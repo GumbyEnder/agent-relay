@@ -40,6 +40,85 @@ function pgliteBootstrapPlugin(): Plugin {
  * and returns the 302 / completion HTML. Deployed apps do not use the popup
  * (full-page OAuth redirect), so `apply: "serve"` is enough.
  */
+
+/**
+ * Agent Relay REST API — five verbs for any harness.
+ * Mounted in dev before TanStack Start so agents get JSON, not SPA HTML.
+ * Production: also served via Nitro route `server/routes/api/agent/[...].ts`.
+ */
+function agentApiPlugin(): Plugin {
+  return {
+    name: "agent-relay:api",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        try {
+          const rawUrl = req.url ?? "";
+          const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+          if (pathOnly !== "/api/agent" && !pathOnly.startsWith("/api/agent/")) {
+            next();
+            return;
+          }
+
+          const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost:8080");
+          const proto = String(
+            req.headers["x-forwarded-proto"] ??
+              ((req.socket as { encrypted?: boolean } | undefined)?.encrypted ? "https" : "http"),
+          );
+
+          const chunks: Buffer[] = [];
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            await new Promise<void>((resolve, reject) => {
+              req.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+              req.on("end", () => resolve());
+              req.on("error", reject);
+            });
+          }
+
+          const requestHeaders = new Headers();
+          for (const [key, value] of Object.entries(req.headers)) {
+            if (value === undefined) continue;
+            if (Array.isArray(value)) {
+              for (const v of value) requestHeaders.append(key, v);
+            } else {
+              requestHeaders.set(key, value);
+            }
+          }
+          if (!requestHeaders.has("host")) requestHeaders.set("host", host);
+
+          const request = new Request(`${proto}://${host}${rawUrl}`, {
+            method: (req.method ?? "GET").toUpperCase(),
+            headers: requestHeaders,
+            body: chunks.length > 0 ? new Uint8Array(Buffer.concat(chunks)) : undefined,
+            // @ts-expect-error undici Request duplex when body present
+            duplex: chunks.length > 0 ? "half" : undefined,
+          });
+
+          const mod = (await server.ssrLoadModule("/src/lib/agent-api.server.ts")) as {
+            handleAgentApiRequest: (req: Request) => Promise<Response>;
+          };
+          const response = await mod.handleAgentApiRequest(request);
+
+          res.statusCode = response.status;
+          response.headers.forEach((value, key) => {
+            if (key.toLowerCase() === "set-cookie") return;
+            res.setHeader(key, value);
+          });
+          const body = Buffer.from(await response.arrayBuffer());
+          res.end(body);
+        } catch (err) {
+          console.error("[agent-relay] /api/agent handler failed:", err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ ok: false, error: "agent api failed" }));
+          }
+        }
+      });
+    },
+  };
+}
+
 function authPopupPlugin(): Plugin {
   return {
     name: "app-builder:auth-popup",
@@ -135,6 +214,7 @@ export default defineConfig(({ command }) => ({
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
+    agentApiPlugin(),
     tailwindcss(),
     tanstackStart(),
     ...(command === "build" ? [nitro({ preset: "vercel" })] : []),

@@ -96,6 +96,25 @@ export function ProtocolPanel() {
           human calls, delivery. That is the product.
         </div>
 
+        <div className="rounded-[var(--radius-md)] border border-border p-3 space-y-2">
+          <h3 className="text-sm font-medium text-fg">HTTP API (v0.2)</h3>
+          <p className="text-xs text-fg-muted">
+            Live on this server. Optional auth: set{" "}
+            <code className="font-mono text-[11px]">AGENT_RELAY_API_KEY</code> and
+            send{" "}
+            <code className="font-mono text-[11px]">Authorization: Bearer …</code>.
+          </p>
+          <pre className="overflow-x-auto rounded-[var(--radius-sm)] bg-bg p-3 font-mono text-[11px] leading-relaxed text-fg-muted shadow-[var(--shadow-border)]">
+{`GET  /api/agent/health
+GET  /api/agent/missions?column=ready&limit=5&agent=forge
+POST /api/agent/missions/:id/claim
+POST /api/agent/missions/:id/heartbeat
+POST /api/agent/missions/:id/escalate
+POST /api/agent/missions/:id/deliver
+POST /api/agent/v1   # { action: poll|claim|… }`}
+          </pre>
+        </div>
+
         {VERBS.map((v, i) => (
           <article
             key={v.id}

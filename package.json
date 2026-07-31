@@ -14,7 +14,10 @@
     "preview": "vite preview --host 0.0.0.0 --port 8080",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:engine": "npx tsx scripts/test-board-engine.ts",
+    "test:api": "node scripts/agent-api-smoke.mjs",
+    "smoke": "npm run test:engine && npm run test:api"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",

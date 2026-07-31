@@ -75,7 +75,7 @@ export function AppShell() {
     panel === "calls";
 
   useEffect(() => {
-    useBoard.persist.rehydrate().then(() => setHydrated());
+    void Promise.resolve(useBoard.persist.rehydrate()).then(() => setHydrated());
   }, [setHydrated]);
 
   useEffect(() => {
