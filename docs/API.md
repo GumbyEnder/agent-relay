@@ -17,6 +17,8 @@ X-Agent-Key: <key>
 
 If unset, the API is open (local demo).
 
+When set, **same-origin browser requests** (operator UI) are allowed without the key; external agents must still send Bearer / X-Agent-Key.
+
 ## Endpoints
 
 ### `GET /health`
