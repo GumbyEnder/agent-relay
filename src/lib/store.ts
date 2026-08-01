@@ -139,35 +139,36 @@ export const useBoard = create<BoardState>()((set, get) => ({
   refresh: async () => {
     set({ _syncing: true });
     try {
-      const pid = get().selectedProjectId;
-      const [snap, projRes] = await Promise.all([
-        agentApi.board(pid),
-        agentApi.listProjects().catch(() => ({
-          ok: true as const,
-          projects: get().projects as Array<{
-            id: string;
-            name: string;
-            slug: string;
-            description: string;
-            createdAt?: number;
-            updatedAt?: number;
-          }>,
-        })),
-      ]);
+      // Resolve project scope BEFORE loading the board so the first paint is never unscoped.
+      const projRes = await agentApi.listProjects().catch(() => ({
+        ok: true as const,
+        projects: get().projects as Array<{
+          id: string;
+          name: string;
+          slug: string;
+          description: string;
+          createdAt?: number;
+          updatedAt?: number;
+        }>,
+      }));
       const projects = (projRes.projects ?? []).map((pr) => ({
         id: pr.id,
         name: pr.name,
         slug: pr.slug,
         description: pr.description ?? "",
-        createdAt: "createdAt" in pr && pr.createdAt ? pr.createdAt : Date.now(),
-        updatedAt: "updatedAt" in pr && pr.updatedAt ? pr.updatedAt : Date.now(),
+        createdAt: "createdAt" in pr && pr.createdAt ? Number(pr.createdAt) : Date.now(),
+        updatedAt: "updatedAt" in pr && pr.updatedAt ? Number(pr.updatedAt) : Date.now(),
       }));
       let selectedProjectId = get().selectedProjectId;
+      if (selectedProjectId && !projects.some((p) => p.id === selectedProjectId)) {
+        selectedProjectId = null;
+      }
       if (!selectedProjectId && projects.length) {
         selectedProjectId =
           projects.find((p) => p.slug === "default" || p.id === "proj_default")?.id ??
           projects[0]!.id;
       }
+      const snap = await agentApi.board(selectedProjectId);
       set({
         agents: snap.agents,
         missions: snap.missions,
