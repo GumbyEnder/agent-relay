@@ -768,27 +768,56 @@ export const durableBoard = {
       return rows.map((r) => rowHistory(r as Record<string, unknown>));
     }),
 
-  adminSnapshot: async (projectId?: string | null) => {
-    const board = await durableBoard.snapshot(projectId);
-    const history = await durableBoard.recentHistory(150, projectId);
+  adminSnapshot: async (
+    projectId?: string | null,
+    opts?: { allowedProjectIds?: string[] | null },
+  ) => {
+    const allBoards = !projectId || projectId === "all";
+    const board = await durableBoard.snapshot(allBoards ? null : projectId);
+    let history = await durableBoard.recentHistory(150, allBoards ? null : projectId);
+    let missions = board.missions;
+    let events = board.events;
+    let calls = board.calls;
+    const allowed = opts?.allowedProjectIds;
+    if (allBoards && allowed && allowed.length > 0) {
+      const allow = new Set(allowed);
+      missions = missions.filter((m) => allow.has(m.projectId));
+      const mid = new Set(missions.map((m) => m.id));
+      events = events.filter(
+        (e) =>
+          (e.projectId && allow.has(e.projectId)) ||
+          (e.missionId && mid.has(e.missionId)) ||
+          !e.missionId,
+      );
+      calls = calls.filter(
+        (c) =>
+          (c.projectId && allow.has(c.projectId)) || mid.has(c.missionId),
+      );
+      history = history.filter(
+        (h) =>
+          (h.projectId && allow.has(h.projectId)) ||
+          mid.has(h.missionId),
+      );
+    }
     const byColumn: Record<string, number> = {};
-    for (const m of board.missions) {
+    for (const m of missions) {
       byColumn[m.column] = (byColumn[m.column] ?? 0) + 1;
     }
     return {
       serverTime: Date.now(),
       agents: board.agents,
-      missions: board.missions,
-      events: board.events,
-      calls: board.calls,
+      missions,
+      events,
+      calls,
       history,
       stats: {
-        missions: board.missions.length,
+        missions: missions.length,
         agents: board.agents.length,
-        openCalls: board.calls.filter((c) => !c.resolvedAt).length,
-        events: board.events.length,
+        openCalls: calls.filter((c) => !c.resolvedAt).length,
+        events: events.length,
         history: history.length,
         byColumn,
+        scope: allBoards ? ("all" as const) : ("board" as const),
       },
     };
   },

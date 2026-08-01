@@ -649,7 +649,15 @@ export function AppShell({
 
           {mainView === "live" && (
             <div className="min-h-0 flex-1">
-              <AdminPortal projectId={selectedProjectId} embedded />
+              <AdminPortal
+                projectId={selectedProjectId}
+                boards={projects.map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  slug: p.slug,
+                }))}
+                embedded
+              />
             </div>
           )}
 

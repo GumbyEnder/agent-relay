@@ -549,9 +549,29 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
 
     // GET /admin — operator live dashboard payload (events + history + board)
+    // ?project=<id> one board · ?project=all (or omit) all boards the user can see
     if (parts.length === 1 && parts[0] === "admin" && req.method === "GET") {
-      const snap = await boardOps.adminSnapshot(projectRef(url));
-      return json({ ok: true, projectId: projectRef(url) ?? null, ...snap });
+      const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
+      const wantAll = !pref || pref === "all" || pref === "*";
+      const ctx = await loadOperatorContext(req);
+      let allowedProjectIds: string[] | null = null;
+      if (wantAll && ctx.authRequired && ctx.user) {
+        const boards = await boardOps.listProjects({
+          ownerUserId: ctx.user.id,
+          includeShared: true,
+          admin: ctx.role === "admin" && url.searchParams.get("all") === "1",
+        });
+        allowedProjectIds = boards.map((b) => b.id);
+      }
+      const snap = await boardOps.adminSnapshot(wantAll ? "all" : pref, {
+        allowedProjectIds,
+      });
+      return json({
+        ok: true,
+        projectId: wantAll ? null : pref,
+        scope: wantAll ? "all" : "board",
+        ...snap,
+      });
     }
 
     // GET|POST /projects  (product language: boards — /boards is an alias)

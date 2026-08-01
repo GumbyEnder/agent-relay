@@ -62,12 +62,19 @@ function columnLabel(id: string | null | undefined) {
   return COLUMNS.find((c) => c.id === id)?.label ?? id.replace(/_/g, " ");
 }
 
+type LiveScope = "board" | "all";
+
+const LIVE_SCOPE_KEY = "devboards-live-scope";
+
 export function AdminPortal({
   projectId = null,
   embedded = false,
+  boards = [],
 }: {
   projectId?: string | null;
   embedded?: boolean;
+  /** Board catalog for labels when scope = all */
+  boards?: Array<{ id: string; name: string; slug: string }>;
 } = {}) {
   const [data, setData] = useState<AdminPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,10 +88,32 @@ export function AdminPortal({
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterKind, setFilterKind] = useState<string>("");
   const [filterQuery, setFilterQuery] = useState("");
+  const [scope, setScope] = useState<LiveScope>(() => {
+    try {
+      const raw = localStorage.getItem(LIVE_SCOPE_KEY);
+      return raw === "all" ? "all" : "board";
+    } catch {
+      return "board";
+    }
+  });
+
+  const setScopePersist = (s: LiveScope) => {
+    setScope(s);
+    try {
+      localStorage.setItem(LIVE_SCOPE_KEY, s);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const load = useCallback(async () => {
     try {
-      const q = projectId ? `?project=${encodeURIComponent(projectId)}` : "";
+      const q =
+        scope === "all"
+          ? "?project=all"
+          : projectId
+            ? `?project=${encodeURIComponent(projectId)}`
+            : "?project=all";
       const res = await fetch(`/api/agent/admin${q}`, { cache: "no-store" });
       const json = (await res.json()) as AdminPayload & { error?: string };
       if (!res.ok || json.ok === false) {
@@ -124,14 +153,14 @@ export function AdminPortal({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [projectId]);
+  }, [projectId, scope]);
 
   useEffect(() => {
     bootstrapped.current = false;
     seenEvents.current = new Set();
     seenHistory.current = new Set();
     void load();
-  }, [load, projectId]);
+  }, [load, projectId, scope]);
 
   useEffect(() => {
     if (!live) return;
@@ -168,6 +197,25 @@ export function AdminPortal({
       (id && map.get(id)) || id || "—";
   }, [data?.missions]);
 
+  const boardName = useMemo(() => {
+    const fromProp = new Map(boards.map((b) => [b.id, b.name]));
+    const fromMissions = new Map(
+      (data?.missions ?? []).map((m) => [m.projectId, m.projectId]),
+    );
+    return (projectId: string | null | undefined) => {
+      if (!projectId) return "—";
+      return fromProp.get(projectId) || fromMissions.get(projectId) || projectId;
+    };
+  }, [boards, data?.missions]);
+
+  const missionBoard = useMemo(() => {
+    const map = new Map(
+      (data?.missions ?? []).map((m) => [m.id, m.projectId] as const),
+    );
+    return (missionId: string | null | undefined) =>
+      (missionId && map.get(missionId)) || null;
+  }, [data?.missions]);
+
   const agentName = useMemo(() => {
     const map = new Map((data?.agents ?? []).map((a) => [a.id, a.name]));
     return (id: string | null | undefined) =>
@@ -175,6 +223,8 @@ export function AdminPortal({
   }, [data?.agents]);
 
   const ageMs = lastOkAt ? Date.now() - lastOkAt : null;
+  const currentBoardLabel =
+    boards.find((b) => b.id === projectId)?.name ?? "This board";
 
   return (
     <div className={cn("flex flex-col overflow-hidden bg-bg text-fg", embedded ? "h-full min-h-0" : "h-dvh")}>
@@ -187,7 +237,7 @@ export function AdminPortal({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-sm font-semibold tracking-tight sm:text-base">
-                  Admin · Live board
+                  Live
                 </h1>
                 <span
                   className={cn(
@@ -207,13 +257,47 @@ export function AdminPortal({
                 </span>
               </div>
               <p className="truncate text-[11px] text-fg-subtle sm:text-xs">
-                Near real-time ops feed, column moves, claims, and human calls —
-                no auth
+                {scope === "all"
+                  ? "All boards you can access · ops feed, moves, claims, calls"
+                  : `${currentBoardLabel} · ops feed, moves, claims, calls`}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle">
+            <div
+              className="inline-flex rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-0.5"
+              role="group"
+              aria-label="Live board scope"
+            >
+              <button
+                type="button"
+                className={cn(
+                  "rounded-[var(--radius-xs)] px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                  scope === "board"
+                    ? "bg-accent text-accent-fg"
+                    : "text-fg-muted hover:text-fg",
+                )}
+                onClick={() => setScopePersist("board")}
+                disabled={!projectId}
+                title={projectId ? "Only the selected board" : "Select a board first"}
+              >
+                This board
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded-[var(--radius-xs)] px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                  scope === "all"
+                    ? "bg-accent text-accent-fg"
+                    : "text-fg-muted hover:text-fg",
+                )}
+                onClick={() => setScopePersist("all")}
+                title="All boards you can access"
+              >
+                All boards
+              </button>
+            </div>
             <span className="tabular hidden sm:inline">
               poll {POLL_MS}ms
               {ageMs != null ? ` · synced ${Math.round(ageMs / 100) / 10}s ago` : ""}
@@ -352,7 +436,10 @@ export function AdminPortal({
                 </div>
                 <p className="mt-1 font-mono text-[10px] text-fg-subtle tabular">
                   <RelativeTime ts={ev.at} /> · {ev.kind.replace(/_/g, " ")}
-                  {ev.missionId ? ` · ${ev.missionId}` : ""}
+                  {scope === "all" &&
+                    (ev.projectId || missionBoard(ev.missionId)) &&
+                    ` · ${boardName(ev.projectId ?? missionBoard(ev.missionId))}`}
+                  {ev.missionId ? ` · ${missionTitle(ev.missionId)}` : ""}
                   {ev.agentId ? ` · ${agentName(ev.agentId)}` : ""}
                 </p>
               </li>
@@ -386,6 +473,11 @@ export function AdminPortal({
                 )}
               >
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  {scope === "all" && (
+                    <span className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle">
+                      {boardName(h.projectId ?? missionBoard(h.missionId))}
+                    </span>
+                  )}
                   <span className="font-medium text-fg">
                     {missionTitle(h.missionId)}
                   </span>
