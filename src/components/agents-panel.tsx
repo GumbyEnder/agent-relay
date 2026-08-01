@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Copy, Plus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,19 +29,22 @@ export function AgentsPanel() {
   const {
     agents,
     missions,
+    projects,
     closePanel,
     registerAgent,
     setAgentStatus,
     removeAgent,
     openPanel,
     selectedProjectId,
+    refresh,
   } = useBoard();
+  const boardName =
+    projects.find((p) => p.id === selectedProjectId)?.name ?? "This board";
   const [name, setName] = useState("");
   const [role, setRole] = useState("client");
   const [harness, setHarness] = useState<HarnessKind>("hermes");
   const [skills, setSkills] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [showDemoAgents, setShowDemoAgents] = useState(false);
   const [keys, setKeys] = useState<Array<Record<string, unknown>>>([]);
   const [lastSecret, setLastSecret] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("");
@@ -54,7 +57,8 @@ export function AgentsPanel() {
   const [ghSecret, setGhSecret] = useState("");
   const [ghRepo, setGhRepo] = useState("");
   const [replyUrl, setReplyUrl] = useState("");
-  const [guideOpen, setGuideOpen] = useState(true);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [copiedGuide, setCopiedGuide] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{
     id: string;
@@ -71,12 +75,8 @@ export function AgentsPanel() {
     () => clientAgentGuideMarkdown(publicBase),
     [publicBase],
   );
-  const visibleAgents = useMemo(
-    () =>
-      showDemoAgents ? agents : agents.filter((a) => !a.isDemo),
-    [agents, showDemoAgents],
-  );
-  const demoCount = agents.filter((a) => a.isDemo).length;
+  // Board snapshot is already scoped to the selected board (non-demo).
+  const roster = useMemo(() => agents.filter((a) => !a.isDemo), [agents]);
 
   const reloadKeys = useCallback(async () => {
     try {
@@ -103,13 +103,33 @@ export function AgentsPanel() {
     void reloadSettings();
   }, [reloadKeys, reloadSettings]);
 
+  async function issueKey(agentId: string, label?: string) {
+    const ag = roster.find((a) => a.id === agentId);
+    try {
+      const res = await agentApi.createApiKey({
+        projectId,
+        name: label || `${ag?.name ?? "agent"}-key`,
+        agentId,
+      });
+      setLastSecret(String(res.key.secret ?? ""));
+      setKeyAgent(agentId);
+      setKeyName("");
+      await reloadKeys();
+      await refresh();
+      toast.success(`Key for ${ag?.name ?? "agent"} — copy secret now`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "create failed");
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-medium text-fg">Agent roster</h2>
           <p className="text-xs text-fg-subtle">
-            Client agents only — HTTPS + API key. No bundled runner.
+            Selected board:{" "}
+            <span className="font-medium text-fg">{boardName}</span>
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -128,68 +148,6 @@ export function AgentsPanel() {
       </header>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        <div className="space-y-2 border-b border-border p-4">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-                Client agent README
-              </h3>
-              <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
-                {CLIENT_AGENT_BLURB}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 shrink-0 text-[11px]"
-              onClick={() => setGuideOpen((v) => !v)}
-            >
-              {guideOpen ? "Hide" : "Show"}
-            </Button>
-          </div>
-          {guideOpen && (
-            <>
-              <p className="font-mono text-[10px] text-fg-subtle break-all">
-                {publicBase}
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="h-7 text-[11px]"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(clientGuide);
-                    setCopiedGuide(true);
-                    toast.success("Client guide copied — paste into your agent");
-                    setTimeout(() => setCopiedGuide(false), 1500);
-                  }}
-                >
-                  {copiedGuide ? (
-                    <Check className="h-3.5 w-3.5" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" />
-                  )}
-                  Copy guide for agent
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-[11px]"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(publicBase);
-                    toast.success("Base URL copied");
-                  }}
-                >
-                  Copy base URL
-                </Button>
-              </div>
-              <pre className="max-h-48 overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-2 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
-                {clientGuide}
-              </pre>
-            </>
-          )}
-        </div>
-
         {showForm && (
           <form
             className="space-y-2 border-b border-border p-4"
@@ -199,8 +157,9 @@ export function AgentsPanel() {
                 toast.error("Name is required");
                 return;
               }
+              const n = name.trim();
               registerAgent({
-                name: name.trim(),
+                name: n,
                 role: role.trim() || "client",
                 harness,
                 skills: skills
@@ -212,9 +171,13 @@ export function AgentsPanel() {
               setRole("client");
               setSkills("");
               setShowForm(false);
-              toast.success(`Registering ${name.trim().toLowerCase()}…`);
+              toast.success(`Registering ${n.toLowerCase()} on ${boardName}…`);
             }}
           >
+            <p className="text-[11px] text-fg-muted">
+              Adds the agent to <span className="text-fg">{boardName}</span>, then
+              issue a key below.
+            </p>
             <Input
               placeholder="name (e.g. forge)"
               value={name}
@@ -244,56 +207,57 @@ export function AgentsPanel() {
               onChange={(e) => setSkills(e.target.value)}
             />
             <Button type="submit" size="sm" className="w-full">
-              Register agent
+              Register on {boardName}
             </Button>
           </form>
         )}
 
-        {demoCount > 0 && (
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
-            <p className="text-[11px] text-fg-subtle">
-              {demoCount} demo agent{demoCount === 1 ? "" : "s"} hidden
-            </p>
-            <button
-              type="button"
-              className="text-[11px] text-fg-muted underline-offset-2 hover:underline"
-              onClick={() => setShowDemoAgents((v) => !v)}
-            >
-              {showDemoAgents ? "Hide demos" : "Show demos"}
-            </button>
-          </div>
-        )}
+        <div className="border-b border-border px-4 py-2.5">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
+            Board roster
+          </h3>
+          <p className="mt-0.5 text-[11px] text-fg-muted">
+            Agents on <span className="text-fg">{boardName}</span>
+            {roster.length > 0 ? (
+              <span className="text-fg-subtle"> · {roster.length}</span>
+            ) : null}
+          </p>
+        </div>
 
         <ul className="divide-y divide-border">
-          {visibleAgents.length === 0 && (
-            <li className="px-4 py-6 text-center text-xs text-fg-subtle">
-              No real agents yet. Register one above (name + harness). Role defaults to
-              “client”.
+          {roster.length === 0 && (
+            <li className="px-4 py-8 text-center text-xs text-fg-subtle">
+              No agents on this board yet.
+              <br />
+              <button
+                type="button"
+                className="mt-2 text-fg underline-offset-2 hover:underline"
+                onClick={() => setShowForm(true)}
+              >
+                Register one for {boardName}
+              </button>
             </li>
           )}
-          {visibleAgents.map((a) => {
+          {roster.map((a) => {
             const active = missions.find((m) => m.id === a.currentMissionId);
             return (
               <li key={a.id} className="space-y-2 px-4 py-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-mono text-sm text-fg">
-                      {a.name}
-                      {a.isDemo ? (
-                        <span className="ml-1.5 text-[10px] text-fg-subtle">demo</span>
-                      ) : null}
-                    </p>
+                    <p className="font-mono text-sm text-fg">{a.name}</p>
                     <p className="text-xs text-fg-muted">{a.role}</p>
                   </div>
                   <Badge variant="default">{HARNESS_LABELS[a.harness] ?? a.harness}</Badge>
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {a.skills.map((s) => (
-                    <Badge key={s} variant="default">
-                      {s}
-                    </Badge>
-                  ))}
-                </div>
+                {a.skills.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {a.skills.map((s) => (
+                      <Badge key={s} variant="default">
+                        {s}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2 text-[11px] text-fg-subtle">
                   <span className="tabular">
                     HB <RelativeTime ts={a.lastHeartbeat} />
@@ -328,21 +292,7 @@ export function AgentsPanel() {
                     size="sm"
                     variant="secondary"
                     className="h-8 text-[11px]"
-                    onClick={async () => {
-                      try {
-                        const res = await agentApi.createApiKey({
-                          projectId,
-                          name: `${a.name}-key`,
-                          agentId: a.id,
-                        });
-                        setLastSecret(String(res.key.secret ?? ""));
-                        setKeyAgent(a.id);
-                        await reloadKeys();
-                        toast.success(`Key for ${a.name} — copy secret now`);
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : "create failed");
-                      }
-                    }}
+                    onClick={() => void issueKey(a.id)}
                   >
                     Issue key
                   </Button>
@@ -361,250 +311,315 @@ export function AgentsPanel() {
             );
           })}
         </ul>
-      </div>
 
-      <div className="border-t border-border p-4 space-y-3">
-        <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">API keys</h3>
-        <p className="text-[11px] text-fg-muted leading-relaxed">
-          <strong className="text-fg">Practical flow:</strong> register the agent above → issue a key
-          bound to that agent → paste <code className="text-fg-subtle">ark_…</code> into the client.
-          Keys only act as that agent. Secret shown once. Admin required.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Input
-            placeholder="key label (optional)"
-            value={keyName}
-            onChange={(e) => setKeyName(e.target.value)}
-            className="h-8 flex-1 min-w-[6rem]"
-          />
-          <select
-            className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs shadow-[var(--shadow-border)]"
-            value={keyAgent}
-            onChange={(e) => setKeyAgent(e.target.value)}
-          >
-            <option value="">Select agent…</option>
-            {visibleAgents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-          <Button
-            size="sm"
-            disabled={!keyAgent}
-            onClick={async () => {
-              if (!keyAgent) {
-                toast.error("Select a registered agent first");
-                return;
-              }
-              try {
-                const ag = visibleAgents.find((a) => a.id === keyAgent);
-                const res = await agentApi.createApiKey({
-                  projectId,
-                  name: keyName || `${ag?.name ?? "agent"}-key`,
-                  agentId: keyAgent,
-                });
-                setLastSecret(String(res.key.secret ?? ""));
-                setKeyName("");
-                await reloadKeys();
-                toast.success("API key created — copy secret now");
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "create failed");
+        <div className="border-t border-border p-4 space-y-3">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
+            API keys · {boardName}
+          </h3>
+          <p className="text-[11px] text-fg-muted leading-relaxed">
+            Register above → issue a key bound to that agent → paste{" "}
+            <code className="text-fg-subtle">ark_…</code> into the client. Secret
+            shown once.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              placeholder="key label (optional)"
+              value={keyName}
+              onChange={(e) => setKeyName(e.target.value)}
+              className="h-8 flex-1 min-w-[6rem]"
+            />
+            <select
+              className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs shadow-[var(--shadow-border)]"
+              value={keyAgent}
+              onChange={(e) => setKeyAgent(e.target.value)}
+            >
+              <option value="">Select agent…</option>
+              {roster.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              disabled={!keyAgent}
+              onClick={() => {
+                if (!keyAgent) {
+                  toast.error("Select a registered agent first");
+                  return;
+                }
+                void issueKey(keyAgent, keyName || undefined);
+              }}
+            >
+              Create key
+            </Button>
+          </div>
+          {lastSecret && (
+            <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px] font-mono break-all">
+              {lastSecret}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-2 w-full"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(lastSecret);
+                  toast.success("Secret copied");
+                }}
+              >
+                Copy secret
+              </Button>
+            </div>
+          )}
+          <ul className="space-y-1.5">
+            {keys.map((k) => {
+              const bound = roster.find((a) => a.id === k.agentId);
+              return (
+                <li
+                  key={String(k.id)}
+                  className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{String(k.name)}</div>
+                    <div className="font-mono text-fg-subtle">
+                      {String(k.keyPrefix)}…
+                      {bound ? ` · ${bound.name}` : k.agentId ? " · bound" : " · shared"}
+                    </div>
+                  </div>
+                  {k.revokedAt ? (
+                    <Badge variant="done">revoked</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      className="h-7 text-[11px]"
+                      onClick={() => {
+                        setRevokeStep(1);
+                        setRevokeTarget({
+                          id: String(k.id),
+                          name: String(k.name),
+                          prefix: String(k.keyPrefix ?? ""),
+                        });
+                      }}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+            {keys.length === 0 && (
+              <li className="text-[11px] text-fg-subtle">No keys on this board yet.</li>
+            )}
+          </ul>
+
+          <Dialog
+            open={Boolean(revokeTarget)}
+            onOpenChange={(o) => {
+              if (!o) {
+                setRevokeTarget(null);
+                setRevokeStep(1);
               }
             }}
           >
-            Create key
-          </Button>
-        </div>
-        {lastSecret && (
-          <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px] font-mono break-all">
-            {lastSecret}
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-2 w-full"
-              onClick={async () => {
-                await navigator.clipboard.writeText(lastSecret);
-                toast.success("Secret copied");
-              }}
-            >
-              Copy secret
-            </Button>
-          </div>
-        )}
-        <ul className="space-y-1.5">
-          {keys.map((k) => {
-            const bound = agents.find((a) => a.id === k.agentId);
-            return (
-              <li
-                key={String(k.id)}
-                className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
-              >
-                <div className="min-w-0">
-                  <div className="font-medium truncate">{String(k.name)}</div>
-                  <div className="font-mono text-fg-subtle">
-                    {String(k.keyPrefix)}…
-                    {bound ? ` · ${bound.name}` : k.agentId ? " · bound" : " · shared"}
-                  </div>
-                </div>
-                {k.revokedAt ? (
-                  <Badge variant="done">revoked</Badge>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    className="h-7 text-[11px]"
-                    onClick={() => {
-                      setRevokeStep(1);
-                      setRevokeTarget({
-                        id: String(k.id),
-                        name: String(k.name),
-                        prefix: String(k.keyPrefix ?? ""),
-                      });
-                    }}
-                  >
-                    Revoke
-                  </Button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-
-        <Dialog
-          open={Boolean(revokeTarget)}
-          onOpenChange={(o) => {
-            if (!o) {
-              setRevokeTarget(null);
-              setRevokeStep(1);
-            }
-          }}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {revokeStep === 1 ? "Revoke API key?" : "Confirm revoke"}
-              </DialogTitle>
-              <DialogDescription>
-                {revokeStep === 1 ? (
-                  <>
-                    This disables{" "}
-                    <span className="font-mono text-fg">
-                      {revokeTarget?.prefix}…
-                    </span>{" "}
-                    ({revokeTarget?.name}). The client agent will get 401 until you
-                    issue a new key.
-                  </>
-                ) : (
-                  <>
-                    Last chance. Revoke is permanent for this secret. You cannot
-                    undo — only create a new key.
-                  </>
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setRevokeTarget(null);
-                  setRevokeStep(1);
-                }}
-              >
-                Cancel
-              </Button>
-              {revokeStep === 1 ? (
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {revokeStep === 1 ? "Revoke API key?" : "Confirm revoke"}
+                </DialogTitle>
+                <DialogDescription>
+                  {revokeStep === 1 ? (
+                    <>
+                      This disables{" "}
+                      <span className="font-mono text-fg">
+                        {revokeTarget?.prefix}…
+                      </span>{" "}
+                      ({revokeTarget?.name}). The client agent will get 401 until you
+                      issue a new key.
+                    </>
+                  ) : (
+                    <>
+                      Last chance. Revoke is permanent for this secret. You cannot
+                      undo — only create a new key.
+                    </>
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
-                  onClick={() => setRevokeStep(2)}
-                >
-                  Continue
-                </Button>
-              ) : (
-                <Button
-                  variant="danger"
-                  size="sm"
-                  disabled={revokeBusy}
-                  onClick={async () => {
-                    if (!revokeTarget) return;
-                    setRevokeBusy(true);
-                    try {
-                      await agentApi.revokeApiKey(revokeTarget.id);
-                      await reloadKeys();
-                      toast.success("Key revoked");
-                      setRevokeTarget(null);
-                      setRevokeStep(1);
-                    } catch (e) {
-                      toast.error(e instanceof Error ? e.message : "revoke failed");
-                    } finally {
-                      setRevokeBusy(false);
-                    }
+                  onClick={() => {
+                    setRevokeTarget(null);
+                    setRevokeStep(1);
                   }}
                 >
-                  {revokeBusy ? "Revoking…" : "Yes, revoke permanently"}
+                  Cancel
                 </Button>
-              )}
+                {revokeStep === 1 ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setRevokeStep(2)}
+                  >
+                    Continue
+                  </Button>
+                ) : (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    disabled={revokeBusy}
+                    onClick={async () => {
+                      if (!revokeTarget) return;
+                      setRevokeBusy(true);
+                      try {
+                        await agentApi.revokeApiKey(revokeTarget.id);
+                        await reloadKeys();
+                        toast.success("Key revoked");
+                        setRevokeTarget(null);
+                        setRevokeStep(1);
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "revoke failed");
+                      } finally {
+                        setRevokeBusy(false);
+                      }
+                    }}
+                  >
+                    {revokeBusy ? "Revoking…" : "Yes, revoke permanently"}
+                  </Button>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 pt-2 text-left text-xs font-medium uppercase tracking-wider text-fg-subtle"
+            onClick={() => setGuideOpen((v) => !v)}
+          >
+            {guideOpen ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            Client agent guide
+          </button>
+          {guideOpen && (
+            <div className="space-y-2">
+              <p className="text-[11px] leading-relaxed text-fg-muted">
+                {CLIENT_AGENT_BLURB}
+              </p>
+              <p className="font-mono text-[10px] text-fg-subtle break-all">
+                {publicBase}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 text-[11px]"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(clientGuide);
+                    setCopiedGuide(true);
+                    toast.success("Client guide copied — paste into your agent");
+                    setTimeout(() => setCopiedGuide(false), 1500);
+                  }}
+                >
+                  {copiedGuide ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  Copy guide for agent
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px]"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(publicBase);
+                    toast.success("Base URL copied");
+                  }}
+                >
+                  Copy base URL
+                </Button>
+              </div>
+              <pre className="max-h-40 overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-2 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
+                {clientGuide}
+              </pre>
             </div>
-          </DialogContent>
-        </Dialog>
-        <h3 className="pt-2 text-xs font-medium uppercase tracking-wider text-fg-subtle">
-          GitHub connect
-        </h3>
-        <p className="text-[11px] text-fg-muted leading-relaxed">
-          Map a repo to this project, set the webhook secret, then point GitHub
-          (App or repo webhook) at the URL below. Issues create one mission with
-          stable <code className="text-fg-subtle">external_id</code>{" "}
-          <code className="text-fg-subtle">github:owner/repo#n</code>.
-        </p>
-        <Input
-          placeholder="GitHub repo org/name"
-          value={ghRepo}
-          onChange={(e) => setGhRepo(e.target.value)}
-          className="h-8"
-        />
-        <Input
-          placeholder="GitHub webhook secret"
-          value={ghSecret}
-          onChange={(e) => setGhSecret(e.target.value)}
-          className="h-8"
-          type="password"
-        />
-        <Input
-          placeholder="Reply webhook URL (on Call resolve)"
-          value={replyUrl}
-          onChange={(e) => setReplyUrl(e.target.value)}
-          className="h-8"
-        />
-        <p className="text-[10px] text-fg-subtle break-all">
-          Payload URL: POST /api/agent/webhooks/github?project={projectId}
-          <br />
-          Events: issues, issue_comment, pull_request, check_run (JSON)
-          <br />
-          {settings.hasGithubSecret ? "Secret configured ✓" : "No secret yet — webhooks accepted unsigned (dev only)"}
-        </p>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="w-full"
-          onClick={async () => {
-            try {
-              await agentApi.updateSettings(projectId, {
-                githubRepo: ghRepo || null,
-                githubWebhookSecret: ghSecret || undefined,
-                replyWebhookUrl: replyUrl || null,
-              });
-              setGhSecret("");
-              await reloadSettings();
-              toast.success("Settings saved");
-            } catch (e) {
-              toast.error(e instanceof Error ? e.message : "save failed");
-            }
-          }}
-        >
-          Save integration settings
-        </Button>
+          )}
+
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 pt-1 text-left text-xs font-medium uppercase tracking-wider text-fg-subtle"
+            onClick={() => setIntegrationsOpen((v) => !v)}
+          >
+            {integrationsOpen ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            Integrations
+          </button>
+          {integrationsOpen && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-fg-muted leading-relaxed">
+                Map a repo to this board, set the webhook secret, then point GitHub
+                at the URL below. Issues create one mission with stable{" "}
+                <code className="text-fg-subtle">external_id</code>{" "}
+                <code className="text-fg-subtle">github:owner/repo#n</code>.
+              </p>
+              <Input
+                placeholder="GitHub repo org/name"
+                value={ghRepo}
+                onChange={(e) => setGhRepo(e.target.value)}
+                className="h-8"
+              />
+              <Input
+                placeholder="GitHub webhook secret"
+                value={ghSecret}
+                onChange={(e) => setGhSecret(e.target.value)}
+                className="h-8"
+                type="password"
+              />
+              <Input
+                placeholder="Reply webhook URL (on Call resolve)"
+                value={replyUrl}
+                onChange={(e) => setReplyUrl(e.target.value)}
+                className="h-8"
+              />
+              <p className="text-[10px] text-fg-subtle break-all">
+                Payload URL: POST /api/agent/webhooks/github?project={projectId}
+                <br />
+                Events: issues, issue_comment, pull_request, check_run (JSON)
+                <br />
+                {settings.hasGithubSecret
+                  ? "Secret configured ✓"
+                  : "No secret yet — webhooks accepted unsigned (dev only)"}
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-full"
+                onClick={async () => {
+                  try {
+                    await agentApi.updateSettings(projectId, {
+                      githubRepo: ghRepo || null,
+                      githubWebhookSecret: ghSecret || undefined,
+                      replyWebhookUrl: replyUrl || null,
+                    });
+                    setGhSecret("");
+                    await reloadSettings();
+                    toast.success("Settings saved");
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : "save failed");
+                  }
+                }}
+              >
+                Save integration settings
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

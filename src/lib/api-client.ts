@@ -153,6 +153,7 @@ export const agentApi = {
     harness: HarnessKind;
     role: string;
     skills?: string[];
+    projectId?: string | null;
   }) => req("POST", "/agents", input),
   setAgentStatus: async (_id: string, _status: AgentStatus) => {
     // no dedicated endpoint yet — refresh board only

@@ -195,9 +195,40 @@ function rowHistory(r: Record<string, unknown>): MissionHistoryEntry {
   };
 }
 
+async function ensureBoardAgent(sql: Sql, projectId: string, agentId: string) {
+  if (!projectId || !agentId) return;
+  await sql`
+    insert into ar_board_agents (project_id, agent_id)
+    values (${projectId}, ${agentId})
+    on conflict do nothing
+  `;
+}
+
 async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData> {
   const [agents, missions, events, calls] = await Promise.all([
-    sql`select * from ar_agents order by name asc`,
+    projectId
+      ? sql`
+          select distinct a.*
+          from ar_agents a
+          left join ar_board_agents ba
+            on ba.agent_id = a.id and ba.project_id = ${projectId}
+          left join ar_api_keys k
+            on k.agent_id = a.id
+            and k.project_id = ${projectId}
+            and k.revoked_at is null
+          where coalesce(a.is_demo, false) = false
+            and (
+              ba.agent_id is not null
+              or k.agent_id is not null
+              -- Legacy real agents with no board membership yet still surface
+              -- until they are keyed/registered onto a board.
+              or not exists (
+                select 1 from ar_board_agents any_ba where any_ba.agent_id = a.id
+              )
+            )
+          order by a.name asc
+        `
+      : sql`select * from ar_agents where coalesce(is_demo, false) = false order by name asc`,
     projectId
       ? sql`select * from ar_missions where project_id = ${projectId} order by updated_at desc`
       : sql`select * from ar_missions order by updated_at desc`,
@@ -210,10 +241,11 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
   ]);
   let missionRows = missions.map((r) => rowMission(r as Record<string, unknown>));
   // Filter calls/events to missions in scope when project set
+  const agentRows = agents.map((r) => rowAgent(r as Record<string, unknown>));
   if (projectId) {
     const ids = new Set(missionRows.map((m) => m.id));
     return {
-      agents: agents.map((r) => rowAgent(r as Record<string, unknown>)),
+      agents: agentRows,
       missions: missionRows,
       events: events
         .map((r) => rowEvent(r as Record<string, unknown>))
@@ -224,7 +256,7 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
     };
   }
   return {
-    agents: agents.map((r) => rowAgent(r as Record<string, unknown>)),
+    agents: agentRows,
     missions: missionRows,
     events: events.map((r) => rowEvent(r as Record<string, unknown>)),
     calls: calls.map((r) => rowCall(r as Record<string, unknown>)),
@@ -637,7 +669,24 @@ export const durableBoard = {
     }),
 
   claim: (missionId: string, agent: string) =>
-    applyEngine((b) => engine.claimMission(b, missionId, agent), agent, "agent", "claim"),
+    withLock(async () => {
+      const sql = await getSql();
+      // Full agent set so claim can resolve / auto-register clients
+      const before = await loadBoard(sql, null);
+      const result = engine.claimMission(before, missionId, agent);
+      if (!result.ok) return result;
+      const hist = collectHistory(before, result.board, {
+        id: result.data.agent.id,
+        name: result.data.agent.name,
+        kind: "agent",
+      }, "claim");
+      await persistBoard(sql, result.board, hist);
+      const m = result.board.missions.find((x) => x.id === missionId);
+      if (m?.projectId) {
+        await ensureBoardAgent(sql, m.projectId, result.data.agent.id);
+      }
+      return result;
+    }),
 
   heartbeat: (missionId: string, agent: string, note?: string) =>
     applyEngine((b) => engine.heartbeatMission(b, missionId, agent, note), agent, "agent", note),
@@ -661,8 +710,27 @@ export const durableBoard = {
   reply: (callId: string, reply: string, operator = "operator") =>
     applyEngine((b) => engine.replyToCall(b, callId, reply), operator, "operator", reply),
 
-  registerAgent: (input: Parameters<typeof engine.registerAgent>[1]) =>
-    applyEngine((b) => engine.registerAgent(b, input), input.name, "operator", "register agent"),
+  registerAgent: (
+    input: Parameters<typeof engine.registerAgent>[1] & { projectId?: string | null },
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      // Full agent list for uniqueness check
+      const board = await loadBoard(sql, null);
+      const result = engine.registerAgent(board, input);
+      if (!result.ok) return result;
+      const hist = collectHistory(board, result.board, {
+        id: input.name,
+        name: input.name,
+        kind: "operator",
+      }, "register agent");
+      await persistBoard(sql, result.board, hist);
+      const projectId = input.projectId?.trim();
+      if (projectId) {
+        await ensureBoardAgent(sql, projectId, result.data.agent.id);
+      }
+      return result;
+    }),
 
   moveMission: (missionId: string, column: MissionColumn, actor = "operator") =>
     applyEngine(
@@ -1023,6 +1091,9 @@ export const durableBoard = {
           ${mat.prefix}, ${mat.hash}, ${ts(mat.createdAt)}
         )
       `;
+      if (mat.agentId) {
+        await ensureBoardAgent(sql, mat.projectId, mat.agentId);
+      }
       return {
         id: mat.id,
         projectId: mat.projectId,

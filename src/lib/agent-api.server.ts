@@ -495,6 +495,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           harness,
           role: str(body.role),
           skills: strArr(body.skills),
+          projectId: str(body.projectId) ?? str(body.project) ?? projectRef(url, body),
         }),
       );
     }

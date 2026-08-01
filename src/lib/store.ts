@@ -386,7 +386,10 @@ export const useBoard = create<BoardState>()((set, get) => ({
 
   registerAgent: (input) => {
     void run("Register agent", async () => {
-      await agentApi.registerAgent(input);
+      await agentApi.registerAgent({
+        ...input,
+        projectId: get().selectedProjectId,
+      });
       await get().refresh();
       set({ panel: "agents" });
     });
