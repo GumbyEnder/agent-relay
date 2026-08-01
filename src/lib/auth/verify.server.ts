@@ -38,8 +38,9 @@ export function humanAuthRequired(
   if (flag === "0" || flag === "false" || flag === "off") return false;
   if (flag === "1" || flag === "true" || flag === "on") return true;
   if (env.VITE_AUTH_ENABLED === "false") return false;
-  const hasPublicAuthUrl = Boolean(env.BETTER_AUTH_URL?.trim());
-  return hasPublicAuthUrl && authConfigured;
+  // Real public origin configured → enforce sessions (email/password or OAuth).
+  if (env.BETTER_AUTH_URL?.trim() && authConfigured) return true;
+  return false;
 }
 
 if (databaseConfigured && !authConfigured) {

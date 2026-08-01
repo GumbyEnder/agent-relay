@@ -119,6 +119,89 @@ function agentApiPlugin(): Plugin {
   };
 }
 
+/**
+ * Better Auth HTTP surface in dev (`/api/auth/*`) — same as Nitro production handlers.
+ * Must forward Set-Cookie (unlike the agent API middleware).
+ */
+function betterAuthApiPlugin(): Plugin {
+  return {
+    name: "agent-relay:better-auth-api",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        try {
+          const rawUrl = req.url ?? "";
+          const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+          if (pathOnly !== "/api/auth" && !pathOnly.startsWith("/api/auth/")) {
+            next();
+            return;
+          }
+
+          const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost:8080");
+          const proto = String(
+            req.headers["x-forwarded-proto"] ??
+              ((req.socket as { encrypted?: boolean } | undefined)?.encrypted ? "https" : "http"),
+          );
+
+          const chunks: Buffer[] = [];
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            await new Promise<void>((resolve, reject) => {
+              req.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+              req.on("end", () => resolve());
+              req.on("error", reject);
+            });
+          }
+
+          const requestHeaders = new Headers();
+          for (const [key, value] of Object.entries(req.headers)) {
+            if (value === undefined) continue;
+            if (Array.isArray(value)) {
+              for (const v of value) requestHeaders.append(key, v);
+            } else {
+              requestHeaders.set(key, value);
+            }
+          }
+          if (!requestHeaders.has("host")) requestHeaders.set("host", host);
+
+          const request = new Request(`${proto}://${host}${rawUrl}`, {
+            method: (req.method ?? "GET").toUpperCase(),
+            headers: requestHeaders,
+            body: chunks.length > 0 ? new Uint8Array(Buffer.concat(chunks)) : undefined,
+            // @ts-expect-error undici Request duplex when body present
+            duplex: chunks.length > 0 ? "half" : undefined,
+          });
+
+          const mod = (await server.ssrLoadModule("/src/lib/auth/server.ts")) as {
+            auth: { handler: (req: Request) => Promise<Response> };
+          };
+          const response = await mod.auth.handler(request);
+
+          res.statusCode = response.status;
+          const setCookies: string[] = [];
+          response.headers.forEach((value, key) => {
+            if (key.toLowerCase() === "set-cookie") {
+              setCookies.push(value);
+              return;
+            }
+            res.setHeader(key, value);
+          });
+          if (setCookies.length === 1) res.setHeader("set-cookie", setCookies[0]!);
+          else if (setCookies.length > 1) res.setHeader("set-cookie", setCookies);
+          const body = Buffer.from(await response.arrayBuffer());
+          res.end(body);
+        } catch (err) {
+          console.error("[agent-relay] /api/auth handler failed:", err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ ok: false, error: "auth api failed" }));
+          }
+        }
+      });
+    },
+  };
+}
+
 function authPopupPlugin(): Plugin {
   return {
     name: "app-builder:auth-popup",
@@ -212,8 +295,9 @@ export default defineConfig(({ command }) => ({
   resolve: { tsconfigPaths: true },
   plugins: [
     pgliteBootstrapPlugin(),
-    // Before tanstackStart so /auth/popup never falls through to the SPA.
+    // Before tanstackStart so /auth and /api/* never fall through to the SPA.
     authPopupPlugin(),
+    betterAuthApiPlugin(),
     agentApiPlugin(),
     tailwindcss(),
     tanstackStart(),
@@ -231,7 +315,7 @@ export default defineConfig(({ command }) => ({
                 "@electric-sql/pglite/*",
               ],
             },
-            // Ensure agent REST API is in the production Node server
+            // Agent REST + Better Auth on the production Node server
             handlers: [
               {
                 route: "/api/agent",
@@ -240,6 +324,14 @@ export default defineConfig(({ command }) => ({
               {
                 route: "/api/agent/**",
                 handler: "./src/lib/agent-api.nitro.ts",
+              },
+              {
+                route: "/api/auth",
+                handler: "./src/lib/auth-api.nitro.ts",
+              },
+              {
+                route: "/api/auth/**",
+                handler: "./src/lib/auth-api.nitro.ts",
               },
             ],
           }),

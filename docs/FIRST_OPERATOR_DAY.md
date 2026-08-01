@@ -51,15 +51,17 @@ npm run start   # migrate.mjs then nitro server
 
 ---
 
-## 3. Human operators (Better Auth)
+## 3. Human operators (email/password — no external broker)
 
-1. Set `BETTER_AUTH_*` + broker client vars (or deployer inject).  
-2. Open `/login` → **Continue with GitHub** (preferred) or Google/X.  
-3. Put your email in `AGENT_RELAY_ADMIN_EMAILS` before or after first login.  
-4. Roles: **viewer** (read), **operator** (board + Calls), **admin** (keys + GitHub settings + reset).  
+1. Set `BETTER_AUTH_URL` (public app URL) + `BETTER_AUTH_SECRET` (random).  
+2. Set `AGENT_RELAY_ADMIN_EMAILS=you@example.com`.  
+3. Open `/login` → **Create account** with that email + password.  
+4. Roles: **viewer** / **operator** / **admin** (admin from email list or `POST /api/agent/roles`).  
 5. Agents **never** use this login — only `Authorization: Bearer ark_…` or global key.
 
-Local open mode: `VITE_AUTH_ENABLED=false` and no broker → UI works without login; `/api/agent/me` reports `admin`. Do **not** use open mode on a public URL.
+See **[GETTING_STARTED.md](./GETTING_STARTED.md)** for the shortest path.
+
+Without `BETTER_AUTH_URL`, local UI stays open as admin (dev). Do **not** leave a public Railway URL without `BETTER_AUTH_URL`.
 
 ---
 

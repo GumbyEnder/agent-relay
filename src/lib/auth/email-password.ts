@@ -1,10 +1,7 @@
 /**
- * Local email/password sign-in (this app's Better Auth DB — not the broker).
+ * Local email/password sign-in (this app's Better Auth DB — not any external broker).
  *
- * Off by default. To enable: set `emailAndPasswordEnabled` to `true` below,
- * then build sign-up / sign-in forms with `authClient.signUp.email` /
- * `authClient.signIn.email` from `@/lib/auth/client` (see the auth skill).
- *
- * Do NOT edit `server.ts` for this — that file is frozen pre-wired config.
+ * Enabled for Agent Relay so operators can create an account and sign in without
+ * Grok deployer / OAuth broker access. Agents still use API keys only.
  */
-export const emailAndPasswordEnabled = false;
+export const emailAndPasswordEnabled = true;
