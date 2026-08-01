@@ -24,7 +24,15 @@ interface BoardState {
   historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
   mainView: "board" | "live" | "calls" | "agents" | "protocol";
-  panel: "none" | "mission" | "agents" | "protocol" | "calls" | "new-mission" | "new-agent";
+  panel:
+    | "none"
+    | "mission"
+    | "agents"
+    | "protocol"
+    | "calls"
+    | "new-mission"
+    | "new-agent"
+    | "help";
   search: string;
   filterAgentId: string | null;
   filterPriority: Priority | null;

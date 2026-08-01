@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Copy, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,11 @@ import { useBoard } from "@/lib/store";
 import { agentApi } from "@/lib/api-client";
 import type { AgentStatus, HarnessKind } from "@/lib/types";
 import { HARNESS_LABELS } from "@/lib/types";
+import {
+  CLIENT_AGENT_BLURB,
+  DEFAULT_PUBLIC_BASE,
+  clientAgentGuideMarkdown,
+} from "@/lib/agent-client-guide";
 
 const harnesses = Object.keys(HARNESS_LABELS) as HarnessKind[];
 const statuses: AgentStatus[] = ["online", "busy", "idle", "offline", "error"];
@@ -41,8 +46,16 @@ export function AgentsPanel() {
   const [ghSecret, setGhSecret] = useState("");
   const [ghRepo, setGhRepo] = useState("");
   const [replyUrl, setReplyUrl] = useState("");
+  const [guideOpen, setGuideOpen] = useState(true);
+  const [copiedGuide, setCopiedGuide] = useState(false);
 
   const projectId = selectedProjectId ?? "proj_default";
+  const publicBase =
+    typeof window !== "undefined" ? window.location.origin : DEFAULT_PUBLIC_BASE;
+  const clientGuide = useMemo(
+    () => clientAgentGuideMarkdown(publicBase),
+    [publicBase],
+  );
 
   const reloadKeys = useCallback(async () => {
     try {
@@ -75,7 +88,7 @@ export function AgentsPanel() {
         <div>
           <h2 className="text-sm font-medium text-fg">Agent roster</h2>
           <p className="text-xs text-fg-subtle">
-            Any harness. Identity only — no bundled runner.
+            Client agents only — HTTPS + API key. No bundled runner.
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -94,6 +107,68 @@ export function AgentsPanel() {
       </header>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="space-y-2 border-b border-border p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
+                Client agent README
+              </h3>
+              <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
+                {CLIENT_AGENT_BLURB}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 shrink-0 text-[11px]"
+              onClick={() => setGuideOpen((v) => !v)}
+            >
+              {guideOpen ? "Hide" : "Show"}
+            </Button>
+          </div>
+          {guideOpen && (
+            <>
+              <p className="font-mono text-[10px] text-fg-subtle break-all">
+                {publicBase}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 text-[11px]"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(clientGuide);
+                    setCopiedGuide(true);
+                    toast.success("Client guide copied — paste into your agent");
+                    setTimeout(() => setCopiedGuide(false), 1500);
+                  }}
+                >
+                  {copiedGuide ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  Copy guide for agent
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px]"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(publicBase);
+                    toast.success("Base URL copied");
+                  }}
+                >
+                  Copy base URL
+                </Button>
+              </div>
+              <pre className="max-h-48 overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-2 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
+                {clientGuide}
+              </pre>
+            </>
+          )}
+        </div>
+
         {showForm && (
           <form
             className="space-y-2 border-b border-border p-4"

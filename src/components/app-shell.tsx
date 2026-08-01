@@ -4,6 +4,7 @@ import {
   Activity,
   BookOpen,
   Bot,
+  CircleHelp,
   Download,
   LayoutDashboard,
   MessageSquareWarning,
@@ -24,6 +25,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { MissionPanel } from "@/components/mission-panel";
 import { NewMissionDialog } from "@/components/new-mission-dialog";
 import { ProtocolPanel } from "@/components/protocol-panel";
+import { HelpPanel } from "@/components/help-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { filteredMissions, useBoard } from "@/lib/store";
@@ -144,7 +146,8 @@ export function AppShell({
     panel === "mission" ||
     panel === "agents" ||
     panel === "protocol" ||
-    panel === "calls";
+    panel === "calls" ||
+    panel === "help";
 
   useEffect(() => {
     setTheme(initTheme());
@@ -310,6 +313,16 @@ export function AppShell({
           </div>
 
           <div className="relative flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-9 w-9 px-0"
+              title="Help — humans & client agents"
+              aria-label="Help"
+              onClick={() => (panel === "help" ? closePanel() : openPanel("help"))}
+            >
+              <CircleHelp className="h-4 w-4" />
+            </Button>
             {can("write_board") && (
             <Button
               size="sm"
@@ -690,6 +703,7 @@ export function AppShell({
           {panel === "agents" && <AgentsPanel />}
           {panel === "protocol" && <ProtocolPanel />}
           {panel === "calls" && <CallsPanel />}
+          {panel === "help" && <HelpPanel onClose={closePanel} />}
         </aside>
 
         {sideOpen && (

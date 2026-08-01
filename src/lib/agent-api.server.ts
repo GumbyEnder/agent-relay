@@ -36,6 +36,7 @@ import {
 import type { OperatorCapability } from "./auth/roles";
 import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
+import { clientAgentGuideMarkdown, DEFAULT_PUBLIC_BASE } from "./agent-client-guide";
 
 const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
 function json(data: unknown, status = 200): Response {
@@ -187,9 +188,6 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     });
   }
 
-  const authFail = await requireApiKey(req);
-  if (authFail) return authFail;
-
   const prefix = "/api/agent";
   if (!path.startsWith(prefix)) {
     return err(404, "Not found");
@@ -197,6 +195,15 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
   const rest = path.slice(prefix.length) || "/";
   const parts = rest.split("/").filter(Boolean);
   // parts e.g. ["missions", "msn_x", "claim"]
+
+  // Public docs surfaces (no agent key) — client agents can fetch the guide cold.
+  const publicDoc =
+    (parts[0] === "health" && parts.length === 1) ||
+    (parts[0] === "client-guide" && (parts.length === 1 || parts[1] === "README.md"));
+  if (!publicDoc) {
+    const authFail = await requireApiKey(req);
+    if (authFail) return authFail;
+  }
 
   try {
     let body: Record<string, unknown> = {};
@@ -230,6 +237,30 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         api_key_required: Boolean(process.env.AGENT_RELAY_API_KEY?.trim()),
         store: "durable",
         stale,
+      });
+    }
+
+    // GET /client-guide — markdown README for remote client agents (no GitHub/local required)
+    if (
+      (parts.length === 1 && parts[0] === "client-guide" && req.method === "GET") ||
+      (parts.length === 2 && parts[0] === "client-guide" && parts[1] === "README.md" && req.method === "GET")
+    ) {
+      const base =
+        url.searchParams.get("base")?.trim() ||
+        process.env.BETTER_AUTH_URL?.trim() ||
+        process.env.RAILWAY_PUBLIC_DOMAIN?.trim() ||
+        DEFAULT_PUBLIC_BASE;
+      const normalized = base.startsWith("http") ? base : `https://${base}`;
+      const md = clientAgentGuideMarkdown(normalized);
+      const asJson = url.searchParams.get("format") === "json";
+      if (asJson) return json({ ok: true, markdown: md, base: normalized.replace(/\/$/, "") });
+      return new Response(md, {
+        status: 200,
+        headers: {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "public, max-age=60",
+          "access-control-allow-origin": "*",
+        },
       });
     }
 
