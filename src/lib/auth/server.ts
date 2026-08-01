@@ -117,16 +117,34 @@ const baseURL = explicitBaseURL ?? {
 
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
 // Missing entries here surface as FORBIDDEN "Invalid origin".
-const trustedOrigins: string[] = explicitBaseURL
-  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS]
-  : [
-      // Host wildcards (matched against Origin's host)
-      ...previewAllowedHosts,
-      // Full-origin wildcards (matched against Origin)
-      ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
-      ...LOCAL_DEV_ORIGINS,
-    ];
-
+// Always allow Railway public host + optional extra origins so login works on
+// both the *.up.railway.app hostname and the custom domain during DNS cutover.
+const railwayPublicHost =
+  env("RAILWAY_PUBLIC_DOMAIN") ||
+  env("RAILWAY_STATIC_URL") ||
+  env("RAILWAY_SERVICE_AGENT_RELAY_URL");
+const railwayOrigins = railwayPublicHost
+  ? [
+      `https://${railwayPublicHost.replace(/^https?:\/\//, "")}`,
+      `http://${railwayPublicHost.replace(/^https?:\/\//, "")}`,
+    ]
+  : [];
+const extraTrusted = (env("BETTER_AUTH_TRUSTED_ORIGINS") ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const trustedOrigins: string[] = [
+  ...(explicitBaseURL ? [explicitBaseURL] : []),
+  ...railwayOrigins,
+  ...extraTrusted,
+  ...LOCAL_DEV_ORIGINS,
+  ...(explicitBaseURL
+    ? []
+    : [
+        ...previewAllowedHosts,
+        ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
+      ]),
+];
 const databaseUrl = env("DATABASE_URL");
 
 // Static broker OAuth endpoints (skip OIDC discovery on every sign-in / callback).
