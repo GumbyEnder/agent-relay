@@ -163,3 +163,134 @@ html[data-theme="cyberpunk"] {
   --shadow-border-hover: 0 0 0 1px rgba(255, 43, 214, 0.35);
   --shadow-panel: 0 0 40px rgba(0, 240, 255, 0.08), 0 16px 48px rgba(0, 0, 0, 0.55);
 }
+
+/* --- Matrix: digital rain console --- */
+html[data-theme="matrix"] {
+  color-scheme: dark;
+  --color-bg: #020804;
+  --color-bg-elevated: #06140a;
+  --color-bg-subtle: #0a1f12;
+  --color-bg-hover: #0f2e1a;
+  --color-fg: #b6ffb6;
+  --color-fg-muted: #5cb86a;
+  --color-fg-subtle: #3d7a48;
+  --color-border: #00ff4128;
+  --color-border-strong: #00ff4155;
+  --color-accent: #00ff41;
+  --color-accent-fg: #021005;
+  --color-ring: #39ff14;
+  --color-status-ready: #3dffa0;
+  --color-status-running: #00ff41;
+  --color-status-human: #c8ff00;
+  --color-status-review: #7dffb2;
+  --color-status-done: #4a7a55;
+  --color-status-blocked: #ff4d4d;
+  --color-status-inbox: #5a8f65;
+  --font-sans: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --shadow-border: 0 0 0 1px rgba(0, 255, 65, 0.2);
+  --shadow-border-hover: 0 0 0 1px rgba(0, 255, 65, 0.45);
+  --shadow-panel: 0 0 32px rgba(0, 255, 65, 0.08), 0 16px 48px rgba(0, 0, 0, 0.65);
+}
+
+/* --- CRT Green phosphor --- */
+html[data-theme="crt_green"] {
+  color-scheme: dark;
+  --color-bg: #0a1008;
+  --color-bg-elevated: #101a0c;
+  --color-bg-subtle: #162412;
+  --color-bg-hover: #1e3018;
+  --color-fg: #9fef7a;
+  --color-fg-muted: #6aaa52;
+  --color-fg-subtle: #4a7a3a;
+  --color-border: #6fff4025;
+  --color-border-strong: #6fff4050;
+  --color-accent: #7dff4a;
+  --color-accent-fg: #0a1008;
+  --color-ring: #b8ff7a;
+  --color-status-ready: #7ec8ff;
+  --color-status-running: #7dff4a;
+  --color-status-human: #e8d44a;
+  --color-status-review: #a0c878;
+  --color-status-done: #5a7050;
+  --color-status-blocked: #e06050;
+  --color-status-inbox: #6a8560;
+  --font-sans: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --shadow-border: 0 0 0 1px rgba(125, 255, 74, 0.22);
+  --shadow-border-hover: 0 0 0 1px rgba(125, 255, 74, 0.4);
+  --shadow-panel: inset 0 0 80px rgba(0, 40, 0, 0.35), 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* --- CRT Amber phosphor --- */
+html[data-theme="crt_amber"] {
+  color-scheme: dark;
+  --color-bg: #120e08;
+  --color-bg-elevated: #1a140c;
+  --color-bg-subtle: #241c10;
+  --color-bg-hover: #302616;
+  --color-fg: #ffb84a;
+  --color-fg-muted: #c4893a;
+  --color-fg-subtle: #8a6230;
+  --color-border: #ffb00028;
+  --color-border-strong: #ffb00055;
+  --color-accent: #ffb000;
+  --color-accent-fg: #120e08;
+  --color-ring: #ffd080;
+  --color-status-ready: #6eb6ff;
+  --color-status-running: #c8e060;
+  --color-status-human: #ffb000;
+  --color-status-review: #e0a060;
+  --color-status-done: #806848;
+  --color-status-blocked: #e05040;
+  --color-status-inbox: #a08060;
+  --font-sans: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --shadow-border: 0 0 0 1px rgba(255, 176, 0, 0.22);
+  --shadow-border-hover: 0 0 0 1px rgba(255, 176, 0, 0.42);
+  --shadow-panel: inset 0 0 80px rgba(40, 20, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* CRT scanline + slight bloom (green/amber only; respects reduced motion) */
+html.theme-crt body {
+  text-shadow: 0 0 0.6px currentColor;
+}
+
+html.theme-crt body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(0, 0, 0, 0.12) 2px,
+    rgba(0, 0, 0, 0.12) 3px
+  );
+  opacity: 0.35;
+}
+
+html.theme-crt body::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(0, 0, 0, 0.35) 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-crt body::before,
+  html.theme-crt body::after {
+    display: none;
+  }
+  html.theme-crt body {
+    text-shadow: none;
+  }
+}

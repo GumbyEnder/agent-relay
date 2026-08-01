@@ -83,11 +83,14 @@ Ship **theme packs** as data (CSS variables), not forks.
 
 | Theme | Intent |
 |-------|--------|
-| **Dark** (default) | Current restrained near-black |
+| **Dark** (default) | Restrained near-black |
 | **Light** | Daytime ops; same structure |
-| **Cyberpunk** | Neon accents, mono-heavy — still readable, not slop purple rain |
-| **Mono** | Grayscale, print-friendly density |
-| **High contrast** | A11y |
+| **Cyberpunk** | Ice cyan + magenta ring |
+| **Matrix** | Digital-rain green, mono UI |
+| **CRT Green** | Green phosphor + scanlines / vignette |
+| **CRT Amber** | Amber phosphor + scanlines / vignette |
+| **Mono** (later) | Grayscale density |
+| **High contrast** (later) | A11y |
 
 ### Rules
 

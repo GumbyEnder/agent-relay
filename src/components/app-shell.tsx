@@ -225,7 +225,7 @@ export function AppShell({
               <span className="hidden md:inline">{THEME_LABELS[theme]}</span>
             </Button>
             {themeOpen && (
-              <div className="absolute right-0 top-full z-50 mt-1 min-w-[9rem] rounded-[var(--radius-md)] border border-border bg-bg-elevated p-1 shadow-[var(--shadow-panel)]">
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[11rem] max-h-72 overflow-y-auto rounded-[var(--radius-md)] border border-border bg-bg-elevated p-1 shadow-[var(--shadow-panel)] scrollbar-thin">
                 {THEME_IDS.map((id) => (
                   <button
                     key={id}
