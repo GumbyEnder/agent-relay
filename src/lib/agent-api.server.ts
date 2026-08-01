@@ -326,7 +326,33 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, ...result.data, webhook });
     }
 
-    // GET /export
+    // GET /export?history=1 — audit history (must win over plain export)
+    if (
+      parts.length === 1 &&
+      parts[0] === "export" &&
+      url.searchParams.get("history") === "1" &&
+      req.method === "GET"
+    ) {
+      const format = (url.searchParams.get("format") ?? "json") === "csv" ? "csv" : "json";
+      const exp = await boardOps.exportHistory({
+        projectId: projectRef(url),
+        missionId: url.searchParams.get("mission") ?? url.searchParams.get("mission_id"),
+        format,
+      });
+      if (format === "csv") {
+        return new Response(exp.body, {
+          status: 200,
+          headers: {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": 'attachment; filename="mission-history.csv"',
+            "cache-control": "no-store",
+          },
+        });
+      }
+      return json({ ok: true, count: exp.count, history: JSON.parse(exp.body) });
+    }
+
+    // GET /export — active board snapshot
     if (parts.length === 1 && parts[0] === "export" && req.method === "GET") {
       return json({ ok: true, ...(await boardOps.exportActive()) });
     }
@@ -569,27 +595,6 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           hasGithubSecret: s.hasGithubSecret,
         },
       });
-    }
-
-    // audit export
-    if (parts.length === 1 && parts[0] === "export" && url.searchParams.get("history") === "1" && req.method === "GET") {
-      const format = (url.searchParams.get("format") ?? "json") === "csv" ? "csv" : "json";
-      const exp = await boardOps.exportHistory({
-        projectId: projectRef(url),
-        missionId: url.searchParams.get("mission") ?? url.searchParams.get("mission_id"),
-        format,
-      });
-      if (format === "csv") {
-        return new Response(exp.body, {
-          status: 200,
-          headers: {
-            "content-type": "text/csv; charset=utf-8",
-            "content-disposition": 'attachment; filename="mission-history.csv"',
-            "cache-control": "no-store",
-          },
-        });
-      }
-      return json({ ok: true, count: exp.count, history: JSON.parse(exp.body) });
     }
 
     // attach artifact
