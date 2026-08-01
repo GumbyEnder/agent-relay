@@ -242,10 +242,18 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, mission: m });
     }
 
-    // POST /missions/:id/claim|heartbeat|escalate|deliver|move|history(GET handled above)
+    // POST /missions/:id/claim|heartbeat|escalate|deliver|move|artifacts
     if (parts.length === 3 && parts[0] === "missions" && req.method === "POST") {
       const id = parts[1]!;
       const verb = parts[2]!;
+
+      if (verb === "artifacts") {
+        const urlA = str(body.url) ?? str(body.html_url);
+        if (!urlA) return err(400, "url required", "bad_request");
+        const m = await boardOps.attachMissionArtifact(id, urlA, str(body.note));
+        if (!m) return err(404, "mission not found", "mission_not_found");
+        return json({ ok: true, mission: m });
+      }
 
       if (verb === "move") {
         const column = str(body.column) as import("./types").MissionColumn | undefined;
