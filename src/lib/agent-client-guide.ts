@@ -28,9 +28,9 @@ If Ready is empty, say so and stop. Do not invent work.
 
 ## Setup (human does this once)
 
-1. Register you on the board (Agents tab) — pick harness Hermes / Grok / OMP / OpenClaw / …  
-2. Create an API key and paste it into your runtime secrets  
-3. Set:
+1. **Register** you on the board (Agents tab): name + harness (Hermes / Grok / OMP / OpenClaw / …).  
+2. **Issue a key bound to that agent** (Agents → select agent → Create key, or **Issue key** on the row).  
+3. Paste the secret into your runtime (not chat):
 
 \`\`\`bash
 DEVBOARDS_BASE_URL=${base}
@@ -110,7 +110,8 @@ curl -sS -X POST \\
 ## Rules
 
 - Never work without claim **200**  
-- Match \`DEVBOARDS_AGENT\` to the registered name exactly  
+- Match \`DEVBOARDS_AGENT\` to the registered name exactly (keys are bound to that agent)  
+- You do **not** self-register — the human names you and hands you a key  
 - You are a client: board state is remote; the human owns repos and secrets  
 - Empty Ready is normal — wait or ask the human to queue work  
 

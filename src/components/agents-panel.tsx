@@ -3,6 +3,13 @@ import { Check, Copy, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RelativeTime } from "@/components/relative-time";
 import { useBoard } from "@/lib/store";
@@ -49,6 +56,13 @@ export function AgentsPanel() {
   const [replyUrl, setReplyUrl] = useState("");
   const [guideOpen, setGuideOpen] = useState(true);
   const [copiedGuide, setCopiedGuide] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<{
+    id: string;
+    name: string;
+    prefix: string;
+  } | null>(null);
+  const [revokeStep, setRevokeStep] = useState<1 | 2>(1);
+  const [revokeBusy, setRevokeBusy] = useState(false);
 
   const projectId = selectedProjectId ?? "proj_default";
   const publicBase =
@@ -312,6 +326,28 @@ export function AgentsPanel() {
                   </select>
                   <Button
                     size="sm"
+                    variant="secondary"
+                    className="h-8 text-[11px]"
+                    onClick={async () => {
+                      try {
+                        const res = await agentApi.createApiKey({
+                          projectId,
+                          name: `${a.name}-key`,
+                          agentId: a.id,
+                        });
+                        setLastSecret(String(res.key.secret ?? ""));
+                        setKeyAgent(a.id);
+                        await reloadKeys();
+                        toast.success(`Key for ${a.name} — copy secret now`);
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "create failed");
+                      }
+                    }}
+                  >
+                    Issue key
+                  </Button>
+                  <Button
+                    size="sm"
                     variant="ghost"
                     onClick={() => {
                       removeAgent(a.id);
@@ -329,12 +365,14 @@ export function AgentsPanel() {
 
       <div className="border-t border-border p-4 space-y-3">
         <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">API keys</h3>
-        <p className="text-[11px] text-fg-muted">
-          Scoped keys for agents/harnesses (machine auth only — never browser OAuth). Secret shown once at create. Admin role required.
+        <p className="text-[11px] text-fg-muted leading-relaxed">
+          <strong className="text-fg">Practical flow:</strong> register the agent above → issue a key
+          bound to that agent → paste <code className="text-fg-subtle">ark_…</code> into the client.
+          Keys only act as that agent. Secret shown once. Admin required.
         </p>
         <div className="flex flex-wrap gap-2">
           <Input
-            placeholder="key name"
+            placeholder="key label (optional)"
             value={keyName}
             onChange={(e) => setKeyName(e.target.value)}
             className="h-8 flex-1 min-w-[6rem]"
@@ -344,8 +382,8 @@ export function AgentsPanel() {
             value={keyAgent}
             onChange={(e) => setKeyAgent(e.target.value)}
           >
-            <option value="">project-wide</option>
-            {agents.map((a) => (
+            <option value="">Select agent…</option>
+            {visibleAgents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
               </option>
@@ -353,12 +391,18 @@ export function AgentsPanel() {
           </select>
           <Button
             size="sm"
+            disabled={!keyAgent}
             onClick={async () => {
+              if (!keyAgent) {
+                toast.error("Select a registered agent first");
+                return;
+              }
               try {
+                const ag = visibleAgents.find((a) => a.id === keyAgent);
                 const res = await agentApi.createApiKey({
                   projectId,
-                  name: keyName || "agent-key",
-                  agentId: keyAgent || null,
+                  name: keyName || `${ag?.name ?? "agent"}-key`,
+                  agentId: keyAgent,
                 });
                 setLastSecret(String(res.key.secret ?? ""));
                 setKeyName("");
@@ -389,34 +433,122 @@ export function AgentsPanel() {
           </div>
         )}
         <ul className="space-y-1.5">
-          {keys.map((k) => (
-            <li
-              key={String(k.id)}
-              className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
-            >
-              <div className="min-w-0">
-                <div className="font-medium truncate">{String(k.name)}</div>
-                <div className="font-mono text-fg-subtle">{String(k.keyPrefix)}…</div>
-              </div>
-              {k.revokedAt ? (
-                <Badge variant="done">revoked</Badge>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={async () => {
-                    await agentApi.revokeApiKey(String(k.id));
-                    await reloadKeys();
-                    toast.message("Key revoked");
-                  }}
-                >
-                  Revoke
-                </Button>
-              )}
-            </li>
-          ))}
+          {keys.map((k) => {
+            const bound = agents.find((a) => a.id === k.agentId);
+            return (
+              <li
+                key={String(k.id)}
+                className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{String(k.name)}</div>
+                  <div className="font-mono text-fg-subtle">
+                    {String(k.keyPrefix)}…
+                    {bound ? ` · ${bound.name}` : k.agentId ? " · bound" : " · shared"}
+                  </div>
+                </div>
+                {k.revokedAt ? (
+                  <Badge variant="done">revoked</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    className="h-7 text-[11px]"
+                    onClick={() => {
+                      setRevokeStep(1);
+                      setRevokeTarget({
+                        id: String(k.id),
+                        name: String(k.name),
+                        prefix: String(k.keyPrefix ?? ""),
+                      });
+                    }}
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </li>
+            );
+          })}
         </ul>
 
+        <Dialog
+          open={Boolean(revokeTarget)}
+          onOpenChange={(o) => {
+            if (!o) {
+              setRevokeTarget(null);
+              setRevokeStep(1);
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {revokeStep === 1 ? "Revoke API key?" : "Confirm revoke"}
+              </DialogTitle>
+              <DialogDescription>
+                {revokeStep === 1 ? (
+                  <>
+                    This disables{" "}
+                    <span className="font-mono text-fg">
+                      {revokeTarget?.prefix}…
+                    </span>{" "}
+                    ({revokeTarget?.name}). The client agent will get 401 until you
+                    issue a new key.
+                  </>
+                ) : (
+                  <>
+                    Last chance. Revoke is permanent for this secret. You cannot
+                    undo — only create a new key.
+                  </>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRevokeTarget(null);
+                  setRevokeStep(1);
+                }}
+              >
+                Cancel
+              </Button>
+              {revokeStep === 1 ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setRevokeStep(2)}
+                >
+                  Continue
+                </Button>
+              ) : (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={revokeBusy}
+                  onClick={async () => {
+                    if (!revokeTarget) return;
+                    setRevokeBusy(true);
+                    try {
+                      await agentApi.revokeApiKey(revokeTarget.id);
+                      await reloadKeys();
+                      toast.success("Key revoked");
+                      setRevokeTarget(null);
+                      setRevokeStep(1);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "revoke failed");
+                    } finally {
+                      setRevokeBusy(false);
+                    }
+                  }}
+                >
+                  {revokeBusy ? "Revoking…" : "Yes, revoke permanently"}
+                </Button>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
         <h3 className="pt-2 text-xs font-medium uppercase tracking-wider text-fg-subtle">
           GitHub connect
         </h3>

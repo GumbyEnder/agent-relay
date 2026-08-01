@@ -82,29 +82,97 @@ function presentedKey(req: Request): string {
   return req.headers.get("x-agent-key")?.trim() ?? "";
 }
 
-async function requireApiKey(req: Request): Promise<Response | null> {
-  // Browser operator UI is same-origin — never require agent keys in the SPA.
-  // Human session/role gates run separately via requireOperatorCap.
-  if (isSameOriginBrowser(req)) return null;
+/** Result of machine auth (Bearer). Browser UI uses type "browser". */
+type MachineAuth =
+  | { type: "browser" }
+  | { type: "global" }
+  | { type: "open" }
+  | {
+      type: "ark";
+      keyId: string;
+      projectId: string;
+      /** Roster agent id when key is bound to one agent (practical flow). */
+      agentId: string | null;
+    };
+
+/**
+ * Authenticate machine callers. Returns auth context or an error Response.
+ * Browser same-origin is never required to present an agent key.
+ */
+async function authenticateMachine(req: Request): Promise<MachineAuth | Response> {
+  if (isSameOriginBrowser(req)) return { type: "browser" };
 
   const key = presentedKey(req);
   const globalKey = process.env.AGENT_RELAY_API_KEY?.trim();
 
   if (key) {
-    if (globalKey && key === globalKey) return null;
+    if (globalKey && key === globalKey) return { type: "global" };
     if (key.startsWith("ark_")) {
       const hit = await boardOps.verifyPresentedApiKey(key);
-      if (hit) return null;
+      if (hit) {
+        return {
+          type: "ark",
+          keyId: hit.id,
+          projectId: hit.projectId,
+          agentId: hit.agentId,
+        };
+      }
+      return err(401, "Invalid or revoked API key", "unauthorized");
     }
     if (globalKey) return err(401, "Invalid or missing API key", "unauthorized");
-    // scoped keys exist path failed
-    if (key.startsWith("ark_")) return err(401, "Invalid or revoked API key", "unauthorized");
   }
 
-  // No key presented: require auth if global key OR any scoped keys might exist.
-  // Enforce when global is set; also when Authorization required by presence of ark attempt only.
   if (globalKey) return err(401, "Invalid or missing API key", "unauthorized");
+  return { type: "open" };
+}
+
+/** @deprecated use authenticateMachine — kept name for call sites during edit */
+async function requireApiKey(req: Request): Promise<Response | null> {
+  const auth = await authenticateMachine(req);
+  if (auth instanceof Response) return auth;
   return null;
+}
+
+/**
+ * Resolve which agent name/id may run a verb.
+ * Agent-scoped keys may only act as that agent (practical human-issues-key flow).
+ */
+async function resolveVerbAgent(
+  body: Record<string, unknown>,
+  machine: MachineAuth,
+): Promise<string | Response> {
+  const requested = str(body.agent) ?? str(body.agent_id);
+
+  if (machine.type === "ark" && machine.agentId) {
+    const snap = await boardOps.snapshot();
+    const bound = snap.agents.find(
+      (a) =>
+        a.id === machine.agentId ||
+        a.name.toLowerCase() === String(machine.agentId).toLowerCase(),
+    );
+    if (!bound) {
+      return err(
+        403,
+        "This API key is bound to an agent that is no longer on the roster. Register the agent again and issue a new key.",
+        "agent_key_orphan",
+      );
+    }
+    if (
+      requested &&
+      requested !== bound.id &&
+      requested.toLowerCase() !== bound.name.toLowerCase()
+    ) {
+      return err(
+        403,
+        `This API key may only act as agent "${bound.name}"`,
+        "agent_key_mismatch",
+      );
+    }
+    return bound.name;
+  }
+
+  if (!requested) return err(400, "agent is required", "bad_request");
+  return requested;
 }
 
 async function loadOperatorContext(req: Request): Promise<OperatorContext> {
@@ -200,9 +268,11 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
   const publicDoc =
     (parts[0] === "health" && parts.length === 1) ||
     (parts[0] === "client-guide" && (parts.length === 1 || parts[1] === "README.md"));
+  let machineAuth: MachineAuth = { type: "open" };
   if (!publicDoc) {
-    const authFail = await requireApiKey(req);
-    if (authFail) return authFail;
+    const auth = await authenticateMachine(req);
+    if (auth instanceof Response) return auth;
+    machineAuth = auth;
   }
 
   try {
@@ -315,14 +385,22 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /v1  — action dispatcher matching PROTOCOL.md
     if (parts.length === 1 && parts[0] === "v1" && req.method === "POST") {
-      return handleAction(body);
+      return handleAction(body, machineAuth);
     }
 
     // GET /missions
     if (parts.length === 1 && parts[0] === "missions" && req.method === "GET") {
       const column = (url.searchParams.get("column") ?? "ready") as MissionColumn;
       const limit = Number(url.searchParams.get("limit") ?? "5");
-      const agent = url.searchParams.get("agent") ?? undefined;
+      let agent = url.searchParams.get("agent") ?? undefined;
+      if (machineAuth.type === "ark" && machineAuth.agentId) {
+        const agentOrErr = await resolveVerbAgent(
+          { agent: agent ?? undefined },
+          machineAuth,
+        );
+        if (agentOrErr instanceof Response) return agentOrErr;
+        agent = agentOrErr;
+      }
       const tags = url.searchParams.get("tags")?.split(",").filter(Boolean);
       const skills = url.searchParams.get("skills")?.split(",").filter(Boolean);
       const matchAgentSkillsRaw = url.searchParams.get("match_agent_skills");
@@ -373,8 +451,9 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         return fromEngine(await boardOps.moveMission(id, column, actor));
       }
 
-      const agent = str(body.agent) ?? str(body.agent_id);
-      if (!agent) return err(400, "agent is required", "bad_request");
+      const agentOrErr = await resolveVerbAgent(body, machineAuth);
+      if (agentOrErr instanceof Response) return agentOrErr;
+      const agent = agentOrErr;
 
       if (verb === "claim") {
         return fromEngine(await boardOps.claim(id, agent));
@@ -799,9 +878,37 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
       const projectId = str(body.projectId) ?? str(body.project) ?? projectRef(url, body) ?? "proj_default";
+      const agentId = str(body.agentId) ?? str(body.agent) ?? null;
+      const allowShared = body.allowShared === true || body.shared === true;
+      // Practical flow: keys bind to a registered agent (unless explicit shared).
+      if (!agentId && !allowShared) {
+        return err(
+          400,
+          "Select a registered agent for this key (or pass allowShared:true for a board-wide key).",
+          "agent_required",
+        );
+      }
+      let boundAgentId: string | null = null;
+      if (agentId) {
+        const snap = await boardOps.snapshot();
+        const ag = snap.agents.find(
+          (a) => a.id === agentId || a.name.toLowerCase() === agentId.toLowerCase(),
+        );
+        if (!ag) {
+          return err(
+            400,
+            "Unknown agent — register the agent on the roster first, then create a key for them.",
+            "agent_not_found",
+          );
+        }
+        if (ag.isDemo) {
+          return err(400, "Cannot issue keys for demo agents. Register a real agent first.", "demo_agent");
+        }
+        boundAgentId = ag.id;
+      }
       const created = await boardOps.createApiKey({
         projectId,
-        agentId: str(body.agentId) ?? str(body.agent) ?? null,
+        agentId: boundAgentId,
         name: str(body.name),
       });
       return json({ ok: true, key: created });
@@ -920,7 +1027,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
   }
 }
 
-async function handleAction(body: Record<string, unknown>): Promise<Response> {
+async function handleAction(
+  body: Record<string, unknown>,
+  machine: MachineAuth = { type: "open" },
+): Promise<Response> {
   const action = str(body.action)?.toLowerCase();
   if (!action) return err(400, "action is required", "bad_request");
 
@@ -934,11 +1044,17 @@ async function handleAction(body: Record<string, unknown>): Promise<Response> {
       matchRaw === undefined
         ? undefined
         : matchRaw === true || matchRaw === 1 || matchRaw === "1" || matchRaw === "true";
+    let agentName: string | undefined = str(body.agent) ?? str(body.agent_id);
+    if (machine.type === "ark" && machine.agentId) {
+      const agentOrErr = await resolveVerbAgent(body, machine);
+      if (agentOrErr instanceof Response) return agentOrErr;
+      agentName = agentOrErr;
+    }
     return fromEngine(
       await boardOps.poll({
         column,
         limit: Number.isFinite(limit) ? limit : 5,
-        agent: str(body.agent),
+        agent: agentName,
         tags,
         skills,
         matchAgentSkills,
@@ -947,21 +1063,22 @@ async function handleAction(body: Record<string, unknown>): Promise<Response> {
     );
   }
 
-  const agent = str(body.agent) ?? str(body.agent_id);
+  const agentOrErr = await resolveVerbAgent(body, machine);
+  if (agentOrErr instanceof Response) return agentOrErr;
+  const agent = agentOrErr;
   const missionId = str(body.mission_id) ?? str(body.missionId);
-  if (action !== "poll" && !agent) return err(400, "agent is required", "bad_request");
   if (["claim", "heartbeat", "escalate", "deliver"].includes(action) && !missionId) {
     return err(400, "mission_id is required", "bad_request");
   }
 
-  if (action === "claim") return fromEngine(await boardOps.claim(missionId!, agent!));
+  if (action === "claim") return fromEngine(await boardOps.claim(missionId!, agent));
   if (action === "heartbeat") {
-    return fromEngine(await boardOps.heartbeat(missionId!, agent!, str(body.note)));
+    return fromEngine(await boardOps.heartbeat(missionId!, agent, str(body.note)));
   }
   if (action === "escalate") {
     const question = str(body.question);
     if (!question) return err(400, "question is required", "bad_request");
-    return fromEngine(await boardOps.escalate(missionId!, agent!, question));
+    return fromEngine(await boardOps.escalate(missionId!, agent, question));
   }
   if (action === "deliver") {
     const summary = str(body.summary) ?? str(body.delivery) ?? "";
