@@ -217,7 +217,34 @@ export default defineConfig(({ command }) => ({
     agentApiPlugin(),
     tailwindcss(),
     tanstackStart(),
-    ...(command === "build" ? [nitro({ preset: "vercel" })] : []),
+    ...(command === "build"
+      ? [
+          nitro({
+            preset: "node-server",
+            // Keep native/wasm DB drivers out of the bundle
+            noExternals: false,
+            externals: {
+              external: [
+                "pg",
+                "pg-native",
+                "@electric-sql/pglite",
+                "@electric-sql/pglite/*",
+              ],
+            },
+            // Ensure agent REST API is in the production Node server
+            handlers: [
+              {
+                route: "/api/agent",
+                handler: "./src/lib/agent-api.nitro.ts",
+              },
+              {
+                route: "/api/agent/**",
+                handler: "./src/lib/agent-api.nitro.ts",
+              },
+            ],
+          }),
+        ]
+      : []),
     viteReact(),
   ],
 }));

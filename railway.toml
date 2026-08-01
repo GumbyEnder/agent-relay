@@ -1,0 +1,9 @@
+[build]
+builder = "RAILPACK"
+buildCommand = "npm ci && npm run build"
+
+[deploy]
+startCommand = "npm run start"
+healthcheckPath = "/api/agent/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"

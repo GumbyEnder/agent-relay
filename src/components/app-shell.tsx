@@ -75,7 +75,15 @@ export function AppShell() {
     panel === "calls";
 
   useEffect(() => {
-    void Promise.resolve(useBoard.persist.rehydrate()).then(() => setHydrated());
+    void useBoard
+      .getState()
+      .refresh()
+      .then(() => setHydrated())
+      .catch(() => setHydrated());
+    const id = window.setInterval(() => {
+      void useBoard.getState().refresh().catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(id);
   }, [setHydrated]);
 
   useEffect(() => {

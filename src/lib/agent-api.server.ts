@@ -21,9 +21,10 @@
  *   Authorization: Bearer <key>  OR  X-Agent-Key: <key>
  * If unset, open access (local demo).
  */
-import type { HarnessKind, MissionColumn } from "./types";
-import { boardOps } from "./board-server";
+import type { HarnessKind } from "./types";
+import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
+import type { MissionColumn } from "./types";
 
 const HARNESSES = new Set<HarnessKind>([
   "claude_code",
@@ -99,6 +100,7 @@ function strArr(v: unknown): string[] | undefined {
  * Handle a full Request whose pathname starts with /api/agent.
  */
 export async function handleAgentApiRequest(req: Request): Promise<Response> {
+  await ensureBoardReady();
   const url = new URL(req.url);
   let path = url.pathname;
   // Normalize trailing slash
@@ -146,6 +148,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         agents: snap.agents.length,
         open_calls: snap.calls.filter((c) => !c.resolvedAt).length,
         api_key_required: Boolean(process.env.AGENT_RELAY_API_KEY?.trim()),
+        store: "durable",
       });
     }
 
@@ -178,10 +181,18 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, mission: m });
     }
 
-    // POST /missions/:id/claim|heartbeat|escalate|deliver
+    // POST /missions/:id/claim|heartbeat|escalate|deliver|move|history(GET handled above)
     if (parts.length === 3 && parts[0] === "missions" && req.method === "POST") {
       const id = parts[1]!;
       const verb = parts[2]!;
+
+      if (verb === "move") {
+        const column = str(body.column) as import("./types").MissionColumn | undefined;
+        if (!column) return err(400, "column is required", "bad_request");
+        const actor = str(body.actor) ?? "operator";
+        return fromEngine(await boardOps.moveMission(id, column, actor));
+      }
+
       const agent = str(body.agent) ?? str(body.agent_id);
       if (!agent) return err(400, "agent is required", "bad_request");
 
@@ -251,13 +262,52 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /reset
     if (parts.length === 1 && parts[0] === "reset" && req.method === "POST") {
-      const board = boardOps.reset();
+      const board = await boardOps.reset();
       return json({
         ok: true,
         message: "Demo board reset",
         missions: board.missions.length,
         agents: board.agents.length,
       });
+    }
+
+    // GET /board — full snapshot for UI
+    if (parts.length === 1 && parts[0] === "board" && req.method === "GET") {
+      const snap = await boardOps.snapshot();
+      return json({ ok: true, ...snap });
+    }
+
+    // GET /missions/:id/history
+    if (parts.length === 3 && parts[0] === "missions" && parts[2] === "history" && req.method === "GET") {
+      const hist = await boardOps.history(parts[1]!);
+      return json({ ok: true, mission_id: parts[1], history: hist });
+    }
+
+    // POST /missions/:id/move  { column, actor? }
+    if (parts.length === 3 && parts[0] === "missions" && parts[2] === "move" && req.method === "POST") {
+      const column = str(body.column) as MissionColumn | undefined;
+      if (!column) return err(400, "column is required", "bad_request");
+      const actor = str(body.actor) ?? "operator";
+      return fromEngine(await boardOps.moveMission(parts[1]!, column, actor));
+    }
+
+    // POST /missions  create
+    if (parts.length === 1 && parts[0] === "missions" && req.method === "POST") {
+      const title = str(body.title);
+      const objective = str(body.objective);
+      if (!title || !objective) return err(400, "title and objective required", "bad_request");
+      return fromEngine(
+        await boardOps.createMission({
+          title,
+          objective,
+          context: str(body.context),
+          constraints: str(body.constraints),
+          acceptance: str(body.acceptance),
+          priority: str(body.priority) as any,
+          tags: strArr(body.tags),
+          column: str(body.column) as any,
+        }),
+      );
     }
 
     // GET /  — catalog

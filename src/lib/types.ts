@@ -132,3 +132,18 @@ export const COLUMN_STATUS_COLOR: Record<MissionColumn, string> = {
   done: "var(--color-status-done)",
   blocked: "var(--color-status-blocked)",
 };
+
+/** Append-only mission column/status change record. */
+export interface MissionHistoryEntry {
+  id: string;
+  missionId: string;
+  actorId: string | null;
+  actorName: string | null;
+  /** agent | operator | system */
+  actorKind: "agent" | "operator" | "system";
+  fromColumn: MissionColumn | null;
+  toColumn: MissionColumn;
+  at: number;
+  note?: string;
+  meta?: Record<string, string>;
+}

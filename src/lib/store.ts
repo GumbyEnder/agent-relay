@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { SEED_AGENTS, SEED_CALLS, SEED_EVENTS, SEED_MISSIONS } from "./seed";
+import { agentApi } from "./api-client";
 import type {
   Agent,
   AgentStatus,
@@ -9,21 +8,25 @@ import type {
   Mission,
   MissionColumn,
   MissionEvent,
+  MissionHistoryEntry,
   Priority,
 } from "./types";
-import { uid } from "./utils";
+import { toast } from "sonner";
 
 interface BoardState {
   agents: Agent[];
   missions: Mission[];
   events: MissionEvent[];
   calls: HumanCall[];
+  historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
   panel: "none" | "mission" | "agents" | "protocol" | "calls" | "new-mission" | "new-agent";
   search: string;
   filterAgentId: string | null;
   filterPriority: Priority | null;
   _hydrated: boolean;
+  _syncing: boolean;
+  _error: string | null;
 
   setSearch: (q: string) => void;
   setFilterAgent: (id: string | null) => void;
@@ -32,6 +35,9 @@ interface BoardState {
   selectMission: (id: string | null) => void;
   closePanel: () => void;
   setHydrated: () => void;
+
+  refresh: () => Promise<void>;
+  loadHistory: (missionId: string) => Promise<void>;
 
   moveMission: (id: string, column: MissionColumn, actor?: string | null) => void;
   claimMission: (missionId: string, agentId: string) => void;
@@ -69,486 +75,253 @@ interface BoardState {
   importMissions: (json: string) => number;
 }
 
-function pushEvent(
-  events: MissionEvent[],
-  partial: Omit<MissionEvent, "id" | "at"> & { at?: number },
-): MissionEvent[] {
-  return [
-    {
-      id: uid("ev"),
-      at: partial.at ?? Date.now(),
-      ...partial,
-    },
-    ...events,
-  ].slice(0, 200);
+async function run(label: string, fn: () => Promise<void>) {
+  try {
+    await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[board] ${label}`, e);
+    toast.error(`${label}: ${msg}`);
+    useBoard.setState({ _error: msg });
+  }
 }
 
-function touchMission(m: Mission, patch: Partial<Mission>): Mission {
-  return { ...m, ...patch, updatedAt: Date.now() };
-}
+export const useBoard = create<BoardState>()((set, get) => ({
+  agents: [],
+  missions: [],
+  events: [],
+  calls: [],
+  historyByMission: {},
+  selectedMissionId: null,
+  panel: "none",
+  search: "",
+  filterAgentId: null,
+  filterPriority: null,
+  _hydrated: false,
+  _syncing: false,
+  _error: null,
 
-export const useBoard = create<BoardState>()(
-  persist(
-    (set, get) => ({
-      agents: SEED_AGENTS,
-      missions: SEED_MISSIONS,
-      events: SEED_EVENTS,
-      calls: SEED_CALLS,
-      selectedMissionId: null,
-      panel: "none",
-      search: "",
-      filterAgentId: null,
-      filterPriority: null,
-      _hydrated: false,
+  setHydrated: () => set({ _hydrated: true }),
+  setSearch: (q) => set({ search: q }),
+  setFilterAgent: (id) => set({ filterAgentId: id }),
+  setFilterPriority: (p) => set({ filterPriority: p }),
 
-      setHydrated: () => set({ _hydrated: true }),
-      setSearch: (q) => set({ search: q }),
-      setFilterAgent: (id) => set({ filterAgentId: id }),
-      setFilterPriority: (p) => set({ filterPriority: p }),
+  openPanel: (panel, missionId) => {
+    set({
+      panel,
+      selectedMissionId:
+        missionId !== undefined ? missionId : get().selectedMissionId,
+    });
+    if (missionId) void get().loadHistory(missionId);
+  },
 
-      openPanel: (panel, missionId) =>
-        set({
-          panel,
-          selectedMissionId:
-            missionId !== undefined ? missionId : get().selectedMissionId,
-        }),
+  selectMission: (id) => {
+    set({ selectedMissionId: id, panel: id ? "mission" : get().panel });
+    if (id) void get().loadHistory(id);
+  },
 
-      selectMission: (id) =>
-        set({ selectedMissionId: id, panel: id ? "mission" : get().panel }),
+  closePanel: () => set({ panel: "none" }),
 
-      closePanel: () => set({ panel: "none" }),
+  refresh: async () => {
+    set({ _syncing: true });
+    try {
+      const snap = await agentApi.board();
+      set({
+        agents: snap.agents,
+        missions: snap.missions,
+        events: snap.events,
+        calls: snap.calls,
+        _hydrated: true,
+        _syncing: false,
+        _error: null,
+      });
+    } catch (e) {
+      set({
+        _syncing: false,
+        _error: e instanceof Error ? e.message : String(e),
+      });
+      throw e;
+    }
+  },
 
-      moveMission: (id, column, actor = null) =>
-        set((s) => {
-          const mission = s.missions.find((m) => m.id === id);
-          if (!mission || mission.column === column) return s;
-          const missions = s.missions.map((m) =>
-            m.id === id
-              ? touchMission(m, {
-                  column,
-                  ...(column === "ready"
-                    ? { claimedBy: null, claimedAt: null, assigneeId: m.assigneeId }
-                    : {}),
-                  ...(column === "done"
-                    ? { claimedBy: m.claimedBy, lastHeartbeat: Date.now() }
-                    : {}),
-                })
-              : m,
-          );
-          return {
-            missions,
-            events: pushEvent(s.events, {
-              missionId: id,
-              agentId: actor,
-              kind: "mission_moved",
-              message: `Moved to ${column.replace("_", " ")}: ${mission.title}`,
-              meta: { from: mission.column, to: column },
-            }),
-          };
-        }),
+  loadHistory: async (missionId) => {
+    try {
+      const res = await agentApi.history(missionId);
+      set((s) => ({
+        historyByMission: { ...s.historyByMission, [missionId]: res.history },
+      }));
+    } catch (e) {
+      console.error("history load", e);
+    }
+  },
 
-      claimMission: (missionId, agentId) =>
-        set((s) => {
-          const mission = s.missions.find((m) => m.id === missionId);
-          const agent = s.agents.find((a) => a.id === agentId);
-          if (!mission || !agent) return s;
-          if (mission.claimedBy && mission.claimedBy !== agentId) return s;
+  moveMission: (id, column, actor = "operator") => {
+    void run("Move", async () => {
+      await agentApi.move(id, column, actor ?? "operator");
+      await get().refresh();
+      await get().loadHistory(id);
+    });
+  },
 
-          const missions = s.missions.map((m) =>
-            m.id === missionId
-              ? touchMission(m, {
-                  claimedBy: agentId,
-                  claimedAt: Date.now(),
-                  assigneeId: agentId,
-                  column: m.column === "ready" || m.column === "inbox" ? "running" : m.column,
-                  lastHeartbeat: Date.now(),
-                })
-              : m,
-          );
-          const agents = s.agents.map((a) =>
-            a.id === agentId
-              ? {
-                  ...a,
-                  status: "busy" as const,
-                  currentMissionId: missionId,
-                  lastHeartbeat: Date.now(),
-                }
-              : a.currentMissionId === missionId
-                ? { ...a, currentMissionId: null, status: a.status === "busy" ? "idle" : a.status }
-                : a,
-          );
-          return {
-            missions,
-            agents,
-            events: pushEvent(s.events, {
-              missionId,
-              agentId,
-              kind: "mission_claimed",
-              message: `${agent.name} claimed · ${mission.title}`,
-            }),
-          };
-        }),
+  claimMission: (missionId, agentId) => {
+    void run("Claim", async () => {
+      await agentApi.claim(missionId, agentId);
+      await get().refresh();
+      await get().loadHistory(missionId);
+    });
+  },
 
-      releaseMission: (missionId) =>
-        set((s) => {
-          const mission = s.missions.find((m) => m.id === missionId);
-          if (!mission) return s;
-          const agentId = mission.claimedBy;
-          const missions = s.missions.map((m) =>
-            m.id === missionId
-              ? touchMission(m, {
-                  claimedBy: null,
-                  claimedAt: null,
-                  column: m.column === "running" ? "ready" : m.column,
-                })
-              : m,
-          );
-          const agents = s.agents.map((a) =>
-            a.id === agentId
-              ? { ...a, currentMissionId: null, status: "idle" as const }
-              : a,
-          );
-          return {
-            missions,
-            agents,
-            events: pushEvent(s.events, {
-              missionId,
-              agentId,
-              kind: "mission_released",
-              message: `Released · ${mission.title}`,
-            }),
-          };
-        }),
+  releaseMission: (missionId) => {
+    void run("Release", async () => {
+      await agentApi.releaseViaMove(missionId);
+      await get().refresh();
+      await get().loadHistory(missionId);
+    });
+  },
 
-      heartbeat: (missionId, note) =>
-        set((s) => {
-          const mission = s.missions.find((m) => m.id === missionId);
-          if (!mission) return s;
-          const missions = s.missions.map((m) =>
-            m.id === missionId
-              ? touchMission(m, {
-                  lastHeartbeat: Date.now(),
-                  progressNote: note?.trim() ? note : m.progressNote,
-                })
-              : m,
-          );
-          const agents = s.agents.map((a) =>
-            a.id === mission.claimedBy
-              ? { ...a, lastHeartbeat: Date.now(), status: "busy" as const }
-              : a,
-          );
-          return {
-            missions,
-            agents,
-            events: pushEvent(s.events, {
-              missionId,
-              agentId: mission.claimedBy,
-              kind: "heartbeat",
-              message: note?.trim()
-                ? `Heartbeat · ${note.trim()}`
-                : `Heartbeat · ${mission.title}`,
-            }),
-          };
-        }),
+  heartbeat: (missionId, note) => {
+    void run("Heartbeat", async () => {
+      const m = get().missions.find((x) => x.id === missionId);
+      const agent = m?.claimedBy ?? get().agents[0]?.id;
+      if (!agent) throw new Error("No agent for heartbeat");
+      await agentApi.heartbeat(missionId, agent, note);
+      await get().refresh();
+    });
+  },
 
-      escalate: (missionId, question, agentId) =>
-        set((s) => {
-          const mission = s.missions.find((m) => m.id === missionId);
-          if (!mission || !question.trim()) return s;
-          const call: HumanCall = {
-            id: uid("call"),
-            missionId,
-            agentId: agentId ?? mission.claimedBy,
-            question: question.trim(),
-            urgency: mission.priority,
-            createdAt: Date.now(),
-            resolvedAt: null,
-            reply: null,
-          };
-          const missions = s.missions.map((m) =>
-            m.id === missionId
-              ? touchMission(m, {
-                  column: "needs_human",
-                  progressNote: question.trim(),
-                })
-              : m,
-          );
-          return {
-            missions,
-            calls: [call, ...s.calls],
-            events: pushEvent(s.events, {
-              missionId,
-              agentId: call.agentId,
-              kind: "escalation",
-              message: `Needs human · ${question.trim()}`,
-            }),
-            panel: "calls",
-          };
-        }),
+  escalate: (missionId, question, agentId) => {
+    void run("Escalate", async () => {
+      const m = get().missions.find((x) => x.id === missionId);
+      const agent = agentId ?? m?.claimedBy ?? "operator";
+      await agentApi.escalate(missionId, agent, question);
+      await get().refresh();
+      await get().loadHistory(missionId);
+      set({ panel: "calls" });
+    });
+  },
 
-      replyToCall: (callId, reply) =>
-        set((s) => {
-          const call = s.calls.find((c) => c.id === callId);
-          if (!call || !reply.trim()) return s;
-          const calls = s.calls.map((c) =>
-            c.id === callId
-              ? { ...c, reply: reply.trim(), resolvedAt: Date.now() }
-              : c,
-          );
-          const missions = s.missions.map((m) =>
-            m.id === call.missionId && m.column === "needs_human"
-              ? touchMission(m, {
-                  column: "running",
-                  progressNote: `Human reply: ${reply.trim()}`,
-                })
-              : m,
-          );
-          return {
-            calls,
-            missions,
-            events: pushEvent(s.events, {
-              missionId: call.missionId,
-              agentId: call.agentId,
-              kind: "human_reply",
-              message: `Human replied · ${reply.trim()}`,
-            }),
-          };
-        }),
+  replyToCall: (callId, reply) => {
+    void run("Reply", async () => {
+      await agentApi.reply(callId, reply);
+      await get().refresh();
+      const call = get().calls.find((c) => c.id === callId);
+      if (call) await get().loadHistory(call.missionId);
+    });
+  },
 
-      deliver: (missionId, delivery) =>
-        set((s) => {
-          const mission = s.missions.find((m) => m.id === missionId);
-          if (!mission) return s;
-          const missions = s.missions.map((m) =>
-            m.id === missionId
-              ? touchMission(m, {
-                  column: "review",
-                  delivery: delivery.trim() || m.delivery,
-                  lastHeartbeat: Date.now(),
-                })
-              : m,
-          );
-          const agents = s.agents.map((a) =>
-            a.currentMissionId === missionId
-              ? { ...a, currentMissionId: null, status: "idle" as const }
-              : a,
-          );
-          return {
-            missions,
-            agents,
-            events: pushEvent(s.events, {
-              missionId,
-              agentId: mission.claimedBy,
-              kind: "delivery",
-              message: `Delivered for review · ${mission.title}`,
-            }),
-          };
-        }),
+  deliver: (missionId, delivery) => {
+    void run("Deliver", async () => {
+      const m = get().missions.find((x) => x.id === missionId);
+      const agent = m?.claimedBy ?? "operator";
+      await agentApi.deliver(missionId, agent, delivery);
+      await get().refresh();
+      await get().loadHistory(missionId);
+    });
+  },
 
-      updateMission: (id, patch) =>
-        set((s) => ({
-          missions: s.missions.map((m) =>
-            m.id === id ? touchMission(m, patch) : m,
-          ),
-        })),
+  updateMission: (id, patch) => {
+    // optimistic local only for title edits not yet on API — skip durable fields
+    set((s) => ({
+      missions: s.missions.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+    }));
+  },
 
-      createMission: (input) => {
-        const id = uid("msn");
-        const mission: Mission = {
-          id,
-          title: input.title.trim(),
-          objective: input.objective.trim(),
-          context: (input.context ?? "").trim(),
-          constraints: (input.constraints ?? "").trim(),
-          acceptance: (input.acceptance ?? "").trim(),
-          column: input.column ?? "inbox",
-          priority: input.priority ?? "p2",
-          tags: input.tags ?? [],
-          assigneeId: input.assigneeId ?? null,
-          claimedBy: null,
-          claimedAt: null,
-          lastHeartbeat: null,
-          progressNote: "",
-          artifacts: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        set((s) => ({
-          missions: [mission, ...s.missions],
-          events: pushEvent(s.events, {
-            missionId: id,
-            agentId: null,
-            kind: "mission_created",
-            message: `Created · ${mission.title}`,
-          }),
-          selectedMissionId: id,
-          panel: "mission",
-        }));
-        return id;
-      },
+  createMission: (input) => {
+    const tempId = `pending_${Date.now()}`;
+    void run("Create mission", async () => {
+      const res = await agentApi.createMission({
+        title: input.title,
+        objective: input.objective,
+        context: input.context,
+        constraints: input.constraints,
+        acceptance: input.acceptance,
+        priority: input.priority,
+        tags: input.tags,
+        column: input.column,
+      });
+      await get().refresh();
+      const id = res.mission.id;
+      set({ selectedMissionId: id, panel: "mission" });
+      await get().loadHistory(id);
+    });
+    return tempId;
+  },
 
-      deleteMission: (id) =>
-        set((s) => ({
-          missions: s.missions.filter((m) => m.id !== id),
-          calls: s.calls.filter((c) => c.missionId !== id),
-          selectedMissionId:
-            s.selectedMissionId === id ? null : s.selectedMissionId,
-          panel: s.selectedMissionId === id ? "none" : s.panel,
-        })),
+  deleteMission: (_id) => {
+    toast.message("Delete not exposed on shared API yet");
+  },
 
-      registerAgent: (input) => {
-        const id = uid("agent");
-        const agent: Agent = {
-          id,
-          name: input.name.trim().toLowerCase().replace(/\s+/g, "-"),
-          harness: input.harness,
-          role: input.role.trim(),
-          status: "online",
-          skills: input.skills ?? [],
-          lastHeartbeat: Date.now(),
-          currentMissionId: null,
-        };
-        set((s) => ({
-          agents: [agent, ...s.agents],
-          events: pushEvent(s.events, {
-            missionId: null,
-            agentId: id,
-            kind: "agent_registered",
-            message: `Agent registered · ${agent.name} (${input.harness})`,
-          }),
-          panel: "agents",
-        }));
-        return id;
-      },
+  registerAgent: (input) => {
+    void run("Register agent", async () => {
+      await agentApi.registerAgent(input);
+      await get().refresh();
+      set({ panel: "agents" });
+    });
+    return "pending";
+  },
 
-      setAgentStatus: (id, status) =>
-        set((s) => ({
-          agents: s.agents.map((a) =>
-            a.id === id
-              ? {
-                  ...a,
-                  status,
-                  lastHeartbeat: status === "offline" ? a.lastHeartbeat : Date.now(),
-                }
-              : a,
-          ),
-          events: pushEvent(s.events, {
-            missionId: null,
-            agentId: id,
-            kind: "agent_status",
-            message: `Agent ${status} · ${s.agents.find((a) => a.id === id)?.name ?? id}`,
-          }),
-        })),
+  setAgentStatus: (_id, _status) => {
+    /* optional */
+  },
 
-      removeAgent: (id) =>
-        set((s) => ({
-          agents: s.agents.filter((a) => a.id !== id),
-          missions: s.missions.map((m) =>
-            m.claimedBy === id || m.assigneeId === id
-              ? touchMission(m, {
-                  claimedBy: m.claimedBy === id ? null : m.claimedBy,
-                  assigneeId: m.assigneeId === id ? null : m.assigneeId,
-                  column:
-                    m.claimedBy === id && m.column === "running" ? "ready" : m.column,
-                })
-              : m,
-          ),
-        })),
+  removeAgent: (_id) => {
+    toast.message("Remove agent not exposed on shared API yet");
+  },
 
-      simulateAgentTick: () => {
-        const s = get();
-        const online = s.agents.filter((a) => a.status !== "offline");
-        if (online.length === 0) return;
-
-        const ready = s.missions.filter(
-          (m) => m.column === "ready" && !m.claimedBy,
-        );
-        const idle = online.filter((a) => !a.currentMissionId && a.status !== "error");
-        if (ready.length && idle.length) {
-          const mission = ready[0]!;
-          const agent = idle[Math.floor(Math.random() * idle.length)]!;
-          get().claimMission(mission.id, agent.id);
-          return;
+  simulateAgentTick: () => {
+    void run("Simulate tick", async () => {
+      const s = get();
+      const ready = s.missions.filter((m) => m.column === "ready" && !m.claimedBy);
+      const idle = s.agents.filter((a) => !a.currentMissionId && a.status !== "offline");
+      if (ready.length && idle.length) {
+        await agentApi.claim(ready[0]!.id, idle[0]!.id);
+      } else {
+        const running = s.missions.find((m) => m.column === "running" && m.claimedBy);
+        if (running?.claimedBy) {
+          await agentApi.heartbeat(running.id, running.claimedBy, "simulate tick");
         }
+      }
+      await get().refresh();
+    });
+  },
 
-        const running = s.missions.filter((m) => m.column === "running" && m.claimedBy);
-        if (running.length) {
-          const mission = running[Math.floor(Math.random() * running.length)]!;
-          const notes = [
-            "Scanning constraints",
-            "Writing draft patch",
-            "Running checks",
-            "Updating progress note",
-            "Preparing delivery",
-          ];
-          get().heartbeat(
-            mission.id,
-            notes[Math.floor(Math.random() * notes.length)],
-          );
-        }
+  resetDemo: () => {
+    void run("Reset demo", async () => {
+      await agentApi.reset();
+      await get().refresh();
+      set({ selectedMissionId: null, panel: "none", historyByMission: {} });
+      toast.success("Demo board reset");
+    });
+  },
+
+  exportActive: () => {
+    // sync export: return last known non-done missions
+    const active = get().missions.filter((m) => m.column !== "done");
+    return JSON.stringify(
+      {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        missions: active,
+        agents: get().agents,
       },
+      null,
+      2,
+    );
+  },
 
-      resetDemo: () =>
-        set({
-          agents: SEED_AGENTS,
-          missions: SEED_MISSIONS,
-          events: SEED_EVENTS,
-          calls: SEED_CALLS,
-          selectedMissionId: null,
-          panel: "none",
-          search: "",
-          filterAgentId: null,
-          filterPriority: null,
-        }),
+  importMissions: () => {
+    toast.message("Import via API not yet supported");
+    return 0;
+  },
+}));
 
-      exportActive: () => {
-        const active = get().missions.filter((m) => m.column !== "done");
-        return JSON.stringify(
-          {
-            version: 1,
-            exportedAt: new Date().toISOString(),
-            missions: active,
-            agents: get().agents,
-          },
-          null,
-          2,
-        );
-      },
-
-      importMissions: (json) => {
-        try {
-          const data = JSON.parse(json) as { missions?: Mission[] };
-          if (!Array.isArray(data.missions)) return 0;
-          const existing = new Set(get().missions.map((m) => m.id));
-          const incoming = data.missions.filter((m) => m?.id && !existing.has(m.id));
-          if (!incoming.length) return 0;
-          set((s) => ({
-            missions: [...incoming, ...s.missions],
-            events: pushEvent(s.events, {
-              missionId: null,
-              agentId: null,
-              kind: "note",
-              message: `Imported ${incoming.length} mission(s)`,
-            }),
-          }));
-          return incoming.length;
-        } catch {
-          return 0;
-        }
-      },
-    }),
-    {
-      name: "agent-relay-board-v1",
-      skipHydration: true,
-      partialize: (s) => ({
-        agents: s.agents,
-        missions: s.missions,
-        events: s.events,
-        calls: s.calls,
-      }),
-    },
-  ),
-);
+type BoardStore = typeof useBoard & {
+  persist: { rehydrate: () => Promise<void> };
+};
+(useBoard as BoardStore).persist = {
+  rehydrate: () => useBoard.getState().refresh(),
+};
+export type { BoardStore };
 
 export function filteredMissions(state: BoardState): Mission[] {
   const q = state.search.trim().toLowerCase();
@@ -560,13 +333,7 @@ export function filteredMissions(state: BoardState): Mission[] {
     }
     if (state.filterPriority && m.priority !== state.filterPriority) return false;
     if (!q) return true;
-    const hay = [
-      m.title,
-      m.objective,
-      m.context,
-      m.tags.join(" "),
-      m.progressNote,
-    ]
+    const hay = [m.title, m.objective, m.context, m.tags.join(" "), m.progressNote]
       .join(" ")
       .toLowerCase();
     return hay.includes(q);

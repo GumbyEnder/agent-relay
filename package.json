@@ -8,16 +8,19 @@
   },
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
-    "build": "vite build && npm run db:migrate",
+    "build": "vite build",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "vite build --mode development",
-    "preview": "vite preview --host 0.0.0.0 --port 8080",
+    "preview": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:engine": "npx tsx scripts/test-board-engine.ts",
+    "test:engine": "npx tsx scripts/test-board-engine.ts && npm run test:history",
     "test:api": "node scripts/agent-api-smoke.mjs",
-    "smoke": "npm run test:engine && npm run test:api"
+    "smoke": "npm run test:engine && npm run test:api",
+    "start": "node scripts/migrate.mjs && node .output/server/index.mjs",
+    "postbuild": "echo build complete",
+    "test:history": "npx tsx scripts/test-history.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
@@ -92,5 +95,8 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.1.0"
   },
-  "description": "Harness-agnostic mission kanban for AI agents"
+  "description": "Harness-agnostic mission kanban for AI agents",
+  "engines": {
+    "node": ">=22"
+  }
 }

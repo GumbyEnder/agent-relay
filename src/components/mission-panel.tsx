@@ -72,6 +72,8 @@ export function MissionPanel({ missionId }: { missionId: string }) {
   const {
     missions,
     agents,
+    historyByMission,
+    loadHistory,
     closePanel,
     moveMission,
     claimMission,
@@ -83,6 +85,10 @@ export function MissionPanel({ missionId }: { missionId: string }) {
     updateMission,
   } = useBoard();
   const mission = missions.find((m) => m.id === missionId);
+  const history = historyByMission[missionId] ?? [];
+  if (missionId && !historyByMission[missionId]) {
+    void loadHistory(missionId);
+  }
   const [heartbeatNote, setHeartbeatNote] = useState("");
   const [escalateQ, setEscalateQ] = useState("");
   const [delivery, setDelivery] = useState("");
@@ -322,6 +328,36 @@ export function MissionPanel({ missionId }: { missionId: string }) {
             </Button>
           </div>
         </div>
+      </div>
+
+
+      <div className="border-t border-border px-4 py-3">
+        <h4 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+          Status history
+        </h4>
+        {history.length === 0 ? (
+          <p className="text-xs text-fg-subtle">No history yet.</p>
+        ) : (
+          <ul className="max-h-48 space-y-2 overflow-y-auto scrollbar-thin">
+            {history.map((h) => (
+              <li
+                key={h.id}
+                className="rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2.5 py-2 text-xs"
+              >
+                <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-fg">
+                  <span className="text-fg-subtle">{h.fromColumn ?? "—"}</span>
+                  <span aria-hidden>→</span>
+                  <span className="font-medium">{h.toColumn}</span>
+                </div>
+                <div className="mt-1 text-fg-muted">
+                  {(h.actorName || h.actorId || "system") + ` · ${h.actorKind} · `}
+                  <RelativeTime ts={h.at} />
+                </div>
+                {h.note ? <div className="mt-1 text-fg-subtle">{h.note}</div> : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <footer className="border-t border-border p-3">
