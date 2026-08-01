@@ -53,3 +53,11 @@ React 19 · TypeScript · TanStack Start · Vite 8 · Tailwind v4 · Zustand (UI
 | This repo | `/mnt/nas/agents/Projects/Agent-Relay/code/` |
 | Obsidian | `/mnt/nas/obsidian vaults/main vault/01_Projects/Agent-Relay/` |
 | GitHub | https://github.com/GumbyEnder/agent-relay |
+
+## Product direction
+
+**Only goal:** kanban automation for projects — agent-first, then humans and harnesses.
+
+See [docs/README.md](docs/README.md) for vision, topology (company/team/user/agents/projects), GitHub/CI, markdown journal, UI views/themes, and access surfaces.
+
+**Live ops UI:** [/admin](https://agent-relay-production-7724.up.railway.app/admin) (to become a first-class Board tab).
