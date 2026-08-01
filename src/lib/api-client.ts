@@ -41,7 +41,38 @@ export interface BoardSnapshot {
 }
 
 export const agentApi = {
-  board: () => req<BoardSnapshot>("GET", "/board"),
+  board: (projectId?: string | null) =>
+    req<BoardSnapshot>(
+      "GET",
+      `/board${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  admin: (projectId?: string | null) =>
+    req<Record<string, unknown>>(
+      "GET",
+      `/admin${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  listProjects: () =>
+    req<{
+      ok: true;
+      projects: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string;
+        createdAt?: number;
+        updatedAt?: number;
+      }>;
+    }>("GET", "/projects"),
+  createProject: (input: { name: string; slug?: string; description?: string }) =>
+    req<{ ok: true; project: { id: string; name: string; slug: string } }>("POST", "/projects", input),
+  ingestGitHub: (body: unknown) =>
+    req<{ ok: true; created: boolean; mission: { id: string; externalId?: string } }>(
+      "POST",
+      "/ingest/github",
+      body,
+    ),
+  journal: (missionId: string) =>
+    req<{ ok: true; markdown: string }>("GET", `/missions/${missionId}/journal`),
   health: () => req<{ ok: boolean; version?: string }>("GET", "/health"),
   claim: (missionId: string, agent: string) =>
     req("POST", `/missions/${missionId}/claim`, { agent }),
@@ -66,6 +97,7 @@ export const agentApi = {
     priority?: Priority;
     tags?: string[];
     column?: MissionColumn;
+    projectId?: string;
   }) => req<{ ok: true; mission: { id: string } }>("POST", "/missions", input),
   registerAgent: (input: {
     name: string;

@@ -1,8 +1,30 @@
-import type { Agent, HumanCall, Mission, MissionEvent } from "./types";
+import type { Agent, HumanCall, Mission, MissionEvent, Project } from "./types";
 
 /** Fixed clock so SSR + client seed data match. */
 const now = 1_753_992_000_000; // 2025-07-31-ish fixed
 const m = (mins: number) => now - mins * 60_000;
+
+
+export const DEFAULT_PROJECT_ID = "proj_default";
+
+export const SEED_PROJECTS: Project[] = [
+  {
+    id: DEFAULT_PROJECT_ID,
+    name: "Default",
+    slug: "default",
+    description: "Default project board",
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: "proj_platform",
+    name: "Platform",
+    slug: "platform",
+    description: "Platform & infra missions",
+    createdAt: now,
+    updatedAt: now,
+  },
+];
 
 export const SEED_AGENTS: Agent[] = [
   {
@@ -61,6 +83,7 @@ export const SEED_AGENTS: Agent[] = [
 export const SEED_MISSIONS: Mission[] = [
   {
     id: "msn_auth_hardening",
+    projectId: "proj_default",
     title: "Harden session cookie flags",
     objective:
       "Ensure auth cookies set Secure, HttpOnly, SameSite=Lax across preview and production hosts.",
@@ -84,6 +107,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_agent_protocol_doc",
+    projectId: "proj_default",
     title: "Publish claim/heartbeat protocol card",
     objective:
       "Document the five agent verbs (poll, claim, heartbeat, escalate, deliver) for any harness.",
@@ -105,6 +129,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_latency_spike",
+    projectId: "proj_platform",
     title: "Investigate agent heartbeat dropouts",
     objective:
       "Find why nightshift heartbeats stop after ~2h idle and propose fix.",
@@ -126,6 +151,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_intake_ideas",
+    projectId: "proj_default",
     title: "Triage weekend idea dump",
     objective: "Turn raw operator notes into 3–5 claimable missions.",
     context: "Slack dump in #agent-ops from last 48h.",
@@ -145,6 +171,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_diff_review",
+    projectId: "proj_default",
     title: "Review forge PR for cookie flags",
     objective: "Security pass on session cookie change before merge.",
     context: "Depends on msn_auth_hardening delivery.",
@@ -164,6 +191,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_board_export",
+    projectId: "proj_default",
     title: "JSON export of active missions",
     objective: "Ship one-click export of non-done missions for offline agents.",
     context: "Air-gapped harnesses need a file drop.",
@@ -184,6 +212,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_dead_letter",
+    projectId: "proj_default",
     title: "Retry failed image pipeline job",
     objective: "Re-run failed sprite sheet batch with fixed chroma key.",
     context: "Job died mid-sheet after magenta key mismatch.",
@@ -203,6 +232,7 @@ export const SEED_MISSIONS: Mission[] = [
   },
   {
     id: "msn_onboard_mcp",
+    projectId: "proj_default",
     title: "Register new MCP agent identity",
     objective: "Add agent identity for weekend research bot.",
     context: "Operator spinning up hermes profile.",

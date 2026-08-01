@@ -3,7 +3,14 @@
  * All agent API + UI paths share this single source of truth.
  */
 import { getSql, type Sql } from "./db";
-import { SEED_AGENTS, SEED_CALLS, SEED_EVENTS, SEED_MISSIONS } from "./seed";
+import {
+  DEFAULT_PROJECT_ID,
+  SEED_AGENTS,
+  SEED_CALLS,
+  SEED_EVENTS,
+  SEED_MISSIONS,
+  SEED_PROJECTS,
+} from "./seed";
 import type {
   Agent,
   AgentStatus,
@@ -14,10 +21,16 @@ import type {
   MissionEvent,
   MissionHistoryEntry,
   Priority,
+  Project,
 } from "./types";
 import { uid } from "./utils";
 import type { BoardData, EngineResult } from "./board-engine";
 import * as engine from "./board-engine";
+import {
+  mapGitHubIssueToMission,
+  type GitHubIngestInput,
+} from "./github-ingest";
+import { renderMissionJournalMarkdown } from "./journal";
 
 const globalRef = globalThis as typeof globalThis & {
   __arBoardReady__?: Promise<void>;
@@ -52,9 +65,21 @@ function asJsonArray(v: unknown): string[] {
   return [];
 }
 
+function rowProject(r: Record<string, unknown>): Project {
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    slug: String(r.slug),
+    description: String(r.description ?? ""),
+    createdAt: ms(r.created_at) ?? Date.now(),
+    updatedAt: ms(r.updated_at) ?? Date.now(),
+  };
+}
+
 function rowMission(r: Record<string, unknown>): Mission {
   return {
     id: String(r.id),
+    projectId: String(r.project_id ?? DEFAULT_PROJECT_ID),
     title: String(r.title),
     objective: String(r.objective ?? ""),
     context: String(r.context ?? ""),
@@ -72,6 +97,8 @@ function rowMission(r: Record<string, unknown>): Mission {
     createdAt: ms(r.created_at) ?? Date.now(),
     updatedAt: ms(r.updated_at) ?? Date.now(),
     delivery: r.delivery != null ? String(r.delivery) : undefined,
+    externalId: r.external_id != null ? String(r.external_id) : null,
+    source: r.source != null ? String(r.source) : null,
   };
 }
 
@@ -94,6 +121,7 @@ function rowCall(r: Record<string, unknown>): HumanCall {
     id: String(r.id),
     missionId: String(r.mission_id),
     agentId: r.agent_id != null ? String(r.agent_id) : null,
+    projectId: r.project_id != null ? String(r.project_id) : null,
     question: String(r.question),
     urgency: String(r.urgency ?? "p2") as Priority,
     createdAt: ms(r.created_at) ?? Date.now(),
@@ -113,6 +141,7 @@ function rowEvent(r: Record<string, unknown>): MissionEvent {
     id: String(r.id),
     missionId: r.mission_id != null ? String(r.mission_id) : null,
     agentId: r.agent_id != null ? String(r.agent_id) : null,
+    projectId: r.project_id != null ? String(r.project_id) : null,
     kind: r.kind as MissionEvent["kind"],
     message: String(r.message),
     at: ms(r.at) ?? Date.now(),
@@ -124,6 +153,7 @@ function rowHistory(r: Record<string, unknown>): MissionHistoryEntry {
   return {
     id: String(r.id),
     missionId: String(r.mission_id),
+    projectId: r.project_id != null ? String(r.project_id) : null,
     actorId: r.actor_id != null ? String(r.actor_id) : null,
     actorName: r.actor_name != null ? String(r.actor_name) : null,
     actorKind: (String(r.actor_kind ?? "system") as MissionHistoryEntry["actorKind"]),
@@ -140,16 +170,37 @@ function rowHistory(r: Record<string, unknown>): MissionHistoryEntry {
   };
 }
 
-async function loadBoard(sql: Sql): Promise<BoardData> {
+async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData> {
   const [agents, missions, events, calls] = await Promise.all([
     sql`select * from ar_agents order by name asc`,
-    sql`select * from ar_missions order by updated_at desc`,
-    sql`select * from ar_events order by at desc limit 200`,
-    sql`select * from ar_calls order by created_at desc`,
+    projectId
+      ? sql`select * from ar_missions where project_id = ${projectId} order by updated_at desc`
+      : sql`select * from ar_missions order by updated_at desc`,
+    projectId
+      ? sql`select * from ar_events where project_id = ${projectId} or project_id is null order by at desc limit 200`
+      : sql`select * from ar_events order by at desc limit 200`,
+    projectId
+      ? sql`select * from ar_calls where project_id = ${projectId} or project_id is null order by created_at desc`
+      : sql`select * from ar_calls order by created_at desc`,
   ]);
+  let missionRows = missions.map((r) => rowMission(r as Record<string, unknown>));
+  // Filter calls/events to missions in scope when project set
+  if (projectId) {
+    const ids = new Set(missionRows.map((m) => m.id));
+    return {
+      agents: agents.map((r) => rowAgent(r as Record<string, unknown>)),
+      missions: missionRows,
+      events: events
+        .map((r) => rowEvent(r as Record<string, unknown>))
+        .filter((e) => !e.missionId || ids.has(e.missionId) || e.projectId === projectId),
+      calls: calls
+        .map((r) => rowCall(r as Record<string, unknown>))
+        .filter((c) => ids.has(c.missionId) || c.projectId === projectId),
+    };
+  }
   return {
     agents: agents.map((r) => rowAgent(r as Record<string, unknown>)),
-    missions: missions.map((r) => rowMission(r as Record<string, unknown>)),
+    missions: missionRows,
     events: events.map((r) => rowEvent(r as Record<string, unknown>)),
     calls: calls.map((r) => rowCall(r as Record<string, unknown>)),
   };
@@ -176,20 +227,35 @@ async function insertAgent(sql: Sql, a: Agent) {
   `;
 }
 
+async function insertProject(sql: Sql, pr: Project) {
+  await sql`
+    insert into ar_projects (id, name, slug, description, created_at, updated_at)
+    values (${pr.id}, ${pr.name}, ${pr.slug}, ${pr.description}, ${ts(pr.createdAt)}, ${ts(pr.updatedAt)})
+    on conflict (id) do update set
+      name = excluded.name,
+      slug = excluded.slug,
+      description = excluded.description,
+      updated_at = excluded.updated_at
+  `;
+}
+
 async function insertMission(sql: Sql, m: Mission) {
   await sql`
     insert into ar_missions (
-      id, title, objective, context, constraints_text, acceptance,
+      id, project_id, title, objective, context, constraints_text, acceptance,
       column_id, priority, tags, assignee_id, claimed_by, claimed_at,
-      last_heartbeat, progress_note, artifacts, delivery, created_at, updated_at
+      last_heartbeat, progress_note, artifacts, delivery, created_at, updated_at,
+      external_id, source
     ) values (
-      ${m.id}, ${m.title}, ${m.objective}, ${m.context}, ${m.constraints}, ${m.acceptance},
+      ${m.id}, ${m.projectId ?? DEFAULT_PROJECT_ID}, ${m.title}, ${m.objective}, ${m.context}, ${m.constraints}, ${m.acceptance},
       ${m.column}, ${m.priority}, ${JSON.stringify(m.tags)}::jsonb,
       ${m.assigneeId}, ${m.claimedBy}, ${ts(m.claimedAt)},
       ${ts(m.lastHeartbeat)}, ${m.progressNote}, ${JSON.stringify(m.artifacts)}::jsonb,
-      ${m.delivery ?? null}, ${ts(m.createdAt)}, ${ts(m.updatedAt)}
+      ${m.delivery ?? null}, ${ts(m.createdAt)}, ${ts(m.updatedAt)},
+      ${m.externalId ?? null}, ${m.source ?? null}
     )
     on conflict (id) do update set
+      project_id = excluded.project_id,
       title = excluded.title,
       objective = excluded.objective,
       context = excluded.context,
@@ -205,18 +271,21 @@ async function insertMission(sql: Sql, m: Mission) {
       progress_note = excluded.progress_note,
       artifacts = excluded.artifacts,
       delivery = excluded.delivery,
+      external_id = excluded.external_id,
+      source = excluded.source,
       updated_at = excluded.updated_at
   `;
 }
 
 async function insertCall(sql: Sql, c: HumanCall) {
   await sql`
-    insert into ar_calls (id, mission_id, agent_id, question, urgency, created_at, resolved_at, reply)
+    insert into ar_calls (id, mission_id, agent_id, project_id, question, urgency, created_at, resolved_at, reply)
     values (
-      ${c.id}, ${c.missionId}, ${c.agentId}, ${c.question}, ${c.urgency},
+      ${c.id}, ${c.missionId}, ${c.agentId}, ${c.projectId ?? null}, ${c.question}, ${c.urgency},
       ${ts(c.createdAt)}, ${ts(c.resolvedAt)}, ${c.reply}
     )
     on conflict (id) do update set
+      project_id = excluded.project_id,
       resolved_at = excluded.resolved_at,
       reply = excluded.reply
   `;
@@ -224,9 +293,9 @@ async function insertCall(sql: Sql, c: HumanCall) {
 
 async function insertEvent(sql: Sql, e: MissionEvent) {
   await sql`
-    insert into ar_events (id, mission_id, agent_id, kind, message, at, meta)
+    insert into ar_events (id, mission_id, agent_id, project_id, kind, message, at, meta)
     values (
-      ${e.id}, ${e.missionId}, ${e.agentId}, ${e.kind}, ${e.message},
+      ${e.id}, ${e.missionId}, ${e.agentId}, ${e.projectId ?? null}, ${e.kind}, ${e.message},
       ${ts(e.at)}, ${e.meta ? JSON.stringify(e.meta) : null}::jsonb
     )
     on conflict (id) do nothing
@@ -236,10 +305,10 @@ async function insertEvent(sql: Sql, e: MissionEvent) {
 async function insertHistory(sql: Sql, h: MissionHistoryEntry) {
   await sql`
     insert into ar_mission_history (
-      id, mission_id, actor_id, actor_name, actor_kind,
+      id, mission_id, project_id, actor_id, actor_name, actor_kind,
       from_column, to_column, at, note, meta
     ) values (
-      ${h.id}, ${h.missionId}, ${h.actorId}, ${h.actorName}, ${h.actorKind},
+      ${h.id}, ${h.missionId}, ${h.projectId ?? null}, ${h.actorId}, ${h.actorName}, ${h.actorKind},
       ${h.fromColumn}, ${h.toColumn}, ${ts(h.at)}, ${h.note ?? null},
       ${h.meta ? JSON.stringify(h.meta) : null}::jsonb
     )
@@ -249,6 +318,7 @@ async function insertHistory(sql: Sql, h: MissionHistoryEntry) {
 
 function historyEntry(opts: {
   missionId: string;
+  projectId?: string | null;
   from: MissionColumn | null;
   to: MissionColumn;
   actorId?: string | null;
@@ -261,6 +331,7 @@ function historyEntry(opts: {
   return {
     id: uid("hist"),
     missionId: opts.missionId,
+    projectId: opts.projectId ?? null,
     actorId: opts.actorId ?? null,
     actorName: opts.actorName ?? null,
     actorKind: opts.actorKind ?? "system",
@@ -287,14 +358,23 @@ async function persistBoard(
   for (const h of history) await insertHistory(sql, h);
 }
 
+async function ensureProjects(sql: Sql) {
+  for (const pr of SEED_PROJECTS) await insertProject(sql, structuredClone(pr));
+}
+
 async function seedIfEmpty(sql: Sql) {
+  await ensureProjects(sql);
   const rows = await sql`select count(*)::int as c from ar_missions`;
   const c = Number((rows[0] as { c: number }).c ?? 0);
   if (c > 0) return;
 
+  for (const pr of SEED_PROJECTS) await insertProject(sql, structuredClone(pr));
   const board: BoardData = {
     agents: structuredClone(SEED_AGENTS),
-    missions: structuredClone(SEED_MISSIONS),
+    missions: structuredClone(SEED_MISSIONS).map((m) => ({
+      ...m,
+      projectId: m.projectId ?? DEFAULT_PROJECT_ID,
+    })),
     events: structuredClone(SEED_EVENTS),
     calls: structuredClone(SEED_CALLS),
   };
@@ -309,6 +389,7 @@ async function seedIfEmpty(sql: Sql) {
       sql,
       historyEntry({
         missionId: m.id,
+        projectId: m.projectId,
         from: null,
         to: m.column,
         actorKind: "system",
@@ -382,6 +463,7 @@ function collectHistory(
       out.push(
         historyEntry({
           missionId: m.id,
+          projectId: m.projectId,
           from: null,
           to: m.column,
           actorId: actor.id,
@@ -396,6 +478,7 @@ function collectHistory(
       out.push(
         historyEntry({
           missionId: m.id,
+          projectId: m.projectId,
           from: p.column,
           to: m.column,
           actorId: actor.id,
@@ -437,16 +520,45 @@ async function applyEngine<T>(
 }
 
 export const durableBoard = {
-  snapshot: () =>
+  snapshot: (projectId?: string | null) =>
     withLock(async () => {
       const sql = await getSql();
-      return loadBoard(sql);
+      return loadBoard(sql, projectId);
+    }),
+
+  listProjects: () =>
+    withLock(async () => {
+      const sql = await getSql();
+      await ensureProjects(sql);
+      const rows = await sql`select * from ar_projects order by name asc`;
+      return rows.map((r) => rowProject(r as Record<string, unknown>));
+    }),
+
+  createProject: (input: { name: string; slug?: string; description?: string }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const name = input.name.trim();
+      if (!name) throw new Error("name required");
+      const slug = (input.slug?.trim() || name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || uid("proj");
+      const pr: Project = {
+        id: uid("proj"),
+        name,
+        slug,
+        description: (input.description ?? "").trim(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      await insertProject(sql, pr);
+      return pr;
     }),
 
   poll: (opts: Parameters<typeof engine.pollMissions>[1]) =>
     withLock(async () => {
       const sql = await getSql();
-      const board = await loadBoard(sql);
+      const board = await loadBoard(sql, opts?.projectId);
       return engine.pollMissions(board, opts);
     }),
 
@@ -528,12 +640,14 @@ export const durableBoard = {
     priority?: Priority;
     tags?: string[];
     column?: MissionColumn;
+    projectId?: string;
   }) =>
     applyEngine(
       (b) => {
         const id = uid("msn");
         const mission: Mission = {
           id,
+          projectId: input.projectId ?? DEFAULT_PROJECT_ID,
           title: input.title.trim(),
           objective: input.objective.trim(),
           context: (input.context ?? "").trim(),
@@ -584,21 +698,28 @@ export const durableBoard = {
       return rows.map((r) => rowHistory(r as Record<string, unknown>));
     }),
 
-  recentHistory: (limit = 100) =>
+  recentHistory: (limit = 100, projectId?: string | null) =>
     withLock(async () => {
       const sql = await getSql();
       const lim = Math.min(Math.max(limit, 1), 500);
-      const rows = await sql`
-        select * from ar_mission_history
-        order by at desc
-        limit ${lim}
-      `;
+      const rows = projectId
+        ? await sql`
+            select * from ar_mission_history
+            where project_id = ${projectId}
+            order by at desc
+            limit ${lim}
+          `
+        : await sql`
+            select * from ar_mission_history
+            order by at desc
+            limit ${lim}
+          `;
       return rows.map((r) => rowHistory(r as Record<string, unknown>));
     }),
 
-  adminSnapshot: async () => {
-    const board = await durableBoard.snapshot();
-    const history = await durableBoard.recentHistory(150);
+  adminSnapshot: async (projectId?: string | null) => {
+    const board = await durableBoard.snapshot(projectId);
+    const history = await durableBoard.recentHistory(150, projectId);
     const byColumn: Record<string, number> = {};
     for (const m of board.missions) {
       byColumn[m.column] = (byColumn[m.column] ?? 0) + 1;
@@ -637,7 +758,125 @@ export const durableBoard = {
       await sql`delete from ar_missions`;
       await sql`delete from ar_agents`;
       await sql`delete from ar_meta where key = 'seeded'`;
+      // keep projects table; ensure seed projects exist
       await seedIfEmpty(sql);
       return loadBoard(sql);
+    }),
+
+  ingestGitHubIssue: (input: GitHubIngestInput) =>
+    withLock(async () => {
+      const sql = await getSql();
+      await ensureProjects(sql);
+      const mapped = mapGitHubIssueToMission(input);
+      const existing = await sql`
+        select * from ar_missions where external_id = ${mapped.externalId} limit 1
+      `;
+      if (existing[0]) {
+        const prev = rowMission(existing[0] as Record<string, unknown>);
+        const next: Mission = {
+          ...prev,
+          title: mapped.title,
+          objective: mapped.objective,
+          context: mapped.context,
+          constraints: mapped.constraints,
+          acceptance: mapped.acceptance,
+          priority: mapped.priority,
+          tags: mapped.tags,
+          artifacts: mapped.artifacts.length ? mapped.artifacts : prev.artifacts,
+          column: mapped.closed ? "done" : prev.column === "done" && !mapped.closed ? "ready" : prev.column,
+          updatedAt: Date.now(),
+          source: "github",
+          externalId: mapped.externalId,
+          projectId: mapped.projectId || prev.projectId,
+        };
+        // If closed, force done with history
+        const hist: MissionHistoryEntry[] = [];
+        if (prev.column !== next.column) {
+          hist.push(
+            historyEntry({
+              missionId: next.id,
+              projectId: next.projectId,
+              from: prev.column,
+              to: next.column,
+              actorKind: "system",
+              actorName: "github",
+              note: mapped.closed ? "issue closed" : "issue updated",
+            }),
+          );
+        }
+        await insertMission(sql, next);
+        for (const h of hist) await insertHistory(sql, h);
+        await insertEvent(sql, {
+          id: uid("ev"),
+          missionId: next.id,
+          agentId: null,
+          projectId: next.projectId,
+          kind: "note",
+          message: `GitHub sync · ${mapped.externalId}`,
+          at: Date.now(),
+        });
+        return { created: false, mission: next };
+      }
+
+      const mission: Mission = {
+        id: uid("msn"),
+        projectId: mapped.projectId,
+        title: mapped.title,
+        objective: mapped.objective,
+        context: mapped.context,
+        constraints: mapped.constraints,
+        acceptance: mapped.acceptance,
+        column: mapped.column,
+        priority: mapped.priority,
+        tags: mapped.tags,
+        assigneeId: null,
+        claimedBy: null,
+        claimedAt: null,
+        lastHeartbeat: null,
+        progressNote: "",
+        artifacts: mapped.artifacts,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        externalId: mapped.externalId,
+        source: "github",
+      };
+      await insertMission(sql, mission);
+      await insertHistory(
+        sql,
+        historyEntry({
+          missionId: mission.id,
+          projectId: mission.projectId,
+          from: null,
+          to: mission.column,
+          actorKind: "system",
+          actorName: "github",
+          note: "ingested from GitHub issue",
+        }),
+      );
+      await insertEvent(sql, {
+        id: uid("ev"),
+        missionId: mission.id,
+        agentId: null,
+        projectId: mission.projectId,
+        kind: "mission_created",
+        message: `GitHub issue · ${mapped.externalId} · ${mission.title}`,
+        at: Date.now(),
+      });
+      return { created: true, mission };
+    }),
+
+  journalMarkdown: (missionId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`select * from ar_missions where id = ${missionId} limit 1`;
+      if (!rows[0]) return null;
+      const mission = rowMission(rows[0] as Record<string, unknown>);
+      const histRows = await sql`
+        select * from ar_mission_history
+        where mission_id = ${missionId}
+        order by at asc
+      `;
+      const history = histRows.map((r) => rowHistory(r as Record<string, unknown>));
+      return renderMissionJournalMarkdown(mission, history);
     }),
 };

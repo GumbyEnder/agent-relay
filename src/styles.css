@@ -104,3 +104,62 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Theme packs — status colors stay distinct in every theme */
+html,
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f4f4f5;
+  --color-bg-elevated: #ffffff;
+  --color-bg-subtle: #e4e4e7;
+  --color-bg-hover: #d4d4d8;
+  --color-fg: #18181b;
+  --color-fg-muted: #52525b;
+  --color-fg-subtle: #71717a;
+  --color-border: #00000014;
+  --color-border-strong: #00000024;
+  --color-accent: #18181b;
+  --color-accent-fg: #fafafa;
+  --color-ring: #3f3f46;
+  --color-status-ready: #2563eb;
+  --color-status-running: #059669;
+  --color-status-human: #d97706;
+  --color-status-review: #64748b;
+  --color-status-done: #6b7280;
+  --color-status-blocked: #dc2626;
+  --color-status-inbox: #71717a;
+  --shadow-border: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-border-hover: 0 0 0 1px rgba(0, 0, 0, 0.14);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="cyberpunk"] {
+  color-scheme: dark;
+  --color-bg: #07060c;
+  --color-bg-elevated: #0e0c18;
+  --color-bg-subtle: #161228;
+  --color-bg-hover: #1e1834;
+  --color-fg: #e8f7ff;
+  --color-fg-muted: #8ba3b8;
+  --color-fg-subtle: #5c6f82;
+  --color-border: #00f0ff22;
+  --color-border-strong: #00f0ff44;
+  --color-accent: #00f0ff;
+  --color-accent-fg: #07060c;
+  --color-ring: #ff2bd6;
+  --color-status-ready: #3d9eff;
+  --color-status-running: #39ff14;
+  --color-status-human: #ffb020;
+  --color-status-review: #b388ff;
+  --color-status-done: #6b7c8a;
+  --color-status-blocked: #ff3864;
+  --color-status-inbox: #7a8a99;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --shadow-border: 0 0 0 1px rgba(0, 240, 255, 0.16);
+  --shadow-border-hover: 0 0 0 1px rgba(255, 43, 214, 0.35);
+  --shadow-panel: 0 0 40px rgba(0, 240, 255, 0.08), 0 16px 48px rgba(0, 0, 0, 0.55);
+}

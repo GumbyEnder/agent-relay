@@ -60,6 +60,7 @@ export function resolveAgent(
 export function missionSummary(m: Mission) {
   return {
     id: m.id,
+    projectId: m.projectId,
     title: m.title,
     objective: m.objective,
     context: m.context,
@@ -74,6 +75,8 @@ export function missionSummary(m: Mission) {
     progressNote: m.progressNote,
     artifacts: m.artifacts,
     delivery: m.delivery,
+    externalId: m.externalId ?? null,
+    source: m.source ?? null,
     updatedAt: m.updatedAt,
   };
 }
@@ -85,6 +88,7 @@ export function pollMissions(
     limit?: number;
     agent?: string;
     tags?: string[];
+    projectId?: string;
   } = {},
 ): EngineResult<{ missions: ReturnType<typeof missionSummary>[]; agent: string | null }> {
   const column = opts.column ?? "ready";
@@ -93,6 +97,7 @@ export function pollMissions(
   const tagFilter = (opts.tags ?? []).map((t) => t.toLowerCase());
 
   let list = board.missions.filter((m) => {
+    if (opts.projectId && m.projectId !== opts.projectId) return false;
     if (m.column !== column) return false;
     if (column === "ready" || column === "inbox") {
       if (m.claimedBy) return false;

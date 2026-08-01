@@ -113,6 +113,18 @@ export function MissionPanel({ missionId }: { missionId: string }) {
     toast.success("Mission prompt copied — paste into any harness");
   };
 
+  const copyJournal = async () => {
+    try {
+      const res = await fetch(`/api/agent/missions/${mission.id}/journal`);
+      const data = (await res.json()) as { ok?: boolean; markdown?: string; error?: string };
+      if (!res.ok || !data.markdown) throw new Error(data.error ?? "journal failed");
+      await navigator.clipboard.writeText(data.markdown);
+      toast.success("Journal markdown copied");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Journal failed");
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -259,7 +271,7 @@ export function MissionPanel({ missionId }: { missionId: string }) {
             >
               Release
             </Button>
-            <Button size="sm" variant="ghost" onClick={copyPrompt}>
+            <Button size="sm" variant="ghost" onClick={() => void copyPrompt()}>
               <Copy className="h-3.5 w-3.5" />
               Copy for harness
             </Button>
@@ -360,6 +372,11 @@ export function MissionPanel({ missionId }: { missionId: string }) {
         )}
       </div>
 
+      <div className="border-t border-border px-4 py-2">
+        <Button size="sm" variant="secondary" className="w-full" onClick={() => void copyJournal()}>
+          Copy journal markdown
+        </Button>
+      </div>
       <footer className="border-t border-border p-3">
         <Button
           variant="danger"

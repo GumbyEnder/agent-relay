@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { agentApi } from "./api-client";
 import type {
   Agent,
+  Project,
   AgentStatus,
   HarnessKind,
   HumanCall,
@@ -18,8 +19,11 @@ interface BoardState {
   missions: Mission[];
   events: MissionEvent[];
   calls: HumanCall[];
+  projects: Project[];
+  selectedProjectId: string | null;
   historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
+  mainView: "board" | "live" | "calls" | "agents" | "protocol";
   panel: "none" | "mission" | "agents" | "protocol" | "calls" | "new-mission" | "new-agent";
   search: string;
   filterAgentId: string | null;
@@ -28,6 +32,8 @@ interface BoardState {
   _syncing: boolean;
   _error: string | null;
 
+  setMainView: (v: BoardState["mainView"]) => void;
+  setSelectedProjectId: (id: string | null) => void;
   setSearch: (q: string) => void;
   setFilterAgent: (id: string | null) => void;
   setFilterPriority: (p: Priority | null) => void;
@@ -91,8 +97,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
   missions: [],
   events: [],
   calls: [],
+  projects: [],
+  selectedProjectId: null,
   historyByMission: {},
   selectedMissionId: null,
+  mainView: "board",
   panel: "none",
   search: "",
   filterAgentId: null,
@@ -102,6 +111,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
   _error: null,
 
   setHydrated: () => set({ _hydrated: true }),
+  setMainView: (v) => set({ mainView: v, panel: "none" }),
+  setSelectedProjectId: (id) => {
+    set({ selectedProjectId: id, selectedMissionId: null, historyByMission: {} });
+    void get().refresh();
+  },
   setSearch: (q) => set({ search: q }),
   setFilterAgent: (id) => set({ filterAgentId: id }),
   setFilterPriority: (p) => set({ filterPriority: p }),
@@ -125,12 +139,42 @@ export const useBoard = create<BoardState>()((set, get) => ({
   refresh: async () => {
     set({ _syncing: true });
     try {
-      const snap = await agentApi.board();
+      const pid = get().selectedProjectId;
+      const [snap, projRes] = await Promise.all([
+        agentApi.board(pid),
+        agentApi.listProjects().catch(() => ({
+          ok: true as const,
+          projects: get().projects as Array<{
+            id: string;
+            name: string;
+            slug: string;
+            description: string;
+            createdAt?: number;
+            updatedAt?: number;
+          }>,
+        })),
+      ]);
+      const projects = (projRes.projects ?? []).map((pr) => ({
+        id: pr.id,
+        name: pr.name,
+        slug: pr.slug,
+        description: pr.description ?? "",
+        createdAt: "createdAt" in pr && pr.createdAt ? pr.createdAt : Date.now(),
+        updatedAt: "updatedAt" in pr && pr.updatedAt ? pr.updatedAt : Date.now(),
+      }));
+      let selectedProjectId = get().selectedProjectId;
+      if (!selectedProjectId && projects.length) {
+        selectedProjectId =
+          projects.find((p) => p.slug === "default" || p.id === "proj_default")?.id ??
+          projects[0]!.id;
+      }
       set({
         agents: snap.agents,
         missions: snap.missions,
         events: snap.events,
         calls: snap.calls,
+        projects,
+        selectedProjectId,
         _hydrated: true,
         _syncing: false,
         _error: null,
@@ -238,6 +282,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
         priority: input.priority,
         tags: input.tags,
         column: input.column,
+        projectId: get().selectedProjectId ?? undefined,
       });
       await get().refresh();
       const id = res.mission.id;

@@ -1,10 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { AdminPortal } from "@/components/admin-portal";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/** Bookmarks to /admin land on the main shell Live tab. */
 export const Route = createFileRoute("/admin")({
-  component: AdminPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/", search: { view: "live" } });
+  },
 });
-
-function AdminPage() {
-  return <AdminPortal />;
-}

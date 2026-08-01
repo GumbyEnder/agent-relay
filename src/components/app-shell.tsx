@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import {
+  Activity,
   BookOpen,
   Bot,
   Download,
+  LayoutDashboard,
   MessageSquareWarning,
+  Palette,
   Plus,
   Radio,
-  Search,
   RotateCcw,
-  LayoutDashboard,
+  Search,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { ActivityFeed } from "@/components/activity-feed";
+import { AdminPortal } from "@/components/admin-portal";
 import { AgentStrip } from "@/components/agent-strip";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BoardColumn } from "@/components/board-column";
@@ -24,23 +27,52 @@ import { ProtocolPanel } from "@/components/protocol-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { filteredMissions, useBoard } from "@/lib/store";
+import {
+  applyTheme,
+  initTheme,
+  THEME_IDS,
+  THEME_LABELS,
+  type ThemeId,
+} from "@/lib/theme";
 import { COLUMNS, type MissionColumn } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export function AppShell() {
+type MainView = "board" | "live" | "calls" | "agents" | "protocol";
+
+const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
+  { id: "board", label: "Board", icon: LayoutDashboard },
+  { id: "live", label: "Live", icon: Activity },
+  { id: "calls", label: "Calls", icon: MessageSquareWarning },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "protocol", label: "Protocol", icon: BookOpen },
+];
+
+export function AppShell({
+  initialView = "board",
+  initialProjectSlug,
+}: {
+  initialView?: MainView;
+  initialProjectSlug?: string;
+} = {}) {
+  const navigate = useNavigate();
   const state = useBoard();
   const {
     agents,
     events,
     calls,
+    projects,
+    selectedProjectId,
     panel,
     selectedMissionId,
+    mainView,
     search,
     filterAgentId,
     filterPriority,
     setSearch,
     setFilterAgent,
     setFilterPriority,
+    setMainView,
+    setSelectedProjectId,
     openPanel,
     selectMission,
     closePanel,
@@ -52,19 +84,13 @@ export function AppShell() {
   } = state;
 
   const [mobileFeed, setMobileFeed] = useState(false);
+  const [theme, setTheme] = useState<ThemeId>("dark");
+  const [themeOpen, setThemeOpen] = useState(false);
+
   const missions = useMemo(
-    () =>
-      filteredMissions({
-        ...state,
-        // selectors used by filter
-      }),
+    () => filteredMissions({ ...state }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      state.missions,
-      state.search,
-      state.filterAgentId,
-      state.filterPriority,
-    ],
+    [state.missions, state.search, state.filterAgentId, state.filterPriority],
   );
   const openCalls = calls.filter((c) => !c.resolvedAt).length;
   const running = state.missions.filter((m) => m.column === "running").length;
@@ -75,6 +101,24 @@ export function AppShell() {
     panel === "agents" ||
     panel === "protocol" ||
     panel === "calls";
+
+  useEffect(() => {
+    setTheme(initTheme());
+  }, []);
+
+  useEffect(() => {
+    if (initialView) setMainView(initialView);
+  }, [initialView, setMainView]);
+
+  useEffect(() => {
+    if (!initialProjectSlug || !projects.length) return;
+    const match = projects.find(
+      (p) => p.slug === initialProjectSlug || p.id === initialProjectSlug,
+    );
+    if (match && match.id !== selectedProjectId) {
+      setSelectedProjectId(match.id);
+    }
+  }, [initialProjectSlug, projects, selectedProjectId, setSelectedProjectId]);
 
   useEffect(() => {
     void useBoard
@@ -99,10 +143,26 @@ export function AppShell() {
   const byColumn = (col: MissionColumn) =>
     missions.filter((m) => m.column === col);
 
+  const selectView = (v: MainView) => {
+    setMainView(v);
+    void navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, view: v === "board" ? undefined : v }),
+    });
+  };
+
+  const onTheme = (id: ThemeId) => {
+    setTheme(applyTheme(id));
+    setThemeOpen(false);
+    toast.message(`Theme · ${THEME_LABELS[id]}`);
+  };
+
+  const selectedProject = projects.find((p) => p.id === selectedProjectId);
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
       <Toaster
-        theme="dark"
+        theme={theme === "light" ? "light" : "dark"}
         position="bottom-right"
         toastOptions={{
           className:
@@ -126,7 +186,9 @@ export function AppShell() {
                 Agent Relay
               </h1>
               <p className="truncate text-[11px] text-fg-subtle sm:text-xs">
-                Mission kanban for any harness — claims, heartbeats, human calls
+                {selectedProject
+                  ? `${selectedProject.name} · agent-first kanban`
+                  : "Mission kanban for any harness"}
               </p>
             </div>
           </div>
@@ -143,14 +205,7 @@ export function AppShell() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Link
-              to="/admin"
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-3 text-xs font-medium text-fg hover:bg-bg-hover"
-            >
-              <LayoutDashboard className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Admin</span>
-            </Link>
+          <div className="relative flex flex-wrap items-center gap-1.5">
             <Button
               size="sm"
               onClick={() => openPanel("new-mission")}
@@ -162,35 +217,32 @@ export function AppShell() {
             <Button
               size="sm"
               variant="secondary"
-              className="h-9 relative"
-              onClick={() => openPanel("calls")}
-            >
-              <MessageSquareWarning className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Calls</span>
-              {openCalls > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-human px-1 text-[10px] font-medium text-accent-fg tabular">
-                  {openCalls}
-                </span>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
               className="h-9"
-              onClick={() => openPanel("agents")}
+              onClick={() => setThemeOpen((o) => !o)}
+              title="Theme"
             >
-              <Bot className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">Agents</span>
+              <Palette className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">{THEME_LABELS[theme]}</span>
             </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-9"
-              onClick={() => openPanel("protocol")}
-            >
-              <BookOpen className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">Protocol</span>
-            </Button>
+            {themeOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[9rem] rounded-[var(--radius-md)] border border-border bg-bg-elevated p-1 shadow-[var(--shadow-panel)]">
+                {THEME_IDS.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center rounded-[var(--radius-sm)] px-3 py-2 text-left text-xs",
+                      theme === id
+                        ? "bg-accent text-accent-fg"
+                        : "text-fg-muted hover:bg-bg-subtle hover:text-fg",
+                    )}
+                    onClick={() => onTheme(id)}
+                  >
+                    {THEME_LABELS[id]}
+                  </button>
+                ))}
+              </div>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -237,73 +289,170 @@ export function AppShell() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-2 text-[11px] text-fg-subtle sm:px-4">
-          <span className="tabular">
-            <span className="text-status-running">{running}</span> running
-          </span>
-          <span className="tabular">
-            <span className="text-status-ready">{ready}</span> ready
-          </span>
-          <span className="tabular">
-            <span className="text-status-human">{openCalls}</span> human calls
-          </span>
-          <span className="hidden sm:inline text-fg-subtle/80">
-            Press{" "}
-            <kbd className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-fg-muted shadow-[var(--shadow-border)]">
-              ⌘K
-            </kbd>{" "}
-            for commands
-          </span>
-          <div className="ml-auto flex items-center gap-1">
-            {(["p0", "p1", "p2", "p3"] as const).map((p) => (
+        {/* View tabs */}
+        <div className="flex flex-wrap items-center gap-1 border-t border-border px-3 py-2 sm:px-4">
+          {VIEWS.map((v) => {
+            const Icon = v.icon;
+            const active = mainView === v.id;
+            return (
               <button
-                key={p}
+                key={v.id}
                 type="button"
-                onClick={() =>
-                  setFilterPriority(filterPriority === p ? null : p)
-                }
+                onClick={() => selectView(v.id)}
                 className={cn(
-                  "rounded-full px-2 py-1 font-mono uppercase transition-colors",
-                  filterPriority === p
+                  "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] px-3 text-xs font-medium transition-colors",
+                  active
                     ? "bg-accent text-accent-fg"
-                    : "bg-bg-subtle text-fg-muted hover:text-fg",
+                    : "text-fg-muted hover:bg-bg-subtle hover:text-fg",
                 )}
               >
-                {p}
+                <Icon className="h-3.5 w-3.5" />
+                {v.label}
+                {v.id === "calls" && openCalls > 0 && (
+                  <span className="ml-0.5 rounded-full bg-status-human px-1.5 text-[10px] text-accent-fg tabular">
+                    {openCalls}
+                  </span>
+                )}
               </button>
-            ))}
+            );
+          })}
+          <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] text-fg-subtle">
+            <span className="tabular">
+              <span className="text-status-running">{running}</span> running
+            </span>
+            <span className="tabular">
+              <span className="text-status-ready">{ready}</span> ready
+            </span>
+            <span className="tabular">
+              <span className="text-status-human">{openCalls}</span> calls
+            </span>
+            <div className="hidden items-center gap-1 sm:flex">
+              {(["p0", "p1", "p2", "p3"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() =>
+                    setFilterPriority(filterPriority === p ? null : p)
+                  }
+                  className={cn(
+                    "rounded-full px-2 py-1 font-mono uppercase transition-colors",
+                    filterPriority === p
+                      ? "bg-accent text-accent-fg"
+                      : "bg-bg-subtle text-fg-muted hover:text-fg",
+                  )}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </header>
 
-      <AgentStrip
-        agents={agents}
-        filterAgentId={filterAgentId}
-        onFilter={setFilterAgent}
-        onOpenRoster={() => openPanel("agents")}
-      />
+      {mainView === "board" && (
+        <AgentStrip
+          agents={agents}
+          filterAgentId={filterAgentId}
+          onFilter={setFilterAgent}
+          onOpenRoster={() => selectView("agents")}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin">
-          <div className="flex h-full gap-2 p-3 sm:gap-3 sm:p-4">
-            {COLUMNS.map((col) => (
-              <BoardColumn
-                key={col.id}
-                columnId={col.id}
-                missions={byColumn(col.id)}
-                agents={agents}
-                selectedId={selectedMissionId}
-                onOpen={(id) => selectMission(id)}
-                onDropMission={(id, column) => moveMission(id, column)}
-                onDragStart={() => {}}
-              />
-            ))}
+        {/* Project rail */}
+        <aside className="hidden w-44 shrink-0 flex-col border-r border-border bg-bg-elevated/30 md:flex lg:w-52">
+          <div className="border-b border-border px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+            Projects
           </div>
-        </main>
-
-        <aside className="hidden w-64 shrink-0 border-l border-border bg-bg-elevated/40 xl:block">
-          <ActivityFeed events={events} />
+          <ul className="flex-1 space-y-0.5 overflow-y-auto p-2 scrollbar-thin">
+            {projects.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProjectId(p.id);
+                    void navigate({
+                      to: "/",
+                      search: (prev) => ({
+                        ...prev,
+                        project: p.slug === "default" ? undefined : p.slug,
+                      }),
+                    });
+                  }}
+                  className={cn(
+                    "flex w-full flex-col rounded-[var(--radius-sm)] px-2.5 py-2 text-left text-xs transition-colors",
+                    selectedProjectId === p.id
+                      ? "bg-accent text-accent-fg"
+                      : "text-fg-muted hover:bg-bg-subtle hover:text-fg",
+                  )}
+                >
+                  <span className="font-medium">{p.name}</span>
+                  <span
+                    className={cn(
+                      "font-mono text-[10px]",
+                      selectedProjectId === p.id
+                        ? "text-accent-fg/70"
+                        : "text-fg-subtle",
+                    )}
+                  >
+                    {p.slug}
+                  </span>
+                </button>
+              </li>
+            ))}
+            {projects.length === 0 && (
+              <li className="px-2 py-4 text-[11px] text-fg-subtle">Loading…</li>
+            )}
+          </ul>
         </aside>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {mainView === "board" && (
+            <div className="flex min-h-0 flex-1">
+              <main className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin">
+                <div className="flex h-full gap-2 p-3 sm:gap-3 sm:p-4">
+                  {COLUMNS.map((col) => (
+                    <BoardColumn
+                      key={col.id}
+                      columnId={col.id}
+                      missions={byColumn(col.id)}
+                      agents={agents}
+                      selectedId={selectedMissionId}
+                      onOpen={(id) => selectMission(id)}
+                      onDropMission={(id, column) => moveMission(id, column)}
+                      onDragStart={() => {}}
+                    />
+                  ))}
+                </div>
+              </main>
+              <aside className="hidden w-64 shrink-0 border-l border-border bg-bg-elevated/40 xl:block">
+                <ActivityFeed events={events} />
+              </aside>
+            </div>
+          )}
+
+          {mainView === "live" && (
+            <div className="min-h-0 flex-1">
+              <AdminPortal projectId={selectedProjectId} embedded />
+            </div>
+          )}
+
+          {mainView === "calls" && (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <CallsPanel />
+            </div>
+          )}
+          {mainView === "agents" && (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <AgentsPanel />
+            </div>
+          )}
+          {mainView === "protocol" && (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ProtocolPanel />
+            </div>
+          )}
+        </div>
 
         <aside
           className={cn(
@@ -329,21 +478,23 @@ export function AppShell() {
         )}
       </div>
 
-      <div className="border-t border-border xl:hidden">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs text-fg-muted"
-          onClick={() => setMobileFeed((v) => !v)}
-        >
-          <span>Ops feed</span>
-          <span className="text-fg-subtle">{mobileFeed ? "Hide" : "Show"}</span>
-        </button>
-        {mobileFeed && (
-          <div className="max-h-48 overflow-y-auto border-t border-border scrollbar-thin">
-            <ActivityFeed events={events} />
-          </div>
-        )}
-      </div>
+      {mainView === "board" && (
+        <div className="border-t border-border xl:hidden">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs text-fg-muted"
+            onClick={() => setMobileFeed((v) => !v)}
+          >
+            <span>Ops feed</span>
+            <span className="text-fg-subtle">{mobileFeed ? "Hide" : "Show"}</span>
+          </button>
+          {mobileFeed && (
+            <div className="max-h-48 overflow-y-auto border-t border-border scrollbar-thin">
+              <ActivityFeed events={events} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

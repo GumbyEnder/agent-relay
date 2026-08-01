@@ -52,6 +52,7 @@ export interface MissionEvent {
   id: string;
   missionId: string | null;
   agentId: string | null;
+  projectId?: string | null;
   kind: EventKind;
   message: string;
   at: number;
@@ -62,6 +63,7 @@ export interface HumanCall {
   id: string;
   missionId: string;
   agentId: string | null;
+  projectId?: string | null;
   question: string;
   urgency: Priority;
   createdAt: number;
@@ -69,8 +71,18 @@ export interface HumanCall {
   reply: string | null;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Mission {
   id: string;
+  projectId: string;
   title: string;
   objective: string;
   context: string;
@@ -88,6 +100,8 @@ export interface Mission {
   createdAt: number;
   updatedAt: number;
   delivery?: string;
+  externalId?: string | null;
+  source?: string | null;
 }
 
 export const COLUMNS: {
@@ -137,6 +151,7 @@ export const COLUMN_STATUS_COLOR: Record<MissionColumn, string> = {
 export interface MissionHistoryEntry {
   id: string;
   missionId: string;
+  projectId?: string | null;
   actorId: string | null;
   actorName: string | null;
   /** agent | operator | system */

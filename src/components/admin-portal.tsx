@@ -61,7 +61,13 @@ function columnLabel(id: string | null | undefined) {
   return COLUMNS.find((c) => c.id === id)?.label ?? id.replace(/_/g, " ");
 }
 
-export function AdminPortal() {
+export function AdminPortal({
+  projectId = null,
+  embedded = false,
+}: {
+  projectId?: string | null;
+  embedded?: boolean;
+} = {}) {
   const [data, setData] = useState<AdminPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(true);
@@ -74,7 +80,8 @@ export function AdminPortal() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/agent/admin", { cache: "no-store" });
+      const q = projectId ? `?project=${encodeURIComponent(projectId)}` : "";
+      const res = await fetch(`/api/agent/admin${q}`, { cache: "no-store" });
       const json = (await res.json()) as AdminPayload & { error?: string };
       if (!res.ok || json.ok === false) {
         throw new Error(json.error ?? `HTTP ${res.status}`);
@@ -113,11 +120,14 @@ export function AdminPortal() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
+    bootstrapped.current = false;
+    seenEvents.current = new Set();
+    seenHistory.current = new Set();
     void load();
-  }, [load]);
+  }, [load, projectId]);
 
   useEffect(() => {
     if (!live) return;
@@ -145,7 +155,7 @@ export function AdminPortal() {
   const ageMs = lastOkAt ? Date.now() - lastOkAt : null;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
+    <div className={cn("flex flex-col overflow-hidden bg-bg text-fg", embedded ? "h-full min-h-0" : "h-dvh")}>
       <header className="shrink-0 border-b border-border bg-bg-elevated/90 backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
           <div className="mr-auto flex min-w-0 items-center gap-3">
@@ -206,12 +216,14 @@ export function AdminPortal() {
             <Button size="sm" variant="default" className="h-9" onClick={() => void load()}>
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
-            <Link
-              to="/"
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-3 text-xs font-medium text-fg hover:bg-bg-hover"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" /> Board
-            </Link>
+            {!embedded && (
+              <Link
+                to="/"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-3 text-xs font-medium text-fg hover:bg-bg-hover"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" /> Board
+              </Link>
+            )}
           </div>
         </div>
 

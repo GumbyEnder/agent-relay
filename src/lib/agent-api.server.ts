@@ -106,6 +106,19 @@ function str(v: unknown): string | undefined {
   return undefined;
 }
 
+function projectRef(
+  url: URL,
+  body?: Record<string, unknown>,
+): string | undefined {
+  const q = url.searchParams.get("project") ?? url.searchParams.get("project_id");
+  if (q?.trim()) return q.trim();
+  if (body) {
+    const b = str(body.project) ?? str(body.project_id);
+    if (b?.trim()) return b.trim();
+  }
+  return undefined;
+}
+
 function strArr(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
   return v.filter((x): x is string => typeof x === "string");
@@ -183,6 +196,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         limit: Number.isFinite(limit) ? limit : 5,
         agent,
         tags,
+        projectId: projectRef(url),
       });
       return fromEngine(result);
     }
@@ -289,14 +303,95 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // GET /admin — operator live dashboard payload (events + history + board)
     if (parts.length === 1 && parts[0] === "admin" && req.method === "GET") {
-      const snap = await boardOps.adminSnapshot();
-      return json({ ok: true, ...snap });
+      const snap = await boardOps.adminSnapshot(projectRef(url));
+      return json({ ok: true, projectId: projectRef(url) ?? null, ...snap });
+    }
+
+    // GET|POST /projects
+    if (parts.length === 1 && parts[0] === "projects" && req.method === "GET") {
+      const projects = await boardOps.listProjects();
+      return json({ ok: true, projects });
+    }
+    if (parts.length === 1 && parts[0] === "projects" && req.method === "POST") {
+      const name = str(body.name);
+      if (!name) return err(400, "name is required", "bad_request");
+      const project = await boardOps.createProject({
+        name,
+        slug: str(body.slug),
+        description: str(body.description),
+      });
+      return json({ ok: true, project });
+    }
+
+    // POST /webhooks/github — issue ingest
+    if (
+      parts.length === 2 &&
+      parts[0] === "webhooks" &&
+      parts[1] === "github" &&
+      req.method === "POST"
+    ) {
+      try {
+        const result = await boardOps.ingestGitHubIssue({
+          action: str(body.action),
+          issue: (body.issue ?? body) as any,
+          repository: body.repository as any,
+          projectId: projectRef(url, body),
+        });
+        return json({ ok: true, ...result });
+      } catch (e) {
+        return err(400, e instanceof Error ? e.message : "ingest failed", "bad_request");
+      }
+    }
+
+    // POST /ingest/github — same as webhook (testable without GH)
+    if (parts.length === 2 && parts[0] === "ingest" && parts[1] === "github" && req.method === "POST") {
+      try {
+        const result = await boardOps.ingestGitHubIssue({
+          action: str(body.action),
+          issue: (body.issue ?? body) as any,
+          repository: body.repository as any,
+          projectId: str(body.projectId) ?? str(body.project) ?? projectRef(url, body),
+        });
+        return json({ ok: true, ...result });
+      } catch (e) {
+        return err(400, e instanceof Error ? e.message : "ingest failed", "bad_request");
+      }
+    }
+
+    // GET /missions/:id/journal.md
+    if (
+      parts.length === 3 &&
+      parts[0] === "missions" &&
+      parts[2] === "journal.md" &&
+      req.method === "GET"
+    ) {
+      const md = await boardOps.journalMarkdown(parts[1]!);
+      if (!md) return err(404, "mission not found", "mission_not_found");
+      return new Response(md, {
+        status: 200,
+        headers: {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      });
+    }
+
+    // GET /missions/:id/journal (json wrapper)
+    if (
+      parts.length === 3 &&
+      parts[0] === "missions" &&
+      parts[2] === "journal" &&
+      req.method === "GET"
+    ) {
+      const md = await boardOps.journalMarkdown(parts[1]!);
+      if (!md) return err(404, "mission not found", "mission_not_found");
+      return json({ ok: true, mission_id: parts[1], markdown: md });
     }
 
     // GET /board — full snapshot for UI
     if (parts.length === 1 && parts[0] === "board" && req.method === "GET") {
-      const snap = await boardOps.snapshot();
-      return json({ ok: true, ...snap });
+      const snap = await boardOps.snapshot(projectRef(url));
+      return json({ ok: true, projectId: projectRef(url) ?? null, ...snap });
     }
 
     // GET /missions/:id/history
@@ -328,6 +423,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           priority: str(body.priority) as any,
           tags: strArr(body.tags),
           column: str(body.column) as any,
+          projectId: str(body.projectId) ?? str(body.project) ?? projectRef(url, body),
         }),
       );
     }
@@ -350,7 +446,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           calls: "GET /api/agent/calls",
           reply: "POST /api/agent/calls/:id/reply",
           export: "GET /api/agent/export",
-          admin: "GET /api/agent/admin",
+          admin: "GET /api/agent/admin?project=",
+          projects: "GET|POST /api/agent/projects",
+          github_ingest: "POST /api/agent/ingest/github",
+          journal: "GET /api/agent/missions/:id/journal",
         },
       });
     }
@@ -376,6 +475,7 @@ async function handleAction(body: Record<string, unknown>): Promise<Response> {
         limit: Number.isFinite(limit) ? limit : 5,
         agent: str(body.agent),
         tags,
+        projectId: str(body.project) ?? str(body.project_id),
       }),
     );
   }
