@@ -41,6 +41,35 @@ export interface BoardSnapshot {
 }
 
 export const agentApi = {
+  listKeys: (projectId: string) =>
+    req<{ ok: true; keys: Array<Record<string, unknown>> }>(
+      "GET",
+      `/keys?project=${encodeURIComponent(projectId)}`,
+    ),
+  createApiKey: (input: { projectId: string; agentId?: string | null; name?: string }) =>
+    req<{ ok: true; key: Record<string, unknown> & { secret?: string } }>("POST", "/keys", input),
+  revokeApiKey: (id: string) =>
+    req<{ ok: true }>("POST", `/keys/${id}/revoke`, {}),
+  getSettings: (projectId: string) =>
+    req<{ ok: true; settings: Record<string, unknown> }>(
+      "GET",
+      `/projects/${projectId}/settings`,
+    ),
+  updateSettings: (projectId: string, patch: Record<string, unknown>) =>
+    req<{ ok: true; settings: Record<string, unknown> }>(
+      "POST",
+      `/projects/${projectId}/settings`,
+      patch,
+    ),
+  exportHistory: async (opts: { projectId?: string; format?: "json" | "csv"; missionId?: string }) => {
+    const q = new URLSearchParams({ history: "1", format: opts.format ?? "json" });
+    if (opts.projectId) q.set("project", opts.projectId);
+    if (opts.missionId) q.set("mission", opts.missionId);
+    const res = await fetch(`/api/agent/export?${q}`);
+    if ((opts.format ?? "json") === "csv") return res.text();
+    return res.json();
+  },
+
   board: (projectId?: string | null) =>
     req<BoardSnapshot>(
       "GET",

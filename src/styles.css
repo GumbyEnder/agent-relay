@@ -294,3 +294,17 @@ html.theme-crt body::after {
     text-shadow: none;
   }
 }
+
+html[data-density="compact"] .density-compact,
+.density-compact {
+  font-size: 13px;
+}
+.density-compact [class*="py-3"] {
+  /* tighten cards via gap */
+}
+.density-compact main .flex.h-full {
+  gap: 0.35rem;
+}
+.density-compact section.flex.w-\[min\(86vw\,280px\)\] {
+  width: min(78vw, 220px);
+}

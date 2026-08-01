@@ -25,6 +25,8 @@ import type { HarnessKind } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
 import type { MissionColumn } from "./types";
+import { verifyGitHubSignature } from "./github-webhook";
+import { extractArtifactFromGitHubPayload } from "./github-ingest";
 
 const HARNESSES = new Set<HarnessKind>([
   "claude_code",
@@ -60,29 +62,50 @@ function fromEngine<T>(result: EngineResult<T>): Response {
   return json({ ok: true, ...result.data });
 }
 
-function requireApiKey(req: Request): Response | null {
-  const expected = process.env.AGENT_RELAY_API_KEY?.trim();
-  if (!expected) return null;
-  const auth = req.headers.get("authorization") ?? "";
-  const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
-  const header = req.headers.get("x-agent-key")?.trim() ?? "";
-  if (bearer === expected || header === expected) return null;
-
-  // Browser operator UI is same-origin — allow without exposing the agent key.
-  // External harnesses must still send Bearer / X-Agent-Key.
+function isSameOriginBrowser(req: Request): boolean {
   const site = (req.headers.get("sec-fetch-site") ?? "").toLowerCase();
-  if (site === "same-origin") return null;
+  if (site === "same-origin") return true;
   const origin = req.headers.get("origin");
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
   if (origin && host) {
     try {
-      if (new URL(origin).host === host.split(",")[0]!.trim()) return null;
+      if (new URL(origin).host === host.split(",")[0]!.trim()) return true;
     } catch {
-      /* ignore bad origin */
+      /* ignore */
     }
   }
-  // Top-level navigations / curl without Origin still need the key when configured.
-  return err(401, "Invalid or missing API key", "unauthorized");
+  return false;
+}
+
+function presentedKey(req: Request): string {
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  return req.headers.get("x-agent-key")?.trim() ?? "";
+}
+
+async function requireApiKey(req: Request): Promise<Response | null> {
+  // Browser operator UI is same-origin — never require agent keys in the SPA.
+  if (isSameOriginBrowser(req)) return null;
+
+  const key = presentedKey(req);
+  const globalKey = process.env.AGENT_RELAY_API_KEY?.trim();
+
+  if (key) {
+    if (globalKey && key === globalKey) return null;
+    if (key.startsWith("ark_")) {
+      const hit = await boardOps.verifyPresentedApiKey(key);
+      if (hit) return null;
+    }
+    if (globalKey) return err(401, "Invalid or missing API key", "unauthorized");
+    // scoped keys exist path failed
+    const hit = key.startsWith("ark_") ? null : null;
+    if (key.startsWith("ark_")) return err(401, "Invalid or revoked API key", "unauthorized");
+  }
+
+  // No key presented: require auth if global key OR any scoped keys might exist.
+  // Enforce when global is set; also when Authorization required by presence of ark attempt only.
+  if (globalKey) return err(401, "Invalid or missing API key", "unauthorized");
+  return null;
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
@@ -145,7 +168,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     });
   }
 
-  const authFail = requireApiKey(req);
+  const authFail = await requireApiKey(req);
   if (authFail) return authFail;
 
   const prefix = "/api/agent";
@@ -158,8 +181,17 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
   try {
     let body: Record<string, unknown> = {};
+    let rawBody = "";
     try {
-      body = await readBody(req);
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        rawBody = await req.text();
+        if (rawBody.trim()) {
+          const parsed = JSON.parse(rawBody) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            body = parsed as Record<string, unknown>;
+          }
+        }
+      }
     } catch {
       return err(400, "Invalid JSON body", "invalid_json");
     }
@@ -281,7 +313,9 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "calls" && parts[2] === "reply" && req.method === "POST") {
       const reply = str(body.reply);
       if (!reply) return err(400, "reply is required", "bad_request");
-      return fromEngine(await boardOps.reply(parts[1]!, reply));
+      const { result, webhook } = await boardOps.replyToCallWithWebhook(parts[1]!, reply);
+      if (!result.ok) return fromEngine(result);
+      return json({ ok: true, ...result.data, webhook });
     }
 
     // GET /export
@@ -323,24 +357,67 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, project });
     }
 
-    // POST /webhooks/github — issue ingest
+    // POST /webhooks/github — signed issue/PR ingest
     if (
       parts.length === 2 &&
       parts[0] === "webhooks" &&
       parts[1] === "github" &&
       req.method === "POST"
     ) {
+      const projectId = projectRef(url, body) ?? str(body.projectId) ?? "proj_default";
+      const settings = await boardOps.getProjectSettings(projectId);
+      const envSecret = process.env.GITHUB_WEBHOOK_SECRET?.trim();
+      const secret = settings.githubWebhookSecret?.trim() || envSecret || "";
+      if (secret) {
+        const sig = req.headers.get("x-hub-signature-256");
+        if (!verifyGitHubSignature(rawBody, sig, secret)) {
+          return err(401, "Invalid GitHub webhook signature", "unauthorized");
+        }
+      }
       try {
-        const result = await boardOps.ingestGitHubIssue({
-          action: str(body.action),
-          issue: (body.issue ?? body) as any,
-          repository: body.repository as any,
-          projectId: projectRef(url, body),
-        });
-        return json({ ok: true, ...result });
+        const eventName = (req.headers.get("x-github-event") ?? str(body.action) ?? "").toLowerCase();
+        // PR / check / workflow artifact attach
+        if (eventName.includes("pull_request") || eventName.includes("check_run") || eventName.includes("workflow_run") || body.pull_request || body.check_run || body.workflow_run) {
+          const art = extractArtifactFromGitHubPayload(body);
+          if (art) {
+            let missionId: string | null = null;
+            if (art.externalId) {
+              const snap = await boardOps.snapshot(projectId);
+              const m = snap.missions.find((x) => x.externalId === art.externalId);
+              missionId = m?.id ?? null;
+            }
+            if (!missionId && str(body.mission_id)) missionId = str(body.mission_id)!;
+            if (missionId) {
+              const m = await boardOps.attachMissionArtifact(missionId, art.url, art.note);
+              return json({ ok: true, attached: true, mission: m, artifact: art });
+            }
+            return json({ ok: true, attached: false, reason: "no_linked_mission", artifact: art });
+          }
+        }
+        if (body.issue) {
+          const result = await boardOps.ingestGitHubIssue({
+            action: str(body.action),
+            issue: body.issue as any,
+            repository: body.repository as any,
+            projectId,
+          });
+          return json({ ok: true, ...result });
+        }
+        return json({ ok: true, ignored: true, event: eventName });
       } catch (e) {
         return err(400, e instanceof Error ? e.message : "ingest failed", "bad_request");
       }
+    }
+
+    // POST /ingest/github/artifact — attach PR/check URL to mission
+    if (parts.length === 3 && parts[0] === "ingest" && parts[1] === "github" && parts[2] === "artifact" && req.method === "POST") {
+      const art = extractArtifactFromGitHubPayload(body);
+      const missionId = str(body.mission_id) ?? str(body.missionId);
+      const urlA = str(body.url) ?? art?.url;
+      if (!missionId || !urlA) return err(400, "mission_id and url required", "bad_request");
+      const m = await boardOps.attachMissionArtifact(missionId, urlA, str(body.note) ?? art?.note);
+      if (!m) return err(404, "mission not found", "mission_not_found");
+      return json({ ok: true, mission: m });
     }
 
     // POST /ingest/github — same as webhook (testable without GH)
@@ -426,6 +503,94 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           projectId: str(body.projectId) ?? str(body.project) ?? projectRef(url, body),
         }),
       );
+    }
+
+
+    // --- API keys ---
+    if (parts.length === 1 && parts[0] === "keys" && req.method === "GET") {
+      const projectId = projectRef(url, body) ?? "proj_default";
+      const keys = await boardOps.listApiKeys(projectId);
+      return json({ ok: true, keys });
+    }
+    if (parts.length === 1 && parts[0] === "keys" && req.method === "POST") {
+      const projectId = str(body.projectId) ?? str(body.project) ?? projectRef(url, body) ?? "proj_default";
+      const created = await boardOps.createApiKey({
+        projectId,
+        agentId: str(body.agentId) ?? str(body.agent) ?? null,
+        name: str(body.name),
+      });
+      return json({ ok: true, key: created });
+    }
+    if (parts.length === 2 && parts[0] === "keys" && req.method === "DELETE") {
+      await boardOps.revokeApiKey(parts[1]!);
+      return json({ ok: true, revoked: parts[1] });
+    }
+    if (parts.length === 3 && parts[0] === "keys" && parts[2] === "revoke" && req.method === "POST") {
+      await boardOps.revokeApiKey(parts[1]!);
+      return json({ ok: true, revoked: parts[1] });
+    }
+
+    // --- project settings ---
+    if (parts.length === 2 && parts[0] === "projects" && parts[1] && req.method === "GET") {
+      // fallthrough if not settings
+    }
+    if (parts.length === 3 && parts[0] === "projects" && parts[2] === "settings" && req.method === "GET") {
+      const s = await boardOps.getProjectSettings(parts[1]!);
+      return json({
+        ok: true,
+        settings: {
+          projectId: s.projectId,
+          githubRepo: s.githubRepo,
+          replyWebhookUrl: s.replyWebhookUrl,
+          hasGithubSecret: s.hasGithubSecret,
+        },
+      });
+    }
+    if (parts.length === 3 && parts[0] === "projects" && parts[2] === "settings" && req.method === "POST") {
+      const s = await boardOps.updateProjectSettings(parts[1]!, {
+        githubWebhookSecret: body.githubWebhookSecret === undefined ? undefined : (str(body.githubWebhookSecret) ?? null),
+        githubRepo: body.githubRepo === undefined ? undefined : (str(body.githubRepo) ?? null),
+        replyWebhookUrl: body.replyWebhookUrl === undefined ? undefined : (str(body.replyWebhookUrl) ?? null),
+      });
+      return json({
+        ok: true,
+        settings: {
+          projectId: s.projectId,
+          githubRepo: s.githubRepo,
+          replyWebhookUrl: s.replyWebhookUrl,
+          hasGithubSecret: s.hasGithubSecret,
+        },
+      });
+    }
+
+    // audit export
+    if (parts.length === 1 && parts[0] === "export" && url.searchParams.get("history") === "1" && req.method === "GET") {
+      const format = (url.searchParams.get("format") ?? "json") === "csv" ? "csv" : "json";
+      const exp = await boardOps.exportHistory({
+        projectId: projectRef(url),
+        missionId: url.searchParams.get("mission") ?? url.searchParams.get("mission_id"),
+        format,
+      });
+      if (format === "csv") {
+        return new Response(exp.body, {
+          status: 200,
+          headers: {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": 'attachment; filename="mission-history.csv"',
+            "cache-control": "no-store",
+          },
+        });
+      }
+      return json({ ok: true, count: exp.count, history: JSON.parse(exp.body) });
+    }
+
+    // attach artifact
+    if (parts.length === 3 && parts[0] === "missions" && parts[2] === "artifacts" && req.method === "POST") {
+      const urlA = str(body.url) ?? str(body.html_url);
+      if (!urlA) return err(400, "url required", "bad_request");
+      const m = await boardOps.attachMissionArtifact(parts[1]!, urlA, str(body.note));
+      if (!m) return err(404, "mission not found", "mission_not_found");
+      return json({ ok: true, mission: m });
     }
 
     // GET /  — catalog

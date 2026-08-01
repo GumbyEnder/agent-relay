@@ -115,3 +115,46 @@ export function mapGitHubIssueToMission(input: GitHubIngestInput): MissionUpsert
     closed,
   };
 }
+
+
+/** PR / check_run / workflow_run → artifact URL + optional issue external id */
+export function extractArtifactFromGitHubPayload(body: Record<string, unknown>): {
+  url: string;
+  externalId?: string;
+  note: string;
+} | null {
+  const repo =
+    (body.repository as { full_name?: string } | undefined)?.full_name ?? "unknown/unknown";
+
+  const pr = body.pull_request as
+    | { html_url?: string; number?: number; title?: string; body?: string | null }
+    | undefined;
+  if (pr?.html_url) {
+    // try link issue from body "Fixes #N"
+    let externalId: string | undefined;
+    const m = (pr.body ?? "").match(/(?:fixes|closes|resolves)\s+#(\d+)/i);
+    if (m) externalId = githubExternalId(repo, Number(m[1]));
+    return {
+      url: pr.html_url,
+      externalId,
+      note: `pull_request #${pr.number ?? "?"} ${pr.title ?? ""}`.trim(),
+    };
+  }
+
+  const cr = body.check_run as { html_url?: string; details_url?: string; name?: string; conclusion?: string } | undefined;
+  if (cr?.html_url || cr?.details_url) {
+    return {
+      url: (cr.html_url || cr.details_url) as string,
+      note: `check_run ${cr.name ?? ""} ${cr.conclusion ?? ""}`.trim(),
+    };
+  }
+
+  const wr = body.workflow_run as { html_url?: string; name?: string; conclusion?: string } | undefined;
+  if (wr?.html_url) {
+    return {
+      url: wr.html_url,
+      note: `workflow_run ${wr.name ?? ""} ${wr.conclusion ?? ""}`.trim(),
+    };
+  }
+  return null;
+}

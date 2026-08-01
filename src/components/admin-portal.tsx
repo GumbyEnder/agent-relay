@@ -25,6 +25,7 @@ import type {
 } from "@/lib/types";
 import { COLUMN_STATUS_COLOR, COLUMNS, HARNESS_LABELS } from "@/lib/types";
 import { cn, formatTime } from "@/lib/utils";
+import { filterEvents, filterHistory } from "@/lib/filters";
 
 interface AdminPayload {
   ok: boolean;
@@ -77,6 +78,9 @@ export function AdminPortal({
   const seenEvents = useRef<Set<string>>(new Set());
   const seenHistory = useRef<Set<string>>(new Set());
   const bootstrapped = useRef(false);
+  const [filterAgent, setFilterAgent] = useState<string>("");
+  const [filterKind, setFilterKind] = useState<string>("");
+  const [filterQuery, setFilterQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -138,6 +142,24 @@ export function AdminPortal({
   const openCalls = useMemo(
     () => (data?.calls ?? []).filter((c) => !c.resolvedAt),
     [data?.calls],
+  );
+
+  const liveFilter = useMemo(
+    () => ({
+      agentId: filterAgent || null,
+      kind: filterKind || null,
+      query: filterQuery || null,
+    }),
+    [filterAgent, filterKind, filterQuery],
+  );
+
+  const filteredEvents = useMemo(
+    () => filterEvents(data?.events ?? [], liveFilter),
+    [data?.events, liveFilter],
+  );
+  const filteredHistory = useMemo(
+    () => filterHistory(data?.history ?? [], liveFilter),
+    [data?.history, liveFilter],
   );
 
   const missionTitle = useMemo(() => {
@@ -257,6 +279,44 @@ export function AdminPortal({
             </div>
           ))}
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2">
+          <span className="text-[10px] uppercase tracking-wider text-fg-subtle">Filters</span>
+          <select
+            className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+            value={filterAgent}
+            onChange={(e) => setFilterAgent(e.target.value)}
+          >
+            <option value="">All agents</option>
+            {(data?.agents ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+            value={filterKind}
+            onChange={(e) => setFilterKind(e.target.value)}
+          >
+            <option value="">All kinds</option>
+            <option value="mission_claimed">claim</option>
+            <option value="heartbeat">heartbeat</option>
+            <option value="escalation">escalation</option>
+            <option value="delivery">delivery</option>
+            <option value="human_reply">human_reply</option>
+            <option value="move">move</option>
+            <option value="agent">actor:agent</option>
+            <option value="operator">actor:operator</option>
+          </select>
+          <input
+            className="h-8 min-w-[8rem] flex-1 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+            placeholder="Search feed…"
+            value={filterQuery}
+            onChange={(e) => setFilterQuery(e.target.value)}
+          />
+        </div>
+
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-12">
@@ -272,7 +332,7 @@ export function AdminPortal({
             </div>
           </div>
           <ul className="flex-1 space-y-0 overflow-y-auto scrollbar-thin">
-            {(data?.events ?? []).slice(0, 80).map((ev) => (
+            {filteredEvents.slice(0, 80).map((ev) => (
               <li
                 key={ev.id}
                 className={cn(
@@ -297,7 +357,7 @@ export function AdminPortal({
                 </p>
               </li>
             ))}
-            {!data?.events?.length && (
+            {!filteredEvents.length && (
               <li className="px-4 py-10 text-center text-xs text-fg-subtle">
                 Waiting for activity…
               </li>
@@ -317,7 +377,7 @@ export function AdminPortal({
             </div>
           </div>
           <ul className="flex-1 space-y-0 overflow-y-auto scrollbar-thin">
-            {(data?.history ?? []).map((h) => (
+            {filteredHistory.map((h) => (
               <li
                 key={h.id}
                 className={cn(
@@ -371,7 +431,7 @@ export function AdminPortal({
                 <p className="mt-1 font-mono text-[10px] text-fg-subtle">{h.missionId}</p>
               </li>
             ))}
-            {!data?.history?.length && (
+            {!filteredHistory.length && (
               <li className="px-4 py-10 text-center text-xs text-fg-subtle">
                 No column history yet
               </li>

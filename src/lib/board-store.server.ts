@@ -31,6 +31,9 @@ import {
   type GitHubIngestInput,
 } from "./github-ingest";
 import { renderMissionJournalMarkdown } from "./journal";
+import { createApiKeyMaterial, verifyApiKeyAgainstHashes, type ApiKeyRecord } from "./api-keys";
+import { historyToCsv, historyToJson } from "./audit-export";
+import { buildReplyWebhookPayload, dispatchReplyWebhook } from "./reply-webhook";
 
 const globalRef = globalThis as typeof globalThis & {
   __arBoardReady__?: Promise<void>;
@@ -427,12 +430,14 @@ export async function ensureBoardReady(): Promise<void> {
 }
 
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {
+  // Serialize via a promise chain that always advances (even on throw).
   const prev = globalRef.__arBoardChain__ ?? Promise.resolve();
   let release!: () => void;
-  const gate = new Promise<void>((r) => {
+  const done = new Promise<void>((r) => {
     release = r;
   });
-  globalRef.__arBoardChain__ = prev.then(() => gate);
+  // Next waiter waits on our "done", not a separate gate that can deadlock.
+  globalRef.__arBoardChain__ = prev.then(() => done);
   await prev.catch(() => undefined);
   try {
     await ensureBoardReady();
@@ -879,4 +884,251 @@ export const durableBoard = {
       const history = histRows.map((r) => rowHistory(r as Record<string, unknown>));
       return renderMissionJournalMarkdown(mission, history);
     }),
+
+  listApiKeys: (projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`
+        select id, project_id, agent_id, name, key_prefix, created_at, revoked_at, last_used_at
+        from ar_api_keys
+        where project_id = ${projectId}
+        order by created_at desc
+      `;
+      return rows.map((r) => {
+        const x = r as Record<string, unknown>;
+        return {
+          id: String(x.id),
+          projectId: String(x.project_id),
+          agentId: x.agent_id != null ? String(x.agent_id) : null,
+          name: String(x.name ?? ""),
+          keyPrefix: String(x.key_prefix),
+          createdAt: ms(x.created_at) ?? Date.now(),
+          revokedAt: ms(x.revoked_at),
+          lastUsedAt: ms(x.last_used_at),
+        };
+      });
+    }),
+
+  createApiKey: (input: { projectId: string; agentId?: string | null; name?: string }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const mat = createApiKeyMaterial({
+        id: uid("key"),
+        projectId: input.projectId,
+        agentId: input.agentId,
+        name: input.name,
+      });
+      await sql`
+        insert into ar_api_keys (id, project_id, agent_id, name, key_prefix, key_hash, created_at)
+        values (
+          ${mat.id}, ${mat.projectId}, ${mat.agentId}, ${mat.name},
+          ${mat.prefix}, ${mat.hash}, ${ts(mat.createdAt)}
+        )
+      `;
+      return {
+        id: mat.id,
+        projectId: mat.projectId,
+        agentId: mat.agentId,
+        name: mat.name,
+        keyPrefix: mat.prefix,
+        createdAt: mat.createdAt,
+        revokedAt: null as number | null,
+        lastUsedAt: null as number | null,
+        secret: mat.secret,
+      };
+    }),
+
+  revokeApiKey: (keyId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      await sql`
+        update ar_api_keys set revoked_at = now() where id = ${keyId} and revoked_at is null
+      `;
+      return true;
+    }),
+
+  verifyPresentedApiKey: (secret: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`
+        select id, project_id, agent_id, key_hash, revoked_at from ar_api_keys
+      `;
+      const candidates = rows.map((r) => {
+        const x = r as Record<string, unknown>;
+        return {
+          id: String(x.id),
+          projectId: String(x.project_id),
+          agentId: x.agent_id != null ? String(x.agent_id) : null,
+          keyHash: String(x.key_hash),
+          revokedAt: ms(x.revoked_at),
+        };
+      });
+      const hit = verifyApiKeyAgainstHashes(secret, candidates);
+      if (hit) {
+        await sql`update ar_api_keys set last_used_at = now() where id = ${hit.id}`;
+      }
+      return hit;
+    }),
+
+  getProjectSettings: (projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`
+        select * from ar_project_settings where project_id = ${projectId} limit 1
+      `;
+      if (!rows[0]) {
+        return {
+          projectId,
+          githubWebhookSecret: null as string | null,
+          githubRepo: null as string | null,
+          replyWebhookUrl: null as string | null,
+          hasGithubSecret: false,
+        };
+      }
+      const x = rows[0] as Record<string, unknown>;
+      const secret = x.github_webhook_secret != null ? String(x.github_webhook_secret) : null;
+      return {
+        projectId,
+        githubWebhookSecret: secret,
+        githubRepo: x.github_repo != null ? String(x.github_repo) : null,
+        replyWebhookUrl: x.reply_webhook_url != null ? String(x.reply_webhook_url) : null,
+        hasGithubSecret: Boolean(secret),
+      };
+    }),
+
+  updateProjectSettings: (
+    projectId: string,
+    patch: {
+      githubWebhookSecret?: string | null;
+      githubRepo?: string | null;
+      replyWebhookUrl?: string | null;
+    },
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const cur = await sql`select * from ar_project_settings where project_id = ${projectId} limit 1`;
+      const prev = (cur[0] as Record<string, unknown> | undefined) ?? {};
+      const secret =
+        patch.githubWebhookSecret !== undefined
+          ? patch.githubWebhookSecret
+          : prev.github_webhook_secret != null
+            ? String(prev.github_webhook_secret)
+            : null;
+      const repo =
+        patch.githubRepo !== undefined
+          ? patch.githubRepo
+          : prev.github_repo != null
+            ? String(prev.github_repo)
+            : null;
+      const hook =
+        patch.replyWebhookUrl !== undefined
+          ? patch.replyWebhookUrl
+          : prev.reply_webhook_url != null
+            ? String(prev.reply_webhook_url)
+            : null;
+      await sql`
+        insert into ar_project_settings (project_id, github_webhook_secret, github_repo, reply_webhook_url, updated_at)
+        values (${projectId}, ${secret}, ${repo}, ${hook}, now())
+        on conflict (project_id) do update set
+          github_webhook_secret = excluded.github_webhook_secret,
+          github_repo = excluded.github_repo,
+          reply_webhook_url = excluded.reply_webhook_url,
+          updated_at = now()
+      `;
+      return {
+        projectId,
+        githubWebhookSecret: secret,
+        githubRepo: repo,
+        replyWebhookUrl: hook,
+        hasGithubSecret: Boolean(secret),
+      };
+    }),
+
+  attachMissionArtifact: (missionId: string, url: string, note?: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`select * from ar_missions where id = ${missionId} limit 1`;
+      if (!rows[0]) return null;
+      const m = rowMission(rows[0] as Record<string, unknown>);
+      const artifacts = Array.from(new Set([...m.artifacts, url.trim()].filter(Boolean)));
+      const next = { ...m, artifacts, updatedAt: Date.now() };
+      await insertMission(sql, next);
+      await insertEvent(sql, {
+        id: uid("ev"),
+        missionId,
+        agentId: null,
+        projectId: m.projectId,
+        kind: "note",
+        message: note?.trim() ? `Artifact · ${note.trim()} · ${url}` : `Artifact · ${url}`,
+        at: Date.now(),
+      });
+      return next;
+    }),
+
+  exportHistory: (opts: { projectId?: string | null; missionId?: string | null; format: "json" | "csv" }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      let rows;
+      if (opts.missionId) {
+        rows = await sql`
+          select * from ar_mission_history where mission_id = ${opts.missionId} order by at asc
+        `;
+      } else if (opts.projectId) {
+        rows = await sql`
+          select * from ar_mission_history where project_id = ${opts.projectId} order by at asc
+        `;
+      } else {
+        rows = await sql`select * from ar_mission_history order by at asc limit 5000`;
+      }
+      const history = rows.map((r) => rowHistory(r as Record<string, unknown>));
+      if (opts.format === "csv") return { format: "csv" as const, body: historyToCsv(history), count: history.length };
+      return { format: "json" as const, body: historyToJson(history), count: history.length };
+    }),
+
+  /** reply that also dispatches webhook when configured */
+  replyToCallWithWebhook: async (callId: string, replyText: string, operator = "operator") => {
+    const result = await durableBoard.reply(callId, replyText, operator);
+    if (!result.ok) return { result, webhook: null as null | object };
+    const missionId = result.data.mission?.id ?? "";
+    // Read settings without nesting locks: chain after reply released
+    const meta = await withLock(async () => {
+      const s = await getSql();
+      const calls = await s`select * from ar_calls where id = ${callId} limit 1`;
+      const callRow = calls[0] as Record<string, unknown> | undefined;
+      let projectId =
+        (callRow?.project_id != null ? String(callRow.project_id) : null) ??
+        (result.data.mission as { projectId?: string } | null | undefined)?.projectId ??
+        null;
+      if (!projectId && missionId) {
+        const rows = await s`select project_id from ar_missions where id = ${missionId} limit 1`;
+        const r = rows[0] as Record<string, unknown> | undefined;
+        projectId = r?.project_id != null ? String(r.project_id) : null;
+      }
+      let replyWebhookUrl: string | null = null;
+      if (projectId) {
+        const st = await s`select reply_webhook_url from ar_project_settings where project_id = ${projectId} limit 1`;
+        const sr = st[0] as Record<string, unknown> | undefined;
+        replyWebhookUrl = sr?.reply_webhook_url != null ? String(sr.reply_webhook_url) : null;
+      }
+      return {
+        missionId: missionId || (callRow ? String(callRow.mission_id) : ""),
+        projectId,
+        agentId: callRow?.agent_id != null ? String(callRow.agent_id) : null,
+        replyWebhookUrl,
+      };
+    });
+    let webhook: object | null = null;
+    if (meta.replyWebhookUrl) {
+      const payload = buildReplyWebhookPayload({
+        callId,
+        missionId: meta.missionId,
+        projectId: meta.projectId,
+        reply: replyText,
+        agentId: meta.agentId,
+      });
+      const dispatched = await dispatchReplyWebhook(meta.replyWebhookUrl, payload);
+      webhook = { payload, dispatched };
+    }
+    return { result, webhook };
+  },
 };

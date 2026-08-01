@@ -36,6 +36,11 @@ import {
 } from "@/lib/theme";
 import { COLUMNS, type MissionColumn } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+  adjacentColumn,
+  matchKeyboardAction,
+} from "@/lib/keyboard-ops";
+import { agentApi } from "@/lib/api-client";
 
 type MainView = "board" | "live" | "calls" | "agents" | "protocol";
 
@@ -68,15 +73,22 @@ export function AppShell({
     search,
     filterAgentId,
     filterPriority,
+    filterTag,
+    compact,
+    focusColumn,
     setSearch,
     setFilterAgent,
     setFilterPriority,
+    setFilterTag,
+    setCompact,
+    setFocusColumn,
     setMainView,
     setSelectedProjectId,
     openPanel,
     selectMission,
     closePanel,
     moveMission,
+    claimMission,
     simulateAgentTick,
     resetDemo,
     exportActive,
@@ -90,7 +102,7 @@ export function AppShell({
   const missions = useMemo(
     () => filteredMissions({ ...state }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.missions, state.search, state.filterAgentId, state.filterPriority],
+    [state.missions, state.search, state.filterAgentId, state.filterPriority, state.filterTag],
   );
   const openCalls = calls.filter((c) => !c.resolvedAt).length;
   const running = state.missions.filter((m) => m.column === "running").length;
@@ -133,12 +145,57 @@ export function AppShell({
   }, [setHydrated]);
 
   useEffect(() => {
+    try {
+      const d = localStorage.getItem("agent-relay-density");
+      if (d === "compact") setCompact(true);
+    } catch { /* ignore */ }
+  }, [setCompact]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && sideOpen) closePanel();
+      const action = matchKeyboardAction(e);
+      if (!action) return;
+      if (action === "escape") {
+        closePanel();
+        return;
+      }
+      e.preventDefault();
+      if (action === "focus_search") {
+        const el = document.querySelector<HTMLInputElement>("input[placeholder^='Search']");
+        el?.focus();
+        return;
+      }
+      if (action === "open_board") selectView("board");
+      if (action === "open_live") selectView("live");
+      if (action === "open_calls") selectView("calls");
+      if (action === "compact_toggle") setCompact(!useBoard.getState().compact);
+      if (action === "next_column" || action === "prev_column") {
+        const cur = (useBoard.getState().focusColumn ?? "ready") as MissionColumn;
+        const next = adjacentColumn(cur, action === "next_column" ? 1 : -1);
+        setFocusColumn(next);
+        toast.message(`Column · ${next.replace(/_/g, " ")}`);
+      }
+      if (action === "claim_selected") {
+        const id = useBoard.getState().selectedMissionId;
+        const agent = useBoard.getState().agents.find((a) => !a.currentMissionId && a.status !== "offline");
+        if (id && agent) {
+          claimMission(id, agent.id);
+          toast.message(`Claim · ${agent.name}`);
+        } else {
+          toast.message("Select a mission and ensure an idle agent");
+        }
+      }
+      if (action === "move_ready" || action === "move_running") {
+        const id = useBoard.getState().selectedMissionId;
+        if (id) {
+          moveMission(id, action === "move_ready" ? "ready" : "running");
+          toast.message(`Moved to ${action === "move_ready" ? "ready" : "running"}`);
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sideOpen, closePanel]);
+  }, [closePanel, claimMission, moveMission, setCompact, setFocusColumn]);
 
   const byColumn = (col: MissionColumn) =>
     missions.filter((m) => m.column === col);
@@ -160,7 +217,13 @@ export function AppShell({
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
+    <div
+      className={cn(
+        "flex h-dvh flex-col overflow-hidden bg-bg text-fg",
+        compact && "density-compact",
+      )}
+      data-density={compact ? "compact" : "comfortable"}
+    >
       <Toaster
         theme={theme === "light" ? "light" : "dark"}
         position="bottom-right"
@@ -326,6 +389,47 @@ export function AppShell({
             <span className="tabular">
               <span className="text-status-human">{openCalls}</span> calls
             </span>
+            <input
+              className="hidden h-7 w-24 rounded-full bg-bg-subtle px-2 text-[11px] text-fg shadow-[var(--shadow-border)] sm:block"
+              placeholder="tag filter"
+              value={filterTag ?? ""}
+              onChange={(e) => setFilterTag(e.target.value || null)}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-[11px]"
+              onClick={() => setCompact(!compact)}
+              title="Compact density (d)"
+            >
+              {compact ? "Comfort" : "Compact"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-[11px]"
+              onClick={async () => {
+                try {
+                  const body = await agentApi.exportHistory({
+                    projectId: selectedProjectId ?? undefined,
+                    format: "csv",
+                  });
+                  const text = typeof body === "string" ? body : JSON.stringify(body);
+                  const blob = new Blob([text], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `history-${Date.now()}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  toast.success("History CSV exported");
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "export failed");
+                }
+              }}
+            >
+              Audit CSV
+            </Button>
             <div className="hidden items-center gap-1 sm:flex">
               {(["p0", "p1", "p2", "p3"] as const).map((p) => (
                 <button

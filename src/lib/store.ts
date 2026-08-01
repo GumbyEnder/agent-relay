@@ -28,6 +28,9 @@ interface BoardState {
   search: string;
   filterAgentId: string | null;
   filterPriority: Priority | null;
+  filterTag: string | null;
+  compact: boolean;
+  focusColumn: string | null;
   _hydrated: boolean;
   _syncing: boolean;
   _error: string | null;
@@ -37,6 +40,9 @@ interface BoardState {
   setSearch: (q: string) => void;
   setFilterAgent: (id: string | null) => void;
   setFilterPriority: (p: Priority | null) => void;
+  setFilterTag: (t: string | null) => void;
+  setCompact: (v: boolean) => void;
+  setFocusColumn: (c: string | null) => void;
   openPanel: (panel: BoardState["panel"], missionId?: string | null) => void;
   selectMission: (id: string | null) => void;
   closePanel: () => void;
@@ -106,6 +112,9 @@ export const useBoard = create<BoardState>()((set, get) => ({
   search: "",
   filterAgentId: null,
   filterPriority: null,
+  filterTag: null,
+  compact: false,
+  focusColumn: null,
   _hydrated: false,
   _syncing: false,
   _error: null,
@@ -119,6 +128,19 @@ export const useBoard = create<BoardState>()((set, get) => ({
   setSearch: (q) => set({ search: q }),
   setFilterAgent: (id) => set({ filterAgentId: id }),
   setFilterPriority: (p) => set({ filterPriority: p }),
+  setFilterTag: (t) => set({ filterTag: t }),
+  setCompact: (v) => {
+    set({ compact: v });
+    try {
+      if (typeof document !== "undefined") {
+        document.documentElement.dataset.density = v ? "compact" : "comfortable";
+      }
+      localStorage.setItem("agent-relay-density", v ? "compact" : "comfortable");
+    } catch {
+      /* ignore */
+    }
+  },
+  setFocusColumn: (c) => set({ focusColumn: c }),
 
   openPanel: (panel, missionId) => {
     set({
@@ -371,6 +393,7 @@ export type { BoardStore };
 
 export function filteredMissions(state: BoardState): Mission[] {
   const q = state.search.trim().toLowerCase();
+  const tag = state.filterTag?.trim().toLowerCase() ?? "";
   return state.missions.filter((m) => {
     if (state.filterAgentId) {
       const match =
@@ -378,6 +401,9 @@ export function filteredMissions(state: BoardState): Mission[] {
       if (!match) return false;
     }
     if (state.filterPriority && m.priority !== state.filterPriority) return false;
+    if (tag && !m.tags.some((x) => x.toLowerCase() === tag || x.toLowerCase().includes(tag))) {
+      return false;
+    }
     if (!q) return true;
     const hay = [m.title, m.objective, m.context, m.tags.join(" "), m.progressNote]
       .join(" ")
