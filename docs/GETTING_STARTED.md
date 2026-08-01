@@ -46,4 +46,7 @@ curl -sS -H "Authorization: Bearer ark_…" \
   "$BASE/api/agent/missions?column=ready&limit=5&agent=my-bot"
 ```
 
+First-class harnesses: **Hermes**, **xAI/Grok**, **OMP**, **OpenClaw** (+ Claude Code, Codex, Cursor, MCP, …).  
+Per-harness setup: **[HARNESSES.md](./HARNESSES.md)**.
+
 See `docs/PROTOCOL.md` and `docs/FIRST_OPERATOR_DAY.md`.

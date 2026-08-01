@@ -22,6 +22,7 @@
  * If unset, open access (local demo).
  */
 import type { HarnessKind } from "./types";
+import { HARNESS_IDS } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
 import type { MissionColumn } from "./types";
@@ -36,18 +37,7 @@ import type { OperatorCapability } from "./auth/roles";
 import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
 
-const HARNESSES = new Set<HarnessKind>([
-  "claude_code",
-  "codex",
-  "cursor",
-  "opencode",
-  "gemini_cli",
-  "copilot",
-  "amp",
-  "mcp",
-  "custom",
-]);
-
+const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,

@@ -26,7 +26,7 @@ export function AgentsPanel() {
   } = useBoard();
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [harness, setHarness] = useState<HarnessKind>("claude_code");
+  const [harness, setHarness] = useState<HarnessKind>("hermes");
   const [skills, setSkills] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [keys, setKeys] = useState<Array<Record<string, unknown>>>([]);

@@ -10,6 +10,11 @@ export type MissionColumn =
 export type Priority = "p0" | "p1" | "p2" | "p3";
 
 export type HarnessKind =
+  | "hermes"
+  | "grok"
+  | "xai"
+  | "omp"
+  | "openclaw"
   | "claude_code"
   | "codex"
   | "cursor"
@@ -19,6 +24,24 @@ export type HarnessKind =
   | "amp"
   | "mcp"
   | "custom";
+
+/** Canonical list — keep in sync with HARNESS_LABELS keys. */
+export const HARNESS_IDS: readonly HarnessKind[] = [
+  "hermes",
+  "grok",
+  "xai",
+  "omp",
+  "openclaw",
+  "claude_code",
+  "codex",
+  "cursor",
+  "opencode",
+  "gemini_cli",
+  "copilot",
+  "amp",
+  "mcp",
+  "custom",
+] as const;
 
 export type AgentStatus = "online" | "busy" | "idle" | "offline" | "error";
 
@@ -125,6 +148,11 @@ export const COLUMNS: {
 ];
 
 export const HARNESS_LABELS: Record<HarnessKind, string> = {
+  hermes: "Hermes",
+  grok: "xAI Grok",
+  xai: "xAI",
+  omp: "OMP",
+  openclaw: "OpenClaw",
   claude_code: "Claude Code",
   codex: "Codex",
   cursor: "Cursor",

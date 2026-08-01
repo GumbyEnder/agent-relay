@@ -12,6 +12,7 @@
 | [ACCESS.md](./ACCESS.md) | Agents, humans, harnesses |
 | [AUTH_AND_ROADMAP.md](./AUTH_AND_ROADMAP.md) | Auth recommendation + remaining features |
 | [GETTING_STARTED.md](./GETTING_STARTED.md) | You + agents: email login, API keys, no broker |
+| [HARNESSES.md](./HARNESSES.md) | Hermes, Grok/xAI, OMP, OpenClaw + other runners |
 | [FIRST_OPERATOR_DAY.md](./FIRST_OPERATOR_DAY.md) | Railway/prod env checklist + first-day smoke |
 | [OPS.md](./OPS.md) | Pointer to ops checklist |
 | [GROK_BUILD_PROMPT.md](./GROK_BUILD_PROMPT.md) | Build handoff |

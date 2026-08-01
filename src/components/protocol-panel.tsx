@@ -80,8 +80,8 @@ export function ProtocolPanel() {
         <div>
           <h2 className="text-sm font-medium text-fg">Agent protocol</h2>
           <p className="text-xs text-fg-subtle">
-            Five verbs. Works with Claude Code, Codex, Cursor, MCP, or a shell
-            script — the board does not care which harness runs the agent.
+            Five verbs. Works with Hermes, xAI/Grok, OMP, OpenClaw, Claude Code,
+            Codex, Cursor, MCP, or any shell client — the board only sees HTTP.
           </p>
         </div>
         <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close">
