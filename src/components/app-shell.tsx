@@ -104,7 +104,13 @@ export function AppShell({
   const [newBoardOpen, setNewBoardOpen] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardBusy, setNewBoardBusy] = useState(false);
+  const [newMissionColumn, setNewMissionColumn] = useState<MissionColumn>("inbox");
   const { role, can } = useOperatorMe();
+
+  const openNewMission = (column: MissionColumn = "inbox") => {
+    setNewMissionColumn(column);
+    openPanel("new-mission");
+  };
 
   const submitNewBoard = async () => {
     if (!newBoardName.trim() || newBoardBusy) return;
@@ -261,7 +267,11 @@ export function AppShell({
       <CommandPalette />
       <NewMissionDialog
         open={panel === "new-mission"}
-        onOpenChange={(o) => (o ? openPanel("new-mission") : closePanel())}
+        defaultColumn={newMissionColumn}
+        onOpenChange={(o) => {
+          if (o) openNewMission(newMissionColumn);
+          else closePanel();
+        }}
       />
 
       <header className="shrink-0 border-b border-border bg-bg-elevated/80 backdrop-blur-sm">
@@ -303,7 +313,7 @@ export function AppShell({
             {can("write_board") && (
             <Button
               size="sm"
-              onClick={() => openPanel("new-mission")}
+              onClick={() => openNewMission("inbox")}
               className="h-9"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -622,6 +632,11 @@ export function AppShell({
                       onOpen={(id) => selectMission(id)}
                       onDropMission={(id, column) => moveMission(id, column)}
                       onDragStart={() => {}}
+                      onAddMission={
+                        can("write_board")
+                          ? (column) => openNewMission(column)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>

@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import { MissionCard } from "@/components/mission-card";
 import type { Agent, Mission, MissionColumn } from "@/lib/types";
 import { COLUMN_STATUS_COLOR, COLUMNS } from "@/lib/types";
@@ -11,6 +12,7 @@ export function BoardColumn({
   onOpen,
   onDropMission,
   onDragStart,
+  onAddMission,
 }: {
   columnId: MissionColumn;
   missions: Mission[];
@@ -19,6 +21,8 @@ export function BoardColumn({
   onOpen: (id: string) => void;
   onDropMission: (missionId: string, column: MissionColumn) => void;
   onDragStart: (missionId: string) => void;
+  /** Open new-mission flow targeting this column */
+  onAddMission?: (column: MissionColumn) => void;
 }) {
   const meta = COLUMNS.find((c) => c.id === columnId)!;
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
@@ -37,7 +41,7 @@ export function BoardColumn({
       }}
     >
       <header className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-2 rounded-[var(--radius-md)] bg-bg/90 px-2 py-2 backdrop-blur-sm">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           <span
             className="h-2 w-2 shrink-0 rounded-full"
             style={{ background: COLUMN_STATUS_COLOR[columnId] }}
@@ -47,15 +51,27 @@ export function BoardColumn({
             <p className="truncate text-[11px] text-fg-subtle">{meta.hint}</p>
           </div>
         </div>
-        <span className="tabular rounded-full bg-bg-subtle px-2 py-0.5 text-xs text-fg-muted">
-          {missions.length}
-        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          {onAddMission && (
+            <button
+              type="button"
+              title={`New mission in ${meta.label}`}
+              aria-label={`New mission in ${meta.label}`}
+              className="grid h-7 w-7 place-items-center rounded-[var(--radius-sm)] text-fg-muted transition-colors hover:bg-bg-subtle hover:text-fg"
+              onClick={() => onAddMission(columnId)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <span className="tabular rounded-full bg-bg-subtle px-2 py-0.5 text-xs text-fg-muted">
+            {missions.length}
+          </span>
+        </div>
       </header>
 
       <div
         className={cn(
-          "flex flex-1 flex-col gap-2 overflow-y-auto px-1 pb-3 scrollbar-thin",
-          "min-h-[120px]",
+          "flex min-h-[120px] flex-1 flex-col gap-2 overflow-y-auto px-1 pb-3 scrollbar-thin",
         )}
       >
         {missions.map((m) => (
@@ -77,9 +93,17 @@ export function BoardColumn({
           />
         ))}
         {missions.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-[var(--radius-md)] border border-dashed border-border px-3 py-8 text-center text-xs text-fg-subtle">
-            Drop missions here
-          </div>
+          <button
+            type="button"
+            disabled={!onAddMission}
+            onClick={() => onAddMission?.(columnId)}
+            className={cn(
+              "flex flex-1 items-center justify-center rounded-[var(--radius-md)] border border-dashed border-border px-3 py-8 text-center text-xs text-fg-subtle",
+              onAddMission && "cursor-pointer transition-colors hover:border-fg-subtle hover:text-fg-muted",
+            )}
+          >
+            {onAddMission ? `Drop here or + add to ${meta.label}` : "Drop missions here"}
+          </button>
         )}
       </div>
     </section>

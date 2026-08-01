@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,15 +10,18 @@ import {
 } from "@/components/ui/dialog";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoard } from "@/lib/store";
-import type { Priority } from "@/lib/types";
-import { PRIORITY_LABELS } from "@/lib/types";
+import type { MissionColumn, Priority } from "@/lib/types";
+import { COLUMNS, PRIORITY_LABELS } from "@/lib/types";
 
 export function NewMissionDialog({
   open,
   onOpenChange,
+  defaultColumn = "inbox",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Column the mission lands in (from header Mission or column +). */
+  defaultColumn?: MissionColumn;
 }) {
   const createMission = useBoard((s) => s.createMission);
   const [title, setTitle] = useState("");
@@ -28,6 +31,11 @@ export function NewMissionDialog({
   const [acceptance, setAcceptance] = useState("");
   const [priority, setPriority] = useState<Priority>("p2");
   const [tags, setTags] = useState("");
+  const [column, setColumn] = useState<MissionColumn>(defaultColumn);
+
+  useEffect(() => {
+    if (open) setColumn(defaultColumn);
+  }, [open, defaultColumn]);
 
   const reset = () => {
     setTitle("");
@@ -37,7 +45,10 @@ export function NewMissionDialog({
     setAcceptance("");
     setPriority("p2");
     setTags("");
+    setColumn(defaultColumn);
   };
+
+  const colLabel = COLUMNS.find((c) => c.id === column)?.label ?? column;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,8 +56,8 @@ export function NewMissionDialog({
         <DialogHeader>
           <DialogTitle>New mission</DialogTitle>
           <DialogDescription>
-            Structured for agents — objective, constraints, acceptance. Not a
-            vague sticky note.
+            Structured for agents — objective, constraints, acceptance. Lands in{" "}
+            <span className="text-fg-muted">{colLabel}</span>.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -65,13 +76,27 @@ export function NewMissionDialog({
                 .split(",")
                 .map((t) => t.trim())
                 .filter(Boolean),
-              column: "inbox",
+              column,
             });
             reset();
             onOpenChange(false);
-            toast.success("Mission in Inbox");
+            toast.success(`Mission in ${colLabel}`);
           }}
         >
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-fg-subtle">Column</span>
+            <select
+              className="flex h-10 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={column}
+              onChange={(e) => setColumn(e.target.value as MissionColumn)}
+            >
+              {COLUMNS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <Input
             placeholder="Title"
             value={title}
