@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   BookOpen,
   Bot,
@@ -8,6 +9,7 @@ import {
   Radio,
   Search,
   RotateCcw,
+  LayoutDashboard,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { ActivityFeed } from "@/components/activity-feed";
@@ -142,6 +144,13 @@ export function AppShell() {
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
+            <Link
+              to="/admin"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-3 text-xs font-medium text-fg hover:bg-bg-hover"
+            >
+              <LayoutDashboard className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Admin</span>
+            </Link>
             <Button
               size="sm"
               onClick={() => openPanel("new-mission")}

@@ -286,6 +286,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       });
     }
 
+
+    // GET /admin — operator live dashboard payload (events + history + board)
+    if (parts.length === 1 && parts[0] === "admin" && req.method === "GET") {
+      const snap = await boardOps.adminSnapshot();
+      return json({ ok: true, ...snap });
+    }
+
     // GET /board — full snapshot for UI
     if (parts.length === 1 && parts[0] === "board" && req.method === "GET") {
       const snap = await boardOps.snapshot();
@@ -343,6 +350,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           calls: "GET /api/agent/calls",
           reply: "POST /api/agent/calls/:id/reply",
           export: "GET /api/agent/export",
+          admin: "GET /api/agent/admin",
         },
       });
     }

@@ -584,6 +584,43 @@ export const durableBoard = {
       return rows.map((r) => rowHistory(r as Record<string, unknown>));
     }),
 
+  recentHistory: (limit = 100) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const lim = Math.min(Math.max(limit, 1), 500);
+      const rows = await sql`
+        select * from ar_mission_history
+        order by at desc
+        limit ${lim}
+      `;
+      return rows.map((r) => rowHistory(r as Record<string, unknown>));
+    }),
+
+  adminSnapshot: async () => {
+    const board = await durableBoard.snapshot();
+    const history = await durableBoard.recentHistory(150);
+    const byColumn: Record<string, number> = {};
+    for (const m of board.missions) {
+      byColumn[m.column] = (byColumn[m.column] ?? 0) + 1;
+    }
+    return {
+      serverTime: Date.now(),
+      agents: board.agents,
+      missions: board.missions,
+      events: board.events,
+      calls: board.calls,
+      history,
+      stats: {
+        missions: board.missions.length,
+        agents: board.agents.length,
+        openCalls: board.calls.filter((c) => !c.resolvedAt).length,
+        events: board.events.length,
+        history: history.length,
+        byColumn,
+      },
+    };
+  },
+
   exportActive: () =>
     withLock(async () => {
       const sql = await getSql();
