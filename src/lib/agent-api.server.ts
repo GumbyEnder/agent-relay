@@ -67,6 +67,21 @@ function requireApiKey(req: Request): Response | null {
   const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
   const header = req.headers.get("x-agent-key")?.trim() ?? "";
   if (bearer === expected || header === expected) return null;
+
+  // Browser operator UI is same-origin — allow without exposing the agent key.
+  // External harnesses must still send Bearer / X-Agent-Key.
+  const site = (req.headers.get("sec-fetch-site") ?? "").toLowerCase();
+  if (site === "same-origin") return null;
+  const origin = req.headers.get("origin");
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  if (origin && host) {
+    try {
+      if (new URL(origin).host === host.split(",")[0]!.trim()) return null;
+    } catch {
+      /* ignore bad origin */
+    }
+  }
+  // Top-level navigations / curl without Origin still need the key when configured.
   return err(401, "Invalid or missing API key", "unauthorized");
 }
 
