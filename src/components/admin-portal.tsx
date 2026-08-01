@@ -70,11 +70,14 @@ export function AdminPortal({
   projectId = null,
   embedded = false,
   boards = [],
+  onOpenMission,
 }: {
   projectId?: string | null;
   embedded?: boolean;
   /** Board catalog for labels when scope = all */
   boards?: Array<{ id: string; name: string; slug: string }>;
+  /** Jump to Board view + open mission panel */
+  onOpenMission?: (missionId: string, boardId?: string | null) => void;
 } = {}) {
   const [data, setData] = useState<AdminPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -416,13 +419,30 @@ export function AdminPortal({
             </div>
           </div>
           <ul className="flex-1 space-y-0 overflow-y-auto scrollbar-thin">
-            {filteredEvents.slice(0, 80).map((ev) => (
+            {filteredEvents.slice(0, 80).map((ev) => {
+              const mid = ev.missionId;
+              const bid = ev.projectId ?? missionBoard(mid);
+              const canOpen = Boolean(mid && onOpenMission);
+              return (
               <li
                 key={ev.id}
                 className={cn(
                   "border-b border-border/50 px-4 py-2.5 transition-colors",
                   flashIds.has(ev.id) && "bg-status-running/10",
+                  canOpen && "cursor-pointer hover:bg-bg-subtle/80",
                 )}
+                onClick={() => {
+                  if (mid && onOpenMission) onOpenMission(mid, bid);
+                }}
+                onKeyDown={(e) => {
+                  if (!canOpen) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (mid && onOpenMission) onOpenMission(mid, bid);
+                  }
+                }}
+                role={canOpen ? "link" : undefined}
+                tabIndex={canOpen ? 0 : undefined}
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className={cn("text-xs leading-relaxed", kindTone(ev.kind))}>
@@ -436,14 +456,24 @@ export function AdminPortal({
                 </div>
                 <p className="mt-1 font-mono text-[10px] text-fg-subtle tabular">
                   <RelativeTime ts={ev.at} /> · {ev.kind.replace(/_/g, " ")}
-                  {scope === "all" &&
-                    (ev.projectId || missionBoard(ev.missionId)) &&
-                    ` · ${boardName(ev.projectId ?? missionBoard(ev.missionId))}`}
-                  {ev.missionId ? ` · ${missionTitle(ev.missionId)}` : ""}
+                  {scope === "all" && bid ? ` · ${boardName(bid)}` : ""}
+                  {mid ? (
+                    <>
+                      {" · "}
+                      <span
+                        className={cn(
+                          canOpen && "text-accent underline-offset-2 hover:underline",
+                        )}
+                      >
+                        {missionTitle(mid)}
+                      </span>
+                    </>
+                  ) : null}
                   {ev.agentId ? ` · ${agentName(ev.agentId)}` : ""}
                 </p>
               </li>
-            ))}
+              );
+            })}
             {!filteredEvents.length && (
               <li className="px-4 py-10 text-center text-xs text-fg-subtle">
                 Waiting for activity…
@@ -464,22 +494,44 @@ export function AdminPortal({
             </div>
           </div>
           <ul className="flex-1 space-y-0 overflow-y-auto scrollbar-thin">
-            {filteredHistory.map((h) => (
+            {filteredHistory.map((h) => {
+              const mid = h.missionId;
+              const bid = h.projectId ?? missionBoard(mid);
+              const canOpen = Boolean(mid && onOpenMission);
+              return (
               <li
                 key={h.id}
                 className={cn(
                   "border-b border-border/50 px-4 py-3 transition-colors",
                   flashIds.has(h.id) && "bg-accent/5",
+                  canOpen && "cursor-pointer hover:bg-bg-subtle/80",
                 )}
+                onClick={() => {
+                  if (mid && onOpenMission) onOpenMission(mid, bid);
+                }}
+                onKeyDown={(e) => {
+                  if (!canOpen) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (mid && onOpenMission) onOpenMission(mid, bid);
+                  }
+                }}
+                role={canOpen ? "link" : undefined}
+                tabIndex={canOpen ? 0 : undefined}
               >
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                   {scope === "all" && (
                     <span className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle">
-                      {boardName(h.projectId ?? missionBoard(h.missionId))}
+                      {boardName(bid)}
                     </span>
                   )}
-                  <span className="font-medium text-fg">
-                    {missionTitle(h.missionId)}
+                  <span
+                    className={cn(
+                      "font-medium text-fg",
+                      canOpen && "text-accent underline-offset-2 hover:underline",
+                    )}
+                  >
+                    {missionTitle(mid)}
                   </span>
                   {flashIds.has(h.id) && (
                     <Badge className="text-[10px]">NEW</Badge>
@@ -520,9 +572,12 @@ export function AdminPortal({
                 {h.note ? (
                   <p className="mt-1 text-[11px] text-fg-subtle">{h.note}</p>
                 ) : null}
-                <p className="mt-1 font-mono text-[10px] text-fg-subtle">{h.missionId}</p>
+                {mid ? (
+                  <p className="mt-1 font-mono text-[10px] text-fg-subtle">{mid}</p>
+                ) : null}
               </li>
-            ))}
+              );
+            })}
             {!filteredHistory.length && (
               <li className="px-4 py-10 text-center text-xs text-fg-subtle">
                 No column history yet
@@ -546,18 +601,36 @@ export function AdminPortal({
               </h2>
             </div>
             <ul className="space-y-2">
-              {openCalls.slice(0, 12).map((c) => (
+              {openCalls.slice(0, 12).map((c) => {
+                const mid = c.missionId;
+                const bid = c.projectId ?? missionBoard(mid);
+                const canOpen = Boolean(mid && onOpenMission);
+                return (
                 <li
                   key={c.id}
-                  className="rounded-[var(--radius-sm)] border border-status-human/30 bg-status-human/5 px-2.5 py-2 text-xs"
+                  className={cn(
+                    "rounded-[var(--radius-sm)] border border-status-human/30 bg-status-human/5 px-2.5 py-2 text-xs",
+                    canOpen && "cursor-pointer hover:bg-status-human/10",
+                  )}
+                  onClick={() => {
+                    if (mid && onOpenMission) onOpenMission(mid, bid);
+                  }}
                 >
                   <p className="font-medium text-fg">{c.question}</p>
                   <p className="mt-1 text-[11px] text-fg-subtle">
-                    {missionTitle(c.missionId)} · {agentName(c.agentId)} ·{" "}
-                    <RelativeTime ts={c.createdAt} />
+                    <span
+                      className={cn(
+                        canOpen && "text-accent underline-offset-2 hover:underline",
+                      )}
+                    >
+                      {missionTitle(mid)}
+                    </span>
+                    {" · "}
+                    {agentName(c.agentId)} · <RelativeTime ts={c.createdAt} />
                   </p>
                 </li>
-              ))}
+                );
+              })}
               {openCalls.length === 0 && (
                 <li className="text-[11px] text-fg-subtle">No open escalations</li>
               )}

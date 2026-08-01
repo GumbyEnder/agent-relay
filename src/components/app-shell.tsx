@@ -98,6 +98,7 @@ export function AppShell({
     exportActive,
     setHydrated,
     createBoard,
+    openMissionOnBoard,
   } = state;
 
   const [mobileFeed, setMobileFeed] = useState(false);
@@ -670,6 +671,21 @@ export function AppShell({
                   slug: p.slug,
                 }))}
                 embedded
+                onOpenMission={(missionId, boardId) => {
+                  openMissionOnBoard(missionId, boardId);
+                  void navigate({
+                    to: "/",
+                    search: (prev) => {
+                      const p = projects.find((x) => x.id === (boardId ?? selectedProjectId));
+                      return {
+                        ...prev,
+                        view: "board",
+                        project:
+                          p?.slug && p.slug !== "default" ? p.slug : undefined,
+                      };
+                    },
+                  });
+                }}
               />
             </div>
           )}

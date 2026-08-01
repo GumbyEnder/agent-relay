@@ -45,6 +45,8 @@ interface BoardState {
 
   setMainView: (v: BoardState["mainView"]) => void;
   setSelectedProjectId: (id: string | null) => void;
+  /** From Live feed: switch to Board view and open mission panel. */
+  openMissionOnBoard: (missionId: string, projectId?: string | null) => void;
   setSearch: (q: string) => void;
   setFilterAgent: (id: string | null) => void;
   setFilterPriority: (p: Priority | null) => void;
@@ -133,6 +135,22 @@ export const useBoard = create<BoardState>()((set, get) => ({
   setSelectedProjectId: (id) => {
     set({ selectedProjectId: id, selectedMissionId: null, historyByMission: {} });
     void get().refresh();
+  },
+  openMissionOnBoard: (missionId, projectId) => {
+    const nextProject = projectId ?? get().selectedProjectId;
+    const projectChanged =
+      nextProject != null && nextProject !== get().selectedProjectId;
+    set({
+      mainView: "board",
+      selectedProjectId: nextProject,
+      selectedMissionId: missionId,
+      panel: "mission",
+      ...(projectChanged ? { historyByMission: {} } : {}),
+    });
+    void get()
+      .refresh()
+      .then(() => get().loadHistory(missionId))
+      .catch(() => undefined);
   },
   setSearch: (q) => set({ search: q }),
   setFilterAgent: (id) => set({ filterAgentId: id }),
