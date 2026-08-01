@@ -38,6 +38,7 @@ export const SEED_AGENTS: Agent[] = [
     lastHeartbeat: m(0.3),
     currentMissionId: null,
     notes: "Hermes Agent — five-verb HTTP or MCP against Dev Boards.",
+    isDemo: true,
   },
   {
     id: "agent_grok",
@@ -49,6 +50,7 @@ export const SEED_AGENTS: Agent[] = [
     lastHeartbeat: m(2),
     currentMissionId: null,
     notes: "xAI Grok via API or Hermes provider — same board verbs.",
+    isDemo: true,
   },
   {
     id: "agent_omp",
@@ -59,6 +61,7 @@ export const SEED_AGENTS: Agent[] = [
     skills: ["batch", "pipeline"],
     lastHeartbeat: m(60),
     currentMissionId: null,
+    isDemo: true,
   },
   {
     id: "agent_openclaw",
@@ -69,6 +72,7 @@ export const SEED_AGENTS: Agent[] = [
     skills: ["code", "tools"],
     lastHeartbeat: m(90),
     currentMissionId: null,
+    isDemo: true,
   },
   {
     id: "agent_scout",
@@ -79,6 +83,7 @@ export const SEED_AGENTS: Agent[] = [
     skills: ["web", "summarize", "triage"],
     lastHeartbeat: m(0.4),
     currentMissionId: null,
+    isDemo: true,
   },
   {
     id: "agent_forge",
@@ -89,6 +94,7 @@ export const SEED_AGENTS: Agent[] = [
     skills: ["code", "tests", "pr"],
     lastHeartbeat: m(0.2),
     currentMissionId: "msn_auth_hardening",
+    isDemo: true,
   },
   {
     id: "agent_lens",
@@ -99,6 +105,7 @@ export const SEED_AGENTS: Agent[] = [
     skills: ["diff-review", "security", "perf"],
     lastHeartbeat: m(3),
     currentMissionId: null,
+    isDemo: true,
   },
   {
     id: "agent_relay",
@@ -110,6 +117,7 @@ export const SEED_AGENTS: Agent[] = [
     lastHeartbeat: m(0.1),
     currentMissionId: null,
     notes: "Harness-agnostic MCP bridge. Polls Ready, posts heartbeats.",
+    isDemo: true,
   },
   {
     id: "agent_night",
@@ -120,6 +128,7 @@ export const SEED_AGENTS: Agent[] = [
     skills: ["batch", "cleanup"],
     lastHeartbeat: m(140),
     currentMissionId: null,
+    isDemo: true,
   },
 ];
 

@@ -23,7 +23,8 @@ export function AgentStrip({
   onFilter: (id: string | null) => void;
   onOpenRoster: () => void;
 }) {
-  const live = agents.filter((a) => a.status !== "offline").length;
+  const roster = agents.filter((a) => !a.isDemo);
+  const live = roster.filter((a) => a.status !== "offline").length;
 
   return (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin border-b border-border bg-bg-elevated/60 px-3 py-2 sm:px-4">
@@ -38,7 +39,10 @@ export function AgentStrip({
       </button>
 
       <div className="flex items-center gap-1.5">
-        {agents.map((a) => (
+        {roster.length === 0 && (
+          <span className="px-2 text-[11px] text-fg-subtle">No agents yet — open roster to register</span>
+        )}
+        {roster.map((a) => (
           <button
             key={a.id}
             type="button"

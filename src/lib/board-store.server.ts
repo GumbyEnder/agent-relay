@@ -106,9 +106,29 @@ function rowMission(r: Record<string, unknown>): Mission {
   };
 }
 
+const SEED_AGENT_IDS = new Set([
+  "agent_scout",
+  "agent_forge",
+  "agent_lens",
+  "agent_relay",
+  "agent_night",
+  "agent_hermes",
+  "agent_grok",
+  "agent_omp",
+  "agent_openclaw",
+]);
+
 function rowAgent(r: Record<string, unknown>): Agent {
+  const notes = r.notes != null ? String(r.notes) : undefined;
+  const id = String(r.id);
+  const isDemo =
+    r.is_demo === true ||
+    r.is_demo === "t" ||
+    r.is_demo === 1 ||
+    notes === "seed" ||
+    SEED_AGENT_IDS.has(id);
   return {
-    id: String(r.id),
+    id,
     name: String(r.name),
     harness: String(r.harness) as HarnessKind,
     role: String(r.role ?? ""),
@@ -116,7 +136,8 @@ function rowAgent(r: Record<string, unknown>): Agent {
     skills: asJsonArray(r.skills),
     lastHeartbeat: ms(r.last_heartbeat) ?? Date.now(),
     currentMissionId: r.current_mission_id != null ? String(r.current_mission_id) : null,
-    notes: r.notes != null ? String(r.notes) : undefined,
+    notes,
+    isDemo: Boolean(isDemo),
   };
 }
 
@@ -212,11 +233,12 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
 
 async function insertAgent(sql: Sql, a: Agent) {
   await sql`
-    insert into ar_agents (id, name, harness, role, status, skills, last_heartbeat, current_mission_id, notes)
+    insert into ar_agents (id, name, harness, role, status, skills, last_heartbeat, current_mission_id, notes, is_demo)
     values (
       ${a.id}, ${a.name}, ${a.harness}, ${a.role}, ${a.status},
       ${JSON.stringify(a.skills)}::jsonb,
-      ${ts(a.lastHeartbeat)}, ${a.currentMissionId}, ${a.notes ?? null}
+      ${ts(a.lastHeartbeat)}, ${a.currentMissionId}, ${a.notes ?? null},
+      ${a.isDemo === true}
     )
     on conflict (id) do update set
       name = excluded.name,
@@ -227,6 +249,7 @@ async function insertAgent(sql: Sql, a: Agent) {
       last_heartbeat = excluded.last_heartbeat,
       current_mission_id = excluded.current_mission_id,
       notes = excluded.notes,
+      is_demo = excluded.is_demo,
       updated_at = now()
   `;
 }

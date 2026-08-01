@@ -30,10 +30,11 @@ export function AgentsPanel() {
     selectedProjectId,
   } = useBoard();
   const [name, setName] = useState("");
-  const [role, setRole] = useState("");
+  const [role, setRole] = useState("client");
   const [harness, setHarness] = useState<HarnessKind>("hermes");
   const [skills, setSkills] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showDemoAgents, setShowDemoAgents] = useState(false);
   const [keys, setKeys] = useState<Array<Record<string, unknown>>>([]);
   const [lastSecret, setLastSecret] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("");
@@ -56,6 +57,12 @@ export function AgentsPanel() {
     () => clientAgentGuideMarkdown(publicBase),
     [publicBase],
   );
+  const visibleAgents = useMemo(
+    () =>
+      showDemoAgents ? agents : agents.filter((a) => !a.isDemo),
+    [agents, showDemoAgents],
+  );
+  const demoCount = agents.filter((a) => a.isDemo).length;
 
   const reloadKeys = useCallback(async () => {
     try {
@@ -174,10 +181,13 @@ export function AgentsPanel() {
             className="space-y-2 border-b border-border p-4"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!name.trim() || !role.trim()) return;
+              if (!name.trim()) {
+                toast.error("Name is required");
+                return;
+              }
               registerAgent({
-                name,
-                role,
+                name: name.trim(),
+                role: role.trim() || "client",
                 harness,
                 skills: skills
                   .split(",")
@@ -185,10 +195,10 @@ export function AgentsPanel() {
                   .filter(Boolean),
               });
               setName("");
-              setRole("");
+              setRole("client");
               setSkills("");
               setShowForm(false);
-              toast.success("Agent registered");
+              toast.success(`Registering ${name.trim().toLowerCase()}…`);
             }}
           >
             <Input
@@ -225,17 +235,43 @@ export function AgentsPanel() {
           </form>
         )}
 
+        {demoCount > 0 && (
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+            <p className="text-[11px] text-fg-subtle">
+              {demoCount} demo agent{demoCount === 1 ? "" : "s"} hidden
+            </p>
+            <button
+              type="button"
+              className="text-[11px] text-fg-muted underline-offset-2 hover:underline"
+              onClick={() => setShowDemoAgents((v) => !v)}
+            >
+              {showDemoAgents ? "Hide demos" : "Show demos"}
+            </button>
+          </div>
+        )}
+
         <ul className="divide-y divide-border">
-          {agents.map((a) => {
+          {visibleAgents.length === 0 && (
+            <li className="px-4 py-6 text-center text-xs text-fg-subtle">
+              No real agents yet. Register one above (name + harness). Role defaults to
+              “client”.
+            </li>
+          )}
+          {visibleAgents.map((a) => {
             const active = missions.find((m) => m.id === a.currentMissionId);
             return (
               <li key={a.id} className="space-y-2 px-4 py-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-mono text-sm text-fg">{a.name}</p>
+                    <p className="font-mono text-sm text-fg">
+                      {a.name}
+                      {a.isDemo ? (
+                        <span className="ml-1.5 text-[10px] text-fg-subtle">demo</span>
+                      ) : null}
+                    </p>
                     <p className="text-xs text-fg-muted">{a.role}</p>
                   </div>
-                  <Badge variant="default">{HARNESS_LABELS[a.harness]}</Badge>
+                  <Badge variant="default">{HARNESS_LABELS[a.harness] ?? a.harness}</Badge>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {a.skills.map((s) => (

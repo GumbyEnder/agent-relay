@@ -148,10 +148,9 @@ export function claimMission(
   missionId: string,
   agentRef: string,
 ): EngineResult<{ mission: ReturnType<typeof missionSummary>; agent: Agent }> {
-  const agent = resolveAgent(board, agentRef);
-  if (!agent) {
-    return { ok: false, status: 404, error: `Unknown agent: ${agentRef}`, code: "agent_not_found" };
-  }
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
   const mission = board.missions.find((m) => m.id === missionId);
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
@@ -229,10 +228,9 @@ export function heartbeatMission(
   agentRef: string,
   note?: string,
 ): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
-  const agent = resolveAgent(board, agentRef);
-  if (!agent) {
-    return { ok: false, status: 404, error: `Unknown agent: ${agentRef}`, code: "agent_not_found" };
-  }
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
   const mission = board.missions.find((m) => m.id === missionId);
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
@@ -285,10 +283,9 @@ export function escalateMission(
   agentRef: string,
   question: string,
 ): EngineResult<{ call: HumanCall; mission: ReturnType<typeof missionSummary> }> {
-  const agent = resolveAgent(board, agentRef);
-  if (!agent) {
-    return { ok: false, status: 404, error: `Unknown agent: ${agentRef}`, code: "agent_not_found" };
-  }
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
   const mission = board.missions.find((m) => m.id === missionId);
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
@@ -338,10 +335,9 @@ export function deliverMission(
   summary: string,
   artifacts: string[] = [],
 ): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
-  const agent = resolveAgent(board, agentRef);
-  if (!agent) {
-    return { ok: false, status: 404, error: `Unknown agent: ${agentRef}`, code: "agent_not_found" };
-  }
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
   const mission = board.missions.find((m) => m.id === missionId);
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
@@ -441,6 +437,42 @@ export function replyToCall(
   };
 }
 
+/** Ensure agent exists by name/id; create if missing (client agents often skip UI roster). */
+export function ensureAgent(
+  board: BoardData,
+  ref: string,
+  opts?: { harness?: HarnessKind; role?: string; skills?: string[] },
+): { board: BoardData; agent: Agent; created: boolean } {
+  const existing = resolveAgent(board, ref);
+  if (existing) return { board, agent: existing, created: false };
+  const name = ref.trim().toLowerCase().replace(/\s+/g, "-") || uid("agent");
+  const agent: Agent = {
+    id: uid("agent"),
+    name,
+    harness: opts?.harness ?? "custom",
+    role: (opts?.role ?? "client").trim() || "client",
+    status: "online",
+    skills: opts?.skills ?? [],
+    lastHeartbeat: Date.now(),
+    currentMissionId: null,
+    isDemo: false,
+  };
+  return {
+    board: {
+      ...board,
+      agents: [agent, ...board.agents],
+      events: pushEvent(board.events, {
+        missionId: null,
+        agentId: agent.id,
+        kind: "agent_registered",
+        message: `Agent auto-registered · ${agent.name} (${agent.harness})`,
+      }),
+    },
+    agent,
+    created: true,
+  };
+}
+
 export function registerAgent(
   board: BoardData,
   input: {
@@ -454,18 +486,38 @@ export function registerAgent(
   if (!name) {
     return { ok: false, status: 400, error: "name is required", code: "bad_request" };
   }
-  if (board.agents.some((a) => a.name === name)) {
-    return { ok: false, status: 409, error: `Agent already exists: ${name}`, code: "agent_exists" };
+  const existing = board.agents.find((a) => a.name === name);
+  if (existing) {
+    // Idempotent: return existing real agent (upgrade out of demo if needed)
+    const agent: Agent = {
+      ...existing,
+      harness: input.harness || existing.harness,
+      role: (input.role ?? existing.role).trim() || existing.role,
+      skills: input.skills ?? existing.skills,
+      status: "online",
+      lastHeartbeat: Date.now(),
+      isDemo: false,
+      notes: existing.isDemo ? undefined : existing.notes,
+    };
+    return {
+      ok: true,
+      board: {
+        ...board,
+        agents: board.agents.map((a) => (a.id === agent.id ? agent : a)),
+      },
+      data: { agent },
+    };
   }
   const agent: Agent = {
     id: uid("agent"),
     name,
     harness: input.harness,
-    role: (input.role ?? "agent").trim(),
+    role: (input.role ?? "agent").trim() || "agent",
     status: "online",
     skills: input.skills ?? [],
     lastHeartbeat: Date.now(),
     currentMissionId: null,
+    isDemo: false,
   };
   const next: BoardData = {
     ...board,

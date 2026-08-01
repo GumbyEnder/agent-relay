@@ -69,6 +69,8 @@ export interface Agent {
   lastHeartbeat: number;
   currentMissionId: string | null;
   notes?: string;
+  /** Seed/demo roster entries — hidden in UI by default */
+  isDemo?: boolean;
 }
 
 export interface MissionEvent {
