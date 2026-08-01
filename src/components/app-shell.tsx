@@ -95,11 +95,15 @@ export function AppShell({
     resetDemo,
     exportActive,
     setHydrated,
+    createBoard,
   } = state;
 
   const [mobileFeed, setMobileFeed] = useState(false);
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [themeOpen, setThemeOpen] = useState(false);
+  const [newBoardOpen, setNewBoardOpen] = useState(false);
+  const [newBoardName, setNewBoardName] = useState("");
+  const [newBoardBusy, setNewBoardBusy] = useState(false);
   const { role, can } = useOperatorMe();
 
   const missions = useMemo(
@@ -249,12 +253,12 @@ export function AppShell({
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight text-fg sm:text-base">
-                Agent Relay
+                Dev Boards
               </h1>
               <p className="truncate text-[11px] text-fg-subtle sm:text-xs">
                 {selectedProject
-                  ? `${selectedProject.name} · agent-first kanban`
-                  : "Mission kanban for any harness"}
+                  ? `${selectedProject.name} · board`
+                  : "Mission boards for AI agents"}
                 {role ? ` · ${role}` : ""}
               </p>
             </div>
@@ -475,11 +479,96 @@ export function AppShell({
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* Project rail */}
+        {/* Board rail (product: Board; API still uses project ids) */}
         <aside className="hidden w-44 shrink-0 flex-col border-r border-border bg-bg-elevated/30 md:flex lg:w-52">
-          <div className="border-b border-border px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
-            Projects
+          <div className="flex items-center justify-between gap-1 border-b border-border px-3 py-2.5">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+              Boards
+            </span>
+            {can("write_board") && (
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-bg-subtle hover:text-fg"
+                title="New board"
+                onClick={() => {
+                  setNewBoardName("");
+                  setNewBoardOpen(true);
+                }}
+              >
+                + New
+              </button>
+            )}
           </div>
+          {newBoardOpen && (
+            <div className="space-y-2 border-b border-border p-2">
+              <Input
+                autoFocus
+                placeholder="Board name"
+                value={newBoardName}
+                onChange={(e) => setNewBoardName(e.target.value)}
+                className="h-8 text-xs"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setNewBoardOpen(false);
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void (async () => {
+                      if (!newBoardName.trim() || newBoardBusy) return;
+                      setNewBoardBusy(true);
+                      const id = await createBoard({ name: newBoardName.trim() });
+                      setNewBoardBusy(false);
+                      if (id) {
+                        setNewBoardOpen(false);
+                        const p = useBoard.getState().projects.find((x) => x.id === id);
+                        void navigate({
+                          to: "/",
+                          search: (prev) => ({
+                            ...prev,
+                            project: p?.slug && p.slug !== "default" ? p.slug : undefined,
+                          }),
+                        });
+                      }
+                    })();
+                  }
+                }}
+              />
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  className="h-7 flex-1 text-[11px]"
+                  disabled={newBoardBusy || !newBoardName.trim()}
+                  onClick={() => {
+                    void (async () => {
+                      if (!newBoardName.trim() || newBoardBusy) return;
+                      setNewBoardBusy(true);
+                      const id = await createBoard({ name: newBoardName.trim() });
+                      setNewBoardBusy(false);
+                      if (id) {
+                        setNewBoardOpen(false);
+                        const p = useBoard.getState().projects.find((x) => x.id === id);
+                        void navigate({
+                          to: "/",
+                          search: (prev) => ({
+                            ...prev,
+                            project: p?.slug && p.slug !== "default" ? p.slug : undefined,
+                          }),
+                        });
+                      }
+                    })();
+                  }}
+                >
+                  {newBoardBusy ? "…" : "Create"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px]"
+                  onClick={() => setNewBoardOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
           <ul className="flex-1 space-y-0.5 overflow-y-auto p-2 scrollbar-thin">
             {projects.map((p) => (
               <li key={p.id}>
@@ -511,13 +600,24 @@ export function AppShell({
                         : "text-fg-subtle",
                     )}
                   >
-                    {p.slug}
+                    {p.ownerUserId ? "yours" : "shared"} · {p.slug}
                   </span>
                 </button>
               </li>
             ))}
             {projects.length === 0 && (
-              <li className="px-2 py-4 text-[11px] text-fg-subtle">Loading…</li>
+              <li className="space-y-2 px-2 py-4 text-[11px] text-fg-subtle">
+                <p>No boards yet.</p>
+                {can("write_board") && (
+                  <Button
+                    size="sm"
+                    className="h-7 w-full text-[11px]"
+                    onClick={() => setNewBoardOpen(true)}
+                  >
+                    Create your first board
+                  </Button>
+                )}
+              </li>
             )}
           </ul>
         </aside>

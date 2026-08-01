@@ -74,6 +74,7 @@ function rowProject(r: Record<string, unknown>): Project {
     name: String(r.name),
     slug: String(r.slug),
     description: String(r.description ?? ""),
+    ownerUserId: r.owner_user_id != null ? String(r.owner_user_id) : null,
     createdAt: ms(r.created_at) ?? Date.now(),
     updatedAt: ms(r.updated_at) ?? Date.now(),
   };
@@ -232,12 +233,21 @@ async function insertAgent(sql: Sql, a: Agent) {
 
 async function insertProject(sql: Sql, pr: Project) {
   await sql`
-    insert into ar_projects (id, name, slug, description, created_at, updated_at)
-    values (${pr.id}, ${pr.name}, ${pr.slug}, ${pr.description}, ${ts(pr.createdAt)}, ${ts(pr.updatedAt)})
+    insert into ar_projects (id, name, slug, description, owner_user_id, created_at, updated_at)
+    values (
+      ${pr.id},
+      ${pr.name},
+      ${pr.slug},
+      ${pr.description},
+      ${pr.ownerUserId ?? null},
+      ${ts(pr.createdAt)},
+      ${ts(pr.updatedAt)}
+    )
     on conflict (id) do update set
       name = excluded.name,
       slug = excluded.slug,
       description = excluded.description,
+      owner_user_id = coalesce(excluded.owner_user_id, ar_projects.owner_user_id),
       updated_at = excluded.updated_at
   `;
 }
@@ -531,28 +541,64 @@ export const durableBoard = {
       return loadBoard(sql, projectId);
     }),
 
-  listProjects: () =>
+  listProjects: (opts?: { ownerUserId?: string | null; includeShared?: boolean; admin?: boolean }) =>
     withLock(async () => {
       const sql = await getSql();
       await ensureProjects(sql);
-      const rows = await sql`select * from ar_projects order by name asc`;
-      return rows.map((r) => rowProject(r as Record<string, unknown>));
+      const owner = opts?.ownerUserId?.trim() || null;
+      const includeShared = opts?.includeShared !== false;
+      const admin = opts?.admin === true;
+      let rows: Record<string, unknown>[];
+      if (admin || !owner) {
+        rows = (await sql`select * from ar_projects order by name asc`) as Record<
+          string,
+          unknown
+        >[];
+      } else if (includeShared) {
+        rows = (await sql`
+          select * from ar_projects
+          where owner_user_id = ${owner} or owner_user_id is null
+          order by
+            case when owner_user_id = ${owner} then 0 else 1 end,
+            name asc
+        `) as Record<string, unknown>[];
+      } else {
+        rows = (await sql`
+          select * from ar_projects
+          where owner_user_id = ${owner}
+          order by name asc
+        `) as Record<string, unknown>[];
+      }
+      return rows.map((r) => rowProject(r));
     }),
 
-  createProject: (input: { name: string; slug?: string; description?: string }) =>
+  createProject: (input: {
+    name: string;
+    slug?: string;
+    description?: string;
+    ownerUserId?: string | null;
+  }) =>
     withLock(async () => {
       const sql = await getSql();
       const name = input.name.trim();
       if (!name) throw new Error("name required");
-      const slug = (input.slug?.trim() || name)
+      let baseSlug = (input.slug?.trim() || name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "") || uid("proj");
+        .replace(/^-|-$/g, "") || uid("board");
+      // Unique slug: append short suffix if taken
+      let slug = baseSlug;
+      for (let i = 0; i < 8; i++) {
+        const hit = await sql`select id from ar_projects where slug = ${slug} limit 1`;
+        if (!hit[0]) break;
+        slug = `${baseSlug}-${uid("x").slice(-4)}`;
+      }
       const pr: Project = {
-        id: uid("proj"),
+        id: uid("board"),
         name,
         slug,
         description: (input.description ?? "").trim(),
+        ownerUserId: input.ownerUserId ?? null,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };

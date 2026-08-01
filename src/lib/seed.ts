@@ -10,22 +10,23 @@ export const DEFAULT_PROJECT_ID = "proj_default";
 export const SEED_PROJECTS: Project[] = [
   {
     id: DEFAULT_PROJECT_ID,
-    name: "Default",
+    name: "Demo board",
     slug: "default",
-    description: "Default project board",
+    description: "Shared demo board — create your own from the Boards rail",
+    ownerUserId: null,
     createdAt: now,
     updatedAt: now,
   },
   {
     id: "proj_platform",
-    name: "Platform",
+    name: "Platform (demo)",
     slug: "platform",
-    description: "Platform & infra missions",
+    description: "Shared demo board for platform-style missions",
+    ownerUserId: null,
     createdAt: now,
     updatedAt: now,
   },
 ];
-
 export const SEED_AGENTS: Agent[] = [
   {
     id: "agent_scout",

@@ -40,7 +40,7 @@ function env(key: string): string | undefined {
 }
 
 export function mailFromAddress(): string {
-  return env("SMTP_FROM") || env("MAIL_FROM") || "Agent Relay <noreply@localhost>";
+  return env("SMTP_FROM") || env("MAIL_FROM") || "Dev Boards <noreply@localhost>";
 }
 
 export function isSmtpConfigured(): boolean {
@@ -194,11 +194,11 @@ export async function sendVerificationMail(opts: {
   url: string;
 }): Promise<OutboundEmail> {
   const name = opts.name?.trim() || "there";
-  const subject = "Verify your Agent Relay email";
+  const subject = "Verify your Dev Boards email";
   const text = [
     `Hi ${name},`,
     "",
-    "Thanks for registering with Agent Relay.",
+    "Thanks for registering with Dev Boards.",
     "Please verify your email by opening this link:",
     "",
     opts.url,
@@ -206,12 +206,12 @@ export async function sendVerificationMail(opts: {
     "This link expires in about one hour.",
     "If you did not create an account, you can ignore this message.",
     "",
-    "— Agent Relay",
+    "— Dev Boards",
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
       <p>Hi ${escapeHtml(name)},</p>
-      <p>Thanks for registering with <strong>Agent Relay</strong>.</p>
+      <p>Thanks for registering with <strong>Dev Boards</strong>.</p>
       <p><a href="${escapeAttr(opts.url)}" style="display:inline-block;padding:0.6rem 1rem;background:#111;color:#fff;text-decoration:none;border-radius:6px">Verify email</a></p>
       <p style="color:#666;font-size:0.9rem">Or paste this URL:<br/><code>${escapeHtml(opts.url)}</code></p>
       <p style="color:#666;font-size:0.85rem">Link expires in about one hour. If you did not sign up, ignore this email.</p>

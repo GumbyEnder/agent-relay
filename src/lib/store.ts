@@ -71,6 +71,7 @@ interface BoardState {
     column?: MissionColumn;
   }) => string;
   deleteMission: (id: string) => void;
+  createBoard: (input: { name: string; slug?: string; description?: string }) => Promise<string | null>;
 
   registerAgent: (input: {
     name: string;
@@ -162,31 +163,47 @@ export const useBoard = create<BoardState>()((set, get) => ({
     set({ _syncing: true });
     try {
       // Resolve project scope BEFORE loading the board so the first paint is never unscoped.
-      const projRes = await agentApi.listProjects().catch(() => ({
-        ok: true as const,
-        projects: get().projects as Array<{
-          id: string;
-          name: string;
-          slug: string;
-          description: string;
-          createdAt?: number;
-          updatedAt?: number;
-        }>,
-      }));
-      const projects = (projRes.projects ?? []).map((pr) => ({
+      type BoardRow = {
+        id: string;
+        name: string;
+        slug: string;
+        description?: string;
+        ownerUserId?: string | null;
+        createdAt?: number;
+        updatedAt?: number;
+      };
+      let rawList: BoardRow[] = [];
+      try {
+        const projRes = await agentApi.listProjects();
+        rawList = (projRes.boards ?? projRes.projects ?? []) as BoardRow[];
+      } catch {
+        rawList = get().projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          slug: p.slug,
+          description: p.description,
+          ownerUserId: p.ownerUserId ?? null,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        }));
+      }
+      const projects: Project[] = rawList.map((pr) => ({
         id: pr.id,
         name: pr.name,
         slug: pr.slug,
         description: pr.description ?? "",
-        createdAt: "createdAt" in pr && pr.createdAt ? Number(pr.createdAt) : Date.now(),
-        updatedAt: "updatedAt" in pr && pr.updatedAt ? Number(pr.updatedAt) : Date.now(),
+        ownerUserId: pr.ownerUserId ?? null,
+        createdAt: pr.createdAt ? Number(pr.createdAt) : Date.now(),
+        updatedAt: pr.updatedAt ? Number(pr.updatedAt) : Date.now(),
       }));
       let selectedProjectId = get().selectedProjectId;
       if (selectedProjectId && !projects.some((p) => p.id === selectedProjectId)) {
         selectedProjectId = null;
       }
       if (!selectedProjectId && projects.length) {
+        // Prefer a board the user owns, then default/shared, then first.
         selectedProjectId =
+          projects.find((p) => p.ownerUserId)?.id ??
           projects.find((p) => p.slug === "default" || p.id === "proj_default")?.id ??
           projects[0]!.id;
       }
@@ -317,6 +334,28 @@ export const useBoard = create<BoardState>()((set, get) => ({
 
   deleteMission: (_id) => {
     toast.message("Delete not exposed on shared API yet");
+  },
+
+  createBoard: async (input) => {
+    try {
+      const res = await agentApi.createBoard({
+        name: input.name,
+        slug: input.slug,
+        description: input.description,
+      });
+      const board = res.board ?? res.project;
+      await get().refresh();
+      if (board?.id) {
+        set({ selectedProjectId: board.id, selectedMissionId: null });
+        toast.success(`Board “${board.name ?? input.name}” created`);
+        return board.id;
+      }
+      return null;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Create board: ${msg}`);
+      return null;
+    }
   },
 
   registerAgent: (input) => {

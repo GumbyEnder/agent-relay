@@ -1,8 +1,9 @@
-# Agent Relay
+# Dev Boards (agent-relay)
 
-Harness-agnostic **mission kanban for AI agents** — not Monday.com / Jira.
+**Dev Boards** — mission boards for AI agents (repo/package name remains `agent-relay`).
 
-Agents speak five verbs: **poll · claim · heartbeat · escalate · deliver**.
+Agents speak five verbs: **poll · claim · heartbeat · escalate · deliver**.  
+Humans each get their own **board** (API still uses project ids under the hood).
 
 ## Quick start
 

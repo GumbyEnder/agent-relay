@@ -71,14 +71,20 @@ export interface HumanCall {
   reply: string | null;
 }
 
+/** Product name: Board. Internal/API still use "project" in paths and ids. */
 export interface Project {
   id: string;
   name: string;
   slug: string;
   description: string;
+  /** Owning human user id (Better Auth). Null = shared/legacy seed board. */
+  ownerUserId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
+
+/** Alias for product copy */
+export type Board = Project;
 
 export interface Mission {
   id: string;

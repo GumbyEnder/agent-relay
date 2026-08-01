@@ -554,22 +554,43 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, projectId: projectRef(url) ?? null, ...snap });
     }
 
-    // GET|POST /projects
-    if (parts.length === 1 && parts[0] === "projects" && req.method === "GET") {
-      const projects = await boardOps.listProjects();
-      return json({ ok: true, projects });
+    // GET|POST /projects  (product language: boards — /boards is an alias)
+    if (
+      parts.length === 1 &&
+      (parts[0] === "projects" || parts[0] === "boards") &&
+      req.method === "GET"
+    ) {
+      const ctx = await loadOperatorContext(req);
+      const adminAll =
+        ctx.role === "admin" && url.searchParams.get("all") === "1";
+      const boards =
+        ctx.authRequired && ctx.user
+          ? await boardOps.listProjects({
+              ownerUserId: ctx.user.id,
+              includeShared: true,
+              admin: adminAll,
+            })
+          : await boardOps.listProjects({ admin: true });
+      return json({ ok: true, boards, projects: boards });
     }
-    if (parts.length === 1 && parts[0] === "projects" && req.method === "POST") {
-      const gate = await requireOperatorCap(req, "manage_settings");
+    if (
+      parts.length === 1 &&
+      (parts[0] === "projects" || parts[0] === "boards") &&
+      req.method === "POST"
+    ) {
+      // Any signed-in operator+ can create their own board (not admin-only).
+      const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
+      const ctx = await loadOperatorContext(req);
       const name = str(body.name);
       if (!name) return err(400, "name is required", "bad_request");
-      const project = await boardOps.createProject({
+      const board = await boardOps.createProject({
         name,
         slug: str(body.slug),
         description: str(body.description),
+        ownerUserId: ctx.user?.id ?? null,
       });
-      return json({ ok: true, project });
+      return json({ ok: true, board, project: board });
     }
 
     // POST /webhooks/github — signed issue/PR ingest
@@ -843,6 +864,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           reply: "POST /api/agent/calls/:id/reply",
           export: "GET /api/agent/export",
           admin: "GET /api/agent/admin?project=",
+          boards: "GET /api/agent/boards",
           projects: "GET|POST /api/agent/projects",
           github_ingest: "POST /api/agent/ingest/github",
           journal: "GET /api/agent/missions/:id/journal",

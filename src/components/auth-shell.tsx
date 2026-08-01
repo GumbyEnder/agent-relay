@@ -17,7 +17,7 @@ export function AuthShell({
       <div className="w-full max-w-sm space-y-6 rounded-[var(--radius-md)] border border-border bg-bg-elevated p-6 shadow-[var(--shadow-panel)]">
         <div className="space-y-1">
           <Link to="/" className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle hover:text-fg">
-            Agent Relay
+            Dev Boards
           </Link>
           <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
           {subtitle ? <p className="text-sm text-fg-muted">{subtitle}</p> : null}

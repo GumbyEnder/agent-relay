@@ -83,17 +83,37 @@ export const agentApi = {
   listProjects: () =>
     req<{
       ok: true;
+      boards?: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string;
+        ownerUserId?: string | null;
+        createdAt?: number;
+        updatedAt?: number;
+      }>;
       projects: Array<{
         id: string;
         name: string;
         slug: string;
         description: string;
+        ownerUserId?: string | null;
         createdAt?: number;
         updatedAt?: number;
       }>;
-    }>("GET", "/projects"),
+    }>("GET", "/boards"),
   createProject: (input: { name: string; slug?: string; description?: string }) =>
-    req<{ ok: true; project: { id: string; name: string; slug: string } }>("POST", "/projects", input),
+    req<{
+      ok: true;
+      board?: { id: string; name: string; slug: string; ownerUserId?: string | null };
+      project: { id: string; name: string; slug: string; ownerUserId?: string | null };
+    }>("POST", "/boards", input),
+  createBoard: (input: { name: string; slug?: string; description?: string }) =>
+    req<{
+      ok: true;
+      board: { id: string; name: string; slug: string; ownerUserId?: string | null };
+      project: { id: string; name: string; slug: string; ownerUserId?: string | null };
+    }>("POST", "/boards", input),
   ingestGitHub: (body: unknown) =>
     req<{ ok: true; created: boolean; mission: { id: string; externalId?: string } }>(
       "POST",

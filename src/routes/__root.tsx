@@ -13,12 +13,12 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       {
-        title: "Agent Relay — Mission kanban for any agent harness",
+        title: "Dev Boards — Mission boards for AI agents",
       },
       {
         name: "description",
         content:
-          "Harness-agnostic kanban for AI agents: claim, heartbeat, escalate, deliver. Not another human project SaaS.",
+          "Dev Boards: agent-first kanban. Poll, claim, heartbeat, escalate, deliver — every human gets their own board.",
       },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
