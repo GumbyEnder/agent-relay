@@ -106,6 +106,25 @@ export function AppShell({
   const [newBoardBusy, setNewBoardBusy] = useState(false);
   const { role, can } = useOperatorMe();
 
+  const submitNewBoard = async () => {
+    if (!newBoardName.trim() || newBoardBusy) return;
+    setNewBoardBusy(true);
+    const id = await createBoard({ name: newBoardName.trim() });
+    setNewBoardBusy(false);
+    if (id) {
+      setNewBoardOpen(false);
+      setNewBoardName("");
+      const p = useBoard.getState().projects.find((x) => x.id === id);
+      void navigate({
+        to: "/",
+        search: (prev) => ({
+          ...prev,
+          project: p?.slug && p.slug !== "default" ? p.slug : undefined,
+        }),
+      });
+    }
+  };
+
   const missions = useMemo(
     () => filteredMissions({ ...state }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -291,11 +310,71 @@ export function AppShell({
               <span className="hidden sm:inline">Mission</span>
             </Button>
             )}
+            {can("write_board") && (
+              <div className="relative">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-9"
+                  title="New board (uncommon — creates a separate workspace)"
+                  onClick={() => {
+                    setNewBoardName("");
+                    setNewBoardOpen((o) => !o);
+                    setThemeOpen(false);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Board</span>
+                </Button>
+                {newBoardOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-1 w-64 space-y-2 rounded-[var(--radius-md)] border border-border bg-bg-elevated p-3 shadow-[var(--shadow-panel)]">
+                    <p className="text-[11px] text-fg-muted">
+                      Create a separate board. Most work stays on one board — only add another when you need isolation.
+                    </p>
+                    <Input
+                      autoFocus
+                      placeholder="Board name"
+                      value={newBoardName}
+                      onChange={(e) => setNewBoardName(e.target.value)}
+                      className="h-8 text-xs"
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setNewBoardOpen(false);
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void submitNewBoard();
+                        }
+                      }}
+                    />
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        className="h-7 flex-1 text-[11px]"
+                        disabled={newBoardBusy || !newBoardName.trim()}
+                        onClick={() => void submitNewBoard()}
+                      >
+                        {newBoardBusy ? "…" : "Create board"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-[11px]"
+                        onClick={() => setNewBoardOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <Button
               size="sm"
               variant="secondary"
               className="h-9"
-              onClick={() => setThemeOpen((o) => !o)}
+              onClick={() => {
+                setThemeOpen((o) => !o);
+                setNewBoardOpen(false);
+              }}
               title="Theme"
             >
               <Palette className="h-3.5 w-3.5" />
@@ -479,96 +558,11 @@ export function AppShell({
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* Board rail (product: Board; API still uses project ids) */}
+        {/* Board rail — switch only; create lives next to Mission in the header */}
         <aside className="hidden w-44 shrink-0 flex-col border-r border-border bg-bg-elevated/30 md:flex lg:w-52">
-          <div className="flex items-center justify-between gap-1 border-b border-border px-3 py-2.5">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
-              Boards
-            </span>
-            {can("write_board") && (
-              <button
-                type="button"
-                className="rounded px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-bg-subtle hover:text-fg"
-                title="New board"
-                onClick={() => {
-                  setNewBoardName("");
-                  setNewBoardOpen(true);
-                }}
-              >
-                + New
-              </button>
-            )}
+          <div className="border-b border-border px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+            Boards
           </div>
-          {newBoardOpen && (
-            <div className="space-y-2 border-b border-border p-2">
-              <Input
-                autoFocus
-                placeholder="Board name"
-                value={newBoardName}
-                onChange={(e) => setNewBoardName(e.target.value)}
-                className="h-8 text-xs"
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setNewBoardOpen(false);
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void (async () => {
-                      if (!newBoardName.trim() || newBoardBusy) return;
-                      setNewBoardBusy(true);
-                      const id = await createBoard({ name: newBoardName.trim() });
-                      setNewBoardBusy(false);
-                      if (id) {
-                        setNewBoardOpen(false);
-                        const p = useBoard.getState().projects.find((x) => x.id === id);
-                        void navigate({
-                          to: "/",
-                          search: (prev) => ({
-                            ...prev,
-                            project: p?.slug && p.slug !== "default" ? p.slug : undefined,
-                          }),
-                        });
-                      }
-                    })();
-                  }
-                }}
-              />
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  className="h-7 flex-1 text-[11px]"
-                  disabled={newBoardBusy || !newBoardName.trim()}
-                  onClick={() => {
-                    void (async () => {
-                      if (!newBoardName.trim() || newBoardBusy) return;
-                      setNewBoardBusy(true);
-                      const id = await createBoard({ name: newBoardName.trim() });
-                      setNewBoardBusy(false);
-                      if (id) {
-                        setNewBoardOpen(false);
-                        const p = useBoard.getState().projects.find((x) => x.id === id);
-                        void navigate({
-                          to: "/",
-                          search: (prev) => ({
-                            ...prev,
-                            project: p?.slug && p.slug !== "default" ? p.slug : undefined,
-                          }),
-                        });
-                      }
-                    })();
-                  }}
-                >
-                  {newBoardBusy ? "…" : "Create"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-[11px]"
-                  onClick={() => setNewBoardOpen(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
           <ul className="flex-1 space-y-0.5 overflow-y-auto p-2 scrollbar-thin">
             {projects.map((p) => (
               <li key={p.id}>
@@ -606,17 +600,8 @@ export function AppShell({
               </li>
             ))}
             {projects.length === 0 && (
-              <li className="space-y-2 px-2 py-4 text-[11px] text-fg-subtle">
-                <p>No boards yet.</p>
-                {can("write_board") && (
-                  <Button
-                    size="sm"
-                    className="h-7 w-full text-[11px]"
-                    onClick={() => setNewBoardOpen(true)}
-                  >
-                    Create your first board
-                  </Button>
-                )}
+              <li className="px-2 py-4 text-[11px] text-fg-subtle">
+                No boards yet. Use <span className="text-fg-muted">+ Board</span> in the header.
               </li>
             )}
           </ul>
