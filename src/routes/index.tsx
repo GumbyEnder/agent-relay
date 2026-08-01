@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
+import { OperatorGate } from "@/components/operator-gate";
 import { z } from "zod";
 
 const searchSchema = z.object({
@@ -18,9 +19,11 @@ export const Route = createFileRoute("/")({
 function Home() {
   const search = Route.useSearch();
   return (
-    <AppShell
-      initialView={search.view ?? "board"}
-      initialProjectSlug={search.project}
-    />
+    <OperatorGate>
+      <AppShell
+        initialView={search.view ?? "board"}
+        initialProjectSlug={search.project}
+      />
+    </OperatorGate>
   );
 }

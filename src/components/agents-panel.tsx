@@ -219,7 +219,7 @@ export function AgentsPanel() {
       <div className="border-t border-border p-4 space-y-3">
         <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">API keys</h3>
         <p className="text-[11px] text-fg-muted">
-          Scoped keys for agents/harnesses. Secret shown once at create.
+          Scoped keys for agents/harnesses (machine auth only — never browser OAuth). Secret shown once at create. Admin role required.
         </p>
         <div className="flex flex-wrap gap-2">
           <Input
@@ -307,8 +307,14 @@ export function AgentsPanel() {
         </ul>
 
         <h3 className="pt-2 text-xs font-medium uppercase tracking-wider text-fg-subtle">
-          Project integrations
+          GitHub connect
         </h3>
+        <p className="text-[11px] text-fg-muted leading-relaxed">
+          Map a repo to this project, set the webhook secret, then point GitHub
+          (App or repo webhook) at the URL below. Issues create one mission with
+          stable <code className="text-fg-subtle">external_id</code>{" "}
+          <code className="text-fg-subtle">github:owner/repo#n</code>.
+        </p>
         <Input
           placeholder="GitHub repo org/name"
           value={ghRepo}
@@ -328,9 +334,12 @@ export function AgentsPanel() {
           onChange={(e) => setReplyUrl(e.target.value)}
           className="h-8"
         />
-        <p className="text-[10px] text-fg-subtle">
-          Webhook: POST /api/agent/webhooks/github?project={projectId}
-          {settings.hasGithubSecret ? " · secret configured" : " · no secret yet (open)"}
+        <p className="text-[10px] text-fg-subtle break-all">
+          Payload URL: POST /api/agent/webhooks/github?project={projectId}
+          <br />
+          Events: issues, issue_comment, pull_request, check_run (JSON)
+          <br />
+          {settings.hasGithubSecret ? "Secret configured ✓" : "No secret yet — webhooks accepted unsigned (dev only)"}
         </p>
         <Button
           size="sm"

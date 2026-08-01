@@ -88,6 +88,13 @@ export function pollMissions(
     limit?: number;
     agent?: string;
     tags?: string[];
+    /** When set, mission must share at least one tag with this skill list. */
+    skills?: string[];
+    /**
+     * When true and agent resolves with skills, also require mission tags ∩ agent.skills
+     * (in addition to explicit skills/tags filters). Default true when agent has skills.
+     */
+    matchAgentSkills?: boolean;
     projectId?: string;
   } = {},
 ): EngineResult<{ missions: ReturnType<typeof missionSummary>[]; agent: string | null }> {
@@ -95,6 +102,10 @@ export function pollMissions(
   const limit = Math.min(Math.max(opts.limit ?? 5, 1), 50);
   const agent = resolveAgent(board, opts.agent);
   const tagFilter = (opts.tags ?? []).map((t) => t.toLowerCase());
+  const skillFilter = (opts.skills ?? []).map((s) => s.toLowerCase());
+  const agentSkills = (agent?.skills ?? []).map((s) => s.toLowerCase());
+  // Only when explicitly requested — default poll must remain unfiltered by agent skills.
+  const useAgentSkills = opts.matchAgentSkills === true && agentSkills.length > 0;
 
   let list = board.missions.filter((m) => {
     if (opts.projectId && m.projectId !== opts.projectId) return false;
@@ -102,9 +113,17 @@ export function pollMissions(
     if (column === "ready" || column === "inbox") {
       if (m.claimedBy) return false;
     }
+    const tags = m.tags.map((t) => t.toLowerCase());
     if (tagFilter.length) {
-      const tags = m.tags.map((t) => t.toLowerCase());
       if (!tagFilter.every((t) => tags.includes(t))) return false;
+    }
+    // Explicit skills query: mission tags must intersect the skill set
+    if (skillFilter.length) {
+      if (!skillFilter.some((s) => tags.includes(s))) return false;
+    }
+    // Optional agent skill routing when no explicit filters
+    if (useAgentSkills && agentSkills.length) {
+      if (!agentSkills.some((s) => tags.includes(s))) return false;
     }
     return true;
   });

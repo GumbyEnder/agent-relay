@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:engine": "npx tsx scripts/test-board-engine.ts && npm run test:history && npm run test:build-order && npm run test:refresh-scope && npm run test:p0p2",
+    "test:engine": "npx tsx scripts/test-board-engine.ts && npm run test:history && npm run test:build-order && npm run test:refresh-scope && npm run test:p0p2 && npm run test:prod",
     "test:api": "node scripts/agent-api-smoke.mjs",
     "smoke": "npm run test:engine && npm run test:api",
     "start": "node scripts/migrate.mjs && HOST=0.0.0.0 NITRO_HOST=0.0.0.0 node .output/server/index.mjs",
@@ -24,7 +24,8 @@
     "test:build-order": "npx tsx scripts/test-build-order.ts",
     "test:refresh-scope": "npx tsx scripts/test-refresh-scope.ts",
     "test:p0p2": "npx tsx scripts/test-p0-p2.ts",
-    "mcp": "node scripts/mcp-server.mjs"
+    "mcp": "node scripts/mcp-server.mjs",
+    "test:prod": "npx tsx scripts/test-prod-ready.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",

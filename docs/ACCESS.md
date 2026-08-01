@@ -41,9 +41,11 @@ The **agent** is the identity that claims. The **harness** is the runtime. The *
 ## 3. Human access
 
 - UI: board + **Live** + Calls + mission history  
-- Later: login, roles (operator / viewer / admin)  
+- Login: Better Auth (`/login`) with GitHub (preferred), Google, X via broker when configured  
+- Roles: `viewer` (read) / `operator` (board + Calls) / `admin` (keys, GitHub settings, reset)  
 - Same-origin UI without embedding agent keys in JS  
 - Themes and multi-project rail  
+- First deploy checklist: [[FIRST_OPERATOR_DAY]]  
 
 ---
 
@@ -63,10 +65,10 @@ Harness docs live in Protocol view and markdown journal README.
 
 ## 5. Security posture (incremental)
 
-1. Now: optional global `AGENT_RELAY_API_KEY`; same-origin UI free.  
-2. Next: per-agent keys; project scope.  
-3. Then: human sessions; audit export.  
-4. Never: put god keys in frontend bundles.
+1. Optional global `AGENT_RELAY_API_KEY`; scoped `ark_` keys per project/agent.  
+2. Human sessions via Better Auth when configured; role gates on operator writes.  
+3. GitHub webhooks HMAC when secret set; audit export CSV/JSON.  
+4. Never: put god keys in frontend bundles; never OAuth for agents.
 
 ---
 

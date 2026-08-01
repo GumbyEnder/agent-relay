@@ -11,6 +11,8 @@
 | [UI_VIEWS_THEMES.md](./UI_VIEWS_THEMES.md) | Tabs, Live view, multi-project, themes |
 | [ACCESS.md](./ACCESS.md) | Agents, humans, harnesses |
 | [AUTH_AND_ROADMAP.md](./AUTH_AND_ROADMAP.md) | Auth recommendation + remaining features |
+| [FIRST_OPERATOR_DAY.md](./FIRST_OPERATOR_DAY.md) | Railway/prod env checklist + first-day smoke |
+| [OPS.md](./OPS.md) | Pointer to ops checklist |
 | [GROK_BUILD_PROMPT.md](./GROK_BUILD_PROMPT.md) | Build handoff |
 
 Obsidian mirrors under `01_Projects/Agent-Relay/` in the main vault.

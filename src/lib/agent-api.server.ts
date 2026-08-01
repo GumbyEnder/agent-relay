@@ -27,6 +27,13 @@ import type { EngineResult } from "./board-engine";
 import type { MissionColumn } from "./types";
 import { verifyGitHubSignature } from "./github-webhook";
 import { extractArtifactFromGitHubPayload } from "./github-ingest";
+import {
+  checkOperatorCapability,
+  resolveOperatorContext,
+  type OperatorContext,
+} from "./auth/verify.server";
+import type { OperatorCapability } from "./auth/roles";
+import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 
 const HARNESSES = new Set<HarnessKind>([
   "claude_code",
@@ -85,6 +92,7 @@ function presentedKey(req: Request): string {
 
 async function requireApiKey(req: Request): Promise<Response | null> {
   // Browser operator UI is same-origin — never require agent keys in the SPA.
+  // Human session/role gates run separately via requireOperatorCap.
   if (isSameOriginBrowser(req)) return null;
 
   const key = presentedKey(req);
@@ -98,7 +106,6 @@ async function requireApiKey(req: Request): Promise<Response | null> {
     }
     if (globalKey) return err(401, "Invalid or missing API key", "unauthorized");
     // scoped keys exist path failed
-    const hit = key.startsWith("ark_") ? null : null;
     if (key.startsWith("ark_")) return err(401, "Invalid or revoked API key", "unauthorized");
   }
 
@@ -106,6 +113,27 @@ async function requireApiKey(req: Request): Promise<Response | null> {
   // Enforce when global is set; also when Authorization required by presence of ark attempt only.
   if (globalKey) return err(401, "Invalid or missing API key", "unauthorized");
   return null;
+}
+
+async function loadOperatorContext(req: Request): Promise<OperatorContext> {
+  return resolveOperatorContext(req.headers, {
+    lookupDbRole: (userId, email) => boardOps.getOperatorRole(userId, email),
+  });
+}
+
+/**
+ * Gate human operator capabilities (board writes, keys, settings).
+ * Agent Bearer keys never grant these — only human session roles do
+ * (or open local mode when human auth is not required).
+ */
+async function requireOperatorCap(
+  req: Request,
+  cap: OperatorCapability,
+): Promise<Response | null> {
+  const ctx = await loadOperatorContext(req);
+  const check = checkOperatorCapability(ctx, cap);
+  if (check.ok) return null;
+  return err(check.status, check.error, check.code);
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
@@ -199,16 +227,37 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     // GET /health
     if (parts.length === 1 && parts[0] === "health" && req.method === "GET") {
       const snap = await boardOps.snapshot();
+      const stale = staleSummary(snap.missions, Date.now(), policyFromEnv());
       return json({
         ok: true,
         service: "agent-relay",
-        version: "0.2.0",
+        version: "0.3.0",
         verbs: ["poll", "claim", "heartbeat", "escalate", "deliver"],
         missions: snap.missions.length,
         agents: snap.agents.length,
         open_calls: snap.calls.filter((c) => !c.resolvedAt).length,
         api_key_required: Boolean(process.env.AGENT_RELAY_API_KEY?.trim()),
         store: "durable",
+        stale,
+      });
+    }
+
+    // GET /me — human session + role (agents ignore; no agent key required for same-origin)
+    if (parts.length === 1 && parts[0] === "me" && req.method === "GET") {
+      const ctx = await loadOperatorContext(req);
+      return json({
+        ok: true,
+        authRequired: ctx.authRequired,
+        user: ctx.user,
+        role: ctx.role,
+        capabilities: {
+          read: checkOperatorCapability(ctx, "read").ok,
+          write_board: checkOperatorCapability(ctx, "write_board").ok,
+          reply_call: checkOperatorCapability(ctx, "reply_call").ok,
+          manage_keys: checkOperatorCapability(ctx, "manage_keys").ok,
+          manage_settings: checkOperatorCapability(ctx, "manage_settings").ok,
+          manage_roles: checkOperatorCapability(ctx, "manage_roles").ok,
+        },
       });
     }
 
@@ -223,11 +272,19 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const limit = Number(url.searchParams.get("limit") ?? "5");
       const agent = url.searchParams.get("agent") ?? undefined;
       const tags = url.searchParams.get("tags")?.split(",").filter(Boolean);
+      const skills = url.searchParams.get("skills")?.split(",").filter(Boolean);
+      const matchAgentSkillsRaw = url.searchParams.get("match_agent_skills");
+      const matchAgentSkills =
+        matchAgentSkillsRaw == null
+          ? undefined
+          : matchAgentSkillsRaw === "1" || matchAgentSkillsRaw === "true";
       const result = await boardOps.poll({
         column,
         limit: Number.isFinite(limit) ? limit : 5,
         agent,
         tags,
+        skills,
+        matchAgentSkills,
         projectId: projectRef(url),
       });
       return fromEngine(result);
@@ -256,6 +313,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       }
 
       if (verb === "move") {
+        const gate = await requireOperatorCap(req, "write_board");
+        if (gate) return gate;
         const column = str(body.column) as import("./types").MissionColumn | undefined;
         if (!column) return err(400, "column is required", "bad_request");
         const actor = str(body.actor) ?? "operator";
@@ -319,6 +378,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /calls/:id/reply
     if (parts.length === 3 && parts[0] === "calls" && parts[2] === "reply" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "reply_call");
+      if (gate) return gate;
       const reply = str(body.reply);
       if (!reply) return err(400, "reply is required", "bad_request");
       const { result, webhook } = await boardOps.replyToCallWithWebhook(parts[1]!, reply);
@@ -359,12 +420,99 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /reset
     if (parts.length === 1 && parts[0] === "reset" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "reset_demo");
+      if (gate) return gate;
       const board = await boardOps.reset();
       return json({
         ok: true,
         message: "Demo board reset",
         missions: board.missions.length,
         agents: board.agents.length,
+      });
+    }
+
+    // GET /stale — list stale running missions (ops reliability)
+    if (parts.length === 1 && parts[0] === "stale" && req.method === "GET") {
+      const snap = await boardOps.snapshot(projectRef(url));
+      const policy = policyFromEnv();
+      const now = Date.now();
+      const summary = staleSummary(snap.missions, now, policy);
+      return json({
+        ok: true,
+        ...summary,
+        policy,
+        missions: snap.missions.filter((m) => summary.staleIds.includes(m.id)),
+      });
+    }
+
+    // GET /events/stream — optional SSE for Live (poll-backed delta)
+    if (parts.length === 2 && parts[0] === "events" && parts[1] === "stream" && req.method === "GET") {
+      const projectId = projectRef(url);
+      const encoder = new TextEncoder();
+      let closed = false;
+      let lastSig = "";
+      const stream = new ReadableStream({
+        start(controller) {
+          const send = (event: string, data: unknown) => {
+            if (closed) return;
+            controller.enqueue(
+              encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
+            );
+          };
+          send("hello", { ok: true, projectId: projectId ?? null });
+          const tick = async () => {
+            if (closed) return;
+            try {
+              const snap = await boardOps.adminSnapshot(projectId);
+              const sig = `${snap.events[0]?.id ?? ""}:${snap.history[0]?.id ?? ""}:${snap.missions.length}`;
+              if (sig !== lastSig) {
+                lastSig = sig;
+                send("board", {
+                  at: Date.now(),
+                  projectId: projectId ?? null,
+                  eventCount: snap.events.length,
+                  historyCount: snap.history.length,
+                  openCalls: snap.calls.filter((c) => !c.resolvedAt).length,
+                  latestEvent: snap.events[0] ?? null,
+                  stale: staleSummary(snap.missions, Date.now(), policyFromEnv()),
+                });
+              } else {
+                send("ping", { at: Date.now() });
+              }
+            } catch (e) {
+              send("error", { message: e instanceof Error ? e.message : "tick failed" });
+            }
+          };
+          void tick();
+          const iv = setInterval(() => void tick(), 1500);
+          const t = setTimeout(() => {
+            clearInterval(iv);
+            if (!closed) {
+              closed = true;
+              try {
+                controller.close();
+              } catch {
+                /* ignore */
+              }
+            }
+          }, 60_000);
+          // @ts-expect-error attach for cancel
+          controller._iv = iv;
+          // @ts-expect-error attach for cancel
+          controller._t = t;
+        },
+        cancel() {
+          closed = true;
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "access-control-allow-origin": "*",
+        },
       });
     }
 
@@ -381,6 +529,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, projects });
     }
     if (parts.length === 1 && parts[0] === "projects" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "manage_settings");
+      if (gate) return gate;
       const name = str(body.name);
       if (!name) return err(400, "name is required", "bad_request");
       const project = await boardOps.createProject({
@@ -513,6 +663,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /missions/:id/move  { column, actor? }
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "move" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
       const column = str(body.column) as MissionColumn | undefined;
       if (!column) return err(400, "column is required", "bad_request");
       const actor = str(body.actor) ?? "operator";
@@ -521,6 +673,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /missions  create
     if (parts.length === 1 && parts[0] === "missions" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
       const title = str(body.title);
       const objective = str(body.objective);
       if (!title || !objective) return err(400, "title and objective required", "bad_request");
@@ -542,11 +696,15 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // --- API keys ---
     if (parts.length === 1 && parts[0] === "keys" && req.method === "GET") {
+      const gate = await requireOperatorCap(req, "manage_keys");
+      if (gate) return gate;
       const projectId = projectRef(url, body) ?? "proj_default";
       const keys = await boardOps.listApiKeys(projectId);
       return json({ ok: true, keys });
     }
     if (parts.length === 1 && parts[0] === "keys" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "manage_keys");
+      if (gate) return gate;
       const projectId = str(body.projectId) ?? str(body.project) ?? projectRef(url, body) ?? "proj_default";
       const created = await boardOps.createApiKey({
         projectId,
@@ -556,12 +714,33 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, key: created });
     }
     if (parts.length === 2 && parts[0] === "keys" && req.method === "DELETE") {
+      const gate = await requireOperatorCap(req, "manage_keys");
+      if (gate) return gate;
       await boardOps.revokeApiKey(parts[1]!);
       return json({ ok: true, revoked: parts[1] });
     }
     if (parts.length === 3 && parts[0] === "keys" && parts[2] === "revoke" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "manage_keys");
+      if (gate) return gate;
       await boardOps.revokeApiKey(parts[1]!);
       return json({ ok: true, revoked: parts[1] });
+    }
+
+    // POST /roles — admin assigns operator role
+    if (parts.length === 1 && parts[0] === "roles" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const userId = str(body.userId) ?? str(body.user_id);
+      const role = str(body.role);
+      if (!userId || (role !== "viewer" && role !== "operator" && role !== "admin")) {
+        return err(400, "userId and role (viewer|operator|admin) required", "bad_request");
+      }
+      const saved = await boardOps.setOperatorRole({
+        userId,
+        email: str(body.email) ?? null,
+        role,
+      });
+      return json({ ok: true, role: saved });
     }
 
     // --- project settings ---
@@ -577,10 +756,18 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           githubRepo: s.githubRepo,
           replyWebhookUrl: s.replyWebhookUrl,
           hasGithubSecret: s.hasGithubSecret,
+          githubConnect: {
+            webhookPath: `/api/agent/webhooks/github?project=${encodeURIComponent(s.projectId)}`,
+            ingestPath: "/api/agent/ingest/github",
+            guidance:
+              "1) Create a GitHub webhook (or App) on the mapped repo. 2) Set content-type application/json. 3) Paste the webhook secret here. 4) Point the payload URL at webhookPath on this host. 5) Issue events create missions with stable external_id github:owner/repo#n.",
+          },
         },
       });
     }
     if (parts.length === 3 && parts[0] === "projects" && parts[2] === "settings" && req.method === "POST") {
+      const gate = await requireOperatorCap(req, "manage_settings");
+      if (gate) return gate;
       const s = await boardOps.updateProjectSettings(parts[1]!, {
         githubWebhookSecret: body.githubWebhookSecret === undefined ? undefined : (str(body.githubWebhookSecret) ?? null),
         githubRepo: body.githubRepo === undefined ? undefined : (str(body.githubRepo) ?? null),
@@ -647,12 +834,20 @@ async function handleAction(body: Record<string, unknown>): Promise<Response> {
     const column = (str(body.column) ?? "ready") as MissionColumn;
     const limit = typeof body.limit === "number" ? body.limit : Number(body.limit ?? 5);
     const tags = strArr(body.tags);
+    const skills = strArr(body.skills);
+    const matchRaw = body.match_agent_skills ?? body.matchAgentSkills;
+    const matchAgentSkills =
+      matchRaw === undefined
+        ? undefined
+        : matchRaw === true || matchRaw === 1 || matchRaw === "1" || matchRaw === "true";
     return fromEngine(
       await boardOps.poll({
         column,
         limit: Number.isFinite(limit) ? limit : 5,
         agent: str(body.agent),
         tags,
+        skills,
+        matchAgentSkills,
         projectId: str(body.project) ?? str(body.project_id),
       }),
     );

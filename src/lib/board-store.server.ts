@@ -1085,6 +1085,51 @@ export const durableBoard = {
       return { format: "json" as const, body: historyToJson(history), count: history.length };
     }),
 
+  getOperatorRole: (userId: string, email?: string | null) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const byId = await sql`
+        select role from ar_operator_roles where user_id = ${userId} limit 1
+      `;
+      if (byId[0]) {
+        const r = String((byId[0] as Record<string, unknown>).role);
+        if (r === "viewer" || r === "operator" || r === "admin") return r as import("./auth/roles").OperatorRole;
+      }
+      if (email?.trim()) {
+        const byEmail = await sql`
+          select role from ar_operator_roles where lower(email) = ${email.trim().toLowerCase()} limit 1
+        `;
+        if (byEmail[0]) {
+          const r = String((byEmail[0] as Record<string, unknown>).role);
+          if (r === "viewer" || r === "operator" || r === "admin") return r as import("./auth/roles").OperatorRole;
+        }
+      }
+      return null;
+    }),
+
+  setOperatorRole: (input: {
+    userId: string;
+    email?: string | null;
+    role: import("./auth/roles").OperatorRole;
+  }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      await sql`
+        insert into ar_operator_roles (user_id, email, role, updated_at)
+        values (
+          ${input.userId},
+          ${input.email ?? null},
+          ${input.role},
+          now()
+        )
+        on conflict (user_id) do update set
+          email = excluded.email,
+          role = excluded.role,
+          updated_at = now()
+      `;
+      return { userId: input.userId, email: input.email ?? null, role: input.role };
+    }),
+
   /** reply that also dispatches webhook when configured */
   replyToCallWithWebhook: async (callId: string, replyText: string, operator = "operator") => {
     const result = await durableBoard.reply(callId, replyText, operator);

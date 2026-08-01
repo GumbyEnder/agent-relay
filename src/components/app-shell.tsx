@@ -41,6 +41,8 @@ import {
   matchKeyboardAction,
 } from "@/lib/keyboard-ops";
 import { agentApi } from "@/lib/api-client";
+import { UserButton } from "@/lib/auth/gates";
+import { useOperatorMe } from "@/components/operator-gate";
 
 type MainView = "board" | "live" | "calls" | "agents" | "protocol";
 
@@ -98,6 +100,7 @@ export function AppShell({
   const [mobileFeed, setMobileFeed] = useState(false);
   const [theme, setTheme] = useState<ThemeId>("dark");
   const [themeOpen, setThemeOpen] = useState(false);
+  const { role, can } = useOperatorMe();
 
   const missions = useMemo(
     () => filteredMissions({ ...state }),
@@ -252,8 +255,13 @@ export function AppShell({
                 {selectedProject
                   ? `${selectedProject.name} · agent-first kanban`
                   : "Mission kanban for any harness"}
+                {role ? ` · ${role}` : ""}
               </p>
             </div>
+          </div>
+
+          <div className="hidden sm:block">
+            <UserButton />
           </div>
 
           <div className="flex w-full items-center gap-2 sm:w-auto sm:max-w-xs">
@@ -269,6 +277,7 @@ export function AppShell({
           </div>
 
           <div className="relative flex flex-wrap items-center gap-1.5">
+            {can("write_board") && (
             <Button
               size="sm"
               onClick={() => openPanel("new-mission")}
@@ -277,6 +286,7 @@ export function AppShell({
               <Plus className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Mission</span>
             </Button>
+            )}
             <Button
               size="sm"
               variant="secondary"
@@ -337,6 +347,7 @@ export function AppShell({
             >
               <Download className="h-3.5 w-3.5" />
             </Button>
+            {can("reset_demo") && (
             <Button
               size="sm"
               variant="ghost"
@@ -349,6 +360,7 @@ export function AppShell({
             >
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
+            )}
           </div>
         </div>
 
