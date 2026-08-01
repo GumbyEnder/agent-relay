@@ -34,6 +34,7 @@ import {
 } from "./auth/verify.server";
 import type { OperatorCapability } from "./auth/roles";
 import { policyFromEnv, staleSummary } from "./stale-heartbeat";
+import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
 
 const HARNESSES = new Set<HarnessKind>([
   "claude_code",
@@ -258,6 +259,36 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           manage_settings: checkOperatorCapability(ctx, "manage_settings").ok,
           manage_roles: checkOperatorCapability(ctx, "manage_roles").ok,
         },
+      });
+    }
+
+    // GET /dev/mail — local verification links when SMTP is not configured
+    if (parts.length === 2 && parts[0] === "dev" && parts[1] === "mail" && req.method === "GET") {
+      if (!isDevMailInboxEnabled()) {
+        return err(404, "Dev mail inbox disabled", "not_found");
+      }
+      const email = url.searchParams.get("email") ?? undefined;
+      const latest = email ? latestDevMailFor(email) : listDevMail({ limit: 1 })[0] ?? null;
+      return json({
+        ok: true,
+        enabled: true,
+        latest: latest
+          ? {
+              id: latest.id,
+              to: latest.to,
+              subject: latest.subject,
+              actionUrl: latest.actionUrl ?? null,
+              at: latest.at,
+              transport: latest.transport,
+            }
+          : null,
+        recent: listDevMail({ email, limit: 5 }).map((m) => ({
+          id: m.id,
+          to: m.to,
+          subject: m.subject,
+          actionUrl: m.actionUrl ?? null,
+          at: m.at,
+        })),
       });
     }
 

@@ -38,6 +38,7 @@ import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
+import { sendVerificationMail } from "../mailer";
 import {
   GROK_ISSUER_DEFAULT,
   PREVIEW_ALLOWED_HOSTS,
@@ -207,13 +208,39 @@ export const auth = betterAuth({
   // flicker-prevention guidance (gate on `isPending`; SSR the session).
   session: { cookieCache: { enabled: true, maxAge: 300 } },
 
-  // Local email/password — toggled only via `./email-password` (not a plugin).
+  // Traditional human auth: register → verify email → sign in.
   ...(emailAndPasswordEnabled
     ? {
         emailAndPassword: {
           enabled: true,
-          // Solo / small-team ops: no mailer required to create the first operator.
-          requireEmailVerification: false,
+          requireEmailVerification: true,
+          minPasswordLength: 8,
+        },
+        emailVerification: {
+          sendOnSignUp: true,
+          sendOnSignIn: true,
+          // Traditional: verify first, then explicit sign-in on /login.
+          autoSignInAfterVerification: false,
+          expiresIn: 60 * 60,
+          sendVerificationEmail: async ({ user, url }) => {
+            // Prefer traditional post-verify landing: sign-in page with success banner.
+            let finalUrl = url;
+            try {
+              const u = new URL(url);
+              const cb = u.searchParams.get("callbackURL") || "";
+              if (!cb || cb === "/" || cb === "%2F") {
+                u.searchParams.set("callbackURL", "/login?verified=1");
+                finalUrl = u.toString();
+              }
+            } catch {
+              /* keep original url */
+            }
+            await sendVerificationMail({
+              to: user.email,
+              name: user.name,
+              url: finalUrl,
+            });
+          },
         },
       }
     : {}),

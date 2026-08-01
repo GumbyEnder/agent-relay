@@ -1,141 +1,138 @@
 import { useState } from "react";
-import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
+import { z } from "zod";
 import { authClient, authEnabled } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+const searchSchema = z.object({
+  verified: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+  email: z.string().optional().catch(undefined),
+});
+
 export const Route = createFileRoute("/login")({
+  validateSearch: searchSchema,
   component: LoginPage,
 });
 
 function LoginPage() {
+  const search = Route.useSearch();
   const { user, isPending } = useCurrentUserState();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(search.email ?? "");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    search.error ? decodeURIComponent(search.error) : null,
+  );
+  const [info, setInfo] = useState<string | null>(
+    search.verified === "1"
+      ? "Email verified. You can sign in now."
+      : null,
+  );
   const [busy, setBusy] = useState(false);
 
-  if (!authEnabled) {
-    return <Navigate to="/" />;
-  }
+  if (!authEnabled) return <Navigate to="/" />;
   if (isPending) {
     return (
-      <div className="grid min-h-dvh place-items-center bg-bg text-fg-muted text-sm">
+      <div className="grid min-h-dvh place-items-center bg-bg text-sm text-fg-muted">
         Checking session…
       </div>
     );
   }
-  if (user) {
-    return <Navigate to="/" />;
-  }
+  if (user) return <Navigate to="/" />;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfo(null);
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const { error: err } = await authClient.signUp.email({
-          email: email.trim(),
-          password,
-          name: name.trim() || email.trim().split("@")[0] || "Operator",
-          callbackURL: "/",
-        });
-        if (err) {
-          setError(err.message ?? "Sign up failed");
+      const { error: err } = await authClient.signIn.email({
+        email: email.trim(),
+        password,
+        callbackURL: "/",
+      });
+      if (err) {
+        const msg = err.message ?? "Sign in failed";
+        // Better Auth prompts verification when requireEmailVerification is on
+        if (/verif/i.test(msg) || /not verified/i.test(msg)) {
+          window.location.assign(
+            `/check-email?email=${encodeURIComponent(email.trim())}&reason=unverified`,
+          );
           return;
         }
-      } else {
-        const { error: err } = await authClient.signIn.email({
-          email: email.trim(),
-          password,
-          callbackURL: "/",
-        });
-        if (err) {
-          setError(err.message ?? "Sign in failed");
-          return;
-        }
+        setError(msg);
+        return;
       }
-      // Session cookie is set; hard navigate so shell + /me pick it up.
       window.location.assign("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Auth failed");
+      setError(err instanceof Error ? err.message : "Sign in failed");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="grid min-h-dvh place-items-center bg-bg px-4 text-fg">
-      <div className="w-full max-w-sm space-y-6 rounded-[var(--radius-md)] border border-border bg-bg-elevated p-6 shadow-[var(--shadow-panel)]">
-        <div className="space-y-1">
-          <h1 className="text-lg font-semibold tracking-tight">
-            {mode === "signin" ? "Sign in" : "Create operator account"}
-          </h1>
-          <p className="text-sm text-fg-muted">
-            Human access to Agent Relay. Agents use API keys from the Agents tab — not this form.
+    <AuthShell
+      title="Sign in"
+      subtitle="Human operators only. Agents use API keys from the Agents tab."
+      footer={
+        <>
+          <p>
+            No account?{" "}
+            <Link to="/register" className="text-fg underline-offset-4 hover:underline">
+              Register
+            </Link>
           </p>
-        </div>
-
-        <form className="space-y-3" onSubmit={(e) => void submit(e)}>
-          {mode === "signup" && (
-            <Input
-              placeholder="Display name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="name"
-              className="h-10"
-            />
-          )}
-          <Input
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            className="h-10"
-          />
-          <Input
-            type="password"
-            required
-            minLength={8}
-            placeholder="Password (8+ characters)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            className="h-10"
-          />
-          {error && (
-            <p className="text-xs text-status-human" role="alert">
-              {error}
-            </p>
-          )}
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? "Working…" : mode === "signin" ? "Sign in" : "Create account"}
-          </Button>
-        </form>
-
-        <button
-          type="button"
-          className="w-full text-center text-xs text-fg-muted underline-offset-4 hover:underline"
-          onClick={() => {
-            setMode((m) => (m === "signin" ? "signup" : "signin"));
-            setError(null);
-          }}
-        >
-          {mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}
-        </button>
-
-        <p className="text-[11px] text-fg-subtle leading-relaxed">
-          First account: put your email in{" "}
-          <code className="text-fg-muted">AGENT_RELAY_ADMIN_EMAILS</code> (env) so you get admin
-          (API keys + GitHub settings). Then open Agents → Create key for harnesses.
-        </p>
-      </div>
-    </div>
+          <p className="text-fg-subtle">
+            Didn’t get a verification email?{" "}
+            <Link
+              to="/check-email"
+              search={{ email: email.trim() || undefined }}
+              className="underline-offset-4 hover:underline"
+            >
+              Resend
+            </Link>
+          </p>
+        </>
+      }
+    >
+      <form className="space-y-3" onSubmit={(ev) => void submit(ev)}>
+        <Input
+          type="email"
+          required
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          className="h-10"
+        />
+        <Input
+          type="password"
+          required
+          minLength={8}
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          className="h-10"
+        />
+        {info && (
+          <p className="text-xs text-status-ready" role="status">
+            {info}
+          </p>
+        )}
+        {error && (
+          <p className="text-xs text-status-human" role="alert">
+            {error}
+          </p>
+        )}
+        <Button type="submit" className="w-full" disabled={busy}>
+          {busy ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }
