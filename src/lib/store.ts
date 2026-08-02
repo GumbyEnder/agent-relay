@@ -38,6 +38,7 @@ interface BoardState {
     | "mission"
     | "agents"
     | "agent"
+    | "user"
     | "protocol"
     | "calls"
     | "new-mission"
@@ -71,6 +72,8 @@ interface BoardState {
   selectMission: (id: string | null) => void;
   /** Open agent profile side panel (stats, key tips, activity). */
   openAgentProfile: (agentId: string) => void;
+  /** Open signed-in operator account panel. */
+  openUserProfile: () => void;
   closePanel: () => void;
   setHydrated: () => void;
 
@@ -98,6 +101,11 @@ interface BoardState {
   }) => string;
   deleteMission: (id: string) => void;
   createBoard: (input: { name: string; slug?: string; description?: string }) => Promise<string | null>;
+  archiveBoard: (boardId: string) => Promise<boolean>;
+  unarchiveBoard: (boardId: string) => Promise<boolean>;
+  deleteBoard: (boardId: string) => Promise<boolean>;
+  /** Active + archived boards for profile management. */
+  listAllBoards: () => Promise<Project[]>;
 
   registerAgent: (input: {
     name: string;
@@ -238,6 +246,14 @@ export const useBoard = create<BoardState>()((set, get) => ({
       selectedAgentId: agentId,
       selectedMissionId: null,
       panel: "agent",
+    });
+  },
+
+  openUserProfile: () => {
+    set({
+      selectedAgentId: null,
+      selectedMissionId: null,
+      panel: "user",
     });
   },
 
@@ -479,6 +495,78 @@ export const useBoard = create<BoardState>()((set, get) => ({
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(`Create board: ${msg}`);
       return null;
+    }
+  },
+
+  listAllBoards: async () => {
+    try {
+      const res = await agentApi.listBoards({ includeArchived: true });
+      const rows = res.boards ?? res.projects ?? [];
+      return rows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        description: p.description ?? "",
+        ownerUserId: p.ownerUserId ?? null,
+        archivedAt: p.archivedAt ?? null,
+        createdAt: p.createdAt ?? Date.now(),
+        updatedAt: p.updatedAt ?? Date.now(),
+      }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`List boards: ${msg}`);
+      return [];
+    }
+  },
+
+  archiveBoard: async (boardId) => {
+    try {
+      await agentApi.archiveBoard(boardId);
+      const sel = get().selectedProjectId;
+      if (sel === boardId) {
+        set({ selectedProjectId: get().lastSingleProjectId === boardId ? null : get().lastSingleProjectId });
+      }
+      await get().refresh();
+      toast.success("Board archived");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Archive failed");
+      return false;
+    }
+  },
+
+  unarchiveBoard: async (boardId) => {
+    try {
+      await agentApi.unarchiveBoard(boardId);
+      await get().refresh();
+      toast.success("Board restored");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Restore failed");
+      return false;
+    }
+  },
+
+  deleteBoard: async (boardId) => {
+    try {
+      await agentApi.deleteBoard(boardId);
+      const sel = get().selectedProjectId;
+      if (sel === boardId) {
+        set({
+          selectedProjectId: null,
+          selectedMissionId: null,
+          lastSingleProjectId:
+            get().lastSingleProjectId === boardId
+              ? null
+              : get().lastSingleProjectId,
+        });
+      }
+      await get().refresh();
+      toast.success("Board deleted");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+      return false;
     }
   },
 

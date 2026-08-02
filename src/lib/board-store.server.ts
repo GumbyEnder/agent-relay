@@ -79,6 +79,7 @@ function rowProject(r: Record<string, unknown>): Project {
     slug: String(r.slug),
     description: String(r.description ?? ""),
     ownerUserId: r.owner_user_id != null ? String(r.owner_user_id) : null,
+    archivedAt: ms(r.archived_at),
     createdAt: ms(r.created_at) ?? Date.now(),
     updatedAt: ms(r.updated_at) ?? Date.now(),
   };
@@ -876,33 +877,65 @@ export const durableBoard = {
       };
     }),
 
-  listProjects: (opts?: { ownerUserId?: string | null; includeShared?: boolean; admin?: boolean }) =>
+  listProjects: (opts?: {
+    ownerUserId?: string | null;
+    includeShared?: boolean;
+    admin?: boolean;
+    /** Include soft-archived boards (default false for rails). */
+    includeArchived?: boolean;
+  }) =>
     withLock(async () => {
       const sql = await getSql();
       await ensureProjects(sql);
       const owner = opts?.ownerUserId?.trim() || null;
       const includeShared = opts?.includeShared !== false;
       const admin = opts?.admin === true;
+      const includeArchived = opts?.includeArchived === true;
       let rows: Record<string, unknown>[];
       if (admin || !owner) {
-        rows = (await sql`select * from ar_projects order by name asc`) as Record<
-          string,
-          unknown
-        >[];
+        rows = (
+          includeArchived
+            ? await sql`select * from ar_projects order by name asc`
+            : await sql`
+                select * from ar_projects
+                where archived_at is null
+                order by name asc
+              `
+        ) as Record<string, unknown>[];
       } else if (includeShared) {
-        rows = (await sql`
-          select * from ar_projects
-          where owner_user_id = ${owner} or owner_user_id is null
-          order by
-            case when owner_user_id = ${owner} then 0 else 1 end,
-            name asc
-        `) as Record<string, unknown>[];
+        rows = (
+          includeArchived
+            ? await sql`
+                select * from ar_projects
+                where owner_user_id = ${owner} or owner_user_id is null
+                order by
+                  case when owner_user_id = ${owner} then 0 else 1 end,
+                  name asc
+              `
+            : await sql`
+                select * from ar_projects
+                where (owner_user_id = ${owner} or owner_user_id is null)
+                  and archived_at is null
+                order by
+                  case when owner_user_id = ${owner} then 0 else 1 end,
+                  name asc
+              `
+        ) as Record<string, unknown>[];
       } else {
-        rows = (await sql`
-          select * from ar_projects
-          where owner_user_id = ${owner}
-          order by name asc
-        `) as Record<string, unknown>[];
+        rows = (
+          includeArchived
+            ? await sql`
+                select * from ar_projects
+                where owner_user_id = ${owner}
+                order by name asc
+              `
+            : await sql`
+                select * from ar_projects
+                where owner_user_id = ${owner}
+                  and archived_at is null
+                order by name asc
+              `
+        ) as Record<string, unknown>[];
       }
       return rows.map((r) => rowProject(r));
     }),
@@ -934,11 +967,82 @@ export const durableBoard = {
         slug,
         description: (input.description ?? "").trim(),
         ownerUserId: input.ownerUserId ?? null,
+        archivedAt: null,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
       await insertProject(sql, pr);
       return pr;
+    }),
+
+  getProject: (projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select * from ar_projects where id = ${projectId} limit 1
+      `) as Record<string, unknown>[];
+      return rows[0] ? rowProject(rows[0]) : null;
+    }),
+
+  archiveProject: (projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const now = Date.now();
+      await sql`
+        update ar_projects
+        set archived_at = ${ts(now)}, updated_at = ${ts(now)}
+        where id = ${projectId}
+      `;
+      const rows = (await sql`
+        select * from ar_projects where id = ${projectId} limit 1
+      `) as Record<string, unknown>[];
+      return rows[0] ? rowProject(rows[0]) : null;
+    }),
+
+  unarchiveProject: (projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const now = Date.now();
+      await sql`
+        update ar_projects
+        set archived_at = null, updated_at = ${ts(now)}
+        where id = ${projectId}
+      `;
+      const rows = (await sql`
+        select * from ar_projects where id = ${projectId} limit 1
+      `) as Record<string, unknown>[];
+      return rows[0] ? rowProject(rows[0]) : null;
+    }),
+
+  /**
+   * Hard-delete a board and its scoped data (missions, events, calls, history,
+   * keys, settings, memberships). Shared seed boards (no owner) refuse unless force.
+   */
+  deleteProject: (projectId: string, opts?: { force?: boolean }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select * from ar_projects where id = ${projectId} limit 1
+      `) as Record<string, unknown>[];
+      if (!rows[0]) throw new Error("board not found");
+      const pr = rowProject(rows[0]);
+      if (
+        !opts?.force &&
+        (pr.id === "proj_default" || pr.id === "proj_platform" || !pr.ownerUserId)
+      ) {
+        throw new Error("Cannot delete shared/demo boards — archive instead");
+      }
+
+      // Scoped cleanup (order respects FKs where present)
+      await sql`delete from ar_mission_history where project_id = ${projectId}`;
+      await sql`delete from ar_events where project_id = ${projectId}`;
+      await sql`delete from ar_calls where project_id = ${projectId}`;
+      await sql`delete from ar_missions where project_id = ${projectId}`;
+      await sql`delete from ar_api_keys where project_id = ${projectId}`;
+      await sql`delete from ar_project_settings where project_id = ${projectId}`;
+      await sql`delete from ar_board_agents where project_id = ${projectId}`;
+      await sql`delete from ar_projects where id = ${projectId}`;
+      return { id: projectId, name: pr.name };
     }),
 
   poll: (opts: Parameters<typeof engine.pollMissions>[1]) =>

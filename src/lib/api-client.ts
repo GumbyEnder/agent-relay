@@ -126,6 +126,48 @@ export const agentApi = {
       board: { id: string; name: string; slug: string; ownerUserId?: string | null };
       project: { id: string; name: string; slug: string; ownerUserId?: string | null };
     }>("POST", "/boards", input),
+  listBoards: (opts?: { includeArchived?: boolean }) =>
+    req<{
+      ok: true;
+      boards: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string;
+        ownerUserId?: string | null;
+        archivedAt?: number | null;
+        createdAt?: number;
+        updatedAt?: number;
+      }>;
+      projects: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string;
+        ownerUserId?: string | null;
+        archivedAt?: number | null;
+      }>;
+    }>(
+      "GET",
+      `/boards${opts?.includeArchived ? "?archived=1" : ""}`,
+    ),
+  archiveBoard: (boardId: string) =>
+    req<{ ok: true; board: { id: string; name: string; archivedAt?: number | null } }>(
+      "POST",
+      `/boards/${encodeURIComponent(boardId)}/archive`,
+      {},
+    ),
+  unarchiveBoard: (boardId: string) =>
+    req<{ ok: true; board: { id: string; name: string; archivedAt?: number | null } }>(
+      "POST",
+      `/boards/${encodeURIComponent(boardId)}/unarchive`,
+      {},
+    ),
+  deleteBoard: (boardId: string) =>
+    req<{ ok: true; deleted: { id: string; name: string } }>(
+      "DELETE",
+      `/boards/${encodeURIComponent(boardId)}`,
+    ),
   ingestGitHub: (body: unknown) =>
     req<{ ok: true; created: boolean; mission: { id: string; externalId?: string } }>(
       "POST",

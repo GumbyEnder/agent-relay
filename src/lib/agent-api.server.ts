@@ -260,7 +260,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       headers: {
         "access-control-allow-origin": "*",
         "access-control-allow-headers": "content-type, authorization, x-agent-key",
-        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
       },
     });
   }
@@ -720,14 +720,18 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const ctx = await loadOperatorContext(req);
       const adminAll =
         ctx.role === "admin" && url.searchParams.get("all") === "1";
+      const includeArchived =
+        url.searchParams.get("archived") === "1" ||
+        url.searchParams.get("include_archived") === "1";
       const boards =
         ctx.authRequired && ctx.user
           ? await boardOps.listProjects({
               ownerUserId: ctx.user.id,
               includeShared: true,
               admin: adminAll,
+              includeArchived,
             })
-          : await boardOps.listProjects({ admin: true });
+          : await boardOps.listProjects({ admin: true, includeArchived });
       return json({ ok: true, boards, projects: boards });
     }
     if (
@@ -748,6 +752,70 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         ownerUserId: ctx.user?.id ?? null,
       });
       return json({ ok: true, board, project: board });
+    }
+
+    // POST /boards/:id/archive | unarchive
+    if (
+      parts.length === 3 &&
+      (parts[0] === "projects" || parts[0] === "boards") &&
+      (parts[2] === "archive" || parts[2] === "unarchive") &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const ctx = await loadOperatorContext(req);
+      const boardId = parts[1]!;
+      const existing = await boardOps.getProject(boardId);
+      if (!existing) return err(404, "board not found", "not_found");
+      if (
+        ctx.authRequired &&
+        ctx.user &&
+        existing.ownerUserId &&
+        existing.ownerUserId !== ctx.user.id &&
+        ctx.role !== "admin"
+      ) {
+        return err(403, "Not your board", "forbidden");
+      }
+      const board =
+        parts[2] === "archive"
+          ? await boardOps.archiveProject(boardId)
+          : await boardOps.unarchiveProject(boardId);
+      return json({ ok: true, board, project: board });
+    }
+
+    // DELETE /boards/:id — hard delete (owner or admin)
+    if (
+      parts.length === 2 &&
+      (parts[0] === "projects" || parts[0] === "boards") &&
+      req.method === "DELETE"
+    ) {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const ctx = await loadOperatorContext(req);
+      const boardId = parts[1]!;
+      const existing = await boardOps.getProject(boardId);
+      if (!existing) return err(404, "board not found", "not_found");
+      if (
+        ctx.authRequired &&
+        ctx.user &&
+        existing.ownerUserId &&
+        existing.ownerUserId !== ctx.user.id &&
+        ctx.role !== "admin"
+      ) {
+        return err(403, "Not your board", "forbidden");
+      }
+      try {
+        const deleted = await boardOps.deleteProject(boardId, {
+          force: ctx.role === "admin" && body.force === true,
+        });
+        return json({ ok: true, deleted });
+      } catch (e) {
+        return err(
+          400,
+          e instanceof Error ? e.message : String(e),
+          "bad_request",
+        );
+      }
     }
 
     // POST /webhooks/github — signed issue/PR ingest

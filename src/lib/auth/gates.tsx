@@ -48,25 +48,45 @@ export function RedirectToSignIn({ to = SIGN_IN_PATH }: { to?: string }) {
  * Minimal signed-in identity chip + sign-out. Restyle freely (see the
  * `design-ui` skill). Sign-out is only shown when auth is enabled (the
  * disabled-auth dev user has nothing to sign out of).
+ *
+ * Pass `onOpenProfile` to make the name/avatar open the account panel.
  */
-export function UserButton() {
+export function UserButton({
+  onOpenProfile,
+}: {
+  onOpenProfile?: () => void;
+} = {}) {
   const user = useCurrentUser();
   if (!user) return null;
   const label = user.displayName ?? user.primaryEmail ?? "Account";
   return (
     <div className="flex items-center gap-2">
-      {user.profileImageUrl ? (
-        <img
-          src={user.profileImageUrl}
-          alt=""
-          className="h-8 w-8 rounded-full object-cover"
-        />
-      ) : (
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20">
-          {label.charAt(0).toUpperCase()}
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.()}
+        className={
+          onOpenProfile
+            ? "flex items-center gap-2 rounded-[var(--radius-sm)] text-left outline-none transition-colors hover:bg-bg-subtle focus-visible:ring-2 focus-visible:ring-ring"
+            : "flex items-center gap-2"
+        }
+        title={onOpenProfile ? "Open account" : undefined}
+        disabled={!onOpenProfile}
+      >
+        {user.profileImageUrl ? (
+          <img
+            src={user.profileImageUrl}
+            alt=""
+            className="h-8 w-8 rounded-full object-cover"
+          />
+        ) : (
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20">
+            {label.charAt(0).toUpperCase()}
+          </span>
+        )}
+        <span className="text-sm font-medium underline-offset-2 hover:underline">
+          {label}
         </span>
-      )}
-      <span className="text-sm font-medium">{label}</span>
+      </button>
       {authEnabled && (
         <button
           type="button"

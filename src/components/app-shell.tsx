@@ -20,6 +20,7 @@ import { AdminPortal } from "@/components/admin-portal";
 import { AgentStrip } from "@/components/agent-strip";
 import { AgentProfilePanel } from "@/components/agent-profile-panel";
 import { AgentsPanel } from "@/components/agents-panel";
+import { UserProfilePanel } from "@/components/user-profile-panel";
 import { BoardColumn } from "@/components/board-column";
 import { CallsPanel } from "@/components/calls-panel";
 import { CommandPalette } from "@/components/command-palette";
@@ -103,6 +104,7 @@ export function AppShell({
     setHydrated,
     createBoard,
     openMissionOnBoard,
+    openUserProfile,
   } = state;
 
   const [mobileFeed, setMobileFeed] = useState(false);
@@ -151,6 +153,7 @@ export function AppShell({
     panel === "mission" ||
     panel === "agents" ||
     panel === "agent" ||
+    panel === "user" ||
     panel === "protocol" ||
     panel === "calls" ||
     panel === "help";
@@ -312,7 +315,7 @@ export function AppShell({
           </div>
 
           <div className="hidden sm:block">
-            <UserButton />
+            <UserButton onOpenProfile={openUserProfile} />
           </div>
 
           <div className="flex w-full items-center gap-2 sm:w-auto sm:max-w-xs">
@@ -811,6 +814,7 @@ export function AppShell({
           {panel === "agent" && selectedAgentId && (
             <AgentProfilePanel agentId={selectedAgentId} />
           )}
+          {panel === "user" && <UserProfilePanel />}
           {panel === "agents" && <AgentsPanel />}
           {panel === "protocol" && <ProtocolPanel />}
           {panel === "calls" && <CallsPanel />}

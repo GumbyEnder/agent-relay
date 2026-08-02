@@ -160,6 +160,8 @@ export interface Project {
   description: string;
   /** Owning human user id (Better Auth). Null = shared/legacy seed board. */
   ownerUserId?: string | null;
+  /** Soft-archive: hidden from active rail, history retained. */
+  archivedAt?: number | null;
   createdAt: number;
   updatedAt: number;
 }
