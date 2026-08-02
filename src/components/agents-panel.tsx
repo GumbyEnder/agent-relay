@@ -5,6 +5,8 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   KeyRound,
   Plus,
   X,
@@ -583,6 +585,7 @@ function AgentsListTab({
                 Remove
               </Button>
             </div>
+            <AgentKeyRevealList agentId={a.id} tips={a.keyTips} />
           </div>
         )}
       </li>
@@ -635,6 +638,162 @@ function AgentsListTab({
           </>
         )}
       </ul>
+    </div>
+  );
+}
+
+/** Per-agent API key reveal under Manage / profile. */
+export function AgentKeyRevealList({
+  agentId,
+  tips,
+}: {
+  agentId: string;
+  tips?: import("@/lib/types").AgentKeyTip[];
+}) {
+  const [keys, setKeys] = useState<Array<Record<string, unknown>>>([]);
+  const [loading, setLoading] = useState(true);
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void agentApi
+      .listAgentKeys(agentId)
+      .then((res) => {
+        if (!cancelled) setKeys(res.keys ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          // Fall back to tip metadata from the fleet snapshot
+          setKeys(
+            (tips ?? []).map((t) => ({
+              id: t.id,
+              keyPrefix: t.prefix,
+              keySuffix: t.suffix,
+              revealable: false,
+              revokedAt: t.revokedAt,
+              name: "key",
+            })),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, tips]);
+
+  const active = keys.filter((k) => !k.revokedAt);
+
+  if (loading) {
+    return (
+      <p className="text-[10px] text-fg-subtle">Loading keys…</p>
+    );
+  }
+
+  if (active.length === 0) {
+    return (
+      <p className="text-[10px] text-fg-subtle">
+        No API key yet — use Issue key above.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 border-t border-border/60 pt-2">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+        API keys
+      </p>
+      {active.map((k) => {
+        const id = String(k.id);
+        const secret = revealed[id];
+        const prefix = String(k.keyPrefix ?? "");
+        const suffix = String(k.keySuffix ?? prefix.slice(-6));
+        const revealable = k.revealable !== false;
+        return (
+          <div
+            key={id}
+            className="rounded-[var(--radius-xs)] border border-border/80 bg-bg px-2 py-1.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-medium text-fg">
+                  {String(k.name || "key")}
+                </p>
+                <p className="truncate font-mono text-[10px] text-fg-subtle">
+                  {secret ? secret : `${prefix}…${suffix}`}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                {secret ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[10px]"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(secret);
+                        toast.success("Key copied");
+                      }}
+                    >
+                      <Copy className="h-3 w-3" />
+                      Copy
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[10px]"
+                      onClick={() =>
+                        setRevealed((prev) => {
+                          const next = { ...prev };
+                          delete next[id];
+                          return next;
+                        })
+                      }
+                    >
+                      <EyeOff className="h-3 w-3" />
+                      Hide
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 text-[10px]"
+                    disabled={busyId === id}
+                    onClick={async () => {
+                      setBusyId(id);
+                      try {
+                        const res = await agentApi.revealApiKey(id);
+                        setRevealed((prev) => ({
+                          ...prev,
+                          [id]: res.key.secret,
+                        }));
+                      } catch (e) {
+                        toast.error(
+                          e instanceof Error
+                            ? e.message
+                            : revealable
+                              ? "Reveal failed"
+                              : "Not revealable — issue a new key",
+                        );
+                      } finally {
+                        setBusyId(null);
+                      }
+                    }}
+                  >
+                    <Eye className="h-3 w-3" />
+                    {busyId === id ? "…" : "Reveal"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

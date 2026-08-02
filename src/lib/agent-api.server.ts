@@ -47,7 +47,7 @@ function json(data: unknown, status = 200): Response {
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "content-type, authorization, x-agent-key",
-      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     },
   });
 }
@@ -1011,9 +1011,54 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 1 && parts[0] === "keys" && req.method === "GET") {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
+      const agentId = url.searchParams.get("agent") ?? url.searchParams.get("agent_id");
+      if (agentId?.trim()) {
+        const keys = await boardOps.listAgentApiKeys(agentId.trim());
+        return json({ ok: true, keys });
+      }
       const projectId = projectRef(url, body) ?? "proj_default";
       const keys = await boardOps.listApiKeys(projectId);
       return json({ ok: true, keys });
+    }
+    // GET|POST /keys/:id/reveal — operator unseals full secret (when stored)
+    if (
+      parts.length === 3 &&
+      parts[0] === "keys" &&
+      parts[2] === "reveal" &&
+      (req.method === "GET" || req.method === "POST")
+    ) {
+      const gate = await requireOperatorCap(req, "manage_keys");
+      if (gate) return gate;
+      const revealed = await boardOps.revealApiKey(parts[1]!);
+      if (!revealed) return err(404, "key not found", "not_found");
+      if (!revealed.ok) {
+        if (revealed.error === "key_revoked") {
+          return err(410, "Key is revoked", "key_revoked");
+        }
+        return json(
+          {
+            ok: false,
+            error:
+              "This key was issued before reveal storage. Issue a new key to enable reveal.",
+            code: "not_revealable",
+            keyPrefix: revealed.keyPrefix,
+            keySuffix: revealed.keySuffix,
+          },
+          409,
+        );
+      }
+      return json({
+        ok: true,
+        key: {
+          id: revealed.id,
+          projectId: revealed.projectId,
+          agentId: revealed.agentId,
+          name: revealed.name,
+          keyPrefix: revealed.keyPrefix,
+          keySuffix: revealed.keySuffix,
+          secret: revealed.secret,
+        },
+      });
     }
     if (parts.length === 1 && parts[0] === "keys" && req.method === "POST") {
       const gate = await requireOperatorCap(req, "manage_keys");

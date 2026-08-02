@@ -35,7 +35,13 @@ import {
   type GitHubIngestInput,
 } from "./github-ingest";
 import { renderMissionJournalMarkdown } from "./journal";
-import { createApiKeyMaterial, verifyApiKeyAgainstHashes, type ApiKeyRecord } from "./api-keys";
+import {
+  createApiKeyMaterial,
+  sealApiKeySecret,
+  unsealApiKeySecret,
+  verifyApiKeyAgainstHashes,
+  type ApiKeyRecord,
+} from "./api-keys";
 import { historyToCsv, historyToJson } from "./audit-export";
 import { buildReplyWebhookPayload, dispatchReplyWebhook } from "./reply-webhook";
 
@@ -1439,7 +1445,8 @@ export const durableBoard = {
     withLock(async () => {
       const sql = await getSql();
       const rows = await sql`
-        select id, project_id, agent_id, name, key_prefix, key_suffix, created_at, revoked_at, last_used_at
+        select id, project_id, agent_id, name, key_prefix, key_suffix, key_ciphertext,
+               created_at, revoked_at, last_used_at
         from ar_api_keys
         where project_id = ${projectId}
         order by created_at desc
@@ -1458,11 +1465,81 @@ export const durableBoard = {
           name: String(x.name ?? ""),
           keyPrefix: prefix,
           keySuffix: suffix.slice(-6),
+          revealable: Boolean(x.key_ciphertext),
           createdAt: ms(x.created_at) ?? Date.now(),
           revokedAt: ms(x.revoked_at),
           lastUsedAt: ms(x.last_used_at),
         };
       });
+    }),
+
+  listAgentApiKeys: (agentId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`
+        select id, project_id, agent_id, name, key_prefix, key_suffix, key_ciphertext,
+               created_at, revoked_at, last_used_at
+        from ar_api_keys
+        where agent_id = ${agentId}
+        order by created_at desc
+      `;
+      return rows.map((r) => {
+        const x = r as Record<string, unknown>;
+        const prefix = String(x.key_prefix ?? "");
+        const suffix =
+          x.key_suffix != null && String(x.key_suffix).trim()
+            ? String(x.key_suffix).trim()
+            : prefix.slice(-6);
+        return {
+          id: String(x.id),
+          projectId: String(x.project_id),
+          agentId: x.agent_id != null ? String(x.agent_id) : null,
+          name: String(x.name ?? ""),
+          keyPrefix: prefix,
+          keySuffix: suffix.slice(-6),
+          revealable: Boolean(x.key_ciphertext) && !ms(x.revoked_at),
+          createdAt: ms(x.created_at) ?? Date.now(),
+          revokedAt: ms(x.revoked_at),
+          lastUsedAt: ms(x.last_used_at),
+        };
+      });
+    }),
+
+  revealApiKey: (keyId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select id, project_id, agent_id, name, key_prefix, key_suffix, key_ciphertext, revoked_at
+        from ar_api_keys
+        where id = ${keyId}
+        limit 1
+      `) as Record<string, unknown>[];
+      if (!rows[0]) return null;
+      const x = rows[0];
+      if (ms(x.revoked_at)) {
+        return { ok: false as const, error: "key_revoked" };
+      }
+      const sealed =
+        x.key_ciphertext != null ? String(x.key_ciphertext) : "";
+      const secret = unsealApiKeySecret(sealed);
+      if (!secret) {
+        return {
+          ok: false as const,
+          error: "not_revealable",
+          keyPrefix: String(x.key_prefix ?? ""),
+          keySuffix: String(x.key_suffix ?? "").slice(-6) || String(x.key_prefix ?? "").slice(-6),
+        };
+      }
+      return {
+        ok: true as const,
+        id: String(x.id),
+        projectId: String(x.project_id),
+        agentId: x.agent_id != null ? String(x.agent_id) : null,
+        name: String(x.name ?? ""),
+        keyPrefix: String(x.key_prefix ?? ""),
+        keySuffix: String(x.key_suffix ?? "").slice(-6),
+        secret,
+      };
     }),
 
   createApiKey: (input: { projectId: string; agentId?: string | null; name?: string }) =>
@@ -1474,11 +1551,14 @@ export const durableBoard = {
         agentId: input.agentId,
         name: input.name,
       });
+      const ciphertext = sealApiKeySecret(mat.secret);
       await sql`
-        insert into ar_api_keys (id, project_id, agent_id, name, key_prefix, key_suffix, key_hash, created_at)
+        insert into ar_api_keys (
+          id, project_id, agent_id, name, key_prefix, key_suffix, key_hash, key_ciphertext, created_at
+        )
         values (
           ${mat.id}, ${mat.projectId}, ${mat.agentId}, ${mat.name},
-          ${mat.prefix}, ${mat.suffix}, ${mat.hash}, ${ts(mat.createdAt)}
+          ${mat.prefix}, ${mat.suffix}, ${mat.hash}, ${ciphertext}, ${ts(mat.createdAt)}
         )
       `;
       if (mat.agentId) {
@@ -1491,6 +1571,7 @@ export const durableBoard = {
         name: mat.name,
         keyPrefix: mat.prefix,
         keySuffix: mat.suffix,
+        revealable: true,
         createdAt: mat.createdAt,
         revokedAt: null as number | null,
         lastUsedAt: null as number | null,

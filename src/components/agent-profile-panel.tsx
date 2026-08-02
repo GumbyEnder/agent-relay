@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RelativeTime } from "@/components/relative-time";
+import { AgentKeyRevealList } from "@/components/agents-panel";
 import { agentApi } from "@/lib/api-client";
 import { useBoard } from "@/lib/store";
 import type { AgentProfile, AgentProfileStats } from "@/lib/types";
@@ -293,41 +294,23 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
           <h4 className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
             API keys
           </h4>
-          {keys.length === 0 ? (
-            <p className="text-xs text-fg-subtle">No keys issued for this agent</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {keys.map((k) => (
-                <li
-                  key={k.id}
-                  className={cn(
-                    "rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2.5 py-2 text-[11px]",
-                    k.revokedAt && "opacity-50",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-fg">
-                      {k.prefix}…{k.suffix}
-                    </span>
-                    {k.revokedAt ? (
-                      <Badge variant="done">revoked</Badge>
-                    ) : (
-                      <Badge variant="default">active</Badge>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-fg-subtle">
-                    {boardName(k.projectId)}
-                    {k.lastUsedAt ? (
-                      <>
-                        {" "}
-                        · last used <RelativeTime ts={k.lastUsedAt} />
-                      </>
-                    ) : (
-                      " · never used"
-                    )}
-                  </p>
-                </li>
-              ))}
+          <p className="text-[11px] text-fg-muted">
+            Reveal shows the full <code className="text-fg-subtle">ark_…</code>{" "}
+            secret for keys issued after reveal storage was enabled.
+          </p>
+          <AgentKeyRevealList agentId={agent.id} tips={agent.keyTips ?? keys} />
+          {keys.some((k) => k.revokedAt) && (
+            <ul className="space-y-1 opacity-60">
+              {keys
+                .filter((k) => k.revokedAt)
+                .map((k) => (
+                  <li
+                    key={k.id}
+                    className="rounded-[var(--radius-sm)] border border-border px-2 py-1.5 font-mono text-[10px] text-fg-subtle"
+                  >
+                    {k.prefix}…{k.suffix} · revoked
+                  </li>
+                ))}
             </ul>
           )}
         </section>

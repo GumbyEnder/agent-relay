@@ -47,6 +47,22 @@ export const agentApi = {
       "GET",
       `/keys?project=${encodeURIComponent(projectId)}`,
     ),
+  listAgentKeys: (agentId: string) =>
+    req<{ ok: true; keys: Array<Record<string, unknown>> }>(
+      "GET",
+      `/keys?agent=${encodeURIComponent(agentId)}`,
+    ),
+  revealApiKey: (keyId: string) =>
+    req<{
+      ok: true;
+      key: {
+        id: string;
+        secret: string;
+        keyPrefix?: string;
+        keySuffix?: string;
+        name?: string;
+      };
+    }>("POST", `/keys/${encodeURIComponent(keyId)}/reveal`, {}),
   createApiKey: (input: { projectId: string; agentId?: string | null; name?: string }) =>
     req<{ ok: true; key: Record<string, unknown> & { secret?: string } }>("POST", "/keys", input),
   revokeApiKey: (id: string) =>
