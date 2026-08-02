@@ -834,33 +834,44 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // GET /board — full snapshot for UI
     // ?project=<id> one board · ?project=all (or omit) all boards the user can see
+    // Agents are always the operator's full fleet (not board-filtered) so the
+    // Agents tab can list every real client (e.g. frodo) regardless of rail.
     if (parts.length === 1 && parts[0] === "board" && req.method === "GET") {
       const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
       const wantAll = !pref || pref === "all" || pref === "*" || pref === "__all__";
+      const ctx = await loadOperatorContext(req);
+      let allowedProjectIds: string[] | null = null;
+      if (ctx.authRequired && ctx.user) {
+        const boards = await boardOps.listProjects({
+          ownerUserId: ctx.user.id,
+          includeShared: true,
+          admin: ctx.role === "admin" && url.searchParams.get("all") === "1",
+        });
+        allowedProjectIds = boards.map((b) => b.id);
+      }
+      const fleet = await boardOps.listFleetAgents(allowedProjectIds);
       if (wantAll) {
-        const ctx = await loadOperatorContext(req);
-        let allowedProjectIds: string[] | null = null;
-        if (ctx.authRequired && ctx.user) {
-          const boards = await boardOps.listProjects({
-            ownerUserId: ctx.user.id,
-            includeShared: true,
-            admin: ctx.role === "admin" && url.searchParams.get("all") === "1",
-          });
-          allowedProjectIds = boards.map((b) => b.id);
-        }
         const snap = await boardOps.adminSnapshot("all", { allowedProjectIds });
         return json({
           ok: true,
           projectId: null,
           scope: "all" as const,
-          agents: snap.agents,
+          agents: fleet,
           missions: snap.missions,
           events: snap.events,
           calls: snap.calls,
         });
       }
       const snap = await boardOps.snapshot(pref);
-      return json({ ok: true, projectId: pref, scope: "board" as const, ...snap });
+      return json({
+        ok: true,
+        projectId: pref,
+        scope: "board" as const,
+        agents: fleet,
+        missions: snap.missions,
+        events: snap.events,
+        calls: snap.calls,
+      });
     }
 
     // GET /missions/:id/history

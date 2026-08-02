@@ -250,6 +250,8 @@ export function AgentsPanel() {
           <AgentsListTab
             roster={roster}
             missions={missions}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
             allBoards={allBoards}
             boardName={boardName}
             writeBoardName={writeBoardName}
@@ -396,6 +398,8 @@ export function AgentsPanel() {
 function AgentsListTab({
   roster,
   missions,
+  projects,
+  selectedProjectId,
   allBoards,
   boardName,
   writeBoardName,
@@ -410,6 +414,8 @@ function AgentsListTab({
 }: {
   roster: import("@/lib/types").Agent[];
   missions: import("@/lib/types").Mission[];
+  projects: import("@/lib/types").Project[];
+  selectedProjectId: string | null;
   allBoards: boolean;
   boardName: string;
   writeBoardName: string;
@@ -425,36 +431,151 @@ function AgentsListTab({
   issueKey: (id: string) => void;
   goCreate: () => void;
 }) {
+  const boardNameById = Object.fromEntries(projects.map((p) => [p.id, p.name]));
+  const onThisBoard = !allBoards && selectedProjectId
+    ? roster.filter((a) => (a.boardIds ?? []).includes(selectedProjectId))
+    : roster;
+  const elsewhere =
+    !allBoards && selectedProjectId
+      ? roster.filter((a) => !(a.boardIds ?? []).includes(selectedProjectId))
+      : [];
+
+  function renderAgent(a: import("@/lib/types").Agent) {
+    const active = missions.find((m) => m.id === a.currentMissionId);
+    const open = expandedAgentId === a.id;
+    const boards = (a.boardIds ?? [])
+      .map((id) => boardNameById[id] ?? id)
+      .filter(Boolean);
+    return (
+      <li key={a.id} className="px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <button
+            type="button"
+            className="min-w-0 flex-1 text-left"
+            onClick={() => setExpandedAgentId(open ? null : a.id)}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-mono text-sm text-fg">{a.name}</p>
+              <Badge variant="default">
+                {HARNESS_LABELS[a.harness] ?? a.harness}
+              </Badge>
+              <StatusDot status={a.status} />
+            </div>
+            <p className="mt-0.5 text-xs text-fg-muted">{a.role}</p>
+            {boards.length > 0 && (
+              <p className="mt-1 flex flex-wrap gap-1">
+                {boards.map((bn) => (
+                  <span
+                    key={bn}
+                    className="rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-subtle"
+                  >
+                    {bn}
+                  </span>
+                ))}
+              </p>
+            )}
+          </button>
+          <span className="shrink-0 text-[11px] text-fg-subtle tabular">
+            HB <RelativeTime ts={a.lastHeartbeat} />
+          </span>
+        </div>
+
+        {a.skills.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {a.skills.map((s) => (
+              <Badge key={s} variant="default">
+                {s}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+          {active ? (
+            <button
+              type="button"
+              className="truncate text-left text-status-running hover:underline"
+              onClick={() => openPanel("mission", active.id)}
+            >
+              {active.title}
+            </button>
+          ) : (
+            <span className="text-fg-subtle">no active mission</span>
+          )}
+          <button
+            type="button"
+            className="shrink-0 text-fg-muted hover:text-fg"
+            onClick={() => setExpandedAgentId(open ? null : a.id)}
+          >
+            {open ? "Less" : "Manage"}
+          </button>
+        </div>
+
+        {open && (
+          <div className="mt-3 space-y-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle/60 p-2.5">
+            <div className="flex items-center gap-2">
+              <select
+                className="h-8 flex-1 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                value={a.status}
+                onChange={(e) =>
+                  setAgentStatus(a.id, e.target.value as AgentStatus)
+                }
+              >
+                {statuses.map((st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 text-[11px]"
+                onClick={() => issueKey(a.id)}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                Issue key
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[11px]"
+                onClick={() => {
+                  removeAgent(a.id);
+                  toast.message("Agent removed");
+                  setExpandedAgentId(null);
+                }}
+              >
+                Remove
+              </Button>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  }
+
   return (
     <div>
       <div className="border-b border-border px-4 py-2.5">
         <p className="text-[11px] text-fg-muted">
-          {allBoards ? (
-            <>
-              All agents you can see
-              {roster.length > 0 ? (
-                <span className="text-fg-subtle"> · {roster.length}</span>
-              ) : null}
-            </>
-          ) : (
-            <>
-              Agents on <span className="text-fg">{boardName}</span>
-              {roster.length > 0 ? (
-                <span className="text-fg-subtle"> · {roster.length}</span>
-              ) : null}
-            </>
-          )}
+          Your full agent fleet
+          {roster.length > 0 ? (
+            <span className="text-fg-subtle"> · {roster.length}</span>
+          ) : null}
+          {!allBoards ? (
+            <span className="text-fg-subtle">
+              {" "}
+              · board rail is {boardName} (missions only)
+            </span>
+          ) : null}
         </p>
       </div>
 
       <ul className="divide-y divide-border">
         {roster.length === 0 && (
           <li className="px-4 py-12 text-center">
-            <p className="text-sm text-fg-muted">
-              {allBoards
-                ? "No agents registered yet."
-                : "No agents on this board yet."}
-            </p>
+            <p className="text-sm text-fg-muted">No agents registered yet.</p>
             <p className="mt-1 text-xs text-fg-subtle">
               Register a client, then issue an API key so it can claim missions.
             </p>
@@ -465,105 +586,20 @@ function AgentsListTab({
             </Button>
           </li>
         )}
-        {roster.map((a) => {
-          const active = missions.find((m) => m.id === a.currentMissionId);
-          const open = expandedAgentId === a.id;
-          return (
-            <li key={a.id} className="px-4 py-3">
-              <div className="flex items-start justify-between gap-2">
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left"
-                  onClick={() => setExpandedAgentId(open ? null : a.id)}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-mono text-sm text-fg">{a.name}</p>
-                    <Badge variant="default">
-                      {HARNESS_LABELS[a.harness] ?? a.harness}
-                    </Badge>
-                    <StatusDot status={a.status} />
-                  </div>
-                  <p className="mt-0.5 text-xs text-fg-muted">{a.role}</p>
-                </button>
-                <span className="shrink-0 text-[11px] text-fg-subtle tabular">
-                  HB <RelativeTime ts={a.lastHeartbeat} />
-                </span>
-              </div>
-
-              {a.skills.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {a.skills.map((s) => (
-                    <Badge key={s} variant="default">
-                      {s}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                {active ? (
-                  <button
-                    type="button"
-                    className="truncate text-left text-status-running hover:underline"
-                    onClick={() => openPanel("mission", active.id)}
-                  >
-                    {active.title}
-                  </button>
-                ) : (
-                  <span className="text-fg-subtle">no active mission</span>
-                )}
-                <button
-                  type="button"
-                  className="shrink-0 text-fg-muted hover:text-fg"
-                  onClick={() => setExpandedAgentId(open ? null : a.id)}
-                >
-                  {open ? "Less" : "Manage"}
-                </button>
-              </div>
-
-              {open && (
-                <div className="mt-3 space-y-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle/60 p-2.5">
-                  <div className="flex items-center gap-2">
-                    <select
-                      className="h-8 flex-1 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
-                      value={a.status}
-                      onChange={(e) =>
-                        setAgentStatus(a.id, e.target.value as AgentStatus)
-                      }
-                    >
-                      {statuses.map((st) => (
-                        <option key={st} value={st}>
-                          {st}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="h-8 text-[11px]"
-                      onClick={() => issueKey(a.id)}
-                    >
-                      <KeyRound className="h-3.5 w-3.5" />
-                      Issue key
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 text-[11px]"
-                      onClick={() => {
-                        removeAgent(a.id);
-                        toast.message("Agent removed");
-                        setExpandedAgentId(null);
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              )}
+        {!allBoards && onThisBoard.length > 0 && (
+          <li className="bg-bg-subtle/40 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+            On {boardName}
+          </li>
+        )}
+        {(allBoards ? roster : onThisBoard).map(renderAgent)}
+        {elsewhere.length > 0 && (
+          <>
+            <li className="bg-bg-subtle/40 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+              On other boards
             </li>
-          );
-        })}
+            {elsewhere.map(renderAgent)}
+          </>
+        )}
       </ul>
     </div>
   );

@@ -71,6 +71,8 @@ export interface Agent {
   notes?: string;
   /** Seed/demo roster entries — hidden in UI by default */
   isDemo?: boolean;
+  /** Boards this agent is a member of (roster / fleet UI). */
+  boardIds?: string[];
 }
 
 export interface MissionEvent {

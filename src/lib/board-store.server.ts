@@ -596,6 +596,78 @@ export const durableBoard = {
       return loadBoard(sql, projectId);
     }),
 
+  /**
+   * Full client-agent fleet for the operator UI.
+   * Includes non-demo agents that:
+   *  - belong to any of the allowed boards, or
+   *  - have an active API key on an allowed board, or
+   *  - have no board membership yet (legacy / just registered).
+   * When allowedProjectIds is null/empty, returns every non-demo agent.
+   */
+  listFleetAgents: (allowedProjectIds?: string[] | null) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const allowed =
+        allowedProjectIds && allowedProjectIds.length > 0
+          ? new Set(allowedProjectIds)
+          : null;
+
+      const rows = (await sql`
+        select * from ar_agents
+        where coalesce(is_demo, false) = false
+        order by name asc
+      `) as Record<string, unknown>[];
+
+      const memberships = (await sql`
+        select project_id, agent_id from ar_board_agents
+      `) as Array<{ project_id: string; agent_id: string }>;
+
+      const keyLinks = (await sql`
+        select project_id, agent_id from ar_api_keys
+        where agent_id is not null and revoked_at is null
+      `) as Array<{ project_id: string; agent_id: string }>;
+
+      const byAgent = new Map<string, string[]>();
+      for (const m of memberships) {
+        const aid = String(m.agent_id);
+        const pid = String(m.project_id);
+        if (allowed && !allowed.has(pid)) continue;
+        const list = byAgent.get(aid) ?? [];
+        if (!list.includes(pid)) list.push(pid);
+        byAgent.set(aid, list);
+      }
+
+      const keyBoards = new Map<string, string[]>();
+      for (const k of keyLinks) {
+        const aid = String(k.agent_id);
+        const pid = String(k.project_id);
+        if (allowed && !allowed.has(pid)) continue;
+        const list = keyBoards.get(aid) ?? [];
+        if (!list.includes(pid)) list.push(pid);
+        keyBoards.set(aid, list);
+      }
+
+      const agentsOnAnyBoard = new Set(memberships.map((m) => String(m.agent_id)));
+
+      return rows
+        .map((r) => {
+          const agent = rowAgent(r);
+          if (agent.isDemo) return null;
+          const boards = byAgent.get(agent.id) ?? [];
+          const keys = keyBoards.get(agent.id) ?? [];
+          const orphan = !agentsOnAnyBoard.has(agent.id);
+          if (allowed) {
+            const visible =
+              boards.length > 0 || keys.length > 0 || orphan;
+            if (!visible) return null;
+          }
+          agent.boardIds = boards;
+          return agent;
+        })
+        .filter((a): a is Agent => a != null)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }),
+
   listProjects: (opts?: { ownerUserId?: string | null; includeShared?: boolean; admin?: boolean }) =>
     withLock(async () => {
       const sql = await getSql();
