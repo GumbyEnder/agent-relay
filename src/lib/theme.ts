@@ -6,7 +6,12 @@ export type ThemeId =
   | "cyberpunk"
   | "matrix"
   | "crt_green"
-  | "crt_amber";
+  | "crt_amber"
+  | "dracula"
+  | "nord"
+  | "catppuccin_mocha"
+  | "tokyo_night"
+  | "gruvbox_dark";
 
 export const THEME_IDS: ThemeId[] = [
   "dark",
@@ -15,6 +20,11 @@ export const THEME_IDS: ThemeId[] = [
   "matrix",
   "crt_green",
   "crt_amber",
+  "dracula",
+  "nord",
+  "catppuccin_mocha",
+  "tokyo_night",
+  "gruvbox_dark",
 ];
 
 export const THEME_LABELS: Record<ThemeId, string> = {
@@ -24,6 +34,11 @@ export const THEME_LABELS: Record<ThemeId, string> = {
   matrix: "Matrix",
   crt_green: "CRT Green",
   crt_amber: "CRT Amber",
+  dracula: "Dracula",
+  nord: "Nord",
+  catppuccin_mocha: "Catppuccin Mocha",
+  tokyo_night: "Tokyo Night",
+  gruvbox_dark: "Gruvbox Dark",
 };
 
 /** Themes that use phosphor CRT scanline overlay */

@@ -212,12 +212,44 @@ export const agentApi = {
     req("POST", `/missions/${missionId}/heartbeat`, { agent, note }),
   escalate: (missionId: string, agent: string, question: string) =>
     req("POST", `/missions/${missionId}/escalate`, { agent, question }),
-  deliver: (missionId: string, agent: string, summary: string) =>
-    req("POST", `/missions/${missionId}/deliver`, { agent, summary }),
+  deliver: (
+    missionId: string,
+    agent: string,
+    summary: string,
+    usage?: import("./types").MissionUsage | null,
+  ) =>
+    req("POST", `/missions/${missionId}/deliver`, {
+      agent,
+      summary,
+      ...(usage ? { usage } : {}),
+    }),
   reply: (callId: string, reply: string) =>
     req("POST", `/calls/${callId}/reply`, { reply }),
   move: (missionId: string, column: MissionColumn, actor = "operator") =>
     req("POST", `/missions/${missionId}/move`, { column, actor }),
+  transferMission: (missionId: string, projectId: string) =>
+    req<{ ok: true; mission: { id: string; projectId: string } }>(
+      "POST",
+      `/missions/${encodeURIComponent(missionId)}/transfer`,
+      { projectId },
+    ),
+  updateMission: (
+    missionId: string,
+    patch: Partial<{
+      title: string;
+      objective: string;
+      context: string;
+      constraints: string;
+      acceptance: string;
+      priority: Priority;
+      tags: string[];
+    }>,
+  ) =>
+    req<{ ok: true; mission: { id: string } }>(
+      "PATCH",
+      `/missions/${encodeURIComponent(missionId)}`,
+      patch,
+    ),
   createMission: (input: {
     title: string;
     objective: string;

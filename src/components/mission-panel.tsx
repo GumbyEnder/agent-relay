@@ -72,6 +72,7 @@ export function MissionPanel({ missionId }: { missionId: string }) {
   const {
     missions,
     agents,
+    projects,
     historyByMission,
     loadHistory,
     closePanel,
@@ -83,6 +84,7 @@ export function MissionPanel({ missionId }: { missionId: string }) {
     deliver,
     deleteMission,
     updateMission,
+    transferMission,
   } = useBoard();
   const mission = missions.find((m) => m.id === missionId);
   const history = historyByMission[missionId] ?? [];
@@ -92,6 +94,13 @@ export function MissionPanel({ missionId }: { missionId: string }) {
   const [heartbeatNote, setHeartbeatNote] = useState("");
   const [escalateQ, setEscalateQ] = useState("");
   const [delivery, setDelivery] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftObjective, setDraftObjective] = useState("");
+  const [draftContext, setDraftContext] = useState("");
+  const [draftConstraints, setDraftConstraints] = useState("");
+  const [draftAcceptance, setDraftAcceptance] = useState("");
+  const [transferBoard, setTransferBoard] = useState("");
   const [claimAgent, setClaimAgent] = useState(
     agents.find((a) => a.status !== "offline")?.id ?? "",
   );
@@ -107,6 +116,31 @@ export function MissionPanel({ missionId }: { missionId: string }) {
   const agent =
     agents.find((a) => a.id === mission.claimedBy) ||
     agents.find((a) => a.id === mission.assigneeId);
+
+  const startEdit = () => {
+    setDraftTitle(mission.title);
+    setDraftObjective(mission.objective);
+    setDraftContext(mission.context);
+    setDraftConstraints(mission.constraints);
+    setDraftAcceptance(mission.acceptance);
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    if (!draftTitle.trim() || !draftObjective.trim()) {
+      toast.error("Title and objective are required");
+      return;
+    }
+    updateMission(mission.id, {
+      title: draftTitle.trim(),
+      objective: draftObjective.trim(),
+      context: draftContext,
+      constraints: draftConstraints,
+      acceptance: draftAcceptance,
+    });
+    setEditing(false);
+    toast.success("Mission saved");
+  };
 
   const copyPrompt = async () => {
     await navigator.clipboard.writeText(buildAgentPrompt(mission));
@@ -145,30 +179,122 @@ export function MissionPanel({ missionId }: { missionId: string }) {
             </Badge>
             <Badge variant="default">{mission.column.replace("_", " ")}</Badge>
           </div>
-          <h2 className="text-base font-semibold leading-snug tracking-tight text-fg">
-            {mission.title}
-          </h2>
+          {!editing ? (
+            <h2 className="text-base font-semibold leading-snug tracking-tight text-fg">
+              {mission.title}
+            </h2>
+          ) : (
+            <Input
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              className="h-9 text-base font-semibold"
+              aria-label="Title"
+            />
+          )}
           <p className="font-mono text-[11px] text-fg-subtle">{mission.id}</p>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close">
-          <X className="h-4 w-4" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {!editing ? (
+            <Button size="sm" variant="ghost" className="h-8 text-[11px]" onClick={startEdit}>
+              Edit
+            </Button>
+          ) : (
+            <>
+              <Button size="sm" variant="secondary" className="h-8 text-[11px]" onClick={saveEdit}>
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[11px]"
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </Button>
+            </>
+          )}
+          <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto p-4 scrollbar-thin">
-        <Section title="Objective">{mission.objective}</Section>
-        {mission.context && <Section title="Context">{mission.context}</Section>}
-        {mission.constraints && (
-          <Section title="Constraints">{mission.constraints}</Section>
-        )}
-        {mission.acceptance && (
-          <Section title="Acceptance">{mission.acceptance}</Section>
+        {!editing ? (
+          <>
+            <Section title="Objective">{mission.objective}</Section>
+            {mission.context && <Section title="Context">{mission.context}</Section>}
+            {mission.constraints && (
+              <Section title="Constraints">{mission.constraints}</Section>
+            )}
+            {mission.acceptance && (
+              <Section title="Acceptance">{mission.acceptance}</Section>
+            )}
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                Objective
+              </label>
+              <Textarea
+                value={draftObjective}
+                onChange={(e) => setDraftObjective(e.target.value)}
+                className="mt-1 min-h-20"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                Context
+              </label>
+              <Textarea
+                value={draftContext}
+                onChange={(e) => setDraftContext(e.target.value)}
+                className="mt-1 min-h-16"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                Constraints
+              </label>
+              <Textarea
+                value={draftConstraints}
+                onChange={(e) => setDraftConstraints(e.target.value)}
+                className="mt-1 min-h-14"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                Acceptance
+              </label>
+              <Textarea
+                value={draftAcceptance}
+                onChange={(e) => setDraftAcceptance(e.target.value)}
+                className="mt-1 min-h-14"
+              />
+            </div>
+          </div>
         )}
         {mission.progressNote && (
           <Section title="Latest progress">{mission.progressNote}</Section>
         )}
         {mission.delivery && (
           <Section title="Delivery">{mission.delivery}</Section>
+        )}
+        {mission.usage && (
+          <Section title="Usage (self-reported)">
+            {[
+              mission.usage.tokensIn != null && `in ${mission.usage.tokensIn}`,
+              mission.usage.tokensOut != null && `out ${mission.usage.tokensOut}`,
+              mission.usage.model && `model ${mission.usage.model}`,
+              mission.usage.estimatedUsd != null &&
+                `~$${mission.usage.estimatedUsd.toFixed(4)}`,
+              typeof mission.usage.toolCalls === "number" &&
+                `tools ${mission.usage.toolCalls}`,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "recorded"}
+          </Section>
         )}
 
         <div className="grid grid-cols-2 gap-3 rounded-[var(--radius-md)] bg-bg-subtle p-3 text-xs">
@@ -189,6 +315,47 @@ export function MissionPanel({ missionId }: { missionId: string }) {
             <p className="text-fg-subtle" suppressHydrationWarning>
               Updated {formatTime(mission.updatedAt)}
             </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+            Board
+          </label>
+          <div className="flex gap-2">
+            <select
+              className="h-10 min-w-0 flex-1 rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+              value={transferBoard || mission.projectId}
+              onChange={(e) => setTransferBoard(e.target.value)}
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-10 shrink-0"
+              disabled={
+                !transferBoard || transferBoard === mission.projectId
+              }
+              onClick={() => {
+                if (!transferBoard || transferBoard === mission.projectId) return;
+                if (
+                  !window.confirm(
+                    "Move this mission to the selected board? History stays with the card.",
+                  )
+                ) {
+                  return;
+                }
+                transferMission(mission.id, transferBoard);
+                setTransferBoard("");
+              }}
+            >
+              Move
+            </Button>
           </div>
         </div>
 

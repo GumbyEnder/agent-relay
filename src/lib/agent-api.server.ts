@@ -47,7 +47,7 @@ function json(data: unknown, status = 200): Response {
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "content-type, authorization, x-agent-key",
-      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     },
   });
 }
@@ -244,6 +244,41 @@ function strArr(v: unknown): string[] | undefined {
   return v.filter((x): x is string => typeof x === "string");
 }
 
+function parseUsage(raw: unknown): import("./types").MissionUsage | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const u = raw as Record<string, unknown>;
+  const num = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v)
+      ? v
+      : typeof v === "string" && v.trim() && Number.isFinite(Number(v))
+        ? Number(v)
+        : undefined;
+  const toolRaw = u.toolCalls ?? u.tool_calls;
+  let toolCalls: number | Record<string, number> | undefined;
+  if (typeof toolRaw === "number") toolCalls = toolRaw;
+  else if (toolRaw && typeof toolRaw === "object" && !Array.isArray(toolRaw)) {
+    toolCalls = Object.fromEntries(
+      Object.entries(toolRaw as Record<string, unknown>)
+        .map(([k, v]) => [k, num(v)] as const)
+        .filter((x): x is [string, number] => x[1] !== undefined),
+    );
+  }
+  return {
+    tokensIn: num(u.tokensIn ?? u.tokens_in),
+    tokensOut: num(u.tokensOut ?? u.tokens_out),
+    model: u.model != null ? String(u.model) : undefined,
+    toolCalls,
+    estimatedUsd: num(u.estimatedUsd ?? u.estimated_usd),
+    pricingSource:
+      u.pricingSource != null
+        ? String(u.pricingSource)
+        : u.pricing_source != null
+          ? String(u.pricing_source)
+          : undefined,
+    raw: u as Record<string, unknown>,
+  };
+}
+
 /**
  * Handle a full Request whose pathname starts with /api/agent.
  */
@@ -260,7 +295,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       headers: {
         "access-control-allow-origin": "*",
         "access-control-allow-headers": "content-type, authorization, x-agent-key",
-        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+        "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
       },
     });
   }
@@ -477,8 +512,15 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       }
       if (verb === "deliver") {
         const summary = str(body.summary) ?? str(body.delivery) ?? "";
+        const usage = parseUsage(body.usage ?? body.usage_report);
         return fromEngine(
-          await boardOps.deliver(id, agent, summary, strArr(body.artifacts) ?? []),
+          await boardOps.deliver(
+            id,
+            agent,
+            summary,
+            strArr(body.artifacts) ?? [],
+            usage,
+          ),
         );
       }
       return err(404, `Unknown verb: ${verb}`);
@@ -984,6 +1026,46 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return fromEngine(await boardOps.moveMission(parts[1]!, column, actor));
     }
 
+    // POST /missions/:id/transfer  { project | projectId } — move to another board
+    if (
+      parts.length === 3 &&
+      parts[0] === "missions" &&
+      (parts[2] === "transfer" || parts[2] === "reboard") &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const raw =
+        str(body.projectId) ?? str(body.project) ?? str(body.board) ?? str(body.boardId);
+      if (!raw) return err(400, "project (board id or slug) required", "bad_request");
+      const target = await boardOps.resolveProjectId(raw);
+      if (!target) return err(404, "board not found", "board_not_found");
+      const result = await boardOps.moveMissionToProject(
+        parts[1]!,
+        target,
+        str(body.actor) ?? "operator",
+      );
+      if (!result.ok) return err(result.status, result.error, result.code);
+      return json({ ok: true, mission: result.mission });
+    }
+
+    // PATCH /missions/:id — operator edit title/body fields
+    if (parts.length === 2 && parts[0] === "missions" && req.method === "PATCH") {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const result = await boardOps.updateMissionFields(parts[1]!, {
+        title: str(body.title),
+        objective: str(body.objective),
+        context: str(body.context),
+        constraints: str(body.constraints),
+        acceptance: str(body.acceptance),
+        priority: str(body.priority) as Priority | undefined,
+        tags: strArr(body.tags),
+      });
+      if (!result.ok) return err(result.status, result.error, result.code);
+      return json({ ok: true, mission: result.mission });
+    }
+
     // POST /missions  create
     // Operators (session) or client agents (ark_ key on an allowed board).
     if (parts.length === 1 && parts[0] === "missions" && req.method === "POST") {
@@ -1294,8 +1376,15 @@ async function handleAction(
   }
   if (action === "deliver") {
     const summary = str(body.summary) ?? str(body.delivery) ?? "";
+    const usage = parseUsage(body.usage ?? body.usage_report);
     return fromEngine(
-      await boardOps.deliver(missionId!, agent!, summary, strArr(body.artifacts) ?? []),
+      await boardOps.deliver(
+        missionId!,
+        agent!,
+        summary,
+        strArr(body.artifacts) ?? [],
+        usage,
+      ),
     );
   }
 

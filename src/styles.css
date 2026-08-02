@@ -251,6 +251,141 @@ html[data-theme="crt_amber"] {
   --shadow-panel: inset 0 0 80px rgba(40, 20, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 
+/* --- Dracula --- */
+html[data-theme="dracula"] {
+  color-scheme: dark;
+  --color-bg: #282a36;
+  --color-bg-elevated: #21222c;
+  --color-bg-subtle: #343746;
+  --color-bg-hover: #44475a;
+  --color-fg: #f8f8f2;
+  --color-fg-muted: #bd93f9;
+  --color-fg-subtle: #6272a4;
+  --color-border: #bd93f928;
+  --color-border-strong: #bd93f950;
+  --color-accent: #ff79c6;
+  --color-accent-fg: #282a36;
+  --color-ring: #8be9fd;
+  --color-status-ready: #8be9fd;
+  --color-status-running: #50fa7b;
+  --color-status-human: #ffb86c;
+  --color-status-review: #bd93f9;
+  --color-status-done: #6272a4;
+  --color-status-blocked: #ff5555;
+  --color-status-inbox: #f1fa8c;
+  --shadow-border: 0 0 0 1px rgba(189, 147, 249, 0.18);
+  --shadow-border-hover: 0 0 0 1px rgba(255, 121, 198, 0.35);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* --- Nord --- */
+html[data-theme="nord"] {
+  color-scheme: dark;
+  --color-bg: #2e3440;
+  --color-bg-elevated: #3b4252;
+  --color-bg-subtle: #434c5e;
+  --color-bg-hover: #4c566a;
+  --color-fg: #eceff4;
+  --color-fg-muted: #d8dee9;
+  --color-fg-subtle: #81a1c1;
+  --color-border: #88c0d028;
+  --color-border-strong: #88c0d050;
+  --color-accent: #88c0d0;
+  --color-accent-fg: #2e3440;
+  --color-ring: #8fbcbb;
+  --color-status-ready: #5e81ac;
+  --color-status-running: #a3be8c;
+  --color-status-human: #ebcb8b;
+  --color-status-review: #b48ead;
+  --color-status-done: #4c566a;
+  --color-status-blocked: #bf616a;
+  --color-status-inbox: #d8dee9;
+  --shadow-border: 0 0 0 1px rgba(136, 192, 208, 0.2);
+  --shadow-border-hover: 0 0 0 1px rgba(143, 188, 187, 0.4);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+/* --- Catppuccin Mocha --- */
+html[data-theme="catppuccin_mocha"] {
+  color-scheme: dark;
+  --color-bg: #1e1e2e;
+  --color-bg-elevated: #181825;
+  --color-bg-subtle: #313244;
+  --color-bg-hover: #45475a;
+  --color-fg: #cdd6f4;
+  --color-fg-muted: #a6adc8;
+  --color-fg-subtle: #6c7086;
+  --color-border: #cba6f728;
+  --color-border-strong: #cba6f750;
+  --color-accent: #cba6f7;
+  --color-accent-fg: #1e1e2e;
+  --color-ring: #89b4fa;
+  --color-status-ready: #89b4fa;
+  --color-status-running: #a6e3a1;
+  --color-status-human: #fab387;
+  --color-status-review: #b4befe;
+  --color-status-done: #6c7086;
+  --color-status-blocked: #f38ba8;
+  --color-status-inbox: #f9e2af;
+  --shadow-border: 0 0 0 1px rgba(203, 166, 247, 0.18);
+  --shadow-border-hover: 0 0 0 1px rgba(137, 180, 250, 0.35);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* --- Tokyo Night --- */
+html[data-theme="tokyo_night"] {
+  color-scheme: dark;
+  --color-bg: #1a1b26;
+  --color-bg-elevated: #16161e;
+  --color-bg-subtle: #24283b;
+  --color-bg-hover: #292e42;
+  --color-fg: #c0caf5;
+  --color-fg-muted: #a9b1d6;
+  --color-fg-subtle: #565f89;
+  --color-border: #7aa2f728;
+  --color-border-strong: #7aa2f750;
+  --color-accent: #7aa2f7;
+  --color-accent-fg: #1a1b26;
+  --color-ring: #bb9af7;
+  --color-status-ready: #7aa2f7;
+  --color-status-running: #9ece6a;
+  --color-status-human: #e0af68;
+  --color-status-review: #bb9af7;
+  --color-status-done: #565f89;
+  --color-status-blocked: #f7768e;
+  --color-status-inbox: #7dcfff;
+  --shadow-border: 0 0 0 1px rgba(122, 162, 247, 0.2);
+  --shadow-border-hover: 0 0 0 1px rgba(187, 154, 247, 0.4);
+  --shadow-panel: 0 0 40px rgba(122, 162, 247, 0.06), 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* --- Gruvbox Dark --- */
+html[data-theme="gruvbox_dark"] {
+  color-scheme: dark;
+  --color-bg: #282828;
+  --color-bg-elevated: #1d2021;
+  --color-bg-subtle: #3c3836;
+  --color-bg-hover: #504945;
+  --color-fg: #ebdbb2;
+  --color-fg-muted: #d5c4a1;
+  --color-fg-subtle: #928374;
+  --color-border: #fabd2f28;
+  --color-border-strong: #fabd2f50;
+  --color-accent: #fe8019;
+  --color-accent-fg: #1d2021;
+  --color-ring: #fabd2f;
+  --color-status-ready: #83a598;
+  --color-status-running: #b8bb26;
+  --color-status-human: #fabd2f;
+  --color-status-review: #d3869b;
+  --color-status-done: #928374;
+  --color-status-blocked: #fb4934;
+  --color-status-inbox: #8ec07c;
+  --shadow-border: 0 0 0 1px rgba(254, 128, 25, 0.2);
+  --shadow-border-hover: 0 0 0 1px rgba(250, 189, 47, 0.4);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
 /* CRT scanline + slight bloom (green/amber only; respects reduced motion) */
 html.theme-crt body {
   text-shadow: 0 0 0.6px currentColor;

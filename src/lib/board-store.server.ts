@@ -91,6 +91,38 @@ function rowProject(r: Record<string, unknown>): Project {
   };
 }
 
+function rowMissionUsage(raw: unknown): Mission["usage"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const u = raw as Record<string, unknown>;
+  const num = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v)
+      ? v
+      : typeof v === "string" && v.trim() && Number.isFinite(Number(v))
+        ? Number(v)
+        : undefined;
+  return {
+    tokensIn: num(u.tokensIn ?? u.tokens_in),
+    tokensOut: num(u.tokensOut ?? u.tokens_out),
+    model: u.model != null ? String(u.model) : undefined,
+    toolCalls:
+      typeof u.toolCalls === "number" || typeof u.tool_calls === "number"
+        ? num(u.toolCalls ?? u.tool_calls)
+        : u.toolCalls && typeof u.toolCalls === "object"
+          ? (u.toolCalls as Record<string, number>)
+          : u.tool_calls && typeof u.tool_calls === "object"
+            ? (u.tool_calls as Record<string, number>)
+            : undefined,
+    estimatedUsd: num(u.estimatedUsd ?? u.estimated_usd),
+    pricingSource:
+      u.pricingSource != null
+        ? String(u.pricingSource)
+        : u.pricing_source != null
+          ? String(u.pricing_source)
+          : undefined,
+    raw: u,
+  };
+}
+
 function rowMission(r: Record<string, unknown>): Mission {
   return {
     id: String(r.id),
@@ -114,6 +146,7 @@ function rowMission(r: Record<string, unknown>): Mission {
     delivery: r.delivery != null ? String(r.delivery) : undefined,
     externalId: r.external_id != null ? String(r.external_id) : null,
     source: r.source != null ? String(r.source) : null,
+    usage: rowMissionUsage(r.usage),
   };
 }
 
@@ -319,19 +352,20 @@ async function insertProject(sql: Sql, pr: Project) {
 }
 
 async function insertMission(sql: Sql, m: Mission) {
+  const usageJson = m.usage ? JSON.stringify(m.usage) : null;
   await sql`
     insert into ar_missions (
       id, project_id, title, objective, context, constraints_text, acceptance,
       column_id, priority, tags, assignee_id, claimed_by, claimed_at,
       last_heartbeat, progress_note, artifacts, delivery, created_at, updated_at,
-      external_id, source
+      external_id, source, usage
     ) values (
       ${m.id}, ${m.projectId ?? DEFAULT_PROJECT_ID}, ${m.title}, ${m.objective}, ${m.context}, ${m.constraints}, ${m.acceptance},
       ${m.column}, ${m.priority}, ${JSON.stringify(m.tags)}::jsonb,
       ${m.assigneeId}, ${m.claimedBy}, ${ts(m.claimedAt)},
       ${ts(m.lastHeartbeat)}, ${m.progressNote}, ${JSON.stringify(m.artifacts)}::jsonb,
       ${m.delivery ?? null}, ${ts(m.createdAt)}, ${ts(m.updatedAt)},
-      ${m.externalId ?? null}, ${m.source ?? null}
+      ${m.externalId ?? null}, ${m.source ?? null}, ${usageJson}::jsonb
     )
     on conflict (id) do update set
       project_id = excluded.project_id,
@@ -350,6 +384,7 @@ async function insertMission(sql: Sql, m: Mission) {
       progress_note = excluded.progress_note,
       artifacts = excluded.artifacts,
       delivery = excluded.delivery,
+      usage = coalesce(excluded.usage, ar_missions.usage),
       external_id = excluded.external_id,
       source = excluded.source,
       updated_at = excluded.updated_at
@@ -1136,13 +1171,126 @@ export const durableBoard = {
       question,
     ),
 
-  deliver: (missionId: string, agent: string, summary: string, artifacts?: string[]) =>
+  deliver: (
+    missionId: string,
+    agent: string,
+    summary: string,
+    artifacts?: string[],
+    usage?: import("./types").MissionUsage | null,
+  ) =>
     applyEngine(
-      (b) => engine.deliverMission(b, missionId, agent, summary, artifacts),
+      (b) => engine.deliverMission(b, missionId, agent, summary, artifacts, usage),
       agent,
       "agent",
       summary,
     ),
+
+  updateMissionFields: (
+    missionId: string,
+    patch: Partial<{
+      title: string;
+      objective: string;
+      context: string;
+      constraints: string;
+      acceptance: string;
+      priority: Priority;
+      tags: string[];
+    }>,
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`select * from ar_missions where id = ${missionId} limit 1`;
+      if (!rows[0]) {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "mission not found",
+          code: "mission_not_found",
+        };
+      }
+      const m = rowMission(rows[0] as Record<string, unknown>);
+      const next: Mission = {
+        ...m,
+        title: patch.title !== undefined ? patch.title.trim() : m.title,
+        objective: patch.objective !== undefined ? patch.objective.trim() : m.objective,
+        context: patch.context !== undefined ? patch.context.trim() : m.context,
+        constraints:
+          patch.constraints !== undefined ? patch.constraints.trim() : m.constraints,
+        acceptance:
+          patch.acceptance !== undefined ? patch.acceptance.trim() : m.acceptance,
+        priority: patch.priority ?? m.priority,
+        tags: patch.tags ?? m.tags,
+        updatedAt: Date.now(),
+      };
+      await insertMission(sql, next);
+      await insertEvent(sql, {
+        id: uid("ev"),
+        missionId,
+        agentId: null,
+        projectId: next.projectId,
+        kind: "note",
+        message: `Mission updated · ${next.title}`,
+        at: Date.now(),
+      });
+      return { ok: true as const, mission: engine.missionSummary(next) };
+    }),
+
+  moveMissionToProject: (missionId: string, targetProjectId: string, actor = "operator") =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = await sql`select * from ar_missions where id = ${missionId} limit 1`;
+      if (!rows[0]) {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "mission not found",
+          code: "mission_not_found",
+        };
+      }
+      const m = rowMission(rows[0] as Record<string, unknown>);
+      if (m.projectId === targetProjectId) {
+        return { ok: true as const, mission: engine.missionSummary(m) };
+      }
+      const board = await sql`select id from ar_projects where id = ${targetProjectId} limit 1`;
+      if (!board[0]) {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "board not found",
+          code: "board_not_found",
+        };
+      }
+      const from = m.projectId;
+      const next: Mission = { ...m, projectId: targetProjectId, updatedAt: Date.now() };
+      await insertMission(sql, next);
+      await sql`update ar_events set project_id = ${targetProjectId} where mission_id = ${missionId}`;
+      await sql`update ar_calls set project_id = ${targetProjectId} where mission_id = ${missionId}`;
+      await sql`update ar_mission_history set project_id = ${targetProjectId} where mission_id = ${missionId}`;
+      await insertEvent(sql, {
+        id: uid("ev"),
+        missionId,
+        agentId: null,
+        projectId: targetProjectId,
+        kind: "mission_moved",
+        message: `Moved board ${from} → ${targetProjectId} · ${m.title}`,
+        at: Date.now(),
+        meta: { from_project: from, to_project: targetProjectId, actor },
+      });
+      await insertHistory(
+        sql,
+        historyEntry({
+          missionId,
+          projectId: targetProjectId,
+          actorId: actor,
+          actorName: actor,
+          actorKind: "operator",
+          from: m.column,
+          to: m.column,
+          note: `board ${from} → ${targetProjectId}`,
+        }),
+      );
+      return { ok: true as const, mission: engine.missionSummary(next) };
+    }),
 
   reply: (callId: string, reply: string, operator = "operator") =>
     applyEngine((b) => engine.replyToCall(b, callId, reply), operator, "operator", reply),

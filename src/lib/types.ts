@@ -169,6 +169,17 @@ export interface Project {
 /** Alias for product copy */
 export type Board = Project;
 
+/** Self-reported usage on deliver (not billing truth). */
+export interface MissionUsage {
+  tokensIn?: number;
+  tokensOut?: number;
+  model?: string;
+  toolCalls?: number | Record<string, number>;
+  estimatedUsd?: number;
+  pricingSource?: "self" | "provider" | string;
+  raw?: Record<string, unknown>;
+}
+
 export interface Mission {
   id: string;
   projectId: string;
@@ -191,6 +202,8 @@ export interface Mission {
   delivery?: string;
   externalId?: string | null;
   source?: string | null;
+  /** Optional agent-reported tokens/tools/$ on deliver */
+  usage?: MissionUsage | null;
 }
 
 export const COLUMNS: {

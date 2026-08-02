@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
+  BarChart3,
   BookMarked,
   BookOpen,
   Bot,
@@ -21,6 +22,7 @@ import { AdminPortal } from "@/components/admin-portal";
 import { AgentStrip } from "@/components/agent-strip";
 import { AgentProfilePanel } from "@/components/agent-profile-panel";
 import { AgentsPanel } from "@/components/agents-panel";
+import { AnalyticsPanel } from "@/components/analytics-panel";
 import { JournalPanel } from "@/components/journal-panel";
 import { UserProfilePanel } from "@/components/user-profile-panel";
 import { BoardColumn } from "@/components/board-column";
@@ -51,7 +53,14 @@ import { UserButton } from "@/lib/auth/gates";
 import { useOperatorMe } from "@/components/operator-gate";
 import { ALL_BOARDS_ID, isAllBoardsScope } from "@/lib/board-scope";
 
-type MainView = "board" | "live" | "calls" | "agents" | "protocol" | "journal";
+type MainView =
+  | "board"
+  | "live"
+  | "calls"
+  | "agents"
+  | "protocol"
+  | "journal"
+  | "analytics";
 
 const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
   { id: "board", label: "Board", icon: LayoutDashboard },
@@ -59,6 +68,7 @@ const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
   { id: "calls", label: "Calls", icon: MessageSquareWarning },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "protocol", label: "Protocol", icon: BookOpen },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "journal", label: "Journal", icon: BookMarked },
 ];
 
@@ -857,6 +867,11 @@ export function AppShell({
           {mainView === "protocol" && (
             <div className="min-h-0 flex-1 overflow-hidden">
               <ProtocolPanel />
+            </div>
+          )}
+          {mainView === "analytics" && (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <AnalyticsPanel />
             </div>
           )}
           {mainView === "journal" && (

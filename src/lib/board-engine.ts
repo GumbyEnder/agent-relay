@@ -77,6 +77,7 @@ export function missionSummary(m: Mission) {
     delivery: m.delivery,
     externalId: m.externalId ?? null,
     source: m.source ?? null,
+    usage: m.usage ?? null,
     updatedAt: m.updatedAt,
   };
 }
@@ -334,6 +335,7 @@ export function deliverMission(
   agentRef: string,
   summary: string,
   artifacts: string[] = [],
+  usage?: import("./types").MissionUsage | null,
 ): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
   const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
   board = ensured.board;
@@ -360,6 +362,7 @@ export function deliverMission(
           delivery,
           artifacts: artifacts.length ? artifacts : m.artifacts,
           lastHeartbeat: now,
+          ...(usage ? { usage } : {}),
         })
       : m,
   );

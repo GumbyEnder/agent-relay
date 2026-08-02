@@ -32,7 +32,14 @@ interface BoardState {
   historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
   selectedAgentId: string | null;
-  mainView: "board" | "live" | "calls" | "agents" | "protocol" | "journal";
+  mainView:
+    | "board"
+    | "live"
+    | "calls"
+    | "agents"
+    | "protocol"
+    | "journal"
+    | "analytics";
   panel:
     | "none"
     | "mission"
@@ -88,6 +95,7 @@ interface BoardState {
   replyToCall: (callId: string, reply: string) => void;
   deliver: (missionId: string, delivery: string) => void;
   updateMission: (id: string, patch: Partial<Mission>) => void;
+  transferMission: (id: string, projectId: string) => void;
   createMission: (input: {
     title: string;
     objective: string;
@@ -439,10 +447,31 @@ export const useBoard = create<BoardState>()((set, get) => ({
   },
 
   updateMission: (id, patch) => {
-    // optimistic local only for title edits not yet on API — skip durable fields
     set((s) => ({
       missions: s.missions.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     }));
+    void run("Update mission", async () => {
+      await agentApi.updateMission(id, {
+        title: patch.title,
+        objective: patch.objective,
+        context: patch.context,
+        constraints: patch.constraints,
+        acceptance: patch.acceptance,
+        priority: patch.priority,
+        tags: patch.tags,
+      });
+      await get().refresh();
+      await get().loadHistory(id);
+    });
+  },
+
+  transferMission: (id, projectId) => {
+    void run("Transfer mission", async () => {
+      await agentApi.transferMission(id, projectId);
+      await get().refresh();
+      await get().loadHistory(id);
+      toast.success("Mission moved to board");
+    });
   },
 
   createMission: (input) => {
