@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Plus, X } from "lucide-react";
+import { Check, Copy, KeyRound, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,9 +21,18 @@ import {
   DEFAULT_PUBLIC_BASE,
   clientAgentGuideMarkdown,
 } from "@/lib/agent-client-guide";
+import { cn } from "@/lib/utils";
 
 const harnesses = Object.keys(HARNESS_LABELS) as HarnessKind[];
 const statuses: AgentStatus[] = ["online", "busy", "idle", "offline", "error"];
+
+type AgentsTab = "agents" | "create" | "guide";
+
+const TABS: Array<{ id: AgentsTab; label: string }> = [
+  { id: "agents", label: "Agents" },
+  { id: "create", label: "Create" },
+  { id: "guide", label: "Guide" },
+];
 
 export function AgentsPanel() {
   const {
@@ -47,18 +56,19 @@ export function AgentsPanel() {
   const writeId = writeProjectId();
   const boardName = allBoards
     ? "All boards"
-    : projects.find((p) => p.id === selectedProjectId)?.name ?? "This board";
+    : (projects.find((p) => p.id === selectedProjectId)?.name ?? "This board");
   const writeBoardName =
     projects.find((p) => p.id === writeId)?.name ??
     (lastSingleProjectId
       ? projects.find((p) => p.id === lastSingleProjectId)?.name
       : null) ??
     "a board";
+
+  const [tab, setTab] = useState<AgentsTab>("agents");
   const [name, setName] = useState("");
   const [role, setRole] = useState("client");
   const [harness, setHarness] = useState<HarnessKind>("hermes");
   const [skills, setSkills] = useState("");
-  const [showForm, setShowForm] = useState(false);
   const [keys, setKeys] = useState<Array<Record<string, unknown>>>([]);
   const [lastSecret, setLastSecret] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("");
@@ -71,8 +81,6 @@ export function AgentsPanel() {
   const [ghSecret, setGhSecret] = useState("");
   const [ghRepo, setGhRepo] = useState("");
   const [replyUrl, setReplyUrl] = useState("");
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [copiedGuide, setCopiedGuide] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{
     id: string;
@@ -81,8 +89,9 @@ export function AgentsPanel() {
   } | null>(null);
   const [revokeStep, setRevokeStep] = useState<1 | 2>(1);
   const [revokeBusy, setRevokeBusy] = useState(false);
+  /** Expand key actions for one agent on the list tab */
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
 
-  // Keys/settings need a concrete board; fall back to last single board.
   const projectId = writeId;
   const publicBase =
     typeof window !== "undefined" ? window.location.origin : DEFAULT_PUBLIC_BASE;
@@ -90,7 +99,6 @@ export function AgentsPanel() {
     () => clientAgentGuideMarkdown(publicBase),
     [publicBase],
   );
-  // Snapshot is already scoped (single board or all boards the user can access).
   const roster = useMemo(() => agents.filter((a) => !a.isDemo), [agents]);
 
   const reloadKeys = useCallback(async () => {
@@ -144,310 +152,655 @@ export function AgentsPanel() {
       await reloadKeys();
       await refresh();
       toast.success(`Key for ${ag?.name ?? "agent"} — copy secret now`);
+      setTab("create");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "create failed");
     }
   }
 
+  function goCreate() {
+    if (!writeId) {
+      toast.error("Select a board in the rail before registering");
+      return;
+    }
+    setTab("create");
+  }
+
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-medium text-fg">Agent roster</h2>
-          <p className="text-xs text-fg-subtle">
-            {allBoards ? (
-              <>
-                Scope: <span className="font-medium text-fg">All boards</span>
-                {writeId ? (
-                  <span className="text-fg-subtle">
-                    {" "}
-                    · writes → {writeBoardName}
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <>
-                Selected board:{" "}
-                <span className="font-medium text-fg">{boardName}</span>
-              </>
+      <header className="border-b border-border px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium text-fg">Agents</h2>
+            <p className="truncate text-xs text-fg-subtle">
+              {allBoards ? (
+                <>
+                  Scope: <span className="font-medium text-fg">All boards</span>
+                  {writeId ? (
+                    <span className="text-fg-subtle"> · writes → {writeBoardName}</span>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  Board: <span className="font-medium text-fg">{boardName}</span>
+                </>
+              )}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {tab === "agents" && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={goCreate}
+                aria-label="Create agent"
+                title="Create agent"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
             )}
-          </p>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={closePanel}
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => {
-              if (!writeId) {
-                toast.error("Select a board in the rail before registering");
-                return;
-              }
-              setShowForm((v) => !v);
-            }}
-            aria-label="Register agent"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close">
-            <X className="h-4 w-4" />
-          </Button>
+
+        <div
+          className="mt-3 flex gap-0.5 rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-0.5"
+          role="tablist"
+          aria-label="Agents sections"
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "flex-1 rounded-[var(--radius-xs)] px-2 py-1.5 text-[11px] font-medium transition-colors",
+                tab === t.id
+                  ? "bg-accent text-accent-fg shadow-sm"
+                  : "text-fg-muted hover:text-fg",
+              )}
+            >
+              {t.label}
+              {t.id === "agents" && roster.length > 0 ? (
+                <span
+                  className={cn(
+                    "ml-1 tabular",
+                    tab === t.id ? "text-accent-fg/80" : "text-fg-subtle",
+                  )}
+                >
+                  {roster.length}
+                </span>
+              ) : null}
+            </button>
+          ))}
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {showForm && (
-          <form
-            className="space-y-2 border-b border-border p-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!name.trim()) {
-                toast.error("Name is required");
-                return;
-              }
-              const n = name.trim();
-              registerAgent({
-                name: n,
-                role: role.trim() || "client",
-                harness,
-                skills: skills
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-              });
-              setName("");
-              setRole("client");
-              setSkills("");
-              setShowForm(false);
-              toast.success(
-                `Registering ${n.toLowerCase()} on ${writeBoardName}…`,
-              );
-            }}
-          >
-            <p className="text-[11px] text-fg-muted">
-              Adds the agent to{" "}
-              <span className="text-fg">{writeBoardName}</span>, then issue a key
-              below.
-            </p>
-            <Input
-              placeholder="name (e.g. forge)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-            <Input
-              placeholder="role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              required
-            />
-            <select
-              className="h-10 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)]"
-              value={harness}
-              onChange={(e) => setHarness(e.target.value as HarnessKind)}
-            >
-              {harnesses.map((h) => (
-                <option key={h} value={h}>
-                  {HARNESS_LABELS[h]}
-                </option>
-              ))}
-            </select>
-            <Input
-              placeholder="skills (comma-separated)"
-              value={skills}
-              onChange={(e) => setSkills(e.target.value)}
-            />
-            <Button type="submit" size="sm" className="w-full">
-              Register on {writeBoardName}
-            </Button>
-          </form>
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+        {tab === "agents" && (
+          <AgentsListTab
+            roster={roster}
+            missions={missions}
+            allBoards={allBoards}
+            boardName={boardName}
+            writeBoardName={writeBoardName}
+            writeId={writeId}
+            expandedAgentId={expandedAgentId}
+            setExpandedAgentId={setExpandedAgentId}
+            setAgentStatus={setAgentStatus}
+            removeAgent={removeAgent}
+            openPanel={openPanel}
+            issueKey={(id) => void issueKey(id)}
+            goCreate={goCreate}
+          />
         )}
 
-        <div className="border-b border-border px-4 py-2.5">
-          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-            {allBoards ? "All-boards roster" : "Board roster"}
-          </h3>
-          <p className="mt-0.5 text-[11px] text-fg-muted">
-            {allBoards ? (
-              <>
-                Agents across boards you can access
-                {roster.length > 0 ? (
-                  <span className="text-fg-subtle"> · {roster.length}</span>
-                ) : null}
-              </>
-            ) : (
-              <>
-                Agents on <span className="text-fg">{boardName}</span>
-                {roster.length > 0 ? (
-                  <span className="text-fg-subtle"> · {roster.length}</span>
-                ) : null}
-              </>
-            )}
-          </p>
-        </div>
+        {tab === "create" && (
+          <CreateTab
+            roster={roster}
+            writeId={writeId}
+            writeBoardName={writeBoardName}
+            name={name}
+            setName={setName}
+            role={role}
+            setRole={setRole}
+            harness={harness}
+            setHarness={setHarness}
+            skills={skills}
+            setSkills={setSkills}
+            registerAgent={registerAgent}
+            keyName={keyName}
+            setKeyName={setKeyName}
+            keyAgent={keyAgent}
+            setKeyAgent={setKeyAgent}
+            keys={keys}
+            lastSecret={lastSecret}
+            setLastSecret={setLastSecret}
+            issueKey={issueKey}
+            projectId={projectId}
+            settings={settings}
+            ghRepo={ghRepo}
+            setGhRepo={setGhRepo}
+            ghSecret={ghSecret}
+            setGhSecret={setGhSecret}
+            replyUrl={replyUrl}
+            setReplyUrl={setReplyUrl}
+            reloadSettings={reloadSettings}
+            setRevokeTarget={setRevokeTarget}
+            setRevokeStep={setRevokeStep}
+            onRegistered={() => setTab("agents")}
+          />
+        )}
 
-        <ul className="divide-y divide-border">
-          {roster.length === 0 && (
-            <li className="px-4 py-8 text-center text-xs text-fg-subtle">
-              {allBoards
-                ? "No agents on any board yet."
-                : "No agents on this board yet."}
-              <br />
-              <button
-                type="button"
-                className="mt-2 text-fg underline-offset-2 hover:underline"
-                onClick={() => {
-                  if (!writeId) {
-                    toast.error("Select a board in the rail first");
-                    return;
+        {tab === "guide" && (
+          <GuideTab
+            publicBase={publicBase}
+            clientGuide={clientGuide}
+            copiedGuide={copiedGuide}
+            setCopiedGuide={setCopiedGuide}
+          />
+        )}
+      </div>
+
+      <Dialog
+        open={Boolean(revokeTarget)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setRevokeTarget(null);
+            setRevokeStep(1);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {revokeStep === 1 ? "Revoke API key?" : "Confirm revoke"}
+            </DialogTitle>
+            <DialogDescription>
+              {revokeStep === 1 ? (
+                <>
+                  This disables{" "}
+                  <span className="font-mono text-fg">
+                    {revokeTarget?.prefix}…
+                  </span>{" "}
+                  ({revokeTarget?.name}). The client agent will get 401 until you
+                  issue a new key.
+                </>
+              ) : (
+                <>
+                  Last chance. Revoke is permanent for this secret. You cannot
+                  undo — only create a new key.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRevokeTarget(null);
+                setRevokeStep(1);
+              }}
+            >
+              Cancel
+            </Button>
+            {revokeStep === 1 ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setRevokeStep(2)}
+              >
+                Continue
+              </Button>
+            ) : (
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={revokeBusy}
+                onClick={async () => {
+                  if (!revokeTarget) return;
+                  setRevokeBusy(true);
+                  try {
+                    await agentApi.revokeApiKey(revokeTarget.id);
+                    await reloadKeys();
+                    toast.success("Key revoked");
+                    setRevokeTarget(null);
+                    setRevokeStep(1);
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : "revoke failed");
+                  } finally {
+                    setRevokeBusy(false);
                   }
-                  setShowForm(true);
                 }}
               >
-                Register one{writeId ? ` for ${writeBoardName}` : ""}
-              </button>
-            </li>
-          )}
-          {roster.map((a) => {
-            const active = missions.find((m) => m.id === a.currentMissionId);
-            return (
-              <li key={a.id} className="space-y-2 px-4 py-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-mono text-sm text-fg">{a.name}</p>
-                    <p className="text-xs text-fg-muted">{a.role}</p>
-                  </div>
-                  <Badge variant="default">{HARNESS_LABELS[a.harness] ?? a.harness}</Badge>
-                </div>
-                {a.skills.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {a.skills.map((s) => (
-                      <Badge key={s} variant="default">
-                        {s}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-                <div className="flex items-center justify-between gap-2 text-[11px] text-fg-subtle">
-                  <span className="tabular">
-                    HB <RelativeTime ts={a.lastHeartbeat} />
-                  </span>
-                  {active ? (
-                    <button
-                      type="button"
-                      className="truncate text-left text-status-running hover:underline"
-                      onClick={() => openPanel("mission", active.id)}
-                    >
-                      {active.title}
-                    </button>
-                  ) : (
-                    <span>no mission</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    className="h-8 flex-1 rounded-[var(--radius-xs)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
-                    value={a.status}
-                    onChange={(e) =>
-                      setAgentStatus(a.id, e.target.value as AgentStatus)
-                    }
-                  >
-                    {statuses.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="h-8 text-[11px]"
-                    onClick={() => void issueKey(a.id)}
-                  >
-                    Issue key
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      removeAgent(a.id);
-                      toast.message("Agent removed");
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                {revokeBusy ? "Revoking…" : "Yes, revoke permanently"}
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
-        <div className="border-t border-border p-4 space-y-3">
+function AgentsListTab({
+  roster,
+  missions,
+  allBoards,
+  boardName,
+  writeBoardName,
+  writeId,
+  expandedAgentId,
+  setExpandedAgentId,
+  setAgentStatus,
+  removeAgent,
+  openPanel,
+  issueKey,
+  goCreate,
+}: {
+  roster: import("@/lib/types").Agent[];
+  missions: import("@/lib/types").Mission[];
+  allBoards: boolean;
+  boardName: string;
+  writeBoardName: string;
+  writeId: string | null;
+  expandedAgentId: string | null;
+  setExpandedAgentId: (id: string | null) => void;
+  setAgentStatus: (id: string, status: AgentStatus) => void;
+  removeAgent: (id: string) => void;
+  openPanel: (
+    panel: "mission" | "agents" | "protocol" | "calls" | "help" | "none" | "new-mission" | "new-agent",
+    missionId?: string | null,
+  ) => void;
+  issueKey: (id: string) => void;
+  goCreate: () => void;
+}) {
+  return (
+    <div>
+      <div className="border-b border-border px-4 py-2.5">
+        <p className="text-[11px] text-fg-muted">
+          {allBoards ? (
+            <>
+              All agents you can see
+              {roster.length > 0 ? (
+                <span className="text-fg-subtle"> · {roster.length}</span>
+              ) : null}
+            </>
+          ) : (
+            <>
+              Agents on <span className="text-fg">{boardName}</span>
+              {roster.length > 0 ? (
+                <span className="text-fg-subtle"> · {roster.length}</span>
+              ) : null}
+            </>
+          )}
+        </p>
+      </div>
+
+      <ul className="divide-y divide-border">
+        {roster.length === 0 && (
+          <li className="px-4 py-12 text-center">
+            <p className="text-sm text-fg-muted">
+              {allBoards
+                ? "No agents registered yet."
+                : "No agents on this board yet."}
+            </p>
+            <p className="mt-1 text-xs text-fg-subtle">
+              Register a client, then issue an API key so it can claim missions.
+            </p>
+            <Button size="sm" className="mt-4" onClick={goCreate}>
+              <Plus className="h-3.5 w-3.5" />
+              Create agent
+              {writeId ? ` on ${writeBoardName}` : ""}
+            </Button>
+          </li>
+        )}
+        {roster.map((a) => {
+          const active = missions.find((m) => m.id === a.currentMissionId);
+          const open = expandedAgentId === a.id;
+          return (
+            <li key={a.id} className="px-4 py-3">
+              <div className="flex items-start justify-between gap-2">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => setExpandedAgentId(open ? null : a.id)}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-mono text-sm text-fg">{a.name}</p>
+                    <Badge variant="default">
+                      {HARNESS_LABELS[a.harness] ?? a.harness}
+                    </Badge>
+                    <StatusDot status={a.status} />
+                  </div>
+                  <p className="mt-0.5 text-xs text-fg-muted">{a.role}</p>
+                </button>
+                <span className="shrink-0 text-[11px] text-fg-subtle tabular">
+                  HB <RelativeTime ts={a.lastHeartbeat} />
+                </span>
+              </div>
+
+              {a.skills.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {a.skills.map((s) => (
+                    <Badge key={s} variant="default">
+                      {s}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                {active ? (
+                  <button
+                    type="button"
+                    className="truncate text-left text-status-running hover:underline"
+                    onClick={() => openPanel("mission", active.id)}
+                  >
+                    {active.title}
+                  </button>
+                ) : (
+                  <span className="text-fg-subtle">no active mission</span>
+                )}
+                <button
+                  type="button"
+                  className="shrink-0 text-fg-muted hover:text-fg"
+                  onClick={() => setExpandedAgentId(open ? null : a.id)}
+                >
+                  {open ? "Less" : "Manage"}
+                </button>
+              </div>
+
+              {open && (
+                <div className="mt-3 space-y-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle/60 p-2.5">
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="h-8 flex-1 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                      value={a.status}
+                      onChange={(e) =>
+                        setAgentStatus(a.id, e.target.value as AgentStatus)
+                      }
+                    >
+                      {statuses.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 text-[11px]"
+                      onClick={() => issueKey(a.id)}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                      Issue key
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-[11px]"
+                      onClick={() => {
+                        removeAgent(a.id);
+                        toast.message("Agent removed");
+                        setExpandedAgentId(null);
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function StatusDot({ status }: { status: AgentStatus }) {
+  const color =
+    status === "busy"
+      ? "bg-status-running"
+      : status === "online" || status === "idle"
+        ? "bg-status-ready"
+        : status === "error"
+          ? "bg-status-blocked"
+          : "bg-fg-subtle";
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] text-fg-subtle">
+      <span className={cn("h-1.5 w-1.5 rounded-full", color)} />
+      {status}
+    </span>
+  );
+}
+
+function CreateTab({
+  roster,
+  writeId,
+  writeBoardName,
+  name,
+  setName,
+  role,
+  setRole,
+  harness,
+  setHarness,
+  skills,
+  setSkills,
+  registerAgent,
+  keyName,
+  setKeyName,
+  keyAgent,
+  setKeyAgent,
+  keys,
+  lastSecret,
+  setLastSecret,
+  issueKey,
+  projectId,
+  settings,
+  ghRepo,
+  setGhRepo,
+  ghSecret,
+  setGhSecret,
+  replyUrl,
+  setReplyUrl,
+  reloadSettings,
+  setRevokeTarget,
+  setRevokeStep,
+  onRegistered,
+}: {
+  roster: import("@/lib/types").Agent[];
+  writeId: string | null;
+  writeBoardName: string;
+  name: string;
+  setName: (v: string) => void;
+  role: string;
+  setRole: (v: string) => void;
+  harness: HarnessKind;
+  setHarness: (v: HarnessKind) => void;
+  skills: string;
+  setSkills: (v: string) => void;
+  registerAgent: (input: {
+    name: string;
+    harness: HarnessKind;
+    role: string;
+    skills: string[];
+  }) => void;
+  keyName: string;
+  setKeyName: (v: string) => void;
+  keyAgent: string;
+  setKeyAgent: (v: string) => void;
+  keys: Array<Record<string, unknown>>;
+  lastSecret: string | null;
+  setLastSecret: (v: string | null) => void;
+  issueKey: (agentId: string, label?: string) => Promise<void>;
+  projectId: string | null;
+  settings: {
+    githubRepo?: string | null;
+    replyWebhookUrl?: string | null;
+    hasGithubSecret?: boolean;
+  };
+  ghRepo: string;
+  setGhRepo: (v: string) => void;
+  ghSecret: string;
+  setGhSecret: (v: string) => void;
+  replyUrl: string;
+  setReplyUrl: (v: string) => void;
+  reloadSettings: () => Promise<void>;
+  setRevokeTarget: (v: { id: string; name: string; prefix: string } | null) => void;
+  setRevokeStep: (v: 1 | 2) => void;
+  onRegistered: () => void;
+}) {
+  return (
+    <div className="space-y-6 p-4">
+      {!writeId && (
+        <p className="rounded-[var(--radius-sm)] border border-status-human/30 bg-status-human/10 px-3 py-2 text-[11px] text-fg-muted">
+          Select a concrete board in the left rail before registering agents or
+          issuing keys.
+        </p>
+      )}
+
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
+            Register agent
+          </h3>
+          <p className="mt-0.5 text-[11px] text-fg-muted">
+            Adds the agent to{" "}
+            <span className="text-fg">{writeId ? writeBoardName : "…"}</span>,
+            then issue a key below.
+          </p>
+        </div>
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!writeId) {
+              toast.error("Select a board in the rail first");
+              return;
+            }
+            if (!name.trim()) {
+              toast.error("Name is required");
+              return;
+            }
+            const n = name.trim();
+            registerAgent({
+              name: n,
+              role: role.trim() || "client",
+              harness,
+              skills: skills
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean),
+            });
+            setName("");
+            setRole("client");
+            setSkills("");
+            toast.success(`Registered ${n.toLowerCase()} on ${writeBoardName}`);
+            onRegistered();
+          }}
+        >
+          <Input
+            placeholder="name (e.g. frodo)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <Input
+            placeholder="role"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            required
+          />
+          <select
+            className="h-10 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+            value={harness}
+            onChange={(e) => setHarness(e.target.value as HarnessKind)}
+          >
+            {harnesses.map((h) => (
+              <option key={h} value={h}>
+                {HARNESS_LABELS[h]}
+              </option>
+            ))}
+          </select>
+          <Input
+            placeholder="skills (comma-separated)"
+            value={skills}
+            onChange={(e) => setSkills(e.target.value)}
+          />
+          <Button type="submit" size="sm" className="w-full" disabled={!writeId}>
+            Register on {writeId ? writeBoardName : "…"}
+          </Button>
+        </form>
+      </section>
+
+      <section className="space-y-3 border-t border-border pt-5">
+        <div>
           <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
             API keys · {projectId ? writeBoardName : "select a board"}
           </h3>
-          <p className="text-[11px] text-fg-muted leading-relaxed">
-            {allBoards && !projectId
-              ? "Pick a board in the rail to issue or manage keys."
-              : allBoards
-                ? `Keys for ${writeBoardName} (last selected board). Register → issue key → paste ark_… into the client.`
-                : "Register above → issue a key bound to that agent → paste "}
-            {!allBoards || projectId ? (
-              <>
-                {!allBoards ? (
-                  <>
-                    <code className="text-fg-subtle">ark_…</code> into the
-                    client. Secret shown once.
-                  </>
-                ) : (
-                  <> Secret shown once.</>
-                )}
-              </>
-            ) : null}
+          <p className="mt-0.5 text-[11px] leading-relaxed text-fg-muted">
+            Bind a key to an agent → paste{" "}
+            <code className="text-fg-subtle">ark_…</code> into the client. Secret
+            shown once.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Input
-              placeholder="key label (optional)"
-              value={keyName}
-              onChange={(e) => setKeyName(e.target.value)}
-              className="h-8 flex-1 min-w-[6rem]"
-            />
-            <select
-              className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs shadow-[var(--shadow-border)]"
-              value={keyAgent}
-              onChange={(e) => setKeyAgent(e.target.value)}
-            >
-              <option value="">Select agent…</option>
-              {roster.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-            <Button
-              size="sm"
-              disabled={!keyAgent || !projectId}
-              onClick={() => {
-                if (!projectId) {
-                  toast.error("Select a board in the rail first");
-                  return;
-                }
-                if (!keyAgent) {
-                  toast.error("Select a registered agent first");
-                  return;
-                }
-                void issueKey(keyAgent, keyName || undefined);
-              }}
-            >
-              Create key
-            </Button>
-          </div>
-          {lastSecret && (
-            <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px] font-mono break-all">
-              {lastSecret}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            placeholder="key label (optional)"
+            value={keyName}
+            onChange={(e) => setKeyName(e.target.value)}
+            className="h-8 flex-1 min-w-[6rem]"
+          />
+          <select
+            className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs shadow-[var(--shadow-border)]"
+            value={keyAgent}
+            onChange={(e) => setKeyAgent(e.target.value)}
+          >
+            <option value="">Select agent…</option>
+            {roster.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            disabled={!keyAgent || !projectId}
+            onClick={() => {
+              if (!projectId) {
+                toast.error("Select a board in the rail first");
+                return;
+              }
+              if (!keyAgent) {
+                toast.error("Select a registered agent first");
+                return;
+              }
+              void issueKey(keyAgent, keyName || undefined);
+            }}
+          >
+            Create key
+          </Button>
+        </div>
+        {lastSecret && (
+          <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px] font-mono break-all">
+            {lastSecret}
+            <div className="mt-2 flex gap-2">
               <Button
                 size="sm"
                 variant="secondary"
-                className="mt-2 w-full"
+                className="flex-1"
                 onClick={async () => {
                   await navigator.clipboard.writeText(lastSecret);
                   toast.success("Secret copied");
@@ -455,275 +808,195 @@ export function AgentsPanel() {
               >
                 Copy secret
               </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setLastSecret(null)}
+              >
+                Dismiss
+              </Button>
             </div>
-          )}
-          <ul className="space-y-1.5">
-            {keys.map((k) => {
-              const bound = roster.find((a) => a.id === k.agentId);
-              return (
-                <li
-                  key={String(k.id)}
-                  className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">{String(k.name)}</div>
-                    <div className="font-mono text-fg-subtle">
-                      {String(k.keyPrefix)}…
-                      {bound ? ` · ${bound.name}` : k.agentId ? " · bound" : " · shared"}
-                    </div>
+          </div>
+        )}
+        <ul className="space-y-1.5">
+          {keys.map((k) => {
+            const bound = roster.find((a) => a.id === k.agentId);
+            return (
+              <li
+                key={String(k.id)}
+                className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{String(k.name)}</div>
+                  <div className="font-mono text-fg-subtle">
+                    {String(k.keyPrefix)}…
+                    {bound
+                      ? ` · ${bound.name}`
+                      : k.agentId
+                        ? " · bound"
+                        : " · shared"}
                   </div>
-                  {k.revokedAt ? (
-                    <Badge variant="done">revoked</Badge>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      className="h-7 text-[11px]"
-                      onClick={() => {
-                        setRevokeStep(1);
-                        setRevokeTarget({
-                          id: String(k.id),
-                          name: String(k.name),
-                          prefix: String(k.keyPrefix ?? ""),
-                        });
-                      }}
-                    >
-                      Revoke
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-            {keys.length === 0 && (
-              <li className="text-[11px] text-fg-subtle">
-                {projectId
-                  ? "No keys on this board yet."
-                  : "Select a board to list keys."}
-              </li>
-            )}
-          </ul>
-
-          <Dialog
-            open={Boolean(revokeTarget)}
-            onOpenChange={(o) => {
-              if (!o) {
-                setRevokeTarget(null);
-                setRevokeStep(1);
-              }
-            }}
-          >
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  {revokeStep === 1 ? "Revoke API key?" : "Confirm revoke"}
-                </DialogTitle>
-                <DialogDescription>
-                  {revokeStep === 1 ? (
-                    <>
-                      This disables{" "}
-                      <span className="font-mono text-fg">
-                        {revokeTarget?.prefix}…
-                      </span>{" "}
-                      ({revokeTarget?.name}). The client agent will get 401 until you
-                      issue a new key.
-                    </>
-                  ) : (
-                    <>
-                      Last chance. Revoke is permanent for this secret. You cannot
-                      undo — only create a new key.
-                    </>
-                  )}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setRevokeTarget(null);
-                    setRevokeStep(1);
-                  }}
-                >
-                  Cancel
-                </Button>
-                {revokeStep === 1 ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setRevokeStep(2)}
-                  >
-                    Continue
-                  </Button>
+                </div>
+                {k.revokedAt ? (
+                  <Badge variant="done">revoked</Badge>
                 ) : (
                   <Button
-                    variant="danger"
                     size="sm"
-                    disabled={revokeBusy}
-                    onClick={async () => {
-                      if (!revokeTarget) return;
-                      setRevokeBusy(true);
-                      try {
-                        await agentApi.revokeApiKey(revokeTarget.id);
-                        await reloadKeys();
-                        toast.success("Key revoked");
-                        setRevokeTarget(null);
-                        setRevokeStep(1);
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : "revoke failed");
-                      } finally {
-                        setRevokeBusy(false);
-                      }
+                    variant="danger"
+                    className="h-7 text-[11px]"
+                    onClick={() => {
+                      setRevokeStep(1);
+                      setRevokeTarget({
+                        id: String(k.id),
+                        name: String(k.name),
+                        prefix: String(k.keyPrefix ?? ""),
+                      });
                     }}
                   >
-                    {revokeBusy ? "Revoking…" : "Yes, revoke permanently"}
+                    Revoke
                   </Button>
                 )}
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          <button
-            type="button"
-            className="flex w-full items-center gap-1.5 pt-2 text-left text-xs font-medium uppercase tracking-wider text-fg-subtle"
-            onClick={() => setGuideOpen((v) => !v)}
-          >
-            {guideOpen ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-            Client agent guide
-          </button>
-          {guideOpen && (
-            <div className="space-y-2">
-              <p className="text-[11px] leading-relaxed text-fg-muted">
-                {CLIENT_AGENT_BLURB}
-              </p>
-              <p className="font-mono text-[10px] text-fg-subtle break-all">
-                {publicBase}
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="h-7 text-[11px]"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(clientGuide);
-                    setCopiedGuide(true);
-                    toast.success("Client guide copied — paste into your agent");
-                    setTimeout(() => setCopiedGuide(false), 1500);
-                  }}
-                >
-                  {copiedGuide ? (
-                    <Check className="h-3.5 w-3.5" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" />
-                  )}
-                  Copy guide for agent
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-[11px]"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(publicBase);
-                    toast.success("Base URL copied");
-                  }}
-                >
-                  Copy base URL
-                </Button>
-              </div>
-              <pre className="max-h-40 overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-2 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
-                {clientGuide}
-              </pre>
-            </div>
+              </li>
+            );
+          })}
+          {keys.length === 0 && (
+            <li className="text-[11px] text-fg-subtle">
+              {projectId
+                ? "No keys on this board yet."
+                : "Select a board to list keys."}
+            </li>
           )}
+        </ul>
+      </section>
 
-          <button
-            type="button"
-            className="flex w-full items-center gap-1.5 pt-1 text-left text-xs font-medium uppercase tracking-wider text-fg-subtle"
-            onClick={() => setIntegrationsOpen((v) => !v)}
-          >
-            {integrationsOpen ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
+      <section className="space-y-3 border-t border-border pt-5">
+        <div>
+          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
             Integrations
-          </button>
-          {integrationsOpen && (
-            <div className="space-y-2">
-              {!projectId ? (
-                <p className="text-[11px] text-fg-muted leading-relaxed">
-                  Select a board in the rail to configure GitHub / webhooks for
-                  that board.
-                </p>
-              ) : (
-                <>
-                  <p className="text-[11px] text-fg-muted leading-relaxed">
-                    Map a repo to {writeBoardName}, set the webhook secret, then
-                    point GitHub at the URL below. Issues create one mission with
-                    stable <code className="text-fg-subtle">external_id</code>{" "}
-                    <code className="text-fg-subtle">github:owner/repo#n</code>.
-                  </p>
-                  <Input
-                    placeholder="GitHub repo org/name"
-                    value={ghRepo}
-                    onChange={(e) => setGhRepo(e.target.value)}
-                    className="h-8"
-                  />
-                  <Input
-                    placeholder="GitHub webhook secret"
-                    value={ghSecret}
-                    onChange={(e) => setGhSecret(e.target.value)}
-                    className="h-8"
-                    type="password"
-                  />
-                  <Input
-                    placeholder="Reply webhook URL (on Call resolve)"
-                    value={replyUrl}
-                    onChange={(e) => setReplyUrl(e.target.value)}
-                    className="h-8"
-                  />
-                  <p className="text-[10px] text-fg-subtle break-all">
-                    Payload URL: POST /api/agent/webhooks/github?project=
-                    {projectId}
-                    <br />
-                    Events: issues, issue_comment, pull_request, check_run (JSON)
-                    <br />
-                    {settings.hasGithubSecret
-                      ? "Secret configured ✓"
-                      : "No secret yet — webhooks accepted unsigned (dev only)"}
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={async () => {
-                      try {
-                        await agentApi.updateSettings(projectId, {
-                          githubRepo: ghRepo || null,
-                          githubWebhookSecret: ghSecret || undefined,
-                          replyWebhookUrl: replyUrl || null,
-                        });
-                        setGhSecret("");
-                        await reloadSettings();
-                        toast.success("Settings saved");
-                      } catch (e) {
-                        toast.error(
-                          e instanceof Error ? e.message : "save failed",
-                        );
-                      }
-                    }}
-                  >
-                    Save integration settings
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
+          </h3>
+          <p className="mt-0.5 text-[11px] text-fg-muted leading-relaxed">
+            Optional GitHub / webhook mapping for{" "}
+            {projectId ? writeBoardName : "the selected board"}.
+          </p>
         </div>
+        {!projectId ? (
+          <p className="text-[11px] text-fg-subtle">
+            Select a board in the rail to configure integrations.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <Input
+              placeholder="GitHub repo org/name"
+              value={ghRepo}
+              onChange={(e) => setGhRepo(e.target.value)}
+              className="h-8"
+            />
+            <Input
+              placeholder="GitHub webhook secret"
+              value={ghSecret}
+              onChange={(e) => setGhSecret(e.target.value)}
+              className="h-8"
+              type="password"
+            />
+            <Input
+              placeholder="Reply webhook URL (on Call resolve)"
+              value={replyUrl}
+              onChange={(e) => setReplyUrl(e.target.value)}
+              className="h-8"
+            />
+            <p className="break-all text-[10px] text-fg-subtle">
+              Payload URL: POST /api/agent/webhooks/github?project={projectId}
+              <br />
+              Events: issues, issue_comment, pull_request, check_run (JSON)
+              <br />
+              {settings.hasGithubSecret
+                ? "Secret configured ✓"
+                : "No secret yet — webhooks accepted unsigned (dev only)"}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="w-full"
+              onClick={async () => {
+                try {
+                  await agentApi.updateSettings(projectId, {
+                    githubRepo: ghRepo || null,
+                    githubWebhookSecret: ghSecret || undefined,
+                    replyWebhookUrl: replyUrl || null,
+                  });
+                  setGhSecret("");
+                  await reloadSettings();
+                  toast.success("Settings saved");
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "save failed");
+                }
+              }}
+            >
+              Save integration settings
+            </Button>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function GuideTab({
+  publicBase,
+  clientGuide,
+  copiedGuide,
+  setCopiedGuide,
+}: {
+  publicBase: string;
+  clientGuide: string;
+  copiedGuide: boolean;
+  setCopiedGuide: (v: boolean) => void;
+}) {
+  return (
+    <div className="space-y-4 p-4">
+      <div>
+        <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
+          Client agent guide
+        </h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
+          {CLIENT_AGENT_BLURB}
+        </p>
       </div>
+      <p className="break-all font-mono text-[10px] text-fg-subtle">{publicBase}</p>
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          size="sm"
+          variant="secondary"
+          className="h-8 text-[11px]"
+          onClick={async () => {
+            await navigator.clipboard.writeText(clientGuide);
+            setCopiedGuide(true);
+            toast.success("Client guide copied — paste into your agent");
+            setTimeout(() => setCopiedGuide(false), 1500);
+          }}
+        >
+          {copiedGuide ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+          Copy guide for agent
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 text-[11px]"
+          onClick={async () => {
+            await navigator.clipboard.writeText(publicBase);
+            toast.success("Base URL copied");
+          }}
+        >
+          Copy base URL
+        </Button>
+      </div>
+      <pre className="max-h-[min(60vh,28rem)] overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-3 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
+        {clientGuide}
+      </pre>
     </div>
   );
 }
