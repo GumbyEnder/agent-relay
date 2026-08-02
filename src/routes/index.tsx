@@ -5,7 +5,7 @@ import { z } from "zod";
 
 const searchSchema = z.object({
   view: z
-    .enum(["board", "live", "calls", "agents", "protocol"])
+    .enum(["board", "live", "calls", "agents", "protocol", "journal"])
     .optional()
     .catch(undefined),
   project: z.string().optional().catch(undefined),

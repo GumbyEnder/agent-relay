@@ -92,6 +92,17 @@ export const agentApi = {
       "GET",
       `/agents/${encodeURIComponent(agentId)}/profile`,
     ),
+  getPrefs: () =>
+    req<{ ok: true; userId: string; theme: string | null; prefs: Record<string, unknown> }>(
+      "GET",
+      "/me/prefs",
+    ),
+  setPrefs: (patch: { theme?: string | null; prefs?: Record<string, unknown> }) =>
+    req<{ ok: true; userId: string; theme: string | null; prefs: Record<string, unknown> }>(
+      "POST",
+      "/me/prefs",
+      patch,
+    ),
 
   board: (projectId?: string | null) => {
     // null / "all" / "*" → every board the operator can access

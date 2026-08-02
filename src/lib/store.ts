@@ -32,7 +32,7 @@ interface BoardState {
   historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
   selectedAgentId: string | null;
-  mainView: "board" | "live" | "calls" | "agents" | "protocol";
+  mainView: "board" | "live" | "calls" | "agents" | "protocol" | "journal";
   panel:
     | "none"
     | "mission"

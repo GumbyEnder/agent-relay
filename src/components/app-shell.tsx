@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
+  BookMarked,
   BookOpen,
   Bot,
   CircleHelp,
@@ -20,6 +21,7 @@ import { AdminPortal } from "@/components/admin-portal";
 import { AgentStrip } from "@/components/agent-strip";
 import { AgentProfilePanel } from "@/components/agent-profile-panel";
 import { AgentsPanel } from "@/components/agents-panel";
+import { JournalPanel } from "@/components/journal-panel";
 import { UserProfilePanel } from "@/components/user-profile-panel";
 import { BoardColumn } from "@/components/board-column";
 import { CallsPanel } from "@/components/calls-panel";
@@ -49,7 +51,7 @@ import { UserButton } from "@/lib/auth/gates";
 import { useOperatorMe } from "@/components/operator-gate";
 import { ALL_BOARDS_ID, isAllBoardsScope } from "@/lib/board-scope";
 
-type MainView = "board" | "live" | "calls" | "agents" | "protocol";
+type MainView = "board" | "live" | "calls" | "agents" | "protocol" | "journal";
 
 const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
   { id: "board", label: "Board", icon: LayoutDashboard },
@@ -57,6 +59,7 @@ const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
   { id: "calls", label: "Calls", icon: MessageSquareWarning },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "protocol", label: "Protocol", icon: BookOpen },
+  { id: "journal", label: "Journal", icon: BookMarked },
 ];
 
 export function AppShell({
@@ -263,7 +266,24 @@ export function AppShell({
     setTheme(applyTheme(id));
     setThemeOpen(false);
     toast.message(`Theme · ${THEME_LABELS[id]}`);
+    void agentApi.setPrefs({ theme: id }).catch(() => {
+      /* unsigned / offline — local only */
+    });
   };
+
+  // Account theme wins over localStorage when signed in
+  useEffect(() => {
+    void agentApi
+      .getPrefs()
+      .then((res) => {
+        if (res.theme && THEME_IDS.includes(res.theme as ThemeId)) {
+          setTheme(applyTheme(res.theme as ThemeId));
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, []);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
@@ -499,7 +519,7 @@ export function AppShell({
                 type="button"
                 onClick={() => selectView(v.id)}
                 className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] px-3 text-xs font-medium transition-colors",
+                  "inline-flex h-10 min-h-[40px] items-center gap-1.5 rounded-[var(--radius-sm)] px-3 text-xs font-medium transition-colors sm:h-8 sm:min-h-0",
                   active
                     ? "bg-accent text-accent-fg"
                     : "text-fg-muted hover:bg-bg-subtle hover:text-fg",
@@ -599,6 +619,45 @@ export function AppShell({
           onOpenRoster={() => selectView("agents")}
         />
       )}
+
+      {/* Mobile board picker — rail is md+ only */}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+        <label className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+          Board
+        </label>
+        <select
+          className="h-11 min-h-[44px] flex-1 rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+          value={isAllBoardsScope(selectedProjectId) ? ALL_BOARDS_ID : (selectedProjectId ?? "")}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === ALL_BOARDS_ID) {
+              setSelectedProjectId(ALL_BOARDS_ID);
+              void navigate({
+                to: "/",
+                search: (prev) => ({ ...prev, project: "all" }),
+              });
+              return;
+            }
+            setSelectedProjectId(v);
+            const p = projects.find((x) => x.id === v);
+            void navigate({
+              to: "/",
+              search: (prev) => ({
+                ...prev,
+                project: p?.slug && p.slug !== "default" ? p.slug : undefined,
+              }),
+            });
+          }}
+          aria-label="Select board"
+        >
+          <option value={ALL_BOARDS_ID}>All boards</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="flex min-h-0 flex-1">
         {/* Board rail — switch only; create lives next to Mission in the header */}
@@ -798,6 +857,11 @@ export function AppShell({
           {mainView === "protocol" && (
             <div className="min-h-0 flex-1 overflow-hidden">
               <ProtocolPanel />
+            </div>
+          )}
+          {mainView === "journal" && (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <JournalPanel />
             </div>
           )}
         </div>

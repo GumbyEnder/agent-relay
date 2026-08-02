@@ -1175,6 +1175,35 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, mission: m });
     }
 
+    // GET|POST /me/prefs — operator UI preferences (theme, …)
+    if (
+      parts.length === 2 &&
+      parts[0] === "me" &&
+      parts[1] === "prefs" &&
+      (req.method === "GET" || req.method === "POST")
+    ) {
+      const gate = await requireOperatorCap(req, "read");
+      if (gate) return gate;
+      const ctx = await loadOperatorContext(req);
+      if (!ctx.user?.id) {
+        return err(401, "Sign in required", "signed_out");
+      }
+      if (req.method === "GET") {
+        const prefs = await boardOps.getOperatorPrefs(ctx.user.id);
+        return json({ ok: true, ...prefs });
+      }
+      const theme = str(body.theme) ?? null;
+      const prefsPatch =
+        body.prefs && typeof body.prefs === "object" && !Array.isArray(body.prefs)
+          ? (body.prefs as Record<string, unknown>)
+          : undefined;
+      const saved = await boardOps.setOperatorPrefs(ctx.user.id, {
+        theme: theme === null || theme === "" ? null : theme,
+        prefs: prefsPatch,
+      });
+      return json({ ok: true, ...saved });
+    }
+
     // GET /  — catalog
     if (parts.length === 0 && req.method === "GET") {
       return json({

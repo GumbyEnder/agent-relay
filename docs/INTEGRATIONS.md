@@ -160,3 +160,14 @@ relay-journal/                 # or .relay/ in the linked git repo
 3. Journal renderer from `mission_history` → markdown files.  
 4. Project setting: `journal.repo` + path prefix.  
 5. Agent verb unchanged; optional `poll` filter `tag:github`.
+
+## GitHub webhook connect (operator UI)
+
+1. Open **Agents → Create → GitHub connect** with the target board selected in the rail.
+2. **Copy** the payload URL (`/api/agent/webhooks/github?project=<boardId>`).
+3. In GitHub: repo **Settings → Webhooks → Add webhook** (or App equivalent).
+4. **Generate** a secret in Dev Boards, paste the same value into GitHub and **Save connection**.
+5. Content type: `application/json`. Events: `issues`, `issue_comment`, `pull_request`, `check_run`.
+6. Open a test issue → one mission with `external_id` `github:org/repo#n`.
+
+Status checklist in the UI shows repo mapped + secret configured.

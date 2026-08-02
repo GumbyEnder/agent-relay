@@ -24,6 +24,8 @@ import { authClient, authEnabled, signOut } from "@/lib/auth/client";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { useOperatorMe } from "@/components/operator-gate";
 import { useBoard } from "@/lib/store";
+import { agentApi } from "@/lib/api-client";
+import { applyTheme, isThemeId, THEME_IDS, THEME_LABELS } from "@/lib/theme";
 import type { Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +55,7 @@ export function UserProfilePanel() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [accountTheme, setAccountTheme] = useState<string | null>(null);
 
   const reloadBoards = useCallback(async () => {
     setLoadingBoards(true);
@@ -67,6 +70,13 @@ export function UserProfilePanel() {
   useEffect(() => {
     void reloadBoards();
   }, [reloadBoards]);
+
+  useEffect(() => {
+    void agentApi
+      .getPrefs()
+      .then((r) => setAccountTheme(r.theme))
+      .catch(() => setAccountTheme(null));
+  }, []);
 
   const active = useMemo(
     () => boards.filter((b) => !b.archivedAt),
@@ -173,6 +183,36 @@ export function UserProfilePanel() {
             <div className="flex justify-between gap-2">
               <dt className="text-fg-subtle">Role</dt>
               <dd className="text-fg">{role ?? "—"}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <dt className="text-fg-subtle">Theme</dt>
+              <dd>
+                <select
+                  className="h-8 rounded-[var(--radius-sm)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                  value={accountTheme && isThemeId(accountTheme) ? accountTheme : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!isThemeId(v)) return;
+                    setAccountTheme(v);
+                    applyTheme(v);
+                    void agentApi
+                      .setPrefs({ theme: v })
+                      .then(() => toast.success(`Theme saved · ${THEME_LABELS[v]}`))
+                      .catch((err) =>
+                        toast.error(err instanceof Error ? err.message : "save failed"),
+                      );
+                  }}
+                >
+                  <option value="" disabled>
+                    Select…
+                  </option>
+                  {THEME_IDS.map((id) => (
+                    <option key={id} value={id}>
+                      {THEME_LABELS[id]}
+                    </option>
+                  ))}
+                </select>
+              </dd>
             </div>
           </dl>
           {authEnabled && (

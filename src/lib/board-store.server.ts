@@ -1669,6 +1669,60 @@ export const durableBoard = {
       return hit;
     }),
 
+  getOperatorPrefs: (userId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select * from ar_operator_prefs where user_id = ${userId} limit 1
+      `) as Record<string, unknown>[];
+      if (!rows[0]) {
+        return { userId, theme: null as string | null, prefs: {} as Record<string, unknown> };
+      }
+      const x = rows[0];
+      const prefs =
+        x.prefs && typeof x.prefs === "object" && !Array.isArray(x.prefs)
+          ? (x.prefs as Record<string, unknown>)
+          : {};
+      return {
+        userId,
+        theme: x.theme != null ? String(x.theme) : null,
+        prefs,
+      };
+    }),
+
+  setOperatorPrefs: (
+    userId: string,
+    patch: { theme?: string | null; prefs?: Record<string, unknown> },
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const cur = (await sql`
+        select * from ar_operator_prefs where user_id = ${userId} limit 1
+      `) as Record<string, unknown>[];
+      const prev = cur[0] ?? {};
+      const theme =
+        patch.theme !== undefined
+          ? patch.theme
+          : prev.theme != null
+            ? String(prev.theme)
+            : null;
+      const prevPrefs =
+        prev.prefs && typeof prev.prefs === "object" && !Array.isArray(prev.prefs)
+          ? (prev.prefs as Record<string, unknown>)
+          : {};
+      const prefs = patch.prefs ? { ...prevPrefs, ...patch.prefs } : prevPrefs;
+      const prefsJson = JSON.stringify(prefs);
+      await sql`
+        insert into ar_operator_prefs (user_id, theme, prefs, updated_at)
+        values (${userId}, ${theme}, ${prefsJson}::jsonb, now())
+        on conflict (user_id) do update set
+          theme = excluded.theme,
+          prefs = excluded.prefs,
+          updated_at = now()
+      `;
+      return { userId, theme, prefs };
+    }),
+
   getProjectSettings: (projectId: string) =>
     withLock(async () => {
       const sql = await getSql();

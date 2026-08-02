@@ -891,11 +891,17 @@ function CreateTab({
   setRevokeStep: (v: 1 | 2) => void;
   onRegistered: () => void;
 }) {
-  const [integrationsOpen, setIntegrationsOpen] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const field =
     "flex h-8 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-2.5 text-xs text-fg shadow-[var(--shadow-border)] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
   const labelCls =
     "mb-1 block text-[10px] font-medium uppercase tracking-wider text-fg-subtle";
+  const webhookUrl =
+    typeof window !== "undefined" && projectId
+      ? `${window.location.origin}/api/agent/webhooks/github?project=${encodeURIComponent(projectId)}`
+      : projectId
+        ? `/api/agent/webhooks/github?project=${projectId}`
+        : "";
 
   return (
     <div className="space-y-5 p-4">
@@ -1176,20 +1182,71 @@ function CreateTab({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" />
           )}
-          Integrations
-          <span className="ml-1 font-normal text-fg-subtle">GitHub · webhooks</span>
+          GitHub connect
+          <span className="ml-1 font-normal text-fg-subtle">
+            {settings.hasGithubSecret ? "· linked" : "· setup"}
+          </span>
         </button>
         {integrationsOpen && (
-          <div className="space-y-2 border-t border-border px-3 pb-3 pt-2">
+          <div className="space-y-3 border-t border-border px-3 pb-3 pt-2">
             {!projectId ? (
               <p className="text-[11px] text-fg-subtle">
                 Select a board in the rail to configure.
               </p>
             ) : (
               <>
+                <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-fg-muted">
+                  <li>Copy the payload URL below into a GitHub repo webhook (or App).</li>
+                  <li>Generate a secret, paste the same value in GitHub and here, then Save.</li>
+                  <li>Set content type to application/json. Events: issues, issue_comment, pull_request, check_run.</li>
+                  <li>Open a test issue — one mission appears with external_id github:org/repo#n.</li>
+                </ol>
+
+                <ul className="space-y-1 rounded-[var(--radius-sm)] border border-border bg-bg-subtle/50 px-2.5 py-2 text-[11px]">
+                  <li className="flex justify-between gap-2">
+                    <span className="text-fg-subtle">Repo mapped</span>
+                    <span className="font-mono text-fg">
+                      {ghRepo.trim() || settings.githubRepo || "—"}
+                    </span>
+                  </li>
+                  <li className="flex justify-between gap-2">
+                    <span className="text-fg-subtle">Webhook secret</span>
+                    <span className="text-fg">
+                      {settings.hasGithubSecret ? "configured ✓" : "missing"}
+                    </span>
+                  </li>
+                  <li className="flex justify-between gap-2">
+                    <span className="text-fg-subtle">Board</span>
+                    <span className="truncate text-fg">{writeBoardName}</span>
+                  </li>
+                </ul>
+
+                <div className="min-w-0">
+                  <label className={labelCls}>Payload URL</label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      readOnly
+                      value={webhookUrl}
+                      className="h-8 flex-1 font-mono text-[10px]"
+                      onFocus={(e) => e.target.select()}
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 shrink-0"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(webhookUrl);
+                        toast.success("Webhook URL copied");
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+
                 <div className="min-w-0">
                   <label className={labelCls} htmlFor="gh-repo">
-                    Repo
+                    GitHub repo
                   </label>
                   <Input
                     id="gh-repo"
@@ -1199,44 +1256,58 @@ function CreateTab({
                     className="h-8 text-xs"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="min-w-0">
-                    <label className={labelCls} htmlFor="gh-secret">
-                      Webhook secret
-                    </label>
+                <div className="min-w-0">
+                  <label className={labelCls} htmlFor="gh-secret">
+                    Webhook secret
+                  </label>
+                  <div className="flex gap-1.5">
                     <Input
                       id="gh-secret"
-                      placeholder="••••"
+                      placeholder={
+                        settings.hasGithubSecret ? "•••• saved — enter to replace" : "generate or paste"
+                      }
                       value={ghSecret}
                       onChange={(e) => setGhSecret(e.target.value)}
-                      className="h-8 text-xs"
+                      className="h-8 flex-1 text-xs"
                       type="password"
                     />
-                  </div>
-                  <div className="min-w-0">
-                    <label className={labelCls} htmlFor="reply-url">
-                      Reply URL
-                    </label>
-                    <Input
-                      id="reply-url"
-                      placeholder="https://…"
-                      value={replyUrl}
-                      onChange={(e) => setReplyUrl(e.target.value)}
-                      className="h-8 text-xs"
-                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 shrink-0"
+                      type="button"
+                      onClick={() => {
+                        const bytes = new Uint8Array(24);
+                        crypto.getRandomValues(bytes);
+                        const s = Array.from(bytes, (b) =>
+                          b.toString(16).padStart(2, "0"),
+                        ).join("");
+                        setGhSecret(s);
+                        void navigator.clipboard.writeText(s).then(
+                          () => toast.success("Secret generated + copied — paste into GitHub too"),
+                          () => toast.success("Secret generated — copy it into GitHub"),
+                        );
+                      }}
+                    >
+                      Generate
+                    </Button>
                   </div>
                 </div>
-                <p className="break-all text-[10px] leading-relaxed text-fg-subtle">
-                  POST /api/agent/webhooks/github?project={projectId}
-                  <br />
-                  {settings.hasGithubSecret
-                    ? "Secret configured ✓"
-                    : "No secret yet (dev accepts unsigned)"}
-                </p>
+                <div className="min-w-0">
+                  <label className={labelCls} htmlFor="reply-url">
+                    Reply webhook (optional)
+                  </label>
+                  <Input
+                    id="reply-url"
+                    placeholder="https://… on Call resolve"
+                    value={replyUrl}
+                    onChange={(e) => setReplyUrl(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
                 <div className="flex justify-end">
                   <Button
                     size="sm"
-                    variant="secondary"
                     onClick={async () => {
                       try {
                         await agentApi.updateSettings(projectId, {
@@ -1246,7 +1317,7 @@ function CreateTab({
                         });
                         setGhSecret("");
                         await reloadSettings();
-                        toast.success("Settings saved");
+                        toast.success("GitHub settings saved");
                       } catch (e) {
                         toast.error(
                           e instanceof Error ? e.message : "save failed",
@@ -1254,7 +1325,7 @@ function CreateTab({
                       }
                     }}
                   >
-                    Save
+                    Save connection
                   </Button>
                 </div>
               </>

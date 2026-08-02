@@ -121,3 +121,16 @@ Ship **theme packs** as data (CSS variables), not forks.
 3. Project rail stub (single project selected).  
 4. Theme switcher + light + cyberpunk tokens.  
 5. Multi-project data when topology lands.
+
+## Journal tab
+
+Read-only markdown trails for missions in the current board scope (or All boards). Open mission jumps to the mission panel.
+
+## Mobile QA checklist (~390px)
+
+- [ ] Board picker visible (no rail)
+- [ ] View tabs tappable; Calls badge visible when open
+- [ ] Open mission side panel; close overlay
+- [ ] Answer a Call
+- [ ] Live feed scrolls; filters usable
+- [ ] Agents roster scrolls

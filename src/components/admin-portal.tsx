@@ -25,7 +25,13 @@ import type {
 } from "@/lib/types";
 import { COLUMN_STATUS_COLOR, COLUMNS, HARNESS_LABELS } from "@/lib/types";
 import { cn, formatTime } from "@/lib/utils";
-import { filterEvents, filterHistory } from "@/lib/filters";
+import {
+  filterEvents,
+  filterHistory,
+  liveFiltersActive,
+  readLiveFilters,
+  writeLiveFilters,
+} from "@/lib/filters";
 
 interface AdminPayload {
   ok: boolean;
@@ -93,9 +99,10 @@ export function AdminPortal({
   const seenEvents = useRef<Set<string>>(new Set());
   const seenHistory = useRef<Set<string>>(new Set());
   const bootstrapped = useRef(false);
-  const [filterAgent, setFilterAgent] = useState<string>("");
-  const [filterKind, setFilterKind] = useState<string>("");
-  const [filterQuery, setFilterQuery] = useState("");
+  const [filterAgent, setFilterAgent] = useState<string>(() => readLiveFilters().agentId ?? "");
+  const [filterKind, setFilterKind] = useState<string>(() => readLiveFilters().kind ?? "");
+  const [filterQuery, setFilterQuery] = useState(() => readLiveFilters().query ?? "");
+  const [filterBoard, setFilterBoard] = useState<string>(() => readLiveFilters().projectId ?? "");
   const [localScope, setLocalScope] = useState<LiveScope>(() => {
     try {
       const raw = localStorage.getItem(LIVE_SCOPE_KEY);
@@ -196,9 +203,14 @@ export function AdminPortal({
       agentId: filterAgent || null,
       kind: filterKind || null,
       query: filterQuery || null,
+      projectId: scope === "all" ? filterBoard || null : null,
     }),
-    [filterAgent, filterKind, filterQuery],
+    [filterAgent, filterKind, filterQuery, filterBoard, scope],
   );
+
+  useEffect(() => {
+    writeLiveFilters(liveFilter);
+  }, [liveFilter]);
 
   const filteredEvents = useMemo(
     () => filterEvents(data?.events ?? [], liveFilter),
@@ -208,6 +220,7 @@ export function AdminPortal({
     () => filterHistory(data?.history ?? [], liveFilter),
     [data?.history, liveFilter],
   );
+  const filtersOn = liveFiltersActive(liveFilter);
 
   const missionTitle = useMemo(() => {
     const map = new Map((data?.missions ?? []).map((m) => [m.id, m.title]));
@@ -388,10 +401,26 @@ export function AdminPortal({
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2">
           <span className="text-[10px] uppercase tracking-wider text-fg-subtle">Filters</span>
+          {scope === "all" && (
+            <select
+              className="h-8 max-w-[9rem] rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+              value={filterBoard}
+              onChange={(e) => setFilterBoard(e.target.value)}
+              aria-label="Filter by board"
+            >
+              <option value="">All boards</option>
+              {boards.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
             value={filterAgent}
             onChange={(e) => setFilterAgent(e.target.value)}
+            aria-label="Filter by agent"
           >
             <option value="">All agents</option>
             {(data?.agents ?? []).map((a) => (
@@ -404,9 +433,11 @@ export function AdminPortal({
             className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
             value={filterKind}
             onChange={(e) => setFilterKind(e.target.value)}
+            aria-label="Filter by kind"
           >
             <option value="">All kinds</option>
             <option value="mission_claimed">claim</option>
+            <option value="mission_created">created</option>
             <option value="heartbeat">heartbeat</option>
             <option value="escalation">escalation</option>
             <option value="delivery">delivery</option>
@@ -420,7 +451,22 @@ export function AdminPortal({
             placeholder="Search feed…"
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
+            aria-label="Search live feed"
           />
+          {filtersOn && (
+            <button
+              type="button"
+              className="h-8 rounded-[var(--radius-sm)] px-2 text-[11px] text-fg-muted hover:bg-bg-subtle hover:text-fg"
+              onClick={() => {
+                setFilterAgent("");
+                setFilterKind("");
+                setFilterQuery("");
+                setFilterBoard("");
+              }}
+            >
+              Clear
+            </button>
+          )}
         </div>
 
       </header>
@@ -495,7 +541,9 @@ export function AdminPortal({
             })}
             {!filteredEvents.length && (
               <li className="px-4 py-10 text-center text-xs text-fg-subtle">
-                Waiting for activity…
+                {filtersOn
+                  ? "No events match filters — try Clear"
+                  : "Waiting for activity…"}
               </li>
             )}
           </ul>
@@ -599,7 +647,9 @@ export function AdminPortal({
             })}
             {!filteredHistory.length && (
               <li className="px-4 py-10 text-center text-xs text-fg-subtle">
-                No column history yet
+                {filtersOn
+                  ? "No history matches filters — try Clear"
+                  : "No column history yet"}
               </li>
             )}
           </ul>

@@ -50,3 +50,7 @@ First-class harnesses: **Hermes**, **xAI/Grok**, **OMP**, **OpenClaw** (+ Claude
 Per-harness setup: **[HARNESSES.md](./HARNESSES.md)**.
 
 See `docs/PROTOCOL.md` and `docs/FIRST_OPERATOR_DAY.md`.
+
+### GitHub → missions
+
+See **[INTEGRATIONS.md](./INTEGRATIONS.md)** — Agents → Create → **GitHub connect** for the board you want issues mapped to.
