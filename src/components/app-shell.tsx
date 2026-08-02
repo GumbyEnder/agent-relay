@@ -627,6 +627,7 @@ export function AppShell({
           filterAgentId={filterAgentId}
           onFilter={setFilterAgent}
           onOpenRoster={() => selectView("agents")}
+          selectedProjectId={selectedProjectId}
         />
       )}
 

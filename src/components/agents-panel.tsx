@@ -464,21 +464,37 @@ function AgentsListTab({
       ? roster.filter((a) => !(a.boardIds ?? []).includes(selectedProjectId))
       : [];
 
-  function renderAgent(a: import("@/lib/types").Agent) {
+  function renderAgent(
+    a: import("@/lib/types").Agent,
+    opts?: { connectedToSelected?: boolean },
+  ) {
     const active = missions.find((m) => m.id === a.currentMissionId);
     const open = expandedAgentId === a.id;
+    const connected = Boolean(opts?.connectedToSelected);
     const boards = (a.boardIds ?? [])
       .map((id) => boardNameById[id] ?? id)
       .filter(Boolean);
     const tip = a.keyTips?.[0];
     return (
-      <li key={a.id} className="px-4 py-3">
+      <li
+        key={a.id}
+        className={cn(
+          "px-4 py-3 transition-colors",
+          connected &&
+            "border-l-2 border-l-accent bg-accent/10 ring-1 ring-inset ring-accent/25",
+        )}
+        data-board-connected={connected ? "true" : undefined}
+        aria-current={connected ? "true" : undefined}
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="font-mono text-sm text-fg underline-offset-2 hover:underline"
+                className={cn(
+                  "font-mono text-sm underline-offset-2 hover:underline",
+                  connected ? "text-accent font-semibold" : "text-fg",
+                )}
                 title="Open agent profile"
                 onClick={() => openAgentProfile(a.id)}
               >
@@ -487,6 +503,14 @@ function AgentsListTab({
               <Badge variant="default">
                 {HARNESS_LABELS[a.harness] ?? a.harness}
               </Badge>
+              {connected && (
+                <span
+                  className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent-fg"
+                  title={`Connected to ${boardName}`}
+                >
+                  on board
+                </span>
+              )}
               <StatusDot status={a.status} />
             </div>
             <p className="mt-0.5 text-xs text-fg-muted">{a.role}</p>
@@ -603,7 +627,12 @@ function AgentsListTab({
           {!allBoards ? (
             <span className="text-fg-subtle">
               {" "}
-              · board rail is {boardName} (missions only)
+              ·{" "}
+              <span className="text-accent">
+                {onThisBoard.length} connected to {boardName}
+              </span>
+              {" "}
+              (highlighted)
             </span>
           ) : null}
         </p>
@@ -624,17 +653,19 @@ function AgentsListTab({
           </li>
         )}
         {!allBoards && onThisBoard.length > 0 && (
-          <li className="bg-bg-subtle/40 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+          <li className="bg-accent/15 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-accent">
             On {boardName}
           </li>
         )}
-        {(allBoards ? roster : onThisBoard).map(renderAgent)}
+        {(allBoards ? roster : onThisBoard).map((a) =>
+          renderAgent(a, { connectedToSelected: !allBoards }),
+        )}
         {elsewhere.length > 0 && (
           <>
             <li className="bg-bg-subtle/40 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
               On other boards
             </li>
-            {elsewhere.map(renderAgent)}
+            {elsewhere.map((a) => renderAgent(a, { connectedToSelected: false }))}
           </>
         )}
       </ul>

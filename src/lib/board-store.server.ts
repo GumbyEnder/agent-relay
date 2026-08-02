@@ -1025,6 +1025,37 @@ export const durableBoard = {
       return rows[0] ? rowProject(rows[0]) : null;
     }),
 
+  /** Load a single mission by id (no board scope). Callers must enforce tenancy. */
+  getMission: (missionId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select * from ar_missions where id = ${missionId} limit 1
+      `) as Record<string, unknown>[];
+      return rows[0] ? rowMission(rows[0]) : null;
+    }),
+
+  /** API key row metadata for ownership checks (no secret). */
+  getApiKeyMeta: (keyId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select id, project_id, agent_id, name, revoked_at
+        from ar_api_keys
+        where id = ${keyId}
+        limit 1
+      `) as Record<string, unknown>[];
+      if (!rows[0]) return null;
+      const x = rows[0];
+      return {
+        id: String(x.id),
+        projectId: String(x.project_id),
+        agentId: x.agent_id != null ? String(x.agent_id) : null,
+        name: String(x.name ?? ""),
+        revokedAt: ms(x.revoked_at),
+      };
+    }),
+
   /** Resolve board id from id or slug. */
   resolveProjectId: (ref: string) =>
     withLock(async () => {

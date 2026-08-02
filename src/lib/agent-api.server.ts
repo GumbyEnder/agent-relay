@@ -37,6 +37,7 @@ import type { OperatorCapability } from "./auth/roles";
 import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
 import { clientAgentGuideMarkdown, DEFAULT_PUBLIC_BASE } from "./agent-client-guide";
+import { canAccessBoardByOwner } from "./board-tenancy";
 
 const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
 function json(data: unknown, status = 200): Response {
@@ -194,6 +195,113 @@ async function requireOperatorCap(
   const check = checkOperatorCapability(ctx, cap);
   if (check.ok) return null;
   return err(check.status, check.error, check.code);
+}
+
+/**
+ * Private boards (owner_user_id set) → owner or admin only.
+ * Shared/demo boards (owner null) → any signed-in operator (intentional product policy).
+ * Open/local mode (auth not required) → allow.
+ */
+async function operatorCanAccessProject(
+  ctx: OperatorContext,
+  projectId: string,
+): Promise<boolean> {
+  const project = await boardOps.getProject(projectId);
+  if (!project) return false;
+  return canAccessBoardByOwner(
+    {
+      authRequired: ctx.authRequired,
+      userId: ctx.user?.id,
+      role: ctx.role,
+    },
+    project.ownerUserId,
+  );
+}
+
+/** Readable project ids for the operator, or null when unrestricted (open mode / admin all). */
+async function resolveReadableProjectIds(
+  ctx: OperatorContext,
+  opts?: { adminAll?: boolean },
+): Promise<string[] | null> {
+  if (!ctx.authRequired) return null;
+  if (!ctx.user) return [];
+  if (ctx.role === "admin" && opts?.adminAll) return null;
+  const boards = await boardOps.listProjects({
+    ownerUserId: ctx.user.id,
+    includeShared: true,
+    admin: false,
+  });
+  return boards.map((b) => b.id);
+}
+
+/**
+ * Resolve board ref and ensure the operator may access it.
+ * Returns project id or an error Response. Uses 404 (not 403) to avoid leaking private board existence.
+ */
+async function requireOperatorProjectAccess(
+  req: Request,
+  projectRefRaw: string,
+  opts?: { adminAll?: boolean },
+): Promise<string | Response> {
+  const resolved = await boardOps.resolveProjectId(projectRefRaw);
+  if (!resolved) return err(404, "board not found", "not_found");
+  const ctx = await loadOperatorContext(req);
+  if (!ctx.authRequired) return resolved;
+  if (!ctx.user) return err(401, "Sign in required", "signed_out");
+  if (ctx.role === "admin" && opts?.adminAll) return resolved;
+  if (!(await operatorCanAccessProject(ctx, resolved))) {
+    return err(404, "board not found", "not_found");
+  }
+  return resolved;
+}
+
+/**
+ * Gate mission reads for operators (session) and agent keys.
+ * Prefer 404 mission_not_found when the caller cannot see the board.
+ */
+async function assertCanReadMission(
+  req: Request,
+  machineAuth: MachineAuth,
+  mission: { id: string; projectId: string },
+): Promise<Response | null> {
+  if (machineAuth.type === "global") return null;
+
+  if (machineAuth.type === "ark") {
+    if (machineAuth.projectId === mission.projectId) return null;
+    if (machineAuth.agentId) {
+      const ok = await boardOps.agentCanAccessBoard(
+        machineAuth.agentId,
+        mission.projectId,
+      );
+      if (ok) return null;
+    }
+    return err(404, `Unknown mission: ${mission.id}`, "mission_not_found");
+  }
+
+  // browser / open — operator session tenancy
+  const ctx = await loadOperatorContext(req);
+  if (!ctx.authRequired) return null;
+  if (!ctx.user) return err(401, "Sign in required", "signed_out");
+  if (!(await operatorCanAccessProject(ctx, mission.projectId))) {
+    return err(404, `Unknown mission: ${mission.id}`, "mission_not_found");
+  }
+  return null;
+}
+
+/**
+ * After requireOperatorCap(write_*), ensure the mission's board is writable by this operator.
+ */
+async function assertOperatorCanWriteMission(
+  req: Request,
+  missionId: string,
+): Promise<{ mission: NonNullable<Awaited<ReturnType<typeof boardOps.getMission>>> } | Response> {
+  const mission = await boardOps.getMission(missionId);
+  if (!mission) return err(404, "mission not found", "mission_not_found");
+  const ctx = await loadOperatorContext(req);
+  if (!(await operatorCanAccessProject(ctx, mission.projectId))) {
+    return err(404, "mission not found", "mission_not_found");
+  }
+  return { mission };
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
@@ -467,9 +575,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     // GET /missions/:id
     if (parts.length === 2 && parts[0] === "missions" && req.method === "GET") {
       const id = parts[1]!;
-      const snap = await boardOps.snapshot();
-      const m = snap.missions.find((x) => x.id === id);
+      const m = await boardOps.getMission(id);
       if (!m) return err(404, `Unknown mission: ${id}`, "mission_not_found");
+      const denied = await assertCanReadMission(req, machineAuth, m);
+      if (denied) return denied;
       return json({ ok: true, mission: m });
     }
 
@@ -481,6 +590,18 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       if (verb === "artifacts") {
         const urlA = str(body.url) ?? str(body.html_url);
         if (!urlA) return err(400, "url required", "bad_request");
+        // Operator session: board ownership. Agent key: same board access as claim.
+        if (machineAuth.type === "browser" || machineAuth.type === "open") {
+          const gate = await requireOperatorCap(req, "write_board");
+          if (gate) return gate;
+          const access = await assertOperatorCanWriteMission(req, id);
+          if (access instanceof Response) return access;
+        } else if (machineAuth.type === "ark") {
+          const existing = await boardOps.getMission(id);
+          if (!existing) return err(404, "mission not found", "mission_not_found");
+          const denied = await assertCanReadMission(req, machineAuth, existing);
+          if (denied) return denied;
+        }
         const m = await boardOps.attachMissionArtifact(id, urlA, str(body.note));
         if (!m) return err(404, "mission not found", "mission_not_found");
         return json({ ok: true, mission: m });
@@ -489,6 +610,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       if (verb === "move") {
         const gate = await requireOperatorCap(req, "write_board");
         if (gate) return gate;
+        const access = await assertOperatorCanWriteMission(req, id);
+        if (access instanceof Response) return access;
         const column = str(body.column) as import("./types").MissionColumn | undefined;
         if (!column) return err(400, "column is required", "bad_request");
         const actor = str(body.actor) ?? "operator";
@@ -733,22 +856,28 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const wantAll =
         !pref || pref === "all" || pref === "*" || pref === "__all__";
       const ctx = await loadOperatorContext(req);
+      const adminAll =
+        ctx.role === "admin" && url.searchParams.get("all") === "1";
       let allowedProjectIds: string[] | null = null;
-      if (wantAll && ctx.authRequired && ctx.user) {
-        const boards = await boardOps.listProjects({
-          ownerUserId: ctx.user.id,
-          includeShared: true,
-          admin: ctx.role === "admin" && url.searchParams.get("all") === "1",
-        });
-        allowedProjectIds = boards.map((b) => b.id);
+      if (ctx.authRequired && ctx.user) {
+        allowedProjectIds = await resolveReadableProjectIds(ctx, { adminAll });
       }
-      const snap = await boardOps.adminSnapshot(wantAll ? "all" : pref, {
-        allowedProjectIds,
-      });
+      if (!wantAll && pref) {
+        const access = await requireOperatorProjectAccess(req, pref, { adminAll });
+        if (access instanceof Response) return access;
+        const snap = await boardOps.adminSnapshot(access, { allowedProjectIds });
+        return json({
+          ok: true,
+          projectId: access,
+          scope: "board" as const,
+          ...snap,
+        });
+      }
+      const snap = await boardOps.adminSnapshot("all", { allowedProjectIds });
       return json({
         ok: true,
-        projectId: wantAll ? null : pref,
-        scope: wantAll ? "all" : "board",
+        projectId: null,
+        scope: "all" as const,
         ...snap,
       });
     }
@@ -945,6 +1074,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       parts[2] === "journal.md" &&
       req.method === "GET"
     ) {
+      const m = await boardOps.getMission(parts[1]!);
+      if (!m) return err(404, "mission not found", "mission_not_found");
+      const denied = await assertCanReadMission(req, machineAuth, m);
+      if (denied) return denied;
       const md = await boardOps.journalMarkdown(parts[1]!);
       if (!md) return err(404, "mission not found", "mission_not_found");
       return new Response(md, {
@@ -963,6 +1096,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       parts[2] === "journal" &&
       req.method === "GET"
     ) {
+      const m = await boardOps.getMission(parts[1]!);
+      if (!m) return err(404, "mission not found", "mission_not_found");
+      const denied = await assertCanReadMission(req, machineAuth, m);
+      if (denied) return denied;
       const md = await boardOps.journalMarkdown(parts[1]!);
       if (!md) return err(404, "mission not found", "mission_not_found");
       return json({ ok: true, mission_id: parts[1], markdown: md });
@@ -976,14 +1113,11 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
       const wantAll = !pref || pref === "all" || pref === "*" || pref === "__all__";
       const ctx = await loadOperatorContext(req);
+      const adminAll =
+        ctx.role === "admin" && url.searchParams.get("all") === "1";
       let allowedProjectIds: string[] | null = null;
       if (ctx.authRequired && ctx.user) {
-        const boards = await boardOps.listProjects({
-          ownerUserId: ctx.user.id,
-          includeShared: true,
-          admin: ctx.role === "admin" && url.searchParams.get("all") === "1",
-        });
-        allowedProjectIds = boards.map((b) => b.id);
+        allowedProjectIds = await resolveReadableProjectIds(ctx, { adminAll });
       }
       const fleet = await boardOps.listFleetAgents(allowedProjectIds);
       if (wantAll) {
@@ -998,10 +1132,12 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           calls: snap.calls,
         });
       }
-      const snap = await boardOps.snapshot(pref);
+      const access = await requireOperatorProjectAccess(req, pref!, { adminAll });
+      if (access instanceof Response) return access;
+      const snap = await boardOps.snapshot(access);
       return json({
         ok: true,
-        projectId: pref,
+        projectId: access,
         scope: "board" as const,
         agents: fleet,
         missions: snap.missions,
@@ -1012,6 +1148,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // GET /missions/:id/history
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "history" && req.method === "GET") {
+      const m = await boardOps.getMission(parts[1]!);
+      if (!m) return err(404, `Unknown mission: ${parts[1]}`, "mission_not_found");
+      const denied = await assertCanReadMission(req, machineAuth, m);
+      if (denied) return denied;
       const hist = await boardOps.history(parts[1]!);
       return json({ ok: true, mission_id: parts[1], history: hist });
     }
@@ -1020,6 +1160,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "move" && req.method === "POST") {
       const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
+      const access = await assertOperatorCanWriteMission(req, parts[1]!);
+      if (access instanceof Response) return access;
       const column = str(body.column) as MissionColumn | undefined;
       if (!column) return err(400, "column is required", "bad_request");
       const actor = str(body.actor) ?? "operator";
@@ -1035,14 +1177,16 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     ) {
       const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
+      const access = await assertOperatorCanWriteMission(req, parts[1]!);
+      if (access instanceof Response) return access;
       const raw =
         str(body.projectId) ?? str(body.project) ?? str(body.board) ?? str(body.boardId);
       if (!raw) return err(400, "project (board id or slug) required", "bad_request");
-      const target = await boardOps.resolveProjectId(raw);
-      if (!target) return err(404, "board not found", "board_not_found");
+      const targetAccess = await requireOperatorProjectAccess(req, raw);
+      if (targetAccess instanceof Response) return targetAccess;
       const result = await boardOps.moveMissionToProject(
         parts[1]!,
-        target,
+        targetAccess,
         str(body.actor) ?? "operator",
       );
       if (!result.ok) return err(result.status, result.error, result.code);
@@ -1053,6 +1197,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 2 && parts[0] === "missions" && req.method === "PATCH") {
       const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
+      const access = await assertOperatorCanWriteMission(req, parts[1]!);
+      if (access instanceof Response) return access;
       const result = await boardOps.updateMissionFields(parts[1]!, {
         title: str(body.title),
         objective: str(body.objective),
@@ -1089,13 +1235,20 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 1 && parts[0] === "keys" && req.method === "GET") {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
+      const ctx = await loadOperatorContext(req);
       const agentId = url.searchParams.get("agent") ?? url.searchParams.get("agent_id");
       if (agentId?.trim()) {
         const keys = await boardOps.listAgentApiKeys(agentId.trim());
-        return json({ ok: true, keys });
+        const filtered = [];
+        for (const k of keys) {
+          if (await operatorCanAccessProject(ctx, k.projectId)) filtered.push(k);
+        }
+        return json({ ok: true, keys: filtered });
       }
-      const projectId = projectRef(url, body) ?? "proj_default";
-      const keys = await boardOps.listApiKeys(projectId);
+      const rawProject = projectRef(url, body) ?? "proj_default";
+      const projectAccess = await requireOperatorProjectAccess(req, rawProject);
+      if (projectAccess instanceof Response) return projectAccess;
+      const keys = await boardOps.listApiKeys(projectAccess);
       return json({ ok: true, keys });
     }
     // GET|POST /keys/:id/reveal — operator unseals full secret (when stored)
@@ -1107,6 +1260,12 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     ) {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
+      const meta = await boardOps.getApiKeyMeta(parts[1]!);
+      if (!meta) return err(404, "key not found", "not_found");
+      const ctx = await loadOperatorContext(req);
+      if (!(await operatorCanAccessProject(ctx, meta.projectId))) {
+        return err(404, "key not found", "not_found");
+      }
       const revealed = await boardOps.revealApiKey(parts[1]!);
       if (!revealed) return err(404, "key not found", "not_found");
       if (!revealed.ok) {
@@ -1141,7 +1300,10 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 1 && parts[0] === "keys" && req.method === "POST") {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
-      const projectId = str(body.projectId) ?? str(body.project) ?? projectRef(url, body) ?? "proj_default";
+      const rawProject =
+        str(body.projectId) ?? str(body.project) ?? projectRef(url, body) ?? "proj_default";
+      const projectAccess = await requireOperatorProjectAccess(req, rawProject);
+      if (projectAccess instanceof Response) return projectAccess;
       const agentId = str(body.agentId) ?? str(body.agent) ?? null;
       const allowShared = body.allowShared === true || body.shared === true;
       // Practical flow: keys bind to a registered agent (unless explicit shared).
@@ -1171,7 +1333,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         boundAgentId = ag.id;
       }
       const created = await boardOps.createApiKey({
-        projectId,
+        projectId: projectAccess,
         agentId: boundAgentId,
         name: str(body.name),
       });
@@ -1180,12 +1342,24 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 2 && parts[0] === "keys" && req.method === "DELETE") {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
+      const meta = await boardOps.getApiKeyMeta(parts[1]!);
+      if (!meta) return err(404, "key not found", "not_found");
+      const ctx = await loadOperatorContext(req);
+      if (!(await operatorCanAccessProject(ctx, meta.projectId))) {
+        return err(404, "key not found", "not_found");
+      }
       await boardOps.revokeApiKey(parts[1]!);
       return json({ ok: true, revoked: parts[1] });
     }
     if (parts.length === 3 && parts[0] === "keys" && parts[2] === "revoke" && req.method === "POST") {
       const gate = await requireOperatorCap(req, "manage_keys");
       if (gate) return gate;
+      const meta = await boardOps.getApiKeyMeta(parts[1]!);
+      if (!meta) return err(404, "key not found", "not_found");
+      const ctx = await loadOperatorContext(req);
+      if (!(await operatorCanAccessProject(ctx, meta.projectId))) {
+        return err(404, "key not found", "not_found");
+      }
       await boardOps.revokeApiKey(parts[1]!);
       return json({ ok: true, revoked: parts[1] });
     }
@@ -1212,7 +1386,11 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       // fallthrough if not settings
     }
     if (parts.length === 3 && parts[0] === "projects" && parts[2] === "settings" && req.method === "GET") {
-      const s = await boardOps.getProjectSettings(parts[1]!);
+      const gate = await requireOperatorCap(req, "read");
+      if (gate) return gate;
+      const projectAccess = await requireOperatorProjectAccess(req, parts[1]!);
+      if (projectAccess instanceof Response) return projectAccess;
+      const s = await boardOps.getProjectSettings(projectAccess);
       return json({
         ok: true,
         settings: {
@@ -1232,7 +1410,9 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "projects" && parts[2] === "settings" && req.method === "POST") {
       const gate = await requireOperatorCap(req, "manage_settings");
       if (gate) return gate;
-      const s = await boardOps.updateProjectSettings(parts[1]!, {
+      const projectAccess = await requireOperatorProjectAccess(req, parts[1]!);
+      if (projectAccess instanceof Response) return projectAccess;
+      const s = await boardOps.updateProjectSettings(projectAccess, {
         githubWebhookSecret: body.githubWebhookSecret === undefined ? undefined : (str(body.githubWebhookSecret) ?? null),
         githubRepo: body.githubRepo === undefined ? undefined : (str(body.githubRepo) ?? null),
         replyWebhookUrl: body.replyWebhookUrl === undefined ? undefined : (str(body.replyWebhookUrl) ?? null),
@@ -1252,6 +1432,17 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "artifacts" && req.method === "POST") {
       const urlA = str(body.url) ?? str(body.html_url);
       if (!urlA) return err(400, "url required", "bad_request");
+      if (machineAuth.type === "browser" || machineAuth.type === "open") {
+        const gate = await requireOperatorCap(req, "write_board");
+        if (gate) return gate;
+        const access = await assertOperatorCanWriteMission(req, parts[1]!);
+        if (access instanceof Response) return access;
+      } else if (machineAuth.type === "ark") {
+        const existing = await boardOps.getMission(parts[1]!);
+        if (!existing) return err(404, "mission not found", "mission_not_found");
+        const denied = await assertCanReadMission(req, machineAuth, existing);
+        if (denied) return denied;
+      }
       const m = await boardOps.attachMissionArtifact(parts[1]!, urlA, str(body.note));
       if (!m) return err(404, "mission not found", "mission_not_found");
       return json({ ok: true, mission: m });
@@ -1434,9 +1625,9 @@ async function createMissionForCaller(opts: {
   if (opCheck.ok) {
     let projectId = rawProject?.trim() || undefined;
     if (projectId) {
-      const resolved = await boardOps.resolveProjectId(projectId);
-      if (!resolved) return err(404, "board not found", "board_not_found");
-      projectId = resolved;
+      const access = await requireOperatorProjectAccess(req, projectId);
+      if (access instanceof Response) return access;
+      projectId = access;
     }
     return fromEngine(
       await boardOps.createMission({
