@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Copy, KeyRound, Plus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, KeyRound, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -723,28 +723,41 @@ function CreateTab({
   setRevokeStep: (v: 1 | 2) => void;
   onRegistered: () => void;
 }) {
-  return (
-    <div className="space-y-6 p-4">
-      {!writeId && (
-        <p className="rounded-[var(--radius-sm)] border border-status-human/30 bg-status-human/10 px-3 py-2 text-[11px] text-fg-muted">
-          Select a concrete board in the left rail before registering agents or
-          issuing keys.
-        </p>
-      )}
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
+  const field =
+    "flex h-8 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-2.5 text-xs text-fg shadow-[var(--shadow-border)] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
+  const labelCls =
+    "mb-1 block text-[10px] font-medium uppercase tracking-wider text-fg-subtle";
 
-      <section className="space-y-3">
-        <div>
-          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-            Register agent
-          </h3>
-          <p className="mt-0.5 text-[11px] text-fg-muted">
-            Adds the agent to{" "}
-            <span className="text-fg">{writeId ? writeBoardName : "…"}</span>,
-            then issue a key below.
-          </p>
-        </div>
+  return (
+    <div className="space-y-5 p-4">
+      {/* Target board chip — not a full-width control */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+          Target board
+        </span>
+        {writeId ? (
+          <span
+            className="max-w-[14rem] truncate rounded-full bg-accent/15 px-2.5 py-0.5 text-[11px] font-medium text-fg"
+            title={writeBoardName}
+          >
+            {writeBoardName}
+          </span>
+        ) : (
+          <span className="rounded-full bg-status-human/15 px-2.5 py-0.5 text-[11px] text-status-human">
+            pick a board in the rail
+          </span>
+        )}
+      </div>
+
+      <section className="rounded-[var(--radius-md)] border border-border bg-bg-subtle/30 p-3">
+        <h3 className="text-xs font-medium text-fg">New agent</h3>
+        <p className="mt-0.5 text-[11px] text-fg-muted">
+          Register a client, then issue a key in the next section.
+        </p>
+
         <form
-          className="space-y-2"
+          className="mt-3 space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
             if (!writeId) {
@@ -772,72 +785,121 @@ function CreateTab({
             onRegistered();
           }}
         >
-          <Input
-            placeholder="name (e.g. frodo)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <Input
-            placeholder="role"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            required
-          />
-          <select
-            className="h-10 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)]"
-            value={harness}
-            onChange={(e) => setHarness(e.target.value as HarnessKind)}
-          >
-            {harnesses.map((h) => (
-              <option key={h} value={h}>
-                {HARNESS_LABELS[h]}
-              </option>
-            ))}
-          </select>
-          <Input
-            placeholder="skills (comma-separated)"
-            value={skills}
-            onChange={(e) => setSkills(e.target.value)}
-          />
-          <Button type="submit" size="sm" className="w-full" disabled={!writeId}>
-            Register on {writeId ? writeBoardName : "…"}
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0">
+              <label className={labelCls} htmlFor="create-agent-name">
+                Name
+              </label>
+              <Input
+                id="create-agent-name"
+                placeholder="frodo"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="min-w-0">
+              <label className={labelCls} htmlFor="create-agent-role">
+                Role
+              </label>
+              <Input
+                id="create-agent-role"
+                placeholder="client"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                required
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0">
+              <label className={labelCls} htmlFor="create-agent-harness">
+                Harness
+              </label>
+              <select
+                id="create-agent-harness"
+                className={field}
+                value={harness}
+                onChange={(e) => setHarness(e.target.value as HarnessKind)}
+              >
+                {harnesses.map((h) => (
+                  <option key={h} value={h}>
+                    {HARNESS_LABELS[h]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="min-w-0">
+              <label className={labelCls} htmlFor="create-agent-skills">
+                Skills
+              </label>
+              <Input
+                id="create-agent-skills"
+                placeholder="optional, comma-sep"
+                value={skills}
+                onChange={(e) => setSkills(e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-0.5">
+            <Button type="submit" size="sm" disabled={!writeId}>
+              <Plus className="h-3.5 w-3.5" />
+              Register
+            </Button>
+          </div>
         </form>
       </section>
 
-      <section className="space-y-3 border-t border-border pt-5">
-        <div>
-          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-            API keys · {projectId ? writeBoardName : "select a board"}
-          </h3>
-          <p className="mt-0.5 text-[11px] leading-relaxed text-fg-muted">
-            Bind a key to an agent → paste{" "}
-            <code className="text-fg-subtle">ark_…</code> into the client. Secret
-            shown once.
-          </p>
+      <section className="rounded-[var(--radius-md)] border border-border bg-bg-subtle/30 p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-xs font-medium text-fg">API key</h3>
+            <p className="mt-0.5 text-[11px] text-fg-muted">
+              Bind <code className="text-fg-subtle">ark_…</code> to an agent.
+              Secret shown once.
+            </p>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Input
-            placeholder="key label (optional)"
-            value={keyName}
-            onChange={(e) => setKeyName(e.target.value)}
-            className="h-8 flex-1 min-w-[6rem]"
-          />
-          <select
-            className="h-8 rounded-[var(--radius-sm)] bg-bg-subtle px-2 text-xs shadow-[var(--shadow-border)]"
-            value={keyAgent}
-            onChange={(e) => setKeyAgent(e.target.value)}
-          >
-            <option value="">Select agent…</option>
-            {roster.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+
+        <div className="mt-3 grid grid-cols-[1fr_minmax(0,7.5rem)_auto] items-end gap-2">
+          <div className="min-w-0">
+            <label className={labelCls} htmlFor="create-key-label">
+              Label
+            </label>
+            <Input
+              id="create-key-label"
+              placeholder="optional"
+              value={keyName}
+              onChange={(e) => setKeyName(e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className={labelCls} htmlFor="create-key-agent">
+              Agent
+            </label>
+            <select
+              id="create-key-agent"
+              className={field}
+              value={keyAgent}
+              onChange={(e) => setKeyAgent(e.target.value)}
+            >
+              <option value="">Select…</option>
+              {roster.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <Button
             size="sm"
+            className="h-8 shrink-0"
             disabled={!keyAgent || !projectId}
             onClick={() => {
               if (!projectId) {
@@ -851,38 +913,36 @@ function CreateTab({
               void issueKey(keyAgent, keyName || undefined);
             }}
           >
-            Create key
+            <KeyRound className="h-3.5 w-3.5" />
+            Issue
           </Button>
         </div>
+
         {lastSecret && (
-          <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px] font-mono break-all">
-            {lastSecret}
-            <div className="mt-1 text-[10px] text-fg-muted">
-              Profile tip ends in …{lastSecret.slice(-6)}
-            </div>
+          <div className="mt-3 rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2.5 text-[11px]">
+            <p className="font-mono break-all text-fg">{lastSecret}</p>
+            <p className="mt-1 text-[10px] text-fg-muted">
+              Tip ends in …{lastSecret.slice(-6)}
+            </p>
             <div className="mt-2 flex gap-2">
               <Button
                 size="sm"
                 variant="secondary"
-                className="flex-1"
                 onClick={async () => {
                   await navigator.clipboard.writeText(lastSecret);
                   toast.success("Secret copied");
                 }}
               >
-                Copy secret
+                Copy
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setLastSecret(null)}
-              >
+              <Button size="sm" variant="ghost" onClick={() => setLastSecret(null)}>
                 Dismiss
               </Button>
             </div>
           </div>
         )}
-        <ul className="space-y-1.5">
+
+        <ul className="mt-3 space-y-1 border-t border-border/60 pt-2">
           {keys.map((k) => {
             const bound = roster.find((a) => a.id === k.agentId);
             const suffix =
@@ -891,17 +951,20 @@ function CreateTab({
             return (
               <li
                 key={String(k.id)}
-                className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2 py-1.5 text-[11px]"
+                className="flex items-center justify-between gap-2 rounded-[var(--radius-sm)] px-1 py-1.5 text-[11px] hover:bg-bg-subtle"
               >
                 <div className="min-w-0">
-                  <div className="truncate font-medium">{String(k.name)}</div>
-                  <div className="font-mono text-fg-subtle">
+                  <div className="truncate font-medium text-fg">
+                    {String(k.name)}
+                    {bound ? (
+                      <span className="font-normal text-fg-subtle">
+                        {" "}
+                        · {bound.name}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="truncate font-mono text-[10px] text-fg-subtle">
                     {String(k.keyPrefix)}…{suffix}
-                    {bound
-                      ? ` · ${bound.name}`
-                      : k.agentId
-                        ? " · bound"
-                        : " · shared"}
                   </div>
                 </div>
                 {k.revokedAt ? (
@@ -909,8 +972,8 @@ function CreateTab({
                 ) : (
                   <Button
                     size="sm"
-                    variant="danger"
-                    className="h-7 text-[11px]"
+                    variant="ghost"
+                    className="h-7 shrink-0 text-[11px] text-status-blocked hover:bg-status-blocked/10"
                     onClick={() => {
                       setRevokeStep(1);
                       setRevokeTarget({
@@ -927,80 +990,107 @@ function CreateTab({
             );
           })}
           {keys.length === 0 && (
-            <li className="text-[11px] text-fg-subtle">
-              {projectId
-                ? "No keys on this board yet."
-                : "Select a board to list keys."}
+            <li className="px-1 py-2 text-[11px] text-fg-subtle">
+              {projectId ? "No keys on this board yet." : "Select a board first."}
             </li>
           )}
         </ul>
       </section>
 
-      <section className="space-y-3 border-t border-border pt-5">
-        <div>
-          <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-            Integrations
-          </h3>
-          <p className="mt-0.5 text-[11px] text-fg-muted leading-relaxed">
-            Optional GitHub / webhook mapping for{" "}
-            {projectId ? writeBoardName : "the selected board"}.
-          </p>
-        </div>
-        {!projectId ? (
-          <p className="text-[11px] text-fg-subtle">
-            Select a board in the rail to configure integrations.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            <Input
-              placeholder="GitHub repo org/name"
-              value={ghRepo}
-              onChange={(e) => setGhRepo(e.target.value)}
-              className="h-8"
-            />
-            <Input
-              placeholder="GitHub webhook secret"
-              value={ghSecret}
-              onChange={(e) => setGhSecret(e.target.value)}
-              className="h-8"
-              type="password"
-            />
-            <Input
-              placeholder="Reply webhook URL (on Call resolve)"
-              value={replyUrl}
-              onChange={(e) => setReplyUrl(e.target.value)}
-              className="h-8"
-            />
-            <p className="break-all text-[10px] text-fg-subtle">
-              Payload URL: POST /api/agent/webhooks/github?project={projectId}
-              <br />
-              Events: issues, issue_comment, pull_request, check_run (JSON)
-              <br />
-              {settings.hasGithubSecret
-                ? "Secret configured ✓"
-                : "No secret yet — webhooks accepted unsigned (dev only)"}
-            </p>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="w-full"
-              onClick={async () => {
-                try {
-                  await agentApi.updateSettings(projectId, {
-                    githubRepo: ghRepo || null,
-                    githubWebhookSecret: ghSecret || undefined,
-                    replyWebhookUrl: replyUrl || null,
-                  });
-                  setGhSecret("");
-                  await reloadSettings();
-                  toast.success("Settings saved");
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "save failed");
-                }
-              }}
-            >
-              Save integration settings
-            </Button>
+      <section className="rounded-[var(--radius-md)] border border-border">
+        <button
+          type="button"
+          className="flex w-full items-center gap-1.5 px-3 py-2.5 text-left text-xs font-medium text-fg"
+          onClick={() => setIntegrationsOpen((v) => !v)}
+        >
+          {integrationsOpen ? (
+            <ChevronDown className="h-3.5 w-3.5 text-fg-subtle" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-fg-subtle" />
+          )}
+          Integrations
+          <span className="ml-1 font-normal text-fg-subtle">GitHub · webhooks</span>
+        </button>
+        {integrationsOpen && (
+          <div className="space-y-2 border-t border-border px-3 pb-3 pt-2">
+            {!projectId ? (
+              <p className="text-[11px] text-fg-subtle">
+                Select a board in the rail to configure.
+              </p>
+            ) : (
+              <>
+                <div className="min-w-0">
+                  <label className={labelCls} htmlFor="gh-repo">
+                    Repo
+                  </label>
+                  <Input
+                    id="gh-repo"
+                    placeholder="org/name"
+                    value={ghRepo}
+                    onChange={(e) => setGhRepo(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="min-w-0">
+                    <label className={labelCls} htmlFor="gh-secret">
+                      Webhook secret
+                    </label>
+                    <Input
+                      id="gh-secret"
+                      placeholder="••••"
+                      value={ghSecret}
+                      onChange={(e) => setGhSecret(e.target.value)}
+                      className="h-8 text-xs"
+                      type="password"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <label className={labelCls} htmlFor="reply-url">
+                      Reply URL
+                    </label>
+                    <Input
+                      id="reply-url"
+                      placeholder="https://…"
+                      value={replyUrl}
+                      onChange={(e) => setReplyUrl(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="break-all text-[10px] leading-relaxed text-fg-subtle">
+                  POST /api/agent/webhooks/github?project={projectId}
+                  <br />
+                  {settings.hasGithubSecret
+                    ? "Secret configured ✓"
+                    : "No secret yet (dev accepts unsigned)"}
+                </p>
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      try {
+                        await agentApi.updateSettings(projectId, {
+                          githubRepo: ghRepo || null,
+                          githubWebhookSecret: ghSecret || undefined,
+                          replyWebhookUrl: replyUrl || null,
+                        });
+                        setGhSecret("");
+                        await reloadSettings();
+                        toast.success("Settings saved");
+                      } catch (e) {
+                        toast.error(
+                          e instanceof Error ? e.message : "save failed",
+                        );
+                      }
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>
