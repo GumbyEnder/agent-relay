@@ -13,6 +13,10 @@ import {
 } from "./seed";
 import type {
   Agent,
+  AgentKeyTip,
+  AgentProfile,
+  AgentProfileActivity,
+  AgentProfileStats,
   AgentStatus,
   HarnessKind,
   HumanCall,
@@ -622,10 +626,11 @@ export const durableBoard = {
         select project_id, agent_id from ar_board_agents
       `) as Array<{ project_id: string; agent_id: string }>;
 
-      const keyLinks = (await sql`
-        select project_id, agent_id from ar_api_keys
-        where agent_id is not null and revoked_at is null
-      `) as Array<{ project_id: string; agent_id: string }>;
+      const keyRows = (await sql`
+        select id, project_id, agent_id, key_prefix, key_suffix, last_used_at, revoked_at
+        from ar_api_keys
+        where agent_id is not null
+      `) as Array<Record<string, unknown>>;
 
       const byAgent = new Map<string, string[]>();
       for (const m of memberships) {
@@ -638,13 +643,33 @@ export const durableBoard = {
       }
 
       const keyBoards = new Map<string, string[]>();
-      for (const k of keyLinks) {
+      const tipsByAgent = new Map<string, AgentKeyTip[]>();
+      for (const k of keyRows) {
         const aid = String(k.agent_id);
         const pid = String(k.project_id);
+        const revokedAt = ms(k.revoked_at);
         if (allowed && !allowed.has(pid)) continue;
-        const list = keyBoards.get(aid) ?? [];
-        if (!list.includes(pid)) list.push(pid);
-        keyBoards.set(aid, list);
+        if (!revokedAt) {
+          const list = keyBoards.get(aid) ?? [];
+          if (!list.includes(pid)) list.push(pid);
+          keyBoards.set(aid, list);
+        }
+        const prefix = String(k.key_prefix ?? "");
+        const suffixRaw =
+          k.key_suffix != null && String(k.key_suffix).trim()
+            ? String(k.key_suffix).trim()
+            : prefix.slice(-6);
+        const tip: AgentKeyTip = {
+          id: String(k.id),
+          projectId: pid,
+          prefix,
+          suffix: suffixRaw.slice(-6),
+          lastUsedAt: ms(k.last_used_at),
+          revokedAt,
+        };
+        const tips = tipsByAgent.get(aid) ?? [];
+        tips.push(tip);
+        tipsByAgent.set(aid, tips);
       }
 
       const agentsOnAnyBoard = new Set(memberships.map((m) => String(m.agent_id)));
@@ -654,18 +679,201 @@ export const durableBoard = {
           const agent = rowAgent(r);
           if (agent.isDemo) return null;
           const boards = byAgent.get(agent.id) ?? [];
-          const keys = keyBoards.get(agent.id) ?? [];
+          const keyPids = keyBoards.get(agent.id) ?? [];
           const orphan = !agentsOnAnyBoard.has(agent.id);
           if (allowed) {
             const visible =
-              boards.length > 0 || keys.length > 0 || orphan;
+              boards.length > 0 || keyPids.length > 0 || orphan;
             if (!visible) return null;
           }
           agent.boardIds = boards;
+          const tips = (tipsByAgent.get(agent.id) ?? [])
+            .filter((t) => !t.revokedAt)
+            .sort(
+              (a, b) =>
+                (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) ||
+                a.prefix.localeCompare(b.prefix),
+            );
+          agent.keyTips = tips;
           return agent;
         })
         .filter((a): a is Agent => a != null)
         .sort((a, b) => a.name.localeCompare(b.name));
+    }),
+
+  getAgentProfile: (agentRef: string, opts?: { allowedProjectIds?: string[] | null }) =>
+    withLock(async (): Promise<AgentProfile | null> => {
+      const sql = await getSql();
+      const ref = agentRef.trim();
+      if (!ref) return null;
+
+      const agentRows = (await sql`
+        select * from ar_agents
+        where id = ${ref} or lower(name) = ${ref.toLowerCase()}
+        limit 1
+      `) as Record<string, unknown>[];
+      if (!agentRows.length) return null;
+      const agent = rowAgent(agentRows[0]!);
+      if (agent.isDemo) {
+        // still allow profile for demos if asked, but fleet hides them
+      }
+
+      const allowed =
+        opts?.allowedProjectIds && opts.allowedProjectIds.length > 0
+          ? new Set(opts.allowedProjectIds)
+          : null;
+
+      const memberships = (await sql`
+        select project_id from ar_board_agents where agent_id = ${agent.id}
+      `) as Array<{ project_id: string }>;
+      agent.boardIds = memberships
+        .map((m) => String(m.project_id))
+        .filter((id) => !allowed || allowed.has(id));
+
+      const keyRows = (await sql`
+        select id, project_id, key_prefix, key_suffix, last_used_at, revoked_at
+        from ar_api_keys
+        where agent_id = ${agent.id}
+        order by created_at desc
+      `) as Array<Record<string, unknown>>;
+      const keys: AgentKeyTip[] = [];
+      for (const k of keyRows) {
+        const pid = String(k.project_id);
+        if (allowed && !allowed.has(pid)) continue;
+        const prefix = String(k.key_prefix ?? "");
+        const suffixRaw =
+          k.key_suffix != null && String(k.key_suffix).trim()
+            ? String(k.key_suffix).trim()
+            : prefix.slice(-6);
+        keys.push({
+          id: String(k.id),
+          projectId: pid,
+          prefix,
+          suffix: suffixRaw.slice(-6),
+          lastUsedAt: ms(k.last_used_at),
+          revokedAt: ms(k.revoked_at),
+        });
+      }
+      agent.keyTips = keys.filter((k) => !k.revokedAt);
+
+      const missions = (await sql`
+        select * from ar_missions
+        where claimed_by = ${agent.id}
+           or claimed_by = ${agent.name}
+           or assignee_id = ${agent.id}
+        order by updated_at desc
+      `) as Record<string, unknown>[];
+      const missionRows = missions
+        .map((r) => rowMission(r))
+        .filter((m) => !allowed || allowed.has(m.projectId));
+
+      const activeMissions = missionRows
+        .filter((m) => !["done"].includes(m.column))
+        .map((m) => ({
+          id: m.id,
+          title: m.title,
+          column: m.column,
+          projectId: m.projectId,
+          priority: m.priority,
+          updatedAt: m.updatedAt,
+        }));
+
+      const titleById = new Map(missionRows.map((m) => [m.id, m.title]));
+      // Also load titles for events that reference other missions
+      const eventRows = (await sql`
+        select * from ar_events
+        where agent_id = ${agent.id}
+           or agent_id = ${agent.name}
+        order by at desc
+        limit 400
+      `) as Record<string, unknown>[];
+      const events = eventRows
+        .map((r) => rowEvent(r))
+        .filter((e) => !allowed || !e.projectId || allowed.has(e.projectId));
+
+      const missingMissionIds = [
+        ...new Set(
+          events
+            .map((e) => e.missionId)
+            .filter((id): id is string => !!id && !titleById.has(id)),
+        ),
+      ];
+      if (missingMissionIds.length) {
+        for (const mid of missingMissionIds.slice(0, 80)) {
+          const mr = (await sql`
+            select id, title from ar_missions where id = ${mid} limit 1
+          `) as Array<{ id: string; title: string }>;
+          if (mr[0]) titleById.set(String(mr[0].id), String(mr[0].title));
+        }
+      }
+
+      const calls = (await sql`
+        select * from ar_calls
+        where agent_id = ${agent.id} or agent_id = ${agent.name}
+        order by created_at desc
+        limit 100
+      `) as Record<string, unknown>[];
+      const callRows = calls
+        .map((r) => rowCall(r))
+        .filter((c) => !allowed || !c.projectId || allowed.has(c.projectId));
+
+      function statsForWindow(hours: number): AgentProfileStats {
+        const since = Date.now() - hours * 3600_000;
+        const inWin = events.filter((e) => e.at >= since);
+        const claims = inWin.filter((e) => e.kind === "mission_claimed").length;
+        const heartbeats = inWin.filter(
+          (e) => e.kind === "heartbeat" || e.kind === "progress",
+        ).length;
+        const deliveries = inWin.filter((e) => e.kind === "delivery").length;
+        const escalations = inWin.filter((e) => e.kind === "escalation").length;
+        const releases = inWin.filter((e) => e.kind === "mission_released").length;
+        const missionsDone = inWin.filter(
+          (e) =>
+            e.kind === "delivery" ||
+            (e.kind === "mission_moved" &&
+              /done|review/i.test(e.message)),
+        ).length;
+        const openCalls = callRows.filter(
+          (c) => !c.resolvedAt && c.createdAt >= since,
+        ).length;
+        const lastActivityAt =
+          inWin.reduce<number | null>((acc, e) => {
+            if (acc == null || e.at > acc) return e.at;
+            return acc;
+          }, null) ??
+          (agent.lastHeartbeat >= since ? agent.lastHeartbeat : null);
+        return {
+          windowHours: hours,
+          claims,
+          heartbeats,
+          deliveries,
+          escalations,
+          releases,
+          missionsDone,
+          openCalls,
+          activeMissions: activeMissions.length,
+          lastActivityAt,
+        };
+      }
+
+      const recentActivity: AgentProfileActivity[] = events.slice(0, 40).map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        message: e.message,
+        at: e.at,
+        missionId: e.missionId,
+        missionTitle: e.missionId ? titleById.get(e.missionId) ?? null : null,
+        projectId: e.projectId ?? null,
+      }));
+
+      return {
+        agent,
+        keys,
+        stats24h: statsForWindow(24),
+        stats7d: statsForWindow(24 * 7),
+        activeMissions,
+        recentActivity,
+      };
     }),
 
   listProjects: (opts?: { ownerUserId?: string | null; includeShared?: boolean; admin?: boolean }) =>
@@ -1127,19 +1335,25 @@ export const durableBoard = {
     withLock(async () => {
       const sql = await getSql();
       const rows = await sql`
-        select id, project_id, agent_id, name, key_prefix, created_at, revoked_at, last_used_at
+        select id, project_id, agent_id, name, key_prefix, key_suffix, created_at, revoked_at, last_used_at
         from ar_api_keys
         where project_id = ${projectId}
         order by created_at desc
       `;
       return rows.map((r) => {
         const x = r as Record<string, unknown>;
+        const prefix = String(x.key_prefix ?? "");
+        const suffix =
+          x.key_suffix != null && String(x.key_suffix).trim()
+            ? String(x.key_suffix).trim()
+            : prefix.slice(-6);
         return {
           id: String(x.id),
           projectId: String(x.project_id),
           agentId: x.agent_id != null ? String(x.agent_id) : null,
           name: String(x.name ?? ""),
-          keyPrefix: String(x.key_prefix),
+          keyPrefix: prefix,
+          keySuffix: suffix.slice(-6),
           createdAt: ms(x.created_at) ?? Date.now(),
           revokedAt: ms(x.revoked_at),
           lastUsedAt: ms(x.last_used_at),
@@ -1157,10 +1371,10 @@ export const durableBoard = {
         name: input.name,
       });
       await sql`
-        insert into ar_api_keys (id, project_id, agent_id, name, key_prefix, key_hash, created_at)
+        insert into ar_api_keys (id, project_id, agent_id, name, key_prefix, key_suffix, key_hash, created_at)
         values (
           ${mat.id}, ${mat.projectId}, ${mat.agentId}, ${mat.name},
-          ${mat.prefix}, ${mat.hash}, ${ts(mat.createdAt)}
+          ${mat.prefix}, ${mat.suffix}, ${mat.hash}, ${ts(mat.createdAt)}
         )
       `;
       if (mat.agentId) {
@@ -1172,6 +1386,7 @@ export const durableBoard = {
         agentId: mat.agentId,
         name: mat.name,
         keyPrefix: mat.prefix,
+        keySuffix: mat.suffix,
         createdAt: mat.createdAt,
         revokedAt: null as number | null,
         lastUsedAt: null as number | null,

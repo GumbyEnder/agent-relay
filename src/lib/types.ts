@@ -59,6 +59,18 @@ export type EventKind =
   | "agent_status"
   | "note";
 
+/** Safe tip for an agent-bound API key (never the full secret). */
+export interface AgentKeyTip {
+  id: string;
+  projectId: string;
+  /** Leading chars e.g. ark_0pKjMn */
+  prefix: string;
+  /** Last 4–6 chars of the secret (or prefix fallback for legacy keys) */
+  suffix: string;
+  lastUsedAt?: number | null;
+  revokedAt?: number | null;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -73,6 +85,48 @@ export interface Agent {
   isDemo?: boolean;
   /** Boards this agent is a member of (roster / fleet UI). */
   boardIds?: string[];
+  /** Active (and recent) API key tips bound to this agent */
+  keyTips?: AgentKeyTip[];
+}
+
+/** Operator-facing agent profile + rolling window stats. */
+export interface AgentProfileStats {
+  windowHours: number;
+  claims: number;
+  heartbeats: number;
+  deliveries: number;
+  escalations: number;
+  releases: number;
+  missionsDone: number;
+  openCalls: number;
+  activeMissions: number;
+  lastActivityAt: number | null;
+}
+
+export interface AgentProfileActivity {
+  id: string;
+  kind: string;
+  message: string;
+  at: number;
+  missionId: string | null;
+  missionTitle?: string | null;
+  projectId?: string | null;
+}
+
+export interface AgentProfile {
+  agent: Agent;
+  keys: AgentKeyTip[];
+  stats24h: AgentProfileStats;
+  stats7d: AgentProfileStats;
+  activeMissions: Array<{
+    id: string;
+    title: string;
+    column: MissionColumn;
+    projectId: string;
+    priority: Priority;
+    updatedAt: number;
+  }>;
+  recentActivity: AgentProfileActivity[];
 }
 
 export interface MissionEvent {

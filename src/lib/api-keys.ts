@@ -27,11 +27,18 @@ export function hashApiKey(secret: string): string {
   return createHash("sha256").update(secret, "utf8").digest("hex");
 }
 
-export function issueApiKeySecret(): { secret: string; prefix: string; hash: string } {
+export function issueApiKeySecret(): {
+  secret: string;
+  prefix: string;
+  /** Last 6 chars of the secret — safe to show in operator UI */
+  suffix: string;
+  hash: string;
+} {
   const raw = randomBytes(24).toString("base64url");
   const secret = `${PREFIX}${raw}`;
   const prefix = secret.slice(0, 12);
-  return { secret, prefix, hash: hashApiKey(secret) };
+  const suffix = secret.slice(-6);
+  return { secret, prefix, suffix, hash: hashApiKey(secret) };
 }
 
 export function buildIssuedKey(input: {
@@ -60,14 +67,24 @@ export function buildIssuedKey(input: {
   } as IssuedApiKey & { hash?: string };
 }
 
-/** Returns { secret, prefix, hash, meta } for persistence */
+/** Returns { secret, prefix, suffix, hash, meta } for persistence */
 export function createApiKeyMaterial(input: {
   id: string;
   projectId: string;
   agentId?: string | null;
   name?: string;
-}): { secret: string; prefix: string; hash: string; id: string; projectId: string; agentId: string | null; name: string; createdAt: number } {
-  const { secret, prefix, hash } = issueApiKeySecret();
+}): {
+  secret: string;
+  prefix: string;
+  suffix: string;
+  hash: string;
+  id: string;
+  projectId: string;
+  agentId: string | null;
+  name: string;
+  createdAt: number;
+} {
+  const { secret, prefix, suffix, hash } = issueApiKeySecret();
   return {
     id: input.id,
     projectId: input.projectId,
@@ -75,6 +92,7 @@ export function createApiKeyMaterial(input: {
     name: (input.name ?? "").trim() || "agent-key",
     secret,
     prefix,
+    suffix,
     hash,
     createdAt: Date.now(),
   };

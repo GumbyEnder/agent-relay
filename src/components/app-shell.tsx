@@ -18,6 +18,7 @@ import { Toaster, toast } from "sonner";
 import { ActivityFeed } from "@/components/activity-feed";
 import { AdminPortal } from "@/components/admin-portal";
 import { AgentStrip } from "@/components/agent-strip";
+import { AgentProfilePanel } from "@/components/agent-profile-panel";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BoardColumn } from "@/components/board-column";
 import { CallsPanel } from "@/components/calls-panel";
@@ -75,6 +76,7 @@ export function AppShell({
     lastSingleProjectId,
     panel,
     selectedMissionId,
+    selectedAgentId,
     mainView,
     search,
     filterAgentId,
@@ -148,6 +150,7 @@ export function AppShell({
   const sideOpen =
     panel === "mission" ||
     panel === "agents" ||
+    panel === "agent" ||
     panel === "protocol" ||
     panel === "calls" ||
     panel === "help";
@@ -804,6 +807,9 @@ export function AppShell({
         >
           {panel === "mission" && selectedMissionId && (
             <MissionPanel missionId={selectedMissionId} />
+          )}
+          {panel === "agent" && selectedAgentId && (
+            <AgentProfilePanel agentId={selectedAgentId} />
           )}
           {panel === "agents" && <AgentsPanel />}
           {panel === "protocol" && <ProtocolPanel />}

@@ -490,6 +490,32 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, agents: snap.agents });
     }
 
+    // GET /agents/:id|/agents/:id/profile — operator agent dossier + stats
+    if (
+      parts[0] === "agents" &&
+      parts.length >= 2 &&
+      req.method === "GET" &&
+      (parts.length === 2 || parts[2] === "profile")
+    ) {
+      const gate = await requireOperatorCap(req, "read");
+      if (gate) return gate;
+      const ctx = await loadOperatorContext(req);
+      let allowedProjectIds: string[] | null = null;
+      if (ctx.authRequired && ctx.user) {
+        const boards = await boardOps.listProjects({
+          ownerUserId: ctx.user.id,
+          includeShared: true,
+          admin: ctx.role === "admin",
+        });
+        allowedProjectIds = boards.map((b) => b.id);
+      }
+      const profile = await boardOps.getAgentProfile(parts[1]!, {
+        allowedProjectIds,
+      });
+      if (!profile) return err(404, "agent not found", "agent_not_found");
+      return json({ ok: true, ...profile });
+    }
+
     // POST /agents
     if (parts.length === 1 && parts[0] === "agents" && req.method === "POST") {
       const name = str(body.name);

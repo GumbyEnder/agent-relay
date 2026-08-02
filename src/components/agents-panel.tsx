@@ -44,6 +44,7 @@ export function AgentsPanel() {
     setAgentStatus,
     removeAgent,
     openPanel,
+    openAgentProfile,
     selectedProjectId,
     lastSingleProjectId,
     writeProjectId,
@@ -263,6 +264,7 @@ export function AgentsPanel() {
             openPanel={openPanel}
             issueKey={(id) => void issueKey(id)}
             goCreate={goCreate}
+            openAgentProfile={openAgentProfile}
           />
         )}
 
@@ -411,6 +413,7 @@ function AgentsListTab({
   openPanel,
   issueKey,
   goCreate,
+  openAgentProfile,
 }: {
   roster: import("@/lib/types").Agent[];
   missions: import("@/lib/types").Mission[];
@@ -425,11 +428,21 @@ function AgentsListTab({
   setAgentStatus: (id: string, status: AgentStatus) => void;
   removeAgent: (id: string) => void;
   openPanel: (
-    panel: "mission" | "agents" | "protocol" | "calls" | "help" | "none" | "new-mission" | "new-agent",
+    panel:
+      | "mission"
+      | "agents"
+      | "agent"
+      | "protocol"
+      | "calls"
+      | "help"
+      | "none"
+      | "new-mission"
+      | "new-agent",
     missionId?: string | null,
   ) => void;
   issueKey: (id: string) => void;
   goCreate: () => void;
+  openAgentProfile: (agentId: string) => void;
 }) {
   const boardNameById = Object.fromEntries(projects.map((p) => [p.id, p.name]));
   const onThisBoard = !allBoards && selectedProjectId
@@ -446,22 +459,34 @@ function AgentsListTab({
     const boards = (a.boardIds ?? [])
       .map((id) => boardNameById[id] ?? id)
       .filter(Boolean);
+    const tip = a.keyTips?.[0];
     return (
       <li key={a.id} className="px-4 py-3">
         <div className="flex items-start justify-between gap-2">
-          <button
-            type="button"
-            className="min-w-0 flex-1 text-left"
-            onClick={() => setExpandedAgentId(open ? null : a.id)}
-          >
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="font-mono text-sm text-fg">{a.name}</p>
+              <button
+                type="button"
+                className="font-mono text-sm text-fg underline-offset-2 hover:underline"
+                title="Open agent profile"
+                onClick={() => openAgentProfile(a.id)}
+              >
+                {a.name}
+              </button>
               <Badge variant="default">
                 {HARNESS_LABELS[a.harness] ?? a.harness}
               </Badge>
               <StatusDot status={a.status} />
             </div>
             <p className="mt-0.5 text-xs text-fg-muted">{a.role}</p>
+            {tip ? (
+              <p className="mt-0.5 font-mono text-[10px] text-fg-subtle">
+                key …{tip.suffix}
+                <span className="text-fg-subtle/80"> · {tip.prefix}…</span>
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[10px] text-fg-subtle">no key</p>
+            )}
             {boards.length > 0 && (
               <p className="mt-1 flex flex-wrap gap-1">
                 {boards.map((bn) => (
@@ -474,7 +499,7 @@ function AgentsListTab({
                 ))}
               </p>
             )}
-          </button>
+          </div>
           <span className="shrink-0 text-[11px] text-fg-subtle tabular">
             HB <RelativeTime ts={a.lastHeartbeat} />
           </span>
@@ -832,6 +857,9 @@ function CreateTab({
         {lastSecret && (
           <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px] font-mono break-all">
             {lastSecret}
+            <div className="mt-1 text-[10px] text-fg-muted">
+              Profile tip ends in …{lastSecret.slice(-6)}
+            </div>
             <div className="mt-2 flex gap-2">
               <Button
                 size="sm"
@@ -857,6 +885,9 @@ function CreateTab({
         <ul className="space-y-1.5">
           {keys.map((k) => {
             const bound = roster.find((a) => a.id === k.agentId);
+            const suffix =
+              (k.keySuffix != null && String(k.keySuffix)) ||
+              String(k.keyPrefix ?? "").slice(-6);
             return (
               <li
                 key={String(k.id)}
@@ -865,7 +896,7 @@ function CreateTab({
                 <div className="min-w-0">
                   <div className="truncate font-medium">{String(k.name)}</div>
                   <div className="font-mono text-fg-subtle">
-                    {String(k.keyPrefix)}…
+                    {String(k.keyPrefix)}…{suffix}
                     {bound
                       ? ` · ${bound.name}`
                       : k.agentId

@@ -4,6 +4,7 @@
  */
 import type {
   Agent,
+  AgentProfile,
   AgentStatus,
   HarnessKind,
   HumanCall,
@@ -69,6 +70,12 @@ export const agentApi = {
     if ((opts.format ?? "json") === "csv") return res.text();
     return res.json();
   },
+
+  agentProfile: (agentId: string) =>
+    req<{ ok: true } & AgentProfile>(
+      "GET",
+      `/agents/${encodeURIComponent(agentId)}/profile`,
+    ),
 
   board: (projectId?: string | null) => {
     // null / "all" / "*" → every board the operator can access

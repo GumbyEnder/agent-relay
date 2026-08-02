@@ -31,11 +31,13 @@ interface BoardState {
   lastSingleProjectId: string | null;
   historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
+  selectedAgentId: string | null;
   mainView: "board" | "live" | "calls" | "agents" | "protocol";
   panel:
     | "none"
     | "mission"
     | "agents"
+    | "agent"
     | "protocol"
     | "calls"
     | "new-mission"
@@ -67,6 +69,8 @@ interface BoardState {
   setFocusColumn: (c: string | null) => void;
   openPanel: (panel: BoardState["panel"], missionId?: string | null) => void;
   selectMission: (id: string | null) => void;
+  /** Open agent profile side panel (stats, key tips, activity). */
+  openAgentProfile: (agentId: string) => void;
   closePanel: () => void;
   setHydrated: () => void;
 
@@ -131,6 +135,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
   lastSingleProjectId: null,
   historyByMission: {},
   selectedMissionId: null,
+  selectedAgentId: null,
   mainView: "board",
   panel: "none",
   search: "",
@@ -214,16 +219,29 @@ export const useBoard = create<BoardState>()((set, get) => ({
       panel,
       selectedMissionId:
         missionId !== undefined ? missionId : get().selectedMissionId,
+      ...(panel !== "agent" ? { selectedAgentId: null } : {}),
     });
     if (missionId) void get().loadHistory(missionId);
   },
 
   selectMission: (id) => {
-    set({ selectedMissionId: id, panel: id ? "mission" : get().panel });
+    set({
+      selectedMissionId: id,
+      selectedAgentId: null,
+      panel: id ? "mission" : get().panel,
+    });
     if (id) void get().loadHistory(id);
   },
 
-  closePanel: () => set({ panel: "none" }),
+  openAgentProfile: (agentId) => {
+    set({
+      selectedAgentId: agentId,
+      selectedMissionId: null,
+      panel: "agent",
+    });
+  },
+
+  closePanel: () => set({ panel: "none", selectedAgentId: null }),
 
   refresh: async () => {
     set({ _syncing: true });
