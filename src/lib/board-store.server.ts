@@ -990,6 +990,53 @@ export const durableBoard = {
       return rows[0] ? rowProject(rows[0]) : null;
     }),
 
+  /** Resolve board id from id or slug. */
+  resolveProjectId: (ref: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const t = ref.trim();
+      if (!t) return null;
+      const byId = (await sql`
+        select id from ar_projects where id = ${t} limit 1
+      `) as Array<{ id: string }>;
+      if (byId[0]) return String(byId[0].id);
+      const bySlug = (await sql`
+        select id from ar_projects where slug = ${t} limit 1
+      `) as Array<{ id: string }>;
+      return bySlug[0] ? String(bySlug[0].id) : null;
+    }),
+
+  /**
+   * True if agent may create/poll work on this board:
+   * membership in ar_board_agents, or an active API key on that board.
+   */
+  agentCanAccessBoard: (agentId: string, projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const mem = (await sql`
+        select 1 from ar_board_agents
+        where agent_id = ${agentId} and project_id = ${projectId}
+        limit 1
+      `) as unknown[];
+      if (mem[0]) return true;
+      const key = (await sql`
+        select 1 from ar_api_keys
+        where agent_id = ${agentId}
+          and project_id = ${projectId}
+          and revoked_at is null
+        limit 1
+      `) as unknown[];
+      return Boolean(key[0]);
+    }),
+
+  /** Idempotent board membership for an existing agent. */
+  grantBoardAccess: (agentId: string, projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      await ensureBoardAgent(sql, projectId, agentId);
+      return true;
+    }),
+
   archiveProject: (projectId: string) =>
     withLock(async () => {
       const sql = await getSql();
@@ -1173,10 +1220,18 @@ export const durableBoard = {
     tags?: string[];
     column?: MissionColumn;
     projectId?: string;
+    /** When set, record agent as creator (client file path). */
+    createdByAgentId?: string | null;
+    createdByAgentName?: string | null;
   }) =>
     applyEngine(
       (b) => {
         const id = uid("msn");
+        const agentId = input.createdByAgentId ?? null;
+        const agentLabel =
+          input.createdByAgentName?.trim() ||
+          input.createdByAgentId?.trim() ||
+          null;
         const mission: Mission = {
           id,
           projectId: input.projectId ?? DEFAULT_PROJECT_ID,
@@ -1205,17 +1260,20 @@ export const durableBoard = {
               id: uid("ev"),
               at: Date.now(),
               missionId: id,
-              agentId: null as string | null,
+              agentId,
+              projectId: mission.projectId,
               kind: "mission_created" as const,
-              message: `Created · ${mission.title}`,
+              message: agentLabel
+                ? `Created by ${agentLabel} · ${mission.title}`
+                : `Created · ${mission.title}`,
             },
             ...b.events,
           ].slice(0, 200),
         };
         return { ok: true, board, data: { mission: engine.missionSummary(mission) } };
       },
-      "operator",
-      "operator",
+      input.createdByAgentName ?? input.createdByAgentId ?? "operator",
+      input.createdByAgentId || input.createdByAgentName ? "agent" : "operator",
       "created",
     ),
 

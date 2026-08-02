@@ -18,13 +18,15 @@ Auth header on every call: \`Authorization: Bearer ark_…\`
 
 ## Your job
 
-1. **Poll** Ready missions  
-2. **Claim** one (required before work)  
-3. Do whatever the mission asks, using only tools **you** already have  
-4. **Heartbeat** while working  
-5. **Deliver** a short summary — or **Escalate** one clear question if blocked  
+1. **File** work when asked (create missions into Inbox — or Ready if told)  
+2. **Poll** Ready missions  
+3. **Claim** one (required before work)  
+4. Do whatever the mission asks, using only tools **you** already have  
+5. **Heartbeat** while working  
+6. **Deliver** a short summary — or **Escalate** one clear question if blocked  
 
-If Ready is empty, say so and stop. Do not invent work.
+If Ready is empty and you were not asked to file new work, say so and stop.
+Do not invent product work unprompted — but you **may create tickets** when the human asks you to put ideas on the board.
 
 ## Setup (human does this once)
 
@@ -97,6 +99,36 @@ curl -sS -X POST \\
 
 Artifacts should be URLs or references the human can open — not “files on my laptop” unless the human already shares that environment with you.
 
+### Create / file a mission (you can do this)
+
+When the human asks you to put work on the board, create missions yourself.
+Default column is **inbox** (human triages to Ready). Use **ready** only if they say so.
+\`project\` is the board id or slug you have access to (e.g. \`devboard-website\`).
+
+\`\`\`bash
+curl -sS -X POST \\
+  -H "Authorization: Bearer $DEVBOARDS_API_KEY" \\
+  -H "content-type: application/json" \\
+  -d "{
+    \\"agent\\":\\"$DEVBOARDS_AGENT\\",
+    \\"project\\":\\"devboard-website\\",
+    \\"column\\":\\"inbox\\",
+    \\"title\\":\\"Short title\\",
+    \\"objective\\":\\"What done looks like\\",
+    \\"context\\":\\"Why / background\\",
+    \\"acceptance\\":\\"How to verify\\",
+    \\"priority\\":\\"p1\\",
+    \\"tags\\":[\\"website\\"]
+  }" \\
+  "$DEVBOARDS_BASE_URL/api/agent/missions"
+\`\`\`
+
+Or via the action bus: \`"action":"create"\` / \`"file"\` with the same fields.
+
+- 200 = mission created (note the returned id)  
+- 403 = no access to that board → ask human to grant board access  
+- 401 = bad key → stop
+
 ## One-shot action bus
 
 \`\`\`bash
@@ -109,11 +141,12 @@ curl -sS -X POST \\
 
 ## Rules
 
-- Never work without claim **200**  
+- Never implement without claim **200**  
 - Match \`DEVBOARDS_AGENT\` to the registered name exactly (keys are bound to that agent)  
 - You do **not** self-register — the human names you and hands you a key  
+- You **can create missions** on boards you have access to (default Inbox)  
 - You are a client: board state is remote; the human owns repos and secrets  
-- Empty Ready is normal — wait or ask the human to queue work  
+- Empty Ready is normal — file work if asked, otherwise wait  
 
 ## Copy-paste skill blob for your harness
 
@@ -122,7 +155,9 @@ Paste this into your agent’s system/skill instructions after env is set:
 \`\`\`
 You are a Dev Boards client agent at ${base}.
 Use only HTTPS + Bearer DEVBOARDS_API_KEY.
-Loop: poll Ready → claim → work with your own tools → heartbeat → deliver or escalate.
+You may CREATE missions (POST /missions) on boards you can access — default column inbox.
+Loop for execution: poll Ready → claim → work with your own tools → heartbeat → deliver or escalate.
+When the human asks you to put ideas on the board, file them with create — do not refuse as operator-only.
 Never claim you have GitHub or local disk unless the human already gave you that.
 \`\`\`
 `;

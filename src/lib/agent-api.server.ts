@@ -9,7 +9,8 @@
  *   POST /missions/:id/heartbeat  { agent, note? }
  *   POST /missions/:id/escalate   { agent, question }
  *   POST /missions/:id/deliver    { agent, summary, artifacts? }
- *   POST /v1                      { action: poll|claim|heartbeat|escalate|deliver, ... }
+ *   POST /missions                { title, objective, project?, column? } — operator or agent key
+ *   POST /v1                      { action: poll|claim|…|create|file, ... }
  *   GET  /agents
  *   POST /agents                  { name, harness, role?, skills? }
  *   GET  /calls
@@ -21,11 +22,10 @@
  *   Authorization: Bearer <key>  OR  X-Agent-Key: <key>
  * If unset, open access (local demo).
  */
-import type { HarnessKind } from "./types";
+import type { HarnessKind, MissionColumn, Priority } from "./types";
 import { HARNESS_IDS } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
-import type { MissionColumn } from "./types";
 import { verifyGitHubSignature } from "./github-webhook";
 import { extractArtifactFromGitHubPayload } from "./github-ingest";
 import {
@@ -985,25 +985,21 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     }
 
     // POST /missions  create
+    // Operators (session) or client agents (ark_ key on an allowed board).
     if (parts.length === 1 && parts[0] === "missions" && req.method === "POST") {
-      const gate = await requireOperatorCap(req, "write_board");
-      if (gate) return gate;
       const title = str(body.title);
       const objective = str(body.objective);
       if (!title || !objective) return err(400, "title and objective required", "bad_request");
-      return fromEngine(
-        await boardOps.createMission({
-          title,
-          objective,
-          context: str(body.context),
-          constraints: str(body.constraints),
-          acceptance: str(body.acceptance),
-          priority: str(body.priority) as any,
-          tags: strArr(body.tags),
-          column: str(body.column) as any,
-          projectId: str(body.projectId) ?? str(body.project) ?? projectRef(url, body),
-        }),
-      );
+
+      const created = await createMissionForCaller({
+        req,
+        body,
+        url,
+        machineAuth,
+        title,
+        objective,
+      });
+      return created;
     }
 
 
@@ -1192,7 +1188,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           heartbeat: "POST /api/agent/missions/:id/heartbeat",
           escalate: "POST /api/agent/missions/:id/escalate",
           deliver: "POST /api/agent/missions/:id/deliver",
-          action: "POST /api/agent/v1  { action, ... }",
+          create: "POST /api/agent/missions  { title, objective, project, column? }",
+          action: "POST /api/agent/v1  { action: poll|claim|…|create|file, ... }",
           agents: "GET|POST /api/agent/agents",
           calls: "GET /api/agent/calls",
           reply: "POST /api/agent/calls/:id/reply",
@@ -1273,7 +1270,173 @@ async function handleAction(
     );
   }
 
+  // Client agents may file missions (Inbox/Ready) on boards they can access.
+  if (action === "create" || action === "file" || action === "create_mission") {
+    const title = str(body.title);
+    const objective = str(body.objective);
+    if (!title || !objective) {
+      return err(400, "title and objective required", "bad_request");
+    }
+    // Synthetic request bits for shared helper — path create only needs body + machine.
+    return createMissionForCaller({
+      req: new Request("http://local/api/agent/missions", { method: "POST" }),
+      body,
+      url: new URL("http://local/api/agent/missions"),
+      machineAuth: machine,
+      title,
+      objective,
+    });
+  }
+
   return err(400, `Unknown action: ${action}`, "bad_request");
+}
+
+const AGENT_CREATE_COLUMNS = new Set<string>(["inbox", "ready"]);
+
+/**
+ * Create a mission as operator (session) or client agent (ark_ key).
+ * Agents default to Inbox and may only target boards they can access.
+ */
+async function createMissionForCaller(opts: {
+  req: Request;
+  body: Record<string, unknown>;
+  url: URL;
+  machineAuth: MachineAuth;
+  title: string;
+  objective: string;
+}): Promise<Response> {
+  const { req, body, url, machineAuth, title, objective } = opts;
+  const rawProject =
+    str(body.projectId) ?? str(body.project) ?? projectRef(url, body);
+  const rawColumn = (str(body.column) ?? "inbox").toLowerCase();
+
+  // ── Operator path ────────────────────────────────────────────
+  const opCtx = await loadOperatorContext(req);
+  const opCheck = checkOperatorCapability(opCtx, "write_board");
+  if (opCheck.ok) {
+    let projectId = rawProject?.trim() || undefined;
+    if (projectId) {
+      const resolved = await boardOps.resolveProjectId(projectId);
+      if (!resolved) return err(404, "board not found", "board_not_found");
+      projectId = resolved;
+    }
+    return fromEngine(
+      await boardOps.createMission({
+        title,
+        objective,
+        context: str(body.context),
+        constraints: str(body.constraints),
+        acceptance: str(body.acceptance),
+        priority: str(body.priority) as Priority | undefined,
+        tags: strArr(body.tags),
+        column: rawColumn as MissionColumn,
+        projectId,
+      }),
+    );
+  }
+
+  // ── Client agent path (ark_ / global key) ────────────────────
+  if (machineAuth.type !== "ark" && machineAuth.type !== "global") {
+    return err(
+      opCheck.status ?? 401,
+      opCheck.error ??
+        "Sign in as an operator, or use an agent API key bound to a board.",
+      opCheck.code ?? "signed_out",
+    );
+  }
+
+  let agentId: string | null =
+    machineAuth.type === "ark" ? machineAuth.agentId : null;
+  let agentName: string | null = null;
+
+  if (machineAuth.type === "ark") {
+    if (!machineAuth.agentId) {
+      return err(
+        403,
+        "This API key is not bound to an agent. Issue an agent-bound key to create missions.",
+        "agent_required",
+      );
+    }
+    const agentOrErr = await resolveVerbAgent(body, machineAuth);
+    if (agentOrErr instanceof Response) return agentOrErr;
+    agentName = agentOrErr;
+    const snap = await boardOps.snapshot();
+    const bound = snap.agents.find(
+      (a) =>
+        a.id === machineAuth.agentId ||
+        a.name.toLowerCase() === agentName!.toLowerCase(),
+    );
+    agentId = bound?.id ?? machineAuth.agentId;
+  } else {
+    // global key: require explicit agent
+    const agentOrErr = await resolveVerbAgent(body, machineAuth);
+    if (agentOrErr instanceof Response) return agentOrErr;
+    agentName = agentOrErr;
+    const snap = await boardOps.snapshot();
+    const bound = snap.agents.find(
+      (a) =>
+        a.name.toLowerCase() === agentName!.toLowerCase() ||
+        a.id === agentName,
+    );
+    if (!bound || bound.isDemo) {
+      return err(400, "Unknown agent — register a real agent first", "agent_not_found");
+    }
+    agentId = bound.id;
+    agentName = bound.name;
+  }
+
+  if (!AGENT_CREATE_COLUMNS.has(rawColumn)) {
+    return err(
+      400,
+      "Agents may only create missions in inbox or ready (default: inbox).",
+      "bad_column",
+    );
+  }
+
+  let projectId =
+    (rawProject?.trim()
+      ? await boardOps.resolveProjectId(rawProject.trim())
+      : null) ??
+    (machineAuth.type === "ark" ? machineAuth.projectId : null);
+
+  if (!projectId) {
+    return err(
+      400,
+      "project (board id or slug) is required when creating as an agent.",
+      "project_required",
+    );
+  }
+
+  const allowed = await boardOps.agentCanAccessBoard(agentId!, projectId);
+  // Also allow the board the key was issued on (even if membership row missing)
+  const keyBoardOk =
+    machineAuth.type === "ark" && machineAuth.projectId === projectId;
+  if (!allowed && !keyBoardOk) {
+    return err(
+      403,
+      "This agent has no access to that board. Ask an operator to grant board access or issue a key on that board.",
+      "board_forbidden",
+    );
+  }
+
+  // Keep roster membership in sync when agent files work via key board access
+  await boardOps.grantBoardAccess(agentId!, projectId);
+
+  return fromEngine(
+    await boardOps.createMission({
+      title,
+      objective,
+      context: str(body.context),
+      constraints: str(body.constraints),
+      acceptance: str(body.acceptance),
+      priority: str(body.priority) as Priority | undefined,
+      tags: strArr(body.tags),
+      column: rawColumn as MissionColumn,
+      projectId,
+      createdByAgentId: agentId,
+      createdByAgentName: agentName,
+    }),
+  );
 }
 
 /** True when the URL path is owned by this handler. */

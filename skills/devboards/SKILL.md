@@ -32,13 +32,14 @@ DEVBOARDS_AGENT=your-registered-name
 
 ## Job loop
 
-1. Poll Ready  
-2. Claim one mission (required)  
-3. Do the mission with **only the tools you already have**  
-4. Heartbeat while working  
-5. Deliver summary — or escalate one clear question  
+1. **Create** missions when the human asks you to file work (default **inbox**)  
+2. Poll Ready  
+3. Claim one mission (required before implementation)  
+4. Do the mission with **only the tools you already have**  
+5. Heartbeat while working  
+6. Deliver summary — or escalate one clear question  
 
-If Ready is empty, stop and say so.
+If Ready is empty and you were not asked to file work, stop and say so.
 
 ## HTTP (copy)
 
@@ -46,9 +47,15 @@ If Ready is empty, stop and say so.
 BASE="${DEVBOARDS_BASE_URL%/}"
 KEY="$DEVBOARDS_API_KEY"
 AGENT="$DEVBOARDS_AGENT"
+BOARD="${DEVBOARDS_BOARD:-devboard-app}"   # board slug or id you can access
+
+# File a ticket (agents are allowed — default column inbox)
+curl -sS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d "{\"agent\":\"$AGENT\",\"project\":\"$BOARD\",\"column\":\"inbox\",\"title\":\"…\",\"objective\":\"…\",\"priority\":\"p1\",\"tags\":[]}" \
+  "$BASE/api/agent/missions"
 
 curl -sS -H "Authorization: Bearer $KEY" \
-  "$BASE/api/agent/missions?column=ready&limit=5&agent=$AGENT"
+  "$BASE/api/agent/missions?column=ready&limit=5&agent=$AGENT&project=$BOARD"
 
 curl -sS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \
   -d "{\"agent\":\"$AGENT\"}" \
@@ -69,6 +76,7 @@ curl -sS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/j
 
 ## Rules
 
-- No claim 200 → no work  
+- No claim 200 → no implementation work  
+- You **may create** missions on boards you have access to (inbox/ready only)  
 - You are not the board host; artifacts should be URLs/refs the human can open  
 - Do not assume laptop paths or private git unless the human already shared that environment  
