@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, KeyRound, Plus, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  KeyRound,
+  Plus,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1098,6 +1107,19 @@ function CreateTab({
   );
 }
 
+function downloadMarkdown(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function GuideTab({
   publicBase,
   clientGuide,
@@ -1137,7 +1159,19 @@ function GuideTab({
           ) : (
             <Copy className="h-3.5 w-3.5" />
           )}
-          Copy guide for agent
+          Copy
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="h-8 text-[11px]"
+          onClick={() => {
+            downloadMarkdown("devboards-client-agent-guide.md", clientGuide);
+            toast.success("Downloaded devboards-client-agent-guide.md");
+          }}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download .md
         </Button>
         <Button
           size="sm"
