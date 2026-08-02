@@ -70,16 +70,21 @@ export const agentApi = {
     return res.json();
   },
 
-  board: (projectId?: string | null) =>
-    req<BoardSnapshot>(
-      "GET",
-      `/board${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`,
-    ),
-  admin: (projectId?: string | null) =>
-    req<Record<string, unknown>>(
-      "GET",
-      `/admin${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`,
-    ),
+  board: (projectId?: string | null) => {
+    // null / "all" / "*" → every board the operator can access
+    const q =
+      !projectId || projectId === "all" || projectId === "*" || projectId === "__all__"
+        ? "?project=all"
+        : `?project=${encodeURIComponent(projectId)}`;
+    return req<BoardSnapshot>("GET", `/board${q}`);
+  },
+  admin: (projectId?: string | null) => {
+    const q =
+      !projectId || projectId === "all" || projectId === "*" || projectId === "__all__"
+        ? "?project=all"
+        : `?project=${encodeURIComponent(projectId)}`;
+    return req<Record<string, unknown>>("GET", `/admin${q}`);
+  },
   listProjects: () =>
     req<{
       ok: true;

@@ -19,12 +19,15 @@ export function MissionCard({
   selected,
   onOpen,
   onDragStart,
+  boardName,
 }: {
   mission: Mission;
   agent?: Agent;
   selected?: boolean;
   onOpen: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  /** When set (All boards view), show which board owns the card */
+  boardName?: string | null;
 }) {
   const [stale, setStale] = useState(false);
 
@@ -66,6 +69,11 @@ export function MissionCard({
             ))}
           </div>
           <h3 className="text-sm font-medium leading-snug text-fg">{mission.title}</h3>
+          {boardName ? (
+            <p className="mt-0.5 truncate text-[10px] font-medium uppercase tracking-wide text-fg-subtle">
+              {boardName}
+            </p>
+          ) : null}
           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-fg-muted">
             {mission.objective}
           </p>

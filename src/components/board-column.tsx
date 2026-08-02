@@ -13,6 +13,8 @@ export function BoardColumn({
   onDropMission,
   onDragStart,
   onAddMission,
+  showBoardName = false,
+  boardNameById = {},
 }: {
   columnId: MissionColumn;
   missions: Mission[];
@@ -23,6 +25,9 @@ export function BoardColumn({
   onDragStart: (missionId: string) => void;
   /** Open new-mission flow targeting this column */
   onAddMission?: (column: MissionColumn) => void;
+  /** All-boards mode: label each card with its board name */
+  showBoardName?: boolean;
+  boardNameById?: Record<string, string>;
 }) {
   const meta = COLUMNS.find((c) => c.id === columnId)!;
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
@@ -84,6 +89,11 @@ export function BoardColumn({
               undefined
             }
             selected={selectedId === m.id}
+            boardName={
+              showBoardName
+                ? boardNameById[m.projectId] ?? m.projectId
+                : null
+            }
             onOpen={() => onOpen(m.id)}
             onDragStart={(e) => {
               e.dataTransfer.setData("text/mission-id", m.id);

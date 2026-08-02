@@ -36,10 +36,24 @@ export function AgentsPanel() {
     removeAgent,
     openPanel,
     selectedProjectId,
+    lastSingleProjectId,
+    writeProjectId,
     refresh,
   } = useBoard();
-  const boardName =
-    projects.find((p) => p.id === selectedProjectId)?.name ?? "This board";
+  const allBoards =
+    selectedProjectId === "__all__" ||
+    selectedProjectId === "all" ||
+    selectedProjectId === "*";
+  const writeId = writeProjectId();
+  const boardName = allBoards
+    ? "All boards"
+    : projects.find((p) => p.id === selectedProjectId)?.name ?? "This board";
+  const writeBoardName =
+    projects.find((p) => p.id === writeId)?.name ??
+    (lastSingleProjectId
+      ? projects.find((p) => p.id === lastSingleProjectId)?.name
+      : null) ??
+    "a board";
   const [name, setName] = useState("");
   const [role, setRole] = useState("client");
   const [harness, setHarness] = useState<HarnessKind>("hermes");
@@ -68,17 +82,22 @@ export function AgentsPanel() {
   const [revokeStep, setRevokeStep] = useState<1 | 2>(1);
   const [revokeBusy, setRevokeBusy] = useState(false);
 
-  const projectId = selectedProjectId ?? "proj_default";
+  // Keys/settings need a concrete board; fall back to last single board.
+  const projectId = writeId;
   const publicBase =
     typeof window !== "undefined" ? window.location.origin : DEFAULT_PUBLIC_BASE;
   const clientGuide = useMemo(
     () => clientAgentGuideMarkdown(publicBase),
     [publicBase],
   );
-  // Board snapshot is already scoped to the selected board (non-demo).
+  // Snapshot is already scoped (single board or all boards the user can access).
   const roster = useMemo(() => agents.filter((a) => !a.isDemo), [agents]);
 
   const reloadKeys = useCallback(async () => {
+    if (!projectId) {
+      setKeys([]);
+      return;
+    }
     try {
       const res = await agentApi.listKeys(projectId);
       setKeys(res.keys ?? []);
@@ -88,6 +107,10 @@ export function AgentsPanel() {
   }, [projectId]);
 
   const reloadSettings = useCallback(async () => {
+    if (!projectId) {
+      setSettings({});
+      return;
+    }
     try {
       const res = await agentApi.getSettings(projectId);
       setSettings(res.settings ?? {});
@@ -104,6 +127,10 @@ export function AgentsPanel() {
   }, [reloadKeys, reloadSettings]);
 
   async function issueKey(agentId: string, label?: string) {
+    if (!projectId) {
+      toast.error("Select a board in the rail before issuing a key");
+      return;
+    }
     const ag = roster.find((a) => a.id === agentId);
     try {
       const res = await agentApi.createApiKey({
@@ -128,15 +155,35 @@ export function AgentsPanel() {
         <div>
           <h2 className="text-sm font-medium text-fg">Agent roster</h2>
           <p className="text-xs text-fg-subtle">
-            Selected board:{" "}
-            <span className="font-medium text-fg">{boardName}</span>
+            {allBoards ? (
+              <>
+                Scope: <span className="font-medium text-fg">All boards</span>
+                {writeId ? (
+                  <span className="text-fg-subtle">
+                    {" "}
+                    · writes → {writeBoardName}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <>
+                Selected board:{" "}
+                <span className="font-medium text-fg">{boardName}</span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-1">
           <Button
             size="icon-sm"
             variant="ghost"
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => {
+              if (!writeId) {
+                toast.error("Select a board in the rail before registering");
+                return;
+              }
+              setShowForm((v) => !v);
+            }}
             aria-label="Register agent"
           >
             <Plus className="h-4 w-4" />
@@ -171,12 +218,15 @@ export function AgentsPanel() {
               setRole("client");
               setSkills("");
               setShowForm(false);
-              toast.success(`Registering ${n.toLowerCase()} on ${boardName}…`);
+              toast.success(
+                `Registering ${n.toLowerCase()} on ${writeBoardName}…`,
+              );
             }}
           >
             <p className="text-[11px] text-fg-muted">
-              Adds the agent to <span className="text-fg">{boardName}</span>, then
-              issue a key below.
+              Adds the agent to{" "}
+              <span className="text-fg">{writeBoardName}</span>, then issue a key
+              below.
             </p>
             <Input
               placeholder="name (e.g. forge)"
@@ -207,34 +257,53 @@ export function AgentsPanel() {
               onChange={(e) => setSkills(e.target.value)}
             />
             <Button type="submit" size="sm" className="w-full">
-              Register on {boardName}
+              Register on {writeBoardName}
             </Button>
           </form>
         )}
 
         <div className="border-b border-border px-4 py-2.5">
           <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-            Board roster
+            {allBoards ? "All-boards roster" : "Board roster"}
           </h3>
           <p className="mt-0.5 text-[11px] text-fg-muted">
-            Agents on <span className="text-fg">{boardName}</span>
-            {roster.length > 0 ? (
-              <span className="text-fg-subtle"> · {roster.length}</span>
-            ) : null}
+            {allBoards ? (
+              <>
+                Agents across boards you can access
+                {roster.length > 0 ? (
+                  <span className="text-fg-subtle"> · {roster.length}</span>
+                ) : null}
+              </>
+            ) : (
+              <>
+                Agents on <span className="text-fg">{boardName}</span>
+                {roster.length > 0 ? (
+                  <span className="text-fg-subtle"> · {roster.length}</span>
+                ) : null}
+              </>
+            )}
           </p>
         </div>
 
         <ul className="divide-y divide-border">
           {roster.length === 0 && (
             <li className="px-4 py-8 text-center text-xs text-fg-subtle">
-              No agents on this board yet.
+              {allBoards
+                ? "No agents on any board yet."
+                : "No agents on this board yet."}
               <br />
               <button
                 type="button"
                 className="mt-2 text-fg underline-offset-2 hover:underline"
-                onClick={() => setShowForm(true)}
+                onClick={() => {
+                  if (!writeId) {
+                    toast.error("Select a board in the rail first");
+                    return;
+                  }
+                  setShowForm(true);
+                }}
               >
-                Register one for {boardName}
+                Register one{writeId ? ` for ${writeBoardName}` : ""}
               </button>
             </li>
           )}
@@ -314,12 +383,26 @@ export function AgentsPanel() {
 
         <div className="border-t border-border p-4 space-y-3">
           <h3 className="text-xs font-medium uppercase tracking-wider text-fg-subtle">
-            API keys · {boardName}
+            API keys · {projectId ? writeBoardName : "select a board"}
           </h3>
           <p className="text-[11px] text-fg-muted leading-relaxed">
-            Register above → issue a key bound to that agent → paste{" "}
-            <code className="text-fg-subtle">ark_…</code> into the client. Secret
-            shown once.
+            {allBoards && !projectId
+              ? "Pick a board in the rail to issue or manage keys."
+              : allBoards
+                ? `Keys for ${writeBoardName} (last selected board). Register → issue key → paste ark_… into the client.`
+                : "Register above → issue a key bound to that agent → paste "}
+            {!allBoards || projectId ? (
+              <>
+                {!allBoards ? (
+                  <>
+                    <code className="text-fg-subtle">ark_…</code> into the
+                    client. Secret shown once.
+                  </>
+                ) : (
+                  <> Secret shown once.</>
+                )}
+              </>
+            ) : null}
           </p>
           <div className="flex flex-wrap gap-2">
             <Input
@@ -342,8 +425,12 @@ export function AgentsPanel() {
             </select>
             <Button
               size="sm"
-              disabled={!keyAgent}
+              disabled={!keyAgent || !projectId}
               onClick={() => {
+                if (!projectId) {
+                  toast.error("Select a board in the rail first");
+                  return;
+                }
                 if (!keyAgent) {
                   toast.error("Select a registered agent first");
                   return;
@@ -408,7 +495,11 @@ export function AgentsPanel() {
               );
             })}
             {keys.length === 0 && (
-              <li className="text-[11px] text-fg-subtle">No keys on this board yet.</li>
+              <li className="text-[11px] text-fg-subtle">
+                {projectId
+                  ? "No keys on this board yet."
+                  : "Select a board to list keys."}
+              </li>
             )}
           </ul>
 
@@ -562,61 +653,73 @@ export function AgentsPanel() {
           </button>
           {integrationsOpen && (
             <div className="space-y-2">
-              <p className="text-[11px] text-fg-muted leading-relaxed">
-                Map a repo to this board, set the webhook secret, then point GitHub
-                at the URL below. Issues create one mission with stable{" "}
-                <code className="text-fg-subtle">external_id</code>{" "}
-                <code className="text-fg-subtle">github:owner/repo#n</code>.
-              </p>
-              <Input
-                placeholder="GitHub repo org/name"
-                value={ghRepo}
-                onChange={(e) => setGhRepo(e.target.value)}
-                className="h-8"
-              />
-              <Input
-                placeholder="GitHub webhook secret"
-                value={ghSecret}
-                onChange={(e) => setGhSecret(e.target.value)}
-                className="h-8"
-                type="password"
-              />
-              <Input
-                placeholder="Reply webhook URL (on Call resolve)"
-                value={replyUrl}
-                onChange={(e) => setReplyUrl(e.target.value)}
-                className="h-8"
-              />
-              <p className="text-[10px] text-fg-subtle break-all">
-                Payload URL: POST /api/agent/webhooks/github?project={projectId}
-                <br />
-                Events: issues, issue_comment, pull_request, check_run (JSON)
-                <br />
-                {settings.hasGithubSecret
-                  ? "Secret configured ✓"
-                  : "No secret yet — webhooks accepted unsigned (dev only)"}
-              </p>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="w-full"
-                onClick={async () => {
-                  try {
-                    await agentApi.updateSettings(projectId, {
-                      githubRepo: ghRepo || null,
-                      githubWebhookSecret: ghSecret || undefined,
-                      replyWebhookUrl: replyUrl || null,
-                    });
-                    setGhSecret("");
-                    await reloadSettings();
-                    toast.success("Settings saved");
-                  } catch (e) {
-                    toast.error(e instanceof Error ? e.message : "save failed");
-                  }
-                }}
-              >
-                Save integration settings
-              </Button>
+              {!projectId ? (
+                <p className="text-[11px] text-fg-muted leading-relaxed">
+                  Select a board in the rail to configure GitHub / webhooks for
+                  that board.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[11px] text-fg-muted leading-relaxed">
+                    Map a repo to {writeBoardName}, set the webhook secret, then
+                    point GitHub at the URL below. Issues create one mission with
+                    stable <code className="text-fg-subtle">external_id</code>{" "}
+                    <code className="text-fg-subtle">github:owner/repo#n</code>.
+                  </p>
+                  <Input
+                    placeholder="GitHub repo org/name"
+                    value={ghRepo}
+                    onChange={(e) => setGhRepo(e.target.value)}
+                    className="h-8"
+                  />
+                  <Input
+                    placeholder="GitHub webhook secret"
+                    value={ghSecret}
+                    onChange={(e) => setGhSecret(e.target.value)}
+                    className="h-8"
+                    type="password"
+                  />
+                  <Input
+                    placeholder="Reply webhook URL (on Call resolve)"
+                    value={replyUrl}
+                    onChange={(e) => setReplyUrl(e.target.value)}
+                    className="h-8"
+                  />
+                  <p className="text-[10px] text-fg-subtle break-all">
+                    Payload URL: POST /api/agent/webhooks/github?project=
+                    {projectId}
+                    <br />
+                    Events: issues, issue_comment, pull_request, check_run (JSON)
+                    <br />
+                    {settings.hasGithubSecret
+                      ? "Secret configured ✓"
+                      : "No secret yet — webhooks accepted unsigned (dev only)"}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={async () => {
+                      try {
+                        await agentApi.updateSettings(projectId, {
+                          githubRepo: ghRepo || null,
+                          githubWebhookSecret: ghSecret || undefined,
+                          replyWebhookUrl: replyUrl || null,
+                        });
+                        setGhSecret("");
+                        await reloadSettings();
+                        toast.success("Settings saved");
+                      } catch (e) {
+                        toast.error(
+                          e instanceof Error ? e.message : "save failed",
+                        );
+                      }
+                    }}
+                  >
+                    Save integration settings
+                  </Button>
+                </>
+              )}
             </div>
           )}
         </div>

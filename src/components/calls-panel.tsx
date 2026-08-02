@@ -8,9 +8,22 @@ import { RelativeTime } from "@/components/relative-time";
 import { useBoard } from "@/lib/store";
 
 export function CallsPanel() {
-  const { calls, missions, agents, replyToCall, closePanel, openPanel } =
-    useBoard();
+  const {
+    calls,
+    missions,
+    agents,
+    projects,
+    selectedProjectId,
+    replyToCall,
+    closePanel,
+    openPanel,
+  } = useBoard();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const allBoards =
+    selectedProjectId === "__all__" ||
+    selectedProjectId === "all" ||
+    selectedProjectId === "*";
+  const boardNameById = Object.fromEntries(projects.map((p) => [p.id, p.name]));
 
   const open = calls.filter((c) => !c.resolvedAt);
   const closed = calls.filter((c) => c.resolvedAt);
@@ -21,7 +34,9 @@ export function CallsPanel() {
         <div>
           <h2 className="text-sm font-medium text-fg">Human call queue</h2>
           <p className="text-xs text-fg-subtle">
-            Fast answers so agents can keep moving
+            {allBoards
+              ? "All boards · fast answers so agents can keep moving"
+              : "Fast answers so agents can keep moving"}
           </p>
         </div>
         <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close">
@@ -44,6 +59,8 @@ export function CallsPanel() {
           {open.map((call) => {
             const mission = missions.find((m) => m.id === call.missionId);
             const agent = agents.find((a) => a.id === call.agentId);
+            const bid = call.projectId ?? mission?.projectId;
+            const bname = bid ? boardNameById[bid] : null;
             return (
               <li key={call.id} className="space-y-3 p-4">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -64,6 +81,11 @@ export function CallsPanel() {
                   {agent && (
                     <span className="font-mono text-[11px] text-fg-muted">
                       {agent.name}
+                    </span>
+                  )}
+                  {allBoards && bname && (
+                    <span className="rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-subtle">
+                      {bname}
                     </span>
                   )}
                 </div>

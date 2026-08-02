@@ -71,6 +71,8 @@ export function AdminPortal({
   embedded = false,
   boards = [],
   onOpenMission,
+  scope: scopeProp,
+  onScopeChange,
 }: {
   projectId?: string | null;
   embedded?: boolean;
@@ -78,6 +80,9 @@ export function AdminPortal({
   boards?: Array<{ id: string; name: string; slug: string }>;
   /** Jump to Board view + open mission panel */
   onOpenMission?: (missionId: string, boardId?: string | null) => void;
+  /** Controlled scope (when set, parent owns All/This board). */
+  scope?: LiveScope;
+  onScopeChange?: (scope: LiveScope) => void;
 } = {}) {
   const [data, setData] = useState<AdminPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +96,7 @@ export function AdminPortal({
   const [filterAgent, setFilterAgent] = useState<string>("");
   const [filterKind, setFilterKind] = useState<string>("");
   const [filterQuery, setFilterQuery] = useState("");
-  const [scope, setScope] = useState<LiveScope>(() => {
+  const [localScope, setLocalScope] = useState<LiveScope>(() => {
     try {
       const raw = localStorage.getItem(LIVE_SCOPE_KEY);
       return raw === "all" ? "all" : "board";
@@ -99,9 +104,19 @@ export function AdminPortal({
       return "board";
     }
   });
+  const controlled = scopeProp !== undefined;
+  const scope: LiveScope = controlled
+    ? scopeProp!
+    : !projectId
+      ? "all"
+      : localScope;
 
   const setScopePersist = (s: LiveScope) => {
-    setScope(s);
+    if (onScopeChange) {
+      onScopeChange(s);
+      return;
+    }
+    setLocalScope(s);
     try {
       localStorage.setItem(LIVE_SCOPE_KEY, s);
     } catch {
@@ -282,8 +297,12 @@ export function AdminPortal({
                     : "text-fg-muted hover:text-fg",
                 )}
                 onClick={() => setScopePersist("board")}
-                disabled={!projectId}
-                title={projectId ? "Only the selected board" : "Select a board first"}
+                disabled={!projectId && !onScopeChange}
+                title={
+                  projectId || onScopeChange
+                    ? "Only the selected board"
+                    : "Select a board first"
+                }
               >
                 This board
               </button>

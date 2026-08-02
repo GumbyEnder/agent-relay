@@ -45,6 +45,7 @@ import {
 import { agentApi } from "@/lib/api-client";
 import { UserButton } from "@/lib/auth/gates";
 import { useOperatorMe } from "@/components/operator-gate";
+import { ALL_BOARDS_ID, isAllBoardsScope } from "@/lib/board-scope";
 
 type MainView = "board" | "live" | "calls" | "agents" | "protocol";
 
@@ -71,6 +72,7 @@ export function AppShell({
     calls,
     projects,
     selectedProjectId,
+    lastSingleProjectId,
     panel,
     selectedMissionId,
     mainView,
@@ -159,7 +161,14 @@ export function AppShell({
   }, [initialView, setMainView]);
 
   useEffect(() => {
-    if (!initialProjectSlug || !projects.length) return;
+    if (!initialProjectSlug) return;
+    if (initialProjectSlug === "all" || initialProjectSlug === "*") {
+      if (selectedProjectId !== ALL_BOARDS_ID) {
+        setSelectedProjectId(ALL_BOARDS_ID);
+      }
+      return;
+    }
+    if (!projects.length) return;
     const match = projects.find(
       (p) => p.slug === initialProjectSlug || p.id === initialProjectSlug,
     );
@@ -289,9 +298,11 @@ export function AppShell({
                 Dev Boards
               </h1>
               <p className="truncate text-[11px] text-fg-subtle sm:text-xs">
-                {selectedProject
-                  ? `${selectedProject.name} · board`
-                  : "Mission boards for AI agents"}
+                {isAllBoardsScope(selectedProjectId)
+                  ? "All boards"
+                  : selectedProject
+                    ? `${selectedProject.name} · board`
+                    : "Mission boards for AI agents"}
                 {role ? ` · ${role}` : ""}
               </p>
             </div>
@@ -530,7 +541,9 @@ export function AppShell({
               onClick={async () => {
                 try {
                   const body = await agentApi.exportHistory({
-                    projectId: selectedProjectId ?? undefined,
+                    projectId: isAllBoardsScope(selectedProjectId)
+                      ? undefined
+                      : (selectedProjectId ?? undefined),
                     format: "csv",
                   });
                   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -588,6 +601,39 @@ export function AppShell({
             Boards
           </div>
           <ul className="flex-1 space-y-0.5 overflow-y-auto p-2 scrollbar-thin">
+            <li>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProjectId(ALL_BOARDS_ID);
+                  void navigate({
+                    to: "/",
+                    search: (prev) => ({
+                      ...prev,
+                      project: "all",
+                    }),
+                  });
+                }}
+                className={cn(
+                  "flex w-full flex-col rounded-[var(--radius-sm)] px-2.5 py-2 text-left text-xs transition-colors",
+                  isAllBoardsScope(selectedProjectId)
+                    ? "bg-accent text-accent-fg"
+                    : "text-fg-muted hover:bg-bg-subtle hover:text-fg",
+                )}
+              >
+                <span className="font-medium">All boards</span>
+                <span
+                  className={cn(
+                    "text-[10px]",
+                    isAllBoardsScope(selectedProjectId)
+                      ? "text-accent-fg/70"
+                      : "text-fg-subtle",
+                  )}
+                >
+                  every board you can access
+                </span>
+              </button>
+            </li>
             {projects.map((p) => (
               <li key={p.id}>
                 <button
@@ -643,12 +689,22 @@ export function AppShell({
                       missions={byColumn(col.id)}
                       agents={agents}
                       selectedId={selectedMissionId}
+                      showBoardName={isAllBoardsScope(selectedProjectId)}
+                      boardNameById={Object.fromEntries(
+                        projects.map((pr) => [pr.id, pr.name]),
+                      )}
                       onOpen={(id) => selectMission(id)}
                       onDropMission={(id, column) => moveMission(id, column)}
                       onDragStart={() => {}}
                       onAddMission={
                         can("write_board")
-                          ? (column) => openNewMission(column)
+                          ? (column) => {
+                              if (isAllBoardsScope(selectedProjectId) && !lastSingleProjectId) {
+                                toast.error("Select a board first (or pick one in the rail)");
+                                return;
+                              }
+                              openNewMission(column);
+                            }
                           : undefined
                       }
                     />
@@ -664,7 +720,40 @@ export function AppShell({
           {mainView === "live" && (
             <div className="min-h-0 flex-1">
               <AdminPortal
-                projectId={selectedProjectId}
+                projectId={
+                  isAllBoardsScope(selectedProjectId) ? null : selectedProjectId
+                }
+                scope={isAllBoardsScope(selectedProjectId) ? "all" : "board"}
+                onScopeChange={(s) => {
+                  if (s === "all") {
+                    setSelectedProjectId(ALL_BOARDS_ID);
+                    void navigate({
+                      to: "/",
+                      search: (prev) => ({ ...prev, project: "all", view: "live" }),
+                    });
+                    return;
+                  }
+                  const id =
+                    lastSingleProjectId ??
+                    projects.find((p) => p.ownerUserId)?.id ??
+                    projects[0]?.id ??
+                    null;
+                  if (!id) {
+                    toast.error("No board available");
+                    return;
+                  }
+                  setSelectedProjectId(id);
+                  const p = projects.find((x) => x.id === id);
+                  void navigate({
+                    to: "/",
+                    search: (prev) => ({
+                      ...prev,
+                      view: "live",
+                      project:
+                        p?.slug && p.slug !== "default" ? p.slug : undefined,
+                    }),
+                  });
+                }}
                 boards={projects.map((p) => ({
                   id: p.id,
                   name: p.name,

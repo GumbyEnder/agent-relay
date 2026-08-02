@@ -13,6 +13,12 @@ import type {
   Priority,
 } from "./types";
 import { toast } from "sonner";
+import {
+  ALL_BOARDS_ID,
+  isAllBoardsScope,
+  readStoredBoardScope,
+  writeStoredBoardScope,
+} from "./board-scope";
 
 interface BoardState {
   agents: Agent[];
@@ -21,6 +27,8 @@ interface BoardState {
   calls: HumanCall[];
   projects: Project[];
   selectedProjectId: string | null;
+  /** Last concrete board (for switching back from All boards). */
+  lastSingleProjectId: string | null;
   historyByMission: Record<string, MissionHistoryEntry[]>;
   selectedMissionId: string | null;
   mainView: "board" | "live" | "calls" | "agents" | "protocol";
@@ -45,6 +53,10 @@ interface BoardState {
 
   setMainView: (v: BoardState["mainView"]) => void;
   setSelectedProjectId: (id: string | null) => void;
+  /** True when viewing every board the user can access. */
+  isAllBoards: () => boolean;
+  /** Concrete board id for write actions, or null if only All is selected. */
+  writeProjectId: () => string | null;
   /** From Live feed: switch to Board view and open mission panel. */
   openMissionOnBoard: (missionId: string, projectId?: string | null) => void;
   setSearch: (q: string) => void;
@@ -116,6 +128,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
   calls: [],
   projects: [],
   selectedProjectId: null,
+  lastSingleProjectId: null,
   historyByMission: {},
   selectedMissionId: null,
   mainView: "board",
@@ -133,20 +146,47 @@ export const useBoard = create<BoardState>()((set, get) => ({
   setHydrated: () => set({ _hydrated: true }),
   setMainView: (v) => set({ mainView: v, panel: "none" }),
   setSelectedProjectId: (id) => {
-    set({ selectedProjectId: id, selectedMissionId: null, historyByMission: {} });
+    const next = id === "all" || id === "*" ? ALL_BOARDS_ID : id;
+    const patch: Partial<BoardState> = {
+      selectedProjectId: next,
+      selectedMissionId: null,
+      historyByMission: {},
+    };
+    if (next && next !== ALL_BOARDS_ID) {
+      patch.lastSingleProjectId = next;
+    }
+    set(patch);
+    writeStoredBoardScope(next);
     void get().refresh();
   },
+  isAllBoards: () => isAllBoardsScope(get().selectedProjectId),
+  writeProjectId: () => {
+    const id = get().selectedProjectId;
+    if (!id || id === ALL_BOARDS_ID) return get().lastSingleProjectId;
+    return id;
+  },
   openMissionOnBoard: (missionId, projectId) => {
-    const nextProject = projectId ?? get().selectedProjectId;
+    const cur = get().selectedProjectId;
+    let nextProject = projectId ?? cur;
+    // Prefer the mission's board so the kanban shows the right column set.
+    if (!nextProject || nextProject === ALL_BOARDS_ID) {
+      nextProject = projectId ?? get().lastSingleProjectId ?? cur;
+    }
+    if (nextProject === ALL_BOARDS_ID) nextProject = get().lastSingleProjectId;
     const projectChanged =
-      nextProject != null && nextProject !== get().selectedProjectId;
-    set({
+      nextProject != null && nextProject !== cur;
+    const patch: Partial<BoardState> = {
       mainView: "board",
       selectedProjectId: nextProject,
       selectedMissionId: missionId,
       panel: "mission",
       ...(projectChanged ? { historyByMission: {} } : {}),
-    });
+    };
+    if (nextProject && nextProject !== ALL_BOARDS_ID) {
+      patch.lastSingleProjectId = nextProject;
+      writeStoredBoardScope(nextProject);
+    }
+    set(patch);
     void get()
       .refresh()
       .then(() => get().loadHistory(missionId))
@@ -223,9 +263,32 @@ export const useBoard = create<BoardState>()((set, get) => ({
         updatedAt: pr.updatedAt ? Number(pr.updatedAt) : Date.now(),
       }));
       let selectedProjectId = get().selectedProjectId;
-      if (selectedProjectId && !projects.some((p) => p.id === selectedProjectId)) {
+      let lastSingleProjectId = get().lastSingleProjectId;
+
+      // First hydrate: restore All boards or last board from localStorage / URL.
+      if (!get()._hydrated && (selectedProjectId == null || selectedProjectId === "")) {
+        const stored = readStoredBoardScope();
+        if (stored === ALL_BOARDS_ID) {
+          selectedProjectId = ALL_BOARDS_ID;
+        } else if (stored && projects.some((p) => p.id === stored)) {
+          selectedProjectId = stored;
+          lastSingleProjectId = stored;
+        }
+      }
+
+      if (selectedProjectId === ALL_BOARDS_ID) {
+        // keep all-boards scope
+      } else if (selectedProjectId && !projects.some((p) => p.id === selectedProjectId)) {
         selectedProjectId = null;
       }
+
+      if (
+        lastSingleProjectId &&
+        !projects.some((p) => p.id === lastSingleProjectId)
+      ) {
+        lastSingleProjectId = null;
+      }
+
       if (!selectedProjectId && projects.length) {
         // Prefer a board the user owns, then default/shared, then first.
         selectedProjectId =
@@ -233,7 +296,18 @@ export const useBoard = create<BoardState>()((set, get) => ({
           projects.find((p) => p.slug === "default" || p.id === "proj_default")?.id ??
           projects[0]!.id;
       }
-      const snap = await agentApi.board(selectedProjectId);
+
+      if (
+        selectedProjectId &&
+        selectedProjectId !== ALL_BOARDS_ID &&
+        !lastSingleProjectId
+      ) {
+        lastSingleProjectId = selectedProjectId;
+      }
+
+      const apiProject =
+        selectedProjectId === ALL_BOARDS_ID ? null : selectedProjectId;
+      const snap = await agentApi.board(apiProject);
       set({
         agents: snap.agents,
         missions: snap.missions,
@@ -241,6 +315,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
         calls: snap.calls,
         projects,
         selectedProjectId,
+        lastSingleProjectId,
         _hydrated: true,
         _syncing: false,
         _error: null,
@@ -339,6 +414,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
   createMission: (input) => {
     const tempId = `pending_${Date.now()}`;
     void run("Create mission", async () => {
+      const projectId = get().writeProjectId();
+      if (!projectId) {
+        toast.error("Select a board before creating a mission");
+        return;
+      }
       const res = await agentApi.createMission({
         title: input.title,
         objective: input.objective,
@@ -348,7 +428,7 @@ export const useBoard = create<BoardState>()((set, get) => ({
         priority: input.priority,
         tags: input.tags,
         column: input.column,
-        projectId: get().selectedProjectId ?? undefined,
+        projectId,
       });
       await get().refresh();
       const id = res.mission.id;
@@ -386,9 +466,14 @@ export const useBoard = create<BoardState>()((set, get) => ({
 
   registerAgent: (input) => {
     void run("Register agent", async () => {
+      const projectId = get().writeProjectId();
+      if (!projectId) {
+        toast.error("Select a board before registering an agent");
+        return;
+      }
       await agentApi.registerAgent({
         ...input,
-        projectId: get().selectedProjectId,
+        projectId,
       });
       await get().refresh();
       set({ panel: "agents" });

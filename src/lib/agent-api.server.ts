@@ -222,10 +222,19 @@ function projectRef(
   body?: Record<string, unknown>,
 ): string | undefined {
   const q = url.searchParams.get("project") ?? url.searchParams.get("project_id");
-  if (q?.trim()) return q.trim();
+  const normalize = (raw: string | undefined) => {
+    if (!raw?.trim()) return undefined;
+    const t = raw.trim();
+    // "all" / "*" = unscoped snapshot across boards the caller can access
+    if (t === "all" || t === "*" || t === "__all__") return undefined;
+    return t;
+  };
+  const fromQ = normalize(q ?? undefined);
+  if (fromQ) return fromQ;
+  if (q?.trim() && normalize(q) === undefined) return undefined;
   if (body) {
     const b = str(body.project) ?? str(body.project_id);
-    if (b?.trim()) return b.trim();
+    return normalize(b);
   }
   return undefined;
 }
@@ -653,7 +662,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     // ?project=<id> one board · ?project=all (or omit) all boards the user can see
     if (parts.length === 1 && parts[0] === "admin" && req.method === "GET") {
       const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
-      const wantAll = !pref || pref === "all" || pref === "*";
+      const wantAll =
+        !pref || pref === "all" || pref === "*" || pref === "__all__";
       const ctx = await loadOperatorContext(req);
       let allowedProjectIds: string[] | null = null;
       if (wantAll && ctx.authRequired && ctx.user) {
@@ -823,9 +833,34 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     }
 
     // GET /board — full snapshot for UI
+    // ?project=<id> one board · ?project=all (or omit) all boards the user can see
     if (parts.length === 1 && parts[0] === "board" && req.method === "GET") {
-      const snap = await boardOps.snapshot(projectRef(url));
-      return json({ ok: true, projectId: projectRef(url) ?? null, ...snap });
+      const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
+      const wantAll = !pref || pref === "all" || pref === "*" || pref === "__all__";
+      if (wantAll) {
+        const ctx = await loadOperatorContext(req);
+        let allowedProjectIds: string[] | null = null;
+        if (ctx.authRequired && ctx.user) {
+          const boards = await boardOps.listProjects({
+            ownerUserId: ctx.user.id,
+            includeShared: true,
+            admin: ctx.role === "admin" && url.searchParams.get("all") === "1",
+          });
+          allowedProjectIds = boards.map((b) => b.id);
+        }
+        const snap = await boardOps.adminSnapshot("all", { allowedProjectIds });
+        return json({
+          ok: true,
+          projectId: null,
+          scope: "all" as const,
+          agents: snap.agents,
+          missions: snap.missions,
+          events: snap.events,
+          calls: snap.calls,
+        });
+      }
+      const snap = await boardOps.snapshot(pref);
+      return json({ ok: true, projectId: pref, scope: "board" as const, ...snap });
     }
 
     // GET /missions/:id/history
