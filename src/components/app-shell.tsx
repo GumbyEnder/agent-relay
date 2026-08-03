@@ -628,6 +628,11 @@ export function AppShell({
           onFilter={setFilterAgent}
           onOpenRoster={() => selectView("agents")}
           selectedProjectId={selectedProjectId}
+          boardName={
+            isAllBoardsScope(selectedProjectId)
+              ? null
+              : (selectedProject?.name ?? null)
+          }
         />
       )}
 

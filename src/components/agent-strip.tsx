@@ -12,12 +12,18 @@ const statusColor: Record<Agent["status"], string> = {
   error: "var(--color-status-blocked)",
 };
 
+function agentOnBoard(agent: Agent, projectId: string | null | undefined): boolean {
+  if (!projectId) return false;
+  return (agent.boardIds ?? []).includes(projectId);
+}
+
 export function AgentStrip({
   agents,
   filterAgentId,
   onFilter,
   onOpenRoster,
   selectedProjectId = null,
+  boardName = null,
 }: {
   agents: Agent[];
   filterAgentId: string | null;
@@ -25,6 +31,8 @@ export function AgentStrip({
   onOpenRoster: () => void;
   /** When a concrete board is selected, agents with membership are highlighted. */
   selectedProjectId?: string | null;
+  /** Display name for the selected board (tooltip / badge). */
+  boardName?: string | null;
 }) {
   const roster = agents.filter((a) => !a.isDemo);
   const live = roster.filter((a) => a.status !== "offline").length;
@@ -33,8 +41,20 @@ export function AgentStrip({
     selectedProjectId !== "__all__" &&
     selectedProjectId !== "all" &&
     selectedProjectId !== "*";
+  const scopeLabel = boardName?.trim() || "this board";
+
+  // Connected agents first so the highlight is obvious in a long fleet.
+  const ordered = boardScoped
+    ? [...roster].sort((a, b) => {
+        const ac = agentOnBoard(a, selectedProjectId) ? 0 : 1;
+        const bc = agentOnBoard(b, selectedProjectId) ? 0 : 1;
+        if (ac !== bc) return ac - bc;
+        return a.name.localeCompare(b.name);
+      })
+    : roster;
+
   const connectedCount = boardScoped
-    ? roster.filter((a) => (a.boardIds ?? []).includes(selectedProjectId!)).length
+    ? ordered.filter((a) => agentOnBoard(a, selectedProjectId)).length
     : 0;
 
   return (
@@ -48,19 +68,25 @@ export function AgentStrip({
         <span className="tabular">{live}</span>
         <span className="text-fg-muted">live</span>
         {boardScoped ? (
-          <span className="tabular text-accent" title="Agents connected to selected board">
-            · {connectedCount} on board
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide tabular"
+            style={{
+              background: "color-mix(in oklab, var(--color-status-ready) 28%, transparent)",
+              color: "var(--color-status-ready)",
+            }}
+            title={`Agents connected to ${scopeLabel}`}
+          >
+            {connectedCount}/{ordered.length} on board
           </span>
         ) : null}
       </button>
 
       <div className="flex items-center gap-1.5">
-        {roster.length === 0 && (
+        {ordered.length === 0 && (
           <span className="px-2 text-[11px] text-fg-subtle">No agents yet — open roster to register</span>
         )}
-        {roster.map((a) => {
-          const onBoard =
-            boardScoped && (a.boardIds ?? []).includes(selectedProjectId!);
+        {ordered.map((a) => {
+          const onBoard = boardScoped && agentOnBoard(a, selectedProjectId);
           const filtered = filterAgentId === a.id;
           return (
             <button
@@ -70,34 +96,57 @@ export function AgentStrip({
               aria-current={onBoard ? "true" : undefined}
               data-board-connected={onBoard ? "true" : undefined}
               className={cn(
-                "flex shrink-0 items-center gap-2 rounded-full px-2.5 py-1.5 text-xs transition-colors",
-                filtered
-                  ? "bg-accent text-accent-fg"
-                  : onBoard
-                    ? "bg-accent/20 text-fg shadow-[0_0_0_1px_var(--color-accent)] ring-1 ring-accent/40"
-                    : "bg-bg/80 text-fg-muted shadow-[var(--shadow-border)] hover:text-fg hover:bg-bg-subtle",
+                "flex shrink-0 items-center gap-2 rounded-full px-2.5 py-1.5 text-xs transition-all",
+                filtered && "bg-accent text-accent-fg",
+                !filtered &&
+                  onBoard &&
+                  "font-semibold text-fg ring-2 ring-[var(--color-status-ready)]",
+                !filtered &&
+                  boardScoped &&
+                  !onBoard &&
+                  "bg-bg/50 text-fg-subtle opacity-45 shadow-[var(--shadow-border)] hover:opacity-80 hover:text-fg",
+                !filtered &&
+                  !boardScoped &&
+                  "bg-bg/80 text-fg-muted shadow-[var(--shadow-border)] hover:text-fg hover:bg-bg-subtle",
               )}
+              style={
+                !filtered && onBoard
+                  ? {
+                      background:
+                        "color-mix(in oklab, var(--color-status-ready) 22%, var(--color-bg-elevated))",
+                      boxShadow:
+                        "0 0 0 1px color-mix(in oklab, var(--color-status-ready) 55%, transparent)",
+                    }
+                  : undefined
+              }
               title={
                 onBoard
-                  ? `${a.name} · connected to this board · ${HARNESS_LABELS[a.harness]} · ${a.role}`
-                  : `${a.name} · ${HARNESS_LABELS[a.harness]} · ${a.role}`
+                  ? `${a.name} · connected to ${scopeLabel} · ${HARNESS_LABELS[a.harness]} · ${a.role}`
+                  : boardScoped
+                    ? `${a.name} · not on ${scopeLabel} · ${HARNESS_LABELS[a.harness]}`
+                    : `${a.name} · ${HARNESS_LABELS[a.harness]} · ${a.role}`
               }
             >
               <Circle
                 className="h-2 w-2 fill-current"
                 style={{
-                  color:
-                    filtered || onBoard
-                      ? "currentColor"
+                  color: filtered
+                    ? "currentColor"
+                    : onBoard
+                      ? "var(--color-status-ready)"
                       : statusColor[a.status],
                 }}
               />
-              <span className={cn("font-mono", onBoard && !filtered && "font-semibold")}>
-                {a.name}
-              </span>
+              <span className="font-mono">{a.name}</span>
               {onBoard && !filtered ? (
-                <span className="hidden text-[10px] font-medium uppercase tracking-wide text-accent sm:inline">
-                  board
+                <span
+                  className="rounded px-1 py-px text-[10px] font-bold uppercase tracking-wide"
+                  style={{
+                    background: "var(--color-status-ready)",
+                    color: "#0a0a0b",
+                  }}
+                >
+                  on board
                 </span>
               ) : (
                 <span

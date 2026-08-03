@@ -480,9 +480,19 @@ function AgentsListTab({
         key={a.id}
         className={cn(
           "px-4 py-3 transition-colors",
-          connected &&
-            "border-l-2 border-l-accent bg-accent/10 ring-1 ring-inset ring-accent/25",
+          connected && "border-l-[3px]",
         )}
+        style={
+          connected
+            ? {
+                borderLeftColor: "var(--color-status-ready)",
+                background:
+                  "color-mix(in oklab, var(--color-status-ready) 12%, transparent)",
+                boxShadow:
+                  "inset 0 0 0 1px color-mix(in oklab, var(--color-status-ready) 35%, transparent)",
+              }
+            : undefined
+        }
         data-board-connected={connected ? "true" : undefined}
         aria-current={connected ? "true" : undefined}
       >
@@ -493,7 +503,7 @@ function AgentsListTab({
                 type="button"
                 className={cn(
                   "font-mono text-sm underline-offset-2 hover:underline",
-                  connected ? "text-accent font-semibold" : "text-fg",
+                  connected ? "font-semibold text-fg" : "text-fg",
                 )}
                 title="Open agent profile"
                 onClick={() => openAgentProfile(a.id)}
@@ -505,7 +515,11 @@ function AgentsListTab({
               </Badge>
               {connected && (
                 <span
-                  className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent-fg"
+                  className="rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                  style={{
+                    background: "var(--color-status-ready)",
+                    color: "#0a0a0b",
+                  }}
                   title={`Connected to ${boardName}`}
                 >
                   on board

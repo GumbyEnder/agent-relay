@@ -728,7 +728,12 @@ export const durableBoard = {
               boards.length > 0 || keyPids.length > 0 || orphan;
             if (!visible) return null;
           }
-          agent.boardIds = boards;
+          // Membership + active key boards both count as "connected" for UI highlight.
+          const connected = [...boards];
+          for (const pid of keyPids) {
+            if (!connected.includes(pid)) connected.push(pid);
+          }
+          agent.boardIds = connected;
           const tips = (tipsByAgent.get(agent.id) ?? [])
             .filter((t) => !t.revokedAt)
             .sort(
