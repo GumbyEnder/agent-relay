@@ -464,177 +464,107 @@ function AgentsListTab({
       ? roster.filter((a) => !(a.boardIds ?? []).includes(selectedProjectId))
       : [];
 
-  function renderAgent(
+  function renderCard(
     a: import("@/lib/types").Agent,
     opts?: { connectedToSelected?: boolean },
   ) {
     const active = missions.find((m) => m.id === a.currentMissionId);
-    const open = expandedAgentId === a.id;
     const connected = Boolean(opts?.connectedToSelected);
     const boards = (a.boardIds ?? [])
       .map((id) => boardNameById[id] ?? id)
       .filter(Boolean);
     const tip = a.keyTips?.[0];
     return (
-      <li
+      <button
         key={a.id}
+        type="button"
+        onClick={() => openAgentProfile(a.id)}
+        data-board-connected={connected ? "true" : undefined}
+        aria-current={connected ? "true" : undefined}
         className={cn(
-          "px-4 py-3 transition-colors",
-          connected && "border-l-[3px]",
+          "flex w-full flex-col rounded-[var(--radius-md)] border border-border bg-bg-elevated p-3 text-left shadow-[var(--shadow-border)] transition-all hover:bg-bg-subtle hover:shadow-[var(--shadow-border-hover)]",
+          connected && "ring-2 ring-[var(--color-status-ready)]",
         )}
         style={
           connected
             ? {
-                borderLeftColor: "var(--color-status-ready)",
                 background:
-                  "color-mix(in oklab, var(--color-status-ready) 12%, transparent)",
-                boxShadow:
-                  "inset 0 0 0 1px color-mix(in oklab, var(--color-status-ready) 35%, transparent)",
+                  "color-mix(in oklab, var(--color-status-ready) 10%, var(--color-bg-elevated))",
               }
             : undefined
         }
-        data-board-connected={connected ? "true" : undefined}
-        aria-current={connected ? "true" : undefined}
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className={cn(
-                  "font-mono text-sm underline-offset-2 hover:underline",
-                  connected ? "font-semibold text-fg" : "text-fg",
-                )}
-                title="Open agent profile"
-                onClick={() => openAgentProfile(a.id)}
-              >
-                {a.name}
-              </button>
-              <Badge variant="default">
-                {HARNESS_LABELS[a.harness] ?? a.harness}
-              </Badge>
-              {connected && (
-                <span
-                  className="rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-                  style={{
-                    background: "var(--color-status-ready)",
-                    color: "#0a0a0b",
-                  }}
-                  title={`Connected to ${boardName}`}
-                >
-                  on board
-                </span>
-              )}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-sm font-semibold text-fg">{a.name}</span>
               <StatusDot status={a.status} />
             </div>
-            <p className="mt-0.5 text-xs text-fg-muted">{a.role}</p>
-            {tip ? (
-              <p className="mt-0.5 font-mono text-[10px] text-fg-subtle">
-                key …{tip.suffix}
-                <span className="text-fg-subtle/80"> · {tip.prefix}…</span>
-              </p>
-            ) : (
-              <p className="mt-0.5 text-[10px] text-fg-subtle">no key</p>
-            )}
-            {boards.length > 0 && (
-              <p className="mt-1 flex flex-wrap gap-1">
-                {boards.map((bn) => (
-                  <span
-                    key={bn}
-                    className="rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-subtle"
-                  >
-                    {bn}
-                  </span>
-                ))}
-              </p>
-            )}
+            <p className="mt-0.5 text-[11px] text-fg-muted">
+              {HARNESS_LABELS[a.harness] ?? a.harness}
+              {a.role ? ` · ${a.role}` : ""}
+            </p>
           </div>
-          <span className="shrink-0 text-[11px] text-fg-subtle tabular">
+          {connected ? (
+            <span
+              className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+              style={{
+                background: "var(--color-status-ready)",
+                color: "#0a0a0b",
+              }}
+            >
+              on board
+            </span>
+          ) : null}
+        </div>
+        {a.skills.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {a.skills.slice(0, 4).map((s) => (
+              <span
+                key={s}
+                className="rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] text-fg-subtle"
+              >
+                {s}
+              </span>
+            ))}
+            {a.skills.length > 4 ? (
+              <span className="text-[10px] text-fg-subtle">+{a.skills.length - 4}</span>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2 text-[10px] text-fg-subtle">
+          <span className="truncate">
+            {active ? (
+              <span className="text-status-running">{active.title}</span>
+            ) : tip ? (
+              <span className="font-mono">
+                key …{tip.suffix}
+              </span>
+            ) : (
+              "no key"
+            )}
+          </span>
+          <span className="shrink-0 tabular">
             HB <RelativeTime ts={a.lastHeartbeat} />
           </span>
         </div>
-
-        {a.skills.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {a.skills.map((s) => (
-              <Badge key={s} variant="default">
-                {s}
-              </Badge>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-          {active ? (
-            <button
-              type="button"
-              className="truncate text-left text-status-running hover:underline"
-              onClick={() => openPanel("mission", active.id)}
-            >
-              {active.title}
-            </button>
-          ) : (
-            <span className="text-fg-subtle">no active mission</span>
-          )}
-          <button
-            type="button"
-            className="shrink-0 text-fg-muted hover:text-fg"
-            onClick={() => setExpandedAgentId(open ? null : a.id)}
-          >
-            {open ? "Less" : "Manage"}
-          </button>
-        </div>
-
-        {open && (
-          <div className="mt-3 space-y-2 rounded-[var(--radius-sm)] border border-border bg-bg-subtle/60 p-2.5">
-            <div className="flex items-center gap-2">
-              <select
-                className="h-8 flex-1 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
-                value={a.status}
-                onChange={(e) =>
-                  setAgentStatus(a.id, e.target.value as AgentStatus)
-                }
-              >
-                {statuses.map((st) => (
-                  <option key={st} value={st}>
-                    {st}
-                  </option>
-                ))}
-              </select>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="h-8 text-[11px]"
-                onClick={() => issueKey(a.id)}
-              >
-                <KeyRound className="h-3.5 w-3.5" />
-                Issue key
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-[11px]"
-                onClick={() => {
-                  removeAgent(a.id);
-                  toast.message("Agent removed");
-                  setExpandedAgentId(null);
-                }}
-              >
-                Remove
-              </Button>
-            </div>
-            <AgentKeyRevealList agentId={a.id} tips={a.keyTips} />
-          </div>
-        )}
-      </li>
+        {boards.length > 0 ? (
+          <p className="mt-1.5 truncate text-[10px] text-fg-subtle">
+            {boards.slice(0, 3).join(" · ")}
+            {boards.length > 3 ? ` +${boards.length - 3}` : ""}
+          </p>
+        ) : null}
+      </button>
     );
   }
+
+  const primaryList = allBoards ? roster : onThisBoard;
 
   return (
     <div>
       <div className="border-b border-border px-4 py-2.5">
         <p className="text-[11px] text-fg-muted">
-          Your full agent fleet
+          Agent cards
           {roster.length > 0 ? (
             <span className="text-fg-subtle"> · {roster.length}</span>
           ) : null}
@@ -645,16 +575,15 @@ function AgentsListTab({
               <span className="text-accent">
                 {onThisBoard.length} connected to {boardName}
               </span>
-              {" "}
-              (highlighted)
             </span>
           ) : null}
+          <span className="text-fg-subtle"> · click a card to open</span>
         </p>
       </div>
 
-      <ul className="divide-y divide-border">
+      <div className="p-3">
         {roster.length === 0 && (
-          <li className="px-4 py-12 text-center">
+          <div className="px-2 py-12 text-center">
             <p className="text-sm text-fg-muted">No agents registered yet.</p>
             <p className="mt-1 text-xs text-fg-subtle">
               Register a client, then issue an API key so it can claim missions.
@@ -664,25 +593,33 @@ function AgentsListTab({
               Create agent
               {writeId ? ` on ${writeBoardName}` : ""}
             </Button>
-          </li>
+          </div>
         )}
-        {!allBoards && onThisBoard.length > 0 && (
-          <li className="bg-accent/15 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-accent">
-            On {boardName}
-          </li>
-        )}
-        {(allBoards ? roster : onThisBoard).map((a) =>
-          renderAgent(a, { connectedToSelected: !allBoards }),
+        {primaryList.length > 0 && (
+          <>
+            {!allBoards && (
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-accent">
+                On {boardName}
+              </p>
+            )}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {primaryList.map((a) =>
+                renderCard(a, { connectedToSelected: !allBoards }),
+              )}
+            </div>
+          </>
         )}
         {elsewhere.length > 0 && (
           <>
-            <li className="bg-bg-subtle/40 px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
+            <p className="mb-2 mt-4 text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
               On other boards
-            </li>
-            {elsewhere.map((a) => renderAgent(a, { connectedToSelected: false }))}
+            </p>
+            <div className="grid grid-cols-1 gap-2 opacity-80 sm:grid-cols-2">
+              {elsewhere.map((a) => renderCard(a, { connectedToSelected: false }))}
+            </div>
           </>
         )}
-      </ul>
+      </div>
     </div>
   );
 }

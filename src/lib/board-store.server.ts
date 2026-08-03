@@ -1742,6 +1742,30 @@ export const durableBoard = {
       return result;
     }),
 
+  updateAgent: (
+    agentRef: string,
+    patch: {
+      role?: string;
+      skills?: string[];
+      status?: import("./types").AgentStatus;
+      harness?: import("./types").HarnessKind;
+      notes?: string;
+    },
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const board = await loadBoard(sql, null);
+      const result = engine.updateAgent(board, agentRef, patch);
+      if (!result.ok) return result;
+      const hist = collectHistory(board, result.board, {
+        id: "operator",
+        name: "operator",
+        kind: "operator",
+      }, "update agent");
+      await persistBoard(sql, result.board, hist);
+      return result;
+    }),
+
   moveMission: (missionId: string, column: MissionColumn, actor = "operator") =>
     applyEngine(
       (b) => {

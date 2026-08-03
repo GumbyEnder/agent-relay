@@ -268,6 +268,21 @@ export const agentApi = {
     skills?: string[];
     projectId?: string | null;
   }) => req("POST", "/agents", input),
+  updateAgent: (
+    agentId: string,
+    patch: {
+      role?: string;
+      skills?: string[];
+      status?: AgentStatus;
+      harness?: HarnessKind;
+      notes?: string;
+    },
+  ) =>
+    req<{ ok: true; agent: import("./types").Agent }>(
+      "PATCH",
+      `/agents/${encodeURIComponent(agentId)}`,
+      patch,
+    ),
   setAgentStatus: async (_id: string, _status: AgentStatus) => {
     // no dedicated endpoint yet — refresh board only
   },

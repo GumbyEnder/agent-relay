@@ -76,9 +76,11 @@ curl -sS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/j
   -d "{\"agent\":\"$AGENT\",\"project\":\"$BOARD\",\"column\":\"inbox\",\"title\":\"…\",\"objective\":\"…\",\"priority\":\"p1\",\"tags\":[]}" \
   "$BASE/api/agent/missions"
 
-# Poll Ready
+# Poll Ready (skill routing: prefers missions whose tags ∩ your agent skills)
 curl -sS -H "Authorization: Bearer $KEY" \
   "$BASE/api/agent/missions?column=ready&limit=5&agent=$AGENT&project=$BOARD"
+# Hard filter to skill matches only:
+#   …&match_agent_skills=1
 
 # Claim
 curl -sS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \

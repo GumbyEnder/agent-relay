@@ -87,6 +87,10 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
   const [reloadToken, setReloadToken] = useState(0);
   const [grantBoard, setGrantBoard] = useState("");
   const [boardBusy, setBoardBusy] = useState(false);
+  const [editRole, setEditRole] = useState("");
+  const [editSkills, setEditSkills] = useState("");
+  const [editStatus, setEditStatus] = useState<string>("online");
+  const [editBusy, setEditBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +101,12 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
       .then((res) => {
         if (cancelled) return;
         setProfile(res);
+        const ag = res.agent;
+        if (ag) {
+          setEditRole(ag.role || "client");
+          setEditSkills((ag.skills ?? []).join(", "));
+          setEditStatus(ag.status || "online");
+        }
       })
       .catch((e) => {
         if (cancelled) return;
@@ -193,6 +203,74 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
       </header>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 scrollbar-thin">
+        <section className="space-y-2 rounded-[var(--radius-md)] border border-border bg-bg-subtle/40 p-3">
+          <h4 className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+            Edit agent
+          </h4>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="block text-[11px] text-fg-subtle">
+              Role
+              <input
+                className="mt-0.5 h-9 w-full rounded-[var(--radius-xs)] bg-bg px-2 text-sm text-fg shadow-[var(--shadow-border)]"
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+              />
+            </label>
+            <label className="block text-[11px] text-fg-subtle">
+              Status
+              <select
+                className="mt-0.5 h-9 w-full rounded-[var(--radius-xs)] bg-bg px-2 text-sm text-fg shadow-[var(--shadow-border)]"
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+              >
+                {(["online", "busy", "idle", "offline", "error"] as const).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="block text-[11px] text-fg-subtle">
+            Skills (comma-separated — used for Ready claim routing)
+            <input
+              className="mt-0.5 h-9 w-full rounded-[var(--radius-xs)] bg-bg px-2 font-mono text-sm text-fg shadow-[var(--shadow-border)]"
+              value={editSkills}
+              onChange={(e) => setEditSkills(e.target.value)}
+              placeholder="code, docs, web"
+            />
+          </label>
+          <Button
+            size="sm"
+            disabled={editBusy}
+            onClick={() => {
+              void (async () => {
+                setEditBusy(true);
+                try {
+                  const skills = editSkills
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  await agentApi.updateAgent(agent.id, {
+                    role: editRole,
+                    skills,
+                    status: editStatus as import("@/lib/types").AgentStatus,
+                  });
+                  toast.success("Agent updated");
+                  setReloadToken((n) => n + 1);
+                  void refresh();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Update failed");
+                } finally {
+                  setEditBusy(false);
+                }
+              })();
+            }}
+          >
+            Save changes
+          </Button>
+        </section>
+
         <section className="space-y-2">
           <h4 className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
             Board access

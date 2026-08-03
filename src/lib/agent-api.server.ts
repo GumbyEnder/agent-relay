@@ -707,6 +707,25 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       );
     }
 
+    // PATCH /agents/:id — edit role, skills, status, harness (operator)
+    if (parts.length === 2 && parts[0] === "agents" && req.method === "PATCH") {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const harness = str(body.harness) as HarnessKind | undefined;
+      if (harness && !HARNESSES.has(harness)) {
+        return err(400, `Invalid harness. One of: ${[...HARNESSES].join(", ")}`, "bad_request");
+      }
+      const status = str(body.status) as import("./types").AgentStatus | undefined;
+      const result = await boardOps.updateAgent(parts[1]!, {
+        role: str(body.role),
+        skills: strArr(body.skills),
+        status,
+        harness,
+        notes: str(body.notes),
+      });
+      return fromEngine(result);
+    }
+
     // GET /calls
     if (parts.length === 1 && parts[0] === "calls" && req.method === "GET") {
       const snap = await boardOps.snapshot();

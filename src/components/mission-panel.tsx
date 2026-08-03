@@ -320,17 +320,26 @@ export function MissionPanel({ missionId }: { missionId: string }) {
 
         <div className="space-y-2">
           <label className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-            Board
+            Reassign board
           </label>
+          <p className="text-[11px] text-fg-subtle">
+            Current:{" "}
+            <span className="font-medium text-fg">
+              {projects.find((p) => p.id === mission.projectId)?.name ??
+                mission.projectId}
+            </span>
+          </p>
           <div className="flex gap-2">
             <select
               className="h-10 min-w-0 flex-1 rounded-[var(--radius-sm)] bg-bg-subtle px-3 text-sm text-fg shadow-[var(--shadow-border)]"
               value={transferBoard || mission.projectId}
               onChange={(e) => setTransferBoard(e.target.value)}
+              aria-label="Target board for reassignment"
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                  {p.id === mission.projectId ? " (current)" : ""}
                 </option>
               ))}
             </select>
@@ -343,9 +352,12 @@ export function MissionPanel({ missionId }: { missionId: string }) {
               }
               onClick={() => {
                 if (!transferBoard || transferBoard === mission.projectId) return;
+                const dest =
+                  projects.find((p) => p.id === transferBoard)?.name ??
+                  transferBoard;
                 if (
                   !window.confirm(
-                    "Move this mission to the selected board? History stays with the card.",
+                    `Reassign this mission to “${dest}”? History stays with the card.`,
                   )
                 ) {
                   return;
@@ -354,7 +366,7 @@ export function MissionPanel({ missionId }: { missionId: string }) {
                 setTransferBoard("");
               }}
             >
-              Move
+              Reassign
             </Button>
           </div>
         </div>

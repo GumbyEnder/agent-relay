@@ -53,8 +53,11 @@ Replace \`MISSION_ID\` and use your agent name.
 
 \`\`\`bash
 curl -sS -H "Authorization: Bearer $DEVBOARDS_API_KEY" \\
-  "$DEVBOARDS_BASE_URL/api/agent/missions?column=ready&limit=5&agent=$DEVBOARDS_AGENT"
+  "$DEVBOARDS_BASE_URL/api/agent/missions?column=ready&limit=5&agent=$DEVBOARDS_AGENT&project=BOARD"
 \`\`\`
+
+When your agent has **skills**, Ready poll **prefers** missions whose tags intersect those skills (still returns others).  
+Hard filter: add \`&match_agent_skills=1\`. Response includes \`skill_routing\`: \`prefer\` | \`require\` | \`off\`.
 
 ### Claim
 

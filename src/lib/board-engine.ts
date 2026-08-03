@@ -98,15 +98,24 @@ export function pollMissions(
     matchAgentSkills?: boolean;
     projectId?: string;
   } = {},
-): EngineResult<{ missions: ReturnType<typeof missionSummary>[]; agent: string | null }> {
+): EngineResult<{
+  missions: ReturnType<typeof missionSummary>[];
+  agent: string | null;
+  skill_routing?: "prefer" | "require" | "skills_filter" | "off";
+}> {
   const column = opts.column ?? "ready";
   const limit = Math.min(Math.max(opts.limit ?? 5, 1), 50);
   const agent = resolveAgent(board, opts.agent);
   const tagFilter = (opts.tags ?? []).map((t) => t.toLowerCase());
   const skillFilter = (opts.skills ?? []).map((s) => s.toLowerCase());
   const agentSkills = (agent?.skills ?? []).map((s) => s.toLowerCase());
-  // Only when explicitly requested — default poll must remain unfiltered by agent skills.
-  const useAgentSkills = opts.matchAgentSkills === true && agentSkills.length > 0;
+  // Hard filter only when match_agent_skills=1|true. Default is soft prefer (sort).
+  const hardMatchSkills = opts.matchAgentSkills === true && agentSkills.length > 0;
+  const softPreferSkills =
+    !hardMatchSkills &&
+    agentSkills.length > 0 &&
+    !skillFilter.length &&
+    (column === "ready" || column === "inbox");
 
   let list = board.missions.filter((m) => {
     if (opts.projectId && m.projectId !== opts.projectId) return false;
@@ -122,22 +131,41 @@ export function pollMissions(
     if (skillFilter.length) {
       if (!skillFilter.some((s) => tags.includes(s))) return false;
     }
-    // Optional agent skill routing when no explicit filters
-    if (useAgentSkills && agentSkills.length) {
+    // Hard agent skill routing when match_agent_skills requested
+    if (hardMatchSkills) {
       if (!agentSkills.some((s) => tags.includes(s))) return false;
     }
     return true;
   });
 
-  // Prefer higher priority
+  // Prefer skill matches, then higher priority, then older first
   const rank: Record<Priority, number> = { p0: 0, p1: 1, p2: 2, p3: 3 };
-  list = [...list].sort((a, b) => rank[a.priority] - rank[b.priority] || a.createdAt - b.createdAt);
+  const skillHit = (m: (typeof list)[0]) => {
+    if (!agentSkills.length) return 0;
+    const tags = m.tags.map((t) => t.toLowerCase());
+    return agentSkills.some((s) => tags.includes(s)) ? 0 : 1;
+  };
+  list = [...list].sort((a, b) => {
+    if (softPreferSkills || hardMatchSkills) {
+      const sa = skillHit(a);
+      const sb = skillHit(b);
+      if (sa !== sb) return sa - sb;
+    }
+    return rank[a.priority] - rank[b.priority] || a.createdAt - b.createdAt;
+  });
 
   return {
     ok: true,
     board,
     data: {
       agent: agent?.name ?? opts.agent ?? null,
+      skill_routing: softPreferSkills
+        ? "prefer"
+        : hardMatchSkills
+          ? "require"
+          : skillFilter.length
+            ? "skills_filter"
+            : "off",
       missions: list.slice(0, limit).map(missionSummary),
     },
   };
@@ -473,6 +501,50 @@ export function ensureAgent(
     },
     agent,
     created: true,
+  };
+}
+
+/** Patch agent fields (role, skills, status, harness). */
+export function updateAgent(
+  board: BoardData,
+  agentRef: string,
+  patch: {
+    role?: string;
+    skills?: string[];
+    status?: Agent["status"];
+    harness?: HarnessKind;
+    notes?: string;
+  },
+): EngineResult<{ agent: Agent }> {
+  const existing = resolveAgent(board, agentRef);
+  if (!existing) {
+    return { ok: false, status: 404, error: "agent not found", code: "agent_not_found" };
+  }
+  const agent: Agent = {
+    ...existing,
+    role:
+      patch.role !== undefined
+        ? patch.role.trim() || existing.role
+        : existing.role,
+    skills: patch.skills !== undefined ? patch.skills : existing.skills,
+    status: patch.status ?? existing.status,
+    harness: patch.harness ?? existing.harness,
+    notes: patch.notes !== undefined ? patch.notes : existing.notes,
+    lastHeartbeat: Date.now(),
+  };
+  return {
+    ok: true,
+    board: {
+      ...board,
+      agents: board.agents.map((a) => (a.id === agent.id ? agent : a)),
+      events: pushEvent(board.events, {
+        missionId: null,
+        agentId: agent.id,
+        kind: "note",
+        message: `Agent updated · ${agent.name}`,
+      }),
+    },
+    data: { agent },
   };
 }
 
