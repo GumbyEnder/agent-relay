@@ -241,12 +241,11 @@ export const useBoard = create<BoardState>()((set, get) => ({
   },
 
   selectMission: (id) => {
+    // Select only — do not open the detail panel (triage macros).
     set({
       selectedMissionId: id,
       selectedAgentId: null,
-      panel: id ? "mission" : get().panel,
     });
-    if (id) void get().loadHistory(id);
   },
 
   openAgentProfile: (agentId) => {
@@ -383,11 +382,30 @@ export const useBoard = create<BoardState>()((set, get) => ({
   },
 
   moveMission: (id, column, actor = "operator") => {
-    void run("Move", async () => {
-      await agentApi.move(id, column, actor ?? "operator");
-      await get().refresh();
-      await get().loadHistory(id);
+    const prev = get().missions.find((m) => m.id === id);
+    if (!prev) return;
+    if (prev.column === column) return;
+    // Optimistic UI — card jumps immediately; rollback on failure.
+    set({
+      missions: get().missions.map((m) =>
+        m.id === id ? { ...m, column, updatedAt: Date.now() } : m,
+      ),
     });
+    void (async () => {
+      try {
+        await agentApi.move(id, column, actor ?? "operator");
+        // Soft refresh in background; don't block UI.
+        void get().refresh().catch(() => undefined);
+        if (get().panel === "mission" && get().selectedMissionId === id) {
+          void get().loadHistory(id).catch(() => undefined);
+        }
+      } catch (e) {
+        set({
+          missions: get().missions.map((m) => (m.id === id ? prev : m)),
+        });
+        toast.error(e instanceof Error ? e.message : "Move failed");
+      }
+    })();
   },
 
   claimMission: (missionId, agentId) => {

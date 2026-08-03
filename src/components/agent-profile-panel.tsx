@@ -6,9 +6,11 @@ import {
   HeartPulse,
   KeyRound,
   MessageSquareWarning,
+  Plus,
   Radio,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RelativeTime } from "@/components/relative-time";
@@ -77,12 +79,14 @@ function kindIcon(kind: string) {
 }
 
 export function AgentProfilePanel({ agentId }: { agentId: string }) {
-  const { projects, closePanel, openPanel } = useBoard();
+  const { projects, closePanel, openPanel, refresh } = useBoard();
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [window, setWindow] = useState<"24h" | "7d">("24h");
   const [reloadToken, setReloadToken] = useState(0);
+  const [grantBoard, setGrantBoard] = useState("");
+  const [boardBusy, setBoardBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,23 +193,90 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
       </header>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 scrollbar-thin">
-        {(agent.boardIds?.length ?? 0) > 0 && (
-          <section>
-            <h4 className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-              Boards
-            </h4>
-            <div className="flex flex-wrap gap-1">
-              {agent.boardIds!.map((id) => (
+        <section className="space-y-2">
+          <h4 className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+            Board access
+          </h4>
+          <div className="flex flex-wrap gap-1.5">
+            {(agent.boardIds ?? []).length === 0 ? (
+              <p className="text-xs text-fg-subtle">No board memberships yet</p>
+            ) : (
+              (agent.boardIds ?? []).map((id) => (
                 <span
                   key={id}
-                  className="rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-subtle"
+                  className="inline-flex items-center gap-1 rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-subtle"
                 >
                   {boardName(id)}
+                  <button
+                    type="button"
+                    title={`Revoke access to ${boardName(id)}`}
+                    className="rounded px-0.5 text-fg-subtle hover:bg-bg-hover hover:text-status-blocked"
+                    disabled={boardBusy}
+                    onClick={() => {
+                      void (async () => {
+                        setBoardBusy(true);
+                        try {
+                          await agentApi.revokeAgentBoard(agent.id, id);
+                          toast.message(`Revoked · ${boardName(id)}`);
+                          setReloadToken((n) => n + 1);
+                          void refresh();
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Revoke failed");
+                        } finally {
+                          setBoardBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    ×
+                  </button>
                 </span>
-              ))}
-            </div>
-          </section>
-        )}
+              ))
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="h-8 min-w-[10rem] flex-1 rounded-[var(--radius-xs)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+              value={grantBoard}
+              onChange={(e) => setGrantBoard(e.target.value)}
+            >
+              <option value="">Grant board…</option>
+              {projects
+                .filter((p) => !(agent.boardIds ?? []).includes(p.id))
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 text-[11px]"
+              disabled={!grantBoard || boardBusy}
+              onClick={() => {
+                void (async () => {
+                  if (!grantBoard) return;
+                  setBoardBusy(true);
+                  try {
+                    await agentApi.grantAgentBoard(agent.id, grantBoard);
+                    toast.message(`Granted · ${boardName(grantBoard)}`);
+                    setGrantBoard("");
+                    setReloadToken((n) => n + 1);
+                    void refresh();
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : "Grant failed");
+                  } finally {
+                    setBoardBusy(false);
+                  }
+                })();
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Grant
+            </Button>
+          </div>
+        </section>
 
         {agent.skills.length > 0 && (
           <section>

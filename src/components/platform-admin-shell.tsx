@@ -1,0 +1,412 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  Activity,
+  Bot,
+  LayoutDashboard,
+  RefreshCw,
+  Shield,
+  Users,
+} from "lucide-react";
+import { Toaster, toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { agentApi } from "@/lib/api-client";
+import { UserButton } from "@/lib/auth/gates";
+import { useOperatorMe } from "@/components/operator-gate";
+import { adminPublicUrl } from "@/lib/surface";
+import { cn, formatTime } from "@/lib/utils";
+
+type AdminTab = "users" | "usage" | "hosting";
+
+type PlatformUser = {
+  id: string;
+  name: string;
+  email: string | null;
+  emailVerified: boolean;
+  createdAt: number;
+  role: string | null;
+  boardCount: number;
+};
+
+type UsagePayload = {
+  rangeDays: number;
+  since: number;
+  totals: {
+    missions: number;
+    done: number;
+    running: number;
+    ready: number;
+    needsHuman: number;
+  };
+  users: Array<{
+    userId: string;
+    name: string;
+    email: string | null;
+    boards: number;
+    missions: number;
+    done: number;
+    running: number;
+    ready: number;
+    needsHuman: number;
+    lastMissionAt: number | null;
+  }>;
+  agents: Array<{
+    agentId: string;
+    name: string;
+    status: string;
+    lastHeartbeat: number | null;
+    boardCount: number;
+    claims: number;
+    heartbeats: number;
+    deliveries: number;
+    escalations: number;
+    lastEventAt: number | null;
+  }>;
+};
+
+const TABS: Array<{ id: AdminTab; label: string; icon: typeof Users }> = [
+  { id: "users", label: "Users", icon: Users },
+  { id: "usage", label: "Usage", icon: Activity },
+  { id: "hosting", label: "Hosting", icon: LayoutDashboard },
+];
+
+export function PlatformAdminShell() {
+  const { role, can, me } = useOperatorMe();
+  const [tab, setTab] = useState<AdminTab>("users");
+  const [users, setUsers] = useState<PlatformUser[]>([]);
+  const [usage, setUsage] = useState<UsagePayload | null>(null);
+  const [range, setRange] = useState<"7d" | "30d">("7d");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isAdmin = role === "admin" || can("manage_roles");
+
+  const loadUsers = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await agentApi.adminListUsers();
+      setUsers(res.users as PlatformUser[]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const loadUsage = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await agentApi.adminUsage(range);
+      setUsage(res as UsagePayload);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [range]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (tab === "users") void loadUsers();
+    if (tab === "usage") void loadUsage();
+  }, [tab, isAdmin, loadUsers, loadUsage]);
+
+  const setRole = async (userId: string, email: string | null, next: string) => {
+    try {
+      await agentApi.setRole({ userId, email, role: next as "viewer" | "operator" | "admin" });
+      toast.message(`Role · ${next}`);
+      await loadUsers();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const appUrl =
+    (typeof window !== "undefined" &&
+      (import.meta as { env?: Record<string, string> }).env?.VITE_APP_PUBLIC_URL) ||
+    "https://app.devboards.ai";
+
+  return (
+    <div className="flex min-h-dvh flex-col bg-bg text-fg">
+      <Toaster theme="dark" position="bottom-right" richColors />
+      <header className="flex items-center justify-between gap-3 border-b border-border bg-bg-elevated px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] bg-accent text-accent-fg">
+            <Shield className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold tracking-tight">Dev Boards Admin</p>
+            <p className="text-[11px] text-fg-subtle">
+              Platform · {typeof window !== "undefined" ? window.location.host : "admin"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href={appUrl}
+            className="hidden text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline sm:inline"
+          >
+            Open operator app
+          </a>
+          <UserButton />
+        </div>
+      </header>
+
+      {!isAdmin ? (
+        <div className="mx-auto max-w-lg px-4 py-16 text-center">
+          <Shield className="mx-auto h-10 w-10 text-fg-subtle" />
+          <h1 className="mt-4 text-lg font-semibold">Admin access required</h1>
+          <p className="mt-2 text-sm text-fg-muted">
+            Signed in as {me?.user?.email ?? "unknown"} with role{" "}
+            <span className="font-mono">{role ?? "none"}</span>. Ask a platform admin to grant the
+            admin role.
+          </p>
+        </div>
+      ) : (
+        <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-4 md:flex-row">
+          <nav className="flex shrink-0 gap-1 md:w-44 md:flex-col">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    "flex items-center gap-2 rounded-[var(--radius-sm)] px-3 py-2 text-left text-sm transition-colors",
+                    tab === t.id
+                      ? "bg-accent text-accent-fg"
+                      : "text-fg-muted hover:bg-bg-subtle hover:text-fg",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <main className="min-w-0 flex-1 rounded-[var(--radius-lg)] border border-border bg-bg-elevated/40 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold capitalize">{tab}</h2>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy || tab === "hosting"}
+                onClick={() => {
+                  if (tab === "users") void loadUsers();
+                  if (tab === "usage") void loadUsage();
+                }}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+                Refresh
+              </Button>
+            </div>
+
+            {error ? (
+              <p className="mb-3 rounded-[var(--radius-sm)] border border-status-blocked/40 bg-status-blocked/10 px-3 py-2 text-sm text-status-blocked">
+                {error}
+              </p>
+            ) : null}
+
+            {tab === "users" && (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
+                    <tr className="border-b border-border">
+                      <th className="px-2 py-2 font-medium">User</th>
+                      <th className="px-2 py-2 font-medium">Role</th>
+                      <th className="px-2 py-2 font-medium">Boards</th>
+                      <th className="px-2 py-2 font-medium">Joined</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {users.map((u) => (
+                      <tr key={u.id} className="hover:bg-bg-subtle/50">
+                        <td className="px-2 py-2">
+                          <p className="font-medium text-fg">{u.name || "—"}</p>
+                          <p className="font-mono text-[11px] text-fg-subtle">{u.email}</p>
+                          {!u.emailVerified ? (
+                            <span className="text-[10px] text-status-human">unverified</span>
+                          ) : null}
+                        </td>
+                        <td className="px-2 py-2">
+                          <select
+                            className="h-8 rounded-[var(--radius-xs)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                            value={u.role ?? "operator"}
+                            onChange={(e) => void setRole(u.id, u.email, e.target.value)}
+                          >
+                            <option value="viewer">viewer</option>
+                            <option value="operator">operator</option>
+                            <option value="admin">admin</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-2 font-mono tabular text-fg-muted">
+                          {u.boardCount}
+                        </td>
+                        <td className="px-2 py-2 text-xs text-fg-subtle">
+                          {formatTime(u.createdAt)}
+                        </td>
+                      </tr>
+                    ))}
+                    {users.length === 0 && !busy ? (
+                      <tr>
+                        <td colSpan={4} className="px-2 py-8 text-center text-fg-subtle">
+                          No users found
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {tab === "usage" && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  {(["7d", "30d"] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setRange(r)}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs font-medium",
+                        range === r
+                          ? "bg-accent text-accent-fg"
+                          : "bg-bg-subtle text-fg-muted hover:text-fg",
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {usage ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {(
+                        [
+                          ["Missions", usage.totals.missions],
+                          ["Ready", usage.totals.ready],
+                          ["Running", usage.totals.running],
+                          ["Needs human", usage.totals.needsHuman],
+                          ["Done", usage.totals.done],
+                        ] as const
+                      ).map(([label, n]) => (
+                        <div
+                          key={label}
+                          className="rounded-[var(--radius-sm)] border border-border bg-bg-subtle/40 px-3 py-2"
+                        >
+                          <p className="text-[10px] uppercase tracking-wider text-fg-subtle">
+                            {label}
+                          </p>
+                          <p className="font-mono text-lg tabular">{n}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <section>
+                      <h3 className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                        <Users className="h-3.5 w-3.5" /> By operator (owned boards)
+                      </h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px] text-left text-sm">
+                          <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
+                            <tr className="border-b border-border">
+                              <th className="px-2 py-2">User</th>
+                              <th className="px-2 py-2">Boards</th>
+                              <th className="px-2 py-2">Missions</th>
+                              <th className="px-2 py-2">Done</th>
+                              <th className="px-2 py-2">Running</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {usage.users.map((u) => (
+                              <tr key={u.userId}>
+                                <td className="px-2 py-2">
+                                  <p className="font-medium">{u.name || "—"}</p>
+                                  <p className="font-mono text-[11px] text-fg-subtle">{u.email}</p>
+                                </td>
+                                <td className="px-2 py-2 font-mono tabular">{u.boards}</td>
+                                <td className="px-2 py-2 font-mono tabular">{u.missions}</td>
+                                <td className="px-2 py-2 font-mono tabular">{u.done}</td>
+                                <td className="px-2 py-2 font-mono tabular">{u.running}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="mt-2 text-[11px] text-fg-subtle">
+                        Aggregates only — private mission titles are not shown here.
+                      </p>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                        <Bot className="h-3.5 w-3.5" /> By agent
+                      </h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px] text-left text-sm">
+                          <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
+                            <tr className="border-b border-border">
+                              <th className="px-2 py-2">Agent</th>
+                              <th className="px-2 py-2">Boards</th>
+                              <th className="px-2 py-2">Claims</th>
+                              <th className="px-2 py-2">Delivers</th>
+                              <th className="px-2 py-2">HB</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {usage.agents.map((a) => (
+                              <tr key={a.agentId}>
+                                <td className="px-2 py-2 font-mono">{a.name}</td>
+                                <td className="px-2 py-2 font-mono tabular">{a.boardCount}</td>
+                                <td className="px-2 py-2 font-mono tabular">{a.claims}</td>
+                                <td className="px-2 py-2 font-mono tabular">{a.deliveries}</td>
+                                <td className="px-2 py-2 font-mono tabular">{a.heartbeats}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </>
+                ) : (
+                  <p className="text-sm text-fg-subtle">{busy ? "Loading…" : "No usage data"}</p>
+                )}
+              </div>
+            )}
+
+            {tab === "hosting" && (
+              <div className="space-y-3 text-sm text-fg-muted">
+                <p>
+                  This Admin surface is meant to run on a <strong className="text-fg">separate Railway
+                  service</strong> and hostname (e.g.{" "}
+                  <code className="font-mono text-fg">admin.devboards.ai</code>).
+                </p>
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>
+                    Set <code className="font-mono text-xs">DEVBOARDS_SURFACE=admin</code> on the admin
+                    service.
+                  </li>
+                  <li>
+                    Operator app keeps default surface{" "}
+                    <code className="font-mono text-xs">app</code> at app.devboards.ai.
+                  </li>
+                  <li>Share DATABASE_URL and BETTER_AUTH_SECRET; set BETTER_AUTH_URL to the admin host.</li>
+                  <li>
+                    ADMIN_PUBLIC_URL on the app service ={" "}
+                    {adminPublicUrl() ?? "https://admin.devboards.ai"}
+                  </li>
+                </ul>
+                <p className="text-xs text-fg-subtle">
+                  See docs/ADMIN_HOST.md for DNS and Railway wiring.
+                </p>
+              </div>
+            )}
+          </main>
+        </div>
+      )}
+    </div>
+  );
+}

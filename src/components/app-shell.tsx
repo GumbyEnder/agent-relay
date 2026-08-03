@@ -15,6 +15,7 @@ import {
   Radio,
   RotateCcw,
   Search,
+  Shield,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { ActivityFeed } from "@/components/activity-feed";
@@ -52,6 +53,7 @@ import { agentApi } from "@/lib/api-client";
 import { UserButton } from "@/lib/auth/gates";
 import { useOperatorMe } from "@/components/operator-gate";
 import { ALL_BOARDS_ID, isAllBoardsScope } from "@/lib/board-scope";
+import { adminPublicUrl } from "@/lib/surface";
 
 type MainView =
   | "board"
@@ -256,10 +258,30 @@ export function AppShell({
           toast.message(`Moved to ${action === "move_ready" ? "ready" : "running"}`);
         }
       }
+      if (action === "advance_column" || action === "retreat_column") {
+        const id = useBoard.getState().selectedMissionId;
+        const m = useBoard.getState().missions.find((x) => x.id === id);
+        if (id && m) {
+          const next = adjacentColumn(
+            m.column,
+            action === "advance_column" ? 1 : -1,
+          );
+          if (next !== m.column) {
+            moveMission(id, next);
+            toast.message(`Moved · ${next.replace(/_/g, " ")}`);
+          }
+        } else {
+          toast.message("Select a mission first (click a card)");
+        }
+      }
+      if (action === "open_selected") {
+        const id = useBoard.getState().selectedMissionId;
+        if (id) openPanel("mission", id);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closePanel, claimMission, moveMission, setCompact, setFocusColumn]);
+  }, [closePanel, claimMission, moveMission, openPanel, setCompact, setFocusColumn]);
 
   const byColumn = (col: MissionColumn) =>
     missions.filter((m) => m.column === col);
@@ -345,6 +367,18 @@ export function AppShell({
           </div>
 
           <div className="hidden sm:block">
+            {role === "admin" && adminPublicUrl() ? (
+              <a
+                href={adminPublicUrl()!}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] bg-bg-subtle px-2.5 text-xs font-medium text-fg-muted shadow-[var(--shadow-border)] hover:bg-bg-hover hover:text-fg"
+                title="Open platform Admin (separate host)"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Admin</span>
+              </a>
+            ) : null}
             <UserButton onOpenProfile={openUserProfile} />
           </div>
 
@@ -774,9 +808,15 @@ export function AppShell({
                       boardNameById={Object.fromEntries(
                         projects.map((pr) => [pr.id, pr.name]),
                       )}
-                      onOpen={(id) => selectMission(id)}
+                      onSelect={(id) => selectMission(id)}
+                      onOpen={(id) => openPanel("mission", id)}
                       onDropMission={(id, column) => moveMission(id, column)}
                       onDragStart={() => {}}
+                      onMoveMission={
+                        can("write_board")
+                          ? (id, column) => moveMission(id, column)
+                          : undefined
+                      }
                       onAddMission={
                         can("write_board")
                           ? (column) => {

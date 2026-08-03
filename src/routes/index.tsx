@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
+import { PlatformAdminShell } from "@/components/platform-admin-shell";
 import { OperatorGate } from "@/components/operator-gate";
+import { resolveSurface } from "@/lib/surface";
 import { z } from "zod";
 
 const searchSchema = z.object({
@@ -26,6 +28,14 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   const search = Route.useSearch();
+  const surface = resolveSurface();
+  if (surface === "admin") {
+    return (
+      <OperatorGate>
+        <PlatformAdminShell />
+      </OperatorGate>
+    );
+  }
   return (
     <OperatorGate>
       <AppShell

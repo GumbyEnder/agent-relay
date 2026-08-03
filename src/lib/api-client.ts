@@ -285,4 +285,35 @@ export const agentApi = {
     return JSON.stringify(rest, null, 2);
   },
   reset: () => req("POST", "/reset", {}),
+  grantAgentBoard: (agentId: string, projectId: string) =>
+    req<{ ok: true; boardIds: string[] }>(
+      "POST",
+      `/agents/${encodeURIComponent(agentId)}/boards`,
+      { projectId },
+    ),
+  revokeAgentBoard: (agentId: string, projectId: string) =>
+    req<{ ok: true; boardIds: string[] }>(
+      "DELETE",
+      `/agents/${encodeURIComponent(agentId)}/boards/${encodeURIComponent(projectId)}`,
+    ),
+  adminListUsers: () =>
+    req<{
+      ok: true;
+      users: Array<{
+        id: string;
+        name: string;
+        email: string | null;
+        emailVerified: boolean;
+        createdAt: number;
+        role: string | null;
+        boardCount: number;
+      }>;
+    }>("GET", "/admin/users"),
+  adminUsage: (range: string = "7d") =>
+    req<Record<string, unknown>>("GET", `/admin/usage?range=${encodeURIComponent(range)}`),
+  setRole: (input: {
+    userId: string;
+    role: "viewer" | "operator" | "admin";
+    email?: string | null;
+  }) => req<{ ok: true }>("POST", "/roles", input),
 };

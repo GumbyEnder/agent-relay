@@ -1381,6 +1381,76 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, role: saved });
     }
 
+    // ── Platform admin (separate admin.* host / manage_roles) ──────────
+    // GET /admin/users
+    if (
+      parts.length === 2 &&
+      parts[0] === "admin" &&
+      parts[1] === "users" &&
+      req.method === "GET"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const users = await boardOps.listPlatformUsers();
+      return json({ ok: true, users });
+    }
+    // GET /admin/usage?range=7d|30d
+    if (
+      parts.length === 2 &&
+      parts[0] === "admin" &&
+      parts[1] === "usage" &&
+      req.method === "GET"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const rangeRaw = (url.searchParams.get("range") ?? "7d").toLowerCase();
+      const days = rangeRaw.endsWith("d")
+        ? Number(rangeRaw.slice(0, -1))
+        : Number(rangeRaw);
+      const usage = await boardOps.platformUsage(Number.isFinite(days) ? days : 7);
+      return json({ ok: true, ...usage });
+    }
+
+    // POST /agents/:id/boards  { project | projectId } — grant membership
+    if (
+      parts.length === 3 &&
+      parts[0] === "agents" &&
+      parts[2] === "boards" &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const raw =
+        str(body.projectId) ?? str(body.project) ?? str(body.board) ?? str(body.boardId);
+      if (!raw) return err(400, "project (board id or slug) required", "bad_request");
+      const projectAccess = await requireOperatorProjectAccess(req, raw);
+      if (projectAccess instanceof Response) return projectAccess;
+      const agentRef = parts[1]!;
+      const profile = await boardOps.getAgentProfile(agentRef);
+      if (!profile?.agent) return err(404, "agent not found", "agent_not_found");
+      await boardOps.grantBoardAccess(profile.agent.id, projectAccess);
+      const next = await boardOps.getAgentProfile(profile.agent.id);
+      return json({ ok: true, agent: next?.agent ?? profile.agent, boardIds: next?.agent.boardIds ?? [] });
+    }
+    // DELETE /agents/:id/boards/:projectId — revoke membership
+    if (
+      parts.length === 4 &&
+      parts[0] === "agents" &&
+      parts[2] === "boards" &&
+      req.method === "DELETE"
+    ) {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const projectAccess = await requireOperatorProjectAccess(req, parts[3]!);
+      if (projectAccess instanceof Response) return projectAccess;
+      const agentRef = parts[1]!;
+      const profile = await boardOps.getAgentProfile(agentRef);
+      if (!profile?.agent) return err(404, "agent not found", "agent_not_found");
+      await boardOps.revokeBoardAccess(profile.agent.id, projectAccess);
+      const next = await boardOps.getAgentProfile(profile.agent.id);
+      return json({ ok: true, agent: next?.agent ?? profile.agent, boardIds: next?.agent.boardIds ?? [] });
+    }
+
     // --- project settings ---
     if (parts.length === 2 && parts[0] === "projects" && parts[1] && req.method === "GET") {
       // fallthrough if not settings

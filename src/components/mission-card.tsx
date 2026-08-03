@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GripVertical, Radio, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { RelativeTime } from "@/components/relative-time";
-import type { Agent, Mission } from "@/lib/types";
+import type { Agent, Mission, MissionColumn } from "@/lib/types";
 import { COLUMN_STATUS_COLOR, PRIORITY_LABELS } from "@/lib/types";
+import { adjacentColumn } from "@/lib/keyboard-ops";
 import { cn } from "@/lib/utils";
 
 const priorityVariant = {
@@ -17,19 +18,28 @@ export function MissionCard({
   mission,
   agent,
   selected,
+  onSelect,
   onOpen,
   onDragStart,
+  onAdvanceReady,
+  onAdvanceNext,
   boardName,
 }: {
   mission: Mission;
   agent?: Agent;
   selected?: boolean;
+  /** Single click — select only (triage). */
+  onSelect: () => void;
+  /** Double-click / Enter — open detail. */
   onOpen: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  onAdvanceReady?: () => void;
+  onAdvanceNext?: () => void;
   /** When set (All boards view), show which board owns the card */
   boardName?: string | null;
 }) {
   const [stale, setStale] = useState(false);
+  const dragFromHandle = useRef(false);
 
   useEffect(() => {
     const check = () => {
@@ -44,19 +54,61 @@ export function MissionCard({
     return () => window.clearInterval(id);
   }, [mission.column, mission.lastHeartbeat]);
 
+  const nextCol = adjacentColumn(mission.column, 1);
+  const showReadyChip = mission.column !== "ready" && mission.column !== "done";
+
   return (
     <article
-      draggable
-      onDragStart={onDragStart}
-      onClick={onOpen}
+      draggable={false}
+      onClick={(e) => {
+        // Ignore clicks on action chips
+        if ((e.target as HTMLElement).closest("[data-card-action]")) return;
+        onSelect();
+      }}
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest("[data-card-action]")) return;
+        onOpen();
+      }}
       className={cn(
-        "group cursor-grab rounded-[var(--radius-md)] bg-bg-elevated p-3 shadow-[var(--shadow-border)] transition-[box-shadow,background-color,transform] duration-150 active:cursor-grabbing hover:shadow-[var(--shadow-border-hover)] hover:bg-bg-subtle",
-        selected && "ring-1 ring-accent/40",
+        "group relative rounded-[var(--radius-md)] bg-bg-elevated p-3 shadow-[var(--shadow-border)] transition-[box-shadow,background-color,transform] duration-150 hover:shadow-[var(--shadow-border-hover)] hover:bg-bg-subtle",
+        selected && "ring-2 ring-[var(--color-status-ready)]",
         stale && "ring-1 ring-status-human/40",
       )}
     >
       <div className="mb-2 flex items-start gap-2">
-        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100" />
+        <button
+          type="button"
+          data-card-action
+          draggable
+          title="Drag to another column"
+          aria-label="Drag mission"
+          className="mt-0.5 shrink-0 cursor-grab rounded p-0.5 text-fg-subtle opacity-40 transition-opacity hover:bg-bg-subtle hover:text-fg group-hover:opacity-100 active:cursor-grabbing"
+          onClick={(e) => e.stopPropagation()}
+          onDragStart={(e) => {
+            dragFromHandle.current = true;
+            e.stopPropagation();
+            e.dataTransfer.setData("text/mission-id", mission.id);
+            e.dataTransfer.effectAllowed = "move";
+            // Minimal ghost
+            try {
+              const ghost = document.createElement("div");
+              ghost.textContent = mission.title;
+              ghost.style.cssText =
+                "position:fixed;top:-1000px;padding:6px 10px;background:#1a1a1e;color:#f4f4f5;border-radius:8px;font:12px sans-serif;max-width:200px";
+              document.body.appendChild(ghost);
+              e.dataTransfer.setDragImage(ghost, 10, 10);
+              window.setTimeout(() => ghost.remove(), 0);
+            } catch {
+              /* ignore */
+            }
+            onDragStart(e);
+          }}
+          onDragEnd={() => {
+            dragFromHandle.current = false;
+          }}
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
         <div className="min-w-0 flex-1">
           <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
             <Badge variant={priorityVariant[mission.priority]}>
@@ -105,6 +157,38 @@ export function MissionCard({
           )}
         </div>
         <div className="flex items-center gap-1 text-[11px] text-fg-subtle tabular">
+          {showReadyChip && onAdvanceReady ? (
+            <button
+              type="button"
+              data-card-action
+              title="Move to Ready"
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-100 hover:opacity-100"
+              style={{
+                background: "color-mix(in oklab, var(--color-status-ready) 25%, transparent)",
+                color: "var(--color-status-ready)",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAdvanceReady();
+              }}
+            >
+              → Ready
+            </button>
+          ) : null}
+          {onAdvanceNext && nextCol !== mission.column ? (
+            <button
+              type="button"
+              data-card-action
+              title={`Advance to ${nextCol}`}
+              className="rounded-full bg-bg-subtle px-1.5 py-0.5 text-[10px] font-medium text-fg-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAdvanceNext();
+              }}
+            >
+              →
+            </button>
+          ) : null}
           {(mission.column === "running" || mission.lastHeartbeat) && (
             <>
               <Radio
@@ -124,3 +208,4 @@ export function MissionCard({
     </article>
   );
 }
+

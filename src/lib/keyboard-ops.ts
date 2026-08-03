@@ -11,6 +11,9 @@ export type KeyboardAction =
   | "claim_selected"
   | "move_ready"
   | "move_running"
+  | "advance_column"
+  | "retreat_column"
+  | "open_selected"
   | "compact_toggle"
   | "escape";
 
@@ -31,6 +34,11 @@ export const KEYBOARD_BINDINGS: Array<{ chord: KeyChord; action: KeyboardAction;
   { chord: { key: "c" }, action: "claim_selected", label: "Claim selected mission" },
   { chord: { key: "r" }, action: "move_ready", label: "Move selected to Ready" },
   { chord: { key: "g" }, action: "move_running", label: "Move selected to Running" },
+  { chord: { key: "ArrowRight" }, action: "advance_column", label: "Advance selected one column" },
+  { chord: { key: "]" }, action: "advance_column", label: "Advance selected one column" },
+  { chord: { key: "ArrowLeft" }, action: "retreat_column", label: "Move selected back one column" },
+  { chord: { key: "[" }, action: "retreat_column", label: "Move selected back one column" },
+  { chord: { key: "Enter" }, action: "open_selected", label: "Open selected mission" },
   { chord: { key: "d" }, action: "compact_toggle", label: "Toggle compact density" },
   { chord: { key: "Escape" }, action: "escape", label: "Close panel" },
 ];

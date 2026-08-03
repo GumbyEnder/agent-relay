@@ -145,7 +145,7 @@ export function CommandPalette() {
               <Item
                 key={m.id}
                 onSelect={() => {
-                  selectMission(m.id);
+                  openPanel("mission", m.id);
                   setOpen(false);
                 }}
               >

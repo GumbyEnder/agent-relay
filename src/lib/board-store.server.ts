@@ -1108,6 +1108,184 @@ export const durableBoard = {
       return true;
     }),
 
+  /** Remove board membership (does not revoke API keys). */
+  revokeBoardAccess: (agentId: string, projectId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      await sql`
+        delete from ar_board_agents
+        where agent_id = ${agentId} and project_id = ${projectId}
+      `;
+      return true;
+    }),
+
+  /** Platform admin: list human accounts + roles + board counts. */
+  listPlatformUsers: () =>
+    withLock(async () => {
+      const sql = await getSql();
+      const users = (await sql`
+        select id, name, email, "emailVerified", "createdAt", "updatedAt"
+        from "user"
+        order by "createdAt" desc
+        limit 500
+      `) as Array<Record<string, unknown>>;
+      const roles = (await sql`
+        select user_id, email, role from ar_operator_roles
+      `) as Array<Record<string, unknown>>;
+      const roleByUser = new Map<string, string>();
+      const roleByEmail = new Map<string, string>();
+      for (const r of roles) {
+        if (r.user_id != null) roleByUser.set(String(r.user_id), String(r.role));
+        if (r.email != null) roleByEmail.set(String(r.email).toLowerCase(), String(r.role));
+      }
+      const boardCounts = (await sql`
+        select owner_user_id as uid, count(*)::int as n
+        from ar_projects
+        where owner_user_id is not null
+          and archived_at is null
+        group by owner_user_id
+      `) as Array<{ uid: string; n: number }>;
+      const boardsByOwner = new Map(boardCounts.map((r) => [String(r.uid), Number(r.n)]));
+      return users.map((u) => {
+        const id = String(u.id);
+        const email = u.email != null ? String(u.email) : null;
+        const role =
+          roleByUser.get(id) ??
+          (email ? roleByEmail.get(email.toLowerCase()) : null) ??
+          null;
+        return {
+          id,
+          name: u.name != null ? String(u.name) : "",
+          email,
+          emailVerified: Boolean(u.emailVerified),
+          createdAt: ms(u.createdAt) ?? Date.now(),
+          updatedAt: ms(u.updatedAt) ?? Date.now(),
+          role,
+          boardCount: boardsByOwner.get(id) ?? 0,
+        };
+      });
+    }),
+
+  /** Platform admin: aggregate usage/velocity (no private mission bodies). */
+  platformUsage: (rangeDays = 7) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const days = Math.max(1, Math.min(90, rangeDays));
+      const since = Date.now() - days * 86_400_000;
+      const sinceTs = ts(since);
+
+      const byOwner = (await sql`
+        select
+          p.owner_user_id as owner_id,
+          count(distinct p.id)::int as boards,
+          count(m.id)::int as missions,
+          count(*) filter (where m.column = 'done')::int as done,
+          count(*) filter (where m.column = 'running')::int as running,
+          count(*) filter (where m.column = 'ready')::int as ready,
+          count(*) filter (where m.column = 'needs_human')::int as needs_human,
+          max(m.updated_at) as last_mission_at
+        from ar_projects p
+        left join ar_missions m
+          on m.project_id = p.id
+          and m.updated_at >= ${sinceTs}
+        where p.owner_user_id is not null
+          and p.archived_at is null
+        group by p.owner_user_id
+        order by count(m.id) desc nulls last
+        limit 200
+      `) as Array<Record<string, unknown>>;
+
+      const users = (await sql`
+        select id, name, email from "user"
+      `) as Array<Record<string, unknown>>;
+      const userMap = new Map(
+        users.map((u) => [
+          String(u.id),
+          {
+            name: u.name != null ? String(u.name) : "",
+            email: u.email != null ? String(u.email) : null,
+          },
+        ]),
+      );
+
+      const byAgent = (await sql`
+        select
+          a.id as agent_id,
+          a.name as agent_name,
+          a.status,
+          a.last_heartbeat,
+          count(*) filter (where e.kind ilike '%claim%')::int as claims,
+          count(*) filter (where e.kind ilike '%heartbeat%' or e.kind ilike '%progress%')::int as heartbeats,
+          count(*) filter (where e.kind ilike '%deliver%')::int as deliveries,
+          count(*) filter (where e.kind ilike '%escalat%' or e.kind ilike '%human%')::int as escalations,
+          max(e.at) as last_event_at
+        from ar_agents a
+        left join ar_events e
+          on e.agent_id = a.id
+          and e.at >= ${sinceTs}
+        where coalesce(a.is_demo, false) = false
+        group by a.id, a.name, a.status, a.last_heartbeat
+        order by count(e.id) desc nulls last
+        limit 200
+      `) as Array<Record<string, unknown>>;
+
+      const memberships = (await sql`
+        select agent_id, count(*)::int as n from ar_board_agents group by agent_id
+      `) as Array<{ agent_id: string; n: number }>;
+      const memMap = new Map(memberships.map((r) => [String(r.agent_id), Number(r.n)]));
+
+      const totals = (await sql`
+        select
+          count(*)::int as missions,
+          count(*) filter (where column = 'done')::int as done,
+          count(*) filter (where column = 'running')::int as running,
+          count(*) filter (where column = 'ready')::int as ready,
+          count(*) filter (where column = 'needs_human')::int as needs_human
+        from ar_missions
+        where updated_at >= ${sinceTs}
+      `) as Array<Record<string, unknown>>;
+
+      return {
+        rangeDays: days,
+        since,
+        totals: {
+          missions: Number(totals[0]?.missions ?? 0),
+          done: Number(totals[0]?.done ?? 0),
+          running: Number(totals[0]?.running ?? 0),
+          ready: Number(totals[0]?.ready ?? 0),
+          needsHuman: Number(totals[0]?.needs_human ?? 0),
+        },
+        users: byOwner.map((r) => {
+          const ownerId = r.owner_id != null ? String(r.owner_id) : "";
+          const u = userMap.get(ownerId);
+          return {
+            userId: ownerId,
+            name: u?.name ?? "",
+            email: u?.email ?? null,
+            boards: Number(r.boards ?? 0),
+            missions: Number(r.missions ?? 0),
+            done: Number(r.done ?? 0),
+            running: Number(r.running ?? 0),
+            ready: Number(r.ready ?? 0),
+            needsHuman: Number(r.needs_human ?? 0),
+            lastMissionAt: ms(r.last_mission_at),
+          };
+        }),
+        agents: byAgent.map((r) => ({
+          agentId: String(r.agent_id),
+          name: String(r.agent_name ?? ""),
+          status: String(r.status ?? "offline"),
+          lastHeartbeat: ms(r.last_heartbeat),
+          boardCount: memMap.get(String(r.agent_id)) ?? 0,
+          claims: Number(r.claims ?? 0),
+          heartbeats: Number(r.heartbeats ?? 0),
+          deliveries: Number(r.deliveries ?? 0),
+          escalations: Number(r.escalations ?? 0),
+          lastEventAt: ms(r.last_event_at),
+        })),
+      };
+    }),
+
   archiveProject: (projectId: string) =>
     withLock(async () => {
       const sql = await getSql();
