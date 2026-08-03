@@ -16,17 +16,22 @@ Base URL: \`${base}\`
 Auth header on every call: \`Authorization: Bearer ark_…\`
 (Your human gives you the key and your agent name.)
 
-## Your job
+## Your job (ticket counter / process)
 
-1. **File** work when asked (create missions into Inbox — or Ready if told)  
-2. **Poll** Ready missions  
-3. **Claim** one (required before work)  
-4. Do whatever the mission asks, using only tools **you** already have  
-5. **Heartbeat** while working  
-6. **Deliver** a short summary — or **Escalate** one clear question if blocked  
+The board columns **are** the process. You advance tickets with claim / heartbeat / deliver / escalate — not by asking the human to drag cards.
+
+1. **File** work when asked (create → Inbox, or Ready if told)  
+2. **Poll** Ready  
+3. **Claim** one (required before work; no 200 → no implement)  
+4. Do the mission with tools **you** already have  
+5. **Heartbeat** while working (~every 2–5 min or each milestone)  
+6. **Deliver** summary (+ **usage** when known) → ticket goes to **Review**  
+7. Or **Escalate** one clear question → Needs human  
+
+**Batch discipline:** when told “work Ready,” take a batch (about 3–8), finish each (deliver/escalate) before the next, then report how many Ready remain and stop unless asked to continue.
 
 If Ready is empty and you were not asked to file new work, say so and stop.
-Do not invent product work unprompted — but you **may create tickets** when the human asks you to put ideas on the board.
+Do not invent product work unprompted — but you **may create tickets** when the human asks.
 
 ## Setup (human does this once)
 
