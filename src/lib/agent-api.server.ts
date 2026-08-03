@@ -649,10 +649,17 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return err(404, `Unknown verb: ${verb}`);
     }
 
-    // GET /agents
+    // GET /agents — fleet scoped to boards the operator can see (boardIds filtered)
     if (parts.length === 1 && parts[0] === "agents" && req.method === "GET") {
-      const snap = await boardOps.snapshot();
-      return json({ ok: true, agents: snap.agents });
+      const ctx = await loadOperatorContext(req);
+      let allowedProjectIds: string[] | null = null;
+      if (ctx.authRequired && ctx.user) {
+        allowedProjectIds = await resolveReadableProjectIds(ctx, {
+          adminAll: ctx.role === "admin" && url.searchParams.get("all") === "1",
+        });
+      }
+      const agents = await boardOps.listFleetAgents(allowedProjectIds);
+      return json({ ok: true, agents });
     }
 
     // GET /agents/:id|/agents/:id/profile — operator agent dossier + stats
@@ -777,9 +784,23 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       });
     }
 
-    // GET /events/stream — optional SSE for Live (poll-backed delta)
+    // GET /events/stream — SSE for Live (server-side delta; client reconnects)
     if (parts.length === 2 && parts[0] === "events" && parts[1] === "stream" && req.method === "GET") {
-      const projectId = projectRef(url);
+      const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
+      const wantAll = !pref || pref === "all" || pref === "*" || pref === "__all__";
+      const ctx = await loadOperatorContext(req);
+      const adminAll =
+        ctx.role === "admin" && url.searchParams.get("all") === "1";
+      let allowedProjectIds: string[] | null = null;
+      if (ctx.authRequired && ctx.user) {
+        allowedProjectIds = await resolveReadableProjectIds(ctx, { adminAll });
+      }
+      let scopedProject: string | null = null;
+      if (!wantAll && pref) {
+        const access = await requireOperatorProjectAccess(req, pref, { adminAll });
+        if (access instanceof Response) return access;
+        scopedProject = access;
+      }
       const encoder = new TextEncoder();
       let closed = false;
       let lastSig = "";
@@ -791,22 +812,49 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
               encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
             );
           };
-          send("hello", { ok: true, projectId: projectId ?? null });
+          send("hello", {
+            ok: true,
+            projectId: scopedProject,
+            scope: wantAll ? "all" : "board",
+            tickMs: 1200,
+          });
           const tick = async () => {
             if (closed) return;
             try {
-              const snap = await boardOps.adminSnapshot(projectId);
-              const sig = `${snap.events[0]?.id ?? ""}:${snap.history[0]?.id ?? ""}:${snap.missions.length}`;
+              const snap = await boardOps.adminSnapshot(wantAll ? "all" : scopedProject, {
+                allowedProjectIds,
+              });
+              const latestEv = snap.events[0];
+              const latestHist = snap.history[0];
+              const sig = [
+                latestEv?.id ?? "",
+                latestHist?.id ?? "",
+                snap.missions.length,
+                snap.calls.filter((c) => !c.resolvedAt).length,
+                snap.stats.byColumn?.running ?? 0,
+              ].join(":");
               if (sig !== lastSig) {
                 lastSig = sig;
                 send("board", {
                   at: Date.now(),
-                  projectId: projectId ?? null,
+                  projectId: scopedProject,
+                  scope: wantAll ? "all" : "board",
                   eventCount: snap.events.length,
                   historyCount: snap.history.length,
+                  missionCount: snap.missions.length,
                   openCalls: snap.calls.filter((c) => !c.resolvedAt).length,
-                  latestEvent: snap.events[0] ?? null,
+                  latestEvent: latestEv ?? null,
+                  latestHistory: latestHist
+                    ? {
+                        id: latestHist.id,
+                        missionId: latestHist.missionId,
+                        toColumn: latestHist.toColumn,
+                        at: latestHist.at,
+                      }
+                    : null,
                   stale: staleSummary(snap.missions, Date.now(), policyFromEnv()),
+                  // Hint client to full-refresh payload (events/history bodies)
+                  refresh: true,
                 });
               } else {
                 send("ping", { at: Date.now() });
@@ -816,18 +864,20 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
             }
           };
           void tick();
-          const iv = setInterval(() => void tick(), 1500);
+          const iv = setInterval(() => void tick(), 1200);
+          // Long-lived stream; client EventSource reconnects on close
           const t = setTimeout(() => {
             clearInterval(iv);
             if (!closed) {
               closed = true;
               try {
+                send("bye", { at: Date.now(), reason: "rotate" });
                 controller.close();
               } catch {
                 /* ignore */
               }
             }
-          }, 60_000);
+          }, 5 * 60_000);
           // @ts-expect-error attach for cancel
           controller._iv = iv;
           // @ts-expect-error attach for cancel
@@ -1409,6 +1459,90 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         : Number(rangeRaw);
       const usage = await boardOps.platformUsage(Number.isFinite(days) ? days : 7);
       return json({ ok: true, ...usage });
+    }
+    // GET /admin/boards
+    if (
+      parts.length === 2 &&
+      parts[0] === "admin" &&
+      parts[1] === "boards" &&
+      req.method === "GET"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const includeArchived =
+        url.searchParams.get("archived") === "1" ||
+        url.searchParams.get("include_archived") === "1";
+      const boards = await boardOps.listPlatformBoards({ includeArchived });
+      return json({ ok: true, boards });
+    }
+    // POST /admin/boards/:id/transfer { userId | email | ownerUserId | null for shared }
+    if (
+      parts.length === 4 &&
+      parts[0] === "admin" &&
+      parts[1] === "boards" &&
+      parts[3] === "transfer" &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const boardId = parts[2]!;
+      const existing = await boardOps.getProject(boardId);
+      if (!existing) return err(404, "board not found", "not_found");
+      let owner: string | null =
+        str(body.userId) ?? str(body.ownerUserId) ?? str(body.owner_user_id) ?? null;
+      if (body.shared === true || body.clearOwner === true) owner = null;
+      const email = str(body.email);
+      if (!owner && email) {
+        const users = await boardOps.listPlatformUsers();
+        const hit = users.find(
+          (u) => u.email && u.email.toLowerCase() === email.toLowerCase(),
+        );
+        if (!hit) return err(404, "user not found for email", "user_not_found");
+        owner = hit.id;
+      }
+      const board = await boardOps.transferBoardOwnership(boardId, owner);
+      return json({ ok: true, board });
+    }
+    // GET /admin/agents — fleet oversight
+    if (
+      parts.length === 2 &&
+      parts[0] === "admin" &&
+      parts[1] === "agents" &&
+      req.method === "GET"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const agents = await boardOps.listPlatformAgents();
+      return json({ ok: true, agents });
+    }
+
+    // POST /missions/bulk-move { ids, column } — operator Accept All etc.
+    if (
+      parts.length === 2 &&
+      parts[0] === "missions" &&
+      parts[1] === "bulk-move" &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "write_board");
+      if (gate) return gate;
+      const ids = strArr(body.ids) ?? strArr(body.missionIds) ?? [];
+      const column = str(body.column) as MissionColumn | undefined;
+      if (!ids.length || !column) {
+        return err(400, "ids[] and column required", "bad_request");
+      }
+      const ctx = await loadOperatorContext(req);
+      const allowed: string[] = [];
+      for (const id of ids) {
+        const m = await boardOps.getMission(id);
+        if (!m) continue;
+        if (await operatorCanAccessProject(ctx, m.projectId)) allowed.push(id);
+      }
+      const result = await boardOps.bulkMoveMissions(
+        allowed,
+        column,
+        str(body.actor) ?? "operator",
+      );
+      return json({ ok: true, ...result, requested: ids.length, allowed: allowed.length });
     }
 
     // POST /agents/:id/boards  { project | projectId } — grant membership

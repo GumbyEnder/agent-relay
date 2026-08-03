@@ -88,6 +88,8 @@ interface BoardState {
   loadHistory: (missionId: string) => Promise<void>;
 
   moveMission: (id: string, column: MissionColumn, actor?: string | null) => void;
+  /** Double-confirm bulk Review → Done. */
+  acceptAllReview: () => void;
   claimMission: (missionId: string, agentId: string) => void;
   releaseMission: (missionId: string) => void;
   heartbeat: (missionId: string, note?: string) => void;
@@ -404,6 +406,40 @@ export const useBoard = create<BoardState>()((set, get) => ({
           missions: get().missions.map((m) => (m.id === id ? prev : m)),
         });
         toast.error(e instanceof Error ? e.message : "Move failed");
+      }
+    })();
+  },
+
+  acceptAllReview: () => {
+    const ids = get()
+      .missions.filter((m) => m.column === "review")
+      .map((m) => m.id);
+    if (!ids.length) {
+      toast.message("No tickets in Review");
+      return;
+    }
+    const ok = window.confirm(
+      `Are you sure you wish to accept them all — this impacts ${ids.length} ticket${ids.length === 1 ? "" : "s"}?\n\nThey will move Review → Done.`,
+    );
+    if (!ok) return;
+    const second = window.confirm(
+      `Final confirm: accept ${ids.length} Review ticket${ids.length === 1 ? "" : "s"} to Done?`,
+    );
+    if (!second) return;
+    const prev = get().missions;
+    set({
+      missions: get().missions.map((m) =>
+        m.column === "review" ? { ...m, column: "done" as MissionColumn, updatedAt: Date.now() } : m,
+      ),
+    });
+    void (async () => {
+      try {
+        const res = await agentApi.bulkMoveMissions(ids, "done");
+        toast.success(`Accepted ${res.moved} ticket${res.moved === 1 ? "" : "s"} → Done`);
+        void get().refresh().catch(() => undefined);
+      } catch (e) {
+        set({ missions: prev });
+        toast.error(e instanceof Error ? e.message : "Accept all failed");
       }
     })();
   },

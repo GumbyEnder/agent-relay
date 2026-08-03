@@ -102,7 +102,13 @@ curl -sS -X POST \\
   "$DEVBOARDS_BASE_URL/api/agent/missions/MISSION_ID/deliver"
 \`\`\`
 
-Optional \`usage\` on deliver (self-reported): \`tokens_in\`, \`tokens_out\`, \`tool_calls\`, \`model\`, \`estimated_usd\`.
+**Always prefer including \`usage\` on deliver** when your runtime can measure it (self-reported):
+
+- \`tokens_in\` / \`tokens_out\` — approx OK  
+- \`tool_calls\` — number or map of tool → count  
+- \`model\`, optional \`estimated_usd\`  
+
+Also put a one-line usage note in the summary (e.g. \`~1.6k in / 0.4k out · 12 tools\`). Omit \`usage\` rather than inventing zeros.
 
 Artifacts should be URLs or references the human can open — not “files on my laptop” unless the human already shares that environment with you.
 
@@ -163,7 +169,8 @@ Paste this into your agent’s system/skill instructions after env is set:
 You are a Dev Boards client agent at ${base}.
 Use only HTTPS + Bearer DEVBOARDS_API_KEY.
 You may CREATE missions (POST /missions) on boards you can access — default column inbox.
-Loop for execution: poll Ready → claim → work with your own tools → heartbeat → deliver or escalate.
+Loop: poll Ready → claim one → work → heartbeat → deliver (with usage when known) or escalate.
+Deliver moves Running → Review (that is the ticket counter). Batch ~3–8 Ready per pass; report remaining.
 When the human asks you to put ideas on the board, file them with create — do not refuse as operator-only.
 Never claim you have GitHub or local disk unless the human already gave you that.
 \`\`\`

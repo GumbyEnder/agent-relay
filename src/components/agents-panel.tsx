@@ -803,7 +803,7 @@ export function AgentKeyRevealList({
                       Hide
                     </Button>
                   </>
-                ) : (
+                ) : revealable ? (
                   <Button
                     size="sm"
                     variant="secondary"
@@ -819,11 +819,7 @@ export function AgentKeyRevealList({
                         }));
                       } catch (e) {
                         toast.error(
-                          e instanceof Error
-                            ? e.message
-                            : revealable
-                              ? "Reveal failed"
-                              : "Not revealable — issue a new key",
+                          e instanceof Error ? e.message : "Reveal failed",
                         );
                       } finally {
                         setBusyId(null);
@@ -833,9 +829,65 @@ export function AgentKeyRevealList({
                     <Eye className="h-3 w-3" />
                     {busyId === id ? "…" : "Reveal"}
                   </Button>
+                ) : (
+                  <span className="text-[10px] text-status-human">legacy</span>
                 )}
               </div>
             </div>
+            {!revealable && !secret ? (
+              <p className="mt-1 text-[10px] leading-snug text-fg-subtle">
+                Issued before reveal storage.{" "}
+                <button
+                  type="button"
+                  className="font-medium text-status-ready underline-offset-2 hover:underline"
+                  disabled={busyId === id}
+                  onClick={async () => {
+                    setBusyId(id);
+                    try {
+                      // Re-issue on same board/agent when possible, then revoke old.
+                      const projectId =
+                        (k.projectId as string | undefined) ||
+                        (k as { project_id?: string }).project_id;
+                      if (!projectId) {
+                        toast.error("Unknown board for this key — use Issue key above");
+                        return;
+                      }
+                      const created = await agentApi.createApiKey({
+                        projectId: String(projectId),
+                        agentId,
+                        name: `${String(k.name || "key")} (reissued)`,
+                      });
+                      const secretNew =
+                        (created.key as { secret?: string })?.secret ?? "";
+                      if (secretNew) {
+                        setRevealed((prev) => ({
+                          ...prev,
+                          [String((created.key as { id?: string }).id ?? "")]:
+                            secretNew,
+                        }));
+                        await navigator.clipboard.writeText(secretNew).catch(() => undefined);
+                        toast.success("New key issued and copied — update the agent runtime");
+                      } else {
+                        toast.success("New key issued — copy it from the list");
+                      }
+                      try {
+                        await agentApi.revokeApiKey(id);
+                      } catch {
+                        toast.message("New key ready; revoke old key manually if needed");
+                      }
+                      const res = await agentApi.listAgentKeys(agentId);
+                      setKeys(res.keys ?? []);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "Re-issue failed");
+                    } finally {
+                      setBusyId(null);
+                    }
+                  }}
+                >
+                  Re-issue + revoke old
+                </button>
+              </p>
+            ) : null}
           </div>
         );
       })}

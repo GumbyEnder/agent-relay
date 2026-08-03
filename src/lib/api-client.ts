@@ -316,4 +316,26 @@ export const agentApi = {
     role: "viewer" | "operator" | "admin";
     email?: string | null;
   }) => req<{ ok: true }>("POST", "/roles", input),
+  bulkMoveMissions: (ids: string[], column: MissionColumn) =>
+    req<{ ok: true; moved: number; allowed: number; requested: number }>(
+      "POST",
+      "/missions/bulk-move",
+      { ids, column },
+    ),
+  adminListBoards: (opts?: { includeArchived?: boolean }) =>
+    req<{ ok: true; boards: Array<Record<string, unknown>> }>(
+      "GET",
+      `/admin/boards${opts?.includeArchived ? "?archived=1" : ""}`,
+    ),
+  adminListAgents: () =>
+    req<{ ok: true; agents: Array<Record<string, unknown>> }>("GET", "/admin/agents"),
+  adminTransferBoard: (
+    boardId: string,
+    body: { userId?: string | null; email?: string; shared?: boolean },
+  ) =>
+    req<{ ok: true; board: unknown }>(
+      "POST",
+      `/admin/boards/${encodeURIComponent(boardId)}/transfer`,
+      body,
+    ),
 };

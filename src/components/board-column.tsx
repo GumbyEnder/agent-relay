@@ -17,6 +17,7 @@ export function BoardColumn({
   onDragStart,
   onAddMission,
   onMoveMission,
+  onAcceptAllReview,
   showBoardName = false,
   boardNameById = {},
 }: {
@@ -31,6 +32,8 @@ export function BoardColumn({
   /** Open new-mission flow targeting this column */
   onAddMission?: (column: MissionColumn) => void;
   onMoveMission?: (missionId: string, column: MissionColumn) => void;
+  /** Review column only — bulk accept to Done */
+  onAcceptAllReview?: () => void;
   /** All-boards mode: label each card with its board name */
   showBoardName?: boolean;
   boardNameById?: Record<string, string>;
@@ -128,6 +131,18 @@ export function BoardColumn({
                   New mission here
                 </button>
               )}
+              {columnId === "review" && onAcceptAllReview && missions.length > 0 && (
+                <button
+                  type="button"
+                  className="flex w-full px-3 py-1.5 text-left text-xs font-medium text-status-ready hover:bg-bg-subtle"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onAcceptAllReview();
+                  }}
+                >
+                  Accept all ({missions.length}) → Done
+                </button>
+              )}
               <button
                 type="button"
                 className="flex w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-bg-subtle"
@@ -147,6 +162,18 @@ export function BoardColumn({
           )}
         </div>
       </header>
+
+      {columnId === "review" && onAcceptAllReview && missions.length > 0 && (
+        <div className="mb-2 px-1">
+          <button
+            type="button"
+            onClick={onAcceptAllReview}
+            className="w-full rounded-[var(--radius-sm)] border border-[color-mix(in_oklab,var(--color-status-ready)_40%,transparent)] bg-[color-mix(in_oklab,var(--color-status-ready)_12%,transparent)] px-2 py-1.5 text-[11px] font-semibold text-[var(--color-status-ready)] hover:bg-[color-mix(in_oklab,var(--color-status-ready)_20%,transparent)]"
+          >
+            Accept all {missions.length} in Review → Done
+          </button>
+        </div>
+      )}
 
       <div
         className={cn(

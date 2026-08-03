@@ -834,7 +834,7 @@ export const durableBoard = {
         order by at desc
         limit 400
       `) as Record<string, unknown>[];
-      const events = eventRows
+      let events = eventRows
         .map((r) => rowEvent(r))
         .filter((e) => !allowed || !e.projectId || allowed.has(e.projectId));
 
@@ -847,11 +847,23 @@ export const durableBoard = {
       ];
       if (missingMissionIds.length) {
         for (const mid of missingMissionIds.slice(0, 80)) {
+          // Never load titles from private boards outside the caller's readable set.
           const mr = (await sql`
-            select id, title from ar_missions where id = ${mid} limit 1
-          `) as Array<{ id: string; title: string }>;
-          if (mr[0]) titleById.set(String(mr[0].id), String(mr[0].title));
+            select id, title, project_id from ar_missions where id = ${mid} limit 1
+          `) as Array<{ id: string; title: string; project_id: string }>;
+          if (!mr[0]) continue;
+          const pid = String(mr[0].project_id);
+          if (allowed && !allowed.has(pid)) continue;
+          titleById.set(String(mr[0].id), String(mr[0].title));
         }
+      }
+      // Drop activity that points at missions outside readable boards (no title leak).
+      if (allowed) {
+        events = events.filter((e) => {
+          if (e.projectId) return allowed.has(e.projectId);
+          if (e.missionId) return titleById.has(e.missionId);
+          return true;
+        });
       }
 
       const calls = (await sql`
@@ -1117,6 +1129,205 @@ export const durableBoard = {
         where agent_id = ${agentId} and project_id = ${projectId}
       `;
       return true;
+    }),
+
+  /** Platform admin: all boards with owner email + counts. */
+  listPlatformBoards: (opts?: { includeArchived?: boolean }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const includeArchived = opts?.includeArchived === true;
+      const boards = (
+        includeArchived
+          ? await sql`select * from ar_projects order by name asc`
+          : await sql`
+              select * from ar_projects
+              where archived_at is null
+              order by name asc
+            `
+      ) as Record<string, unknown>[];
+      const users = (await sql`
+        select id, name, email from "user"
+      `) as Array<Record<string, unknown>>;
+      const userMap = new Map(
+        users.map((u) => [
+          String(u.id),
+          {
+            name: u.name != null ? String(u.name) : "",
+            email: u.email != null ? String(u.email) : null,
+          },
+        ]),
+      );
+      const missionCounts = (await sql`
+        select project_id, count(*)::int as n,
+          count(*) filter (where column = 'running')::int as running,
+          count(*) filter (where column = 'ready')::int as ready
+        from ar_missions
+        group by project_id
+      `) as Array<Record<string, unknown>>;
+      const mc = new Map(
+        missionCounts.map((r) => [
+          String(r.project_id),
+          {
+            missions: Number(r.n ?? 0),
+            running: Number(r.running ?? 0),
+            ready: Number(r.ready ?? 0),
+          },
+        ]),
+      );
+      const agentCounts = (await sql`
+        select project_id, count(*)::int as n from ar_board_agents group by project_id
+      `) as Array<{ project_id: string; n: number }>;
+      const ac = new Map(agentCounts.map((r) => [String(r.project_id), Number(r.n)]));
+      return boards.map((r) => {
+        const pr = rowProject(r);
+        const owner = pr.ownerUserId ? userMap.get(pr.ownerUserId) : null;
+        const counts = mc.get(pr.id) ?? { missions: 0, running: 0, ready: 0 };
+        return {
+          id: pr.id,
+          name: pr.name,
+          slug: pr.slug,
+          description: pr.description,
+          ownerUserId: pr.ownerUserId,
+          ownerName: owner?.name ?? null,
+          ownerEmail: owner?.email ?? null,
+          archivedAt: pr.archivedAt ?? null,
+          createdAt: pr.createdAt,
+          updatedAt: pr.updatedAt,
+          missionCount: counts.missions,
+          runningCount: counts.running,
+          readyCount: counts.ready,
+          agentCount: ac.get(pr.id) ?? 0,
+          shared: !pr.ownerUserId,
+        };
+      });
+    }),
+
+  /** Platform admin: agent fleet + key health. */
+  listPlatformAgents: () =>
+    withLock(async () => {
+      const sql = await getSql();
+      const agents = (await sql`
+        select * from ar_agents
+        where coalesce(is_demo, false) = false
+        order by name asc
+      `) as Record<string, unknown>[];
+      const memberships = (await sql`
+        select agent_id, project_id from ar_board_agents
+      `) as Array<{ agent_id: string; project_id: string }>;
+      const byAgent = new Map<string, string[]>();
+      for (const m of memberships) {
+        const list = byAgent.get(String(m.agent_id)) ?? [];
+        list.push(String(m.project_id));
+        byAgent.set(String(m.agent_id), list);
+      }
+      const keys = (await sql`
+        select id, agent_id, project_id, key_prefix, key_suffix, created_at, revoked_at, last_used_at, key_ciphertext
+        from ar_api_keys
+        where agent_id is not null
+        order by created_at desc
+      `) as Array<Record<string, unknown>>;
+      const keysByAgent = new Map<string, Array<Record<string, unknown>>>();
+      for (const k of keys) {
+        const aid = String(k.agent_id);
+        const list = keysByAgent.get(aid) ?? [];
+        list.push(k);
+        keysByAgent.set(aid, list);
+      }
+      return agents.map((r) => {
+        const a = rowAgent(r);
+        const boards = byAgent.get(a.id) ?? [];
+        const klist = keysByAgent.get(a.id) ?? [];
+        const active = klist.filter((k) => !ms(k.revoked_at));
+        const lastKeyUse = active.reduce<number | null>((acc, k) => {
+          const t = ms(k.last_used_at);
+          if (t == null) return acc;
+          if (acc == null || t > acc) return t;
+          return acc;
+        }, null);
+        const orphan = boards.length === 0 && active.length === 0;
+        return {
+          id: a.id,
+          name: a.name,
+          harness: a.harness,
+          role: a.role,
+          status: a.status,
+          lastHeartbeat: a.lastHeartbeat,
+          currentMissionId: a.currentMissionId,
+          boardIds: boards,
+          boardCount: boards.length,
+          activeKeyCount: active.length,
+          totalKeyCount: klist.length,
+          revealableKeyCount: active.filter((k) => Boolean(k.key_ciphertext)).length,
+          lastKeyUseAt: lastKeyUse,
+          orphan,
+          keys: active.slice(0, 8).map((k) => ({
+            id: String(k.id),
+            projectId: String(k.project_id),
+            keyPrefix: String(k.key_prefix ?? ""),
+            keySuffix: String(k.key_suffix ?? "").slice(-6),
+            revealable: Boolean(k.key_ciphertext),
+            createdAt: ms(k.created_at),
+            lastUsedAt: ms(k.last_used_at),
+          })),
+        };
+      });
+    }),
+
+  transferBoardOwnership: (boardId: string, newOwnerUserId: string | null) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const now = Date.now();
+      await sql`
+        update ar_projects
+        set owner_user_id = ${newOwnerUserId}, updated_at = ${ts(now)}
+        where id = ${boardId}
+      `;
+      const rows = (await sql`
+        select * from ar_projects where id = ${boardId} limit 1
+      `) as Record<string, unknown>[];
+      return rows[0] ? rowProject(rows[0]) : null;
+    }),
+
+  bulkMoveMissions: (
+    missionIds: string[],
+    column: MissionColumn,
+    actor = "operator",
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      let moved = 0;
+      for (const id of missionIds) {
+        const rows = await sql`select * from ar_missions where id = ${id} limit 1`;
+        if (!rows[0]) continue;
+        const m = rowMission(rows[0] as Record<string, unknown>);
+        if (m.column === column) continue;
+        const next: Mission = { ...m, column, updatedAt: Date.now() };
+        await insertMission(sql, next);
+        await insertEvent(sql, {
+          id: uid("ev"),
+          missionId: id,
+          agentId: null,
+          projectId: m.projectId,
+          kind: "mission_moved",
+          message: `Moved ${m.column} → ${column} · ${m.title}`,
+          at: Date.now(),
+          meta: { actor, bulk: "1" },
+        });
+        await insertHistory(sql, {
+          id: uid("hist"),
+          missionId: id,
+          projectId: m.projectId,
+          actorId: actor,
+          actorName: actor,
+          actorKind: "operator",
+          fromColumn: m.column,
+          toColumn: column,
+          at: Date.now(),
+          note: "bulk accept",
+        });
+        moved++;
+      }
+      return { moved, column };
     }),
 
   /** Platform admin: list human accounts + roles + board counts. */

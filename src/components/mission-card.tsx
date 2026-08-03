@@ -72,7 +72,8 @@ export function MissionCard({
       className={cn(
         "group relative rounded-[var(--radius-md)] bg-bg-elevated p-3 shadow-[var(--shadow-border)] transition-[box-shadow,background-color,transform] duration-150 hover:shadow-[var(--shadow-border-hover)] hover:bg-bg-subtle",
         selected && "ring-2 ring-[var(--color-status-ready)]",
-        stale && "ring-1 ring-status-human/40",
+        stale &&
+          "ring-2 ring-[var(--color-status-human)] bg-[color-mix(in_oklab,var(--color-status-human)_10%,var(--color-bg-elevated))]",
       )}
     >
       <div className="mb-2 flex items-start gap-2">
@@ -114,6 +115,17 @@ export function MissionCard({
             <Badge variant={priorityVariant[mission.priority]}>
               {mission.priority.toUpperCase()}
             </Badge>
+            {stale ? (
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                style={{
+                  background: "var(--color-status-human)",
+                  color: "#0a0a0b",
+                }}
+              >
+                stale HB
+              </span>
+            ) : null}
             {mission.tags.slice(0, 2).map((t) => (
               <Badge key={t} variant="default">
                 {t}

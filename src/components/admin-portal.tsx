@@ -187,11 +187,51 @@ export function AdminPortal({
     void load();
   }, [load, projectId, scope]);
 
+  // Prefer SSE for lower lag; fall back to interval poll if EventSource unavailable.
   useEffect(() => {
     if (!live) return;
-    const id = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(id);
-  }, [live, load]);
+    let es: EventSource | null = null;
+    let pollId: number | null = null;
+    let fallbackPoll = false;
+
+    const startPoll = (ms: number) => {
+      if (pollId != null) window.clearInterval(pollId);
+      pollId = window.setInterval(() => void load(), ms);
+    };
+
+    const q =
+      scope === "all"
+        ? "project=all"
+        : projectId
+          ? `project=${encodeURIComponent(projectId)}`
+          : "project=all";
+
+    try {
+      es = new EventSource(`/api/agent/events/stream?${q}`);
+      es.addEventListener("board", () => {
+        void load();
+      });
+      es.addEventListener("hello", () => {
+        // SSE connected — slow safety poll only
+        startPoll(Math.max(POLL_MS * 8, 10_000));
+      });
+      es.onerror = () => {
+        if (!fallbackPoll) {
+          fallbackPoll = true;
+          startPoll(POLL_MS);
+        }
+      };
+      // Initial full load still runs from the other effect
+      startPoll(Math.max(POLL_MS * 8, 10_000));
+    } catch {
+      startPoll(POLL_MS);
+    }
+
+    return () => {
+      es?.close();
+      if (pollId != null) window.clearInterval(pollId);
+    };
+  }, [live, load, projectId, scope]);
 
   const openCalls = useMemo(
     () => (data?.calls ?? []).filter((c) => !c.resolvedAt),

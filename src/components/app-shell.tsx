@@ -54,6 +54,7 @@ import { UserButton } from "@/lib/auth/gates";
 import { useOperatorMe } from "@/components/operator-gate";
 import { ALL_BOARDS_ID, isAllBoardsScope } from "@/lib/board-scope";
 import { adminPublicUrl } from "@/lib/surface";
+import { listStaleMissions, DEFAULT_STALE_HEARTBEAT_MS } from "@/lib/stale-heartbeat";
 
 type MainView =
   | "board"
@@ -112,6 +113,7 @@ export function AppShell({
     selectMission,
     closePanel,
     moveMission,
+    acceptAllReview,
     claimMission,
     simulateAgentTick,
     resetDemo,
@@ -318,6 +320,12 @@ export function AppShell({
   }, []);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
+  const staleRunning = useMemo(
+    () => listStaleMissions(missions, Date.now()),
+    // recompute when missions or tick changes via refresh
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [missions, events.length],
+  );
 
   return (
     <div
@@ -554,6 +562,31 @@ export function AppShell({
 
         {/* View tabs */}
         <div className="flex flex-wrap items-center gap-1 border-t border-border px-3 py-2 sm:px-4">
+          {staleRunning.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                selectView("board");
+                const first = staleRunning[0];
+                if (first) {
+                  setFilterPriority(null);
+                  openPanel("mission", first.id);
+                  toast.message(
+                    `${staleRunning.length} stale Running (>${Math.round(DEFAULT_STALE_HEARTBEAT_MS / 60_000)}m without heartbeat)`,
+                  );
+                }
+              }}
+              className="mr-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+              style={{
+                background: "color-mix(in oklab, var(--color-status-human) 28%, transparent)",
+                color: "var(--color-status-human)",
+              }}
+              title="Running missions past heartbeat SLA"
+            >
+              <Radio className="h-3 w-3" />
+              {staleRunning.length} stale
+            </button>
+          )}
           {VIEWS.map((v) => {
             const Icon = v.icon;
             const active = mainView === v.id;
@@ -816,6 +849,9 @@ export function AppShell({
                         can("write_board")
                           ? (id, column) => moveMission(id, column)
                           : undefined
+                      }
+                      onAcceptAllReview={
+                        can("write_board") ? () => acceptAllReview() : undefined
                       }
                       onAddMission={
                         can("write_board")

@@ -15,7 +15,7 @@ import { useOperatorMe } from "@/components/operator-gate";
 import { adminPublicUrl } from "@/lib/surface";
 import { cn, formatTime } from "@/lib/utils";
 
-type AdminTab = "users" | "usage" | "hosting";
+type AdminTab = "users" | "usage" | "boards" | "agents" | "hosting";
 
 type PlatformUser = {
   id: string;
@@ -66,7 +66,9 @@ type UsagePayload = {
 const TABS: Array<{ id: AdminTab; label: string; icon: typeof Users }> = [
   { id: "users", label: "Users", icon: Users },
   { id: "usage", label: "Usage", icon: Activity },
-  { id: "hosting", label: "Hosting", icon: LayoutDashboard },
+  { id: "boards", label: "Boards", icon: LayoutDashboard },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "hosting", label: "Hosting", icon: Shield },
 ];
 
 export function PlatformAdminShell() {
@@ -74,6 +76,10 @@ export function PlatformAdminShell() {
   const [tab, setTab] = useState<AdminTab>("users");
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [usage, setUsage] = useState<UsagePayload | null>(null);
+  const [boards, setBoards] = useState<Array<Record<string, unknown>>>([]);
+  const [agents, setAgents] = useState<Array<Record<string, unknown>>>([]);
+  const [boardQ, setBoardQ] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [range, setRange] = useState<"7d" | "30d">("7d");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,11 +112,39 @@ export function PlatformAdminShell() {
     }
   }, [range]);
 
+  const loadBoards = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await agentApi.adminListBoards({ includeArchived: showArchived });
+      setBoards(res.boards ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [showArchived]);
+
+  const loadAgents = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await agentApi.adminListAgents();
+      setAgents(res.agents ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
     if (tab === "users") void loadUsers();
     if (tab === "usage") void loadUsage();
-  }, [tab, isAdmin, loadUsers, loadUsage]);
+    if (tab === "boards") void loadBoards();
+    if (tab === "agents") void loadAgents();
+  }, [tab, isAdmin, loadUsers, loadUsage, loadBoards, loadAgents]);
 
   const setRole = async (userId: string, email: string | null, next: string) => {
     try {
@@ -197,6 +231,8 @@ export function PlatformAdminShell() {
                 onClick={() => {
                   if (tab === "users") void loadUsers();
                   if (tab === "usage") void loadUsage();
+                  if (tab === "boards") void loadBoards();
+                  if (tab === "agents") void loadAgents();
                 }}
               >
                 <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
@@ -377,6 +413,242 @@ export function PlatformAdminShell() {
               </div>
             )}
 
+            {tab === "boards" && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    className="h-8 min-w-[12rem] flex-1 rounded-[var(--radius-xs)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                    placeholder="Search name, slug, owner…"
+                    value={boardQ}
+                    onChange={(e) => setBoardQ(e.target.value)}
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <input
+                      type="checkbox"
+                      checked={showArchived}
+                      onChange={(e) => setShowArchived(e.target.checked)}
+                    />
+                    Archived
+                  </label>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-left text-sm">
+                    <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
+                      <tr className="border-b border-border">
+                        <th className="px-2 py-2">Board</th>
+                        <th className="px-2 py-2">Owner</th>
+                        <th className="px-2 py-2">Missions</th>
+                        <th className="px-2 py-2">Agents</th>
+                        <th className="px-2 py-2">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {boards
+                        .filter((b) => {
+                          const q = boardQ.trim().toLowerCase();
+                          if (!q) return true;
+                          const blob = [
+                            b.name,
+                            b.slug,
+                            b.ownerEmail,
+                            b.ownerName,
+                            b.id,
+                          ]
+                            .map((x) => String(x ?? "").toLowerCase())
+                            .join(" ");
+                          return blob.includes(q);
+                        })
+                        .map((b) => (
+                          <tr key={String(b.id)}>
+                            <td className="px-2 py-2">
+                              <p className="font-medium">{String(b.name)}</p>
+                              <p className="font-mono text-[11px] text-fg-subtle">
+                                {String(b.slug)} · {String(b.id)}
+                              </p>
+                              {b.shared ? (
+                                <span className="text-[10px] text-fg-subtle">shared</span>
+                              ) : null}
+                              {b.archivedAt ? (
+                                <span className="ml-1 text-[10px] text-status-human">archived</span>
+                              ) : null}
+                            </td>
+                            <td className="px-2 py-2 text-xs">
+                              <p>{String(b.ownerName || "—")}</p>
+                              <p className="font-mono text-fg-subtle">
+                                {String(b.ownerEmail || "null owner")}
+                              </p>
+                            </td>
+                            <td className="px-2 py-2 font-mono tabular text-xs">
+                              {Number(b.missionCount ?? 0)}
+                              <span className="text-fg-subtle">
+                                {" "}
+                                · r{Number(b.readyCount ?? 0)}/run{Number(b.runningCount ?? 0)}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2 font-mono tabular">
+                              {Number(b.agentCount ?? 0)}
+                            </td>
+                            <td className="px-2 py-2">
+                              <div className="flex flex-wrap gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-[10px]"
+                                  onClick={() => {
+                                    void (async () => {
+                                      try {
+                                        if (b.archivedAt) {
+                                          await agentApi.unarchiveBoard(String(b.id));
+                                        } else {
+                                          await agentApi.archiveBoard(String(b.id));
+                                        }
+                                        toast.message(b.archivedAt ? "Unarchived" : "Archived");
+                                        await loadBoards();
+                                      } catch (e) {
+                                        toast.error(
+                                          e instanceof Error ? e.message : "Archive failed",
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  {b.archivedAt ? "Unarchive" : "Archive"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-[10px]"
+                                  onClick={() => {
+                                    const email = window.prompt(
+                                      "Transfer ownership to email (empty = shared/demo):",
+                                      String(b.ownerEmail ?? ""),
+                                    );
+                                    if (email === null) return;
+                                    void (async () => {
+                                      try {
+                                        if (!email.trim()) {
+                                          await agentApi.adminTransferBoard(String(b.id), {
+                                            shared: true,
+                                          });
+                                        } else {
+                                          await agentApi.adminTransferBoard(String(b.id), {
+                                            email: email.trim(),
+                                          });
+                                        }
+                                        toast.success("Ownership updated");
+                                        await loadBoards();
+                                      } catch (e) {
+                                        toast.error(
+                                          e instanceof Error ? e.message : "Transfer failed",
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  Transfer
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-fg-subtle">
+                  Metadata only — mission bodies are not listed here.
+                </p>
+              </div>
+            )}
+
+            {tab === "agents" && (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
+                    <tr className="border-b border-border">
+                      <th className="px-2 py-2">Agent</th>
+                      <th className="px-2 py-2">Status</th>
+                      <th className="px-2 py-2">Boards</th>
+                      <th className="px-2 py-2">Keys</th>
+                      <th className="px-2 py-2">Flags</th>
+                      <th className="px-2 py-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {agents.map((a) => (
+                      <tr key={String(a.id)}>
+                        <td className="px-2 py-2">
+                          <p className="font-mono font-medium">{String(a.name)}</p>
+                          <p className="text-[11px] text-fg-subtle">
+                            {String(a.harness)} · {String(a.id)}
+                          </p>
+                        </td>
+                        <td className="px-2 py-2 text-xs">{String(a.status)}</td>
+                        <td className="px-2 py-2 font-mono tabular">
+                          {Number(a.boardCount ?? 0)}
+                        </td>
+                        <td className="px-2 py-2 font-mono tabular text-xs">
+                          {Number(a.activeKeyCount ?? 0)} active
+                          <span className="text-fg-subtle">
+                            {" "}
+                            / {Number(a.revealableKeyCount ?? 0)} revealable
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-[10px]">
+                          {a.orphan ? (
+                            <span className="rounded bg-status-human/20 px-1.5 py-0.5 text-status-human">
+                              orphan
+                            </span>
+                          ) : (
+                            <span className="text-fg-subtle">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {((a.keys as Array<Record<string, unknown>>) ?? [])
+                              .slice(0, 2)
+                              .map((k) => (
+                                <Button
+                                  key={String(k.id)}
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-[10px]"
+                                  title={`Revoke ${k.keyPrefix}…`}
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        `Revoke key ${String(k.keyPrefix)}…${String(k.keySuffix)}?`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    void (async () => {
+                                      try {
+                                        await agentApi.revokeApiKey(String(k.id));
+                                        toast.message("Key revoked");
+                                        await loadAgents();
+                                      } catch (e) {
+                                        toast.error(
+                                          e instanceof Error ? e.message : "Revoke failed",
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  Revoke key
+                                </Button>
+                              ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[11px] text-fg-subtle">
+                  Prefix/suffix only — full secrets stay on owner reveal paths.
+                </p>
+              </div>
+            )}
+
             {tab === "hosting" && (
               <div className="space-y-3 text-sm text-fg-muted">
                 <p>
@@ -400,7 +672,7 @@ export function PlatformAdminShell() {
                   </li>
                 </ul>
                 <p className="text-xs text-fg-subtle">
-                  See docs/ADMIN_HOST.md for DNS and Railway wiring.
+                  See docs/ADMIN_HOST.md and docs/TEAM_TENANCY_SKETCH.md.
                 </p>
               </div>
             )}
