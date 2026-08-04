@@ -1,0 +1,17 @@
+node_modules
+.output
+.vercel
+.nitro
+.tanstack
+.data
+.pglite
+.git
+.env
+.env.*
+!.env.example
+*.log
+playwright-report
+test-results
+dist
+tmp
+.DS_Store

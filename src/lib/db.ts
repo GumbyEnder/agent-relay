@@ -103,6 +103,56 @@ function createNeonSql(): Promise<Sql> {
   return globalRef.__pgSqlPromise__;
 }
 
+/**
+ * Load `migrations/*.sql` as `{ pathOrName: sqlText }`.
+ * Vite: import.meta.glob. Node/tsx: filesystem next to the process cwd / package root.
+ */
+async function loadMigrationFiles(): Promise<Record<string, string>> {
+  const meta = import.meta as ImportMeta & {
+    glob?: (
+      pattern: string,
+      opts?: { query?: string; import?: string; eager?: boolean },
+    ) => Record<string, string>;
+  };
+  if (typeof meta.glob === "function") {
+    try {
+      const bundled = meta.glob("/migrations/*.sql", {
+        query: "?raw",
+        import: "default",
+        eager: true,
+      });
+      if (bundled && Object.keys(bundled).length > 0) return bundled;
+    } catch {
+      // fall through to fs
+    }
+  }
+
+  const { readdir, readFile } = await import("node:fs/promises");
+  const { dirname, join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const candidates = [
+    join(process.cwd(), "migrations"),
+    // db.ts lives at src/lib/db.ts → repo root is ../..
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations"),
+  ];
+
+  for (const dir of candidates) {
+    try {
+      const names = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
+      if (names.length === 0) continue;
+      const out: Record<string, string> = {};
+      for (const name of names) {
+        out[join(dir, name)] = await readFile(join(dir, name), "utf8");
+      }
+      return out;
+    } catch {
+      // try next candidate
+    }
+  }
+  return {};
+}
+
 async function createPgliteSql(): Promise<Sql> {
   // Embedded Postgres, imported on demand so it never loads on the Neon path.
   // One in-memory instance per process, shared across HMR module instances, so
@@ -128,16 +178,12 @@ async function createPgliteSql(): Promise<Sql> {
   const pg = await globalRef.__pgliteInstance__;
 
   // Apply migrations/ (the single schema source) so preview matches production.
-  // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
-  // files are tracked in _migrations. Runs once per module instance — so an HMR
-  // reload after adding a migration file applies it live — with passes
-  // serialized on a global chain so concurrent callers never double-apply.
+  // Under Vite, SQL is inlined via import.meta.glob. Under plain Node/tsx
+  // (tests, some scripts), fall back to reading migrations/ from disk.
+  // Applied files are tracked in _migrations. Passes are serialized on a
+  // global chain so concurrent callers never double-apply.
   const migrate = async (): Promise<void> => {
-    const migrations = import.meta.glob("/migrations/*.sql", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }) as Record<string, string>;
+    const migrations = await loadMigrationFiles();
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );

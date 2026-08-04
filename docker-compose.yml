@@ -1,0 +1,66 @@
+# Dev Boards — local Postgres (+ optional app service).
+#
+# Database only (use host Node for UI/API):
+#   docker compose up -d db
+#   export DATABASE_URL=postgresql://relay:relay@127.0.0.1:5432/agent_relay
+#   npm install && npm run db:migrate && npm run dev
+#
+# Full stack (build app image):
+#   docker compose --profile full up --build
+#
+# Health: curl -s http://127.0.0.1:8080/api/agent/health
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: devboards-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: relay
+      POSTGRES_DB: agent_relay
+    ports:
+      - "5432:5432"
+    volumes:
+      - devboards_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay -d agent_relay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    profiles: ["full"]
+    build: .
+    container_name: devboards-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      NITRO_HOST: "0.0.0.0"
+      DATABASE_URL: postgresql://relay:relay@db:5432/agent_relay
+      # Demo-friendly defaults — override in production.
+      BETTER_AUTH_URL: http://127.0.0.1:8080
+      BETTER_AUTH_SECRET: local-compose-only-change-me-in-prod-32b
+      # Uncomment to require a global agent key:
+      # AGENT_RELAY_API_KEY: dev-secret
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/agent/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+volumes:
+  devboards_pg:

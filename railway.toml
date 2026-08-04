@@ -4,7 +4,7 @@ buildCommand = "npm install && npm run build"
 
 [deploy]
 startCommand = "npm run start"
-# Root HTML is enough for liveness; agent API verified post-deploy
-healthcheckPath = "/"
+# Prefer agent health (core) over bare HTML
+healthcheckPath = "/api/agent/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

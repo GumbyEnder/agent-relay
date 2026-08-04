@@ -122,27 +122,6 @@ function LoginPage() {
           >
             Continue with GitHub
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            disabled={busy}
-            onClick={() => {
-              setError(null);
-              setBusy(true);
-              void signInSocial("google")
-                .catch((err) =>
-                  setError(
-                    err instanceof Error
-                      ? err.message
-                      : "Google sign-in unavailable — set GOOGLE_CLIENT_ID/SECRET on the server",
-                  ),
-                )
-                .finally(() => setBusy(false));
-            }}
-          >
-            Continue with Google
-          </Button>
         </div>
         <div className="relative py-1 text-center text-[11px] text-fg-subtle">
           <span className="bg-bg-elevated px-2 relative z-[1]">or email</span>
@@ -183,13 +162,10 @@ function LoginPage() {
           </Button>
         </form>
         <p className="text-[10px] leading-relaxed text-fg-subtle">
-          OAuth needs server env:{" "}
+          GitHub OAuth needs server env:{" "}
           <code className="font-mono">GITHUB_CLIENT_ID</code> /{" "}
-          <code className="font-mono">SECRET</code> and/or{" "}
-          <code className="font-mono">GOOGLE_CLIENT_ID</code> /{" "}
-          <code className="font-mono">SECRET</code>. Callback:{" "}
-          <code className="font-mono">/api/auth/callback/github</code> or{" "}
-          <code className="font-mono">…/google</code>.
+          <code className="font-mono">GITHUB_CLIENT_SECRET</code>. Callback:{" "}
+          <code className="font-mono">/api/auth/callback/github</code>.
         </p>
       </div>
     </AuthShell>

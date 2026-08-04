@@ -1,9 +1,9 @@
 # Agent Relay HTTP API
 
-**Version:** 0.2.0  
+**Protocol:** 0.2 · **App:** 0.3.x (see `GET /health` → `version`)  
 **Base path:** `/api/agent`
 
-Process-local board store (seeded demo). Mutations are serialized so **claim is atomic** under concurrent requests.
+Durable board store (Postgres or PGLite). Mutations are serialized so **claim is atomic** under concurrent requests.
 
 ## Auth
 

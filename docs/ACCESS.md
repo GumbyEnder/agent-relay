@@ -43,29 +43,29 @@ The **agent** is the identity that claims. The **harness** is the runtime. The *
 - UI: board + **Live** + Calls + mission history  
 - Login: Better Auth (`/login`)  
   - **Email/password** (default)  
-  - **Native Google / GitHub OIDC** when env is set (see below)  
+  - **Native GitHub OIDC** when env is set (see below); Google UI deferred  
   - Optional Grok broker federation (`GROK_AUTH_*`) for sandbox/preview  
 - Roles: `viewer` (read) / `operator` (board + Calls) / `admin` (keys, GitHub settings, reset)  
 - Same-origin UI without embedding agent keys in JS  
 - Themes and multi-project rail  
 - First deploy checklist: [[FIRST_OPERATOR_DAY]]  
 
-### 3.1 Google + GitHub OAuth (Railway)
+### 3.1 GitHub OAuth (Railway)
 
 Set on the **app** service (and admin service if operators sign in there):
 
 | Env | Purpose |
 |-----|---------|
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth App |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client |
 
-Callback URLs (Better Auth social):
+Callback URL (Better Auth social):
 
 - `https://app.devboards.ai/api/auth/callback/github`
-- `https://app.devboards.ai/api/auth/callback/google`
 
-Also add the same paths for `admin.devboards.ai` if used.  
-Login page shows **Continue with GitHub / Google** always; buttons error clearly if env is missing.
+Also add the same path for `admin.devboards.ai` if used.  
+Login page shows **Continue with GitHub** + email; the button errors clearly if env is missing.
+
+**Google (later):** server still accepts `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and callback `/api/auth/callback/google` — re-add the login button when ready.
 
 ---
 
