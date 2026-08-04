@@ -1,6 +1,17 @@
 {
   "name": "agent-relay",
-  "private": true,
+  "version": "0.3.0",
+  "private": false,
+  "license": "MIT",
+  "description": "Dev Boards — harness-agnostic mission kanban for AI agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GumbyEnder/agent-relay.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GumbyEnder/agent-relay/issues"
+  },
+  "homepage": "https://github.com/GumbyEnder/agent-relay#readme",
   "sideEffects": false,
   "type": "module",
   "overrides": {
@@ -15,9 +26,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:engine": "npx tsx scripts/test-board-engine.ts && npm run test:history && npm run test:build-order && npm run test:refresh-scope && npm run test:p0p2 && npm run test:prod && npm run test:auth-email && npm run test:tenancy && npm run test:skill-routing && npm run test:github-ingest",
+    "test:engine": "npx tsx scripts/test-board-engine.ts && npm run test:history && npm run test:build-order && npm run test:refresh-scope && npm run test:p0p2 && npm run test:prod && npm run test:auth-email && npm run test:tenancy && npm run test:skill-routing && npm run test:project-ref && npm run test:github-ingest",
     "test:tenancy": "npx tsx scripts/test-board-tenancy.ts",
     "test:skill-routing": "npx tsx scripts/test-skill-routing.ts",
+    "test:project-ref": "npx tsx scripts/test-project-ref.ts",
     "test:github-ingest": "npx tsx scripts/test-github-ingest-extras.ts",
     "test:api": "node scripts/agent-api-smoke.mjs",
     "smoke": "npm run test:engine && npm run test:api",
@@ -106,7 +118,6 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.1.0"
   },
-  "description": "Harness-agnostic mission kanban for AI agents",
   "engines": {
     "node": ">=22"
   }

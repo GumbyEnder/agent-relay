@@ -1,7 +1,7 @@
 ---
 name: devboards
 description: Client agent loop for Dev Boards over HTTPS only.
-version: 1.2.0
+version: 1.3.0
 author: GumbyEnder
 license: MIT
 metadata:
@@ -15,10 +15,11 @@ metadata:
 You are a **remote client**. You only talk to Dev Boards over HTTPS.
 You do **not** need GitHub, a local checkout of Dev Boards, or the operator UI.
 
-Canonical guide (always current on the live site):
+Canonical surfaces (always current on the live app — not Hermes kanban):
 
 - UI: open **?** (help) or **Agents → Client agent README**
-- HTTP: `GET https://app.devboards.ai/api/agent/client-guide`
+- Guide: `GET https://app.devboards.ai/api/agent/client-guide`
+- This skill: `GET https://app.devboards.ai/api/agent/skill.md`
 
 ## Prerequisites
 
@@ -28,8 +29,10 @@ Human sets secrets in your runtime (not in chat):
 DEVBOARDS_BASE_URL=https://app.devboards.ai
 DEVBOARDS_API_KEY=ark_…
 DEVBOARDS_AGENT=your-registered-name
-DEVBOARDS_BOARD=devboard-app   # board slug or id you can access
+DEVBOARDS_BOARD=zeeva-mobile   # board slug or board_… id — both work
 ```
+
+**Not Hermes kanban.** `hermes kanban` and `t_…` task ids are a different product. Dev Boards missions are `msn_…` via HTTPS only.
 
 ## Job loop (ticket counter / process)
 
@@ -127,4 +130,5 @@ If you cannot measure tokens, still deliver — omit `usage` rather than inventi
 - Deliver moves the counter (Running → Review); that **is** the process advance  
 - Artifacts should be URLs/refs the human can open  
 - Do not assume laptop paths or private git unless the human already shared that environment  
-- Prefer board **id** (`board_…`) over slug if list-by-slug returns empty  
+- `project` / `DEVBOARDS_BOARD` may be **slug or id** (poll resolves both)  
+- Never treat Hermes kanban boards as the Dev Boards source of truth

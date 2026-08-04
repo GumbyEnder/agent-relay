@@ -41,6 +41,7 @@ import type { OperatorCapability } from "./auth/roles";
 import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
 import { clientAgentGuideMarkdown, DEFAULT_PUBLIC_BASE } from "./agent-client-guide";
+import { clientAgentSkillMarkdown } from "./agent-skill";
 import { canAccessBoardByOwner } from "./board-tenancy";
 import { summarizeTickets } from "./ticket-summary";
 
@@ -421,10 +422,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
   const parts = rest.split("/").filter(Boolean);
   // parts e.g. ["missions", "msn_x", "claim"]
 
-  // Public docs surfaces (no agent key) — client agents can fetch the guide cold.
+  // Public docs surfaces (no agent key) — client agents can fetch the guide/skill cold.
   const publicDoc =
     (parts[0] === "health" && parts.length === 1) ||
-    (parts[0] === "client-guide" && (parts.length === 1 || parts[1] === "README.md"));
+    (parts[0] === "client-guide" && (parts.length === 1 || parts[1] === "README.md")) ||
+    (parts[0] === "skill.md" && parts.length === 1) ||
+    (parts[0] === "skill" && parts.length === 1) ||
+    (parts[0] === "skills" && parts[1] === "devboards" && parts.length <= 3);
   let machineAuth: MachineAuth = { type: "open" };
   if (!publicDoc) {
     const auth = await authenticateMachine(req);
@@ -487,6 +491,43 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           "content-type": "text/markdown; charset=utf-8",
           "cache-control": "public, max-age=60",
           "access-control-allow-origin": "*",
+        },
+      });
+    }
+
+    // GET /skill.md | /skill | /skills/devboards[/SKILL.md] — installable client skill (public)
+    if (
+      req.method === "GET" &&
+      ((parts.length === 1 && (parts[0] === "skill.md" || parts[0] === "skill")) ||
+        (parts.length === 2 && parts[0] === "skills" && parts[1] === "devboards") ||
+        (parts.length === 3 &&
+          parts[0] === "skills" &&
+          parts[1] === "devboards" &&
+          parts[2] === "SKILL.md"))
+    ) {
+      const base =
+        url.searchParams.get("base")?.trim() ||
+        process.env.BETTER_AUTH_URL?.trim() ||
+        process.env.RAILWAY_PUBLIC_DOMAIN?.trim() ||
+        DEFAULT_PUBLIC_BASE;
+      const normalized = base.startsWith("http") ? base : `https://${base}`;
+      const md = clientAgentSkillMarkdown(normalized);
+      const asJson = url.searchParams.get("format") === "json";
+      if (asJson) {
+        return json({
+          ok: true,
+          name: "devboards",
+          markdown: md,
+          base: normalized.replace(/\/$/, ""),
+        });
+      }
+      return new Response(md, {
+        status: 200,
+        headers: {
+          "content-type": "text/markdown; charset=utf-8",
+          "cache-control": "public, max-age=60",
+          "access-control-allow-origin": "*",
+          "content-disposition": 'inline; filename="SKILL.md"',
         },
       });
     }

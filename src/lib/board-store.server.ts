@@ -44,6 +44,7 @@ import {
 } from "./api-keys";
 import { historyToCsv, historyToJson } from "./audit-export";
 import { buildReplyWebhookPayload, dispatchReplyWebhook } from "./reply-webhook";
+import { resolveProjectRef } from "./project-ref";
 
 const globalRef = globalThis as typeof globalThis & {
   __arBoardReady__?: Promise<void>;
@@ -556,6 +557,21 @@ async function withLock<T>(fn: () => Promise<T>): Promise<T> {
   } finally {
     release();
   }
+}
+
+/** Resolve board id from id or slug (caller must hold lock / ready DB). */
+async function lookupProjectId(sql: Sql, ref: string): Promise<string | null> {
+  const t = ref.trim();
+  if (!t || t === "all" || t === "*" || t === "__all__") return null;
+  const rows = (await sql`
+    select id, slug from ar_projects
+    where id = ${t} or slug = ${t}
+    limit 2
+  `) as Array<{ id: string; slug: string }>;
+  return resolveProjectRef(
+    t,
+    rows.map((r) => ({ id: String(r.id), slug: String(r.slug ?? "") })),
+  );
 }
 
 function actorFromBoard(board: BoardData, agentRef?: string | null) {
@@ -1077,16 +1093,7 @@ export const durableBoard = {
   resolveProjectId: (ref: string) =>
     withLock(async () => {
       const sql = await getSql();
-      const t = ref.trim();
-      if (!t) return null;
-      const byId = (await sql`
-        select id from ar_projects where id = ${t} limit 1
-      `) as Array<{ id: string }>;
-      if (byId[0]) return String(byId[0].id);
-      const bySlug = (await sql`
-        select id from ar_projects where slug = ${t} limit 1
-      `) as Array<{ id: string }>;
-      return bySlug[0] ? String(bySlug[0].id) : null;
+      return lookupProjectId(sql, ref);
     }),
 
   /**
@@ -1561,8 +1568,21 @@ export const durableBoard = {
   poll: (opts: Parameters<typeof engine.pollMissions>[1]) =>
     withLock(async () => {
       const sql = await getSql();
-      const board = await loadBoard(sql, opts?.projectId);
-      return engine.pollMissions(board, opts);
+      const rawProject = opts?.projectId?.trim();
+      let projectId = rawProject || undefined;
+      if (rawProject) {
+        const resolved = await lookupProjectId(sql, rawProject);
+        // Unknown slug/id → empty board (do not fall open to all missions)
+        if (!resolved) {
+          return engine.pollMissions(
+            { agents: [], missions: [], events: [], calls: [] },
+            { ...opts, projectId: rawProject },
+          );
+        }
+        projectId = resolved;
+      }
+      const board = await loadBoard(sql, projectId ?? null);
+      return engine.pollMissions(board, { ...opts, projectId });
     }),
 
   claim: (missionId: string, agent: string) =>

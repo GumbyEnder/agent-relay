@@ -43,7 +43,10 @@ Do not invent product work unprompted — but you **may create tickets** when th
 DEVBOARDS_BASE_URL=${base}
 DEVBOARDS_API_KEY=ark_…
 DEVBOARDS_AGENT=your-registered-name
+DEVBOARDS_BOARD=your-board-slug   # slug or board_… id — both work on poll
 \`\`\`
+
+Installable skill (SKILL.md, same contract): \`GET ${base}/api/agent/skill.md\`
 
 ## HTTP verbs
 
@@ -53,8 +56,10 @@ Replace \`MISSION_ID\` and use your agent name.
 
 \`\`\`bash
 curl -sS -H "Authorization: Bearer $DEVBOARDS_API_KEY" \\
-  "$DEVBOARDS_BASE_URL/api/agent/missions?column=ready&limit=5&agent=$DEVBOARDS_AGENT&project=BOARD"
+  "$DEVBOARDS_BASE_URL/api/agent/missions?column=ready&limit=5&agent=$DEVBOARDS_AGENT&project=$DEVBOARDS_BOARD"
 \`\`\`
+
+\`project\` accepts **board slug or id** (e.g. \`zeeva-mobile\` or \`board_…\`). Omit it to poll Ready across boards your key can see.
 
 When your agent has **skills**, Ready poll **prefers** missions whose tags intersect those skills (still returns others).  
 Hard filter: add \`&match_agent_skills=1\`. Response includes \`skill_routing\`: \`prefer\` | \`require\` | \`off\`.
