@@ -79,7 +79,8 @@ function kindIcon(kind: string) {
 }
 
 export function AgentProfilePanel({ agentId }: { agentId: string }) {
-  const { projects, closePanel, openPanel, refresh } = useBoard();
+  const { projects, closePanel, openPanel, refresh, writeProjectId } = useBoard();
+  const keyProjectId = writeProjectId();
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -447,7 +448,13 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
             Reveal shows the full <code className="text-fg-subtle">ark_…</code>{" "}
             secret for keys issued after reveal storage was enabled.
           </p>
-          <AgentKeyRevealList agentId={agent.id} tips={agent.keyTips ?? keys} />
+          <AgentKeyRevealList
+            agentId={agent.id}
+            agentName={agent.name}
+            tips={agent.keyTips ?? keys}
+            projectId={keyProjectId}
+            onIssued={() => setReloadToken((n) => n + 1)}
+          />
           {keys.some((k) => k.revokedAt) && (
             <ul className="space-y-1 opacity-60">
               {keys

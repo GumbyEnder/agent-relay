@@ -283,7 +283,17 @@ export const agentApi = {
     role: string;
     skills?: string[];
     projectId?: string | null;
-  }) => req("POST", "/agents", input),
+    /** Default true when projectId set — mint board-bound ark_ with the agent. */
+    issueKey?: boolean;
+    keyName?: string;
+  }) =>
+    req<{
+      ok: true;
+      agent: Agent;
+      key?: Record<string, unknown> & { secret?: string };
+      keyError?: string;
+      issuedKey?: boolean;
+    }>("POST", "/agents", input),
   updateAgent: (
     agentId: string,
     patch: {

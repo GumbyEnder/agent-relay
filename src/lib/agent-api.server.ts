@@ -734,7 +734,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, ...profile });
     }
 
-    // POST /agents
+    // POST /agents  { name, harness, role?, skills?, project?, issueKey? }
+    // When project is set, issueKey defaults true — register + board-bound ark_ in one step.
     if (parts.length === 1 && parts[0] === "agents" && req.method === "POST") {
       const name = str(body.name);
       const harness = str(body.harness) as HarnessKind | undefined;
@@ -742,15 +743,81 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       if (!HARNESSES.has(harness)) {
         return err(400, `Invalid harness. One of: ${[...HARNESSES].join(", ")}`, "bad_request");
       }
-      return fromEngine(
-        await boardOps.registerAgent({
-          name,
-          harness,
-          role: str(body.role),
-          skills: strArr(body.skills),
-          projectId: str(body.projectId) ?? str(body.project) ?? projectRef(url, body),
-        }),
-      );
+      const rawProject =
+        str(body.projectId) ?? str(body.project) ?? projectRef(url, body) ?? null;
+      const issueKeyRaw = body.issueKey ?? body.issue_key;
+      const issueKey =
+        issueKeyRaw === undefined || issueKeyRaw === null
+          ? Boolean(rawProject?.trim())
+          : issueKeyRaw === true ||
+            issueKeyRaw === 1 ||
+            issueKeyRaw === "1" ||
+            issueKeyRaw === "true";
+
+      const result = await boardOps.registerAgent({
+        name,
+        harness,
+        role: str(body.role),
+        skills: strArr(body.skills),
+        projectId: rawProject,
+      });
+      if (!result.ok) return fromEngine(result);
+
+      let key: Awaited<ReturnType<typeof boardOps.createApiKey>> | null = null;
+      let keyError: string | null = null;
+      if (issueKey) {
+        if (!rawProject?.trim()) {
+          keyError = "project required to issue key";
+        } else {
+          // Keys are operator-only (manage_keys). Agent ark_ callers still get the agent.
+          const gate = await requireOperatorCap(req, "manage_keys");
+          if (gate) {
+            try {
+              const bodyJson = (await gate.clone().json()) as { error?: string };
+              keyError = bodyJson.error ?? "manage_keys required to issue key";
+            } catch {
+              keyError = "manage_keys required to issue key";
+            }
+          } else {
+            const projectAccess = await requireOperatorProjectAccess(req, rawProject.trim());
+            if (projectAccess instanceof Response) {
+              try {
+                const bodyJson = (await projectAccess.clone().json()) as { error?: string };
+                keyError = bodyJson.error ?? "board not accessible for key";
+              } catch {
+                keyError = "board not accessible for key";
+              }
+            } else {
+              key = await boardOps.createApiKey({
+                projectId: projectAccess,
+                agentId: result.data.agent.id,
+                name: str(body.keyName) ?? str(body.key_name) ?? `${result.data.agent.name}-key`,
+              });
+            }
+          }
+        }
+      }
+
+      return json({
+        ok: true,
+        agent: result.data.agent,
+        ...(key
+          ? {
+              key: {
+                id: key.id,
+                projectId: key.projectId,
+                agentId: key.agentId,
+                name: key.name,
+                keyPrefix: key.keyPrefix,
+                keySuffix: key.keySuffix,
+                secret: key.secret,
+                createdAt: key.createdAt,
+              },
+            }
+          : {}),
+        ...(keyError ? { keyError } : {}),
+        issuedKey: Boolean(key),
+      });
     }
 
     // PATCH /agents/:id — edit role, skills, status, harness (operator)

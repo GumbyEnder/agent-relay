@@ -123,6 +123,9 @@ interface BoardState {
     harness: HarnessKind;
     role: string;
     skills?: string[];
+    /** Default true — mint board-bound ark_ with the agent. */
+    issueKey?: boolean;
+    keyName?: string;
   }) => string;
   setAgentStatus: (id: string, status: AgentStatus) => void;
   removeAgent: (id: string) => void;
@@ -669,12 +672,37 @@ export const useBoard = create<BoardState>()((set, get) => ({
         toast.error("Select a board before registering an agent");
         return;
       }
-      await agentApi.registerAgent({
+      const issueKey = input.issueKey !== false;
+      const res = await agentApi.registerAgent({
         ...input,
         projectId,
+        issueKey,
       });
       await get().refresh();
       set({ panel: "agents" });
+      const secret =
+        res.key && typeof res.key.secret === "string" ? res.key.secret : null;
+      if (secret) {
+        // Surface one-time secret for Create tab / callers via custom event
+        window.dispatchEvent(
+          new CustomEvent("devboards:agent-key-issued", {
+            detail: {
+              agentId: res.agent?.id,
+              agentName: res.agent?.name,
+              secret,
+            },
+          }),
+        );
+        toast.success(
+          `Registered ${res.agent?.name ?? "agent"} + API key — copy secret now`,
+        );
+      } else if (issueKey && res.keyError) {
+        toast.message(
+          `Registered ${res.agent?.name ?? "agent"}; key not issued: ${res.keyError}`,
+        );
+      } else {
+        toast.success(`Registered ${res.agent?.name ?? "agent"}`);
+      }
     });
     return "pending";
   },

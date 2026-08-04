@@ -36,7 +36,8 @@ Do not invent product work unprompted — but you **may create tickets** when th
 ## Setup (human does this once)
 
 1. **Register** you on the board (Agents tab): name + harness (Hermes / Grok / OMP / OpenClaw / …).  
-2. **Issue a key bound to that agent** (Agents → select agent → Create key, or **Issue key** on the row).  
+   By default this **also issues a board-bound \`ark_…\` key** — copy the one-time secret from the success panel.  
+2. If you already exist without a key: open your agent card → **Issue API key**, or Agents → Create → Issue key (existing agent).  
 3. Paste the secret into your runtime (not chat):
 
 \`\`\`bash

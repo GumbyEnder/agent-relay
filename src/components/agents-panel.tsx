@@ -628,47 +628,79 @@ function AgentsListTab({
 export function AgentKeyRevealList({
   agentId,
   tips,
+  projectId,
+  agentName,
+  onIssued,
 }: {
   agentId: string;
   tips?: import("@/lib/types").AgentKeyTip[];
+  /** When set, show Issue key if the agent has none on this board. */
+  projectId?: string | null;
+  agentName?: string;
+  onIssued?: (secret: string) => void;
 }) {
   const [keys, setKeys] = useState<Array<Record<string, unknown>>>([]);
   const [loading, setLoading] = useState(true);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
+  const [freshSecret, setFreshSecret] = useState<string | null>(null);
+  const { refresh } = useBoard();
 
-  useEffect(() => {
-    let cancelled = false;
+  const reload = useCallback(() => {
     setLoading(true);
     void agentApi
       .listAgentKeys(agentId)
       .then((res) => {
-        if (!cancelled) setKeys(res.keys ?? []);
+        setKeys(res.keys ?? []);
       })
       .catch(() => {
-        if (!cancelled) {
-          // Fall back to tip metadata from the fleet snapshot
-          setKeys(
-            (tips ?? []).map((t) => ({
-              id: t.id,
-              keyPrefix: t.prefix,
-              keySuffix: t.suffix,
-              revealable: false,
-              revokedAt: t.revokedAt,
-              name: "key",
-            })),
-          );
-        }
+        setKeys(
+          (tips ?? []).map((t) => ({
+            id: t.id,
+            keyPrefix: t.prefix,
+            keySuffix: t.suffix,
+            revealable: false,
+            revokedAt: t.revokedAt,
+            name: "key",
+          })),
+        );
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => setLoading(false));
   }, [agentId, tips]);
 
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
   const active = keys.filter((k) => !k.revokedAt);
+
+  async function issueNow() {
+    if (!projectId) {
+      toast.error("Select a board in the rail before issuing a key");
+      return;
+    }
+    setIssuing(true);
+    try {
+      const res = await agentApi.createApiKey({
+        projectId,
+        agentId,
+        name: `${agentName ?? "agent"}-key`,
+      });
+      const secret = String(res.key.secret ?? "");
+      if (secret) {
+        setFreshSecret(secret);
+        onIssued?.(secret);
+        toast.success("API key issued — copy secret now");
+      }
+      await refresh();
+      reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Issue key failed");
+    } finally {
+      setIssuing(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -678,9 +710,39 @@ export function AgentKeyRevealList({
 
   if (active.length === 0) {
     return (
-      <p className="text-[10px] text-fg-subtle">
-        No API key yet — use Issue key above.
-      </p>
+      <div className="space-y-2">
+        <p className="text-[10px] text-fg-subtle">No API key on this agent yet.</p>
+        {freshSecret ? (
+          <div className="rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2 text-[11px]">
+            <p className="font-mono break-all text-fg">{freshSecret}</p>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-2"
+              onClick={async () => {
+                await navigator.clipboard.writeText(freshSecret);
+                toast.success("Secret copied");
+              }}
+            >
+              Copy secret
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            disabled={!projectId || issuing}
+            onClick={() => void issueNow()}
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+            {issuing ? "Issuing…" : "Issue API key"}
+          </Button>
+        )}
+        {!projectId ? (
+          <p className="text-[10px] text-status-human">
+            Select a board in the rail to bind the key.
+          </p>
+        ) : null}
+      </div>
     );
   }
 
@@ -899,6 +961,8 @@ function CreateTab({
     harness: HarnessKind;
     role: string;
     skills: string[];
+    issueKey?: boolean;
+    keyName?: string;
   }) => void;
   keyName: string;
   setKeyName: (v: string) => void;
@@ -926,6 +990,7 @@ function CreateTab({
   onRegistered: () => void;
 }) {
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
+  const [issueKeyOnCreate, setIssueKeyOnCreate] = useState(true);
   const field =
     "flex h-8 w-full rounded-[var(--radius-sm)] bg-bg-subtle px-2.5 text-xs text-fg shadow-[var(--shadow-border)] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
   const labelCls =
@@ -936,6 +1001,16 @@ function CreateTab({
       : projectId
         ? `/api/agent/webhooks/github?project=${projectId}`
         : "";
+
+  // One-time secret from concurrent register+issue (store dispatches this)
+  useEffect(() => {
+    function onIssued(ev: Event) {
+      const detail = (ev as CustomEvent<{ secret?: string }>).detail;
+      if (detail?.secret) setLastSecret(detail.secret);
+    }
+    window.addEventListener("devboards:agent-key-issued", onIssued);
+    return () => window.removeEventListener("devboards:agent-key-issued", onIssued);
+  }, [setLastSecret]);
 
   return (
     <div className="space-y-5 p-4">
@@ -961,7 +1036,8 @@ function CreateTab({
       <section className="rounded-[var(--radius-md)] border border-border bg-bg-subtle/30 p-3">
         <h3 className="text-xs font-medium text-fg">New agent</h3>
         <p className="mt-0.5 text-[11px] text-fg-muted">
-          Register a client, then issue a key in the next section.
+          Registers on the target board and issues a bound{" "}
+          <code className="text-fg-subtle">ark_…</code> key by default.
         </p>
 
         <form
@@ -985,11 +1061,12 @@ function CreateTab({
                 .split(",")
                 .map((s) => s.trim())
                 .filter(Boolean),
+              issueKey: issueKeyOnCreate,
+              keyName: keyName.trim() || undefined,
             });
             setName("");
             setRole("client");
             setSkills("");
-            toast.success(`Registered ${n.toLowerCase()} on ${writeBoardName}`);
             onRegistered();
           }}
         >
@@ -1054,22 +1131,64 @@ function CreateTab({
             </div>
           </div>
 
+          <label className="flex cursor-pointer items-start gap-2 rounded-[var(--radius-sm)] border border-border/80 bg-bg px-2.5 py-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={issueKeyOnCreate}
+              onChange={(e) => setIssueKeyOnCreate(e.target.checked)}
+            />
+            <span className="min-w-0 text-[11px] leading-snug text-fg-muted">
+              <span className="font-medium text-fg">Issue API key now</span>
+              {" — "}
+              board-bound secret shown once after register (recommended)
+            </span>
+          </label>
+
           <div className="flex items-center justify-end gap-2 pt-0.5">
             <Button type="submit" size="sm" disabled={!writeId}>
               <Plus className="h-3.5 w-3.5" />
-              Register
+              {issueKeyOnCreate ? "Register + key" : "Register"}
             </Button>
           </div>
         </form>
+
+        {lastSecret && (
+          <div className="mt-3 rounded-[var(--radius-sm)] border border-status-human/40 bg-status-human/10 p-2.5 text-[11px]">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-status-human">
+              One-time secret — copy now
+            </p>
+            <p className="mt-1 font-mono break-all text-fg">{lastSecret}</p>
+            <p className="mt-1 text-[10px] text-fg-muted">
+              Tip ends in …{lastSecret.slice(-6)}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(lastSecret);
+                  toast.success("Secret copied");
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setLastSecret(null)}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-[var(--radius-md)] border border-border bg-bg-subtle/30 p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-xs font-medium text-fg">API key</h3>
+            <h3 className="text-xs font-medium text-fg">Issue key (existing agent)</h3>
             <p className="mt-0.5 text-[11px] text-fg-muted">
-              Bind <code className="text-fg-subtle">ark_…</code> to an agent.
-              Secret shown once.
+              For agents already on the roster (or rotate a key). Secret shown once.
+              You can also open an agent card → profile → Issue API key.
             </p>
           </div>
         </div>
