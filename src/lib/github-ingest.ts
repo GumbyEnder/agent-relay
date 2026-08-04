@@ -117,10 +117,35 @@ export function mapGitHubIssueToMission(input: GitHubIngestInput): MissionUpsert
 }
 
 
+/** Extract issue numbers from PR body / title (Fixes #12, closes org/repo#3, …). */
+export function extractLinkedIssueNumbers(text: string | null | undefined): number[] {
+  if (!text) return [];
+  const out = new Set<number>();
+  const re =
+    /(?:fixes|closes|resolves|refs?|references)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    out.add(Number(m[1]));
+  }
+  // bare " #123 " in title
+  const bare = text.matchAll(/#(\d{1,7})\b/g);
+  for (const b of bare) out.add(Number(b[1]));
+  return [...out];
+}
+
+/** Parse `/relay reply …` from a GitHub issue comment body. */
+export function parseRelayReplyComment(body: string | null | undefined): string | null {
+  if (!body?.trim()) return null;
+  const m = body.trim().match(/^\/relay\s+reply\s+([\s\S]+)$/i);
+  if (!m?.[1]?.trim()) return null;
+  return m[1].trim();
+}
+
 /** PR / check_run / workflow_run → artifact URL + optional issue external id */
 export function extractArtifactFromGitHubPayload(body: Record<string, unknown>): {
   url: string;
   externalId?: string;
+  externalIds?: string[];
   note: string;
 } | null {
   const repo =
@@ -130,29 +155,57 @@ export function extractArtifactFromGitHubPayload(body: Record<string, unknown>):
     | { html_url?: string; number?: number; title?: string; body?: string | null }
     | undefined;
   if (pr?.html_url) {
-    // try link issue from body "Fixes #N"
-    let externalId: string | undefined;
-    const m = (pr.body ?? "").match(/(?:fixes|closes|resolves)\s+#(\d+)/i);
-    if (m) externalId = githubExternalId(repo, Number(m[1]));
+    const nums = extractLinkedIssueNumbers(`${pr.title ?? ""}\n${pr.body ?? ""}`);
+    const externalIds = nums.map((n) => githubExternalId(repo, n));
     return {
       url: pr.html_url,
-      externalId,
+      externalId: externalIds[0],
+      externalIds,
       note: `pull_request #${pr.number ?? "?"} ${pr.title ?? ""}`.trim(),
     };
   }
 
-  const cr = body.check_run as { html_url?: string; details_url?: string; name?: string; conclusion?: string } | undefined;
+  const cr = body.check_run as
+    | {
+        html_url?: string;
+        details_url?: string;
+        name?: string;
+        conclusion?: string;
+        check_suite?: { pull_requests?: Array<{ number?: number; html_url?: string }> };
+        pull_requests?: Array<{ number?: number; html_url?: string }>;
+      }
+    | undefined;
   if (cr?.html_url || cr?.details_url) {
+    const prs = cr.pull_requests ?? cr.check_suite?.pull_requests ?? [];
+    const nums = prs.map((p) => p.number).filter((n): n is number => typeof n === "number");
+    // Prefer PR html if present on first PR
+    const prUrl = prs.find((p) => p.html_url)?.html_url;
+    const externalIds = nums.map((n) => githubExternalId(repo, n));
     return {
-      url: (cr.html_url || cr.details_url) as string,
+      url: (prUrl || cr.html_url || cr.details_url) as string,
+      externalId: externalIds[0],
+      externalIds,
       note: `check_run ${cr.name ?? ""} ${cr.conclusion ?? ""}`.trim(),
     };
   }
 
-  const wr = body.workflow_run as { html_url?: string; name?: string; conclusion?: string } | undefined;
+  const wr = body.workflow_run as
+    | {
+        html_url?: string;
+        name?: string;
+        conclusion?: string;
+        pull_requests?: Array<{ number?: number }>;
+      }
+    | undefined;
   if (wr?.html_url) {
+    const nums = (wr.pull_requests ?? [])
+      .map((p) => p.number)
+      .filter((n): n is number => typeof n === "number");
+    const externalIds = nums.map((n) => githubExternalId(repo, n));
     return {
       url: wr.html_url,
+      externalId: externalIds[0],
+      externalIds,
       note: `workflow_run ${wr.name ?? ""} ${wr.conclusion ?? ""}`.trim(),
     };
   }

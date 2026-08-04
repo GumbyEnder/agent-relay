@@ -89,6 +89,29 @@ type PopupMessage = { source: "grok-auth-popup"; token: string | null; error?: s
  * Either way it clears any existing local session FIRST so switching providers
  * actually switches identity.
  */
+/**
+ * Native Better Auth social (GitHub / Google) when server has
+ * GITHUB_CLIENT_ID / GOOGLE_CLIENT_ID (+ secrets). Prefer this on Railway
+ * when not using the Grok broker.
+ */
+export async function signInSocial(
+  provider: "github" | "google",
+  opts: { callbackURL?: string } = {},
+): Promise<void> {
+  const callbackURL = opts.callbackURL ?? "/";
+  const { data, error } = await authClient.signIn.social({
+    provider,
+    callbackURL,
+  });
+  if (error) throw new Error(error.message ?? "Social sign-in failed");
+  if (data?.url) {
+    window.location.href = data.url;
+    return;
+  }
+  // Some flows set session immediately
+  window.location.assign(callbackURL);
+}
+
 export async function signIn(
   providerId: string,
   opts: { callbackURL?: string; errorCallbackURL?: string } = {},

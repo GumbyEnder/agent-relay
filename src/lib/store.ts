@@ -98,6 +98,7 @@ interface BoardState {
   deliver: (missionId: string, delivery: string) => void;
   updateMission: (id: string, patch: Partial<Mission>) => void;
   transferMission: (id: string, projectId: string) => void;
+  attachArtifact: (id: string, url: string, note?: string) => void;
   createMission: (input: {
     title: string;
     objective: string;
@@ -525,6 +526,14 @@ export const useBoard = create<BoardState>()((set, get) => ({
       await get().refresh();
       await get().loadHistory(id);
       toast.success("Mission moved to board");
+    });
+  },
+
+  attachArtifact: (id, url, note) => {
+    void run("Attach artifact", async () => {
+      await agentApi.attachArtifact(id, url, note);
+      await get().refresh();
+      toast.success("Link attached");
     });
   },
 

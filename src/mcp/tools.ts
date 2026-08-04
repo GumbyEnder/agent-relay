@@ -26,7 +26,8 @@ export function mcpToolDefinitions() {
   return [
     {
       name: "poll",
-      description: "List claimable missions from Ready (or column)",
+      description:
+        "List claimable missions from Ready (or column). Prefers skill∩tag matches when agent has skills.",
       inputSchema: {
         type: "object",
         properties: {
@@ -34,6 +35,7 @@ export function mcpToolDefinitions() {
           limit: { type: "number" },
           agent: { type: "string" },
           projectId: { type: "string" },
+          match_agent_skills: { type: "boolean" },
         },
       },
     },
@@ -100,11 +102,16 @@ export async function handleMcpTool(
   const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : undefined);
   try {
     if (name === "poll") {
+      const matchRaw = args.match_agent_skills ?? args.matchAgentSkills;
       const r = await ops.poll({
         column: (str(args.column) as any) ?? "ready",
         limit: typeof args.limit === "number" ? args.limit : 5,
         agent: str(args.agent),
         projectId: str(args.projectId) ?? str(args.project),
+        matchAgentSkills:
+          matchRaw === true || matchRaw === 1 || matchRaw === "1" || matchRaw === "true"
+            ? true
+            : undefined,
       });
       if (!r.ok) return { ok: false, isError: true, content: r };
       return { ok: true, content: r.data };

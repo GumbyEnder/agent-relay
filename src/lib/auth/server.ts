@@ -191,6 +191,23 @@ const grokOAuthPlugin = authConfigured
     })
   : null;
 
+/** Native Better Auth social (no Grok broker) when Shane sets app OAuth apps. */
+const githubId = env("GITHUB_CLIENT_ID") ?? env("GITHUB_OAUTH_CLIENT_ID");
+const githubSecret = env("GITHUB_CLIENT_SECRET") ?? env("GITHUB_OAUTH_CLIENT_SECRET");
+const googleId = env("GOOGLE_CLIENT_ID") ?? env("GOOGLE_OAUTH_CLIENT_ID");
+const googleSecret = env("GOOGLE_CLIENT_SECRET") ?? env("GOOGLE_OAUTH_CLIENT_SECRET");
+const nativeSocialProviders: Record<
+  string,
+  { clientId: string; clientSecret: string }
+> = {};
+if (githubId && githubSecret) {
+  nativeSocialProviders.github = { clientId: githubId, clientSecret: githubSecret };
+}
+if (googleId && googleSecret) {
+  nativeSocialProviders.google = { clientId: googleId, clientSecret: googleSecret };
+}
+export const nativeSocialEnabled = Object.keys(nativeSocialProviders);
+
 export const auth = betterAuth({
   baseURL,
   // Deployed apps inject BETTER_AUTH_SECRET. Preview: process-stable secret on
@@ -203,6 +220,11 @@ export const auth = betterAuth({
   // local loopback variants, or clients get "Invalid origin".
   trustedOrigins,
 
+  // Direct GitHub / Google OIDC when env credentials are set (alongside email/password).
+  ...(Object.keys(nativeSocialProviders).length
+    ? { socialProviders: nativeSocialProviders }
+    : {}),
+
   // Encrypt broker-issued OAuth tokens at rest, and treat the broker's upstreams
   // as trusted first-party identities. The broker owns identity and X emails are
   // synthetic/unverified, so WITHOUT this a login can fail with
@@ -213,7 +235,10 @@ export const auth = betterAuth({
     encryptOAuthTokens: true,
     accountLinking: {
       enabled: true,
-      trustedProviders: GROK_PROVIDERS.map((p) => p.providerId),
+      trustedProviders: [
+        ...GROK_PROVIDERS.map((p) => p.providerId),
+        ...Object.keys(nativeSocialProviders),
+      ],
       // X's synthetic email is never "verified", so don't gate linking on the
       // local user's email-verified state.
       requireLocalEmailVerified: false,

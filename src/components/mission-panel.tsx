@@ -85,6 +85,7 @@ export function MissionPanel({ missionId }: { missionId: string }) {
     deleteMission,
     updateMission,
     transferMission,
+    attachArtifact,
   } = useBoard();
   const mission = missions.find((m) => m.id === missionId);
   const history = historyByMission[missionId] ?? [];
@@ -101,6 +102,7 @@ export function MissionPanel({ missionId }: { missionId: string }) {
   const [draftConstraints, setDraftConstraints] = useState("");
   const [draftAcceptance, setDraftAcceptance] = useState("");
   const [transferBoard, setTransferBoard] = useState("");
+  const [artifactUrl, setArtifactUrl] = useState("");
   const [claimAgent, setClaimAgent] = useState(
     agents.find((a) => a.status !== "offline")?.id ?? "",
   );
@@ -521,6 +523,63 @@ export function MissionPanel({ missionId }: { missionId: string }) {
         </div>
       </div>
 
+
+      <div className="border-t border-border px-4 py-3">
+        <h4 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+          Links & PR artifacts
+        </h4>
+        {mission.artifacts?.length ? (
+          <ul className="mb-2 space-y-1">
+            {mission.artifacts.map((url) => {
+              const isHttp = /^https?:\/\//i.test(url);
+              const isPr = /github\.com\/.+\/pull\//i.test(url);
+              return (
+                <li key={url} className="truncate text-xs">
+                  {isHttp ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-status-ready underline-offset-2 hover:underline"
+                    >
+                      {isPr ? "PR · " : ""}
+                      {url}
+                    </a>
+                  ) : (
+                    <span className="font-mono text-fg-muted">{url}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="mb-2 text-[11px] text-fg-subtle">
+            No links yet. Paste a GitHub PR URL (optional).
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Input
+            placeholder="https://github.com/org/repo/pull/123"
+            value={artifactUrl}
+            onChange={(e) => setArtifactUrl(e.target.value)}
+            className="h-9 font-mono text-xs"
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-9 shrink-0"
+            disabled={!artifactUrl.trim()}
+            onClick={() => {
+              const u = artifactUrl.trim();
+              if (!u) return;
+              attachArtifact(mission.id, u, /pull\//i.test(u) ? "pull_request" : undefined);
+              setArtifactUrl("");
+            }}
+          >
+            Attach
+          </Button>
+        </div>
+      </div>
 
       <div className="border-t border-border px-4 py-3">
         <h4 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle">

@@ -41,11 +41,31 @@ The **agent** is the identity that claims. The **harness** is the runtime. The *
 ## 3. Human access
 
 - UI: board + **Live** + Calls + mission history  
-- Login: Better Auth (`/login`) with GitHub (preferred), Google, X via broker when configured  
+- Login: Better Auth (`/login`)  
+  - **Email/password** (default)  
+  - **Native Google / GitHub OIDC** when env is set (see below)  
+  - Optional Grok broker federation (`GROK_AUTH_*`) for sandbox/preview  
 - Roles: `viewer` (read) / `operator` (board + Calls) / `admin` (keys, GitHub settings, reset)  
 - Same-origin UI without embedding agent keys in JS  
 - Themes and multi-project rail  
 - First deploy checklist: [[FIRST_OPERATOR_DAY]]  
+
+### 3.1 Google + GitHub OAuth (Railway)
+
+Set on the **app** service (and admin service if operators sign in there):
+
+| Env | Purpose |
+|-----|---------|
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth App |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client |
+
+Callback URLs (Better Auth social):
+
+- `https://app.devboards.ai/api/auth/callback/github`
+- `https://app.devboards.ai/api/auth/callback/google`
+
+Also add the same paths for `admin.devboards.ai` if used.  
+Login page shows **Continue with GitHub / Google** always; buttons error clearly if env is missing.
 
 ---
 
@@ -54,7 +74,7 @@ The **agent** is the identity that claims. The **harness** is the runtime. The *
 | Harness style | Integration |
 |---------------|-------------|
 | **HTTP client** | REST five verbs |
-| **MCP client** | Tools 1:1 with verbs (planned) |
+| **MCP client** | `node scripts/mcp-server.mjs` — poll/claim/heartbeat/escalate/deliver/create |
 | **Clipboard / file** | “Copy for harness” markdown brief |
 | **CI bot** | Webhook in + service account agent |
 | **IDE agent** | Same HTTP/MCP with user-provided base URL + key |

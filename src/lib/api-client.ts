@@ -233,6 +233,22 @@ export const agentApi = {
       `/missions/${encodeURIComponent(missionId)}/transfer`,
       { projectId },
     ),
+  attachArtifact: (missionId: string, url: string, note?: string) =>
+    req<{ ok: true; mission: Mission }>(
+      "POST",
+      `/missions/${encodeURIComponent(missionId)}/artifacts`,
+      { url, note },
+    ),
+  boardSummary: (projectId?: string | null) => {
+    const q =
+      !projectId || projectId === "all" || projectId === "__all__"
+        ? ""
+        : `?project=${encodeURIComponent(projectId)}`;
+    return req<{ ok: true; markdown: string; totals: Record<string, number> }>(
+      "GET",
+      `/summary${q}`,
+    );
+  },
   updateMission: (
     missionId: string,
     patch: Partial<{

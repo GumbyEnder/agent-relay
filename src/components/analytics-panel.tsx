@@ -147,14 +147,36 @@ export function AnalyticsPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
       <header className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-fg-muted" />
-          <div>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <BarChart3 className="h-4 w-4 shrink-0 text-fg-muted" />
+          <div className="min-w-0">
             <h2 className="text-sm font-medium text-fg">Analytics</h2>
             <p className="text-[11px] text-fg-subtle">
               {scopeLabel} · agent ops at a glance
             </p>
           </div>
+          <button
+            type="button"
+            className="ml-2 shrink-0 rounded-[var(--radius-sm)] border border-border bg-bg-subtle px-2.5 py-1 text-[11px] font-medium text-fg-muted hover:text-fg"
+            onClick={() => {
+              void (async () => {
+                try {
+                  const { agentApi } = await import("@/lib/api-client");
+                  const res = await agentApi.boardSummary(
+                    isAllBoardsScope(selectedProjectId) ? null : selectedProjectId,
+                  );
+                  await navigator.clipboard.writeText(res.markdown);
+                  const { toast } = await import("sonner");
+                  toast.success("Ticket summary copied (markdown)");
+                } catch (e) {
+                  const { toast } = await import("sonner");
+                  toast.error(e instanceof Error ? e.message : "Summary failed");
+                }
+              })();
+            }}
+          >
+            Copy AI summary
+          </button>
         </div>
         <div
           className="ml-auto inline-flex rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-0.5"

@@ -2394,6 +2394,27 @@ export const durableBoard = {
       };
     }),
 
+  findMissionByExternalId: (externalId: string, projectId?: string | null) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const ext = externalId.trim();
+      if (!ext) return null;
+      const rows = projectId
+        ? ((await sql`
+            select * from ar_missions
+            where external_id = ${ext} and project_id = ${projectId}
+            order by updated_at desc
+            limit 1
+          `) as Record<string, unknown>[])
+        : ((await sql`
+            select * from ar_missions
+            where external_id = ${ext}
+            order by updated_at desc
+            limit 1
+          `) as Record<string, unknown>[]);
+      return rows[0] ? rowMission(rows[0]) : null;
+    }),
+
   attachMissionArtifact: (missionId: string, url: string, note?: string) =>
     withLock(async () => {
       const sql = await getSql();

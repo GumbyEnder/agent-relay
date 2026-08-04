@@ -27,7 +27,11 @@ import { HARNESS_IDS } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
 import { verifyGitHubSignature } from "./github-webhook";
-import { extractArtifactFromGitHubPayload } from "./github-ingest";
+import {
+  extractArtifactFromGitHubPayload,
+  githubExternalId,
+  parseRelayReplyComment,
+} from "./github-ingest";
 import {
   checkOperatorCapability,
   resolveOperatorContext,
@@ -38,6 +42,7 @@ import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
 import { clientAgentGuideMarkdown, DEFAULT_PUBLIC_BASE } from "./agent-client-guide";
 import { canAccessBoardByOwner } from "./board-tenancy";
+import { summarizeTickets } from "./ticket-summary";
 
 const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
 function json(data: unknown, status = 200): Response {
@@ -789,6 +794,40 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       });
     }
 
+    // GET /summary — deterministic ticket/sprint rollup (AI-style, no external LLM)
+    if (parts.length === 1 && parts[0] === "summary" && req.method === "GET") {
+      const gate = await requireOperatorCap(req, "read");
+      if (gate) return gate;
+      const pref = projectRef(url);
+      const ctx = await loadOperatorContext(req);
+      let missions;
+      if (pref) {
+        const access = await requireOperatorProjectAccess(req, pref);
+        if (access instanceof Response) return access;
+        const snap = await boardOps.snapshot(access);
+        missions = snap.missions;
+      } else {
+        let allowed: string[] | null = null;
+        if (ctx.authRequired && ctx.user) {
+          allowed = await resolveReadableProjectIds(ctx, {
+            adminAll: ctx.role === "admin" && url.searchParams.get("all") === "1",
+          });
+        }
+        const snap = await boardOps.adminSnapshot("all", { allowedProjectIds: allowed });
+        missions = snap.missions;
+      }
+      const columnFilter = url.searchParams.get("columns")?.split(",").filter(Boolean);
+      if (columnFilter?.length) {
+        const set = new Set(columnFilter);
+        missions = missions.filter((m) => set.has(m.column));
+      }
+      const summary = summarizeTickets({
+        missions,
+        scopeLabel: pref ?? "All boards",
+      });
+      return json({ ok: true, ...summary });
+    }
+
     // GET /stale — list stale running missions (ops reliability)
     if (parts.length === 1 && parts[0] === "stale" && req.method === "GET") {
       const snap = await boardOps.snapshot(projectRef(url));
@@ -1076,23 +1115,100 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         }
       }
       try {
-        const eventName = (req.headers.get("x-github-event") ?? str(body.action) ?? "").toLowerCase();
+        const eventName = (
+          req.headers.get("x-github-event") ??
+          str(body.action) ??
+          ""
+        ).toLowerCase();
+
+        // Issue comment: `/relay reply …` resolves open Call on linked mission
+        if (
+          eventName === "issue_comment" ||
+          (body.comment && body.issue && !body.pull_request)
+        ) {
+          const comment = body.comment as { body?: string } | undefined;
+          const issue = body.issue as { number?: number; pull_request?: unknown } | undefined;
+          const reply = parseRelayReplyComment(comment?.body);
+          if (reply && issue?.number != null && !issue.pull_request) {
+            const repo =
+              (body.repository as { full_name?: string } | undefined)?.full_name ?? "";
+            const externalId = githubExternalId(repo, issue.number);
+            const mission = await boardOps.findMissionByExternalId(externalId, projectId);
+            if (!mission) {
+              return json({
+                ok: true,
+                relay_reply: false,
+                reason: "no_linked_mission",
+                externalId,
+              });
+            }
+            const openCall = (await boardOps.snapshot(projectId)).calls.find(
+              (c) => c.missionId === mission.id && !c.resolvedAt,
+            );
+            if (!openCall) {
+              return json({
+                ok: true,
+                relay_reply: false,
+                reason: "no_open_call",
+                missionId: mission.id,
+              });
+            }
+            const { result, webhook } = await boardOps.replyToCallWithWebhook(
+              openCall.id,
+              reply,
+              "github",
+            );
+            if (!result.ok) return fromEngine(result);
+            return json({
+              ok: true,
+              relay_reply: true,
+              missionId: mission.id,
+              callId: openCall.id,
+              webhook,
+              ...result.data,
+            });
+          }
+        }
+
         // PR / check / workflow artifact attach
-        if (eventName.includes("pull_request") || eventName.includes("check_run") || eventName.includes("workflow_run") || body.pull_request || body.check_run || body.workflow_run) {
+        if (
+          eventName.includes("pull_request") ||
+          eventName.includes("check_run") ||
+          eventName.includes("workflow_run") ||
+          body.pull_request ||
+          body.check_run ||
+          body.workflow_run
+        ) {
           const art = extractArtifactFromGitHubPayload(body);
           if (art) {
-            let missionId: string | null = null;
-            if (art.externalId) {
-              const snap = await boardOps.snapshot(projectId);
-              const m = snap.missions.find((x) => x.externalId === art.externalId);
-              missionId = m?.id ?? null;
+            const ids = art.externalIds?.length
+              ? art.externalIds
+              : art.externalId
+                ? [art.externalId]
+                : [];
+            const attached: string[] = [];
+            for (const ext of ids) {
+              const mission = await boardOps.findMissionByExternalId(ext, projectId);
+              if (mission) {
+                await boardOps.attachMissionArtifact(mission.id, art.url, art.note);
+                attached.push(mission.id);
+              }
             }
-            if (!missionId && str(body.mission_id)) missionId = str(body.mission_id)!;
-            if (missionId) {
-              const m = await boardOps.attachMissionArtifact(missionId, art.url, art.note);
-              return json({ ok: true, attached: true, mission: m, artifact: art });
+            if (!attached.length && str(body.mission_id)) {
+              const m = await boardOps.attachMissionArtifact(
+                str(body.mission_id)!,
+                art.url,
+                art.note,
+              );
+              if (m) attached.push(m.id);
             }
-            return json({ ok: true, attached: false, reason: "no_linked_mission", artifact: art });
+            return json({
+              ok: true,
+              attached: attached.length > 0,
+              missionIds: attached,
+              artifact: art,
+              reason: attached.length ? undefined : "no_linked_mission",
+            });
           }
         }
         if (body.issue) {

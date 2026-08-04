@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { z } from "zod";
-import { authClient, authEnabled } from "@/lib/auth/client";
+import { authClient, authEnabled, signInSocial } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -99,40 +99,99 @@ function LoginPage() {
         </>
       }
     >
-      <form className="space-y-3" onSubmit={(ev) => void submit(ev)}>
-        <Input
-          type="email"
-          required
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-          className="h-10"
-        />
-        <Input
-          type="password"
-          required
-          minLength={8}
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-          className="h-10"
-        />
-        {info && (
-          <p className="text-xs text-status-ready" role="status">
-            {info}
-          </p>
-        )}
-        {error && (
-          <p className="text-xs text-status-human" role="alert">
-            {error}
-          </p>
-        )}
-        <Button type="submit" className="w-full" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
-        </Button>
-      </form>
+      <div className="space-y-3">
+        <div className="grid gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              setBusy(true);
+              void signInSocial("github")
+                .catch((err) =>
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : "GitHub sign-in unavailable — set GITHUB_CLIENT_ID/SECRET on the server",
+                  ),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Continue with GitHub
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              setBusy(true);
+              void signInSocial("google")
+                .catch((err) =>
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : "Google sign-in unavailable — set GOOGLE_CLIENT_ID/SECRET on the server",
+                  ),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Continue with Google
+          </Button>
+        </div>
+        <div className="relative py-1 text-center text-[11px] text-fg-subtle">
+          <span className="bg-bg-elevated px-2 relative z-[1]">or email</span>
+          <span className="absolute inset-x-0 top-1/2 border-t border-border" aria-hidden />
+        </div>
+        <form className="space-y-3" onSubmit={(ev) => void submit(ev)}>
+          <Input
+            type="email"
+            required
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            className="h-10"
+          />
+          <Input
+            type="password"
+            required
+            minLength={8}
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            className="h-10"
+          />
+          {info && (
+            <p className="text-xs text-status-ready" role="status">
+              {info}
+            </p>
+          )}
+          {error && (
+            <p className="text-xs text-status-human" role="alert">
+              {error}
+            </p>
+          )}
+          <Button type="submit" className="w-full" disabled={busy}>
+            {busy ? "Signing in…" : "Sign in with email"}
+          </Button>
+        </form>
+        <p className="text-[10px] leading-relaxed text-fg-subtle">
+          OAuth needs server env:{" "}
+          <code className="font-mono">GITHUB_CLIENT_ID</code> /{" "}
+          <code className="font-mono">SECRET</code> and/or{" "}
+          <code className="font-mono">GOOGLE_CLIENT_ID</code> /{" "}
+          <code className="font-mono">SECRET</code>. Callback:{" "}
+          <code className="font-mono">/api/auth/callback/github</code> or{" "}
+          <code className="font-mono">…/google</code>.
+        </p>
+      </div>
     </AuthShell>
   );
 }
