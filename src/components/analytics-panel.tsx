@@ -145,8 +145,10 @@ export function AnalyticsPanel() {
   }, [events, missions, agents, calls, since, windowH]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+    // Match Calls/Agents: h-full shell + scroll on the body. Parent clips with
+    // overflow-hidden; putting overflow on a content-sized root never scrolls.
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <BarChart3 className="h-4 w-4 shrink-0 text-fg-muted" />
           <div className="min-w-0">
@@ -206,7 +208,7 @@ export function AnalyticsPanel() {
         </div>
       </header>
 
-      <div className="space-y-6 p-4">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 scrollbar-thin">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           <StatTile label="Claims" value={stats.claims} hint={`last ${windowH === 24 ? "24h" : "7d"}`} />
           <StatTile label="Deliveries" value={stats.deliveries} />
