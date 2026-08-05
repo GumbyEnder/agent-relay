@@ -344,6 +344,26 @@ export const useBoard = create<BoardState>()((set, get) => ({
           projects[0]!.id;
       }
 
+      // No readable boards: never call GET /board without a project scope that
+      // would historically fail open. Keep an empty UI until they create one.
+      if (!projects.length) {
+        selectedProjectId = null;
+        lastSingleProjectId = null;
+        set({
+          agents: [],
+          missions: [],
+          events: [],
+          calls: [],
+          projects,
+          selectedProjectId: null,
+          lastSingleProjectId: null,
+          _hydrated: true,
+          _syncing: false,
+          _error: null,
+        });
+        return;
+      }
+
       if (
         selectedProjectId &&
         selectedProjectId !== ALL_BOARDS_ID &&

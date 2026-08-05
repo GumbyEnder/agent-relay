@@ -90,7 +90,40 @@ async function main() {
     password: "newpass-88xx",
   });
 
-  console.log("✓ tenancy endpoint isolation + admin user flags");
+  // P0 regression: empty allowedProjectIds must NOT fail open to all boards
+  const privateMission = missionId;
+  const leakSnap = await durableBoard.adminSnapshot("all", {
+    allowedProjectIds: [],
+  });
+  assert(
+    leakSnap.missions.length === 0,
+    "empty allow list must yield zero missions (no fail-open)",
+  );
+  assert(
+    !leakSnap.missions.some((m) => m.id === privateMission),
+    "private mission must not appear under empty allow list",
+  );
+  const openSnap = await durableBoard.adminSnapshot("all", {
+    allowedProjectIds: null,
+  });
+  assert(
+    openSnap.missions.some((m) => m.id === privateMission),
+    "null allow list remains unrestricted for open/admin-all paths",
+  );
+  const filtered = await durableBoard.adminSnapshot("all", {
+    allowedProjectIds: [boardA.id],
+  });
+  assert(
+    filtered.missions.some((m) => m.id === privateMission),
+    "owner allow list includes own mission",
+  );
+  assert(
+    !filtered.missions.some((m) => m.projectId === boardB.id && m.id !== privateMission) ||
+      filtered.missions.every((m) => m.projectId === boardA.id),
+    "filtered snap only owner A boards",
+  );
+
+  console.log("✓ tenancy endpoint isolation + admin user flags + empty-allow fail-closed");
 }
 
 main().catch((e) => {

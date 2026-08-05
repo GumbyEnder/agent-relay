@@ -664,15 +664,16 @@ export const durableBoard = {
    *  - belong to any of the allowed boards, or
    *  - have an active API key on an allowed board, or
    *  - have no board membership yet (legacy / just registered).
-   * When allowedProjectIds is null/empty, returns every non-demo agent.
+   * When allowedProjectIds is null/undefined, returns every non-demo agent (unrestricted).
+   * When it is [] (signed-in user with zero readable boards), memberships/keys are empty —
+   * never treat empty array as unrestricted (that leaked private boards).
    */
   listFleetAgents: (allowedProjectIds?: string[] | null) =>
     withLock(async () => {
       const sql = await getSql();
+      // null = unrestricted; Set (possibly empty) = restricted to those board ids
       const allowed =
-        allowedProjectIds && allowedProjectIds.length > 0
-          ? new Set(allowedProjectIds)
-          : null;
+        allowedProjectIds == null ? null : new Set(allowedProjectIds);
 
       const rows = (await sql`
         select * from ar_agents
@@ -781,10 +782,11 @@ export const durableBoard = {
         // still allow profile for demos if asked, but fleet hides them
       }
 
+      // null = unrestricted; empty Set = no board access (do not fail open)
       const allowed =
-        opts?.allowedProjectIds && opts.allowedProjectIds.length > 0
-          ? new Set(opts.allowedProjectIds)
-          : null;
+        opts?.allowedProjectIds == null
+          ? null
+          : new Set(opts.allowedProjectIds);
 
       const memberships = (await sql`
         select project_id from ar_board_agents where agent_id = ${agent.id}
@@ -2092,26 +2094,38 @@ export const durableBoard = {
     let missions = board.missions;
     let events = board.events;
     let calls = board.calls;
+    // Tenancy: null/undefined allowedProjectIds = unrestricted (open mode / admin-all).
+    // [] = signed-in user with zero readable boards — MUST return empty, not all data.
+    // Non-empty = filter to those project ids only.
+    // BUG (2026-08-05): `allowed && allowed.length > 0` failed open on [] and leaked
+    // every private board to new operators (e.g. re-registered gumbyender@gmail.com).
     const allowed = opts?.allowedProjectIds;
-    if (allBoards && allowed && allowed.length > 0) {
-      const allow = new Set(allowed);
-      missions = missions.filter((m) => allow.has(m.projectId));
-      const mid = new Set(missions.map((m) => m.id));
-      events = events.filter(
-        (e) =>
-          (e.projectId && allow.has(e.projectId)) ||
-          (e.missionId && mid.has(e.missionId)) ||
-          !e.missionId,
-      );
-      calls = calls.filter(
-        (c) =>
-          (c.projectId && allow.has(c.projectId)) || mid.has(c.missionId),
-      );
-      history = history.filter(
-        (h) =>
-          (h.projectId && allow.has(h.projectId)) ||
-          mid.has(h.missionId),
-      );
+    if (allBoards && allowed != null) {
+      if (allowed.length === 0) {
+        missions = [];
+        events = [];
+        calls = [];
+        history = [];
+      } else {
+        const allow = new Set(allowed);
+        missions = missions.filter((m) => allow.has(m.projectId));
+        const mid = new Set(missions.map((m) => m.id));
+        events = events.filter(
+          (e) =>
+            (e.projectId && allow.has(e.projectId)) ||
+            (e.missionId && mid.has(e.missionId)) ||
+            !e.missionId,
+        );
+        calls = calls.filter(
+          (c) =>
+            (c.projectId && allow.has(c.projectId)) || mid.has(c.missionId),
+        );
+        history = history.filter(
+          (h) =>
+            (h.projectId && allow.has(h.projectId)) ||
+            mid.has(h.missionId),
+        );
+      }
     }
     const byColumn: Record<string, number> = {};
     for (const m of missions) {
