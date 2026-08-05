@@ -348,8 +348,40 @@ export const agentApi = {
         createdAt: number;
         role: string | null;
         boardCount: number;
+        disabled?: boolean;
+        disabledAt?: number | null;
+        disabledReason?: string | null;
       }>;
     }>("GET", "/admin/users"),
+  adminCreateUser: (input: {
+    email: string;
+    password: string;
+    name?: string;
+    role?: "viewer" | "operator" | "admin";
+  }) =>
+    req<{ ok: true; user: { id: string; email: string; name: string; role: string } }>(
+      "POST",
+      "/admin/users",
+      input,
+    ),
+  adminDisableUser: (userId: string, reason?: string) =>
+    req<{ ok: true; userId: string; disabled: boolean }>(
+      "POST",
+      `/admin/users/${encodeURIComponent(userId)}/disable`,
+      { reason },
+    ),
+  adminEnableUser: (userId: string) =>
+    req<{ ok: true; userId: string; disabled: boolean }>(
+      "POST",
+      `/admin/users/${encodeURIComponent(userId)}/enable`,
+      {},
+    ),
+  adminResetUserPassword: (userId: string, password: string) =>
+    req<{ ok: true; userId: string; email: string }>(
+      "POST",
+      `/admin/users/${encodeURIComponent(userId)}/reset-password`,
+      { password },
+    ),
   adminUsage: (range: string = "7d") =>
     req<Record<string, unknown>>("GET", `/admin/usage?range=${encodeURIComponent(range)}`),
   setRole: (input: {

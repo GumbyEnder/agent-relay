@@ -284,7 +284,7 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
       ? sql`select * from ar_calls where project_id = ${projectId} or project_id is null order by created_at desc`
       : sql`select * from ar_calls order by created_at desc`,
   ]);
-  let missionRows = missions.map((r) => rowMission(r as Record<string, unknown>));
+  const missionRows = missions.map((r) => rowMission(r as Record<string, unknown>));
   // Filter calls/events to missions in scope when project set
   const agentRows = agents.map((r) => rowAgent(r as Record<string, unknown>));
   if (projectId) {
@@ -1024,7 +1024,7 @@ export const durableBoard = {
       const sql = await getSql();
       const name = input.name.trim();
       if (!name) throw new Error("name required");
-      let baseSlug = (input.slug?.trim() || name)
+      const baseSlug = (input.slug?.trim() || name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "") || uid("board");
@@ -1364,6 +1364,19 @@ export const durableBoard = {
         group by owner_user_id
       `) as Array<{ uid: string; n: number }>;
       const boardsByOwner = new Map(boardCounts.map((r) => [String(r.uid), Number(r.n)]));
+      const flags = (await sql`
+        select user_id, disabled_at, disabled_reason from ar_user_admin
+      `) as Array<Record<string, unknown>>;
+      const flagByUser = new Map(
+        flags.map((f) => [
+          String(f.user_id),
+          {
+            disabledAt: ms(f.disabled_at),
+            disabledReason:
+              f.disabled_reason != null ? String(f.disabled_reason) : null,
+          },
+        ]),
+      );
       return users.map((u) => {
         const id = String(u.id);
         const email = u.email != null ? String(u.email) : null;
@@ -1371,6 +1384,7 @@ export const durableBoard = {
           roleByUser.get(id) ??
           (email ? roleByEmail.get(email.toLowerCase()) : null) ??
           null;
+        const flag = flagByUser.get(id);
         return {
           id,
           name: u.name != null ? String(u.name) : "",
@@ -1380,8 +1394,152 @@ export const durableBoard = {
           updatedAt: ms(u.updatedAt) ?? Date.now(),
           role,
           boardCount: boardsByOwner.get(id) ?? 0,
+          disabled: Boolean(flag?.disabledAt),
+          disabledAt: flag?.disabledAt ?? null,
+          disabledReason: flag?.disabledReason ?? null,
         };
       });
+    }),
+
+  /** True when platform admin has disabled this account. */
+  isUserDisabled: (userId: string) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const rows = (await sql`
+        select disabled_at from ar_user_admin
+        where user_id = ${userId} and disabled_at is not null
+        limit 1
+      `) as Array<{ disabled_at: unknown }>;
+      return Boolean(rows[0]);
+    }),
+
+  setUserDisabled: (input: {
+    userId: string;
+    disabled: boolean;
+    reason?: string | null;
+  }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const uid = input.userId.trim();
+      if (!uid) throw new Error("userId required");
+      if (input.disabled) {
+        await sql`
+          insert into ar_user_admin (user_id, disabled_at, disabled_reason, updated_at)
+          values (${uid}, now(), ${input.reason?.trim() || null}, now())
+          on conflict (user_id) do update set
+            disabled_at = now(),
+            disabled_reason = excluded.disabled_reason,
+            updated_at = now()
+        `;
+        // Kill active sessions so a disabled user cannot keep using a cached cookie.
+        await sql`delete from "session" where "userId" = ${uid}`;
+      } else {
+        await sql`
+          insert into ar_user_admin (user_id, disabled_at, disabled_reason, updated_at)
+          values (${uid}, null, null, now())
+          on conflict (user_id) do update set
+            disabled_at = null,
+            disabled_reason = null,
+            updated_at = now()
+        `;
+      }
+      return { userId: uid, disabled: input.disabled };
+    }),
+
+  /**
+   * Create a human operator account (email/password) for invite flows.
+   * Uses Better Auth-compatible password hash on the credential account row.
+   */
+  adminCreateUser: (input: {
+    email: string;
+    name?: string;
+    password: string;
+    role?: string;
+    emailVerified?: boolean;
+  }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const email = input.email.trim().toLowerCase();
+      if (!email || !email.includes("@")) throw new Error("valid email required");
+      if (!input.password || input.password.length < 8) {
+        throw new Error("password must be at least 8 characters");
+      }
+      const existing = (await sql`
+        select id from "user" where lower(email) = ${email} limit 1
+      `) as Array<{ id: string }>;
+      if (existing[0]) throw new Error("user already exists");
+
+      const { hashPassword } = await import("better-auth/crypto");
+      const passwordHash = await hashPassword(input.password);
+      const userId = uid("usr");
+      const name = (input.name?.trim() || email.split("@")[0] || "operator").slice(0, 120);
+      const verified = input.emailVerified !== false;
+      await sql`
+        insert into "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
+        values (${userId}, ${name}, ${email}, ${verified}, now(), now())
+      `;
+      const accountId = uid("acc");
+      await sql`
+        insert into "account" (
+          id, "accountId", "providerId", "userId", password, "createdAt", "updatedAt"
+        )
+        values (
+          ${accountId}, ${email}, 'credential', ${userId}, ${passwordHash}, now(), now()
+        )
+      `;
+      const role = (input.role?.trim() || "operator") as string;
+      if (role === "viewer" || role === "operator" || role === "admin") {
+        await sql`
+          insert into ar_operator_roles (user_id, email, role, updated_at)
+          values (${userId}, ${email}, ${role}, now())
+          on conflict (user_id) do update set
+            email = excluded.email,
+            role = excluded.role,
+            updated_at = now()
+        `;
+      }
+      return { id: userId, name, email, role };
+    }),
+
+  adminResetUserPassword: (input: { userId: string; password: string }) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const uidIn = input.userId.trim();
+      if (!uidIn) throw new Error("userId required");
+      if (!input.password || input.password.length < 8) {
+        throw new Error("password must be at least 8 characters");
+      }
+      const users = (await sql`
+        select id, email from "user" where id = ${uidIn} limit 1
+      `) as Array<{ id: string; email: string }>;
+      if (!users[0]) throw new Error("user not found");
+      const { hashPassword } = await import("better-auth/crypto");
+      const passwordHash = await hashPassword(input.password);
+      const email = String(users[0].email);
+      const accounts = (await sql`
+        select id from "account"
+        where "userId" = ${uidIn} and "providerId" = 'credential'
+        limit 1
+      `) as Array<{ id: string }>;
+      if (accounts[0]) {
+        await sql`
+          update "account"
+          set password = ${passwordHash}, "updatedAt" = now()
+          where id = ${accounts[0].id}
+        `;
+      } else {
+        await sql`
+          insert into "account" (
+            id, "accountId", "providerId", "userId", password, "createdAt", "updatedAt"
+          )
+          values (
+            ${uid("acc")}, ${email}, 'credential', ${uidIn}, ${passwordHash}, now(), now()
+          )
+        `;
+      }
+      // Force re-login after password reset
+      await sql`delete from "session" where "userId" = ${uidIn}`;
+      return { userId: uidIn, email };
     }),
 
   /** Platform admin: aggregate usage/velocity (no private mission bodies). */

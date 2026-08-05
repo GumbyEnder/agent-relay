@@ -25,6 +25,9 @@ type PlatformUser = {
   createdAt: number;
   role: string | null;
   boardCount: number;
+  disabled?: boolean;
+  disabledAt?: number | null;
+  disabledReason?: string | null;
 };
 
 type UsagePayload = {
@@ -146,6 +149,12 @@ export function PlatformAdminShell() {
     if (tab === "agents") void loadAgents();
   }, [tab, isAdmin, loadUsers, loadUsage, loadBoards, loadAgents]);
 
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteName, setInviteName] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
+  const [inviteRole, setInviteRole] = useState<"viewer" | "operator" | "admin">("operator");
+  const [inviteBusy, setInviteBusy] = useState(false);
+
   const setRole = async (userId: string, email: string | null, next: string) => {
     try {
       await agentApi.setRole({ userId, email, role: next as "viewer" | "operator" | "admin" });
@@ -153,6 +162,61 @@ export function PlatformAdminShell() {
       await loadUsers();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const toggleDisabled = async (u: PlatformUser) => {
+    try {
+      if (u.disabled) {
+        await agentApi.adminEnableUser(u.id);
+        toast.success(`Enabled ${u.email ?? u.name}`);
+      } else {
+        const reason = window.prompt("Disable reason (optional)") ?? undefined;
+        await agentApi.adminDisableUser(u.id, reason || undefined);
+        toast.success(`Disabled ${u.email ?? u.name}`);
+      }
+      await loadUsers();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const resetPassword = async (u: PlatformUser) => {
+    const password = window.prompt(
+      `New password for ${u.email ?? u.name} (min 8 chars)`,
+    );
+    if (!password) return;
+    try {
+      await agentApi.adminResetUserPassword(u.id, password);
+      toast.success("Password reset — user must sign in again");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const inviteUser = async () => {
+    if (!inviteEmail.trim() || !invitePassword) {
+      toast.error("Email and password required");
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      const res = await agentApi.adminCreateUser({
+        email: inviteEmail.trim(),
+        password: invitePassword,
+        name: inviteName.trim() || undefined,
+        role: inviteRole,
+      });
+      toast.success(`Created ${res.user.email}`);
+      setInviteEmail("");
+      setInviteName("");
+      setInvitePassword("");
+      setInviteRole("operator");
+      await loadUsers();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setInviteBusy(false);
     }
   };
 
@@ -247,54 +311,138 @@ export function PlatformAdminShell() {
             ) : null}
 
             {tab === "users" && (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
-                    <tr className="border-b border-border">
-                      <th className="px-2 py-2 font-medium">User</th>
-                      <th className="px-2 py-2 font-medium">Role</th>
-                      <th className="px-2 py-2 font-medium">Boards</th>
-                      <th className="px-2 py-2 font-medium">Joined</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {users.map((u) => (
-                      <tr key={u.id} className="hover:bg-bg-subtle/50">
-                        <td className="px-2 py-2">
-                          <p className="font-medium text-fg">{u.name || "—"}</p>
-                          <p className="font-mono text-[11px] text-fg-subtle">{u.email}</p>
-                          {!u.emailVerified ? (
-                            <span className="text-[10px] text-status-human">unverified</span>
-                          ) : null}
-                        </td>
-                        <td className="px-2 py-2">
-                          <select
-                            className="h-8 rounded-[var(--radius-xs)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
-                            value={u.role ?? "operator"}
-                            onChange={(e) => void setRole(u.id, u.email, e.target.value)}
-                          >
-                            <option value="viewer">viewer</option>
-                            <option value="operator">operator</option>
-                            <option value="admin">admin</option>
-                          </select>
-                        </td>
-                        <td className="px-2 py-2 font-mono tabular text-fg-muted">
-                          {u.boardCount}
-                        </td>
-                        <td className="px-2 py-2 text-xs text-fg-subtle">
-                          {formatTime(u.createdAt)}
-                        </td>
+              <div className="space-y-4">
+                <section className="rounded-[var(--radius-md)] border border-border bg-bg-subtle/30 p-3">
+                  <h3 className="text-xs font-medium text-fg">Invite / create user</h3>
+                  <p className="mt-0.5 text-[11px] text-fg-muted">
+                    Creates an email/password account and assigns a platform role.
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                    <input
+                      className="h-8 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                      placeholder="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      autoComplete="off"
+                    />
+                    <input
+                      className="h-8 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                      placeholder="name (optional)"
+                      value={inviteName}
+                      onChange={(e) => setInviteName(e.target.value)}
+                    />
+                    <input
+                      type="password"
+                      className="h-8 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                      placeholder="temp password (min 8)"
+                      value={invitePassword}
+                      onChange={(e) => setInvitePassword(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                    <select
+                      className="h-8 rounded-[var(--radius-xs)] bg-bg px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                      value={inviteRole}
+                      onChange={(e) =>
+                        setInviteRole(e.target.value as "viewer" | "operator" | "admin")
+                      }
+                    >
+                      <option value="viewer">viewer</option>
+                      <option value="operator">operator</option>
+                      <option value="admin">admin</option>
+                    </select>
+                    <Button
+                      size="sm"
+                      className="h-8"
+                      disabled={inviteBusy}
+                      onClick={() => void inviteUser()}
+                    >
+                      {inviteBusy ? "Creating…" : "Create user"}
+                    </Button>
+                  </div>
+                </section>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-left text-sm">
+                    <thead className="text-[11px] uppercase tracking-wider text-fg-subtle">
+                      <tr className="border-b border-border">
+                        <th className="px-2 py-2 font-medium">User</th>
+                        <th className="px-2 py-2 font-medium">Role</th>
+                        <th className="px-2 py-2 font-medium">Status</th>
+                        <th className="px-2 py-2 font-medium">Boards</th>
+                        <th className="px-2 py-2 font-medium">Joined</th>
+                        <th className="px-2 py-2 font-medium">Actions</th>
                       </tr>
-                    ))}
-                    {users.length === 0 && !busy ? (
-                      <tr>
-                        <td colSpan={4} className="px-2 py-8 text-center text-fg-subtle">
-                          No users found
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {users.map((u) => (
+                        <tr key={u.id} className="hover:bg-bg-subtle/50">
+                          <td className="px-2 py-2">
+                            <p className="font-medium text-fg">{u.name || "—"}</p>
+                            <p className="font-mono text-[11px] text-fg-subtle">{u.email}</p>
+                            {!u.emailVerified ? (
+                              <span className="text-[10px] text-status-human">unverified</span>
+                            ) : null}
+                          </td>
+                          <td className="px-2 py-2">
+                            <select
+                              className="h-8 rounded-[var(--radius-xs)] bg-bg-subtle px-2 text-xs text-fg shadow-[var(--shadow-border)]"
+                              value={u.role ?? "operator"}
+                              onChange={(e) => void setRole(u.id, u.email, e.target.value)}
+                            >
+                              <option value="viewer">viewer</option>
+                              <option value="operator">operator</option>
+                              <option value="admin">admin</option>
+                            </select>
+                          </td>
+                          <td className="px-2 py-2">
+                            {u.disabled ? (
+                              <span className="rounded-full bg-status-blocked/15 px-2 py-0.5 text-[10px] font-medium text-status-blocked">
+                                disabled
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-status-ready/15 px-2 py-0.5 text-[10px] font-medium text-status-ready">
+                                active
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-2 font-mono tabular text-fg-muted">
+                            {u.boardCount}
+                          </td>
+                          <td className="px-2 py-2 text-xs text-fg-subtle">
+                            {formatTime(u.createdAt)}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 text-[11px]"
+                                onClick={() => void toggleDisabled(u)}
+                              >
+                                {u.disabled ? "Enable" : "Disable"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-[11px]"
+                                onClick={() => void resetPassword(u)}
+                              >
+                                Reset pw
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {users.length === 0 && !busy ? (
+                        <tr>
+                          <td colSpan={6} className="px-2 py-8 text-center text-fg-subtle">
+                            No users found
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 

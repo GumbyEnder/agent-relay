@@ -88,6 +88,13 @@ export async function getSessionUserFromHeaders(
   try {
     const session = await auth.api.getSession({ headers });
     if (!session?.user) return null;
+    // Platform-disabled accounts must not resolve as signed-in (any path).
+    try {
+      const { boardOps } = await import("../board-server");
+      if (await boardOps.isUserDisabled(session.user.id)) return null;
+    } catch {
+      /* board store unavailable — fail open only if import fails mid-boot */
+    }
     return { id: session.user.id, email: session.user.email ?? null };
   } catch {
     return null;

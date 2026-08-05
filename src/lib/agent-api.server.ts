@@ -1687,6 +1687,80 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const users = await boardOps.listPlatformUsers();
       return json({ ok: true, users });
     }
+    // POST /admin/users  { email, password, name?, role? } — invite/create
+    if (
+      parts.length === 2 &&
+      parts[0] === "admin" &&
+      parts[1] === "users" &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const email = str(body.email);
+      const password = str(body.password);
+      if (!email || !password) {
+        return err(400, "email and password required", "bad_request");
+      }
+      try {
+        const user = await boardOps.adminCreateUser({
+          email,
+          password,
+          name: str(body.name) ?? undefined,
+          role: str(body.role) ?? "operator",
+          emailVerified: body.emailVerified !== false && body.email_verified !== false,
+        });
+        return json({ ok: true, user }, 201);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "create failed";
+        const status = /already exists/i.test(msg) ? 409 : 400;
+        return err(status, msg, status === 409 ? "conflict" : "bad_request");
+      }
+    }
+    // POST /admin/users/:id/disable | /enable
+    if (
+      parts.length === 4 &&
+      parts[0] === "admin" &&
+      parts[1] === "users" &&
+      (parts[3] === "disable" || parts[3] === "enable") &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const userId = parts[2]!;
+      const ctx = await loadOperatorContext(req);
+      if (ctx.user?.id === userId && parts[3] === "disable") {
+        return err(400, "cannot disable your own account", "bad_request");
+      }
+      const result = await boardOps.setUserDisabled({
+        userId,
+        disabled: parts[3] === "disable",
+        reason: str(body.reason) ?? str(body.disabled_reason),
+      });
+      return json({ ok: true, ...result });
+    }
+    // POST /admin/users/:id/reset-password { password }
+    if (
+      parts.length === 4 &&
+      parts[0] === "admin" &&
+      parts[1] === "users" &&
+      (parts[3] === "reset-password" || parts[3] === "reset_password") &&
+      req.method === "POST"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_roles");
+      if (gate) return gate;
+      const password = str(body.password) ?? str(body.newPassword);
+      if (!password) return err(400, "password required", "bad_request");
+      try {
+        const result = await boardOps.adminResetUserPassword({
+          userId: parts[2]!,
+          password,
+        });
+        return json({ ok: true, ...result });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "reset failed";
+        return err(/not found/i.test(msg) ? 404 : 400, msg, "bad_request");
+      }
+    }
     // GET /admin/usage?range=7d|30d
     if (
       parts.length === 2 &&
@@ -2149,7 +2223,7 @@ async function createMissionForCaller(opts: {
     );
   }
 
-  let projectId =
+  const projectId =
     (rawProject?.trim()
       ? await boardOps.resolveProjectId(rawProject.trim())
       : null) ??

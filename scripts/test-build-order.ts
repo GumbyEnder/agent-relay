@@ -46,13 +46,19 @@ async function main() {
   console.log("✓ project isolation");
 
   // --- live/admin snapshot after claim ---
-  const claim = await durableBoard.claim(idA, "lens");
+  // Unique agent name per run — ar_agents.name is globally unique; "lens" collides
+  // when durable store survives across test files or repeated invocations.
+  const claimAgent = `lens-bo-${Date.now().toString(36)}`;
+  const claim = await durableBoard.claim(idA, claimAgent);
   assert(claim.ok, "claim");
   const admin = await durableBoard.adminSnapshot(def!.id);
   assert(admin.events.length >= 1, "events present");
   assert(admin.history.some((h) => h.missionId === idA && h.toColumn === "running"), "history claim row");
   const histRow = admin.history.find((h) => h.missionId === idA && h.toColumn === "running")!;
-  assert(histRow.actorName === "lens" || histRow.actorId, "actor on history");
+  assert(
+    histRow.actorName === claimAgent || histRow.actorId,
+    "actor on history",
+  );
   assert(histRow.fromColumn === "ready", "from ready");
   console.log("✓ live/admin snapshot after claim");
 
@@ -84,7 +90,7 @@ async function main() {
   console.log("✓ github ingest idempotent", g1.mission.id);
 
   // --- journal ---
-  await durableBoard.escalate(idA, "lens", "Ship isolation fix?");
+  await durableBoard.escalate(idA, claimAgent, "Ship isolation fix?");
   const md = await durableBoard.journalMarkdown(idA);
   assert(md && md.includes(idA), "journal has mission id");
   assert(md!.includes("ready") && md!.includes("running"), "timeline columns");
