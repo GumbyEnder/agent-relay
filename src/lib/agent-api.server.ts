@@ -44,6 +44,7 @@ import { clientAgentGuideMarkdown, DEFAULT_PUBLIC_BASE } from "./agent-client-gu
 import { clientAgentSkillMarkdown } from "./agent-skill";
 import { canAccessBoardByOwner } from "./board-tenancy";
 import { summarizeTickets } from "./ticket-summary";
+import { renderDocsHtmlPage, wantsHtmlDocs } from "./docs-html";
 
 const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
 function json(data: unknown, status = 200): Response {
@@ -428,7 +429,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     (parts[0] === "client-guide" && (parts.length === 1 || parts[1] === "README.md")) ||
     (parts[0] === "skill.md" && parts.length === 1) ||
     (parts[0] === "skill" && parts.length === 1) ||
-    (parts[0] === "skills" && parts[1] === "devboards" && parts.length <= 3);
+    (parts[0] === "skills" && parts[1] === "devboards" && parts.length <= 3) ||
+    (parts[0] === "docs" && parts.length >= 1 && parts.length <= 2);
   let machineAuth: MachineAuth = { type: "open" };
   if (!publicDoc) {
     const auth = await authenticateMachine(req);
@@ -471,10 +473,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       });
     }
 
-    // GET /client-guide — markdown README for remote client agents (no GitHub/local required)
+    // GET /client-guide | /docs | /docs/guide — humans get HTML; agents get markdown
     if (
-      (parts.length === 1 && parts[0] === "client-guide" && req.method === "GET") ||
-      (parts.length === 2 && parts[0] === "client-guide" && parts[1] === "README.md" && req.method === "GET")
+      req.method === "GET" &&
+      ((parts.length === 1 && parts[0] === "client-guide") ||
+        (parts.length === 2 && parts[0] === "client-guide" && parts[1] === "README.md") ||
+        (parts.length === 1 && parts[0] === "docs") ||
+        (parts.length === 2 && parts[0] === "docs" && (parts[1] === "guide" || parts[1] === "client-guide")))
     ) {
       const base =
         url.searchParams.get("base")?.trim() ||
@@ -485,6 +490,24 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       const md = clientAgentGuideMarkdown(normalized);
       const asJson = url.searchParams.get("format") === "json";
       if (asJson) return json({ ok: true, markdown: md, base: normalized.replace(/\/$/, "") });
+      if (wantsHtmlDocs(req, url)) {
+        const html = renderDocsHtmlPage({
+          title: "Client agent guide",
+          subtitle:
+            "How remote agents connect to Dev Boards — written for operators and harness authors.",
+          markdown: md,
+          rawPath: "/api/agent/client-guide",
+          baseUrl: normalized,
+        });
+        return new Response(html, {
+          status: 200,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "public, max-age=60",
+            "access-control-allow-origin": "*",
+          },
+        });
+      }
       return new Response(md, {
         status: 200,
         headers: {
@@ -495,7 +518,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       });
     }
 
-    // GET /skill.md | /skill | /skills/devboards[/SKILL.md] — installable client skill (public)
+    // GET /skill.md | /skill | /skills/devboards | /docs/skill — skill for agents + HTML for people
     if (
       req.method === "GET" &&
       ((parts.length === 1 && (parts[0] === "skill.md" || parts[0] === "skill")) ||
@@ -503,7 +526,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         (parts.length === 3 &&
           parts[0] === "skills" &&
           parts[1] === "devboards" &&
-          parts[2] === "SKILL.md"))
+          parts[2] === "SKILL.md") ||
+        (parts.length === 2 && parts[0] === "docs" && (parts[1] === "skill" || parts[1] === "skill.md")))
     ) {
       const base =
         url.searchParams.get("base")?.trim() ||
@@ -519,6 +543,24 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           name: "devboards",
           markdown: md,
           base: normalized.replace(/\/$/, ""),
+        });
+      }
+      if (wantsHtmlDocs(req, url)) {
+        const html = renderDocsHtmlPage({
+          title: "Agent skill",
+          subtitle:
+            "Installable client skill for Hermes and other harnesses — readable here, copyable as markdown for agents.",
+          markdown: md,
+          rawPath: "/api/agent/skill.md",
+          baseUrl: normalized,
+        });
+        return new Response(html, {
+          status: 200,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "public, max-age=60",
+            "access-control-allow-origin": "*",
+          },
         });
       }
       return new Response(md, {

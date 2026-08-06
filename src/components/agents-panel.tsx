@@ -1514,6 +1514,8 @@ function GuideTab({
   copiedGuide: boolean;
   setCopiedGuide: (v: boolean) => void;
 }) {
+  const guidePage = `${publicBase.replace(/\/$/, "")}/api/agent/docs/guide`;
+  const skillPage = `${publicBase.replace(/\/$/, "")}/api/agent/docs/skill`;
   return (
     <div className="space-y-4 p-4">
       <div>
@@ -1521,11 +1523,26 @@ function GuideTab({
           Client agent guide
         </h3>
         <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
-          {CLIENT_AGENT_BLURB}
+          {CLIENT_AGENT_BLURB} Open the readable page for people; copy markdown when pasting into an agent.
         </p>
       </div>
       <p className="break-all font-mono text-[10px] text-fg-subtle">{publicBase}</p>
       <div className="flex flex-wrap gap-1.5">
+        <Button
+          size="sm"
+          className="h-8 text-[11px]"
+          onClick={() => window.open(guidePage, "_blank", "noopener,noreferrer")}
+        >
+          Open readable guide
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="h-8 text-[11px]"
+          onClick={() => window.open(skillPage, "_blank", "noopener,noreferrer")}
+        >
+          Open skill page
+        </Button>
         <Button
           size="sm"
           variant="secondary"
@@ -1533,7 +1550,7 @@ function GuideTab({
           onClick={async () => {
             await navigator.clipboard.writeText(clientGuide);
             setCopiedGuide(true);
-            toast.success("Client guide copied — paste into your agent");
+            toast.success("Markdown copied — paste into your agent");
             setTimeout(() => setCopiedGuide(false), 1500);
           }}
         >
@@ -1542,7 +1559,7 @@ function GuideTab({
           ) : (
             <Copy className="h-3.5 w-3.5" />
           )}
-          Copy
+          Copy markdown
         </Button>
         <Button
           size="sm"
@@ -1568,7 +1585,19 @@ function GuideTab({
           Copy base URL
         </Button>
       </div>
-      <pre className="max-h-[min(60vh,28rem)] overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-3 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
+      <p className="text-[11px] text-fg-muted">
+        Preview (markdown source for agents). Prefer{" "}
+        <a
+          href={guidePage}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-fg underline-offset-2 hover:underline"
+        >
+          the readable guide
+        </a>{" "}
+        when sharing with humans.
+      </p>
+      <pre className="max-h-[min(40vh,20rem)] overflow-auto rounded-[var(--radius-sm)] border border-border bg-bg-subtle p-3 text-[10px] leading-relaxed text-fg-muted whitespace-pre-wrap font-mono">
         {clientGuide}
       </pre>
     </div>
