@@ -57,6 +57,27 @@
       { id: "hand", title: "Hand it over" },
     ];
 
+    const STORAGE_KEY = "beezilla-dana-v1";
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (_) { /* quota, private mode, etc. */ }
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        if (saved && typeof saved === "object") {
+          Object.assign(state, saved);
+          return true;
+        }
+      } catch (_) { /* corrupt data */ }
+      return false;
+    }
+
     const state = {
       screen: "intro",
       q: 0,
@@ -68,6 +89,8 @@
       board: { Waiting: [], Working: [], "Needs you": [], Done: [] },
       events: [],
     };
+
+    loadState();
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
     const setPhase = (t) => { document.getElementById("phaseLabel").textContent = t; };
@@ -300,6 +323,7 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       else if (state.screen === "board") goBoard();
       else if (state.screen === "result") goResult();
       else if (state.screen === "remember") goRemember();
+      saveState();
     }
     document.getElementById("memLink").onclick = (e) => {
       e.preventDefault();
