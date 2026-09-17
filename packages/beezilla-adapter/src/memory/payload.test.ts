@@ -5,32 +5,41 @@ import { emptyCard } from "./card.js";
 
 describe("sanitizeForHoncho", () => {
   it("strips wallet facts", () => {
-    const card = emptyCard("c1");
+    const card = emptyCard("client-1");
     card.facts = [
-      { id: "1", text: "wallet balance $500" },
-      { id: "2", text: "Prefers morning visits" },
+      { id: "f1", text: "wallet balance is $500" },
+      { id: "f2", text: "Prefers morning visits" },
     ];
-    card.jobs = [{ id: "j1", oneLiner: "clean job text", finishedAt: "2025-01-01" }];
+    card.jobs = [];
+
     const result = sanitizeForHoncho(card);
+
     expect(result.facts).toHaveLength(1);
     expect(result.facts[0].text).toBe("Prefers morning visits");
   });
 
   it("keeps clean facts", () => {
-    const card = emptyCard("c2");
+    const card = emptyCard("client-2");
     card.facts = [
-      { id: "1", text: "Prefers morning visits" },
-      { id: "2", text: "Allergic to bees" },
+      { id: "f1", text: "Prefers morning visits" },
+      { id: "f2", text: "Allergic to bees" },
     ];
     card.jobs = [];
+
     const result = sanitizeForHoncho(card);
+
     expect(result.facts).toHaveLength(2);
+    expect(result.facts.map((f) => f.text)).toEqual([
+      "Prefers morning visits",
+      "Allergic to bees",
+    ]);
   });
 
-  it("workspace is not frodo", () => {
-    const card = emptyCard("c3");
+  it("workspace !== frodo", () => {
+    const card = emptyCard("client-3");
     const result = sanitizeForHoncho(card);
-    expect(result.workspace).not.toMatch(/frodo/i);
+
     expect(result.workspace).toBe(BEEZILLA_HONCHO_WORKSPACE);
+    expect(result.workspace).not.toMatch(/frodo/i);
   });
 });
