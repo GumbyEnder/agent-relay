@@ -93,6 +93,10 @@ React 19 · TypeScript · TanStack Start · Vite · Tailwind · Postgres (or PGL
 
 [MIT](LICENSE)
 
+## CI
+
+Run adapter unit tests (no live network): `NODE_ENV=development npm test`
+
 ## Status
 
 **v0.x** — useful and tested in-tree; protocol and storage may still change before 1.0. Pin a git tag for deployments. See [docs/ROADMAP.md](docs/ROADMAP.md).

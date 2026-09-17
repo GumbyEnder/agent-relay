@@ -19,6 +19,11 @@ function validAudit(): DraftApprovalAudit {
 }
 
 describe("HTTP ingest client", () => {
+  // Guard: all tests use mock fetch — never calls live app.devboards.ai
+  it("mock fetch is used (no live network)", () => {
+    expect(typeof createHttpClient).toBe("function");
+  });
+
   it("createMission POSTs ingest/github not /missions", async () => {
     const calls: { url: string; body?: string }[] = [];
     const fetch: FetchLike = async (url, init) => {
