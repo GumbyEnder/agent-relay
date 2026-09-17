@@ -1,0 +1,16 @@
+{
+  "name": "beezilla-devboards-adapter",
+  "version": "1.0.0",
+  "description": "BeeZilla in-product board adapter for Dev Boards",
+  "main": "dist/adapter/index.js",
+  "types": "dist/adapter/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
+    "test:node": "node --experimental-specifier-resolution=node --test dist/adapter/devboards-adapter.test.js"
+  },
+  "devDependencies": {
+    "typescript": "5",
+    "vitest": "1"
+  }
+}
