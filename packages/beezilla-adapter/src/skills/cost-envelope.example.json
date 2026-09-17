@@ -1,0 +1,24 @@
+{
+  "example_for": "Dana — plain-language contractor scope of work (home repair)",
+  "currency": "USD",
+  "estimate_low": 1.0,
+  "estimate_high": 3.0,
+  "display_estimate": "about $1–3",
+  "tier_breakdown": {
+    "interview": "pennies",
+    "drafting_and_plain_language": "about $0.50–1",
+    "research_and_rates": "about $0.50–1",
+    "verify_tier_source_check_and_fairness": "about $0.50–1",
+    "formatting_on_approval": "pennies"
+  },
+  "verification_reserve": 0.5,
+  "display_reserve": "about $0.50 held in reserve in case a check has to run twice",
+  "budget_cap": 3.5,
+  "cap_status": "hard_stop",
+  "user_controls": {
+    "default": "value",
+    "options": ["value", "private", "budget"],
+    "notes": "Default is value. Private beats cost when chosen. Budget cap is a hard stop regardless of setting."
+  },
+  "render_rules": "Show 'about $X' and role names only. Never show model ids, token counts, or raw prices per skill to the civilian."
+}

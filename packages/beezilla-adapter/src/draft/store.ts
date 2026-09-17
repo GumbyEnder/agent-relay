@@ -141,6 +141,7 @@ export async function saveDraft(
     created_at: versionEvent.timestamp,
   };
   await store.appendEvent(mission.id, storedEvent);
+  events.push(versionEvent);
 
   return mission.id;
 }
@@ -246,13 +247,29 @@ export async function approveDraft(
     throw new Error("Cannot approve draft with no work items");
   }
 
+  // Latest version is highest vN, not newest timestamp (saves can share a second).
+  const versionEvents = events.filter((e) => e.meta.type === "draft_version");
+  if (versionEvents.length > 0) {
+    const n = (v: unknown) =>
+      parseInt(String(v ?? "").replace(/^v/i, ""), 10) || 0;
+    const latest = versionEvents.reduce((a, b) =>
+      n((b.meta as { version?: string }).version) >
+      n((a.meta as { version?: string }).version)
+        ? b
+        : a,
+    );
+    if ((latest.meta as { version?: string }).version !== draft.version) {
+      throw new Error("Cannot approve stale version");
+    }
+  }
+
   // Update draft status
   draft.status = "approved";
   draft.approved_at = new Date().toISOString();
   draft.approved_by = approvedBy;
 
-  // Build and write the approval event
-  const approvalEvent = buildApprovalEvent(draft.id, approvedBy);
+  // Build and write the first_ticket_cut audit event (NO work-item missions)
+  const approvalEvent = buildApprovalEvent(draft, approvedBy);
   const storedEvent: StoredEvent = {
     id: approvalEvent.id,
     mission_id: `draft_${draft.id}`,

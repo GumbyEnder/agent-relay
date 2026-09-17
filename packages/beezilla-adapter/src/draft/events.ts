@@ -6,7 +6,7 @@
  * approval state from the event list.
  */
 
-import type { DraftEvent, DraftEventMeta } from "./types.js";
+import type { ApprovalMeta, DraftDocument, DraftEvent, DraftEventMeta } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Event ID generation
@@ -45,25 +45,36 @@ export function buildDraftVersionEvent(
 }
 
 /**
- * Build an approval event (kind=note, meta.type=approval).
+ * Build a first-ticket-cut approval event (kind=note, meta.type=approval).
  * Called when the user approves the draft.
  * Does NOT create work-item missions — that happens elsewhere.
  */
 export function buildApprovalEvent(
-  draftId: string,
+  draft: DraftDocument,
   approvedBy: string,
 ): DraftEvent {
-  const meta: DraftEventMeta = {
+  const costEnvelope =
+    draft.context.cost as { min: number; max: number } | undefined;
+  const meta: ApprovalMeta = {
     type: "approval",
     approved_by: approvedBy,
     gate: "first_ticket_cut",
+    draft_id: draft.id,
+    draft_version: draft.version,
+    draft_snapshot_id: eventId("snap"),
+    user_action: "approve",
+    timestamp: new Date().toISOString(),
+    cost_envelope_at_approve: costEnvelope ?? null,
+    work_items_approved: draft.work_items.map(wi => wi.id),
+    missions_created_after: [],
+    snapshot: draft.context,
   };
   return {
     id: eventId("evt_approve"),
-    draft_id: draftId,
+    draft_id: draft.id,
     kind: "note",
     meta,
-    timestamp: new Date().toISOString(),
+    timestamp: meta.timestamp ?? new Date().toISOString(),
   };
 }
 

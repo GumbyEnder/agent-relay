@@ -342,7 +342,81 @@ describe("isApproved — derivation sequence", () => {
 });
 
 // ===========================================================================
-// TEST 6: civilian view helper strips mission/column/tag words
+// TEST 6: stale version cannot approve
+// ===========================================================================
+
+describe("approveDraft — stale version rejection", () => {
+  it("rejects approval when draft version lags latest version event", async () => {
+    const store = createFakeStore();
+    const draft = createDraft();
+    const events: DraftEvent[] = [];
+
+    // Save draft → v2
+    await saveDraft(store, draft, events);
+    expect(draft.version).toBe("v2");
+
+    // Manually advance draft to v1 (simulating a stale handle)
+    draft.version = "v1";
+
+    await expect(
+      approveDraft(store, draft, events, "admin"),
+    ).rejects.toThrow("Cannot approve stale version");
+  });
+
+  it("allows approval when draft version matches latest version event", async () => {
+    const store = createFakeStore();
+    const draft = createDraft();
+    const events: DraftEvent[] = [];
+
+    // Save draft → v2
+    await saveDraft(store, draft, events);
+    expect(draft.version).toBe("v2");
+
+    // Approval should succeed — version matches
+    const event = await approveDraft(store, draft, events, "admin");
+    expect(isApproved(events)).toBe(true);
+
+    // Verify audit meta fields
+    const approvalMeta = event.meta as any;
+    expect(approvalMeta.type).toBe("approval");
+    expect(approvalMeta.gate).toBe("first_ticket_cut");
+    expect(approvalMeta.draft_id).toBe("drft_test01");
+    expect(approvalMeta.draft_version).toBe("v2");
+    expect(approvalMeta.draft_snapshot_id).toBeDefined();
+    expect(approvalMeta.user_action).toBe("approve");
+    expect(approvalMeta.timestamp).toBeDefined();
+    expect(approvalMeta.cost_envelope_at_approve).toEqual({ min: 100, max: 500 });
+    expect(approvalMeta.work_items_approved).toEqual(["wi_1", "wi_2"]);
+    expect(approvalMeta.missions_created_after).toEqual([]);
+    expect(approvalMeta.snapshot).toEqual(draft.context);
+  });
+
+  it("voids old approval — must approve new version", async () => {
+    const store = createFakeStore();
+    const draft = createDraft();
+    const events: DraftEvent[] = [];
+
+    // Save, approve
+    await saveDraft(store, draft, events);
+    await approveDraft(store, draft, events, "admin");
+    expect(isApproved(events)).toBe(true);
+
+    // Save again → v3, approval voided
+    await saveDraft(store, draft, events);
+    expect(isApproved(events)).toBe(false);
+    expect(draft.version).toBe("v3");
+
+    // Now approve the new version
+    const event = await approveDraft(store, draft, events, "admin");
+    expect(isApproved(events)).toBe(true);
+
+    const approvalMeta = event.meta as any;
+    expect(approvalMeta.draft_version).toBe("v3");
+  });
+});
+
+// ===========================================================================
+// TEST 7: civilian view helper strips mission/column/tag words
 // ===========================================================================
 
 describe("stripCivilianJargon", () => {
