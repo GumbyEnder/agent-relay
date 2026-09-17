@@ -1,0 +1,58 @@
+[
+  {
+    "id": "what_happened",
+    "prompt": "What happened out there — which parts of the fence got damaged?",
+    "why_it_changes_work": "The whole scope: a few sections vs. the full line is different work, different crew, different quote.",
+    "skip_if": "Customer says skip, doesn't know, or gives no answer.",
+    "default": "Storm damage, full fence line affected."
+  },
+  {
+    "id": "rough_size",
+    "prompt": "Roughly how much fence are we talking? Feet, or just 'about a backyard' is fine.",
+    "why_it_changes_work": "Drives material quantities and whether one crew finishes in a day.",
+    "skip_if": "Customer says skip or can't estimate.",
+    "default": "Typical residential yard, single line."
+  },
+  {
+    "id": "material_supplier",
+    "prompt": "Who's getting the materials — you or the contractor?",
+    "why_it_changes_work": "Splits every quote into labor-only vs. labor-plus-materials; without it, quotes can't be compared.",
+    "skip_if": "Customer says skip or doesn't know.",
+    "default": "Contractor supplies."
+  },
+  {
+    "id": "budget_range",
+    "prompt": "Got a budget range in mind? Ballpark is fine.",
+    "why_it_changes_work": "A range steers the SOW away from work the customer won't pay for.",
+    "skip_if": "Customer says skip or prefers not to say.",
+    "default": "No stated budget — quotes will define it."
+  },
+  {
+    "id": "timing",
+    "prompt": "When do you need this done by?",
+    "why_it_changes_work": "A hard deadline is the difference between a quote and a bid.",
+    "skip_if": "Customer says skip or whenever works.",
+    "default": "Flexible timing."
+  },
+  {
+    "id": "done_right_check",
+    "prompt": "How will you know when it's done right — what would you check?",
+    "why_it_changes_work": "Acceptance criteria: the customer's own words go into the completion terms.",
+    "skip_if": "Customer says skip or shrugs.",
+    "default": "Fence straight, panels secure, gates work."
+  },
+  {
+    "id": "quote_count",
+    "prompt": "Getting quotes from a few contractors, or just this one?",
+    "why_it_changes_work": "Determines whether the SOW needs line-item granularity for apples-to-apples comparison.",
+    "skip_if": "Customer says skip or unsure.",
+    "default": "Comparing quotes — itemized."
+  },
+  {
+    "id": "exclusions",
+    "prompt": "Anything you definitely don't want done?",
+    "why_it_changes_work": "Exclusions belong in the SOW, not in a dispute afterward.",
+    "skip_if": "Customer says skip or no.",
+    "default": "No exclusions."
+  }
+]

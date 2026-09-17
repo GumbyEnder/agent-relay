@@ -58,6 +58,16 @@ export interface ApprovalMeta {
   type: "approval";
   approved_by: string;
   gate: "first_ticket_cut";
+  /* full audit fields — present on real events, optional for test fixtures */
+  draft_id?: string;
+  draft_version?: string;
+  draft_snapshot_id?: string;
+  user_action?: "approve";
+  timestamp?: string;
+  cost_envelope_at_approve?: { min: number; max: number } | null;
+  work_items_approved?: string[];
+  missions_created_after?: string[];
+  snapshot?: Record<string, unknown>;
 }
 
 /** Event meta for void notes */
