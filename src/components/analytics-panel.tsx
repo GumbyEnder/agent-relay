@@ -155,6 +155,16 @@ export function AnalyticsPanel() {
     const escalations = byKind.escalation ?? 0;
     const created = byKind.mission_created ?? 0;
 
+    // Completions + velocity: boards that move cards to done without an agent
+    // claim/deliver lifecycle (e.g. ingest flows) have no delivery events, so
+    // count done missions updated in-window instead.
+    const days = windowH / 24;
+    const doneMissions = missions.filter(
+      (m) => m.column === "done" && m.updatedAt >= since && m.updatedAt <= now,
+    );
+    const completed = doneMissions.length;
+    const velocity = completed / days;
+
     // Mission lookup for usage + cycle-time attribution.
     const missionById = new Map<string, Mission>(missions.map((m) => [m.id, m]));
 
@@ -231,6 +241,7 @@ export function AnalyticsPanel() {
         i,
         start,
         end,
+        created: slice.filter((e) => e.kind === "mission_created").length,
         claims: slice.filter((e) => e.kind === "mission_claimed").length,
         deliveries: slice.filter((e) => e.kind === "delivery").length,
         escalations: slice.filter((e) => e.kind === "escalation").length,
@@ -238,7 +249,7 @@ export function AnalyticsPanel() {
     });
     const stackMax = Math.max(
       1,
-      ...series.map((s) => s.claims + s.deliveries + s.escalations),
+      ...series.map((s) => s.created + s.claims + s.deliveries + s.escalations),
     );
 
     // Column mix is current board state (not windowed) — labeled "now" in UI.
@@ -250,6 +261,8 @@ export function AnalyticsPanel() {
       deliveries,
       escalations,
       created,
+      completed,
+      velocity,
       agentRows,
       medianCycle,
       tokensIn,
@@ -331,16 +344,22 @@ export function AnalyticsPanel() {
       </header>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 scrollbar-thin">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          <StatTile label="Claims" value={stats.claims} hint={`last ${windowLabel}`} />
-          <StatTile label="Deliveries" value={stats.deliveries} hint={`last ${windowLabel}`} />
-          <StatTile label="Escalations" value={stats.escalations} hint={`last ${windowLabel}`} />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+          <StatTile label="Total tickets" value={stats.created} hint={`created · last ${windowLabel}`} />
+          <StatTile label="Completed" value={stats.completed} hint={`done · last ${windowLabel}`} />
+          <StatTile
+            label="Velocity"
+            value={stats.velocity.toFixed(1)}
+            hint="done / day"
+          />
           <StatTile
             label="Median cycle"
             value={stats.medianCycle ? fmtDur(stats.medianCycle) : "—"}
             hint="claim → deliver"
           />
-          <StatTile label="Created" value={stats.created} hint={`last ${windowLabel}`} />
+          <StatTile label="Claims" value={stats.claims} hint={`last ${windowLabel}`} />
+          <StatTile label="Deliveries" value={stats.deliveries} hint={`last ${windowLabel}`} />
+          <StatTile label="Escalations" value={stats.escalations} hint={`last ${windowLabel}`} />
           <StatTile label="Open calls" value={stats.openCalls} hint="now" />
         </div>
 
@@ -349,7 +368,7 @@ export function AnalyticsPanel() {
             Throughput over time
           </h3>
           <p className="mt-0.5 text-[11px] text-fg-muted">
-            Claims · deliveries · escalations, last {windowLabel}
+            Created · claims · deliveries · escalations, last {windowLabel}
           </p>
           <div className="mt-4 flex h-36 items-stretch gap-1 sm:gap-1.5">
             {stats.series.map((s) => {
@@ -357,7 +376,7 @@ export function AnalyticsPanel() {
               // to the max bucket total, so a column can never exceed 100%.
               const seg = (n: number) =>
                 n > 0 ? `${Math.max((n / stats.stackMax) * 100, 2)}%` : "0%";
-              const tip = `${fmtClock(s.start)}–${fmtClock(s.end)} · ${s.claims} claims · ${s.deliveries} deliveries · ${s.escalations} escalations`;
+              const tip = `${fmtClock(s.start)}–${fmtClock(s.end)} · ${s.created} created · ${s.claims} claims · ${s.deliveries} deliveries · ${s.escalations} escalations`;
               return (
                 <div
                   key={s.i}
@@ -365,7 +384,11 @@ export function AnalyticsPanel() {
                   title={tip}
                 >
                   <div
-                    className="w-full rounded-t-sm bg-status-ready/80"
+                    className="w-full rounded-t-sm bg-accent/80"
+                    style={{ height: seg(s.created) }}
+                  />
+                  <div
+                    className="w-full bg-status-ready/80"
                     style={{ height: seg(s.claims) }}
                   />
                   <div
@@ -386,6 +409,9 @@ export function AnalyticsPanel() {
             <span>now</span>
           </div>
           <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-fg-subtle">
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-sm bg-accent" /> created
+            </span>
             <span className="inline-flex items-center gap-1">
               <span className="h-2 w-2 rounded-sm bg-status-ready" /> claims
             </span>
