@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Activity,
+  Check,
   CheckCircle2,
   Hand,
   HeartPulse,
@@ -78,6 +79,46 @@ function kindIcon(kind: string) {
   return Activity;
 }
 
+/** Copy a revealed ark_ secret. ClipboardItem+Promise keeps the user-gesture token across the reveal fetch. */
+async function copyApiKeySecret(keyId: string): Promise<void> {
+  const ClipboardItemCtor =
+    typeof ClipboardItem !== "undefined" ? ClipboardItem : undefined;
+  if (navigator.clipboard?.write && ClipboardItemCtor) {
+    try {
+      const blobPromise = agentApi.revealApiKey(keyId).then((res) => {
+        const secret = res.key?.secret;
+        if (!secret) throw new Error("Could not reveal API key");
+        return new Blob([secret], { type: "text/plain" });
+      });
+      await navigator.clipboard.write([
+        new ClipboardItemCtor({
+          "text/plain": blobPromise,
+        }),
+      ]);
+      return;
+    } catch {
+      // Firefox and some Chromium builds reject Promise-valued ClipboardItem.
+    }
+  }
+  const res = await agentApi.revealApiKey(keyId);
+  const secret = res.key?.secret;
+  if (!secret) throw new Error("Could not reveal API key");
+  try {
+    await navigator.clipboard.writeText(secret);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = secret;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    if (!ok) throw new Error("Clipboard permission denied");
+  }
+}
+
 export function AgentProfilePanel({ agentId }: { agentId: string }) {
   const { projects, closePanel, openPanel, refresh, writeProjectId } = useBoard();
   const keyProjectId = writeProjectId();
@@ -92,6 +133,8 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
   const [editSkills, setEditSkills] = useState("");
   const [editStatus, setEditStatus] = useState<string>("online");
   const [editBusy, setEditBusy] = useState(false);
+  const [copyingKey, setCopyingKey] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,15 +227,43 @@ export function AgentProfilePanel({ agentId }: { agentId: string }) {
             </div>
             <p className="mt-0.5 text-xs text-fg-muted">{agent.role || "client"}</p>
             {primaryTip ? (
-              <p className="mt-1.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle">
-                <KeyRound className="h-3 w-3" />
+              <button
+                type="button"
+                className="mt-1.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-subtle hover:text-fg disabled:opacity-60"
+                title="Copy full API key"
+                aria-label="Copy API key"
+                disabled={copyingKey || !primaryTip.id}
+                onClick={() => {
+                  if (!primaryTip.id) return;
+                  void (async () => {
+                    setCopyingKey(true);
+                    try {
+                      await copyApiKeySecret(primaryTip.id);
+                      setCopiedKey(true);
+                      toast.success("API key copied");
+                      globalThis.setTimeout(() => setCopiedKey(false), 1600);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "Copy failed");
+                    } finally {
+                      setCopyingKey(false);
+                    }
+                  })();
+                }}
+              >
+                {copiedKey ? (
+                  <Check className="h-3 w-3 text-status-ready" />
+                ) : (
+                  <KeyRound className="h-3 w-3" />
+                )}
                 <span title={`${primaryTip.prefix}…${primaryTip.suffix}`}>
-                  {primaryTip.prefix}…{primaryTip.suffix}
+                  {copyingKey
+                    ? "copying…"
+                    : `${primaryTip.prefix}…${primaryTip.suffix}`}
                 </span>
                 {activeKeys.length > 1 ? (
                   <span className="text-fg-subtle">· {activeKeys.length} keys</span>
                 ) : null}
-              </p>
+              </button>
             ) : (
               <p className="mt-1.5 text-[11px] text-fg-subtle">No API key bound yet</p>
             )}
