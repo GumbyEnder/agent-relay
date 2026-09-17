@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { fillTemplate, toMarkdown, toPdf } from "./format.js";
+import { fillTemplate, toMarkdown, toPdf, fromInterview } from "./format.js";
 import type { SowAnswers } from "./format.js";
 
 // ---------------------------------------------------------------------------
@@ -265,5 +265,116 @@ describe("toPdf", () => {
     const pdf = toPdf(danaAnswers);
     // A minimal PDF with Dana's content should be at least 1KB
     expect(pdf.length).toBeGreaterThan(1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TEST 6: fromInterview maps interview answers → SowAnswers → markdown
+// ---------------------------------------------------------------------------
+
+describe("fromInterview", () => {
+  it("maps interview ids into SowAnswers correctly", () => {
+    const interviewAnswers: Record<string, string> = {
+      what_happened: "Storm knocked down the north section",
+      rough_size: "About 60 feet of fence along the back yard",
+      material_supplier: "Contractor supplies",
+      budget_range: "$2000-$4000",
+      timing: "Need it done by October",
+      done_right_check: "Fence straight\nGates latch properly\nNo gaps between panels",
+      quote_count: "Comparing quotes — itemized",
+      exclusions: "No tree trimming\nNo landscaping repair",
+      property_address: "456 Maple Drive",
+    };
+
+    const answers = fromInterview(interviewAnswers);
+
+    // Check key mappings
+    expect(answers.clientName).toBe("Dana");
+    expect(answers.propertyAddress).toBe("456 Maple Drive");
+    expect(answers.whatTheyWant).toBe("Storm knocked down the north section");
+    expect(answers.propertyDetails).toBe("About 60 feet of fence along the back yard");
+    expect(answers.timeline).toBe("Need it done by October");
+    expect(answers.budgetRange).toBe("$2000-$4000");
+    expect(answers.postDepth).toBe("24 inches");
+  });
+
+  it("uses defaults when interview answers are missing", () => {
+    const interviewAnswers: Record<string, string> = {
+      what_happened: "Storm knocked down the north section",
+    };
+
+    const defaults: Record<string, string> = {
+      what_happened: "Storm damage, full fence line affected.",
+      rough_size: "Typical residential yard, single line.",
+      timing: "Flexible timing.",
+      done_right_check: "Fence straight, panels secure, gates work.",
+      exclusions: "No exclusions.",
+      budget_range: "No stated budget — quotes will define it.",
+    };
+
+    const answers = fromInterview(interviewAnswers, defaults);
+
+    // Provided answer wins
+    expect(answers.whatTheyWant).toBe("Storm knocked down the north section");
+    // Defaults fill in
+    expect(answers.propertyDetails).toBe("Typical residential yard, single line.");
+    expect(answers.timeline).toBe("Flexible timing.");
+    expect(answers.budgetRange).toBe("No stated budget — quotes will define it.");
+  });
+
+  it("Dana fixture through fromInterview → toMarkdown contains fence/storm/defaults", () => {
+    // Simulate a Dana interview with realistic answers
+    const interviewAnswers: Record<string, string> = {
+      what_happened: "Storm knocked down the north section of the fence",
+      rough_size: "About 80 feet along the back and side yard",
+      material_supplier: "Contractor supplies",
+      budget_range: "$3000-$5000",
+      timing: "Need it done by Halloween",
+      done_right_check: "Fence straight and secure\nGates work properly\nClean job site",
+      quote_count: "Comparing quotes — itemized",
+      exclusions: "No tree trimming needed",
+    };
+
+    const answers = fromInterview(interviewAnswers);
+    const markdown = toMarkdown(answers);
+
+    // Should contain storm reference from what_happened
+    expect(markdown).toContain("Storm");
+    expect(markdown).toContain("north section");
+
+    // Should contain fence references
+    expect(markdown).toContain("fence");
+    expect(markdown).toContain("80 feet");
+
+    // Should contain defaults where no interview answer was provided
+    expect(markdown).toContain("24 inches"); // default post depth
+    expect(markdown).toContain("Dana"); // default client name
+
+    // Should NOT contain placeholders
+    expect(markdown).not.toMatch(/\{\{[A-Z_]+\}\}/);
+
+    // Done criteria should be split from multi-line answer
+    expect(markdown).toContain("Fence straight and secure");
+    expect(markdown).toContain("Gates work properly");
+    expect(markdown).toContain("Clean job site");
+
+    // Exclusions should be split
+    expect(markdown).toContain("No tree trimming needed");
+  });
+
+  it("handles empty interview answers gracefully", () => {
+    const answers = fromInterview({});
+    const markdown = toMarkdown(answers);
+
+    // Should still be valid structure
+    expect(markdown).toContain("## 1. What We Talked About (Interview Notes)");
+    expect(markdown).toContain("## 6. Sign-off");
+
+    // Placeholders should be replaced
+    expect(markdown).not.toMatch(/\{\{[A-Z_]+\}\}/);
+
+    // Should have defaults
+    expect(markdown).toContain("Dana");
+    expect(markdown).toContain("24 inches");
   });
 });
