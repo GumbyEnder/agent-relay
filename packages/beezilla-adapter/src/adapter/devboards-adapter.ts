@@ -150,7 +150,12 @@ export async function createMissionsAfterApprove(
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
 
-    const tags = [validAudit.draft_version, `wi_${workItem}`];
+    const tags = [
+      validAudit.draft_version,
+      `wi_${workItem}`,
+      `beezilla:parent:${validAudit.draft_id}`,
+      `beezilla:cut:${validAudit.draft_version}`,
+    ];
 
     const request: MissionCreateRequest = {
       title,
