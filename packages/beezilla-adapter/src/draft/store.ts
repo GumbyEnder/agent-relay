@@ -29,6 +29,32 @@ import {
 } from "./events.js";
 
 // ---------------------------------------------------------------------------
+// validateAudit — thin export: reject records missing id / version / approved_at
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate that a draft record has the required id, version, and
+ * approved_at fields before proceeding with store operations.
+ * Throws on missing fields so callers fail fast.
+ */
+export function validateAudit(record: unknown): asserts record is DraftDocument {
+  if (!record || typeof record !== "object") {
+    throw new Error("Refused: audit record must be an object");
+  }
+  const r = record as Record<string, unknown>;
+  if (!r.id || typeof r.id !== "string") {
+    throw new Error("Refused: audit record missing 'id'");
+  }
+  if (!r.version || typeof r.version !== "string") {
+    throw new Error("Refused: audit record missing 'version'");
+  }
+  // approved_at is required once the draft reaches approval state
+  if (r.status === "approved" && (r.approved_at === undefined || r.approved_at === null)) {
+    throw new Error("Refused: approved draft missing 'approved_at'");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
