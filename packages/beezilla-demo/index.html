@@ -16,6 +16,12 @@
     .jobrow { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; cursor: pointer; }
     .jobrow:hover { border-color: #aaa; }
     .tag { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .templates { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+    @media (max-width: 600px) { .templates { grid-template-columns: 1fr; } }
+    .templates button { width: 100%; text-align: left; background: #fff; color: #111; }
+    .templates button.sel { border-color: var(--gold); background: #fffbeb; }
+    .bubble { padding: .7rem .85rem; margin: .5rem 0; border: 1px solid var(--line); background: #fff; }
+    .bubble.me { background: #f4f4f4; }
     main { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
     h1 { font-size: 1.7rem; margin: 0 0 .5rem; }
     h2 { font-size: 1.2rem; margin: 1.5rem 0 .5rem; }
@@ -69,7 +75,10 @@
       return {
         id: id || ("job_" + Date.now()),
         createdAt: Date.now(),
-        screen: "intro",
+        template: null,
+        problem: "",
+        messages: [],
+        screen: "pick",
         q: 0,
         answers: {},
         skipped: {},
@@ -86,10 +95,10 @@
     }
 
     function jobTitle(j) {
+      if (j.problem) return j.problem.slice(0, 72);
+      if (j.template) return j.template + " job";
       const happened = (j.answers && j.answers.what_happened) || "";
       if (happened) return happened.slice(0, 72);
-      if (j.approved) return "Fence paperwork (approved)";
-      if (j.q > 0) return "Fence paperwork (in progress)";
       return "New job";
     }
 
@@ -98,6 +107,8 @@
       if (j.screen === "board") return "Working";
       if (j.approved) return "Working";
       if (j.screen === "draft") return "Needs you";
+      if (j.problem) return "In progress";
+      if (j.template) return "In progress";
       if (j.q > 0) return "In progress";
       return "Not started";
     }
@@ -163,9 +174,12 @@
       if (!j) return;
       state = j;
       catalog.currentId = id;
-      if (state.screen === "jobs") {
-        state.screen = jobComplete(state) ? "result" : (state.q > 0 || state.version ? state.screen : "intro");
-        if (state.screen === "jobs") state.screen = "intro";
+      if (state.screen === "jobs" || state.screen === "intro") {
+        if (jobComplete(state)) state.screen = "result";
+        else if (state.problem) state.screen = "chat";
+        else if (state.template) state.screen = "problem";
+        else if (state.answers && state.answers.what_happened) state.screen = state.version ? "draft" : "ask";
+        else state.screen = "pick";
       }
       render();
     }
@@ -175,7 +189,7 @@
       state = emptyJob();
       catalog.jobs.unshift(state);
       catalog.currentId = state.id;
-      state.screen = "intro";
+      state.screen = "pick";
       render();
     }
 
@@ -247,14 +261,84 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       });
     }
 
-    function goIntro() {
-      setPhase("Just talk it through");
+    const TEMPLATES = [
+      { id: "legal", name: "Legal", hint: "Letters, agreements, notices — not legal advice." },
+      { id: "finance", name: "Finance", hint: "Budgets, invoices, money questions." },
+      { id: "creative", name: "Creative writing", hint: "Stories, scripts, copy." },
+      { id: "technical", name: "Technical", hint: "Explainers, specs, how-it-works." },
+      { id: "code", name: "Code", hint: "Scripts and programming help." },
+    ];
+
+    function goPick() {
+      setPhase("New job");
+      const tiles = TEMPLATES.map((t) => {
+        const sel = state.template === t.id ? " sel" : "";
+        return "<button class='secondary" + sel + "' data-id='" + t.id + "'><strong>" + t.name + "</strong><br><span class='muted'>" + t.hint + "</span></button>";
+      }).join("");
       document.getElementById("app").innerHTML =
-        "<h1>Tell me what happened</h1>" +
-        "<p>I'll put together the paperwork for hiring someone to fix the fence. Eight quick questions. Skip any of them — I'll fill in a sensible answer.</p>" +
-        "<p class='muted'>Nothing is sent, hired, or started until you approve a full draft.</p>" +
-        "<div class='row'><button id='go'>Let's go</button></div>";
-      document.getElementById("go").onclick = () => { state.screen = "ask"; render(); };
+        "<h1>What kind of job is this?</h1>" +
+        "<p>Pick a template. Then tell BeeZilla the problem in your own words. The product is a chat — this is the start of that conversation.</p>" +
+        "<div class='templates'>" + tiles + "</div>" +
+        "<div class='row'><button id='next' disabled>Continue</button><button id='cancel' class='secondary'>Cancel</button></div>";
+      document.querySelectorAll(".templates button").forEach((el) => {
+        el.onclick = () => {
+          state.template = el.getAttribute("data-id");
+          goPick();
+        };
+      });
+      const next = document.getElementById("next");
+      if (state.template) next.disabled = false;
+      next.onclick = () => { if (!state.template) return; state.screen = "problem"; render(); };
+      document.getElementById("cancel").onclick = () => { state.screen = "jobs"; render(); };
+    }
+
+    function goProblem() {
+      const t = TEMPLATES.find((x) => x.id === state.template);
+      setPhase((t && t.name) || "New job");
+      document.getElementById("app").innerHTML =
+        "<h1>What's the problem?</h1>" +
+        "<p class='muted'>" + (t ? t.name : "") + " — write it like you'd say it out loud. Nothing starts until you approve a draft later.</p>" +
+        "<textarea id='prob' rows='7' placeholder='Describe what you need…'></textarea>" +
+        "<div class='row'><button id='go'>Continue</button><button id='back' class='secondary'>Back</button></div>";
+      const box = document.getElementById("prob");
+      box.value = state.problem || "";
+      document.getElementById("go").onclick = () => {
+        const v = box.value.trim();
+        if (!v) { box.focus(); return; }
+        state.problem = v;
+        state.messages = [
+          { who: "me", text: v },
+          { who: "bee", text: "Got it — I'll treat this as a " + (t ? t.name : "") + " job. In the full product this is a live chat with your job history. Here, your note is saved. Nothing is sent or started until you approve a draft." },
+        ];
+        state.screen = "chat";
+        render();
+      };
+      document.getElementById("back").onclick = () => { state.screen = "pick"; render(); };
+    }
+
+    function goChat() {
+      const t = TEMPLATES.find((x) => x.id === state.template);
+      setPhase("Talk it through");
+      const msgs = (state.messages || []).map((m) => "<div class='bubble" + (m.who === "me" ? " me" : "") + "'>" + String(m.text).replace(/</g,"&lt;").replace(/\n/g,"<br>") + "</div>").join("");
+      document.getElementById("app").innerHTML =
+        "<h1>" + (t ? t.name : "Job") + "</h1>" +
+        msgs +
+        "<textarea id='more' rows='3' placeholder='Add more…'></textarea>" +
+        "<div class='row'><button id='send'>Send</button><button id='jobsbtn' class='secondary'>Back to your jobs</button></div>" +
+        "<p class='muted'>This is a stand-in for Talk to BeeZilla. It does not call Honcho yet.</p>";
+      document.getElementById("send").onclick = () => {
+        const v = document.getElementById("more").value.trim();
+        if (!v) return;
+        state.messages = state.messages || [];
+        state.messages.push({ who: "me", text: v });
+        state.messages.push({ who: "bee", text: "Saved. Full chat + memory comes with accounts and Honcho." });
+        render();
+      };
+      document.getElementById("jobsbtn").onclick = () => { state.screen = "jobs"; render(); };
+    }
+
+    function goIntro() {
+      goPick();
     }
 
     function goAsk() {
@@ -443,7 +527,9 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
 
     function render() {
       if (state.screen === "jobs") goJobs();
-      else if (state.screen === "intro") goIntro();
+      else if (state.screen === "pick" || state.screen === "intro") goPick();
+      else if (state.screen === "problem") goProblem();
+      else if (state.screen === "chat") goChat();
       else if (state.screen === "ask") goAsk();
       else if (state.screen === "pause") goPause();
       else if (state.screen === "draft") goDraft();
