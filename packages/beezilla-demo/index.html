@@ -11,6 +11,11 @@
     header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); background: #fff; display:flex; justify-content:space-between; align-items:baseline; }
     header strong { letter-spacing: .04em; }
     header span { color: var(--muted); font-size: .9rem; }
+    header a { color: inherit; }
+    label.filter { display: flex; align-items: center; gap: .4rem; font-size: .95rem; margin: .8rem 0; }
+    .jobrow { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; cursor: pointer; }
+    .jobrow:hover { border-color: #aaa; }
+    .tag { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
     main { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
     h1 { font-size: 1.7rem; margin: 0 0 .5rem; }
     h2 { font-size: 1.2rem; margin: 1.5rem 0 .5rem; }
@@ -35,7 +40,7 @@
 <body>
   <header>
     <strong>BeeZilla</strong>
-    <span><a href="#remember" id="memLink">What BeeZilla remembers</a> · <span id="phaseLabel">Just talk it through</span></span>
+    <span><a href="#jobs" id="jobsLink">Your jobs</a> · <a href="#remember" id="memLink">What BeeZilla remembers</a> · <span id="phaseLabel">Your jobs</span></span>
   </header>
   <main id="app"></main>
   <script src="sow-pdf.js"></script>
@@ -57,38 +62,122 @@
       { id: "hand", title: "Hand it over" },
     ];
 
-    const STORAGE_KEY = "beezilla-dana-v1";
+    const STORAGE_KEY = "beezilla-jobs-v1";
+    const LEGACY_KEY = "beezilla-dana-v1";
+
+    function emptyJob(id) {
+      return {
+        id: id || ("job_" + Date.now()),
+        createdAt: Date.now(),
+        screen: "intro",
+        q: 0,
+        answers: {},
+        skipped: {},
+        version: 0,
+        approved: false,
+        pause: null,
+        board: { Waiting: [], Working: [], "Needs you": [], Done: [] },
+        events: [],
+      };
+    }
+
+    function jobComplete(j) {
+      return !!(j && j.screen === "result");
+    }
+
+    function jobTitle(j) {
+      const happened = (j.answers && j.answers.what_happened) || "";
+      if (happened) return happened.slice(0, 72);
+      if (j.approved) return "Fence paperwork (approved)";
+      if (j.q > 0) return "Fence paperwork (in progress)";
+      return "New job";
+    }
+
+    function jobStatus(j) {
+      if (jobComplete(j)) return "Done";
+      if (j.screen === "board") return "Working";
+      if (j.approved) return "Working";
+      if (j.screen === "draft") return "Needs you";
+      if (j.q > 0) return "In progress";
+      return "Not started";
+    }
+
+    const catalog = { currentId: null, hideCompleted: true, jobs: [] };
+    let state = emptyJob();
+
+    function snapshotCurrent() {
+      if (!state.id) return;
+      const copy = JSON.parse(JSON.stringify(state));
+      const i = catalog.jobs.findIndex((j) => j.id === copy.id);
+      if (i >= 0) catalog.jobs[i] = copy;
+      else catalog.jobs.unshift(copy);
+    }
 
     function saveState() {
+      snapshotCurrent();
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (_) { /* quota, private mode, etc. */ }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog));
+      } catch (_) { /* quota, private mode */ }
     }
 
     function loadState() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return false;
-        const saved = JSON.parse(raw);
-        if (saved && typeof saved === "object") {
-          Object.assign(state, saved);
-          return true;
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (saved && Array.isArray(saved.jobs)) {
+            catalog.jobs = saved.jobs;
+            catalog.hideCompleted = saved.hideCompleted !== false;
+            catalog.currentId = saved.currentId || (saved.jobs[0] && saved.jobs[0].id) || null;
+            const cur = catalog.jobs.find((j) => j.id === catalog.currentId);
+            if (cur) state = cur;
+            else if (catalog.jobs[0]) { state = catalog.jobs[0]; catalog.currentId = state.id; }
+            else { state = emptyJob(); catalog.jobs = [state]; catalog.currentId = state.id; }
+            if (!state.screen || state.screen === "intro") state.screen = "jobs";
+            return true;
+          }
         }
-      } catch (_) { /* corrupt data */ }
+        const legacy = localStorage.getItem(LEGACY_KEY);
+        if (legacy) {
+          const old = JSON.parse(legacy);
+          if (old && typeof old === "object") {
+            state = Object.assign(emptyJob("job_legacy"), old);
+            state.id = "job_legacy";
+            catalog.jobs = [state];
+            catalog.currentId = state.id;
+            state.screen = "jobs";
+            return true;
+          }
+        }
+      } catch (_) { /* corrupt */ }
+      state = emptyJob();
+      catalog.jobs = [state];
+      catalog.currentId = state.id;
+      state.screen = "jobs";
       return false;
     }
 
-    const state = {
-      screen: "intro",
-      q: 0,
-      answers: {},
-      skipped: {},
-      version: 0,
-      approved: false,
-      pause: null,
-      board: { Waiting: [], Working: [], "Needs you": [], Done: [] },
-      events: [],
-    };
+    function openJob(id) {
+      snapshotCurrent();
+      const j = catalog.jobs.find((x) => x.id === id);
+      if (!j) return;
+      state = j;
+      catalog.currentId = id;
+      if (state.screen === "jobs") {
+        state.screen = jobComplete(state) ? "result" : (state.q > 0 || state.version ? state.screen : "intro");
+        if (state.screen === "jobs") state.screen = "intro";
+      }
+      render();
+    }
+
+    function newJob() {
+      snapshotCurrent();
+      state = emptyJob();
+      catalog.jobs.unshift(state);
+      catalog.currentId = state.id;
+      state.screen = "intro";
+      render();
+    }
 
     loadState();
 
@@ -128,6 +217,34 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       ];
       notes.push("We could not confirm typical prices from two solid sources.");
       return notes;
+    }
+
+    function goJobs() {
+      setPhase("Your jobs");
+      snapshotCurrent();
+      const list = catalog.jobs.filter((j) => !(catalog.hideCompleted && jobComplete(j)));
+      const rows = list.length
+        ? list.map((j) => {
+            const when = new Date(j.createdAt || Date.now()).toLocaleDateString();
+            return "<div class='card jobrow' data-id='" + j.id + "'><div><strong>" + jobTitle(j).replace(/</g,"&lt;") + "</strong><p class='muted'>" + when + "</p></div><span class='tag'>" + jobStatus(j) + "</span></div>";
+          }).join("")
+        : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
+      document.getElementById("app").innerHTML =
+        "<h1>Your jobs</h1>" +
+        "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
+        "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
+        rows +
+        "<div class='row'><button id='newjob'>New job</button></div>" +
+        "<p class='muted'>Talk to BeeZilla with your history needs an account and Honcho. This page is the job list only.</p>";
+      document.getElementById("hideDone").onchange = () => {
+        catalog.hideCompleted = document.getElementById("hideDone").checked;
+        saveState();
+        goJobs();
+      };
+      document.getElementById("newjob").onclick = newJob;
+      document.querySelectorAll(".jobrow").forEach((el) => {
+        el.onclick = () => openJob(el.getAttribute("data-id"));
+      });
     }
 
     function goIntro() {
@@ -278,8 +395,9 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       document.getElementById("app").innerHTML =
         "<h1>What BeeZilla remembers</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
-        "<div class='card'><h2>Across jobs</h2><p>Nothing yet. This is a first job — BeeZilla does not pretend to know you.</p>" +
-        "<p class='muted'>Later: short facts you can read, correct, or forget. Not model names, not your wallet, not a hidden profile.</p></div>" +
+        "<div class='card'><h2>Across jobs</h2>" + (catalog.jobs.filter(jobComplete).length
+          ? "<ul>" + catalog.jobs.filter(jobComplete).map((j) => "<li>" + jobTitle(j).replace(/</g,"&lt;") + "</li>").join("") + "</ul><p class='muted'>This list is on this device. Honcho (the real across-jobs memory) is not wired to this demo.</p>"
+          : "<p>Nothing yet across jobs. BeeZilla does not pretend to know you.</p><p class='muted'>Later: short facts you can read, correct, or forget. Not model names, not your wallet.</p>") + "</div>" +
         "<div class='card'><h2>What is not stored</h2><ul><li>Model names and token counts</li><li>Wallet or payment details</li><li>Full interview dumps forever</li></ul></div>" +
         "<div class='row'><button id='forgetJob' class='secondary'>Forget this job</button><button id='back' class='secondary'>Back</button></div>";
       document.getElementById("forgetJob").onclick = () => {
@@ -303,7 +421,8 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         "<div class='row'><button id='dl'>Download editable copy</button><button id='dlpdf' class='secondary'>Download PDF</button></div>" +
         "<div class='card'><h2>Fairness notes</h2><ul>" + fairnessNotes().map((n) => "<li>" + n + "</li>").join("") + "</ul></div>" +
         "<p>What it cost: <strong>about $1.50</strong>.</p>" +
-        "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>";
+        "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>" +
+        "<div class='row'><button id='backjobs' class='secondary'>Back to your jobs</button></div>";
       document.getElementById("dl").onclick = () => {
         const blob = new Blob([sowText()], { type: "text/markdown" });
         const a = document.createElement("a");
@@ -319,10 +438,12 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         a.download = "fence-scope-of-work.pdf";
         a.click();
       };
+      document.getElementById("backjobs").onclick = () => { state.screen = "jobs"; render(); };
     }
 
     function render() {
-      if (state.screen === "intro") goIntro();
+      if (state.screen === "jobs") goJobs();
+      else if (state.screen === "intro") goIntro();
       else if (state.screen === "ask") goAsk();
       else if (state.screen === "pause") goPause();
       else if (state.screen === "draft") goDraft();
@@ -331,6 +452,11 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       else if (state.screen === "remember") goRemember();
       saveState();
     }
+    document.getElementById("jobsLink").onclick = (e) => {
+      e.preventDefault();
+      state.screen = "jobs";
+      render();
+    };
     document.getElementById("memLink").onclick = (e) => {
       e.preventDefault();
       state.screen = "remember";
