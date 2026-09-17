@@ -1,0 +1,4 @@
+:{$PORT}
+root * .
+file_server
+encode gzip
