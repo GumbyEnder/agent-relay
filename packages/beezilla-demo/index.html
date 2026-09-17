@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — fence paperwork</title>
+  <style>
+    :root { --ink:#111; --muted:#555; --line:#ddd; --gold:#e6b800; --bg:#fafafa; }
+    * { box-sizing: border-box; }
+    body { font-family: Georgia, "Times New Roman", serif; color: var(--ink); background: var(--bg); margin: 0; }
+    header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); background: #fff; display:flex; justify-content:space-between; align-items:baseline; }
+    header strong { letter-spacing: .04em; }
+    header span { color: var(--muted); font-size: .9rem; }
+    main { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size: 1.7rem; margin: 0 0 .5rem; }
+    h2 { font-size: 1.2rem; margin: 1.5rem 0 .5rem; }
+    p, li { line-height: 1.45; }
+    .muted { color: var(--muted); }
+    button { font: inherit; padding: .55rem 1rem; border: 1px solid #222; background: #111; color: #fff; cursor: pointer; }
+    button.secondary { background: #fff; color: #111; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    textarea, input { width: 100%; font: inherit; padding: .6rem; border: 1px solid #bbb; }
+    .row { display: flex; gap: .6rem; margin-top: 1rem; flex-wrap: wrap; }
+    .card { background: #fff; border: 1px solid var(--line); padding: 1rem 1.1rem; margin: .7rem 0; }
+    .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; }
+    @media (max-width: 800px) { .board { grid-template-columns: 1fr 1fr; } }
+    .col { background: #fff; border: 1px solid var(--line); min-height: 8rem; padding: .6rem; }
+    .col h3 { margin: 0 0 .5rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; }
+    .chip { border: 1px solid #ccc; padding: .45rem .5rem; margin: .35rem 0; font-size: .9rem; background: #fff; }
+    .chip.working { border-color: var(--gold); }
+    .hidden { display: none; }
+    .preview { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: .82rem; background: #f4f4f4; padding: .8rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>BeeZilla</strong>
+    <span id="phaseLabel">Just talk it through</span>
+  </header>
+  <main id="app"></main>
+  <script>
+    const QUESTIONS = [
+      { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
+      { id: "rough_size", prompt: "Roughly how much fence are we talking? Feet, or just 'about a backyard' is fine.", def: "Typical residential yard, single line." },
+      { id: "material_supplier", prompt: "Who's getting the materials — you or the contractor?", def: "Contractor supplies." },
+      { id: "budget_range", prompt: "Got a budget range in mind? Ballpark is fine.", def: "No stated budget — quotes will define it." },
+      { id: "timing", prompt: "When do you need this done by?", def: "Flexible timing." },
+      { id: "done_right_check", prompt: "How will you know when it's done right — what would you check?", def: "Fence straight, panels secure, gates work." },
+      { id: "quote_count", prompt: "Getting quotes from a few contractors, or just this one?", def: "Comparing quotes — itemized." },
+      { id: "exclusions", prompt: "Anything you definitely don't want done?", def: "No exclusions." },
+    ];
+    const STEPS = [
+      { id: "write", title: "Write the scope of work" },
+      { id: "fair", title: "Check it for fairness" },
+      { id: "format", title: "Format the documents" },
+      { id: "hand", title: "Hand it over" },
+    ];
+
+    const state = {
+      screen: "intro",
+      q: 0,
+      answers: {},
+      skipped: {},
+      version: 0,
+      approved: false,
+      pause: null,
+      board: { Waiting: [], Working: [], "Needs you": [], Done: [] },
+      events: [],
+    };
+
+    const $ = (html) => { document.getElementById("app").innerHTML = html; };
+    const setPhase = (t) => { document.getElementById("phaseLabel").textContent = t; };
+
+    function parseBudget(s) {
+      const n = String(s || "").replace(/,/g, "").match(/(\d+)/);
+      return n ? Number(n[1]) : null;
+    }
+
+    function sowText() {
+      const a = state.answers;
+      return `Scope of Work — Fence repair
+Prepared for: Dana (homeowner)
+Status: ${state.approved ? "Approved — for quotes" : "Draft — not started"}
+Version: v${state.version}
+
+What happened: ${a.what_happened}
+Size: ${a.rough_size}
+Materials: ${a.material_supplier}
+Budget: ${a.budget_range}
+Timing: ${a.timing}
+Done right means: ${a.done_right_check}
+Quotes: ${a.quote_count}
+Please don't: ${a.exclusions}
+
+This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or sending this out.`;
+    }
+
+    function fairnessNotes() {
+      const b = parseBudget(state.answers.budget_range);
+      const notes = [
+        "Written extras need your OK before they happen — that protects you.",
+        "Itemized quotes (materials vs labor) make it easier to compare people.",
+      ];
+      if (b != null && b < 400) notes.push("Your number is below what fence repairs like this often run ($400–$1,000). We paused to check that.");
+      else notes.push("Typical fence repairs like this often run about $400–$1,000 depending on materials.");
+      return notes;
+    }
+
+    function goIntro() {
+      setPhase("Just talk it through");
+      document.getElementById("app").innerHTML =
+        "<h1>Tell me what happened</h1>" +
+        "<p>I'll put together the paperwork for hiring someone to fix the fence. Eight quick questions. Skip any of them — I'll fill in a sensible answer.</p>" +
+        "<p class='muted'>Nothing is sent, hired, or started until you approve a full draft.</p>" +
+        "<div class='row'><button id='go'>Let's go</button></div>";
+      document.getElementById("go").onclick = () => { state.screen = "ask"; render(); };
+    }
+
+    function goAsk() {
+      const q = QUESTIONS[state.q];
+      setPhase("Question " + (state.q + 1) + " of 8");
+      document.getElementById("app").innerHTML =
+        "<p class='muted'>You can skip this. I'll use a default.</p>" +
+        "<h1>" + q.prompt + "</h1>" +
+        "<textarea id='ans' rows='4' placeholder='Type here…'></textarea>" +
+        "<div class='row'><button id='next'>Continue</button><button id='skip' class='secondary'>Skip</button></div>";
+      document.getElementById("next").onclick = () => submitQ(false);
+      document.getElementById("skip").onclick = () => submitQ(true);
+    }
+
+    function submitQ(skip) {
+      const q = QUESTIONS[state.q];
+      const val = skip ? q.def : (document.getElementById("ans").value.trim() || q.def);
+      if (skip) state.skipped[q.id] = true;
+      state.answers[q.id] = val;
+      const b = parseBudget(val);
+      if (q.id === "budget_range" && b != null && b < 400) {
+        state.pause = { question: "You said around $" + b + ". Fence work like this often runs $400–$1,000. Stay at your number, or stay flexible?" };
+        state.screen = "pause";
+        render();
+        return;
+      }
+      state.q += 1;
+      if (state.q >= QUESTIONS.length) { buildDraft(); state.screen = "draft"; }
+      render();
+    }
+
+    function goPause() {
+      setPhase("Needs you");
+      document.getElementById("app").innerHTML =
+        "<h1>Before we go further</h1><p>" + state.pause.question + "</p>" +
+        "<div class='row'><button id='flex'>My budget is flexible</button>" +
+        "<button id='stay' class='secondary'>I need to stay at my number</button></div>" +
+        "<p class='muted'>This pause does not start any work and does not create extra steps.</p>";
+      document.getElementById("flex").onclick = () => {
+        state.answers.budget_range = (state.answers.budget_range || "") + " (flexible)";
+        state.pause = null; state.q += 1;
+        if (state.q >= QUESTIONS.length) { buildDraft(); state.screen = "draft"; }
+        render();
+      };
+      document.getElementById("stay").onclick = () => {
+        state.pause = null; state.q += 1;
+        if (state.q >= QUESTIONS.length) { buildDraft(); state.screen = "draft"; }
+        render();
+      };
+    }
+
+    function buildDraft() {
+      state.version += 1;
+      state.approved = false;
+      state.events.push({ type: "draft_version", version: "v" + state.version, at: Date.now() });
+    }
+
+    function goDraft() {
+      setPhase("Check this before anything starts");
+      const notes = fairnessNotes().map((n) => "<li>" + n + "</li>").join("");
+      document.getElementById("app").innerHTML =
+        "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
+        "<div class='card'><h2>What you asked for</h2><p>Write a plain-language scope of work for fence repair so you can get fair quotes without getting taken.</p></div>" +
+        "<div class='card'><h2>The plan, in steps</h2><ol>" +
+        "<li>Ask a few short questions (done)</li><li>Write the scope of work</li><li>Check it for fairness</li><li>PDF + an editable copy</li></ol></div>" +
+        "<div class='card'><h2>Document preview</h2><div class='preview'>" + sowText().replace(/</g,"&lt;") + "</div></div>" +
+        "<div class='card'><h2>Typical cost check</h2><p>Fence repairs like this usually run about $400–$1,000. BeeZilla putting this paperwork together is <strong>about $1–3</strong> (about $0.50 held for a second check if needed).</p></div>" +
+        "<div class='card'><h2>Fairness notes</h2><ul>" + notes + "</ul></div>" +
+        "<div class='card'><h2>What happens after you approve</h2><p>BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.</p></div>" +
+        "<p class='muted'>Draft version v" + state.version + " — hidden from a normal glance, shown here so testers can see Change something bumps it.</p>" +
+        "<div class='row'><button id='ok'>Approve — go ahead</button><button id='chg' class='secondary'>Change something</button></div>";
+      document.getElementById("ok").onclick = approve;
+      document.getElementById("chg").onclick = () => {
+        state.q = 0; state.screen = "ask"; state.approved = false; render();
+      };
+    }
+
+    function approve() {
+      state.events.push({ type: "approval", gate: "first_ticket_cut", version: "v" + state.version, at: Date.now(), missions: [] });
+      state.approved = true;
+      state.board = {
+        Waiting: [{ title: STEPS[1].title }, { title: STEPS[2].title }, { title: STEPS[3].title }],
+        Working: [{ title: STEPS[0].title }],
+        "Needs you": [],
+        Done: [],
+      };
+      state.screen = "board";
+      render();
+      runWork();
+    }
+
+    function runWork() {
+      const order = ["write", "fair", "format", "hand"];
+      let i = 0;
+      const tick = () => {
+        if (!state.approved || state.screen !== "board") return;
+        if (i === 0) {
+          move("Working", "Done", STEPS[0].title);
+          move("Waiting", "Working", STEPS[1].title);
+        } else if (i === 1) {
+          move("Working", "Done", STEPS[1].title);
+          move("Waiting", "Working", STEPS[2].title);
+        } else if (i === 2) {
+          move("Working", "Done", STEPS[2].title);
+          move("Waiting", "Working", STEPS[3].title);
+        } else {
+          move("Working", "Done", STEPS[3].title);
+          state.screen = "result";
+        }
+        i += 1;
+        render();
+        if (state.screen === "board") setTimeout(tick, 1400);
+      };
+      setTimeout(tick, 1400);
+    }
+
+    function move(from, to, title) {
+      state.board[from] = state.board[from].filter((c) => c.title !== title);
+      state.board[to].push({ title: title });
+    }
+
+    function goBoard() {
+      setPhase("Watch the work move");
+      const cols = ["Waiting", "Working", "Needs you", "Done"].map((name) => {
+        const chips = (state.board[name] || []).map((c) => "<div class='chip" + (name === "Working" ? " working" : "") + "'>" + c.title + "</div>").join("") || "<p class='muted'>None</p>";
+        return "<div class='col'><h3>" + name + "</h3>" + chips + "</div>";
+      }).join("");
+      document.getElementById("app").innerHTML =
+        "<h1>Watch the work move</h1><p class='muted'>These steps only exist because you approved the draft.</p>" +
+        "<div class='board'>" + cols + "</div>";
+    }
+
+    function goResult() {
+      setPhase("Your documents are ready");
+      document.getElementById("app").innerHTML =
+        "<h1>Your documents are ready.</h1>" +
+        "<p>Download the editable copy. Print it if you want a PDF for now.</p>" +
+        "<div class='row'><button id='dl'>Download editable copy</button></div>" +
+        "<div class='card'><h2>Fairness notes</h2><ul>" + fairnessNotes().map((n) => "<li>" + n + "</li>").join("") + "</ul></div>" +
+        "<p>What it cost: <strong>about $1.50</strong>.</p>" +
+        "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>";
+      document.getElementById("dl").onclick = () => {
+        const blob = new Blob([sowText()], { type: "text/markdown" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "fence-scope-of-work.md";
+        a.click();
+      };
+    }
+
+    function render() {
+      if (state.screen === "intro") goIntro();
+      else if (state.screen === "ask") goAsk();
+      else if (state.screen === "pause") goPause();
+      else if (state.screen === "draft") goDraft();
+      else if (state.screen === "board") goBoard();
+      else if (state.screen === "result") goResult();
+    }
+    render();
+  </script>
+</body>
+</html>
