@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BeeZilla — fence paperwork</title>
+  <title>BeeZilla</title>
   <style>
     :root { --ink:#111; --muted:#555; --line:#ddd; --gold:#e6b800; --bg:#fafafa; }
     * { box-sizing: border-box; }
@@ -46,7 +46,7 @@
 <body>
   <header>
     <strong>BeeZilla</strong>
-    <span><a href="#jobs" id="jobsLink">Your jobs</a> · <a href="#remember" id="memLink">What BeeZilla remembers</a> · <span id="phaseLabel">Your jobs</span></span>
+    <span><a href="#jobs" id="jobsLink">Your jobs</a> · <a href="#talk" id="talkLink">Talk to BeeZilla</a> · <a href="#remember" id="memLink">What BeeZilla remembers</a> · <span id="phaseLabel">Your jobs</span></span>
   </header>
   <main id="app"></main>
   <script src="sow-pdf.js"></script>
@@ -113,7 +113,7 @@
       return "Not started";
     }
 
-    const catalog = { currentId: null, hideCompleted: true, jobs: [] };
+    const catalog = { currentId: null, hideCompleted: true, jobs: [], userId: null };
     let state = emptyJob();
 
     function snapshotCurrent() {
@@ -139,6 +139,7 @@
           if (saved && Array.isArray(saved.jobs)) {
             catalog.jobs = saved.jobs;
             catalog.hideCompleted = saved.hideCompleted !== false;
+            catalog.userId = saved.userId || catalog.userId;
             catalog.currentId = saved.currentId || (saved.jobs[0] && saved.jobs[0].id) || null;
             const cur = catalog.jobs.find((j) => j.id === catalog.currentId);
             if (cur) state = cur;
@@ -194,6 +195,7 @@
     }
 
     loadState();
+    if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
     const setPhase = (t) => { document.getElementById("phaseLabel").textContent = t; };
@@ -483,6 +485,7 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
           ? "<ul>" + catalog.jobs.filter(jobComplete).map((j) => "<li>" + jobTitle(j).replace(/</g,"&lt;") + "</li>").join("") + "</ul><p class='muted'>This list is on this device. Honcho (the real across-jobs memory) is not wired to this demo.</p>"
           : "<p>Nothing yet across jobs. BeeZilla does not pretend to know you.</p><p class='muted'>Later: short facts you can read, correct, or forget. Not model names, not your wallet.</p>") + "</div>" +
         "<div class='card'><h2>What is not stored</h2><ul><li>Model names and token counts</li><li>Wallet or payment details</li><li>Full interview dumps forever</li></ul></div>" +
+        "<p class='muted'>Device id (will be your Honcho peer later): " + (catalog.userId || "—") + "</p>" +
         "<div class='row'><button id='forgetJob' class='secondary'>Forget this job</button><button id='back' class='secondary'>Back</button></div>";
       document.getElementById("forgetJob").onclick = () => {
         state.answers = {};
@@ -541,6 +544,13 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
     document.getElementById("jobsLink").onclick = (e) => {
       e.preventDefault();
       state.screen = "jobs";
+      render();
+    };
+    document.getElementById("talkLink").onclick = (e) => {
+      e.preventDefault();
+      if (state.problem) state.screen = "chat";
+      else if (state.template) state.screen = "problem";
+      else { newJob(); return; }
       render();
     };
     document.getElementById("memLink").onclick = (e) => {
