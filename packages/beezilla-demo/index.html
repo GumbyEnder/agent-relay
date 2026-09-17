@@ -38,6 +38,7 @@
     <span><a href="#remember" id="memLink">What BeeZilla remembers</a> · <span id="phaseLabel">Just talk it through</span></span>
   </header>
   <main id="app"></main>
+  <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
       { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
@@ -98,11 +99,11 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
     function fairnessNotes() {
       const b = parseBudget(state.answers.budget_range);
       const notes = [
+        "This is a guide, not legal advice — it helps you ask better questions.",
         "Written extras need your OK before they happen — that protects you.",
-        "Itemized quotes (materials vs labor) make it easier to compare people.",
+        "Compare every quote you get against this document.",
       ];
-      if (b != null && b < 400) notes.push("Your number is below what fence repairs like this often run ($400–$1,000). We paused to check that.");
-      else notes.push("Typical fence repairs like this often run about $400–$1,000 depending on materials.");
+      notes.push("We could not confirm typical prices from two solid sources.");
       return notes;
     }
 
@@ -134,8 +135,8 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       if (skip) state.skipped[q.id] = true;
       state.answers[q.id] = val;
       const b = parseBudget(val);
-      if (q.id === "budget_range" && b != null && b < 400) {
-        state.pause = { question: "You said around $" + b + ". Fence work like this often runs $400–$1,000. Stay at your number, or stay flexible?" };
+      if (q.id === "budget_range" && b != null) {
+        state.pause = { question: "You said around $" + b + ". We could not confirm typical prices from two solid sources. Stay at your number, or stay flexible?" };
         state.screen = "pause";
         render();
         return;
@@ -176,11 +177,11 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       const notes = fairnessNotes().map((n) => "<li>" + n + "</li>").join("");
       document.getElementById("app").innerHTML =
         "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
-        "<div class='card'><h2>What you asked for</h2><p>Write a plain-language scope of work for fence repair so you can get fair quotes without getting taken.</p></div>" +
+        "<div class='card'><h2>What you asked for</h2><p>You want a clear scope of work so fence quotes are easy to compare.</p></div>" +
         "<div class='card'><h2>The plan, in steps</h2><ol>" +
-        "<li>Ask a few short questions (done)</li><li>Write the scope of work</li><li>Check it for fairness</li><li>PDF + an editable copy</li></ol></div>" +
+        "<li>Answer a few questions about your fence (done)</li><li>I'll turn your answers into a plain-language scope of work</li><li>Review the draft and approve it — nothing goes out until you do</li><li>Once approved, watch it through Waiting, Working, Needs you, and Done</li></ol></div>" +
         "<div class='card'><h2>Document preview</h2><div class='preview'>" + sowText().replace(/</g,"&lt;") + "</div></div>" +
-        "<div class='card'><h2>Typical cost check</h2><p>Fence repairs like this usually run about $400–$1,000. BeeZilla putting this paperwork together is <strong>about $1–3</strong> (about $0.50 held for a second check if needed).</p></div>" +
+        "<div class='card'><h2>Typical cost check</h2><p>We could not confirm typical prices from two solid sources.</p><p>Putting this paperwork together is <strong>about $1–3</strong>.</p></div>" +
         "<div class='card'><h2>Fairness notes</h2><ul>" + notes + "</ul></div>" +
         "<div class='card'><h2>What happens after you approve</h2><p>BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.</p></div>" +
         "<p class='muted'>Draft version v" + state.version + " — hidden from a normal glance, shown here so testers can see Change something bumps it.</p>" +
@@ -269,8 +270,8 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       setPhase("Your documents are ready");
       document.getElementById("app").innerHTML =
         "<h1>Your documents are ready.</h1>" +
-        "<p>Download the editable copy. Print it if you want a PDF for now.</p>" +
-        "<div class='row'><button id='dl'>Download editable copy</button></div>" +
+        "<p>Download the editable copy and a PDF.</p>" +
+        "<div class='row'><button id='dl'>Download editable copy</button><button id='dlpdf' class='secondary'>Download PDF</button></div>" +
         "<div class='card'><h2>Fairness notes</h2><ul>" + fairnessNotes().map((n) => "<li>" + n + "</li>").join("") + "</ul></div>" +
         "<p>What it cost: <strong>about $1.50</strong>.</p>" +
         "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>";
@@ -279,6 +280,14 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = "fence-scope-of-work.md";
+        a.click();
+      };
+      document.getElementById("dlpdf").onclick = () => {
+        const bytes = window.beezillaSowPdf(sowText());
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "fence-scope-of-work.pdf";
         a.click();
       };
     }
