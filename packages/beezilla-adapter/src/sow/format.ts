@@ -183,6 +183,102 @@ function pdfTextEncode(str: string): string {
     .replace(/\n/g, "\\n");
 }
 
+// ---------------------------------------------------------------------------
+// fromInterview — map sow-questions.json ids → SowAnswers
+// ---------------------------------------------------------------------------
+
+/**
+ * Map interview-question ids (from sow-questions.json) into a SowAnswers
+ * object.  Missing / blank answers fall back to the question's default.
+ * Fields that require multiple values (done criteria, exclusions) are
+ * joined from a single answer using newline splitting.
+ */
+export function fromInterview(
+  answers: Record<string, string>,
+  defaults: Record<string, string> = {},
+): SowAnswers {
+  const get = (id: string): string => answers[id] ?? defaults[id] ?? "";
+
+  // Helper: split a multi-line answer into parts, pad with "N/A"
+  const parts = (id: string, n: number): string[] =>
+    get(id)
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .concat(Array(n).fill("N/A"))
+      .slice(0, n);
+
+  const date = new Date().toISOString().split("T")[0];
+
+  return {
+    // Section 1 — interview notes
+    clientName: "Dana",
+    propertyAddress: get("property_address") ?? "",
+    date,
+    whatTheyWant: get("what_happened") ?? defaults["what_happened"] ?? "",
+    whyNow: get("why_now") ?? defaults["why_now"] ?? "",
+    propertyDetails: get("rough_size"),
+    householdDetails: get("household_details") ?? "",
+    stylePreference: get("style_preference") ?? "",
+    heightAndLook: get("height_and_look") ?? "",
+    gates: get("gates") ?? "",
+    timeline: get("timing"),
+    budgetRange: get("budget_range"),
+    propertyLineNotes: get("property_line_notes") ?? "",
+    groundConditions: get("ground_conditions") ?? "",
+    obstacles: get("obstacles") ?? "",
+    utilityLocateStatus: get("utility_locate_status") ?? "",
+    existingFenceStatus: get("existing_fence_status") ?? "",
+    photoReferences: get("photo_references") ?? "",
+
+    // Section 3 — done criteria (up to 5)
+    ...Object.fromEntries(
+      Array.from({ length: 5 }, (_, i) => {
+        const vals = parts("done_right_check", 5);
+        return [`doneCriterion${i + 1}` as keyof SowAnswers, vals[i]];
+      }),
+    ) as any,
+    walkthroughArrangement: get("walkthrough_arrangement") || "Client walk-through on completion",
+
+    // Section 4 — exclusions (up to 5)
+    ...Object.fromEntries(
+      Array.from({ length: 5 }, (_, i) => {
+        const vals = parts("exclusions", 5);
+        return [`exclusion${i + 1}` as keyof SowAnswers, vals[i]];
+      }),
+    ) as any,
+    permitResponsibility: get("permit_responsibility") ?? "Contractor to pull permit",
+
+    // Section 5 — quote (line items left blank for contractor fill-in)
+    item1: "",
+    item1Desc: "",
+    item1Qty: "",
+    item1Unit: "",
+    item1Total: "",
+    item2: "",
+    item2Desc: "",
+    item2Qty: "",
+    item2Unit: "",
+    item2Total: "",
+    item3: "",
+    item3Desc: "",
+    item3Qty: "",
+    item3Unit: "",
+    item3Total: "",
+    haulDesc: get("haul_description") ?? "",
+    haulQty: "",
+    haulUnit: "",
+    haulTotal: "",
+    subtotal: "",
+    tax: "",
+    total: "",
+    paymentTerms: get("payment_terms") ?? "Negotiable",
+    estimatedStart: get("estimated_start") ?? "",
+    estimatedDuration: get("estimated_duration") ?? "",
+    postDepth: get("post_depth") || "24 inches",
+  };
+}
+
 /**
  * Convert markdown text to a simple multi-page PDF with monospaced text
  * rendered line-by-line.  No fonts, no images — just a stream of text
