@@ -62,10 +62,17 @@
       { id: "exclusions", prompt: "Anything you definitely don't want done?", def: "No exclusions." },
     ];
     const STEPS = [
-      { id: "write", title: "Write the scope of work" },
+      { id: "write", title: "Write the draft" },
       { id: "fair", title: "Check it for fairness" },
       { id: "format", title: "Format the documents" },
       { id: "hand", title: "Hand it over" },
+    ];
+    const TEMPLATES = [
+      { id: "legal", name: "Legal", hint: "Letters, agreements, notices — not legal advice." },
+      { id: "finance", name: "Finance", hint: "Budgets, invoices, money questions." },
+      { id: "creative", name: "Creative writing", hint: "Stories, scripts, copy." },
+      { id: "technical", name: "Technical", hint: "Explainers, specs, how-it-works." },
+      { id: "code", name: "Code", hint: "Scripts and programming help." },
     ];
 
     const STORAGE_KEY = "beezilla-jobs-v1";
@@ -205,10 +212,18 @@
       return n ? Number(n[1]) : null;
     }
 
-    function sowText() {
+    function templateName() {
+      const t = TEMPLATES.find((x) => x.id === state.template);
+      return (t && t.name) || "Job";
+    }
+
+    function draftDoc() {
+      if (state.problem) {
+        return templateName() + " draft\nStatus: " + (state.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + state.version + "\n\nWhat you asked for:\n" + state.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";
+      }
       const a = state.answers;
       return `Scope of Work — Fence repair
-Prepared for: Dana (homeowner)
+Prepared for: you (homeowner)
 Status: ${state.approved ? "Approved — for quotes" : "Draft — not started"}
 Version: v${state.version}
 
@@ -221,7 +236,7 @@ Done right means: ${a.done_right_check}
 Quotes: ${a.quote_count}
 Please don't: ${a.exclusions}
 
-This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or sending this out.`;
+This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or sending this out.`;
     }
 
     function fairnessNotes() {
@@ -229,7 +244,7 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
       const notes = [
         "This is a guide, not legal advice — it helps you ask better questions.",
         "Written extras need your OK before they happen — that protects you.",
-        "Compare every quote you get against this document.",
+        "You stay in control of what gets sent.",
       ];
       notes.push("We could not confirm typical prices from two solid sources.");
       return notes;
@@ -262,14 +277,6 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         el.onclick = () => openJob(el.getAttribute("data-id"));
       });
     }
-
-    const TEMPLATES = [
-      { id: "legal", name: "Legal", hint: "Letters, agreements, notices — not legal advice." },
-      { id: "finance", name: "Finance", hint: "Budgets, invoices, money questions." },
-      { id: "creative", name: "Creative writing", hint: "Stories, scripts, copy." },
-      { id: "technical", name: "Technical", hint: "Explainers, specs, how-it-works." },
-      { id: "code", name: "Code", hint: "Scripts and programming help." },
-    ];
 
     function goPick() {
       setPhase("New job");
@@ -310,7 +317,7 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         state.problem = v;
         state.messages = [
           { who: "me", text: v },
-          { who: "bee", text: "Got it — I'll treat this as a " + (t ? t.name : "") + " job. In the full product this is a live chat with your job history. Here, your note is saved. Nothing is sent or started until you approve a draft." },
+          { who: "bee", text: "Got it — I'll treat this as a " + (t ? t.name : "") + " job. When you're ready, I'll show a full draft. Nothing starts until you approve it." },
         ];
         state.screen = "chat";
         render();
@@ -326,14 +333,28 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         "<h1>" + (t ? t.name : "Job") + "</h1>" +
         msgs +
         "<textarea id='more' rows='3' placeholder='Add more…'></textarea>" +
-        "<div class='row'><button id='send'>Send</button><button id='jobsbtn' class='secondary'>Back to your jobs</button></div>" +
-        "<p class='muted'>This is a stand-in for Talk to BeeZilla. It does not call Honcho yet.</p>";
+        "<div class='row'><button id='draft'>Show the draft</button><button id='send'>Send</button><button id='jobsbtn' class='secondary'>Back to your jobs</button></div>" +
+        "<p class='muted'>Approve the draft next — that's when the board appears.</p>";
+      document.getElementById("draft").onclick = () => {
+        buildDraft();
+        state.screen = "draft";
+        render();
+      };
       document.getElementById("send").onclick = () => {
         const v = document.getElementById("more").value.trim();
-        if (!v) return;
+        if (!v) {
+          if (state.problem) {
+            buildDraft();
+            state.screen = "draft";
+            render();
+          }
+          return;
+        }
         state.messages = state.messages || [];
         state.messages.push({ who: "me", text: v });
-        state.messages.push({ who: "bee", text: "Saved. Full chat + memory comes with accounts and Honcho." });
+        state.problem = (state.problem ? state.problem + "\n\n" : "") + v;
+        buildDraft();
+        state.screen = "draft";
         render();
       };
       document.getElementById("jobsbtn").onclick = () => { state.screen = "jobs"; render(); };
@@ -401,20 +422,31 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
     function goDraft() {
       setPhase("Check this before anything starts");
       const notes = fairnessNotes().map((n) => "<li>" + n + "</li>").join("");
+      const echo = state.problem
+        ? state.problem.replace(/</g, "&lt;").replace(/\n/g, "<br>")
+        : "You want a clear scope of work so fence quotes are easy to compare.";
+      const plan = state.problem
+        ? "<li>You described the problem (done)</li><li>I'll turn that into a plain-language draft</li><li>You approve it — nothing goes out until you do</li><li>Then watch it through Waiting, Working, Needs you, and Done</li>"
+        : "<li>Answer a few questions about your fence (done)</li><li>I'll turn your answers into a plain-language scope of work</li><li>Review the draft and approve it — nothing goes out until you do</li><li>Once approved, watch it through Waiting, Working, Needs you, and Done</li>";
+      const after = state.problem
+        ? "BeeZilla finishes the draft, double-checks it, and hands you files. You'll see each step on the board."
+        : "BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.";
       document.getElementById("app").innerHTML =
         "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
-        "<div class='card'><h2>What you asked for</h2><p>You want a clear scope of work so fence quotes are easy to compare.</p></div>" +
-        "<div class='card'><h2>The plan, in steps</h2><ol>" +
-        "<li>Answer a few questions about your fence (done)</li><li>I'll turn your answers into a plain-language scope of work</li><li>Review the draft and approve it — nothing goes out until you do</li><li>Once approved, watch it through Waiting, Working, Needs you, and Done</li></ol></div>" +
-        "<div class='card'><h2>Document preview</h2><div class='preview'>" + sowText().replace(/</g,"&lt;") + "</div></div>" +
+        "<div class='card'><h2>What you asked for</h2><p>" + echo + "</p></div>" +
+        "<div class='card'><h2>The plan, in steps</h2><ol>" + plan + "</ol></div>" +
+        "<div class='card'><h2>Document preview</h2><div class='preview'>" + draftDoc().replace(/</g,"&lt;") + "</div></div>" +
         "<div class='card'><h2>Typical cost check</h2><p>We could not confirm typical prices from two solid sources.</p><p>Putting this paperwork together is <strong>about $1–3</strong>.</p></div>" +
         "<div class='card'><h2>Fairness notes</h2><ul>" + notes + "</ul></div>" +
-        "<div class='card'><h2>What happens after you approve</h2><p>BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.</p></div>" +
-        "<p class='muted'>Draft version v" + state.version + " — hidden from a normal glance, shown here so testers can see Change something bumps it.</p>" +
+        "<div class='card'><h2>What happens after you approve</h2><p>" + after + "</p></div>" +
+        "<p class='muted'>Draft version v" + state.version + "</p>" +
         "<div class='row'><button id='ok'>Approve — go ahead</button><button id='chg' class='secondary'>Change something</button></div>";
       document.getElementById("ok").onclick = approve;
       document.getElementById("chg").onclick = () => {
-        state.q = 0; state.screen = "ask"; state.approved = false; render();
+        state.approved = false;
+        state.screen = state.template ? "problem" : "ask";
+        if (!state.template) state.q = 0;
+        render();
       };
     }
 
@@ -511,18 +543,18 @@ This is paperwork Dana can hand to contractors. BeeZilla is not hiring anyone or
         "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>" +
         "<div class='row'><button id='backjobs' class='secondary'>Back to your jobs</button></div>";
       document.getElementById("dl").onclick = () => {
-        const blob = new Blob([sowText()], { type: "text/markdown" });
+        const blob = new Blob([draftDoc()], { type: "text/markdown" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = "fence-scope-of-work.md";
+        a.download = (state.template || "job") + "-draft.md";
         a.click();
       };
       document.getElementById("dlpdf").onclick = () => {
-        const bytes = window.beezillaSowPdf(sowText());
+        const bytes = window.beezillaSowPdf(draftDoc());
         const blob = new Blob([bytes], { type: "application/pdf" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = "fence-scope-of-work.pdf";
+        a.download = (state.template || "job") + "-draft.pdf";
         a.click();
       };
       document.getElementById("backjobs").onclick = () => { state.screen = "jobs"; render(); };
