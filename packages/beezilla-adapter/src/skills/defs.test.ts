@@ -1,18 +1,26 @@
 /**
  * BeeZilla — getSkill tests.
  *
- * Verifies that the three core civilian skills (interview, doc-draft,
- * plain-language) exist in the catalog with dana_sow=true, nonempty
- * civilian_name, and no github in their ids.
+ * Verifies that all civilian skills exist in the catalog with
+ * dana_sow=true, nonempty civilian_name, and no github/railway in their ids.
  */
 
 import { describe, it, expect } from "vitest";
 import { getSkill } from "./defs.js";
 
 describe("getSkill", () => {
-  const requiredSkills = ["interview", "doc-draft", "plain-language"];
+  const allSkills = [
+    "interview",
+    "doc-draft",
+    "plain-language",
+    "research",
+    "rates-research",
+    "source-verify",
+    "fairness-review",
+    "doc-format",
+  ];
 
-  for (const id of requiredSkills) {
+  for (const id of allSkills) {
     it(`returns {id, civilian_name, dana_sow} for "${id}"`, () => {
       const skill = getSkill(id);
       expect(skill).toBeDefined();
@@ -34,6 +42,11 @@ describe("getSkill", () => {
     it(`"${id}" id does not contain "github"`, () => {
       const skill = getSkill(id);
       expect(skill?.id).not.toContain("github");
+    });
+
+    it(`"${id}" id does not contain "railway"`, () => {
+      const skill = getSkill(id);
+      expect(skill?.id).not.toContain("railway");
     });
   }
 });
