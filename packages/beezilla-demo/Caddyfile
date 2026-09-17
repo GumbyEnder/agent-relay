@@ -1,4 +1,6 @@
-:{$PORT}
-root * .
-file_server
-encode gzip
+:{$PORT:80} {
+  root * /app
+  encode gzip
+  try_files {path} {path}.html {path}/ /index.html
+  file_server
+}
