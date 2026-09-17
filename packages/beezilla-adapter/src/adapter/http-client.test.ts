@@ -104,4 +104,274 @@ describe("HTTP ingest client", () => {
       true,
     );
   });
+
+  it("claim POSTs to /api/agent/missions/:id/claim", async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key1",
+      fetch,
+    });
+    const r = await client.claim("msn_x1", "frodo");
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain("/api/agent/missions/msn_x1/claim");
+    expect(calls[0]!.url).not.toContain("/heartbeat");
+    const body = JSON.parse(calls[0]!.body ?? "{}");
+    expect(body.agent).toBe("frodo");
+  });
+
+  it("heartbeat POSTs to /api/agent/missions/:id/heartbeat", async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key2",
+      fetch,
+    });
+    const r = await client.heartbeat("msn_x2", "sam", "on it");
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain(
+      "/api/agent/missions/msn_x2/heartbeat",
+    );
+    const body = JSON.parse(calls[0]!.body ?? "{}");
+    expect(body.agent).toBe("sam");
+    expect(body.note).toBe("on it");
+  });
+
+  it("escalate POSTs to /api/agent/missions/:id/escalate", async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key3",
+      fetch,
+    });
+    const r = await client.escalate("msn_x3", "merry", "stuck on auth");
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain(
+      "/api/agent/missions/msn_x3/escalate",
+    );
+    const body = JSON.parse(calls[0]!.body ?? "{}");
+    expect(body.agent).toBe("merry");
+    expect(body.question).toBe("stuck on auth");
+  });
+
+  it("deliver POSTs to /api/agent/missions/:id/deliver", async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key4",
+      fetch,
+    });
+    const r = await client.deliver(
+      "msn_x4",
+      "pippin",
+      "done the PR",
+      { tokensIn: 1000, tokensOut: 500 },
+    );
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain("/api/agent/missions/msn_x4/deliver");
+    const body = JSON.parse(calls[0]!.body ?? "{}");
+    expect(body.agent).toBe("pippin");
+    expect(body.summary).toBe("done the PR");
+    expect(body.usage.tokensIn).toBe(1000);
+  });
+
+  it("deliver POSTs with null usage when omitted", async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, body: init?.body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key4b",
+      fetch,
+    });
+    await client.deliver("msn_x4b", "pippin", "done");
+    const body = JSON.parse(calls[0]!.body ?? "{}");
+    expect(body.usage).toBeNull();
+  });
+
+  it("getMissions GETs /api/agent/missions with query params", async () => {
+    const calls: { url: string }[] = [];
+    const fetch: FetchLike = async (url) => {
+      calls.push({ url });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ missions: [{ id: "msn_g1" }] }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key5",
+      fetch,
+    });
+    const r = await client.getMissions({
+      column: "running",
+      agent: "frodo",
+      project: "proj_abc",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.missions).toEqual([{ id: "msn_g1" }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain("/api/agent/missions?");
+    expect(calls[0]!.url).toContain("column=running");
+    expect(calls[0]!.url).toContain("agent=frodo");
+    expect(calls[0]!.url).toContain("project=proj_abc");
+    expect(calls[0]!.url).toContain("limit=20");
+  });
+
+  it("getMissions omits omitted params from query", async () => {
+    const calls: { url: string }[] = [];
+    const fetch: FetchLike = async (url) => {
+      calls.push({ url });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ missions: [] }),
+        text: async () => "",
+      };
+    };
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "key5b",
+      fetch,
+    });
+    await client.getMissions({});
+    expect(calls[0]!.url).not.toContain("column=");
+    expect(calls[0]!.url).not.toContain("agent=");
+    expect(calls[0]!.url).not.toContain("project=");
+    expect(calls[0]!.url).toContain("limit=20");
+  });
+
+  it("claim throws on non-ok response", async () => {
+    const fetch: FetchLike = async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => "not found",
+    });
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "keyX",
+      fetch,
+    });
+    await expect(client.claim("msn_bad", "nobody")).rejects.toThrow(
+      "Dev Boards HTTP 404",
+    );
+  });
+
+  it("heartbeat throws on non-ok response", async () => {
+    const fetch: FetchLike = async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => "server error",
+    });
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "keyX",
+      fetch,
+    });
+    await expect(
+      client.heartbeat("msn_bad", "nobody", "hi"),
+    ).rejects.toThrow("Dev Boards HTTP 500");
+  });
+
+  it("escalate throws on non-ok response", async () => {
+    const fetch: FetchLike = async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({}),
+      text: async () => "forbidden",
+    });
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "keyX",
+      fetch,
+    });
+    await expect(
+      client.escalate("msn_bad", "nobody", "why"),
+    ).rejects.toThrow("Dev Boards HTTP 403");
+  });
+
+  it("deliver throws on non-ok response", async () => {
+    const fetch: FetchLike = async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({}),
+      text: async () => "bad request",
+    });
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "keyX",
+      fetch,
+    });
+    await expect(
+      client.deliver("msn_bad", "nobody", "nope"),
+    ).rejects.toThrow("Dev Boards HTTP 400");
+  });
+
+  it("getMissions throws on non-ok response", async () => {
+    const fetch: FetchLike = async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+      text: async () => "service unavailable",
+    });
+    const client = createHttpClient({
+      baseUrl: "https://app.devboards.ai",
+      apiKey: "keyX",
+      fetch,
+    });
+    await expect(client.getMissions({})).rejects.toThrow(
+      "Dev Boards HTTP 503",
+    );
+  });
 });
