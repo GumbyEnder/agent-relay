@@ -198,6 +198,7 @@
       catalog.jobs.unshift(state);
       catalog.currentId = state.id;
       state.screen = "pick";
+      ensureHonchoPeer();
       render();
     }
 
@@ -573,6 +574,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       else if (state.screen === "remember") goRemember();
       saveState();
     }
+    const HONCHO_BASE = "https://honcho-api-production-215c.up.railway.app";
+
+    function ensureHonchoPeer() {
+      if (!catalog.userId) return;
+      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/peers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: catalog.userId }),
+      }).catch(function () { /* CORS or offline — job still local */ });
+    }
+
     document.getElementById("jobsLink").onclick = (e) => {
       e.preventDefault();
       state.screen = "jobs";
@@ -580,6 +592,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     };
     document.getElementById("talkLink").onclick = (e) => {
       e.preventDefault();
+      ensureHonchoPeer();
       if (state.problem) state.screen = "chat";
       else if (state.template) state.screen = "problem";
       else { newJob(); return; }
