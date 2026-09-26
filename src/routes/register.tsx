@@ -17,6 +17,7 @@ function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!authEnabled) return <Navigate to="/" />;
@@ -58,6 +59,29 @@ function RegisterPage() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitMagicLink = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      const { error: err } = await authClient.signIn.magicLink({
+        email: email.trim(),
+        callbackURL: "/",
+      });
+      if (err) {
+        setError(err.message ?? "Could not send the magic link");
+        return;
+      }
+      setInfo(
+        `Magic link sent to ${email.trim()}. Open it in this browser — it signs you in (and registers you if you're new).`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the magic link");
     } finally {
       setBusy(false);
     }
@@ -118,10 +142,32 @@ function RegisterPage() {
             {error}
           </p>
         )}
+        {info && (
+          <p className="text-xs text-status-ready" role="status">
+            {info}
+          </p>
+        )}
         <Button type="submit" className="w-full" disabled={busy}>
           {busy ? "Creating…" : "Register"}
         </Button>
       </form>
+      <div className="relative py-1 text-center text-[11px] text-fg-subtle">
+        <span className="bg-bg-elevated px-2 relative z-[1]">or</span>
+        <span className="absolute inset-x-0 top-1/2 border-t border-border" aria-hidden />
+      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        className="w-full"
+        disabled={busy || !email.trim()}
+        onClick={() => void submitMagicLink()}
+      >
+        {busy ? "Sending…" : "Email me a magic link instead"}
+      </Button>
+      <p className="text-[11px] text-fg-subtle">
+        No password needed — we email a one-time sign-in link that registers
+        you on first use.
+      </p>
     </AuthShell>
   );
 }

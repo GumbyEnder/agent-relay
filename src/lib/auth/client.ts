@@ -1,4 +1,4 @@
-import { genericOAuthClient } from "better-auth/client/plugins";
+import { genericOAuthClient, magicLinkClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { GROK_PROVIDERS } from "./providers";
 
@@ -13,7 +13,7 @@ import { GROK_PROVIDERS } from "./providers";
  * is stored, so nothing changes.
  */
 export const authClient = createAuthClient({
-  plugins: [genericOAuthClient()],
+  plugins: [genericOAuthClient(), magicLinkClient()],
   fetchOptions: {
     onRequest(ctx) {
       const token = getBearerToken();

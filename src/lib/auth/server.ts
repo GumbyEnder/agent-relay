@@ -29,7 +29,7 @@
  * a verified id via `@/lib/auth/middleware`.
  */
 import { betterAuth } from "better-auth";
-import { bearer, genericOAuth } from "better-auth/plugins";
+import { bearer, genericOAuth, magicLink } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
@@ -38,7 +38,7 @@ import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
-import { sendVerificationMail } from "../mailer";
+import { sendVerificationMail, sendMagicLinkMail } from "../mailer";
 import {
   GROK_ISSUER_DEFAULT,
   PREVIEW_ALLOWED_HOSTS,
@@ -266,15 +266,12 @@ export const auth = betterAuth({
           autoSignInAfterVerification: false,
           expiresIn: 60 * 60,
           sendVerificationEmail: async ({ user, url }) => {
-            // Prefer traditional post-verify landing: sign-in page with success banner.
+            // Always land on /login after verify (never raw JSON from /api/auth/verify-email).
             let finalUrl = url;
             try {
               const u = new URL(url);
-              const cb = u.searchParams.get("callbackURL") || "";
-              if (!cb || cb === "/" || cb === "%2F") {
-                u.searchParams.set("callbackURL", "/login?verified=1");
-                finalUrl = u.toString();
-              }
+              u.searchParams.set("callbackURL", "/login?verified=1");
+              finalUrl = u.toString();
             } catch {
               /* keep original url */
             }
@@ -307,6 +304,16 @@ export const auth = betterAuth({
   },
 
   plugins: [
+    // Magic-link sign-in: emails a one-time URL (Resend via `../mailer`) that
+    // both registers and signs the visitor in — works with or without
+    // email/password enabled. 15-minute single-use tokens.
+    magicLink({
+      expiresIn: 60 * 15,
+      sendMagicLink: async ({ email, url }) => {
+        await sendMagicLinkMail({ to: email, url });
+      },
+    }),
+
     // One genericOAuth provider per upstream (when auth is on), all federating
     // to the broker with the SAME client and differing only by the `idp` hint.
     ...(grokOAuthPlugin ? [grokOAuthPlugin] : []),
@@ -327,6 +334,64 @@ export const auth = betterAuth({
 
 export function readSessionToken(): string | null {
   return getCookie(SESSION_TOKEN_COOKIE) ?? null;
+}
+
+const VERIFY_EMAIL_OK = "/login?verified=1";
+const VERIFY_EMAIL_FAIL = "/login?verified=0";
+
+function isVerifyEmailRequest(req: Request): boolean {
+  try {
+    const path = new URL(req.url).pathname.replace(/\/+$/, "") || "/";
+    return path === "/api/auth/verify-email" || path.endsWith("/verify-email");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Better Auth handler with browser-safe verify-email redirects.
+ * Missing callbackURL is filled in; JSON/error responses never reach the browser.
+ */
+export async function handleAuthRequest(req: Request): Promise<Response> {
+  let request = req;
+  if (req.method === "GET" && isVerifyEmailRequest(req)) {
+    const url = new URL(req.url);
+    if (!url.searchParams.get("callbackURL")) {
+      url.searchParams.set("callbackURL", VERIFY_EMAIL_OK);
+      request = new Request(url.toString(), req);
+    }
+  }
+
+  const res = await auth.handler(request);
+  if (!(req.method === "GET" && isVerifyEmailRequest(req))) return res;
+
+  const origin = new URL(req.url).origin;
+  const ok = `${origin}${VERIFY_EMAIL_OK}`;
+  const fail = `${origin}${VERIFY_EMAIL_FAIL}`;
+  if (res.status >= 300 && res.status < 400) {
+    const loc = res.headers.get("location") ?? "";
+    if (/[?&]error=/.test(loc)) {
+      return copyCookies(res, Response.redirect(fail, 302));
+    }
+    return res;
+  }
+  const ct = res.headers.get("content-type") ?? "";
+  if (ct.includes("application/json")) {
+    return copyCookies(res, Response.redirect(res.ok ? ok : fail, 302));
+  }
+  if (res.status >= 400) {
+    return copyCookies(res, Response.redirect(fail, 302));
+  }
+  return res;
+}
+
+function copyCookies(from: Response, to: Response): Response {
+  const cookies =
+    typeof from.headers.getSetCookie === "function"
+      ? from.headers.getSetCookie()
+      : [];
+  for (const c of cookies) to.headers.append("set-cookie", c);
+  return to;
 }
 
 // Re-exported for convenience; the array lives in the dependency-free

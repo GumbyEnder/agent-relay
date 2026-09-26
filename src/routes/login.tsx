@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { authClient, authEnabled, signInSocial } from "@/lib/auth/client";
@@ -24,7 +24,11 @@ function LoginPage() {
   const [email, setEmail] = useState(search.email ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(
-    search.error ? decodeURIComponent(search.error) : null,
+    search.verified === "0"
+      ? "Verification link expired or invalid. Request a new one from the check-email page."
+      : search.error
+        ? decodeURIComponent(search.error)
+        : null,
   );
   const [info, setInfo] = useState<string | null>(
     search.verified === "1"
@@ -32,6 +36,20 @@ function LoginPage() {
       : null,
   );
   const [busy, setBusy] = useState(false);
+  const [githubOAuth, setGithubOAuth] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/agent/me", { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ githubOAuth?: boolean }>)
+      .then((data) => {
+        if (!cancelled && data?.githubOAuth === true) setGithubOAuth(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!authEnabled) return <Navigate to="/" />;
   if (isPending) {
@@ -74,6 +92,29 @@ function LoginPage() {
     }
   };
 
+  const submitMagicLink = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      const { error: err } = await authClient.signIn.magicLink({
+        email: email.trim(),
+        callbackURL: "/",
+      });
+      if (err) {
+        setError(err.message ?? "Could not send the magic link");
+        return;
+      }
+      setInfo(
+        `Magic link sent to ${email.trim()}. Open it in this browser to sign in.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the magic link");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <AuthShell
       title="Sign in"
@@ -100,33 +141,37 @@ function LoginPage() {
       }
     >
       <div className="space-y-3">
-        <div className="grid gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            disabled={busy}
-            onClick={() => {
-              setError(null);
-              setBusy(true);
-              void signInSocial("github")
-                .catch((err) =>
-                  setError(
-                    err instanceof Error
-                      ? err.message
-                      : "GitHub sign-in unavailable — set GITHUB_CLIENT_ID/SECRET on the server",
-                  ),
-                )
-                .finally(() => setBusy(false));
-            }}
-          >
-            Continue with GitHub
-          </Button>
-        </div>
-        <div className="relative py-1 text-center text-[11px] text-fg-subtle">
-          <span className="bg-bg-elevated px-2 relative z-[1]">or email</span>
-          <span className="absolute inset-x-0 top-1/2 border-t border-border" aria-hidden />
-        </div>
+        {githubOAuth ? (
+          <>
+            <div className="grid gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                disabled={busy}
+                onClick={() => {
+                  setError(null);
+                  setBusy(true);
+                  void signInSocial("github")
+                    .catch((err) =>
+                      setError(
+                        err instanceof Error
+                          ? err.message
+                          : "GitHub sign-in is unavailable.",
+                      ),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Continue with GitHub
+              </Button>
+            </div>
+            <div className="relative py-1 text-center text-[11px] text-fg-subtle">
+              <span className="bg-bg-elevated px-2 relative z-[1]">or email</span>
+              <span className="absolute inset-x-0 top-1/2 border-t border-border" aria-hidden />
+            </div>
+          </>
+        ) : null}
         <form className="space-y-3" onSubmit={(ev) => void submit(ev)}>
           <Input
             type="email"
@@ -161,12 +206,38 @@ function LoginPage() {
             {busy ? "Signing in…" : "Sign in with email"}
           </Button>
         </form>
-        <p className="text-[10px] leading-relaxed text-fg-subtle">
-          GitHub OAuth needs server env:{" "}
-          <code className="font-mono">GITHUB_CLIENT_ID</code> /{" "}
-          <code className="font-mono">GITHUB_CLIENT_SECRET</code>. Callback:{" "}
-          <code className="font-mono">/api/auth/callback/github</code>.
-        </p>
+        <div className="relative py-1 text-center text-[11px] text-fg-subtle">
+          <span className="bg-bg-elevated px-2 relative z-[1]">or</span>
+          <span className="absolute inset-x-0 top-1/2 border-t border-border" aria-hidden />
+        </div>
+        <form
+          className="space-y-2"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            void submitMagicLink();
+          }}
+        >
+          <Button
+            type="submit"
+            variant="secondary"
+            className="w-full"
+            disabled={busy || !email.trim()}
+          >
+            {busy ? "Sending…" : "Email me a magic link"}
+          </Button>
+          <p className="text-[11px] text-fg-subtle">
+            No password needed — we email a one-time sign-in link (works for new
+            accounts too).
+          </p>
+        </form>
+        {import.meta.env.DEV ? (
+          <p className="text-[10px] leading-relaxed text-fg-subtle">
+            GitHub OAuth needs server env:{" "}
+            <code className="font-mono">GITHUB_CLIENT_ID</code> /{" "}
+            <code className="font-mono">GITHUB_CLIENT_SECRET</code>. Callback:{" "}
+            <code className="font-mono">/api/auth/callback/github</code>.
+          </p>
+        ) : null}
       </div>
     </AuthShell>
   );

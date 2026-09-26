@@ -220,6 +220,38 @@ export async function sendVerificationMail(opts: {
   return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url });
 }
 
+/** Magic-link sign-in email (Better Auth magicLink plugin). */
+export async function sendMagicLinkMail(opts: {
+  to: string;
+  name?: string | null;
+  url: string;
+}): Promise<OutboundEmail> {
+  const name = opts.name?.trim() || "there";
+  const subject = "Your Dev Boards sign-in link";
+  const text = [
+    `Hi ${name},`,
+    "",
+    "Click this link to sign in to Dev Boards:",
+    "",
+    opts.url,
+    "",
+    "This link expires in 15 minutes and can be used once.",
+    "If you did not request it, you can ignore this message.",
+    "",
+    "— Dev Boards",
+  ].join("\n");
+  const html = `
+    <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
+      <p>Hi ${escapeHtml(name)},</p>
+      <p>Click below to sign in to <strong>Dev Boards</strong>:</p>
+      <p><a href="${escapeAttr(opts.url)}" style="display:inline-block;padding:0.6rem 1rem;background:#111;color:#fff;text-decoration:none;border-radius:6px">Sign in</a></p>
+      <p style="color:#666;font-size:0.9rem">Or paste this URL:<br/><code>${escapeHtml(opts.url)}</code></p>
+      <p style="color:#666;font-size:0.85rem">This link expires in 15 minutes and can be used once. If you didn't request it, ignore this email.</p>
+    </div>
+  `.trim();
+  return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url });
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
