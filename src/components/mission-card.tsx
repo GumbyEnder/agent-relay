@@ -70,7 +70,7 @@ export function MissionCard({
         onOpen();
       }}
       className={cn(
-        "group relative rounded-[var(--radius-md)] bg-bg-elevated p-3 shadow-[var(--shadow-border)] transition-[box-shadow,background-color,transform] duration-150 hover:shadow-[var(--shadow-border-hover)] hover:bg-bg-subtle",
+        "bz-riveted bz-rivets group relative rounded-[var(--radius-md)] bg-bg-elevated p-3 shadow-[var(--shadow-border)] transition-[box-shadow,background-color,transform] duration-150 hover:shadow-[var(--shadow-border-hover)] hover:bg-bg-subtle",
         selected && "ring-2 ring-[var(--color-status-ready)]",
         stale &&
           "ring-2 ring-[var(--color-status-human)] bg-[color-mix(in_oklab,var(--color-status-human)_10%,var(--color-bg-elevated))]",
@@ -95,7 +95,7 @@ export function MissionCard({
               const ghost = document.createElement("div");
               ghost.textContent = mission.title;
               ghost.style.cssText =
-                "position:fixed;top:-1000px;padding:6px 10px;background:#1a1a1e;color:#f4f4f5;border-radius:8px;font:12px sans-serif;max-width:200px";
+                "position:fixed;top:-1000px;padding:6px 10px;background:#141414;color:#f5f5f4;border-radius:8px;font:12px sans-serif;max-width:200px";
               document.body.appendChild(ghost);
               e.dataTransfer.setDragImage(ghost, 10, 10);
               window.setTimeout(() => ghost.remove(), 0);

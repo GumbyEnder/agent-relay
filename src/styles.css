@@ -2,28 +2,39 @@
 @import "tw-animate-css";
 
 @theme {
-  --color-bg: #0a0a0b;
-  --color-bg-elevated: #121214;
-  --color-bg-subtle: #1a1a1e;
-  --color-bg-hover: #222228;
-  --color-fg: #f4f4f5;
-  --color-fg-muted: #a1a1aa;
-  --color-fg-subtle: #71717a;
+  /* BeeZilla brand tokens (docs/BRAND-UI-BRIEF.md) */
+  --color-bg: #0a0a0a;
+  --color-bg-elevated: #141414;
+  --color-bg-subtle: #1a1a1a;
+  --color-bg-hover: #242424;
+  --color-fg: #f5f5f4;
+  --color-fg-muted: #a8a8ad;
+  --color-fg-subtle: #6e6e76;
   --color-border: #ffffff14;
   --color-border-strong: #ffffff24;
-  --color-accent: #e4e4e7;
-  --color-accent-fg: #0a0a0b;
-  --color-ring: #e4e4e7;
+  --color-accent: #ffc107;
+  --color-accent-fg: #0a0a0a;
+  --color-ring: #ffc107;
 
-  --color-status-ready: #5b8def;
-  --color-status-running: #3ecf8e;
-  --color-status-human: #e8a54b;
-  --color-status-review: #8b9cb3;
-  --color-status-done: #6b7280;
+  /* Status: muted per brief — blue=in progress, lavender=review,
+     green=done, red=needs_human */
+  --color-status-ready: #6b9bff;
+  --color-status-running: #5b8def;
+  --color-status-human: #e05d5d;
+  --color-status-review: #b3a4e0;
+  --color-status-done: #55b06a;
   --color-status-blocked: #e05d5d;
-  --color-status-inbox: #a1a1aa;
+  --color-status-inbox: #a8a8ad;
 
-  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Raw BeeZilla palette (build notes) */
+  --bz-black: #0a0a0a;
+  --bz-panel: #141414;
+  --bz-col: #1a1a1a;
+  --bz-yellow: #ffc107;
+  --bz-silver: #c9cdd2;
+  --bz-charcoal: #111111;
+
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --radius-xs: 4px;
@@ -442,4 +453,109 @@ html[data-density="compact"] .density-compact,
 }
 .density-compact section.flex.w-\[min\(86vw\,280px\)\] {
   width: min(78vw, 220px);
+}
+
+/* ===== BeeZilla brand motifs (docs/BRAND-UI-BRIEF.md) ===== */
+
+/* Hexagon marker — step numbers, status icons, badges */
+.bz-hex {
+  clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0% 50%);
+}
+
+/* Riveted-metal card: brushed silver gradient, beveled edge, dark text.
+   Use sparingly — board cards and plan tiers only. */
+.bz-riveted {
+  position: relative;
+  background:
+    linear-gradient(160deg, #d6dade 0%, #c9cdd2 38%, #b4b9c0 62%, #c9cdd2 100%);
+  color: #16181c;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    inset 1px 0 0 rgba(255, 255, 255, 0.25),
+    inset -1px 0 0 rgba(0, 0, 0, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  border: 1px solid #8a9099;
+}
+
+.bz-riveted::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(20, 22, 26, 0.55) 1.4px, transparent 1.6px);
+  background-size: 18px 18px;
+  background-position: 5px 5px, 5px 5px;
+  mask-image: linear-gradient(to bottom, black 0 9px, transparent 9px calc(100% - 9px), black calc(100% - 9px)),
+    linear-gradient(to right, black 0 9px, transparent 9px calc(100% - 9px), black calc(100% - 9px));
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  opacity: 0.7;
+}
+
+/* Corner rivets (four dots) — pair with .bz-riveted */
+.bz-rivets::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 5px 5px, #eef1f4 1.6px, #5a6068 2.4px, transparent 2.8px),
+    radial-gradient(circle at calc(100% - 5px) 5px, #eef1f4 1.6px, #5a6068 2.4px, transparent 2.8px),
+    radial-gradient(circle at 5px calc(100% - 5px), #eef1f4 1.6px, #5a6068 2.4px, transparent 2.8px),
+    radial-gradient(circle at calc(100% - 5px) calc(100% - 5px), #eef1f4 1.6px, #5a6068 2.4px, transparent 2.8px);
+}
+
+/* Subtle circuit-line corner decoration (very low opacity) */
+.bz-corner-lines {
+  position: relative;
+}
+.bz-corner-lines::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 72px;
+  height: 48px;
+  pointer-events: none;
+  opacity: 0.06;
+  background-image:
+    linear-gradient(to left, currentColor 1px, transparent 1px),
+    linear-gradient(to bottom, currentColor 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: top right;
+  mask-image: linear-gradient(225deg, black 0%, transparent 70%);
+  -webkit-mask-image: linear-gradient(225deg, black 0%, transparent 70%);
+}
+
+/* Dark text on riveted cards — overrides semantic fg utilities inside .bz-riveted */
+.bz-riveted :is(.text-fg) {
+  color: #16181c;
+}
+.bz-riveted :is(.text-fg-muted) {
+  color: #3d434b;
+}
+.bz-riveted :is(.text-fg-subtle) {
+  color: #5a6068;
+}
+.bz-riveted :is(.border-t, .border-border) {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+/* Yellow column trim — thin accent rule under board column headers */
+.bz-col-trim {
+  position: relative;
+}
+.bz-col-trim::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--bz-yellow);
+  opacity: 0.85;
 }

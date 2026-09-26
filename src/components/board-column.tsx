@@ -81,10 +81,11 @@ export function BoardColumn({
         setMenuOpen(true);
       }}
     >
-      <header className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-2 rounded-[var(--radius-md)] bg-bg/90 px-2 py-2 backdrop-blur-sm">
+      <header className="bz-col-trim sticky top-0 z-10 mb-2 flex items-center justify-between gap-2 rounded-[var(--radius-md)] bg-bg/90 px-2 py-2 backdrop-blur-sm">
         <div className="flex min-w-0 items-center gap-2">
           <span
-            className="h-2 w-2 shrink-0 rounded-full"
+            aria-hidden
+            className="bz-hex h-2.5 w-2.5 shrink-0"
             style={{ background: COLUMN_STATUS_COLOR[columnId] }}
           />
           <div className="min-w-0">
