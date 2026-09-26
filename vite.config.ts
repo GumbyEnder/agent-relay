@@ -172,9 +172,9 @@ function betterAuthApiPlugin(): Plugin {
           });
 
           const mod = (await server.ssrLoadModule("/src/lib/auth/server.ts")) as {
-            auth: { handler: (req: Request) => Promise<Response> };
+            handleAuthRequest: (req: Request) => Promise<Response>;
           };
-          const response = await mod.auth.handler(request);
+          const response = await mod.handleAuthRequest(request);
 
           res.statusCode = response.status;
           const setCookies: string[] = [];

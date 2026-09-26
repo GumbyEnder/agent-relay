@@ -2112,9 +2112,8 @@ export const durableBoard = {
         const mid = new Set(missions.map((m) => m.id));
         events = events.filter(
           (e) =>
-            (e.projectId && allow.has(e.projectId)) ||
-            (e.missionId && mid.has(e.missionId)) ||
-            !e.missionId,
+            (e.projectId != null && allow.has(e.projectId)) ||
+            (e.missionId != null && mid.has(e.missionId)),
         );
         calls = calls.filter(
           (c) =>
@@ -2127,20 +2126,26 @@ export const durableBoard = {
         );
       }
     }
+    let agents = board.agents;
+    if (allowed != null) {
+      const fleet = await durableBoard.listFleetAgents(allowed);
+      const allow = new Set(allowed);
+      agents = fleet.filter((a) => (a.boardIds ?? []).some((id) => allow.has(id)));
+    }
     const byColumn: Record<string, number> = {};
     for (const m of missions) {
       byColumn[m.column] = (byColumn[m.column] ?? 0) + 1;
     }
     return {
       serverTime: Date.now(),
-      agents: board.agents,
+      agents,
       missions,
       events,
       calls,
       history,
       stats: {
         missions: missions.length,
-        agents: board.agents.length,
+        agents: agents.length,
         openCalls: calls.filter((c) => !c.resolvedAt).length,
         events: events.length,
         history: history.length,
@@ -2176,6 +2181,13 @@ export const durableBoard = {
       const sql = await getSql();
       await ensureProjects(sql);
       const mapped = mapGitHubIssueToMission(input);
+      const resolvedProject = await lookupProjectId(sql, mapped.projectId);
+      if (!resolvedProject) {
+        throw new Error(
+          `Unknown project "${mapped.projectId}" — ingest refuses to create orphaned missions`,
+        );
+      }
+      mapped.projectId = resolvedProject;
       const existing = await sql`
         select * from ar_missions where external_id = ${mapped.externalId} limit 1
       `;
@@ -2628,7 +2640,12 @@ export const durableBoard = {
       return next;
     }),
 
-  exportHistory: (opts: { projectId?: string | null; missionId?: string | null; format: "json" | "csv" }) =>
+  exportHistory: (opts: {
+    projectId?: string | null;
+    missionId?: string | null;
+    format: "json" | "csv";
+    allowedProjectIds?: string[] | null;
+  }) =>
     withLock(async () => {
       const sql = await getSql();
       let rows;
@@ -2643,7 +2660,11 @@ export const durableBoard = {
       } else {
         rows = await sql`select * from ar_mission_history order by at asc limit 5000`;
       }
-      const history = rows.map((r) => rowHistory(r as Record<string, unknown>));
+      let history = rows.map((r) => rowHistory(r as Record<string, unknown>));
+      if (opts.allowedProjectIds != null) {
+        const allow = new Set(opts.allowedProjectIds);
+        history = history.filter((h) => h.projectId != null && allow.has(h.projectId));
+      }
       if (opts.format === "csv") return { format: "csv" as const, body: historyToCsv(history), count: history.length };
       return { format: "json" as const, body: historyToJson(history), count: history.length };
     }),

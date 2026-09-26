@@ -5,6 +5,18 @@ All notable changes to Dev Boards (`agent-relay`) are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).  
 Versioning is **0.x** until the agent protocol is frozen for 1.0 — breaking changes may occur with a clear entry below.
 
+## Unreleased
+
+### Added
+- **devboards-tui** (`apps/tui`): Ink/React terminal client P0 — board columns, claim/deliver/escalate/heartbeat, detail, search, multi-board, `--status` (see `docs/TUI_DESIGN.md`).
+
+### Fixed
+- **Security:** `POST /ingest/github` now uses the same key→board gate as `POST /missions` (`unknown_project` / `board_forbidden`). The store also refuses unknown `projectId` so ingest cannot mint orphan missions.
+- Deliver / heartbeat / escalate require the calling agent to own the claim (`409 not_claimer`); empty deliver summaries return `400`.
+- Invalid `?column=` values return `400 bad_column` instead of an empty poll.
+- Agent-key `GET /boards` is filtered to the key's issued board plus memberships.
+- Login page no longer leaks GitHub OAuth env/callback details to unauthenticated production visitors.
+
 ## [0.3.0] — 2026-08-04
 
 ### Added

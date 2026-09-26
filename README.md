@@ -96,3 +96,18 @@ React 19 · TypeScript · TanStack Start · Vite · Tailwind · Postgres (or PGL
 ## Status
 
 **v0.x** — useful and tested in-tree; protocol and storage may still change before 1.0. Pin a git tag for deployments. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Terminal UI (experimental P0)
+
+```bash
+cd apps/tui && npm install
+export DEVBOARDS_BASE_URL=https://app.devboards.ai
+export DEVBOARDS_API_KEY=ark_…
+export DEVBOARDS_AGENT=your-agent
+export DEVBOARDS_BOARD=devboard-app
+npm run dev          # interactive
+npm run status       # one-shot counts
+```
+
+Design: [docs/TUI_DESIGN.md](docs/TUI_DESIGN.md) · package: `apps/tui`
+

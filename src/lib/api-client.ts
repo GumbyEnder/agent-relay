@@ -47,11 +47,14 @@ export const agentApi = {
       "GET",
       `/keys?project=${encodeURIComponent(projectId)}`,
     ),
-  listAgentKeys: (agentId: string) =>
-    req<{ ok: true; keys: Array<Record<string, unknown>> }>(
+  listAgentKeys: (agentId: string, projectId?: string | null) => {
+    const q = new URLSearchParams({ agent: agentId });
+    if (projectId) q.set("project", projectId);
+    return req<{ ok: true; keys: Array<Record<string, unknown>> }>(
       "GET",
-      `/keys?agent=${encodeURIComponent(agentId)}`,
-    ),
+      `/keys?${q.toString()}`,
+    );
+  },
   revealApiKey: (keyId: string) =>
     req<{
       ok: true;

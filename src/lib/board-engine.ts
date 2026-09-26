@@ -97,14 +97,19 @@ export function pollMissions(
      */
     matchAgentSkills?: boolean;
     projectId?: string;
+    /** When set, restrict poll to these boards (agent-key scope). Empty = no boards. */
+    allowedProjectIds?: string[] | null;
   } = {},
 ): EngineResult<{
   missions: ReturnType<typeof missionSummary>[];
   agent: string | null;
   skill_routing?: "prefer" | "require" | "skills_filter" | "off";
+  total: number;
+  limit: number;
+  truncated: boolean;
 }> {
   const column = opts.column ?? "ready";
-  const limit = Math.min(Math.max(opts.limit ?? 5, 1), 50);
+  const limit = Math.min(Math.max(opts.limit ?? 5, 1), 500);
   const agent = resolveAgent(board, opts.agent);
   const tagFilter = (opts.tags ?? []).map((t) => t.toLowerCase());
   const skillFilter = (opts.skills ?? []).map((s) => s.toLowerCase());
@@ -119,6 +124,9 @@ export function pollMissions(
 
   let list = board.missions.filter((m) => {
     if (opts.projectId && m.projectId !== opts.projectId) return false;
+    if (opts.allowedProjectIds != null && !opts.allowedProjectIds.includes(m.projectId)) {
+      return false;
+    }
     if (m.column !== column) return false;
     if (column === "ready" || column === "inbox") {
       if (m.claimedBy) return false;
@@ -154,6 +162,7 @@ export function pollMissions(
     return rank[a.priority] - rank[b.priority] || a.createdAt - b.createdAt;
   });
 
+  const total = list.length;
   return {
     ok: true,
     board,
@@ -166,6 +175,9 @@ export function pollMissions(
           : skillFilter.length
             ? "skills_filter"
             : "off",
+      total,
+      limit,
+      truncated: total > limit,
       missions: list.slice(0, limit).map(missionSummary),
     },
   };
@@ -264,11 +276,13 @@ export function heartbeatMission(
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
   }
-  if (mission.claimedBy && mission.claimedBy !== agent.id) {
+  if (mission.claimedBy !== agent.id) {
     return {
       ok: false,
-      status: 403,
-      error: "Only the claiming agent may heartbeat this mission",
+      status: 409,
+      error: mission.claimedBy
+        ? "Only the claiming agent may heartbeat this mission"
+        : "Claim the mission before sending a heartbeat",
       code: "not_claimer",
     };
   }
@@ -318,6 +332,16 @@ export function escalateMission(
   const mission = board.missions.find((m) => m.id === missionId);
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
+  }
+  if (mission.claimedBy !== agent.id) {
+    return {
+      ok: false,
+      status: 409,
+      error: mission.claimedBy
+        ? "Only the claiming agent may escalate this mission"
+        : "Claim the mission before escalating",
+      code: "not_claimer",
+    };
   }
   const q = question.trim();
   if (!q) {
@@ -372,17 +396,23 @@ export function deliverMission(
   if (!mission) {
     return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
   }
-  if (mission.claimedBy && mission.claimedBy !== agent.id) {
+  if (mission.claimedBy !== agent.id) {
     return {
       ok: false,
-      status: 403,
-      error: "Only the claiming agent may deliver this mission",
+      status: 409,
+      error: mission.claimedBy
+        ? "Only the claiming agent may deliver this mission"
+        : "Claim the mission before delivering",
       code: "not_claimer",
     };
   }
+  const trimmedSummary = summary.trim();
+  if (!trimmedSummary) {
+    return { ok: false, status: 400, error: "summary is required", code: "bad_request" };
+  }
 
   const now = Date.now();
-  const delivery = summary.trim() || mission.delivery || "";
+  const delivery = trimmedSummary;
   const missions = board.missions.map((m) =>
     m.id === missionId
       ? touchMission(m, {

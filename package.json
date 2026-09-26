@@ -32,7 +32,7 @@
     "test:project-ref": "npx tsx scripts/test-project-ref.ts",
     "test:docs-html": "npx tsx scripts/test-docs-html.ts",
     "test:tenancy-endpoints": "npx tsx scripts/test-tenancy-endpoints.ts",
-    "test:github-ingest": "npx tsx scripts/test-github-ingest-extras.ts",
+    "test:github-ingest": "npx tsx scripts/test-github-ingest-extras.ts && npx tsx scripts/test-ingest-authz.ts",
     "test:api": "node scripts/agent-api-smoke.mjs",
     "smoke": "npm run test:engine && npm run test:api",
     "start": "node scripts/migrate.mjs && HOST=0.0.0.0 NITRO_HOST=0.0.0.0 node .output/server/index.mjs",

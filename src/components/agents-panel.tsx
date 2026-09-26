@@ -645,16 +645,29 @@ export function AgentKeyRevealList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [freshSecret, setFreshSecret] = useState<string | null>(null);
+  const [canIssue, setCanIssue] = useState(true);
   const { refresh } = useBoard();
 
   const reload = useCallback(() => {
     setLoading(true);
     void agentApi
-      .listAgentKeys(agentId)
+      .listAgentKeys(agentId, projectId)
       .then((res) => {
+        setCanIssue(true);
         setKeys(res.keys ?? []);
       })
-      .catch(() => {
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : "Could not list keys";
+        const forbidden =
+          /cannot manage_keys|forbidden|Sign in required|Role '|board not found|not_found|HTTP 401|HTTP 403|HTTP 404/i.test(
+            msg,
+          );
+        if (forbidden) {
+          toast.error(msg);
+          setCanIssue(false);
+          setKeys([]);
+          return;
+        }
         setKeys(
           (tips ?? []).map((t) => ({
             id: t.id,
@@ -667,7 +680,7 @@ export function AgentKeyRevealList({
         );
       })
       .finally(() => setLoading(false));
-  }, [agentId, tips]);
+  }, [agentId, projectId, tips]);
 
   useEffect(() => {
     reload();
@@ -709,6 +722,13 @@ export function AgentKeyRevealList({
   }
 
   if (active.length === 0) {
+    if (!canIssue) {
+      return (
+        <p className="text-[10px] text-fg-subtle">
+          You cannot issue API keys on this board. Ask the board owner or an admin.
+        </p>
+      );
+    }
     return (
       <div className="space-y-2">
         <p className="text-[10px] text-fg-subtle">No API key on this agent yet.</p>
@@ -874,7 +894,10 @@ export function AgentKeyRevealList({
                       } catch {
                         toast.message("New key ready; revoke old key manually if needed");
                       }
-                      const res = await agentApi.listAgentKeys(agentId);
+                      const res = await agentApi.listAgentKeys(
+                        agentId,
+                        String(projectId),
+                      );
                       setKeys(res.keys ?? []);
                     } catch (e) {
                       toast.error(e instanceof Error ? e.message : "Re-issue failed");

@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  canManageBoardKeys,
   gateCapability,
   parseEmailList,
   resolveOperatorRole,
@@ -86,6 +87,14 @@ function emptyBoard(over: Partial<BoardData> = {}): BoardData {
   assert.equal(roleCan("operator", "reply_call"), true);
   assert.equal(roleCan("operator", "manage_keys"), false);
   assert.equal(roleCan("admin", "manage_keys"), true);
+
+  assert.equal(canManageBoardKeys("admin", { isOwner: false }), true);
+  assert.equal(canManageBoardKeys("admin", { isOwner: true }), true);
+  assert.equal(canManageBoardKeys("operator", { isOwner: true }), true);
+  assert.equal(canManageBoardKeys("operator", { isOwner: false }), false);
+  assert.equal(canManageBoardKeys("viewer", { isOwner: true }), false);
+  assert.equal(canManageBoardKeys("viewer", { isOwner: false }), false);
+  assert.equal(canManageBoardKeys(null, { isOwner: true }), false);
   assert.equal(roleCan("admin", "manage_settings"), true);
 
   const gOut = gateCapability(null, "read", { authRequired: true });
@@ -240,7 +249,33 @@ function emptyBoard(over: Partial<BoardData> = {}): BoardData {
 
   const noFilter = pollMissions(board, { limit: 10 });
   assert.ok(noFilter.ok);
-  if (noFilter.ok) assert.equal(noFilter.data.missions.length, 3);
+  if (noFilter.ok) {
+    assert.equal(noFilter.data.missions.length, 3);
+    assert.equal(noFilter.data.total, 3);
+    assert.equal(noFilter.data.limit, 10);
+    assert.equal(noFilter.data.truncated, false);
+  }
+
+  const many = emptyBoard({
+    missions: Array.from({ length: 12 }, (_, i) =>
+      mission({ id: `m_${i}`, title: `t${i}`, column: "ready" }),
+    ),
+  });
+  const capped = pollMissions(many, { limit: 5 });
+  assert.ok(capped.ok);
+  if (capped.ok) {
+    assert.equal(capped.data.missions.length, 5);
+    assert.equal(capped.data.total, 12);
+    assert.equal(capped.data.limit, 5);
+    assert.equal(capped.data.truncated, true);
+  }
+  const high = pollMissions(many, { limit: 5000 });
+  assert.ok(high.ok);
+  if (high.ok) {
+    assert.equal(high.data.limit, 500);
+    assert.equal(high.data.truncated, false);
+    assert.equal(high.data.missions.length, 12);
+  }
   console.log("✓ skill/tag poll routing");
 }
 

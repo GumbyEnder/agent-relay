@@ -25,3 +25,5 @@
 | [GROK_BUILD_PROMPT.md](./GROK_BUILD_PROMPT.md) | Historical build handoff |
 
 Repo root also has [CHANGELOG.md](../CHANGELOG.md), [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md).
+
+| [TUI_DESIGN.md](TUI_DESIGN.md) | Terminal UI design spec (v0) — Ink/TS MVP |

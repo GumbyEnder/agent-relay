@@ -49,6 +49,20 @@ export function roleCan(role: OperatorRole, cap: OperatorCapability): boolean {
   return roleAtLeast(role, CAP_MIN[cap]);
 }
 
+/**
+ * Board-scoped key minting: platform admin, or a signed-in operator who owns
+ * the board. Does not change CAP_MIN.manage_keys (still admin for platform-wide
+ * key/admin ops). Shared/demo boards (`ownerUserId == null`) are never owned.
+ */
+export function canManageBoardKeys(
+  role: OperatorRole | null,
+  opts: { isOwner: boolean },
+): boolean {
+  if (role === "admin") return true;
+  if (role === "operator" && opts.isOwner) return true;
+  return false;
+}
+
 /** Parse comma/space-separated email lists from env. */
 export function parseEmailList(raw: string | null | undefined): Set<string> {
   if (!raw?.trim()) return new Set();

@@ -5,6 +5,7 @@
  */
 import { durableBoard, ensureBoardReady } from "../src/lib/board-store.server";
 import { canAccessBoardByOwner } from "../src/lib/board-tenancy";
+import { getSql } from "../src/lib/db";
 
 function assert(c: unknown, m: string): asserts c {
   if (!c) throw new Error(m);
@@ -121,6 +122,20 @@ async function main() {
     !filtered.missions.some((m) => m.projectId === boardB.id && m.id !== privateMission) ||
       filtered.missions.every((m) => m.projectId === boardA.id),
     "filtered snap only owner A boards",
+  );
+
+  const sql = await getSql();
+  const leakEv = `ev_leak_${ownerA}`;
+  await sql`
+    insert into ar_events (id, mission_id, agent_id, project_id, kind, message, at)
+    values (${leakEv}, null, null, ${boardB.id}, 'note', 'foreign orphan event', now())
+  `;
+  const evSnap = await durableBoard.adminSnapshot("all", {
+    allowedProjectIds: [boardA.id],
+  });
+  assert(
+    !evSnap.events.some((e) => e.id === leakEv),
+    "foreign projectId + null missionId event must not pass allow list",
   );
 
   console.log("✓ tenancy endpoint isolation + admin user flags + empty-allow fail-closed");
