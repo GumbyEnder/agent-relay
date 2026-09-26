@@ -2,7 +2,46 @@
 @import "tw-animate-css";
 
 @theme {
-  /* BeeZilla brand tokens (docs/BRAND-UI-BRIEF.md) */
+  /* Neutral Dev Boards chrome (default) */
+  --color-bg: #0a0a0b;
+  --color-bg-elevated: #121214;
+  --color-bg-subtle: #1a1a1e;
+  --color-bg-hover: #222228;
+  --color-fg: #f4f4f5;
+  --color-fg-muted: #a1a1aa;
+  --color-fg-subtle: #71717a;
+  --color-border: #ffffff14;
+  --color-border-strong: #ffffff24;
+  --color-accent: #e4e4e7;
+  --color-accent-fg: #0a0a0b;
+  --color-ring: #e4e4e7;
+
+  /* Status: muted — blue=in progress, green=done, amber=human, gray=review */
+  --color-status-ready: #5b8def;
+  --color-status-running: #3ecf8e;
+  --color-status-human: #e8a54b;
+  --color-status-review: #8b9cb3;
+  --color-status-done: #6b7280;
+  --color-status-blocked: #e05d5d;
+  --color-status-inbox: #a1a1aa;
+
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.13);
+  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+/* --- BeeZilla brand token overrides (docs/BRAND-UI-BRIEF.md) ---
+   Only active when BZ_BRAND=beezilla (data-brand="beezilla" on <html>). */
+[data-brand="beezilla"] {
   --color-bg: #0a0a0a;
   --color-bg-elevated: #141414;
   --color-bg-subtle: #1a1a1a;
@@ -16,8 +55,6 @@
   --color-accent-fg: #0a0a0a;
   --color-ring: #ffc107;
 
-  /* Status: muted per brief — blue=in progress, lavender=review,
-     green=done, red=needs_human */
   --color-status-ready: #6b9bff;
   --color-status-running: #5b8def;
   --color-status-human: #e05d5d;
@@ -26,7 +63,7 @@
   --color-status-blocked: #e05d5d;
   --color-status-inbox: #a8a8ad;
 
-  /* Raw BeeZilla palette (build notes) */
+  /* Raw BeeZilla palette */
   --bz-black: #0a0a0a;
   --bz-panel: #141414;
   --bz-col: #1a1a1a;
@@ -35,17 +72,6 @@
   --bz-charcoal: #111111;
 
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-
-  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.13);
-  --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
 @layer base {
@@ -455,7 +481,11 @@ html[data-density="compact"] .density-compact,
   width: min(78vw, 220px);
 }
 
-/* ===== BeeZilla brand motifs (docs/BRAND-UI-BRIEF.md) ===== */
+/* ===== BeeZilla brand motifs (docs/BRAND-UI-BRIEF.md) =====
+   All scoped under [data-brand="beezilla"] so they only apply
+   when BZ_BRAND=beezilla is set at build time. */
+
+[data-brand="beezilla"] {
 
 /* Hexagon marker — step numbers, status icons, badges */
 .bz-hex {
@@ -559,3 +589,5 @@ html[data-density="compact"] .density-compact,
   background: var(--bz-yellow);
   opacity: 0.85;
 }
+
+} /* / [data-brand="beezilla"] */

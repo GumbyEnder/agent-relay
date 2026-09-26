@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   createRootRoute,
   HeadContent,
@@ -5,6 +6,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
+import { BZ_BRAND } from "@/lib/brand";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -24,6 +26,18 @@ export const Route = createRootRoute({
     links: [{ rel: "stylesheet", href: appCss }],
   }),
   component: () => (
+    <RootComponent />
+  ),
+});
+
+function RootComponent() {
+  useEffect(() => {
+    if (BZ_BRAND) {
+      document.documentElement.dataset.brand = "beezilla";
+    }
+  }, []);
+
+  return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
         <HeadContent />
@@ -35,5 +49,5 @@ export const Route = createRootRoute({
         <Scripts />
       </body>
     </html>
-  ),
-});
+  );
+}

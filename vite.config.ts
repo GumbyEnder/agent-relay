@@ -293,6 +293,9 @@ export default defineConfig(({ command }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
+  define: {
+    "import.meta.env.VITE_BZ_BRAND": JSON.stringify(process.env.BZ_BRAND ?? ""),
+  },
   plugins: [
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth and /api/* never fall through to the SPA.

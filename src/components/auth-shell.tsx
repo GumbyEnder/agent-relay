@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { BZ_BRAND } from "@/lib/brand";
 
 /** BeeZilla mascot expression mapped to auth surfaces (brief: 16-smiling → default/empty). */
 function BeeZillaMark() {
@@ -33,14 +34,14 @@ export function AuthShell({
   footer?: ReactNode;
 }) {
   return (
-    <div className="bz-corner-lines grid min-h-dvh place-items-center bg-bg px-4 text-fg">
+    <div className={"grid min-h-dvh place-items-center bg-bg px-4 text-fg" + (BZ_BRAND ? " bz-corner-lines" : "")}>
       <div className="w-full max-w-sm space-y-6 rounded-[var(--radius-md)] border border-border bg-bg-elevated p-6 shadow-[var(--shadow-panel)]">
         <div className="space-y-1">
           <Link
             to="/"
             className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle hover:text-fg"
           >
-            <BeeZillaMark />
+            {BZ_BRAND ? <BeeZillaMark /> : null}
             <span>Dev Boards</span>
           </Link>
           <h1 className="pt-2 text-lg font-semibold tracking-tight">{title}</h1>
