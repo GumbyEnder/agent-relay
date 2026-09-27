@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import {
   createRootRoute,
   HeadContent,
@@ -31,14 +30,15 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  useEffect(() => {
-    if (BZ_BRAND) {
-      document.documentElement.dataset.brand = "beezilla";
-    }
-  }, []);
-
   return (
-    <html lang="en" data-theme="dark" suppressHydrationWarning>
+    <html
+      lang="en"
+      data-theme="dark"
+      // SSR: the brand attribute is rendered from server env so the client
+      // flag (src/lib/brand.ts) agrees without build-time baking.
+      data-brand={BZ_BRAND ? "beezilla" : undefined}
+      suppressHydrationWarning
+    >
       <head>
         <HeadContent />
       </head>
