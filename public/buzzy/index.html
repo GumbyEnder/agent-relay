@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla</title>
+  <style>
+    /* ── BeeZilla Design Tokens ─────────────────────────── */
+    :root {
+      --bz-black: #0A0A0A;
+      --bz-panel: #141414;
+      --bz-col: #1A1A1A;
+      --bz-yellow: #FFC107;
+      --bz-yellow-dim: #B8860B;
+      --bz-silver: #C9CDD2;
+      --bz-charcoal: #111111;
+      --bz-status-blue: #5B8DB8;
+      --bz-status-lavender: #9B8EC4;
+      --bz-status-green: #5BAF6B;
+      --bz-status-red: #C45B5B;
+      --bz-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: var(--bz-font);
+      color: #E8E8E8;
+      background: var(--bz-black);
+      margin: 0;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid #222;
+      background: var(--bz-panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header .brand strong {
+      letter-spacing: .06em;
+      font-size: 1.15rem;
+      color: var(--bz-yellow);
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+    header .brand .mascot-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+    }
+    header nav {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    header nav a {
+      color: #999;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.15s;
+    }
+    header nav a:hover { color: var(--bz-yellow); }
+    header nav .phase {
+      color: var(--bz-yellow);
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-left: 0.5rem;
+    }
+
+    /* ── Main ───────────────────────────────────────────── */
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin: 0 0 0.5rem;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    h2 {
+      font-size: 1.05rem;
+      margin: 0 0 0.5rem;
+      color: var(--bz-yellow);
+      font-weight: 600;
+    }
+    p, li {
+      color: #C8C8C8;
+      line-height: 1.55;
+      font-size: 0.92rem;
+    }
+    .muted { color: #777; font-size: 0.82rem; }
+
+    /* ── Mascot ─────────────────────────────────────────── */
+    .mascot {
+      display: block;
+      margin: 0 auto 1.2rem;
+      max-width: 180px;
+      width: 100%;
+      height: auto;
+      opacity: 0.92;
+    }
+    .mascot-sm {
+      width: 64px;
+      height: auto;
+      margin: 0.5rem auto 1rem;
+      display: block;
+    }
+    .mascot-lg {
+      max-width: 240px;
+      margin: 0 auto 1.5rem;
+      display: block;
+    }
+
+    /* ── Hexagon badge ──────────────────────────────────── */
+    .hex-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      background: var(--bz-yellow);
+      color: var(--bz-black);
+      font-weight: 800;
+      font-size: 0.78rem;
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      flex-shrink: 0;
+    }
+
+    /* ── Riveted-metal card ─────────────────────────────── */
+    .riveted {
+      background: linear-gradient(160deg, #D8DCE2 0%, #B8BCC2 40%, #A8ACB2 100%);
+      border: 1px solid #8A8E94;
+      border-radius: 6px;
+      padding: 1rem 1.1rem;
+      margin: 0.7rem 0;
+      position: relative;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.35),
+        inset 0 -1px 0 rgba(0,0,0,0.15),
+        0 2px 8px rgba(0,0,0,0.4);
+      color: #1A1A1A;
+      font-size: 0.9rem;
+    }
+    .riveted h2 {
+      color: #1A1A1A;
+      font-size: 0.95rem;
+      margin: 0 0 0.4rem;
+    }
+    .riveted p, .riveted li {
+      color: #2A2A2A;
+      font-size: 0.88rem;
+    }
+    .riveted .rivet {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #E8E8E8, #8A8E94);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .riveted .rivet::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: #666;
+      transform: translate(-50%, -50%);
+    }
+    .riveted .r-tl { top: 6px; left: 6px; }
+    .riveted .r-tr { top: 6px; right: 6px; }
+    .riveted .r-bl { bottom: 6px; left: 6px; }
+    .riveted .r-br { bottom: 6px; right: 6px; }
+
+    /* ── Buttons ────────────────────────────────────────── */
+    button {
+      font: inherit;
+      padding: 0.6rem 1.2rem;
+      border: 1px solid var(--bz-yellow);
+      background: var(--bz-yellow);
+      color: var(--bz-black);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.88rem;
+      border-radius: 4px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    button:hover { background: var(--bz-yellow-dim); border-color: var(--bz-yellow-dim); }
+    button:active { transform: scale(0.98); }
+    button.secondary {
+      background: transparent;
+      color: var(--bz-yellow);
+      border: 1px solid #444;
+    }
+    button.secondary:hover {
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.08);
+    }
+    button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    /* ── Inputs ─────────────────────────────────────────── */
+    textarea, input {
+      width: 100%;
+      font: inherit;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #333;
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+    textarea:focus, input:focus {
+      outline: none;
+      border-color: var(--bz-yellow);
+      box-shadow: 0 0 0 2px rgba(255,193,7,0.15);
+    }
+    textarea::placeholder, input::placeholder {
+      color: #555;
+    }
+
+    /* ── Job list rows ──────────────────────────────────── */
+    .jobrow {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: baseline;
+      cursor: pointer;
+      padding: 0.75rem 1rem;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+    .jobrow:hover { background: rgba(255,193,7,0.06); }
+    .tag {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--bz-yellow);
+      background: rgba(255,193,7,0.1);
+      padding: 0.2rem 0.5rem;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+
+    /* ── Template tiles ─────────────────────────────────── */
+    .templates {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+    }
+    @media (max-width: 600px) {
+      .templates { grid-template-columns: 1fr; }
+    }
+    .templates button {
+      width: 100%;
+      text-align: left;
+      background: var(--bz-panel);
+      color: #E8E8E8;
+      border: 1px solid #333;
+      font-size: 0.85rem;
+    }
+    .templates button:hover {
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.06);
+    }
+    .templates button.sel {
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.12);
+      color: var(--bz-yellow);
+    }
+    .templates button .muted { color: #777; font-size: 0.78rem; }
+
+    /* ── Chat bubbles ───────────────────────────────────── */
+    .bubble {
+      padding: 0.75rem 0.95rem;
+      margin: 0.5rem 0;
+      border: 1px solid #2A2A2A;
+      background: var(--bz-panel);
+      border-radius: 6px;
+      color: #D8D8D8;
+      font-size: 0.9rem;
+    }
+    .bubble.me {
+      background: var(--bz-col);
+      border-color: var(--bz-yellow-dim);
+      color: #E8E8E8;
+    }
+
+    /* ── Board ──────────────────────────────────────────── */
+    .board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.6rem;
+    }
+    @media (max-width: 800px) {
+      .board { grid-template-columns: 1fr 1fr; }
+    }
+    .col {
+      background: var(--bz-col);
+      border: 1px solid #2A2A2A;
+      border-top: 3px solid var(--bz-yellow);
+      border-radius: 4px;
+      min-height: 8rem;
+      padding: 0.6rem;
+    }
+    .col h3 {
+      margin: 0 0 0.5rem;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--bz-yellow);
+      font-weight: 700;
+    }
+    .chip {
+      border: 1px solid #3A3A3A;
+      padding: 0.45rem 0.55rem;
+      margin: 0.35rem 0;
+      font-size: 0.82rem;
+      background: var(--bz-charcoal);
+      border-radius: 3px;
+      color: #C8C8C8;
+    }
+    .chip.working {
+      border-color: var(--bz-status-blue);
+      color: var(--bz-status-blue);
+    }
+
+    /* ── Draft preview ──────────────────────────────────── */
+    .preview {
+      white-space: pre-wrap;
+      font-family: ui-monospace, 'Cascadia Code', Menlo, monospace;
+      font-size: 0.78rem;
+      background: var(--bz-charcoal);
+      padding: 0.85rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 4px;
+      color: #B8B8B8;
+      line-height: 1.5;
+    }
+
+    /* ── Filter checkbox ────────────────────────────────── */
+    label.filter {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      margin: 0.8rem 0;
+      color: #999;
+      cursor: pointer;
+    }
+    label.filter input[type="checkbox"] {
+      accent-color: var(--bz-yellow);
+      width: 15px;
+      height: 15px;
+    }
+
+    /* ── Row / spacing ──────────────────────────────────── */
+    .row {
+      display: flex;
+      gap: 0.6rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: var(--bz-panel);
+      border: 1px solid #2A2A2A;
+      padding: 1rem 1.1rem;
+      margin: 0.7rem 0;
+      border-radius: 4px;
+    }
+    .card h2 {
+      color: var(--bz-yellow);
+    }
+    .card p, .card li {
+      color: #C8C8C8;
+    }
+
+    .hidden { display: none; }
+
+    /* ── Steps list (in draft plan) ─────────────────────── */
+    .card ol {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .card ol li {
+      color: #C8C8C8;
+      margin-bottom: 0.3rem;
+    }
+    .card ul {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .card ul li {
+      color: #C8C8C8;
+      margin-bottom: 0.3rem;
+    }
+
+    /* ── Remember page ──────────────────────────────────── */
+    .remember-list ul {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .remember-list li {
+      color: #C8C8C8;
+      margin-bottom: 0.3rem;
+      font-size: 0.88rem;
+    }
+
+    /* ── Circuit-line decoration ────────────────────────── */
+    .circuit-deco {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 200px;
+      height: 200px;
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Step indicator in ask flow ─────────────────────── */
+    .step-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .step-indicator .hex-badge {
+      width: 24px;
+      height: 24px;
+      font-size: 0.7rem;
+    }
+    .step-indicator span {
+      font-size: 0.78rem;
+      color: var(--bz-yellow-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Fairness notes list ────────────────────────────── */
+    .fairness-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .fairness-list li {
+      position: relative;
+      padding-left: 1.2rem;
+      margin-bottom: 0.4rem;
+      color: #C8C8C8;
+      font-size: 0.88rem;
+    }
+    .fairness-list li::before {
+      content: '◆';
+      position: absolute;
+      left: 0;
+      color: var(--bz-yellow);
+      font-size: 0.6rem;
+      top: 0.55rem;
+    }
+
+    /* ── Result page ────────────────────────────────────── */
+    .result-cost {
+      font-size: 0.92rem;
+      color: #E8E8E8;
+      margin: 0.5rem 0;
+    }
+    .result-cost strong {
+      color: var(--bz-yellow);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+      <strong>BeeZilla</strong>
+    </div>
+    <nav>
+      <a href="#jobs" id="jobsLink">Your jobs</a>
+      <a href="#talk" id="talkLink">Talk to BeeZilla</a>
+      <a href="#remember" id="memLink">What BeeZilla remembers</a>
+      <a href="/login" class="account-link">Sign in</a>
+      <span class="phase" id="phaseLabel">Your jobs</span>
+    </nav>
+  </header>
+  <main id="app"></main>
+  <script src="sow-pdf.js"></script>
+  <script>
+    const QUESTIONS = [
+      { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
+      { id: "rough_size", prompt: "Roughly how much fence are we talking? Feet, or just 'about a backyard' is fine.", def: "Typical residential yard, single line." },
+      { id: "material_supplier", prompt: "Who's getting the materials — you or the contractor?", def: "Contractor supplies." },
+      { id: "budget_range", prompt: "Got a budget range in mind? Ballpark is fine.", def: "No stated budget — quotes will define it." },
+      { id: "timing", prompt: "When do you need this done by?", def: "Flexible timing." },
+      { id: "done_right_check", prompt: "How will you know when it's done right — what would you check?", def: "Fence straight, panels secure, gates work." },
+      { id: "quote_count", prompt: "Getting quotes from a few contractors, or just this one?", def: "Comparing quotes — itemized." },
+      { id: "exclusions", prompt: "Anything you definitely don't want done?", def: "No exclusions." },
+    ];
+    const STEPS = [
+      { id: "write", title: "Write the draft" },
+      { id: "fair", title: "Check it for fairness" },
+      { id: "format", title: "Format the documents" },
+      { id: "hand", title: "Hand it over" },
+    ];
+    const TEMPLATES = [
+      { id: "legal", name: "Legal", hint: "Letters, agreements, notices — not legal advice." },
+      { id: "finance", name: "Finance", hint: "Budgets, invoices, money questions." },
+      { id: "creative", name: "Creative writing", hint: "Stories, scripts, copy." },
+      { id: "technical", name: "Technical", hint: "Explainers, specs, how-it-works." },
+      { id: "code", name: "Code", hint: "Scripts and programming help." },
+    ];
+
+    const STORAGE_KEY = "beezilla-jobs-v1";
+    const LEGACY_KEY = "beezilla-dana-v1";
+
+    function emptyJob(id) {
+      return {
+        id: id || ("job_" + Date.now()),
+        createdAt: Date.now(),
+        template: null,
+        problem: "",
+        messages: [],
+        screen: "pick",
+        q: 0,
+        answers: {},
+        skipped: {},
+        version: 0,
+        approved: false,
+        pause: null,
+        board: { Waiting: [], Working: [], "Needs you": [], Done: [] },
+        events: [],
+      };
+    }
+
+    function jobComplete(j) {
+      return !!(j && j.screen === "result");
+    }
+
+    function jobTitle(j) {
+      if (j.problem) return j.problem.slice(0, 72);
+      if (j.template) return j.template + " job";
+      const happened = (j.answers && j.answers.what_happened) || "";
+      if (happened) return happened.slice(0, 72);
+      return "New job";
+    }
+
+    function jobStatus(j) {
+      if (jobComplete(j)) return "Done";
+      if (j.screen === "board") return "Working";
+      if (j.approved) return "Working";
+      if (j.screen === "draft") return "Needs you";
+      if (j.problem) return "In progress";
+      if (j.template) return "In progress";
+      if (j.q > 0) return "In progress";
+      return "Not started";
+    }
+
+    const catalog = { currentId: null, hideCompleted: true, jobs: [], userId: null };
+    let state = emptyJob();
+
+    function snapshotCurrent() {
+      if (!state.id) return;
+      const copy = JSON.parse(JSON.stringify(state));
+      const i = catalog.jobs.findIndex((j) => j.id === copy.id);
+      if (i >= 0) catalog.jobs[i] = copy;
+      else catalog.jobs.unshift(copy);
+    }
+
+    function saveState() {
+      snapshotCurrent();
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog));
+      } catch (_) { /* quota, private mode */ }
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (saved && Array.isArray(saved.jobs)) {
+            catalog.jobs = saved.jobs;
+            catalog.hideCompleted = saved.hideCompleted !== false;
+            catalog.userId = saved.userId || catalog.userId;
+            catalog.currentId = saved.currentId || (saved.jobs[0] && saved.jobs[0].id) || null;
+            const cur = catalog.jobs.find((j) => j.id === catalog.currentId);
+            if (cur) state = cur;
+            else if (catalog.jobs[0]) { state = catalog.jobs[0]; catalog.currentId = state.id; }
+            else { state = emptyJob(); catalog.jobs = [state]; catalog.currentId = state.id; }
+            if (!state.screen || state.screen === "intro") state.screen = "jobs";
+            return true;
+          }
+        }
+        const legacy = localStorage.getItem(LEGACY_KEY);
+        if (legacy) {
+          const old = JSON.parse(legacy);
+          if (old && typeof old === "object") {
+            state = Object.assign(emptyJob("job_legacy"), old);
+            state.id = "job_legacy";
+            catalog.jobs = [state];
+            catalog.currentId = state.id;
+            state.screen = "jobs";
+            return true;
+          }
+        }
+      } catch (_) { /* corrupt */ }
+      state = emptyJob();
+      catalog.jobs = [state];
+      catalog.currentId = state.id;
+      state.screen = "jobs";
+      return false;
+    }
+
+    function openJob(id) {
+      snapshotCurrent();
+      const j = catalog.jobs.find((x) => x.id === id);
+      if (!j) return;
+      state = j;
+      catalog.currentId = id;
+      if (state.screen === "jobs" || state.screen === "intro") {
+        if (jobComplete(state)) state.screen = "result";
+        else if (state.problem) state.screen = "chat";
+        else if (state.template) state.screen = "problem";
+        else if (state.answers && state.answers.what_happened) state.screen = state.version ? "draft" : "ask";
+        else state.screen = "pick";
+      }
+      render();
+    }
+
+    function newJob() {
+      snapshotCurrent();
+      state = emptyJob();
+      catalog.jobs.unshift(state);
+      catalog.currentId = state.id;
+      state.screen = "pick";
+      ensureHonchoPeer();
+      render();
+    }
+
+    loadState();
+    if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+    const $ = (html) => { document.getElementById("app").innerHTML = html; };
+    const setPhase = (t) => { document.getElementById("phaseLabel").textContent = t; };
+
+    function parseBudget(s) {
+      const n = String(s || "").replace(/,/g, "").match(/(\d+)/);
+      return n ? Number(n[1]) : null;
+    }
+
+    function templateName() {
+      const t = TEMPLATES.find((x) => x.id === state.template);
+      return (t && t.name) || "Job";
+    }
+
+    function draftDoc() {
+      if (state.problem) {
+        return templateName() + " draft\nStatus: " + (state.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + state.version + "\n\nWhat you asked for:\n" + state.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";
+      }
+      const a = state.answers;
+      return `Scope of Work — Fence repair
+Prepared for: you (homeowner)
+Status: ${state.approved ? "Approved — for quotes" : "Draft — not started"}
+Version: v${state.version}
+
+What happened: ${a.what_happened}
+Size: ${a.rough_size}
+Materials: ${a.material_supplier}
+Budget: ${a.budget_range}
+Timing: ${a.timing}
+Done right means: ${a.done_right_check}
+Quotes: ${a.quote_count}
+Please don't: ${a.exclusions}
+
+This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or sending this out.`;
+    }
+
+    function fairnessNotes() {
+      const b = parseBudget(state.answers.budget_range);
+      const notes = [
+        "This is a guide, not legal advice — it helps you ask better questions.",
+        "Written extras need your OK before they happen — that protects you.",
+        "You stay in control of what gets sent.",
+      ];
+      notes.push("We could not confirm typical prices from two solid sources.");
+      return notes;
+    }
+
+    function goJobs() {
+      setPhase("Your jobs");
+      snapshotCurrent();
+      const list = catalog.jobs.filter((j) => !(catalog.hideCompleted && jobComplete(j)));
+      const rows = list.length
+        ? list.map((j) => {
+            const when = new Date(j.createdAt || Date.now()).toLocaleDateString();
+            const statusClass = jobStatus(j) === "Done" ? " tag-done" : jobStatus(j) === "Working" ? " tag-working" : "";
+            return "<div class='jobrow' data-id='" + j.id + "'><div><strong>" + jobTitle(j).replace(/</g,"&lt;") + "</strong><p class='muted'>" + when + "</p></div><span class='tag'>" + jobStatus(j) + "</span></div>";
+          }).join("")
+        : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
+        "<h1>Your jobs</h1>" +
+        "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
+        "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
+        rows +
+        "<div class='row'><button id='newjob'>New job</button></div>" +
+        "<p class='muted'>Talk to BeeZilla with your history needs an account and Honcho. This page is the job list only.</p>";
+      document.getElementById("hideDone").onchange = () => {
+        catalog.hideCompleted = document.getElementById("hideDone").checked;
+        saveState();
+        goJobs();
+      };
+      document.getElementById("newjob").onclick = newJob;
+      document.querySelectorAll(".jobrow").forEach((el) => {
+        el.onclick = () => openJob(el.getAttribute("data-id"));
+      });
+    }
+
+    function goPick() {
+      setPhase("New job");
+      const tiles = TEMPLATES.map((t) => {
+        const sel = state.template === t.id ? " sel" : "";
+        return "<button class='secondary" + sel + "' data-id='" + t.id + "'><strong>" + t.name + "</strong><br><span class='muted'>" + t.hint + "</span></button>";
+      }).join("");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot' src='brand/revision6_expressions_13-idea.png' alt='BeeZilla' />" +
+        "<h1>What kind of job is this?</h1>" +
+        "<p>Pick a template. Then tell BeeZilla the problem in your own words. The product is a chat — this is the start of that conversation.</p>" +
+        "<div class='templates'>" + tiles + "</div>" +
+        "<div class='row'><button id='next' disabled>Continue</button><button id='cancel' class='secondary'>Cancel</button></div>";
+      document.querySelectorAll(".templates button").forEach((el) => {
+        el.onclick = () => {
+          state.template = el.getAttribute("data-id");
+          goPick();
+        };
+      });
+      const next = document.getElementById("next");
+      if (state.template) next.disabled = false;
+      next.onclick = () => { if (!state.template) return; state.screen = "problem"; render(); };
+      document.getElementById("cancel").onclick = () => { state.screen = "jobs"; render(); };
+    }
+
+    function goProblem() {
+      const t = TEMPLATES.find((x) => x.id === state.template);
+      setPhase((t && t.name) || "New job");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<h1>What's the problem?</h1>" +
+        "<p class='muted'>" + (t ? t.name : "") + " — write it like you'd say it out loud. Nothing starts until you approve a draft later.</p>" +
+        "<textarea id='prob' rows='7' placeholder='Describe what you need…'></textarea>" +
+        "<div class='row'><button id='go'>Continue</button><button id='back' class='secondary'>Back</button></div>";
+      const box = document.getElementById("prob");
+      box.value = state.problem || "";
+      document.getElementById("go").onclick = () => {
+        const v = box.value.trim();
+        if (!v) { box.focus(); return; }
+        state.problem = v;
+        state.messages = [
+          { who: "me", text: v },
+          { who: "bee", text: "Got it — I'll treat this as a " + (t ? t.name : "") + " job. When you're ready, I'll show a full draft. Nothing starts until you approve it." },
+        ];
+        state.screen = "chat";
+        syncHonchoChat();
+        render();
+      };
+      document.getElementById("back").onclick = () => { state.screen = "pick"; render(); };
+    }
+
+    function goChat() {
+      const t = TEMPLATES.find((x) => x.id === state.template);
+      setPhase("Talk it through");
+      const msgs = (state.messages || []).map((m) => "<div class='bubble" + (m.who === "me" ? " me" : "") + "'>" + String(m.text).replace(/</g,"&lt;").replace(/\n/g,"<br>") + "</div>").join("");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<h1>" + (t ? t.name : "Job") + "</h1>" +
+        msgs +
+        "<textarea id='more' rows='3' placeholder='Add more…'></textarea>" +
+        "<div class='row'><button id='draft'>Show the draft</button><button id='send'>Send</button><button id='jobsbtn' class='secondary'>Back to your jobs</button></div>" +
+        "<p class='muted'>Approve the draft next — that's when the board appears.</p>";
+      document.getElementById("draft").onclick = () => {
+        buildDraft();
+        syncHonchoChat();
+        state.screen = "draft";
+        render();
+      };
+      document.getElementById("send").onclick = () => {
+        const v = document.getElementById("more").value.trim();
+        if (!v) {
+          if (state.problem) {
+            buildDraft();
+            syncHonchoChat();
+            state.screen = "draft";
+            render();
+          }
+          return;
+        }
+        state.messages = state.messages || [];
+        state.messages.push({ who: "me", text: v });
+        state.problem = (state.problem ? state.problem + "\n\n" : "") + v;
+        buildDraft();
+        syncHonchoChat();
+        state.screen = "draft";
+        render();
+      };
+      document.getElementById("jobsbtn").onclick = () => { state.screen = "jobs"; render(); };
+    }
+
+    function goIntro() {
+      goPick();
+    }
+
+    function goAsk() {
+      const q = QUESTIONS[state.q];
+      setPhase("Question " + (state.q + 1) + " of 8");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<div class='step-indicator'><span class='hex-badge'>" + (state.q + 1) + "</span><span>" + (state.q + 1) + " of 8</span></div>" +
+        "<p class='muted'>You can skip this. I'll use a default.</p>" +
+        "<h1>" + q.prompt + "</h1>" +
+        "<textarea id='ans' rows='4' placeholder='Type here…'></textarea>" +
+        "<div class='row'><button id='next'>Continue</button><button id='skip' class='secondary'>Skip</button></div>";
+      document.getElementById("next").onclick = () => submitQ(false);
+      document.getElementById("skip").onclick = () => submitQ(true);
+    }
+
+    function submitQ(skip) {
+      const q = QUESTIONS[state.q];
+      const val = skip ? q.def : (document.getElementById("ans").value.trim() || q.def);
+      if (skip) state.skipped[q.id] = true;
+      state.answers[q.id] = val;
+      const b = parseBudget(val);
+      if (q.id === "budget_range" && b != null) {
+        state.pause = { question: "You said around $" + b + ". We could not confirm typical prices from two solid sources. Stay at your number, or stay flexible?" };
+        state.screen = "pause";
+        render();
+        return;
+      }
+      state.q += 1;
+      if (state.q >= QUESTIONS.length) { buildDraft(); state.screen = "draft"; }
+      render();
+    }
+
+    function goPause() {
+      setPhase("Needs you");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<h1>Before we go further</h1><p>" + state.pause.question + "</p>" +
+        "<div class='row'><button id='flex'>My budget is flexible</button>" +
+        "<button id='stay' class='secondary'>I need to stay at my number</button></div>" +
+        "<p class='muted'>This pause does not start any work and does not create extra steps.</p>";
+      document.getElementById("flex").onclick = () => {
+        state.answers.budget_range = (state.answers.budget_range || "") + " (flexible)";
+        state.pause = null; state.q += 1;
+        if (state.q >= QUESTIONS.length) { buildDraft(); state.screen = "draft"; }
+        render();
+      };
+      document.getElementById("stay").onclick = () => {
+        state.pause = null; state.q += 1;
+        if (state.q >= QUESTIONS.length) { buildDraft(); state.screen = "draft"; }
+        render();
+      };
+    }
+
+    function buildDraft() {
+      state.version += 1;
+      state.approved = false;
+      state.events.push({ type: "draft_version", version: "v" + state.version, at: Date.now() });
+    }
+
+    function goDraft() {
+      setPhase("Check this before anything starts");
+      const notes = fairnessNotes().map((n) => "<li>" + n + "</li>").join("");
+      const echo = state.problem
+        ? state.problem.replace(/</g, "&lt;").replace(/\n/g, "<br>")
+        : "You want a clear scope of work so fence quotes are easy to compare.";
+      const plan = state.problem
+        ? "<li>You described the problem (done)</li><li>I'll turn that into a plain-language draft</li><li>You approve it — nothing goes out until you do</li><li>Then watch it through Waiting, Working, Needs you, and Done</li>"
+        : "<li>Answer a few questions about your fence (done)</li><li>I'll turn your answers into a plain-language scope of work</li><li>Review the draft and approve it — nothing goes out until you do</li><li>Once approved, watch it through Waiting, Working, Needs you, and Done</li>";
+      const after = state.problem
+        ? "BeeZilla finishes the draft, double-checks it, and hands you files. You'll see each step on the board."
+        : "BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.";
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
+        "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>What you asked for</h2><p>" + echo + "</p></div>" +
+        "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>The plan, in steps</h2><ol>" + plan + "</ol></div>" +
+        "<div class='card'><h2>Document preview</h2><div class='preview'>" + draftDoc().replace(/</g,"&lt;") + "</div></div>" +
+        "<div class='card'><h2>Typical cost check</h2><p>We could not confirm typical prices from two solid sources.</p><p>Putting this paperwork together is <strong>about $1–3</strong>.</p></div>" +
+        "<div class='card'><h2>Fairness notes</h2><ul class='fairness-list'>" + notes + "</ul></div>" +
+        "<div class='card'><h2>What happens after you approve</h2><p>" + after + "</p></div>" +
+        "<p class='muted'>Draft version v" + state.version + "</p>" +
+        "<div class='row'><button id='ok'>Approve — go ahead</button><button id='chg' class='secondary'>Change something</button></div>";
+      document.getElementById("ok").onclick = approve;
+      document.getElementById("chg").onclick = () => {
+        state.approved = false;
+        state.screen = state.template ? "problem" : "ask";
+        if (!state.template) state.q = 0;
+        render();
+      };
+    }
+
+    function approve() {
+      state.events.push({ type: "approval", gate: "first_ticket_cut", version: "v" + state.version, at: Date.now(), missions: [] });
+      state.approved = true;
+      state.board = {
+        Waiting: [{ title: STEPS[1].title }, { title: STEPS[2].title }, { title: STEPS[3].title }],
+        Working: [{ title: STEPS[0].title }],
+        "Needs you": [],
+        Done: [],
+      };
+      state.screen = "board";
+      render();
+      runWork();
+    }
+
+    function runWork() {
+      const order = ["write", "fair", "format", "hand"];
+      let i = 0;
+      const tick = () => {
+        if (!state.approved || state.screen !== "board") return;
+        if (i === 0) {
+          move("Working", "Done", STEPS[0].title);
+          move("Waiting", "Working", STEPS[1].title);
+        } else if (i === 1) {
+          move("Working", "Done", STEPS[1].title);
+          move("Waiting", "Working", STEPS[2].title);
+        } else if (i === 2) {
+          move("Working", "Done", STEPS[2].title);
+          move("Waiting", "Working", STEPS[3].title);
+        } else {
+          move("Working", "Done", STEPS[3].title);
+          state.screen = "result";
+        }
+        i += 1;
+        render();
+        if (state.screen === "board") setTimeout(tick, 1400);
+      };
+      setTimeout(tick, 1400);
+    }
+
+    function move(from, to, title) {
+      state.board[from] = state.board[from].filter((c) => c.title !== title);
+      state.board[to].push({ title: title });
+    }
+
+    function goBoard() {
+      setPhase("Watch the work move");
+      const cols = ["Waiting", "Working", "Needs you", "Done"].map((name) => {
+        const chips = (state.board[name] || []).map((c) => "<div class='chip" + (name === "Working" ? " working" : "") + "'>" + c.title + "</div>").join("") || "<p class='muted'>None</p>";
+        return "<div class='col'><h3>" + name + "</h3>" + chips + "</div>";
+      }).join("");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<h1>Watch the work move</h1><p class='muted'>These steps only exist because you approved the draft.</p>" +
+        "<div class='board'>" + cols + "</div>";
+    }
+
+    function goRemember() {
+      setPhase("What BeeZilla remembers");
+      const stm = Object.keys(state.answers).length
+        ? "<ul>" + QUESTIONS.map((q) => "<li>" + q.prompt.split("—")[0] + ": " + (state.answers[q.id] || "—") + "</li>").join("") + "</ul>"
+        : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
+      document.getElementById("app").innerHTML =
+        "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<h1>What BeeZilla remembers</h1>" +
+        "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
+        "<div class='card'><h2>Across jobs</h2>" + (catalog.jobs.filter(jobComplete).length
+          ? "<ul>" + catalog.jobs.filter(jobComplete).map((j) => "<li>" + jobTitle(j).replace(/</g,"&lt;") + "</li>").join("") + "</ul><p class='muted'>This list is on this device. Honcho (the real across-jobs memory) is not wired to this demo.</p>"
+          : "<p>Nothing yet across jobs. BeeZilla does not pretend to know you.</p><p class='muted'>Later: short facts you can read, correct, or forget. Not model names, not your wallet.</p>") + "</div>" +
+        "<div class='card'><h2>What is not stored</h2><ul><li>Model names and token counts</li><li>Wallet or payment details</li><li>Full interview dumps forever</li></ul></div>" +
+        "<p class='muted'>Device id (will be your Honcho peer later): " + (catalog.userId || "—") + "</p>" +
+        "<div class='row'><button id='forgetJob' class='secondary'>Forget this job</button><button id='back' class='secondary'>Back</button></div>";
+      document.getElementById("forgetJob").onclick = () => {
+        state.answers = {};
+        state.skipped = {};
+        state.q = 0;
+        render();
+      };
+      document.getElementById("back").onclick = () => {
+        state.screen = state.approved ? (state.board.Done.length >= 4 ? "result" : "board") : (state.q > 0 && state.q < 8 ? "ask" : "intro");
+        if (state.version && !state.approved) state.screen = "draft";
+        render();
+      };
+    }
+
+    function goResult() {
+      setPhase("Your documents are ready");
+      document.getElementById("app").innerHTML =
+        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<h1>Your documents are ready.</h1>" +
+        "<p>Download the editable copy and a PDF.</p>" +
+        "<div class='row'><button id='dl'>Download editable copy</button><button id='dlpdf' class='secondary'>Download PDF</button></div>" +
+        "<div class='card'><h2>Fairness notes</h2><ul class='fairness-list'>" + fairnessNotes().map((n) => "<li>" + n + "</li>").join("") + "</ul></div>" +
+        "<p class='result-cost'>What it cost: <strong>about $1.50</strong>.</p>" +
+        "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>" +
+        "<div class='row'><button id='backjobs' class='secondary'>Back to your jobs</button></div>";
+      document.getElementById("dl").onclick = () => {
+        const blob = new Blob([draftDoc()], { type: "text/markdown" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = (state.template || "job") + "-draft.md";
+        a.click();
+      };
+      document.getElementById("dlpdf").onclick = () => {
+        const bytes = window.beezillaSowPdf(draftDoc());
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = (state.template || "job") + "-draft.pdf";
+        a.click();
+      };
+      document.getElementById("backjobs").onclick = () => { state.screen = "jobs"; render(); };
+    }
+
+    function render() {
+      if (state.screen === "jobs") goJobs();
+      else if (state.screen === "pick" || state.screen === "intro") goPick();
+      else if (state.screen === "problem") goProblem();
+      else if (state.screen === "chat") goChat();
+      else if (state.screen === "ask") goAsk();
+      else if (state.screen === "pause") goPause();
+      else if (state.screen === "draft") goDraft();
+      else if (state.screen === "board") goBoard();
+      else if (state.screen === "result") goResult();
+      else if (state.screen === "remember") goRemember();
+      saveState();
+    }
+    const HONCHO_BASE = "https://honcho-api-production-215c.up.railway.app";
+
+    function ensureHonchoPeer() {
+      if (!catalog.userId) return;
+      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/peers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: catalog.userId }),
+      }).catch(function () {});
+    }
+
+    function syncHonchoChat() {
+      if (!catalog.userId || !state.id) return;
+      ensureHonchoPeer();
+      const sid = String(state.id).slice(0, 128);
+      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: sid, peers: { [catalog.userId]: {}, beezilla: {} } }),
+      }).then(function () {
+        const msgs = (state.messages || []).filter(function (m) { return m.who === "me" && m.text; }).slice(-5);
+        if (!msgs.length && state.problem) msgs.push({ who: "me", text: state.problem });
+        if (!msgs.length) return;
+        return fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/sessions/" + encodeURIComponent(sid) + "/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            messages: msgs.map(function (m) { return { content: String(m.text).slice(0, 4000), peer_id: catalog.userId }; }),
+          }),
+        });
+      }).catch(function () {});
+    }
+
+    document.getElementById("jobsLink").onclick = (e) => {
+      e.preventDefault();
+      state.screen = "jobs";
+      render();
+    };
+    document.getElementById("talkLink").onclick = (e) => {
+      e.preventDefault();
+      ensureHonchoPeer();
+      if (state.problem) state.screen = "chat";
+      else if (state.template) state.screen = "problem";
+      else { newJob(); return; }
+      render();
+    };
+    document.getElementById("memLink").onclick = (e) => {
+      e.preventDefault();
+      state.screen = "remember";
+      render();
+    };
+    render();
+  </script>
+</body>
+</html>
