@@ -51,7 +51,11 @@ export async function chatCompletion(
   opts?: { model?: string; temperature?: number; maxTokens?: number },
 ): Promise<string> {
   const model = opts?.model || DEFAULT_MODEL;
-  const url = new URL("/chat/completions", BASE_URL);
+  // BASE_URL may or may not end in "/v1" — join paths, never use new URL()
+  // (an absolute path would REPLACE the base path and drop "/v1").
+  const url = new URL(
+    BASE_URL.replace(/\/+$/, "") + "/chat/completions",
+  );
   const body = {
     model,
     messages,
