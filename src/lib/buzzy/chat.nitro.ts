@@ -9,9 +9,9 @@
  *   GET  /api/buzzy/models — list available models (labels + ids)
  */
 
-import { defineEventHandler, getMethod, getQuery, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
-import { requireUserId } from "@/lib/auth/verify.server";
+import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels } from "./llm";
 
 export default defineEventHandler(async (event) => {
@@ -26,13 +26,19 @@ export default defineEventHandler(async (event) => {
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
   if (method === "POST" && path === "/api/buzzy/chat") {
-    let userId: string;
-    try {
-      userId = await requireUserId();
-    } catch {
+    const rawHeaders = event.node?.req?.headers ?? event.req?.headers;
+    const headersInit = rawHeaders instanceof Headers
+      ? rawHeaders
+      : Object.entries(rawHeaders as Record<string, string>).reduce<Record<string, string>>((h, [k, v]) => {
+          if (v !== undefined) h[k] = Array.isArray(v) ? v.join(", ") : v;
+          return h;
+        }, {});
+    const user = await getSessionUserFromHeaders(new Headers(headersInit));
+    if (!user) {
       setResponseStatus(event, 401);
       return { error: "Sign in required", code: "signed_out" };
     }
+    const userId = user.id;
 
     let body: Record<string, unknown> = {};
     try {

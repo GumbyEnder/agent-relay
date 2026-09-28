@@ -1454,6 +1454,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try {
         const resp = await fetch(CHAT_BASE, {
           method: "POST",
+          credentials: "same-origin",
           headers: {
             "Content-Type": "application/json",
             ...getAuthHeaders(),
