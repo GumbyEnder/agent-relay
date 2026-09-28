@@ -202,6 +202,97 @@ function betterAuthApiPlugin(): Plugin {
   };
 }
 
+/**
+ * Buzzy chat API in dev (`/api/buzzy/*`) — same route as Nitro production.
+ * Delegates to chat.nitro.ts which handles both /chat and /models.
+ */
+function buzzApiPlugin(): Plugin {
+  return {
+    name: "app-builder:buzzy-api",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        try {
+          const rawUrl = req.url ?? "";
+          const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+          if (pathOnly !== "/api/buzzy/chat" && pathOnly !== "/api/buzzy/models") {
+            next();
+            return;
+          }
+
+          const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost:8080");
+          const proto = String(
+            req.headers["x-forwarded-proto"] ??
+              ((req.socket as { encrypted?: boolean } | undefined)?.encrypted ? "https" : "http"),
+          );
+
+          const chunks: Buffer[] = [];
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            await new Promise<void>((resolve, reject) => {
+              req.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+              req.on("end", () => resolve());
+              req.on("error", reject);
+            });
+          }
+
+          const requestHeaders = new Headers();
+          for (const [key, value] of Object.entries(req.headers)) {
+            if (value === undefined) continue;
+            if (Array.isArray(value)) {
+              for (const v of value) requestHeaders.append(key, v);
+            } else {
+              requestHeaders.set(key, value);
+            }
+          }
+          if (!requestHeaders.has("host")) requestHeaders.set("host", host);
+
+          const request = new Request(`${proto}://${host}${rawUrl}`, {
+            method: (req.method ?? "GET").toUpperCase(),
+            headers: requestHeaders,
+            body: chunks.length > 0 ? new Uint8Array(Buffer.concat(chunks)) : undefined,
+            // @ts-expect-error undici Request duplex when body present
+            duplex: chunks.length > 0 ? "half" : undefined,
+          });
+
+          // Import the Nitro handler module and invoke it
+          const mod = (await server.ssrLoadModule("/src/lib/buzzy/chat.nitro.ts")) as {
+            default: (event: any) => Promise<any>;
+          };
+          const handler = mod.default;
+          if (typeof handler !== "function") {
+            res.statusCode = 500;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ ok: false, error: "buzzy handler not found" }));
+            return;
+          }
+
+          // Build a minimal h3 event-like object from the Node request
+          const event = {
+            req,
+            path: pathOnly,
+            method: (req.method ?? "GET").toUpperCase(),
+            headers: requestHeaders,
+            context: {},
+          };
+
+          const response = await handler(event);
+
+          res.statusCode = response.ok !== false ? 200 : 400;
+          res.setHeader("content-type", "application/json; charset=utf-8");
+          res.end(JSON.stringify(response));
+        } catch (err) {
+          console.error("[app-builder] /api/buzzy handler failed:", err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ ok: false, error: "buzzy api failed" }));
+          }
+        }
+      });
+    },
+  };
+}
+
 function authPopupPlugin(): Plugin {
   return {
     name: "app-builder:auth-popup",
@@ -335,6 +426,18 @@ export default defineConfig(({ command }) => ({
               {
                 route: "/api/auth/**",
                 handler: "./src/lib/auth-api.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/chat",
+                handler: "./src/lib/buzzy/chat.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/models",
+                handler: "./src/lib/buzzy/chat.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/**",
+                handler: "./src/lib/buzzy/chat.nitro.ts",
               },
             ],
           }),

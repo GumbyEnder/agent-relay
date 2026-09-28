@@ -489,6 +489,153 @@
     .result-cost strong {
       color: var(--bz-yellow);
     }
+
+    /* ── Chat-first screen ──────────────────────────────────── */
+    .chat-layout {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 1.2rem;
+      min-height: 60vh;
+    }
+    @media (max-width: 800px) {
+      .chat-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+    .chat-main {
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 0;
+      max-height: 60vh;
+    }
+    .chat-messages .bubble {
+      margin: 0.6rem 0;
+    }
+    .chat-input-row {
+      display: flex;
+      gap: 0.5rem;
+      padding-top: 0.8rem;
+      border-top: 1px solid #222;
+      margin-top: auto;
+    }
+    .chat-input-row textarea {
+      flex: 1;
+      resize: none;
+      min-height: 48px;
+      max-height: 120px;
+    }
+    .chat-input-row button {
+      align-self: flex-end;
+      padding: 0.6rem 1rem;
+    }
+    .chat-mascot {
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+    .chat-mascot img {
+      width: 48px;
+      height: auto;
+    }
+    .thinking-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0%   { content: ''; }
+      25%  { content: '.'; }
+      50%  { content: '..'; }
+      75%  { content: '...'; }
+    }
+    .slot-checklist {
+      background: var(--bz-panel);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 1rem;
+      font-size: 0.85rem;
+    }
+    .slot-checklist h3 {
+      margin: 0 0 0.8rem;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--bz-yellow);
+      font-weight: 700;
+    }
+    .slot-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.45rem 0;
+      border-bottom: 1px solid #1A1A1A;
+    }
+    .slot-item:last-child { border-bottom: none; }
+    .slot-check {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      border: 1px solid #444;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+      font-size: 0.7rem;
+      color: transparent;
+      transition: all 0.2s;
+    }
+    .slot-item.filled .slot-check {
+      background: var(--bz-status-green);
+      border-color: var(--bz-status-green);
+      color: #fff;
+    }
+    .slot-label {
+      color: #999;
+      line-height: 1.4;
+    }
+    .slot-item.filled .slot-label {
+      color: #E8E8E8;
+    }
+    .slot-value {
+      display: block;
+      font-size: 0.78rem;
+      color: #777;
+      margin-top: 0.15rem;
+    }
+    .slot-item.filled .slot-value {
+      color: #aaa;
+    }
+    .draft-ready-banner {
+      background: rgba(91,175,107,0.1);
+      border: 1px solid var(--bz-status-green);
+      border-radius: 6px;
+      padding: 1rem;
+      text-align: center;
+      margin-top: 1rem;
+    }
+    .draft-ready-banner p {
+      color: var(--bz-status-green);
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+    }
+    .draft-ready-banner .muted {
+      color: #888;
+    }
+    .chat-error {
+      background: rgba(196,91,91,0.1);
+      border: 1px solid var(--bz-status-red);
+      border-radius: 6px;
+      padding: 0.8rem 1rem;
+      margin: 0.5rem 0;
+      color: var(--bz-status-red);
+      font-size: 0.88rem;
+    }
+    .new-chat-btn {
+      margin-top: 0.8rem;
+    }
   </style>
 </head>
 <body>
@@ -506,6 +653,36 @@
     </nav>
   </header>
   <main id="app"></main>
+  <!-- Chat-first screen (P1) -->
+  <div id="chatScreen" class="hidden">
+    <div class="chat-layout">
+      <div class="chat-main">
+        <div class="chat-mascot">
+          <img id="chatMascot" src="brand/revision6_expressions_17-attentive.png" alt="BeeZilla" />
+        </div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-input-row">
+          <textarea id="chatInput" rows="2" placeholder="Tell BeeZilla about your fence problem…"></textarea>
+          <button id="chatSend">Send</button>
+        </div>
+        <div id="draftBanner" class="draft-ready-banner hidden">
+          <p>Everything BeeZilla needs has been gathered!</p>
+          <p class="muted">A draft is ready for you to review.</p>
+          <div class="row" style="justify-content:center;margin-top:0.8rem">
+            <button id="viewDraft" class="secondary">View draft</button>
+            <button id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+          </div>
+        </div>
+        <div id="chatError" class="chat-error hidden"></div>
+        <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
+      </div>
+      <div class="slot-checklist" id="slotChecklist">
+        <h3>What BeeZilla knows</h3>
+        <div id="slotItems"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -1087,11 +1264,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     };
     document.getElementById("talkLink").onclick = (e) => {
       e.preventDefault();
-      ensureHonchoPeer();
-      if (state.problem) state.screen = "chat";
-      else if (state.template) state.screen = "problem";
-      else { newJob(); return; }
-      render();
+      // P1: show the chat-first screen
+      showChatScreen();
     };
     document.getElementById("memLink").onclick = (e) => {
       e.preventDefault();
@@ -1127,6 +1301,209 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         })
         .catch(function () {});
     })();
+
+
+    // ── Chat-first screen (P1) ────────────────────────────────────
+    const SLOT_LABELS = {
+      what_happened: "What happened",
+      rough_size: "Rough size",
+      material_supplier: "Material supplier",
+      budget_range: "Budget range",
+      timing: "Timing",
+      done_right_check: "Done right means",
+      quote_count: "Quote count",
+      exclusions: "Exclusions",
+    };
+
+    let chatState = {
+      jobId: null,
+      slots: {},
+      messages: [],
+      draftReady: false,
+      userId: null,
+    };
+
+    const CHAT_BASE = "/api/buzzy/chat";
+
+    function getAuthHeaders() {
+      // In production (same-origin cookies), no extra headers needed.
+      // In live preview, forward the bearer token if available.
+      return {};
+    }
+
+    function renderChatMessages() {
+      const container = document.getElementById("chatMessages");
+      const html = chatState.messages.map((m) => {
+        const cls = m.role === "user" ? "bubble me" : "bubble";
+        const escaped = String(m.content).replace(/</g, "&lt;").replace(/\n/g, "<br>");
+        return '<div class="' + cls + '">' + escaped + "</div>";
+      }).join("");
+      container.innerHTML = html;
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function renderSlotChecklist() {
+      const container = document.getElementById("slotItems");
+      const ids = Object.keys(SLOT_LABELS);
+      const html = ids.map((id) => {
+        const filled = !!chatState.slots[id];
+        const check = filled ? "✓" : "";
+        return '<div class="slot-item' + (filled ? ' filled' : '') + '">' +
+          '<span class="slot-check">' + check + '</span>' +
+          '<span class="slot-label">' + SLOT_LABELS[id] +
+          (filled ? '<span class="slot-value">' + chatState.slots[id].replace(/</g,"&lt;") + '</span>' : '') +
+          '</span></div>';
+      }).join("");
+      container.innerHTML = html;
+    }
+
+    function setChatMascot(expr) {
+      document.getElementById("chatMascot").src =
+        "brand/revision6_expressions_" + expr + ".png";
+    }
+
+    function showChatScreen() {
+      // Hide all other screens
+      document.getElementById("app").innerHTML =
+        document.getElementById("app").innerHTML; // no-op, but marks intent
+      // We'll just toggle the chatScreen div visibility
+      document.getElementById("chatScreen").classList.remove("hidden");
+      document.getElementById("chatMessages").innerHTML = "";
+      document.getElementById("chatError").classList.add("hidden");
+      document.getElementById("draftBanner").classList.add("hidden");
+      setChatMascot("17-attentive");
+      renderSlotChecklist();
+      renderChatMessages();
+
+      // If we have existing chat history, show it
+      if (chatState.messages.length > 0) {
+        renderChatMessages();
+        renderSlotChecklist();
+      } else {
+        // Welcome message
+        setChatMascot("17-attentive");
+        chatState.messages.push({
+          role: "assistant",
+          content: "Hi there — I'm BeeZilla. Tell me about your fence problem and I'll help you put together a clear scope of work. No jargon, no pressure. What happened out there?",
+        });
+        renderChatMessages();
+        renderSlotChecklist();
+      }
+
+      // Focus input
+      setTimeout(() => {
+        document.getElementById("chatInput").focus();
+      }, 100);
+
+      setPhase("Talk to BeeZilla");
+    }
+
+    async function sendChatMessage() {
+      const input = document.getElementById("chatInput");
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = "";
+      setChatMascot("08-thinking");
+
+      // Add user message
+      chatState.messages.push({ role: "user", content: text });
+      renderChatMessages();
+
+      // Disable input while waiting
+      input.disabled = true;
+      document.getElementById("chatSend").disabled = true;
+
+      try {
+        const resp = await fetch(CHAT_BASE, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({
+            jobId: chatState.jobId,
+            message: text,
+          }),
+        });
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+          setChatMascot("18-unimpressed");
+          document.getElementById("chatError").textContent = data.error || "Something went wrong.";
+          document.getElementById("chatError").classList.remove("hidden");
+          chatState.messages.push({
+            role: "assistant",
+            content: "Sorry about that — I couldn't process your message. Please try again.",
+          });
+          renderChatMessages();
+          return;
+        }
+
+        // Hide error if present
+        document.getElementById("chatError").classList.add("hidden");
+
+        // Add assistant reply
+        chatState.messages.push({
+          role: "assistant",
+          content: data.reply,
+        });
+
+        // Update slots if present
+        if (data.slots) {
+          Object.assign(chatState.slots, data.slots);
+        }
+
+        // Check for draft readiness
+        if (data.draft) {
+          chatState.draftReady = true;
+          setChatMascot("12-content");
+          document.getElementById("draftBanner").classList.remove("hidden");
+        } else {
+          setChatMascot("17-attentive");
+        }
+
+        renderChatMessages();
+        renderSlotChecklist();
+
+      } catch (err) {
+        setChatMascot("18-unimpressed");
+        document.getElementById("chatError").textContent =
+          "Couldn't reach the server. Check your connection and try again.";
+        document.getElementById("chatError").classList.remove("hidden");
+      } finally {
+        input.disabled = false;
+        document.getElementById("chatSend").disabled = false;
+        input.focus();
+      }
+    }
+
+    // Wire up chat events
+    document.getElementById("chatSend").onclick = sendChatMessage;
+    document.getElementById("chatInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+    document.getElementById("viewDraft").onclick = () => {
+      // Switch to the existing draft flow
+      state.screen = "draft";
+      document.getElementById("chatScreen").classList.add("hidden");
+      render();
+    };
+    document.getElementById("newChatBtn").onclick = () => {
+      chatState = {
+        jobId: null,
+        slots: {},
+        messages: [],
+        draftReady: false,
+        userId: null,
+      };
+      document.getElementById("draftBanner").classList.add("hidden");
+      showChatScreen();
+    };
 
     render();
   </script>
