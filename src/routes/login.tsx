@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { authClient, authEnabled, signInSocial } from "@/lib/auth/client";
+import { BZ_BRAND } from "@/lib/brand";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -70,7 +71,7 @@ function LoginPage() {
       const { error: err } = await authClient.signIn.email({
         email: email.trim(),
         password,
-        callbackURL: "/",
+        callbackURL: BZ_BRAND ? "/buzzy/" : "/",
       });
       if (err) {
         const msg = err.message ?? "Sign in failed";
@@ -84,7 +85,7 @@ function LoginPage() {
         setError(msg);
         return;
       }
-      window.location.assign("/");
+      window.location.assign(BZ_BRAND ? "/buzzy/" : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed");
     } finally {
@@ -99,7 +100,7 @@ function LoginPage() {
     try {
       const { error: err } = await authClient.signIn.magicLink({
         email: email.trim(),
-        callbackURL: "/",
+        callbackURL: BZ_BRAND ? "/buzzy/" : "/",
       });
       if (err) {
         setError(err.message ?? "Could not send the magic link");

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { authClient, authEnabled } from "@/lib/auth/client";
+import { BZ_BRAND } from "@/lib/brand";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -71,7 +72,7 @@ function RegisterPage() {
     try {
       const { error: err } = await authClient.signIn.magicLink({
         email: email.trim(),
-        callbackURL: "/",
+        callbackURL: BZ_BRAND ? "/buzzy/" : "/",
       });
       if (err) {
         setError(err.message ?? "Could not send the magic link");
