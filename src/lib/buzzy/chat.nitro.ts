@@ -9,9 +9,9 @@
  *   GET  /api/buzzy/models — list available models (labels + ids)
  */
 
-import { defineEventHandler, getQuery, getMethod } from "h3";
+import { defineEventHandler, getMethod, getQuery, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
-import { requireUserId, UnauthorizedError } from "@/lib/auth/verify.server";
+import { requireUserId } from "@/lib/auth/verify.server";
 import { getModels } from "./llm";
 
 export default defineEventHandler(async (event) => {
@@ -30,7 +30,8 @@ export default defineEventHandler(async (event) => {
     try {
       userId = await requireUserId();
     } catch {
-      throw new UnauthorizedError();
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
     }
 
     let body: Record<string, unknown> = {};
