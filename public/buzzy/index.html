@@ -493,7 +493,7 @@
     /* ── Chat-first screen ──────────────────────────────────── */
     .chat-layout {
       display: grid;
-      grid-template-columns: 1fr 280px;
+      grid-template-columns: 1fr;
       gap: 1.2rem;
       min-height: 60vh;
     }
@@ -551,12 +551,36 @@
       75%  { content: '...'; }
     }
     .slot-checklist {
+      display: none;
       background: var(--bz-panel);
       border: 1px solid #2A2A2A;
       border-radius: 6px;
       padding: 1rem;
       font-size: 0.85rem;
     }
+    /* Intake mode tabs: chat (default) vs form */
+    .bz-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.9rem;
+    }
+    .bz-tab {
+      padding: 0.45rem 1rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      background: var(--bz-panel);
+      color: var(--bz-silver);
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .bz-tab.active {
+      background: var(--bz-yellow);
+      border-color: var(--bz-yellow);
+      color: #111;
+    }
+    body[data-intake="form"] .chat-main { display: none; }
+    body[data-intake="form"] #slotChecklist { display: block; }
     .slot-checklist h3 {
       margin: 0 0 0.8rem;
       font-size: 0.78rem;
@@ -655,6 +679,10 @@
   <main id="app"></main>
   <!-- Chat-first screen (P1) -->
   <div id="chatScreen" class="hidden">
+    <div class="bz-tabs" role="tablist">
+      <button type="button" class="bz-tab active" id="tabChat" data-tab="chat">Chat</button>
+      <button type="button" class="bz-tab" id="tabForm" data-tab="form">Form</button>
+    </div>
     <div class="chat-layout">
       <div class="chat-main">
         <div class="chat-mascot">
@@ -1272,6 +1300,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       state.screen = "remember";
       render();
     };
+
+    // ── Intake mode tabs: chat (default) / form ────────────────────────
+    document.querySelectorAll(".bz-tab").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        document.querySelectorAll(".bz-tab").forEach(function (t) { t.classList.remove("active"); });
+        tab.classList.add("active");
+        document.body.dataset.intake = tab.dataset.tab;
+      });
+    });
 
     // ── Account: session-aware Sign in / user name + Log out ──────────
     (function account() {
