@@ -493,11 +493,11 @@
     /* ── Chat-first screen ──────────────────────────────────── */
     .chat-layout {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr 320px;
       gap: 1.2rem;
       min-height: 60vh;
     }
-    @media (max-width: 800px) {
+    @media (max-width: 900px) {
       .chat-layout {
         grid-template-columns: 1fr;
       }
@@ -506,14 +506,44 @@
       display: flex;
       flex-direction: column;
     }
+    .chat-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0 0.2rem;
+    }
+    .chat-header-row .mascot-sm {
+      width: 36px;
+      height: auto;
+    }
+    .agent-select {
+      font: inherit;
+      padding: 0.35rem 0.6rem;
+      border: 1px solid #333;
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 4px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 6px center;
+      padding-right: 20px;
+    }
+    .agent-select:focus {
+      outline: none;
+      border-color: var(--bz-yellow);
+    }
     .chat-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 1rem 0;
-      max-height: 60vh;
+      padding: 0.5rem 0;
+      max-height: 55vh;
     }
     .chat-messages .bubble {
-      margin: 0.6rem 0;
+      margin: 0.5rem 0;
+      font-size: 0.88rem;
     }
     .chat-input-row {
       display: flex;
@@ -551,12 +581,14 @@
       75%  { content: '...'; }
     }
     .slot-checklist {
-      display: none;
       background: var(--bz-panel);
       border: 1px solid #2A2A2A;
       border-radius: 6px;
       padding: 1rem;
       font-size: 0.85rem;
+      height: fit-content;
+      position: sticky;
+      top: 1rem;
     }
     /* Intake mode tabs: chat (default) vs form */
     .bz-tabs {
@@ -685,8 +717,13 @@
     </div>
     <div class="chat-layout">
       <div class="chat-main">
-        <div class="chat-mascot">
-          <img id="chatMascot" src="brand/revision6_expressions_17-attentive.png" alt="BeeZilla" />
+        <div class="chat-header-row">
+          <div class="chat-mascot">
+            <img id="chatMascot" src="brand/revision6_expressions_17-attentive.png" alt="BeeZilla" />
+          </div>
+          <select id="agentSelect" class="agent-select" title="Choose an agent model">
+            <option value="">Loading agents…</option>
+          </select>
         </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-input-row">
@@ -705,7 +742,7 @@
         <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
       </div>
       <div class="slot-checklist" id="slotChecklist">
-        <h3>What BeeZilla knows</h3>
+        <h3>Decisions made</h3>
         <div id="slotItems"></div>
       </div>
     </div>
@@ -1360,7 +1397,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       messages: [],
       draftReady: false,
       userId: null,
+      model: null,
     };
+
+    let modelCatalog = [];
 
     const CHAT_BASE = "/api/buzzy/chat";
 
@@ -1368,6 +1408,35 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // In production (same-origin cookies), no extra headers needed.
       // In live preview, forward the bearer token if available.
       return {};
+    }
+
+    // ── Load model catalog and populate selector ────────────────────
+    function loadModels() {
+      fetch("/api/buzzy/models")
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data || !data.models || !data.models.length) return;
+          modelCatalog = data.models;
+          const sel = document.getElementById("agentSelect");
+          if (!sel) return;
+          sel.innerHTML = "";
+          var defaultOpt = document.createElement("option");
+          defaultOpt.value = "";
+          defaultOpt.textContent = "Default agent";
+          sel.appendChild(defaultOpt);
+          modelCatalog.forEach(function (m) {
+            var opt = document.createElement("option");
+            opt.value = m.model;
+            opt.textContent = m.label;
+            sel.appendChild(opt);
+          });
+        })
+        .catch(function () {});
+    }
+
+    function selectedModel() {
+      var sel = document.getElementById("agentSelect");
+      return sel && sel.value ? sel.value : null;
     }
 
     function renderChatMessages() {
@@ -1409,8 +1478,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("chatError").classList.add("hidden");
       document.getElementById("draftBanner").classList.add("hidden");
       setChatMascot("17-attentive");
-      renderSlotChecklist();
-      renderChatMessages();
+
+      // Always show the decisions panel (form tab no longer needed)
+      document.body.dataset.intake = "chat";
+
+      // Load model catalog if not already loaded
+      if (!modelCatalog.length) loadModels();
 
       // If we have existing chat history, show it
       if (chatState.messages.length > 0) {
@@ -1462,6 +1535,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           body: JSON.stringify({
             jobId: chatState.jobId,
             message: text,
+            model: selectedModel(),
           }),
         });
 

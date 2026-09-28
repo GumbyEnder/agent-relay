@@ -104,7 +104,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const rows = await sql`
     SELECT role, content FROM buzzy_chat_messages
     WHERE user_id = ${userId} AND job_id = ${jobId}
-    ORDER BY created_at DESC LIMIT 20
+    ORDER BY created_at DESC LIMIT 10
   `;
 
   // Reverse to chronological order

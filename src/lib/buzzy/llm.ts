@@ -60,7 +60,7 @@ export async function chatCompletion(
     model,
     messages,
     temperature: opts?.temperature ?? 0.7,
-    max_tokens: opts?.maxTokens ?? 2048,
+    max_tokens: opts?.maxTokens ?? 512,
     stream: false,
   };
 
