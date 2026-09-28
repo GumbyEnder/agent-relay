@@ -1240,6 +1240,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function render() {
+      // Legacy render always hides the chat screen; only showChatScreen shows it.
+      document.getElementById("chatScreen").classList.add("hidden");
       if (state.screen === "jobs") goJobs();
       else if (state.screen === "pick" || state.screen === "intro") goPick();
       else if (state.screen === "problem") goProblem();
@@ -1252,7 +1254,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       else if (state.screen === "remember") goRemember();
       saveState();
     }
-    const HONCHO_BASE = "https://honcho-api-production-215c.up.railway.app";
+    const HONCHO_BASE = "https://honcho-api-production-5869.up.railway.app";
 
     function ensureHonchoPeer() {
       if (!catalog.userId) return;
@@ -1400,10 +1402,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function showChatScreen() {
-      // Hide all other screens
-      document.getElementById("app").innerHTML =
-        document.getElementById("app").innerHTML; // no-op, but marks intent
-      // We'll just toggle the chatScreen div visibility
+      // Chat replaces any legacy screen — clear #app so nothing renders above.
+      document.getElementById("app").innerHTML = "";
       document.getElementById("chatScreen").classList.remove("hidden");
       document.getElementById("chatMessages").innerHTML = "";
       document.getElementById("chatError").classList.add("hidden");
