@@ -553,19 +553,19 @@
           </div>
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
+          <div id="formScreen" class="hidden" style="max-width:600px;">
+            <h2 style="margin:0 0 0.5rem;color:var(--bz-yellow);font-size:1.05rem;">Structured job request</h2>
+            <p class="muted">Fill in the fields — BeeZilla will turn it into a conversation and lock in the decisions.</p>
+            <div id="formBody"></div>
+            <div class="row" style="margin-top:1rem;">
+              <button id="formSubmit">Submit to BeeZilla</button>
+            </div>
+          </div>
         </div>
         <div class="slot-checklist" id="slotChecklist">
           <h3>Decisions made</h3>
           <div id="slotItems"></div>
         </div>
-      </div>
-    </div>
-    <div id="formScreen" class="hidden" style="max-width:600px;margin:0 auto;">
-      <h2 style="margin:0 0 0.5rem;color:var(--bz-yellow);font-size:1.05rem;">Structured job request</h2>
-      <p class="muted">Fill in the fields — BeeZilla will turn it into a conversation and lock in the decisions.</p>
-      <div id="formBody"></div>
-      <div class="row" style="margin-top:1rem;">
-        <button id="formSubmit">Submit to BeeZilla</button>
       </div>
     </div>
   </main>
@@ -1152,12 +1152,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Show/hide panels
         var chatPanel = document.getElementById("chatScreen");
         var formPanel = document.getElementById("formScreen");
+        var chatCol = chatPanel.querySelector(".chat-main > .chat-messages, .chat-main .chat-messages");
+        var chatInputRow = chatPanel.querySelector(".chat-input-row");
+        var chatErr = document.getElementById("chatError");
+        var chatFooter = chatPanel.querySelector(".chat-main > p.muted");
         if (tab.dataset.tab === "form") {
-          chatPanel.classList.add("hidden");
+          chatPanel.classList.remove("hidden");
+          [chatCol, chatInputRow, chatErr, chatFooter].forEach(function (el) {
+            if (el) el.classList.add("hidden");
+          });
           formPanel.classList.remove("hidden");
           renderForm();
         } else {
-          chatPanel.classList.remove("hidden");
+          [chatCol, chatInputRow, chatFooter].forEach(function (el) {
+            if (el) el.classList.remove("hidden");
+          });
           formPanel.classList.add("hidden");
           showChatScreen();
         }
