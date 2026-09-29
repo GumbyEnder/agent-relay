@@ -74,6 +74,7 @@
     }
     header nav a:hover { color: var(--bz-yellow); }
     header nav a.active { color: var(--bz-yellow); font-weight: 600; }
+    header .brand-link { text-decoration: none; cursor: pointer; }
     header nav .phase {
       color: var(--bz-yellow);
       font-weight: 600;
@@ -465,18 +466,57 @@
     }
 
     .hidden { display: none; }
+
+    /* ── Form tab styles ──────────────────────────────────── */
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--bz-yellow);
+      margin-bottom: 0.3rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      font: inherit;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #333;
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--bz-yellow);
+      box-shadow: 0 0 0 2px rgba(255,193,7,0.15);
+    }
+    .form-group input::placeholder,
+    .form-group textarea::placeholder {
+      color: #555;
+    }
   </style>
 </head>
 <body>
   <header>
-    <div class="brand">
-      <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-      <strong>BeeZilla</strong>
-    </div>
+    <a href="/buzzy/" class="brand-link">
+      <div class="brand">
+        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <strong>BeeZilla</strong>
+      </div>
+    </a>
     <nav>
       <a href="/buzzy/" id="jobsLink">Your jobs</a>
-      <a href="/buzzy/talk.html" id="talkLink" class="active">Talk to BeeZilla</a>
+      <a href="/buzzy/talk" id="talkLink" class="active">Discuss</a>
       <a href="/buzzy/memory" id="memLink">Memory</a>
+      <a href="/buzzy/experts">Experts</a>
       <a href="/login" class="account-link">Sign in</a>
     </nav>
   </header>
@@ -518,6 +558,14 @@
           <h3>Decisions made</h3>
           <div id="slotItems"></div>
         </div>
+      </div>
+    </div>
+    <div id="formScreen" class="hidden" style="max-width:600px;margin:0 auto;">
+      <h2 style="margin:0 0 0.5rem;color:var(--bz-yellow);font-size:1.05rem;">Structured job request</h2>
+      <p class="muted">Fill in the fields — BeeZilla will turn it into a conversation and lock in the decisions.</p>
+      <div id="formBody"></div>
+      <div class="row" style="margin-top:1rem;">
+        <button id="formSubmit">Submit to BeeZilla</button>
       </div>
     </div>
   </main>
@@ -1101,7 +1149,75 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         document.querySelectorAll(".bz-tab").forEach(function (t) { t.classList.remove("active"); });
         tab.classList.add("active");
         document.body.dataset.intake = tab.dataset.tab;
+        // Show/hide panels
+        var chatPanel = document.getElementById("chatScreen");
+        var formPanel = document.getElementById("formScreen");
+        if (tab.dataset.tab === "form") {
+          chatPanel.classList.add("hidden");
+          formPanel.classList.remove("hidden");
+          renderForm();
+        } else {
+          chatPanel.classList.remove("hidden");
+          formPanel.classList.add("hidden");
+          showChatScreen();
+        }
       });
+    });
+
+    // ── Expert query param ─────────────────────────────────────────────
+    var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
+    if (expertFromUrl) {
+      chatState.expert = expertFromUrl;
+      // Clear the query param from the URL
+      window.history.replaceState({}, "", "/buzzy/talk");
+    }
+
+    // ── Form tab ───────────────────────────────────────────────────────
+    var FORM_FIELDS = [
+      { id: "job_type", label: "Job type", type: "text", placeholder: "e.g. fence repair, legal letter" },
+      { id: "description", label: "Description", type: "textarea", placeholder: "Describe the job in your own words…" },
+      { id: "budget_range", label: "Budget range", type: "text", placeholder: "e.g. $500–$1,000" },
+      { id: "timing", label: "Timing", type: "text", placeholder: "e.g. ASAP, next week, flexible" },
+      { id: "done_right_check", label: "Done right means", type: "textarea", placeholder: "How will you know it's done right?" },
+      { id: "exclusions", label: "Exclusions", type: "textarea", placeholder: "Anything you definitely don't want done?" },
+    ];
+
+    function renderForm() {
+      var container = document.getElementById("formBody");
+      var html = "";
+      FORM_FIELDS.forEach(function (f) {
+        if (f.type === "textarea") {
+          html += '<div class="form-group"><label for="form_' + f.id + '">' + f.label + '</label><textarea id="form_' + f.id + '" rows="3" placeholder="' + f.placeholder + '"></textarea></div>';
+        } else {
+          html += '<div class="form-group"><label for="form_' + f.id + '">' + f.label + '</label><input id="form_' + f.id + '" type="' + f.type + '" placeholder="' + f.placeholder + '" /></div>';
+        }
+      });
+      container.innerHTML = html;
+    }
+
+    document.getElementById("formSubmit").addEventListener("click", function () {
+      var values = {};
+      FORM_FIELDS.forEach(function (f) {
+        var el = document.getElementById("form_" + f.id);
+        values[f.id] = el ? el.value.trim() : "";
+      });
+      // Build compact structured message
+      var parts = [];
+      if (values.job_type) parts.push("type=" + values.job_type);
+      if (values.description) parts.push("description=" + values.description);
+      if (values.budget_range) parts.push("budget=" + values.budget_range);
+      if (values.timing) parts.push("timing=" + values.timing);
+      if (values.done_right_check) parts.push("done_right=" + values.done_right_check);
+      if (values.exclusions) parts.push("exclusions=" + values.exclusions);
+      var structured = "New job request: " + parts.join(", ");
+      // Add expert context
+      var msg = structured;
+      if (chatState.expert) {
+        msg = "Context: the user came from the " + chatState.expert + " experts page.\n\n" + msg;
+      }
+      // Post through the chat endpoint
+      document.getElementById("chatInput").value = msg;
+      document.getElementById("chatSend").click();
     });
 
     // ── Account: session-aware Sign in / user name + Log out ──────────

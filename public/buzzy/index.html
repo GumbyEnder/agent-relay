@@ -69,6 +69,7 @@
     }
     header nav a:hover { color: var(--bz-yellow); }
     header nav a.active { color: var(--bz-yellow); font-weight: 600; }
+    header .brand-link { text-decoration: none; cursor: pointer; }
     header nav .phase {
       color: var(--bz-yellow);
       font-weight: 600;
@@ -413,14 +414,17 @@
 </head>
 <body>
   <header>
-    <div class="brand">
-      <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-      <strong>BeeZilla</strong>
-    </div>
+    <a href="/buzzy/" class="brand-link">
+      <div class="brand">
+        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <strong>BeeZilla</strong>
+      </div>
+    </a>
     <nav>
       <a href="/buzzy/" id="jobsLink" class="active">Your jobs</a>
-      <a href="/buzzy/talk" id="talkLink">Talk to BeeZilla</a>
+      <a href="/buzzy/talk" id="talkLink">Discuss</a>
       <a href="/buzzy/memory" id="memLink">Memory</a>
+      <a href="/buzzy/experts">Experts</a>
       <a href="/login" class="account-link">Sign in</a>
       <span class="phase" id="phaseLabel">Your jobs</span>
     </nav>

@@ -158,10 +158,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   try {
     reply = await chatCompletion(messages, { model });
   } catch (err) {
+    console.error("[buzzy/chat] LLM request failed:", err instanceof Error ? err.message : err);
     return {
       ok: false,
       reply: "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
-      error: "LLM request failed",
+      error: err instanceof Error ? err.message : "LLM request failed",
       code: "llm_error",
     };
   }

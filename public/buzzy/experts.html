@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — Experts</title>
+  <style>
+    :root {
+      --bz-black: #0A0A0A;
+      --bz-panel: #141414;
+      --bz-col: #1A1A1A;
+      --bz-yellow: #FFC107;
+      --bz-yellow-dim: #B8860B;
+      --bz-silver: #C9CDD2;
+      --bz-charcoal: #111111;
+      --bz-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: var(--bz-font);
+      color: #E8E8E8;
+      background: var(--bz-black);
+      margin: 0;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid #222;
+      background: var(--bz-panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header .brand strong {
+      letter-spacing: .06em;
+      font-size: 1.15rem;
+      color: var(--bz-yellow);
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+    header .brand .mascot-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+    }
+    header nav {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    header nav a {
+      color: #999;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.15s;
+    }
+    header nav a:hover { color: var(--bz-yellow); }
+    header nav a.active { color: var(--bz-yellow); font-weight: 600; }
+    header .brand-link { text-decoration: none; cursor: pointer; }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin: 0 0 0.5rem;
+      color: #fff;
+      font-weight: 700;
+    }
+    .muted { color: #777; font-size: 0.82rem; }
+    .experts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .expert-card {
+      background: var(--bz-panel);
+      border: 1px solid #2A2A2A;
+      border-top: 3px solid var(--bz-yellow);
+      border-radius: 6px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .expert-card h2 {
+      font-size: 1.05rem;
+      margin: 0;
+      color: var(--bz-yellow);
+      font-weight: 700;
+    }
+    .expert-card p {
+      margin: 0;
+      color: #C8C8C8;
+      font-size: 0.88rem;
+    }
+    .expert-card button {
+      align-self: flex-start;
+      margin-top: 0.3rem;
+    }
+    button {
+      font: inherit;
+      padding: 0.55rem 1.1rem;
+      border: 1px solid var(--bz-yellow);
+      background: var(--bz-yellow);
+      color: var(--bz-black);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+      border-radius: 4px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    button:hover { background: var(--bz-yellow-dim); border-color: var(--bz-yellow-dim); }
+    button:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/buzzy/" class="brand-link">
+      <div class="brand">
+        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <strong>BeeZilla</strong>
+      </div>
+    </a>
+    <nav>
+      <a href="/buzzy/">Your jobs</a>
+      <a href="/buzzy/talk">Discuss</a>
+      <a href="/buzzy/memory">Memory</a>
+      <a href="/buzzy/experts" class="active">Experts</a>
+      <a href="/login" class="account-link">Sign in</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Experts</h1>
+    <p class="muted">Pick an expert area and BeeZilla will tailor the conversation.</p>
+    <div class="experts-grid">
+      <div class="expert-card">
+        <h2>Legal</h2>
+        <p>Letters, agreements, notices — not legal advice.</p>
+        <a href="/buzzy/talk?expert=legal"><button>Discuss with BeeZilla</button></a>
+      </div>
+      <div class="expert-card">
+        <h2>Medical</h2>
+        <p>Insurance questions, billing disputes, patient rights.</p>
+        <a href="/buzzy/talk?expert=medical"><button>Discuss with BeeZilla</button></a>
+      </div>
+      <div class="expert-card">
+        <h2>Software</h2>
+        <p>Debugging, architecture, code reviews, best practices.</p>
+        <a href="/buzzy/talk?expert=software"><button>Discuss with BeeZilla</button></a>
+      </div>
+      <div class="expert-card">
+        <h2>Technology</h2>
+        <p>Hardware, infrastructure, deployment, ops.</p>
+        <a href="/buzzy/talk?expert=technology"><button>Discuss with BeeZilla</button></a>
+      </div>
+      <div class="expert-card">
+        <h2>Accounting</h2>
+        <p>Budgets, invoices, tax questions, financial planning.</p>
+        <a href="/buzzy/talk?expert=accounting"><button>Discuss with BeeZilla</button></a>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
