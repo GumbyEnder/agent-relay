@@ -142,7 +142,7 @@
       display: grid;
       grid-template-columns: 1fr 260px;
       gap: 1rem;
-      min-height: 60vh;
+      align-items: start;
     }
     @media (max-width: 900px) {
       .chat-layout {
@@ -397,7 +397,6 @@
       <a href="/buzzy/talk.html" id="talkLink" class="active">Talk to BeeZilla</a>
       <a href="/buzzy/remember.html" id="memLink">What BeeZilla remembers</a>
       <a href="/login" class="account-link">Sign in</a>
-      <span class="phase" id="phaseLabel">Talk to BeeZilla</span>
     </nav>
   </header>
   <main>
@@ -598,7 +597,7 @@
     loadState();
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
-    const setPhase = (t) => { document.getElementById("phaseLabel").textContent = t; };
+    const setPhase = (t) => { const el = document.getElementById("phaseLabel"); if (el) el.textContent = t; };
 
     function parseBudget(s) {
       const n = String(s || "").replace(/,/g, "").match(/(\d+)/);
