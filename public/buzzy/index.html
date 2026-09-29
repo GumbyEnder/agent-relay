@@ -727,7 +727,7 @@
         </div>
         <div class="chat-messages" id="chatMessages"></div>
         <div class="chat-input-row">
-          <textarea id="chatInput" rows="2" placeholder="Tell BeeZilla about your fence problem…"></textarea>
+          <textarea id="chatInput" rows="2" placeholder="Describe the job…"></textarea>
           <button id="chatSend">Send</button>
         </div>
         <div id="draftBanner" class="draft-ready-banner hidden">
@@ -1494,7 +1494,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         setChatMascot("17-attentive");
         chatState.messages.push({
           role: "assistant",
-          content: "Hi there — I'm BeeZilla. Tell me about your fence problem and I'll help you put together a clear scope of work. No jargon, no pressure. What happened out there?",
+          content: "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.",
         });
         renderChatMessages();
         renderSlotChecklist();
