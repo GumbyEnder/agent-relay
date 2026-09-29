@@ -297,28 +297,6 @@
       color: transparent;
       transition: all 0.2s;
     }
-    .slot-item.filled .slot-check {
-      background: var(--bz-status-green);
-      border-color: var(--bz-status-green);
-      color: #fff;
-    }
-    .slot-label {
-      color: #999;
-      line-height: 1.4;
-    }
-    .slot-item.filled .slot-label {
-      color: #E8E8E8;
-    }
-    .slot-value {
-      display: block;
-      font-size: 0.78rem;
-      color: #777;
-      margin-top: 0.15rem;
-    }
-    .slot-item.filled .slot-value {
-      color: #aaa;
-    }
-
     /* ── Tabs ───────────────────────────────────────────── */
     /* FIX #6: larger tabs */
     .bz-tabs {
@@ -383,6 +361,109 @@
       margin-top: 0.8rem;
     }
 
+    /* ── Thinking indicator bubble ──────────────────────────── */
+    .thinking-bubble {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.55rem 0.85rem;
+      margin: 0.5rem 0;
+      color: #999;
+      font-size: 0.82rem;
+    }
+    .thinking-bubble .thinking-mascot {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+    }
+    .thinking-bubble .thinking-dots {
+      display: inline-block;
+      width: 14px;
+      text-align: center;
+      animation: pulse-dots 1.2s ease-in-out infinite;
+      color: var(--bz-yellow-dim);
+      font-size: 0.95rem;
+      letter-spacing: 1px;
+    }
+    @keyframes pulse-dots {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+
+    /* ── Decisions: value as headline ───────────────────────── */
+    .slot-value-headline {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #E8E8E8;
+      line-height: 1.35;
+      padding-left: 0.2rem;
+    }
+    .slot-label-secondary {
+      display: block;
+      font-size: 0.72rem;
+      color: #777;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-top: 0.1rem;
+      padding-left: 0.2rem;
+    }
+    .slot-still-open {
+      font-size: 0.78rem;
+      color: #555;
+      font-style: italic;
+      padding-left: 0.2rem;
+    }
+
+    /* ── Inline edit for decisions ──────────────────────────── */
+    .slot-edit-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      padding: 0.3rem 0;
+    }
+    .slot-edit-row input {
+      width: 100%;
+      font: inherit;
+      padding: 0.35rem 0.55rem;
+      border: 1px solid var(--bz-yellow);
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 3px;
+      font-size: 0.85rem;
+    }
+    .slot-edit-row .edit-actions {
+      display: flex;
+      gap: 0.4rem;
+    }
+    .slot-edit-row .edit-actions button {
+      padding: 0.25rem 0.6rem;
+      font-size: 0.75rem;
+    }
+
+    /* ── Edit icon ──────────────────────────────────────────── */
+    .slot-edit-icon {
+      cursor: pointer;
+      color: #555;
+      font-size: 0.72rem;
+      margin-left: auto;
+      padding: 0.1rem 0.25rem;
+      border-radius: 2px;
+      transition: color 0.15s, background 0.15s;
+      flex-shrink: 0;
+      align-self: center;
+    }
+    .slot-edit-icon:hover {
+      color: var(--bz-yellow);
+      background: rgba(255,193,7,0.08);
+    }
+    .slot-item.filled .slot-check {
+      background: var(--bz-yellow);
+      border-color: var(--bz-yellow);
+      color: var(--bz-black);
+      font-weight: 700;
+    }
+
     .hidden { display: none; }
   </style>
 </head>
@@ -395,7 +476,7 @@
     <nav>
       <a href="/buzzy/" id="jobsLink">Your jobs</a>
       <a href="/buzzy/talk.html" id="talkLink" class="active">Talk to BeeZilla</a>
-      <a href="/buzzy/remember.html" id="memLink">What BeeZilla remembers</a>
+      <a href="/buzzy/memory" id="memLink">Memory</a>
       <a href="/login" class="account-link">Sign in</a>
     </nav>
   </header>
@@ -1127,19 +1208,103 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const ids = Object.keys(SLOT_LABELS);
       const html = ids.map((id) => {
         const filled = !!chatState.slots[id];
-        const check = filled ? "✓" : "";
-        return '<div class="slot-item' + (filled ? ' filled' : '') + '">' +
-          '<span class="slot-check">' + check + '</span>' +
-          '<span class="slot-label">' + SLOT_LABELS[id] +
-          (filled ? '<span class="slot-value">' + chatState.slots[id].replace(/</g,"&lt;") + '</span>' : '') +
-          '</span></div>';
+        const escapedValue = (chatState.slots[id] || "").replace(/</g, "&lt;");
+        const escapedLabel = SLOT_LABELS[id].replace(/</g, "&lt;");
+        if (filled) {
+          return '<div class="slot-item filled" data-slot="' + id + '">' +
+            '<span class="slot-check">✓</span>' +
+            '<span class="slot-value-headline">' + escapedValue + '</span>' +
+            '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
+            '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
+            '</div>';
+        }
+        return '<div class="slot-item">' +
+          '<span class="slot-check"></span>' +
+          '<span class="slot-still-open">still open</span>' +
+          '</div>';
       }).join("");
       container.innerHTML = html;
+      // Wire up edit icons
+      container.querySelectorAll(".slot-edit-icon").forEach(function (icon) {
+        icon.addEventListener("click", function () {
+          startEditSlot(icon.getAttribute("data-slot"));
+        });
+      });
     }
 
     function setChatMascot(expr) {
       document.getElementById("chatMascot").src =
         "brand/revision6_expressions_" + expr + ".png";
+    }
+
+    // ── Inline slot editing ─────────────────────────────────────
+    function startEditSlot(slotId) {
+      const container = document.getElementById("slotItems");
+      const item = container.querySelector('[data-slot="' + slotId + '"]');
+      if (!item) return;
+      const currentValue = chatState.slots[slotId] || "";
+      const label = SLOT_LABELS[slotId];
+      const escapedLabel = label.replace(/</g, "&lt;");
+      item.classList.remove("filled");
+      item.innerHTML =
+        '<div class="slot-edit-row">' +
+        '<input type="text" class="slot-edit-input" value="' + currentValue.replace(/"/g, '&quot;') + '" data-slot="' + slotId + '" />' +
+        '<div class="edit-actions">' +
+        '<button class="slot-edit-save" data-slot="' + slotId + '">Save</button>' +
+        '<button class="slot-edit-cancel" data-slot="' + slotId + '">Cancel</button>' +
+        '</div></div>';
+      const input = item.querySelector(".slot-edit-input");
+      input.focus();
+      input.select();
+      item.querySelector(".slot-edit-save").addEventListener("click", function () {
+        saveSlotEdit(slotId, input.value.trim());
+      });
+      item.querySelector(".slot-edit-cancel").addEventListener("click", function () {
+        renderSlotChecklist();
+      });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          saveSlotEdit(slotId, input.value.trim());
+        } else if (e.key === "Escape") {
+          renderSlotChecklist();
+        }
+      });
+    }
+
+    function saveSlotEdit(slotId, newValue) {
+      if (!newValue) {
+        renderSlotChecklist();
+        return;
+      }
+      // Update locally
+      chatState.slots[slotId] = newValue;
+      renderSlotChecklist();
+      // Post through existing chat endpoint so model knows
+      const label = SLOT_LABELS[slotId];
+      const editMsg = "Update: " + label + " is now \"" + newValue + "\".";
+      chatState.messages.push({ role: "user", content: editMsg });
+      renderChatMessages();
+      // Disable input briefly while posting
+      document.getElementById("chatInput").disabled = true;
+      document.getElementById("chatSend").disabled = true;
+      fetch(CHAT_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId: chatState.jobId,
+          message: editMsg,
+          model: selectedModel(),
+        }),
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.ok && data.slots) {
+          Object.assign(chatState.slots, data.slots);
+          renderSlotChecklist();
+        }
+      }).catch(function () {}).finally(function () {
+        document.getElementById("chatInput").disabled = false;
+        document.getElementById("chatSend").disabled = false;
+      });
     }
 
     function showChatScreen() {
@@ -1186,6 +1351,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Add user message
       chatState.messages.push({ role: "user", content: text });
       renderChatMessages();
+
+      // Show thinking indicator in the chat stream
+      const messagesContainer = document.getElementById("chatMessages");
+      const thinkingEl = document.createElement("div");
+      thinkingEl.className = "thinking-bubble";
+      thinkingEl.id = "thinkingIndicator";
+      thinkingEl.innerHTML =
+        '<img class="thinking-mascot" src="brand/revision6_expressions_08-thinking.png" alt="" />' +
+        '<span class="thinking-dots">...</span>';
+      messagesContainer.appendChild(thinkingEl);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
       // Disable input while waiting
       input.disabled = true;
@@ -1326,7 +1502,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     };
     document.getElementById("memLink").onclick = (e) => {
       e.preventDefault();
-      window.location.href = "/buzzy/remember";
+      window.location.href = "/buzzy/memory";
     };
 
     // Show chat screen on load

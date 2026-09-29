@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — Memory</title>
+  <link rel="icon" type="image/png" href="/buzzy/brand/revision6_expressions_16-smiling.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --panel: #141414;
+      --panel2: #1a1a1a;
+      --line: #2a2a2a;
+      --text: #f2f2f2;
+      --muted: #9a9a9a;
+      --yellow: #ffc107;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    header img { width: 48px; height: 48px; }
+    header h1 { font-size: 1.1rem; margin: 0; }
+    header h1 span { color: var(--yellow); }
+    nav {
+      display: flex;
+      gap: 1rem;
+      margin-left: auto;
+      font-size: 0.92rem;
+    }
+    nav a { color: var(--muted); text-decoration: none; padding: 0.25rem 0.5rem; border-radius: 6px; }
+    nav a.active { color: var(--yellow); background: var(--panel2); }
+    nav a:hover { color: var(--text); }
+    nav .account-link { color: var(--yellow); border: 1px solid var(--line); }
+    main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+    .muted { color: var(--muted); }
+    .mem-status {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+    }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.9rem 1.2rem;
+      min-width: 140px;
+    }
+    .stat b { font-size: 1.5rem; display: block; color: var(--yellow); }
+    .stat span { font-size: 0.8rem; color: var(--muted); }
+    section h2 {
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.4rem;
+    }
+    .fact {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--yellow);
+      border-radius: 8px;
+      padding: 0.6rem 0.9rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: baseline;
+    }
+    .fact .v { font-weight: 600; }
+    .fact .k { color: var(--muted); font-size: 0.85rem; }
+    .fact .j { color: var(--muted); font-size: 0.75rem; }
+    .msg {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.6rem 0.9rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .msg.assistant { border-left: 3px solid #6c7bd9; }
+    .msg.user { border-left: 3px solid var(--yellow); }
+    .msg .who { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
+    .empty { color: var(--muted); padding: 1rem 0; }
+    .signout {
+      text-align: center;
+      padding: 3rem 0;
+    }
+    .signout a {
+      color: var(--yellow);
+      border: 1px solid var(--line);
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+    <h1>Bee<span>Zilla</span> — Memory</h1>
+    <nav>
+      <a href="/buzzy/" id="jobsLink">Your jobs</a>
+      <a href="/buzzy/talk" id="talkLink">Talk to BeeZilla</a>
+      <a href="/buzzy/memory" id="memLink" class="active">Memory</a>
+      <a href="/login" class="account-link">Sign in</a>
+    </nav>
+  </header>
+  <main>
+    <div id="content"><p class="empty">Loading memory…</p></div>
+  </main>
+  <script>
+    (async () => {
+      const res = await fetch("/api/buzzy/memory", { credentials: "same-origin" });
+      const root = document.getElementById("content");
+      if (res.status === 401) {
+        root.innerHTML =
+          '<div class="signout"><p class="muted">Memory is tied to your account.</p><a href="/login">Sign in</a></div>';
+        return;
+      }
+      const data = await res.json();
+      const facts = data.facts || [];
+      const messages = data.messages || [];
+      const honcho = data.honchoAvailable;
+      const jobLabel = (id) => (id ? id.slice(0, 8) : "general");
+
+      const stats = `
+        <div class="mem-status">
+          <div class="stat"><b>${facts.length}</b><span>decisions &amp; facts</span></div>
+          <div class="stat"><b>${messages.length}</b><span>recent messages</span></div>
+          <div class="stat"><b>${honcho ? "on" : "off"}</b><span>honcho long-term memory</span></div>
+        </div>`;
+
+      const factsHtml = facts.length
+        ? facts
+            .map(
+              (f) =>
+                `<div class="fact"><span class="v">${esc(f.value)}</span><span class="k">${esc(f.key)}</span><span class="j">job ${jobLabel(f.jobId)}</span></div>`,
+            )
+            .join("")
+        : '<p class="empty">No decisions captured yet. Talk to BeeZilla and locked-in decisions will appear here.</p>';
+
+      const msgsHtml = messages.length
+        ? messages
+            .map(
+              (m) =>
+                `<div class="msg ${esc(m.role)}"><div class="who">${m.role === "assistant" ? "BeeZilla" : "You"} · job ${jobLabel(m.jobId)}</div>${esc(m.content)}</div>`,
+            )
+            .join("")
+        : '<p class="empty">No conversations yet.</p>';
+
+      root.innerHTML =
+        stats +
+        '<section><h2>What BeeZilla knows</h2>' + factsHtml + '</section>' +
+        '<section style="margin-top:1.5rem"><h2>Recent conversations</h2>' + msgsHtml + '</section>';
+    })();
+
+    function esc(s) {
+      const d = document.createElement("div");
+      d.textContent = String(s ?? "");
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>

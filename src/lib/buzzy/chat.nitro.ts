@@ -7,12 +7,25 @@
  * Routes:
  *   POST /api/buzzy/chat   — send a message, get a reply
  *   GET  /api/buzzy/models — list available models (labels + ids)
+ *   GET  /api/buzzy/memory — aggregate memory for the Memory page
  */
 
 import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels } from "./llm";
+import { getSql } from "@/lib/db";
+import { honchoAvailable } from "./honcho";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function headersFromEvent(event: any): Headers {
+  const rawHeaders = event.node?.req?.headers ?? event.req?.headers;
+  if (rawHeaders instanceof Headers) return rawHeaders;
+  const init: [string, string][] = Object.entries(
+    (rawHeaders ?? {}) as Record<string, string | string[] | undefined>,
+  ).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")]);
+  return new Headers(init);
+}
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event);
@@ -26,14 +39,7 @@ export default defineEventHandler(async (event) => {
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
   if (method === "POST" && path === "/api/buzzy/chat") {
-    const rawHeaders = event.node?.req?.headers ?? event.req?.headers;
-    const headersInit = rawHeaders instanceof Headers
-      ? rawHeaders
-      : Object.entries(rawHeaders as Record<string, string>).reduce<Record<string, string>>((h, [k, v]) => {
-          if (v !== undefined) h[k] = Array.isArray(v) ? v.join(", ") : v;
-          return h;
-        }, {});
-    const user = await getSessionUserFromHeaders(new Headers(headersInit));
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
       setResponseStatus(event, 401);
       return { error: "Sign in required", code: "signed_out" };
@@ -56,6 +62,44 @@ export default defineEventHandler(async (event) => {
 
     const result = await chatLoop({ userId, jobId, message, model });
     return result;
+  }
+
+  // ── GET /api/buzzy/memory — aggregate memory for the Memory page ─────
+  if (method === "GET" && path === "/api/buzzy/memory") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+
+    const sql = await getSql();
+    const facts = await sql`
+      SELECT job_id, key, value, updated_at FROM buzzy_user_memory
+      WHERE user_id = ${user.id}
+      ORDER BY updated_at DESC
+      LIMIT 200
+    `;
+    const messages = await sql`
+      SELECT job_id, role, content, created_at FROM buzzy_chat_messages
+      WHERE user_id = ${user.id}
+      ORDER BY created_at DESC
+      LIMIT 100
+    `;
+    return {
+      honchoAvailable: honchoAvailable(),
+      facts: facts.map((r) => ({
+        jobId: r.job_id,
+        key: r.key,
+        value: r.value,
+        updatedAt: r.updated_at,
+      })),
+      messages: messages.map((r) => ({
+        jobId: r.job_id,
+        role: r.role,
+        content: r.content,
+        createdAt: r.created_at,
+      })),
+    };
   }
 
   throw new Error("Not found");

@@ -439,6 +439,14 @@ export default defineConfig(({ command }) => ({
                 route: "/api/buzzy/**",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
+              {
+                route: "/buzzy",
+                handler: "./src/lib/buzzy/pages.nitro.ts",
+              },
+              {
+                route: "/buzzy/**",
+                handler: "./src/lib/buzzy/pages.nitro.ts",
+              },
             ],
           }),
         ]

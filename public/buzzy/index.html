@@ -419,8 +419,8 @@
     </div>
     <nav>
       <a href="/buzzy/" id="jobsLink" class="active">Your jobs</a>
-      <a href="/buzzy/talk.html" id="talkLink">Talk to BeeZilla</a>
-      <a href="/buzzy/remember.html" id="memLink">What BeeZilla remembers</a>
+      <a href="/buzzy/talk" id="talkLink">Talk to BeeZilla</a>
+      <a href="/buzzy/memory" id="memLink">Memory</a>
       <a href="/login" class="account-link">Sign in</a>
       <span class="phase" id="phaseLabel">Your jobs</span>
     </nav>
@@ -905,7 +905,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
       document.getElementById("app").innerHTML =
         "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
-        "<h1>What BeeZilla remembers</h1>" +
+        "<h1>Memory</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
         "<div class='card'><h2>Across jobs</h2>" + (catalog.jobs.filter(jobComplete).length
           ? "<ul>" + catalog.jobs.filter(jobComplete).map((j) => "<li>" + jobTitle(j).replace(/</g,"&lt;") + "</li>").join("") + "</ul><p class='muted'>This list is on this device. Honcho (the real across-jobs memory) is not wired to this demo.</p>"
