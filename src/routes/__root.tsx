@@ -21,10 +21,25 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/favicon.ico", sizes: "any" },
-      { rel: "icon", type: "image/png", href: "/favicon-32.png", sizes: "32x32" },
-      { rel: "icon", type: "image/png", href: "/favicon-16.png", sizes: "16x16" },
-      { rel: "apple-touch-icon", href: "/favicon-180.png", sizes: "180x180" },
+      // Default brand = Dev Boards kanban mark; BeeZilla brand swaps to its robot-head mark.
+      { rel: "icon", href: BZ_BRAND ? "/favicon-bz.ico" : "/favicon.ico", sizes: "any" },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: BZ_BRAND ? "/brand/bz-favicon-32.png" : "/favicon-32.png",
+        sizes: "32x32",
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: BZ_BRAND ? "/brand/bz-favicon-16.png" : "/favicon-16.png",
+        sizes: "16x16",
+      },
+      {
+        rel: "apple-touch-icon",
+        href: BZ_BRAND ? "/brand/bz-favicon-180.png" : "/favicon-180.png",
+        sizes: "180x180",
+      },
     ],
   }),
   component: () => (
