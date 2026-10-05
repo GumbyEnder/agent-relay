@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": false,
   "license": "MIT",
-  "description": "Dev Boards \u2014 harness-agnostic mission kanban for AI agents",
+  "description": "Dev Boards — harness-agnostic mission kanban for AI agents",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/GumbyEnder/agent-relay.git"
@@ -51,6 +51,7 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
     "@hookform/resolvers": "^5.0.0",
+    "@openpanel/web": "^1.4.1",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "^1.1.11",

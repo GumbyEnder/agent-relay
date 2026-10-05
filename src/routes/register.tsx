@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { authClient, authEnabled } from "@/lib/auth/client";
 import { BZ_BRAND } from "@/lib/brand";
+import { op } from "@/lib/analytics";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,9 @@ function RegisterPage() {
         name: name.trim() || email.trim().split("@")[0] || "Operator",
         callbackURL: "/login?verified=1",
       });
+      op.track(err ? "register_failed" : "register_submitted", {
+        error: err ? (err.message ?? "unknown") : undefined,
+      });
       if (err) {
         setError(err.message ?? "Registration failed");
         return;
@@ -73,6 +77,9 @@ function RegisterPage() {
       const { error: err } = await authClient.signIn.magicLink({
         email: email.trim(),
         callbackURL: BZ_BRAND ? "/buzzy/" : "/",
+      });
+      op.track(err ? "register_magic_link_failed" : "register_magic_link_sent", {
+        error: err ? (err.message ?? "unknown") : undefined,
       });
       if (err) {
         setError(err.message ?? "Could not send the magic link");

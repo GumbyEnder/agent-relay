@@ -3,6 +3,7 @@ import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { authClient, authEnabled, signInSocial } from "@/lib/auth/client";
 import { BZ_BRAND } from "@/lib/brand";
+import { op } from "@/lib/analytics";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,10 @@ function LoginPage() {
         password,
         callbackURL: BZ_BRAND ? "/buzzy/" : "/",
       });
+      op.track(err ? "login_failed" : "login", {
+        method: "password",
+        error: err ? (err.message ?? "unknown") : undefined,
+      });
       if (err) {
         const msg = err.message ?? "Sign in failed";
         // Better Auth prompts verification when requireEmailVerification is on
@@ -101,6 +106,9 @@ function LoginPage() {
       const { error: err } = await authClient.signIn.magicLink({
         email: email.trim(),
         callbackURL: BZ_BRAND ? "/buzzy/" : "/",
+      });
+      op.track(err ? "login_magic_link_failed" : "login_magic_link_sent", {
+        error: err ? (err.message ?? "unknown") : undefined,
       });
       if (err) {
         setError(err.message ?? "Could not send the magic link");
@@ -154,13 +162,14 @@ function LoginPage() {
                   setError(null);
                   setBusy(true);
                   void signInSocial("github")
-                    .catch((err) =>
+                    .then(() => op.track("login", { method: "github" }))
+                    .catch((err) => {
                       setError(
                         err instanceof Error
                           ? err.message
                           : "GitHub sign-in is unavailable.",
-                      ),
-                    )
+                      );
+                    })
                     .finally(() => setBusy(false));
                 }}
               >
