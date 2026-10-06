@@ -9,6 +9,7 @@
  *   POST /missions/:id/heartbeat  { agent, note? }
  *   POST /missions/:id/escalate   { agent, question }
  *   POST /missions/:id/deliver    { agent, summary, artifacts? }
+ *   POST /missions/:id/move       { column, actor? }  (operator; ark_ key limited to review→done|ready with review skill)
  *   POST /missions                { title, objective, project?, column? } — operator or agent key
  *   POST /v1                      { action: poll|claim|…|create|file, ... }
  *   GET  /agents
@@ -479,6 +480,51 @@ async function assertCanReadMission(
 }
 
 /**
+ * Reviewer-move: an ark agent key whose agent has the "review" skill may move
+ * a mission from review → done|ready only (accept/bounce). Returns null to
+ * proceed with the agent move, a Response to reject, or undefined when the
+ * caller is not an ark key (fall through to operator gating).
+ */
+async function assertAgentReviewMove(
+  req: Request,
+  machineAuth: MachineAuth,
+  missionId: string,
+  column: import("./types").MissionColumn | undefined,
+): Promise<Response | undefined> {
+  if (machineAuth.type !== "ark" || !machineAuth.agentId) return undefined;
+  const agentOrErr = await resolveVerbAgent({}, machineAuth);
+  if (agentOrErr instanceof Response) return agentOrErr;
+  const profile = await boardOps.getAgentProfile(machineAuth.agentId);
+  const skills = (profile?.agent.skills ?? []).map((s) => s.toLowerCase());
+  if (!skills.includes("review")) {
+    return err(
+      403,
+      `Agent "${agentOrErr}" lacks the review skill — reviewer moves not permitted on this key`,
+      "review_skill_required",
+    );
+  }
+  if (column !== "done" && column !== "ready") {
+    return err(
+      403,
+      "Reviewer agents may only move review → done or review → ready",
+      "move_target_restricted",
+    );
+  }
+  const mission = await boardOps.getMission(missionId);
+  if (!mission) return err(404, "mission not found", "mission_not_found");
+  const denied = await assertCanReadMission(req, machineAuth, mission);
+  if (denied) return denied;
+  if (mission.column !== "review") {
+    return err(
+      409,
+      `Mission is in column "${mission.column}" — reviewer moves apply to review only`,
+      "move_from_restricted",
+    );
+  }
+  return undefined;
+}
+
+/**
  * After requireOperatorCap(write_*), ensure the mission's board is writable by this operator.
  */
 async function assertOperatorCanWriteMission(
@@ -897,11 +943,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       }
 
       if (verb === "move") {
+        const column = str(body.column) as import("./types").MissionColumn | undefined;
+        const agentGate = await assertAgentReviewMove(req, machineAuth, id, column);
+        if (agentGate) return agentGate;
         const gate = await requireOperatorCap(req, "write_board");
         if (gate) return gate;
         const access = await assertOperatorCanWriteMission(req, id);
         if (access instanceof Response) return access;
-        const column = str(body.column) as import("./types").MissionColumn | undefined;
         if (!column) return err(400, "column is required", "bad_request");
         const actor = str(body.actor) ?? "operator";
         return fromEngine(await boardOps.moveMission(id, column, actor));
@@ -1763,11 +1811,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
     // POST /missions/:id/move  { column, actor? }
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "move" && req.method === "POST") {
+      const column = str(body.column) as import("./types").MissionColumn | undefined;
+      const agentGate = await assertAgentReviewMove(req, machineAuth, parts[1]!, column);
+      if (agentGate) return agentGate;
       const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
       const access = await assertOperatorCanWriteMission(req, parts[1]!);
       if (access instanceof Response) return access;
-      const column = str(body.column) as MissionColumn | undefined;
       if (!column) return err(400, "column is required", "bad_request");
       const actor = str(body.actor) ?? "operator";
       return fromEngine(await boardOps.moveMission(parts[1]!, column, actor));

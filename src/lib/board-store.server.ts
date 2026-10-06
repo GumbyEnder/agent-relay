@@ -309,6 +309,29 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
 }
 
 async function insertAgent(sql: Sql, a: Agent) {
+  // Name-unique table: upsert by name so a re-seed / re-register with a fresh
+  // id can't trip ar_agents_name_key.
+  const existing = await sql`select id from ar_agents where name = ${a.name} limit 1`;
+  if (existing[0]) {
+    const oldId = (existing[0] as { id: string }).id;
+    if (oldId !== a.id) {
+      // Engine regenerated the id for this name. Re-point the only FK
+      // (ar_board_agents.agent_id) to the new id, then take it.
+      await sql`
+        update ar_board_agents set agent_id = ${a.id} where agent_id = ${oldId}
+      `;
+      await sql`update ar_agents set id = ${a.id} where id = ${oldId}`;
+    }
+    await sql`
+      update ar_agents set
+        harness = ${a.harness}, role = ${a.role}, status = ${a.status},
+        skills = ${JSON.stringify(a.skills)}::jsonb,
+        last_heartbeat = ${ts(a.lastHeartbeat)}, current_mission_id = ${a.currentMissionId},
+        notes = ${a.notes ?? null}, is_demo = ${a.isDemo === true}, updated_at = now()
+      where id = ${a.id}
+    `;
+    return;
+  }
   await sql`
     insert into ar_agents (id, name, harness, role, status, skills, last_heartbeat, current_mission_id, notes, is_demo)
     values (
