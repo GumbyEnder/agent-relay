@@ -534,7 +534,9 @@
             if (cur) state = cur;
             else if (catalog.jobs[0]) { state = catalog.jobs[0]; catalog.currentId = state.id; }
             else { state = emptyJob(); catalog.jobs = [state]; catalog.currentId = state.id; }
-            if (!state.screen || state.screen === "intro") state.screen = "jobs";
+            // Landing URL is the jobs hub — always open there, never resume
+            // mid-flow from a previous visit (dogfood 10017).
+            if (!state.screen || state.screen === "intro" || state.screen === "result") state.screen = "jobs";
             return true;
           }
         }
@@ -651,7 +653,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
         rows +
         "<div class='row'><button id='newjob'>New job</button></div>" +
-        "<p class='muted'>Talk to BeeZilla with your history needs an account and Honcho. This page is the job list only.</p>";
+        (catalog.userId
+          ? ""
+          : "<p class='muted'>Sign in and BeeZilla will keep your history across jobs.</p>");
       document.getElementById("hideDone").onchange = () => {
         catalog.hideCompleted = document.getElementById("hideDone").checked;
         saveState();

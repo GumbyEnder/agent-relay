@@ -128,12 +128,54 @@
     <div id="content"><p class="empty">Loading memory…</p></div>
   </main>
   <script>
+    // Session-aware account link (same as talk.html) — memory.html previously
+    // had no account code, so signed-in users always saw "Sign in" (dogfood 10003).
+    (function account() {
+      var link = document.querySelector(".account-link");
+      if (!link) return;
+      fetch("/api/auth/get-session", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (session) {
+          var user = session && session.user;
+          if (!user || !user.name) return;
+          link.textContent = user.name;
+          link.removeAttribute("href");
+          link.style.cursor = "default";
+          var out = document.createElement("a");
+          out.href = "#";
+          out.textContent = "Log out";
+          out.addEventListener("click", function (e) {
+            e.preventDefault();
+            fetch("/api/auth/sign-out", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }).then(function () { window.location.href = "/buzzy/"; });
+          });
+          link.parentNode.insertBefore(out, link.nextSibling);
+        })
+        .catch(function () {});
+    })();
+    // esc is hoisted via function declaration, but keep it above the IIFE for
+    // safety — the memory render previously could throw mid-template and leave
+    // "Loading memory…" stuck (dogfood 10016).
+    function esc(s) {
+      const d = document.createElement("div");
+      d.textContent = String(s ?? "");
+      return d.innerHTML;
+    }
     (async () => {
+      try {
       const res = await fetch("/api/buzzy/memory", { credentials: "same-origin" });
       const root = document.getElementById("content");
       if (res.status === 401) {
         root.innerHTML =
           '<div class="signout"><p class="muted">Memory is tied to your account.</p><a href="/login">Sign in</a></div>';
+        return;
+      }
+      if (!res.ok) {
+        root.innerHTML = '<p class="empty">Couldn\u2019t load memory right now. Try refreshing.</p>';
         return;
       }
       const data = await res.json();
@@ -171,13 +213,11 @@
         stats +
         '<section><h2>What BeeZilla knows</h2>' + factsHtml + '</section>' +
         '<section style="margin-top:1.5rem"><h2>Recent conversations</h2>' + msgsHtml + '</section>';
+      } catch (err) {
+        const root = document.getElementById("content");
+        if (root) root.innerHTML = '<p class="empty">Couldn\u2019t load memory right now. Try refreshing.</p>';
+      }
     })();
-
-    function esc(s) {
-      const d = document.createElement("div");
-      d.textContent = String(s ?? "");
-      return d.innerHTML;
-    }
   </script>
 </body>
 </html>
