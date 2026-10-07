@@ -1445,25 +1445,45 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Load model catalog if not already loaded
       if (!modelCatalog.length) loadModels();
 
-      // If we have existing chat history, show it
+      // If we have existing chat history, show it; otherwise restore the
+      // server-side transcript for this job (dogfood 10007) before falling
+      // back to the welcome message.
       if (chatState.messages.length > 0) {
         renderChatMessages();
         renderSlotChecklist();
       } else {
-        // Welcome message
-        setChatMascot("17-attentive");
-        chatState.messages.push({
-          role: "assistant",
-          content: "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.",
-        });
-        renderChatMessages();
-        renderSlotChecklist();
+        restoreTranscript();
       }
 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
 
       setPhase("Talk to BeeZilla");
+    }
+
+    async function restoreTranscript() {
+      try {
+        const q = chatState.jobId ? "?jobId=" + encodeURIComponent(chatState.jobId) : "";
+        const r = await fetch("/api/buzzy/transcript" + q, { credentials: "same-origin" });
+        if (!r.ok) throw new Error("no transcript");
+        const data = await r.json();
+        const msgs = (data.messages || []).map((m) => ({ role: m.role, content: m.content }));
+        if (msgs.length >= 2) {
+          chatState.messages = msgs;
+          renderChatMessages();
+          renderSlotChecklist();
+          setChatMascot("12-content");
+          return;
+        }
+      } catch (_) { /* signed out, empty, or unreachable — fall through */ }
+      // Welcome message
+      setChatMascot("17-attentive");
+      chatState.messages.push({
+        role: "assistant",
+        content: "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.",
+      });
+      renderChatMessages();
+      renderSlotChecklist();
     }
 
     async function sendChatMessage() {

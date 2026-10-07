@@ -37,6 +37,33 @@ export default defineEventHandler(async (event) => {
     return { models };
   }
 
+  // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
+  if (method === "GET" && path === "/api/buzzy/transcript") {
+    const url = new URL(event.path ?? "/api/buzzy/transcript", "http://x");
+    const jobIdParam = url.searchParams.get("jobId");
+    const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT job_id, role, content, created_at FROM buzzy_chat_messages
+      WHERE user_id = ${user.id} AND job_id IS NOT DISTINCT FROM ${jobId}
+      ORDER BY created_at ASC LIMIT 50
+    `;
+    return {
+      messages: rows.map((r) => ({
+        jobId: r.job_id,
+        role: r.role,
+        content: r.content,
+        createdAt: r.created_at,
+      })),
+    };
+  }
+
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
   if (method === "POST" && path === "/api/buzzy/chat") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
