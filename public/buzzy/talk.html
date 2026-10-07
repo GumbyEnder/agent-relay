@@ -1322,7 +1322,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // ── Load model catalog and populate selector ────────────────────
     function loadModels() {
-      fetch("/api/buzzy/models")
+      // Timeout + fallback list so the selector never sticks at "Loading agents…"
+      fetch("/api/buzzy/models", { signal: AbortSignal.timeout(8000) })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
           if (!data || !data.models || !data.models.length) return;
@@ -1341,7 +1342,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             sel.appendChild(opt);
           });
         })
-        .catch(function () {});
+        .catch(function () {
+          // Models unreachable — populate the fallback list so the dropdown
+          // never sticks at "Loading agents…" (seen live).
+          const sel = document.getElementById("agentSelect");
+          if (!sel || sel.options.length > 1) return;
+          sel.innerHTML = "";
+          var defaultOpt = document.createElement("option");
+          defaultOpt.value = "";
+          defaultOpt.textContent = "Default agent";
+          sel.appendChild(defaultOpt);
+          [["z-ai/glm-5.3-flash", "Marvin"],
+           ["moonshotai/kimi-k3", "Kimi"],
+           ["qwen/qwen3-235b-a22b-thinking", "Qwen Thinking"]].forEach(function (p) {
+            var opt = document.createElement("option");
+            opt.value = p[0];
+            opt.textContent = p[1];
+            sel.appendChild(opt);
+          });
+        });
     }
 
     function selectedModel() {
@@ -1496,7 +1515,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     async function restoreTranscript() {
       try {
         const q = chatState.jobId ? "?jobId=" + encodeURIComponent(chatState.jobId) : "";
-        const r = await fetch("/api/buzzy/transcript" + q, { credentials: "same-origin" });
+        // Timeout so a hung request can't leave the transcript blank forever
+        // (seen live: stuck chat with no welcome message).
+        const r = await fetch("/api/buzzy/transcript" + q, {
+          credentials: "same-origin",
+          signal: AbortSignal.timeout(8000),
+        });
         if (!r.ok) throw new Error("no transcript");
         const data = await r.json();
         const msgs = (data.messages || []).map((m) => ({ role: m.role, content: m.content }));
