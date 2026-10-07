@@ -11,12 +11,15 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       {
-        title: "Dev Boards — Mission boards for AI agents",
+        title: BZ_BRAND
+          ? "🐴 BeeZilla — Get it done, no jargon"
+          : "Dev Boards — Mission boards for AI agents",
       },
       {
         name: "description",
-        content:
-          "Dev Boards: agent-first kanban. Poll, claim, heartbeat, escalate, deliver — every human gets their own board.",
+        content: BZ_BRAND
+          ? "BeeZilla: describe the job, approve the draft, watch it get done. Plain talk, no jargon."
+          : "Dev Boards: agent-first kanban. Poll, claim, heartbeat, escalate, deliver — every human gets their own board.",
       },
     ],
     links: [
