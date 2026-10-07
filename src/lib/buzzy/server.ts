@@ -31,6 +31,8 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - Do not repeat back the user's answer as a restatement or react emotionally to it. Acknowledge in at most two words ("Got it.") or skip the acknowledgment entirely, then move to the next decision.
 - Never re-ask something already answered — the conversation state shows what's decided.
 - Track decisions, not stories: capture the decision, then move on.
+- IMPORTANT — job type: if the client's message is clearly a different kind of job (creative writing, a story, copy, a poem, a technical explainer), work THAT job. Do not refuse it and do not drag in unrelated earlier problems. Only ask scope-of-work questions that fit the actual request.
+- Only use details from THIS conversation. Never mention or reuse problems from other jobs.
 You never mention models, tokens, or technical internals.`;
 
 // ── Helper: str ────────────────────────────────────────────────────────
@@ -109,7 +111,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Load recent chat history ───────────────────────────────────────
   const rows = await sql`
     SELECT role, content FROM buzzy_chat_messages
-    WHERE user_id = ${userId} AND job_id = ${jobId}
+    WHERE user_id = ${userId} AND job_id IS NOT DISTINCT FROM ${jobId}
     ORDER BY created_at DESC LIMIT 10
   `;
 

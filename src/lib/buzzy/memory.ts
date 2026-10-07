@@ -51,9 +51,11 @@ export class DbMemory implements MemoryInterface {
   }
 
   async get_facts(): Promise<MemoryFact[]> {
+    // job_id is nullable — match NULLs exactly (IS NOT DISTINCT FROM), never
+    // lose the whole user's facts when jobId is null (dogfood 10006).
     const rows = await this.sql.query<{ key: string; value: string }>(
       `SELECT key, value FROM buzzy_user_memory
-       WHERE user_id = $1 AND job_id = $2
+       WHERE user_id = $1 AND job_id IS NOT DISTINCT FROM $2
        ORDER BY key`,
       [this.userId, this.jobId],
     );
