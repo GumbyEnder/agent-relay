@@ -71,7 +71,7 @@ Hard filter: add \`&match_agent_skills=1\`. Response includes \`skill_routing\`:
 curl -sS -X POST \\
   -H "Authorization: Bearer $DEVBOARDS_API_KEY" \\
   -H "content-type: application/json" \\
-  -d "{\\"agent\\":\\"$DEVBOARDS_AGENT\\}" \\
+  -d "{\\"agent\\":\\"$DEVBOARDS_AGENT\\"}" \\
   "$DEVBOARDS_BASE_URL/api/agent/missions/MISSION_ID/claim"
 \`\`\`
 
