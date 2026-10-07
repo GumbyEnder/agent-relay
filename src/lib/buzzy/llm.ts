@@ -64,6 +64,35 @@ export async function chatCompletion(
     stream: false,
   };
 
+  // One retry on an empty/failed completion — glm occasionally returns an
+  // empty first choice; a single immediate retry usually recovers (dogfood #10004).
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      body.temperature = Math.min((opts?.temperature ?? 0.7) + 0.2, 1);
+    }
+    try {
+      return await postCompletion(body);
+    } catch (err) {
+      lastError = err;
+      if (err instanceof Error && /LLM request failed \((4\d\d)\)/.test(err.message)) {
+        throw err; // auth/permission errors won't fix themselves — fail fast
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("LLM call failed");
+}
+
+async function postCompletion(body: {
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature: number;
+  max_tokens: number;
+}): Promise<string> {
+  const url = new URL(
+    BASE_URL.replace(/\/+$/, "") + "/chat/completions",
+  );
+
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: {
