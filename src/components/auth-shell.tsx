@@ -42,7 +42,7 @@ export function AuthShell({
             className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-fg-subtle hover:text-fg"
           >
             {BZ_BRAND ? <BeeZillaMark /> : null}
-            <span>Dev Boards</span>
+            <span>{BZ_BRAND ? "BeeZilla" : "Dev Boards"}</span>
           </Link>
           <h1 className="pt-2 text-lg font-semibold tracking-tight">{title}</h1>
           {subtitle ? <p className="text-sm text-fg-muted">{subtitle}</p> : null}
