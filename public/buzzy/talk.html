@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>🐴 BeeZilla — Discuss</title>
+  <title>🐴 BeeZilla — Chat</title>
   <style>
     /* ── BeeZilla Design Tokens ─────────────────────────── */
     :root {
@@ -530,8 +530,8 @@
       </div>
     </a>
     <nav>
-      <a href="/buzzy/" id="jobsLink">Your jobs</a>
-      <a href="/buzzy/talk" id="talkLink" class="active">Discuss</a>
+      <a href="/buzzy/" id="jobsLink">Jobs</a>
+      <a href="/buzzy/talk" id="talkLink" class="active">Chat</a>
       <a href="/buzzy/memory" id="memLink">Memory</a>
       <a href="/buzzy/experts">Experts</a>
       <a href="/login" class="account-link">Sign in</a>
@@ -1195,7 +1195,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
     if (expertFromUrl) {
       chatState.expert = expertFromUrl;
-      // Clear the query param from the URL
+      window.history.replaceState({}, "", "/buzzy/talk");
+    }
+
+    // ── Job context from the Jobs card "Chat" button ───────────────────
+    // sessionStorage payload (set by openJobChat) gives the agent the project
+    // context; the ?job= param identifies the job for transcript restore.
+    var jobFromUrl = new URLSearchParams(window.location.search).get("job");
+    if (jobFromUrl) {
+      chatState.jobId = jobFromUrl;
+      try {
+        var jobCtx = JSON.parse(sessionStorage.getItem("bz_open_job") || "null");
+        if (jobCtx && jobCtx.jobId === jobFromUrl) {
+          chatState.jobContext = jobCtx;
+        }
+      } catch (_) {}
       window.history.replaceState({}, "", "/buzzy/talk");
     }
 
@@ -1465,7 +1479,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
       // If we have existing chat history, show it; otherwise restore the
       // server-side transcript for this job (dogfood 10007) before falling
-      // back to the welcome message.
+      // back to the job-context opener or the welcome message.
       if (chatState.messages.length > 0) {
         renderChatMessages();
         renderSlotChecklist();
@@ -1476,7 +1490,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
 
-      setPhase("Talk to BeeZilla");
+      setPhase(chatState.jobContext ? "Chat — " + chatState.jobContext.title : "Talk to BeeZilla");
     }
 
     async function restoreTranscript() {
@@ -1494,11 +1508,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return;
         }
       } catch (_) { /* signed out, empty, or unreachable — fall through */ }
-      // Welcome message
       setChatMascot("17-attentive");
+      // Job context opener — the Chat button on a Jobs card carries the
+      // project here; greet with context instead of the generic welcome.
+      var jc = chatState.jobContext;
+      var opener;
+      if (jc) {
+        opener = "Picking up \"" + jc.title + "\" (" + (jc.template || "General") + ", " + jc.status + ")." +
+          (jc.problem ? " Where you left off: " + jc.problem.slice(0, 160) : "") +
+          " What do you need on it?";
+      } else if (chatState.expert) {
+        opener = "You're in the " + chatState.expert + " area. Describe the job — what needs to be done?";
+      } else {
+        opener = "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.";
+      }
       chatState.messages.push({
         role: "assistant",
-        content: "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.",
+        content: opener,
       });
       renderChatMessages();
       renderSlotChecklist();
@@ -1546,6 +1572,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             jobId: chatState.jobId,
             message: text,
             model: selectedModel(),
+            jobContext: chatState.jobContext || undefined,
           }),
         });
 

@@ -86,8 +86,9 @@ export default defineEventHandler(async (event) => {
     const jobId: string | null = typeof body.jobId === "string" ? body.jobId : null;
     const message: string = typeof body.message === "string" ? body.message : "";
     const model: string | undefined = typeof body.model === "string" ? body.model : undefined;
+    const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
 
-    const result = await chatLoop({ userId, jobId, message, model });
+    const result = await chatLoop({ userId, jobId, message, model, jobContext });
     return result;
   }
 

@@ -69,6 +69,8 @@ export interface ChatRequest {
   jobId: string | null;
   message: string;
   model?: string;
+  /** Context from the Jobs-card "Chat" button — project the agent is working. */
+  jobContext?: Record<string, unknown>;
 }
 
 export interface ChatResponse {
@@ -82,7 +84,7 @@ export interface ChatResponse {
 }
 
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
-  const { userId, jobId, message, model } = req;
+  const { userId, jobId, message, model, jobContext } = req;
 
   if (!message?.trim()) {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
@@ -143,7 +145,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ? `\n\nYour next question should be: "${nextQ.prompt}"`
     : "\n\nAll required details have been gathered. Generate a draft summary for the user to review.";
 
-  const systemPrompt = PERSONA + factsSection + guidance;
+  // ── Job context from the Jobs-card "Chat" button ────────────────────
+  const jobCtxSection =
+    jobContext && typeof jobContext.title === "string"
+      ? "\n\nYou are working inside the client's existing job \"" +
+        String(jobContext.title) +
+        "\"" +
+        (typeof jobContext.template === "string" ? " (" + jobContext.template + ")" : "") +
+        (typeof jobContext.status === "string" ? " — currently " + jobContext.status : "") +
+        (typeof jobContext.problem === "string" && jobContext.problem
+          ? ". Problem on file: " + String(jobContext.problem).slice(0, 300)
+          : "") +
+        ". Stay on this job."
+      : "";
+
+  const systemPrompt = PERSONA + jobCtxSection + factsSection + guidance;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   const messages: Array<{ role: string; content: string }> = [

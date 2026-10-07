@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>🐴 BeeZilla — Your jobs</title>
+  <title>🐴 BeeZilla — Jobs</title>
   <style>
     :root {
       --bz-black: #0A0A0A;
@@ -247,6 +247,62 @@
       transition: background 0.15s;
     }
     .jobrow:hover { background: rgba(255,193,7,0.06); }
+    /* Card format for the jobs list (desktop-friendly, self-contained) */
+    .job-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 0.9rem;
+    }
+    .jobcard {
+      border: 1px solid #2A2A2A;
+      background: var(--bz-panel);
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .jobcard:hover {
+      border-color: var(--bz-yellow-dim, #6a5a10);
+      background: rgba(255,193,7,0.04);
+    }
+    .jobcard-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .jobcard-title {
+      font-weight: 600;
+      color: #fff;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .jobcard-dates {
+      font-size: 0.72rem;
+      color: #777;
+      display: flex;
+      gap: 0.9rem;
+      flex-wrap: wrap;
+    }
+    .jobcard-dates b { color: #999; font-weight: 500; }
+    .jobcard-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+    }
+    .jobcard .chatbtn {
+      font-size: 0.78rem;
+      padding: 0.35rem 0.7rem;
+    }
     .tag {
       font-size: 0.7rem;
       text-transform: uppercase;
@@ -434,12 +490,12 @@
         </div>
       </a>
       <nav>
-        <a href="/buzzy/" id="jobsLink" class="active">Your jobs</a>
-        <a href="/buzzy/talk" id="talkLink">Discuss</a>
+        <a href="/buzzy/" id="jobsLink" class="active">Jobs</a>
+        <a href="/buzzy/talk" id="talkLink">Chat</a>
         <a href="/buzzy/memory" id="memLink">Memory</a>
         <a href="/buzzy/experts">Experts</a>
         <a href="/login" class="account-link">Sign in</a>
-        <span class="phase" id="phaseLabel">Your jobs</span>
+        <span class="phase" id="phaseLabel">Jobs</span>
       </nav>
   </div>
   </header>
@@ -478,6 +534,7 @@
       return {
         id: id || ("job_" + Date.now()),
         createdAt: Date.now(),
+        updatedAt: Date.now(),
         template: null,
         problem: "",
         messages: [],
@@ -531,6 +588,7 @@
 
     function snapshotCurrent() {
       if (!state.id) return;
+      state.updatedAt = Date.now();
       const copy = JSON.parse(JSON.stringify(state));
       const i = catalog.jobs.findIndex((j) => j.id === copy.id);
       if (i >= 0) catalog.jobs[i] = copy;
@@ -661,22 +719,38 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function goJobs() {
-      setPhase("Your jobs");
+      setPhase("Jobs");
       snapshotCurrent();
       const list = catalog.jobs.filter((j) => !(catalog.hideCompleted && jobComplete(j)));
-      const rows = list.length
-        ? list.map((j) => {
-            const when = new Date(j.createdAt || Date.now()).toLocaleDateString();
-            const statusClass = jobStatus(j) === "Done" ? " tag-done" : jobStatus(j) === "Working" ? " tag-working" : "";
-            return "<div class='jobrow' data-id='" + j.id + "'><div><strong>" + jobTitle(j).replace(/</g,"&lt;") + "</strong><p class='muted'>" + when + "</p></div><span class='tag'>" + jobStatus(j) + "</span></div>";
-          }).join("")
+      const fmt = (ts) => new Date(ts || Date.now()).toLocaleDateString();
+      const esc = (s) => String(s).replace(/</g, "&lt;");
+      const cards = list.length
+        ? "<div class='job-cards'>" + list.map((j) => {
+            const status = jobStatus(j);
+            const statusClass = status === "Done" ? " tag-done" : status === "Working" ? " tag-working" : "";
+            const hasChat = !!(j.problem || (j.messages && j.messages.length) || j.template);
+            return "<div class='jobcard' data-id='" + j.id + "'>" +
+              "<div class='jobcard-top'>" +
+                "<div class='jobcard-title'>" + jobTitle(j).replace(/</g, "&lt;") + "</div>" +
+                "<span class='tag" + statusClass + "'>" + status + "</span>" +
+              "</div>" +
+              "<div class='jobcard-dates'>" +
+                "<span><b>Started</b> " + fmt(j.createdAt) + "</span>" +
+                "<span><b>Updated</b> " + fmt(j.updatedAt || j.createdAt) + "</span>" +
+              "</div>" +
+              "<div class='jobcard-bottom'>" +
+                "<span class='muted' style='font-size:0.75rem'>" + esc(j.template || "General") + "</span>" +
+                (hasChat ? "<button class='secondary chatbtn' data-chat='" + j.id + "'>Chat</button>" : "") +
+              "</div>" +
+            "</div>";
+          }).join("") + "</div>"
         : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
       document.getElementById("app").innerHTML =
         "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
-        "<h1>Your jobs</h1>" +
+        "<h1>Jobs</h1>" +
         "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
         "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
-        rows +
+        cards +
         "<div class='row'><button id='newjob'>New job</button></div>" +
         (catalog.userId
           ? ""
@@ -687,9 +761,43 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         goJobs();
       };
       document.getElementById("newjob").onclick = newJob;
-      document.querySelectorAll(".jobrow").forEach((el) => {
-        el.onclick = () => openJob(el.getAttribute("data-id"));
+      document.querySelectorAll(".jobcard").forEach((el) => {
+        el.onclick = (e) => {
+          // The Chat button has its own action — don't double-handle
+          if (e.target.closest(".chatbtn")) return;
+          openJob(el.getAttribute("data-id"));
+        };
       });
+      document.querySelectorAll(".chatbtn").forEach((el) => {
+        el.onclick = (e) => {
+          e.stopPropagation();
+          openJobChat(el.getAttribute("data-chat"));
+        };
+      });
+    }
+
+    // Launch agent chat with this job's context (dogfood UX: Chat on every card)
+    function openJobChat(id) {
+      snapshotCurrent();
+      const j = catalog.jobs.find((x) => x.id === id);
+      if (!j) return;
+      state = j;
+      catalog.currentId = id;
+      saveState();
+      const payload = {
+        jobId: j.id,
+        title: jobTitle(j),
+        template: j.template,
+        problem: j.problem || "",
+        messages: (j.messages || []).map((m) => ({ who: m.who, text: m.text })),
+        answers: j.answers || {},
+        approved: !!j.approved,
+        status: jobStatus(j),
+      };
+      try {
+        sessionStorage.setItem("bz_open_job", JSON.stringify(payload));
+      } catch (_) { /* storage full/blocked — chat still opens, just without context */ }
+      window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(j.id);
     }
 
     function goPick() {
