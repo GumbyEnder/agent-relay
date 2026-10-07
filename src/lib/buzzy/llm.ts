@@ -108,10 +108,22 @@ async function postCompletion(body: {
   }
 
   const json = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{ message?: { content?: string; reasoning?: string } }>;
   };
 
-  const content = json.choices?.[0]?.message?.content;
+  const msg = json.choices?.[0]?.message;
+  let content = msg?.content?.trim();
+
+  // glm-5.3-flash sometimes burns all tokens on reasoning and returns
+  // content: null with the answer in `reasoning` — fall back to it
+  // (dogfood 10004 empty-choice root cause).
+  if (!content && msg?.reasoning?.trim()) {
+    const r = msg.reasoning.trim();
+    // Reasoning text can be long — take the final usable chunk
+    const tail = r.length > 800 ? r.slice(-800) : r;
+    content = tail;
+  }
+
   if (!content) {
     throw new Error("LLM returned no content in first choice");
   }
