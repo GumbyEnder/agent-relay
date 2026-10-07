@@ -490,6 +490,10 @@
     }
 
     function jobTitle(j) {
+      // Auto-title from the first user message (dogfood 10013); fall back to
+      // template name, then "New job".
+      const first = (j.messages || []).find((m) => m.who === "me" && m.text);
+      if (first) return first.text.slice(0, 72);
       if (j.problem) return j.problem.slice(0, 72);
       if (j.template) return j.template + " job";
       const happened = (j.answers && j.answers.what_happened) || "";
