@@ -480,7 +480,13 @@
     }
 
     function jobComplete(j) {
-      return !!(j && j.screen === "result");
+      // screen is unreliable — leaving the result view overwrites it with
+      // "jobs". The durable completion signal is the board: all 4 steps in Done
+      // (dogfood 10015 root cause).
+      if (!j) return false;
+      if (j.screen === "result") return true;
+      if (j.board && Array.isArray(j.board.Done) && j.board.Done.length >= 4) return true;
+      return false;
     }
 
     function jobTitle(j) {
