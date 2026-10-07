@@ -1494,9 +1494,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("chatSend").disabled = true;
 
       try {
+        // Abort after 60s so a slow LLM turn fails cleanly instead of reading
+        // as a dead connection (dogfood 10018).
         const resp = await fetch(CHAT_BASE, {
           method: "POST",
           credentials: "same-origin",
+          signal: AbortSignal.timeout(60000),
           headers: {
             "Content-Type": "application/json",
             ...getAuthHeaders(),
@@ -1556,7 +1559,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       } catch (err) {
         setChatMascot("18-unimpressed");
         document.getElementById("chatError").textContent =
-          "Couldn't reach the server. Check your connection and try again.";
+          err && err.name === "TimeoutError"
+            ? "BeeZilla took too long on that one. Try again — or pick a faster agent."
+            : "Couldn't reach the server. Check your connection and try again.";
         document.getElementById("chatError").classList.remove("hidden");
       } finally {
         // Only re-enable if not signed out
