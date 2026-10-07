@@ -568,6 +568,7 @@
       catalog.currentId = id;
       if (state.screen === "jobs" || state.screen === "intro") {
         if (jobComplete(state)) state.screen = "result";
+        else if (state.approved) state.screen = "board"; // approved but not finished — show the board, not the chat (dogfood 10012)
         else if (state.problem) state.screen = "chat";
         else if (state.template) state.screen = "problem";
         else if (state.answers && state.answers.what_happened) state.screen = state.version ? "draft" : "ask";
@@ -881,6 +882,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         } else {
           move("Working", "Done", STEPS[3].title);
           state.screen = "result";
+          saveState(); // persist DONE state immediately (dogfood 10015)
         }
         i += 1;
         render();
