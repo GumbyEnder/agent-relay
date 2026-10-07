@@ -38,6 +38,18 @@
       flex-wrap: wrap;
       gap: 0.5rem;
     }
+    header > .header-inner,
+    .header-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
     header .brand {
       display: flex;
       align-items: center;
@@ -414,20 +426,22 @@
 </head>
 <body>
   <header>
-    <a href="/buzzy/" class="brand-link">
-      <div class="brand">
-        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-        <strong>BeeZilla</strong>
-      </div>
-    </a>
-    <nav>
-      <a href="/buzzy/" id="jobsLink" class="active">Your jobs</a>
-      <a href="/buzzy/talk" id="talkLink">Discuss</a>
-      <a href="/buzzy/memory" id="memLink">Memory</a>
-      <a href="/buzzy/experts">Experts</a>
-      <a href="/login" class="account-link">Sign in</a>
-      <span class="phase" id="phaseLabel">Your jobs</span>
-    </nav>
+      <div class="header-inner">
+  <a href="/buzzy/" class="brand-link">
+        <div class="brand">
+          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <strong>BeeZilla</strong>
+        </div>
+      </a>
+      <nav>
+        <a href="/buzzy/" id="jobsLink" class="active">Your jobs</a>
+        <a href="/buzzy/talk" id="talkLink">Discuss</a>
+        <a href="/buzzy/memory" id="memLink">Memory</a>
+        <a href="/buzzy/experts">Experts</a>
+        <a href="/login" class="account-link">Sign in</a>
+        <span class="phase" id="phaseLabel">Your jobs</span>
+      </nav>
+  </div>
   </header>
   <main id="app"></main>
 

@@ -34,6 +34,18 @@
       flex-wrap: wrap;
       gap: 0.5rem;
     }
+    header > .header-inner,
+    .header-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
     header .brand {
       display: flex;
       align-items: center;
@@ -128,19 +140,21 @@
 </head>
 <body>
   <header>
-    <a href="/buzzy/" class="brand-link">
-      <div class="brand">
-        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-        <strong>BeeZilla</strong>
-      </div>
-    </a>
-    <nav>
-      <a href="/buzzy/">Your jobs</a>
-      <a href="/buzzy/talk">Discuss</a>
-      <a href="/buzzy/memory">Memory</a>
-      <a href="/buzzy/experts" class="active">Experts</a>
-      <a href="/login" class="account-link">Sign in</a>
-    </nav>
+      <div class="header-inner">
+  <a href="/buzzy/" class="brand-link">
+        <div class="brand">
+          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <strong>BeeZilla</strong>
+        </div>
+      </a>
+      <nav>
+        <a href="/buzzy/">Your jobs</a>
+        <a href="/buzzy/talk">Discuss</a>
+        <a href="/buzzy/memory">Memory</a>
+        <a href="/buzzy/experts" class="active">Experts</a>
+        <a href="/login" class="account-link">Sign in</a>
+      </nav>
+  </div>
   </header>
   <script>
     // Session-aware account link (same as talk.html) — experts.html previously

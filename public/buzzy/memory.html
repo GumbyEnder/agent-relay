@@ -31,6 +31,18 @@
       padding: 1rem 1.5rem;
       border-bottom: 1px solid var(--line);
     }
+    header > .header-inner,
+    .header-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
     header img { width: 48px; height: 48px; }
     header h1 { font-size: 1.1rem; margin: 0; }
     header h1 span { color: var(--yellow); }
@@ -112,17 +124,19 @@
 </head>
 <body>
   <header>
-    <a href="/buzzy/" class="brand-link">
-      <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-      <h1>Bee<span>Zilla</span> — Memory</h1>
-    </a>
-    <nav>
-      <a href="/buzzy/" id="jobsLink">Your jobs</a>
-      <a href="/buzzy/talk" id="talkLink">Discuss</a>
-      <a href="/buzzy/memory" id="memLink" class="active">Memory</a>
-      <a href="/buzzy/experts">Experts</a>
-      <a href="/login" class="account-link">Sign in</a>
-    </nav>
+      <div class="header-inner">
+  <a href="/buzzy/" class="brand-link">
+        <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <h1>Bee<span>Zilla</span> — Memory</h1>
+      </a>
+      <nav>
+        <a href="/buzzy/" id="jobsLink">Your jobs</a>
+        <a href="/buzzy/talk" id="talkLink">Discuss</a>
+        <a href="/buzzy/memory" id="memLink" class="active">Memory</a>
+        <a href="/buzzy/experts">Experts</a>
+        <a href="/login" class="account-link">Sign in</a>
+      </nav>
+  </div>
   </header>
   <main>
     <div id="content"><p class="empty">Loading memory…</p></div>
