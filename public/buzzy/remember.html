@@ -278,36 +278,9 @@
       };
     }
 
-    // ── Account: session-aware Sign in / user name + Log out ──────────
-    (function account() {
-      var link = document.querySelector(".account-link");
-      if (!link) return;
-      fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (session) {
-          var user = session && session.user;
-          if (!user || !user.name) return;
-          link.textContent = user.name;
-          link.removeAttribute("href");
-          link.style.cursor = "default";
-          var out = document.createElement("a");
-          out.href = "#";
-          out.textContent = "Log out";
-          out.addEventListener("click", function (e) {
-            e.preventDefault();
-            fetch("/api/auth/sign-out", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "content-type": "application/json" },
-              body: "{}",
-            }).then(function () { window.location.href = "/buzzy/"; });
-          });
-          link.parentNode.insertBefore(out, link.nextSibling);
-        })
-        .catch(function () {});
-    })();
-
     goRemember();
   </script>
+<script src="common.js"></script>
+<script>(function(){var run=function(){if(window.__bzHeader)window.__bzHeader("memory")};if(document.readyState!=="loading")run();else document.addEventListener("DOMContentLoaded",run)})();</script>
 </body>
 </html>
