@@ -478,7 +478,29 @@
       margin: 0.5rem 0;
     }
     .result-cost strong { color: var(--bz-yellow); }
-  </style>
+  
+    .account-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 0.4rem;
+      background: var(--bz-panel, #141414);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.7rem 0.9rem;
+      min-width: 200px;
+      z-index: 50;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    .account-menu .am-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+    .account-menu .am-email { font-size: 0.75rem; color: #888; margin: 0.15rem 0 0.6rem; word-break: break-all; }
+    .account-menu .am-signout {
+      width: 100%;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+    .header-inner, header { position: relative; }
+</style>
 </head>
 <body>
   <header>
@@ -1153,11 +1175,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var user = session && session.user;
           if (!user || !user.name) return;
           link.textContent = user.name;
-          link.removeAttribute("href");
-          link.style.cursor = "default";
-          var out = document.createElement("a");
-          out.href = "#";
-          out.textContent = "Log out";
+          link.href = "#";
+          link.style.cursor = "pointer";
+          // Profile menu: clicking the name opens a small account panel
+          var menu = document.createElement("div");
+          menu.className = "account-menu";
+          menu.style.display = "none";
+          menu.innerHTML =
+            '<div class="am-name">' + user.name + "</div>" +
+            '<div class="am-email">' + (user.email || "") + "</div>" +
+            '<button type="button" class="am-signout">Log out</button>';
+          var out = menu.querySelector(".am-signout");
           out.addEventListener("click", function (e) {
             e.preventDefault();
             fetch("/api/auth/sign-out", {
@@ -1167,10 +1195,34 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               body: "{}",
             }).then(function () { window.location.href = "/buzzy/"; });
           });
-          link.parentNode.insertBefore(out, link.nextSibling);
+          link.parentNode.insertBefore(menu, link.nextSibling);
+          link.addEventListener("click", function (e) {
+            e.preventDefault();
+            menu.style.display = menu.style.display === "none" ? "block" : "none";
+          });
+          document.addEventListener("click", function (e) {
+            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
+          });
         })
         .catch(function () {});
     })();
+
+    // Navigation — same-URL nav clicks must reset the SPA view (the browser
+    // won't reload /buzzy/ → /buzzy/, leaving the user stuck mid-flow).
+    document.querySelectorAll('a[href="/buzzy/"]').forEach((a) => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        state.screen = "jobs";
+        render();
+        window.scrollTo(0, 0);
+      });
+    });
+    document.querySelectorAll('a[href="/buzzy/talk"], a[href="/buzzy/talk.html"]').forEach((a) => {
+      a.addEventListener("click", () => {
+        snapshotCurrent();
+        saveState();
+      });
+    });
 
     render();
   </script>

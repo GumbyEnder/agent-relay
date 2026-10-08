@@ -316,26 +316,6 @@
     }
     /* ── Tabs ───────────────────────────────────────────── */
     /* FIX #6: larger tabs */
-    .bz-tabs {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.9rem;
-    }
-    .bz-tab {
-      padding: 0.6rem 1.25rem;
-      border: 1px solid #2A2A2A;
-      border-radius: 6px;
-      background: var(--bz-panel);
-      color: var(--bz-silver);
-      cursor: pointer;
-      font-size: 0.92rem;
-      font-weight: 600;
-    }
-    .bz-tab.active {
-      background: var(--bz-yellow);
-      border-color: var(--bz-yellow);
-      color: #111;
-    }
 
     /* ── Draft banner ───────────────────────────────────── */
     .draft-ready-banner {
@@ -518,7 +498,29 @@
     .form-group textarea::placeholder {
       color: #555;
     }
-  </style>
+  
+    .account-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 0.4rem;
+      background: var(--bz-panel, #141414);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.7rem 0.9rem;
+      min-width: 200px;
+      z-index: 50;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    .account-menu .am-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+    .account-menu .am-email { font-size: 0.75rem; color: #888; margin: 0.15rem 0 0.6rem; word-break: break-all; }
+    .account-menu .am-signout {
+      width: 100%;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+    .header-inner, header { position: relative; }
+</style>
 </head>
 <body>
   <header>
@@ -540,10 +542,6 @@
   </header>
   <main>
     <div id="chatScreen">
-      <div class="bz-tabs" role="tablist">
-        <button type="button" class="bz-tab active" id="tabChat" data-tab="chat">Chat</button>
-        <button type="button" class="bz-tab" id="tabForm" data-tab="form">Form</button>
-      </div>
       <div class="chat-layout">
         <div class="chat-main">
           <div class="chat-header-row">
@@ -571,14 +569,6 @@
           </div>
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
-          <div id="formScreen" class="hidden" style="max-width:600px;">
-            <h2 style="margin:0 0 0.5rem;color:var(--bz-yellow);font-size:1.05rem;">Structured job request</h2>
-            <p class="muted">Fill in the fields — BeeZilla will turn it into a conversation and lock in the decisions.</p>
-            <div id="formBody"></div>
-            <div class="row" style="margin-top:1rem;">
-              <button id="formSubmit">Submit to BeeZilla</button>
-            </div>
-          </div>
         </div>
         <div class="slot-checklist" id="slotChecklist">
           <h3>Decisions made</h3>
@@ -1162,35 +1152,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     // ── Intake mode tabs: chat (default) / form ────────────────────────
-    document.querySelectorAll(".bz-tab").forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        document.querySelectorAll(".bz-tab").forEach(function (t) { t.classList.remove("active"); });
-        tab.classList.add("active");
-        document.body.dataset.intake = tab.dataset.tab;
-        // Show/hide panels
-        var chatPanel = document.getElementById("chatScreen");
-        var formPanel = document.getElementById("formScreen");
-        var chatCol = chatPanel.querySelector(".chat-main > .chat-messages, .chat-main .chat-messages");
-        var chatInputRow = chatPanel.querySelector(".chat-input-row");
-        var chatErr = document.getElementById("chatError");
-        var chatFooter = chatPanel.querySelector(".chat-main > p.muted");
-        if (tab.dataset.tab === "form") {
-          chatPanel.classList.remove("hidden");
-          [chatCol, chatInputRow, chatErr, chatFooter].forEach(function (el) {
-            if (el) el.classList.add("hidden");
-          });
-          formPanel.classList.remove("hidden");
-          renderForm();
-        } else {
-          [chatCol, chatInputRow, chatFooter].forEach(function (el) {
-            if (el) el.classList.remove("hidden");
-          });
-          formPanel.classList.add("hidden");
-          showChatScreen();
-        }
-      });
-    });
-
     // ── Expert query param ─────────────────────────────────────────────
     var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
     if (expertFromUrl) {
@@ -1223,18 +1184,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       { id: "exclusions", label: "Exclusions", type: "textarea", placeholder: "Anything you definitely don't want done?" },
     ];
 
-    function renderForm() {
-      var container = document.getElementById("formBody");
-      var html = "";
-      FORM_FIELDS.forEach(function (f) {
-        if (f.type === "textarea") {
-          html += '<div class="form-group"><label for="form_' + f.id + '">' + f.label + '</label><textarea id="form_' + f.id + '" rows="3" placeholder="' + f.placeholder + '"></textarea></div>';
-        } else {
-          html += '<div class="form-group"><label for="form_' + f.id + '">' + f.label + '</label><input id="form_' + f.id + '" type="' + f.type + '" placeholder="' + f.placeholder + '" /></div>';
-        }
-      });
-      container.innerHTML = html;
-    }
 
     document.getElementById("formSubmit").addEventListener("click", function () {
       var values = {};
@@ -1271,11 +1220,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var user = session && session.user;
           if (!user || !user.name) return; // keep the Sign in link
           link.textContent = user.name;
-          link.removeAttribute("href");
-          link.style.cursor = "default";
-          var out = document.createElement("a");
-          out.href = "#";
-          out.textContent = "Log out";
+          link.href = "#";
+          link.style.cursor = "pointer";
+          // Profile menu: clicking the name opens a small account panel
+          var menu = document.createElement("div");
+          menu.className = "account-menu";
+          menu.style.display = "none";
+          menu.innerHTML =
+            '<div class="am-name">' + user.name + "</div>" +
+            '<div class="am-email">' + (user.email || "") + "</div>" +
+            '<button type="button" class="am-signout">Log out</button>';
+          var out = menu.querySelector(".am-signout");
           out.addEventListener("click", function (e) {
             e.preventDefault();
             fetch("/api/auth/sign-out", {
@@ -1285,7 +1240,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               body: "{}",
             }).then(function () { window.location.href = "/buzzy/"; });
           });
-          link.parentNode.insertBefore(out, link.nextSibling);
+          link.parentNode.insertBefore(menu, link.nextSibling);
+          link.addEventListener("click", function (e) {
+            e.preventDefault();
+            menu.style.display = menu.style.display === "none" ? "block" : "none";
+          });
+          document.addEventListener("click", function (e) {
+            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
+          });
         })
         .catch(function () {});
     })();

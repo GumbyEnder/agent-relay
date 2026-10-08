@@ -58,6 +58,62 @@
     nav a:hover { color: var(--text); }
     nav .account-link { color: var(--yellow); border: 1px solid var(--line); }
     main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+    /* Memory redesign: digest card + per-job drill-down */
+    .mem-digest {
+      border: 1px solid var(--line);
+      background: var(--panel2);
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      margin: 1.2rem 0;
+    }
+    .mem-digest h2 { margin: 0 0 0.4rem; color: var(--yellow); font-size: 1rem; }
+    .mem-digest p { margin: 0; color: var(--text); font-size: 0.92rem; line-height: 1.5; }
+    .mem-job {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin-bottom: 0.6rem;
+      overflow: hidden;
+    }
+    .mem-job-head {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      background: none;
+      border: none;
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      padding: 0.7rem 0.9rem;
+      cursor: pointer;
+    }
+    .mem-job-head:hover { background: rgba(255,193,7,0.05); }
+    .mem-job-head .mj-title { font-weight: 600; color: #fff; min-width: 90px; }
+    .mem-job-head .mj-digest {
+      flex: 1;
+      color: var(--muted);
+      font-size: 0.82rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .mem-job-head .mj-count {
+      background: rgba(255,193,7,0.12);
+      color: var(--yellow);
+      border-radius: 10px;
+      font-size: 0.72rem;
+      padding: 0.1rem 0.55rem;
+      font-weight: 600;
+    }
+    .mem-job-detail { padding: 0.4rem 0.9rem 0.8rem; border-top: 1px solid var(--line); }
+    .mem-conv { margin-top: 1.5rem; }
+    .mem-conv summary {
+      cursor: pointer;
+      color: var(--yellow);
+      font-weight: 600;
+      font-size: 1rem;
+      margin-bottom: 0.6rem;
+    }
     .muted { color: var(--muted); }
     .mem-status {
       display: flex;
@@ -120,7 +176,29 @@
       border-radius: 8px;
       text-decoration: none;
     }
-  </style>
+  
+    .account-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 0.4rem;
+      background: var(--bz-panel, #141414);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.7rem 0.9rem;
+      min-width: 200px;
+      z-index: 50;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    .account-menu .am-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+    .account-menu .am-email { font-size: 0.75rem; color: #888; margin: 0.15rem 0 0.6rem; word-break: break-all; }
+    .account-menu .am-signout {
+      width: 100%;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+    .header-inner, header { position: relative; }
+</style>
 </head>
 <body>
   <header>
@@ -153,11 +231,17 @@
           var user = session && session.user;
           if (!user || !user.name) return;
           link.textContent = user.name;
-          link.removeAttribute("href");
-          link.style.cursor = "default";
-          var out = document.createElement("a");
-          out.href = "#";
-          out.textContent = "Log out";
+          link.href = "#";
+          link.style.cursor = "pointer";
+          // Profile menu: clicking the name opens a small account panel
+          var menu = document.createElement("div");
+          menu.className = "account-menu";
+          menu.style.display = "none";
+          menu.innerHTML =
+            '<div class="am-name">' + user.name + "</div>" +
+            '<div class="am-email">' + (user.email || "") + "</div>" +
+            '<button type="button" class="am-signout">Log out</button>';
+          var out = menu.querySelector(".am-signout");
           out.addEventListener("click", function (e) {
             e.preventDefault();
             fetch("/api/auth/sign-out", {
@@ -167,7 +251,14 @@
               body: "{}",
             }).then(function () { window.location.href = "/buzzy/"; });
           });
-          link.parentNode.insertBefore(out, link.nextSibling);
+          link.parentNode.insertBefore(menu, link.nextSibling);
+          link.addEventListener("click", function (e) {
+            e.preventDefault();
+            menu.style.display = menu.style.display === "none" ? "block" : "none";
+          });
+          document.addEventListener("click", function (e) {
+            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
+          });
         })
         .catch(function () {});
     })();
@@ -196,37 +287,76 @@
       const facts = data.facts || [];
       const messages = data.messages || [];
       const honcho = data.honchoAvailable;
-      const jobLabel = (id) => (id ? id.slice(0, 8) : "general");
+      const jobLabel = (id) => (id ? id.slice(0, 8) : "General");
+
+      // ── Memory redesign: summary first, drill-down on demand ──────────
+      // Group facts by job, show a plain-language summary line per job plus
+      // a one-line "what we know" digest; details hidden behind toggles.
+      const jobsMap = {};
+      facts.forEach((f) => {
+        const k = f.jobId || "general";
+        (jobsMap[k] = jobsMap[k] || []).push(f);
+      });
+
+      const digest = facts.length
+        ? facts.slice(0, 5).map((f) => esc(f.value)).join(" · ")
+        : "Nothing yet — chat with BeeZilla and what it learns will appear here.";
 
       const stats = `
         <div class="mem-status">
-          <div class="stat"><b>${facts.length}</b><span>decisions &amp; facts</span></div>
-          <div class="stat"><b>${messages.length}</b><span>recent messages</span></div>
-          <div class="stat"><b>${honcho ? "on" : "off"}</b><span>honcho long-term memory</span></div>
+          <div class="stat"><b>${facts.length}</b><span>things known</span></div>
+          <div class="stat"><b>${Object.keys(jobsMap).length}</b><span>jobs touched</span></div>
+          <div class="stat"><b>${honcho ? "on" : "off"}</b><span>long-term memory</span></div>
         </div>`;
 
-      const factsHtml = facts.length
-        ? facts
-            .map(
-              (f) =>
-                `<div class="fact"><span class="v">${esc(f.value)}</span><span class="k">${esc(f.key)}</span><span class="j">job ${jobLabel(f.jobId)}</span></div>`,
-            )
-            .join("")
+      const summaryCard = `
+        <div class="mem-digest">
+          <h2>At a glance</h2>
+          <p>${digest}</p>
+        </div>`;
+
+      const jobsHtml = Object.keys(jobsMap).length
+        ? Object.entries(jobsMap).map(([jobId, fs]) => {
+            const label = jobLabel(jobId);
+            const digestLine = fs.map((f) => esc(f.value)).join(" · ");
+            const detailRows = fs
+              .map((f) => `<div class="fact"><span class="k">${esc(f.key)}</span><span class="v">${esc(f.value)}</span></div>`)
+              .join("");
+            return `<div class="mem-job">
+              <button type="button" class="mem-job-head" data-job="${esc(jobId)}">
+                <span class="mj-title">${esc(label)}</span>
+                <span class="mj-digest">${digestLine}</span>
+                <span class="mj-count">${fs.length}</span>
+              </button>
+              <div class="mem-job-detail" style="display:none">${detailRows}</div>
+            </div>`;
+          }).join("")
         : '<p class="empty">No decisions captured yet. Talk to BeeZilla and locked-in decisions will appear here.</p>';
 
       const msgsHtml = messages.length
-        ? messages
+        ? messages.slice(0, 20)
             .map(
               (m) =>
-                `<div class="msg ${esc(m.role)}"><div class="who">${m.role === "assistant" ? "BeeZilla" : "You"} · job ${jobLabel(m.jobId)}</div>${esc(m.content)}</div>`,
+                `<div class="msg ${esc(m.role)}"><div class="who">${m.role === "assistant" ? "BeeZilla" : "You"} · ${jobLabel(m.jobId)}</div>${esc(m.content)}</div>`,
             )
             .join("")
         : '<p class="empty">No conversations yet.</p>';
 
       root.innerHTML =
         stats +
-        '<section><h2>What BeeZilla knows</h2>' + factsHtml + '</section>' +
-        '<section style="margin-top:1.5rem"><h2>Recent conversations</h2>' + msgsHtml + '</section>';
+        summaryCard +
+        '<section><h2>By job</h2>' + jobsHtml + '</section>' +
+        '<details class="mem-conv"><summary>Recent conversations</summary>' + msgsHtml + '</details>';
+
+      // Wire drill-down toggles
+      root.querySelectorAll(".mem-job-head").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const d = btn.parentElement.querySelector(".mem-job-detail");
+          const open = d.style.display !== "none";
+          d.style.display = open ? "none" : "block";
+          btn.classList.toggle("open", !open);
+        });
+      });
       } catch (err) {
         const root = document.getElementById("content");
         if (root) root.innerHTML = '<p class="empty">Couldn\u2019t load memory right now. Try refreshing.</p>';
