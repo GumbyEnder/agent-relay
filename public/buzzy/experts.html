@@ -91,12 +91,13 @@
     }
     .muted { color: #777; font-size: 0.82rem; }
     .experts-grid {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
       gap: 1rem;
       margin-top: 1.5rem;
     }
+    @media (max-width: 1100px) { .experts-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) { .experts-grid { grid-template-columns: 1fr; } }
     .expert-card {
       background: var(--bz-panel);
       border: 1px solid #2A2A2A;
@@ -106,6 +107,7 @@
       display: flex;
       flex-direction: column;
       gap: 0.6rem;
+      min-height: 170px;
     }
     .expert-card h2 {
       font-size: 1.05rem;

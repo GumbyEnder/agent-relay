@@ -1185,7 +1185,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     ];
 
 
-    document.getElementById("formSubmit").addEventListener("click", function () {
+    const formSubmitEl = document.getElementById("formSubmit");
+    if (formSubmitEl) formSubmitEl.addEventListener("click", function () {
       var values = {};
       FORM_FIELDS.forEach(function (f) {
         var el = document.getElementById("form_" + f.id);
@@ -1283,47 +1284,62 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     // ── Load model catalog and populate selector ────────────────────
+    let _modelsStarted = false;
+    function fallbackAgents(sel) {
+      sel.innerHTML = "";
+      var defaultOpt = document.createElement("option");
+      defaultOpt.value = "";
+      defaultOpt.textContent = "Default agent";
+      sel.appendChild(defaultOpt);
+      [["z-ai/glm-5.3-flash", "Marvin"],
+       ["moonshotai/kimi-k3", "Kimi"],
+       ["qwen/qwen3-235b-a22b-thinking", "Qwen Thinking"]].forEach(function (p) {
+        var opt = document.createElement("option");
+        opt.value = p[0];
+        opt.textContent = p[1];
+        sel.appendChild(opt);
+      });
+    }
     function loadModels() {
+      // Single flight — never two overlapping fetches on the same selector.
+      if (_modelsStarted) return;
+      _modelsStarted = true;
+      const sel = document.getElementById("agentSelect");
       // Timeout + fallback list so the selector never sticks at "Loading agents…"
       fetch("/api/buzzy/models", { signal: AbortSignal.timeout(8000) })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
-          if (!data || !data.models || !data.models.length) return;
-          modelCatalog = data.models;
-          const sel = document.getElementById("agentSelect");
-          if (!sel) return;
-          sel.innerHTML = "";
-          var defaultOpt = document.createElement("option");
-          defaultOpt.value = "";
-          defaultOpt.textContent = "Default agent";
-          sel.appendChild(defaultOpt);
-          modelCatalog.forEach(function (m) {
-            var opt = document.createElement("option");
-            opt.value = m.model;
-            opt.textContent = m.label;
-            sel.appendChild(opt);
-          });
+          // Empty/invalid body counts as failure: populate the fallback so the
+          // dropdown can NEVER stay at "Loading agents…" (dogfood: seen live).
+          if (data && Array.isArray(data.models) && data.models.length) {
+            modelCatalog = data.models;
+            if (!sel) return;
+            sel.innerHTML = "";
+            var defaultOpt = document.createElement("option");
+            defaultOpt.value = "";
+            defaultOpt.textContent = "Default agent";
+            sel.appendChild(defaultOpt);
+            modelCatalog.forEach(function (m) {
+              var opt = document.createElement("option");
+              opt.value = m.model;
+              opt.textContent = m.label;
+              sel.appendChild(opt);
+            });
+          } else if (sel && sel.options.length <= 1) {
+            fallbackAgents(sel);
+          }
         })
         .catch(function () {
           // Models unreachable — populate the fallback list so the dropdown
           // never sticks at "Loading agents…" (seen live).
-          const sel = document.getElementById("agentSelect");
-          if (!sel || sel.options.length > 1) return;
-          sel.innerHTML = "";
-          var defaultOpt = document.createElement("option");
-          defaultOpt.value = "";
-          defaultOpt.textContent = "Default agent";
-          sel.appendChild(defaultOpt);
-          [["z-ai/glm-5.3-flash", "Marvin"],
-           ["moonshotai/kimi-k3", "Kimi"],
-           ["qwen/qwen3-235b-a22b-thinking", "Qwen Thinking"]].forEach(function (p) {
-            var opt = document.createElement("option");
-            opt.value = p[0];
-            opt.textContent = p[1];
-            sel.appendChild(opt);
-          });
+          const sel2 = document.getElementById("agentSelect");
+          if (!sel2 || sel2.options.length > 1) return;
+          fallbackAgents(sel2);
         });
     }
+    // Populate the selector at script start, not only when the chat screen
+    // mounts — a slow/failed screen change must never leave "Loading agents…".
+    loadModels();
 
     function selectedModel() {
       var sel = document.getElementById("agentSelect");
