@@ -5,51 +5,509 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BeeZilla</title>
   <style>
-    :root { --ink:#111; --muted:#555; --line:#ddd; --gold:#e6b800; --bg:#fafafa; }
+    /* ── BeeZilla Design Tokens ─────────────────────────── */
+    :root {
+      --bz-black: #0A0A0A;
+      --bz-panel: #141414;
+      --bz-col: #1A1A1A;
+      --bz-yellow: #FFC107;
+      --bz-yellow-dim: #B8860B;
+      --bz-silver: #C9CDD2;
+      --bz-charcoal: #111111;
+      --bz-status-blue: #5B8DB8;
+      --bz-status-lavender: #9B8EC4;
+      --bz-status-green: #5BAF6B;
+      --bz-status-red: #C45B5B;
+      --bz-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+
     * { box-sizing: border-box; }
-    body { font-family: Georgia, "Times New Roman", serif; color: var(--ink); background: var(--bg); margin: 0; }
-    header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); background: #fff; display:flex; justify-content:space-between; align-items:baseline; }
-    header strong { letter-spacing: .04em; }
-    header span { color: var(--muted); font-size: .9rem; }
-    header a { color: inherit; }
-    label.filter { display: flex; align-items: center; gap: .4rem; font-size: .95rem; margin: .8rem 0; }
-    .jobrow { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; cursor: pointer; }
-    .jobrow:hover { border-color: #aaa; }
-    .tag { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-    .templates { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
-    @media (max-width: 600px) { .templates { grid-template-columns: 1fr; } }
-    .templates button { width: 100%; text-align: left; background: #fff; color: #111; }
-    .templates button.sel { border-color: var(--gold); background: #fffbeb; }
-    .bubble { padding: .7rem .85rem; margin: .5rem 0; border: 1px solid var(--line); background: #fff; }
-    .bubble.me { background: #f4f4f4; }
-    main { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-    h1 { font-size: 1.7rem; margin: 0 0 .5rem; }
-    h2 { font-size: 1.2rem; margin: 1.5rem 0 .5rem; }
-    p, li { line-height: 1.45; }
-    .muted { color: var(--muted); }
-    button { font: inherit; padding: .55rem 1rem; border: 1px solid #222; background: #111; color: #fff; cursor: pointer; }
-    button.secondary { background: #fff; color: #111; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    textarea, input { width: 100%; font: inherit; padding: .6rem; border: 1px solid #bbb; }
-    .row { display: flex; gap: .6rem; margin-top: 1rem; flex-wrap: wrap; }
-    .card { background: #fff; border: 1px solid var(--line); padding: 1rem 1.1rem; margin: .7rem 0; }
-    .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; }
-    @media (max-width: 800px) { .board { grid-template-columns: 1fr 1fr; } }
-    .col { background: #fff; border: 1px solid var(--line); min-height: 8rem; padding: .6rem; }
-    .col h3 { margin: 0 0 .5rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; }
-    .chip { border: 1px solid #ccc; padding: .45rem .5rem; margin: .35rem 0; font-size: .9rem; background: #fff; }
-    .chip.working { border-color: var(--gold); }
+
+    body {
+      font-family: var(--bz-font);
+      color: #E8E8E8;
+      background: var(--bz-black);
+      margin: 0;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid #222;
+      background: var(--bz-panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header .brand strong {
+      letter-spacing: .06em;
+      font-size: 1.15rem;
+      color: var(--bz-yellow);
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+    header .brand .mascot-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+    }
+    header nav {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    header nav a {
+      color: #999;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.15s;
+    }
+    header nav a:hover { color: var(--bz-yellow); }
+    header nav .phase {
+      color: var(--bz-yellow);
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-left: 0.5rem;
+    }
+
+    /* ── Main ───────────────────────────────────────────── */
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin: 0 0 0.5rem;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    h2 {
+      font-size: 1.05rem;
+      margin: 0 0 0.5rem;
+      color: var(--bz-yellow);
+      font-weight: 600;
+    }
+    p, li {
+      color: #C8C8C8;
+      line-height: 1.55;
+      font-size: 0.92rem;
+    }
+    .muted { color: #777; font-size: 0.82rem; }
+
+    /* ── Mascot ─────────────────────────────────────────── */
+    .mascot {
+      display: block;
+      margin: 0 auto 1.2rem;
+      max-width: 180px;
+      width: 100%;
+      height: auto;
+      opacity: 0.92;
+    }
+    .mascot-sm {
+      width: 64px;
+      height: auto;
+      margin: 0.5rem auto 1rem;
+      display: block;
+    }
+    .mascot-lg {
+      max-width: 240px;
+      margin: 0 auto 1.5rem;
+      display: block;
+    }
+
+    /* ── Hexagon badge ──────────────────────────────────── */
+    .hex-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      background: var(--bz-yellow);
+      color: var(--bz-black);
+      font-weight: 800;
+      font-size: 0.78rem;
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      flex-shrink: 0;
+    }
+
+    /* ── Riveted-metal card ─────────────────────────────── */
+    .riveted {
+      background: linear-gradient(160deg, #D8DCE2 0%, #B8BCC2 40%, #A8ACB2 100%);
+      border: 1px solid #8A8E94;
+      border-radius: 6px;
+      padding: 1rem 1.1rem;
+      margin: 0.7rem 0;
+      position: relative;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.35),
+        inset 0 -1px 0 rgba(0,0,0,0.15),
+        0 2px 8px rgba(0,0,0,0.4);
+      color: #1A1A1A;
+      font-size: 0.9rem;
+    }
+    .riveted h2 {
+      color: #1A1A1A;
+      font-size: 0.95rem;
+      margin: 0 0 0.4rem;
+    }
+    .riveted p, .riveted li {
+      color: #2A2A2A;
+      font-size: 0.88rem;
+    }
+    .riveted .rivet {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #E8E8E8, #8A8E94);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .riveted .rivet::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: #666;
+      transform: translate(-50%, -50%);
+    }
+    .riveted .r-tl { top: 6px; left: 6px; }
+    .riveted .r-tr { top: 6px; right: 6px; }
+    .riveted .r-bl { bottom: 6px; left: 6px; }
+    .riveted .r-br { bottom: 6px; right: 6px; }
+
+    /* ── Buttons ────────────────────────────────────────── */
+    button {
+      font: inherit;
+      padding: 0.6rem 1.2rem;
+      border: 1px solid var(--bz-yellow);
+      background: var(--bz-yellow);
+      color: var(--bz-black);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.88rem;
+      border-radius: 4px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    button:hover { background: var(--bz-yellow-dim); border-color: var(--bz-yellow-dim); }
+    button:active { transform: scale(0.98); }
+    button.secondary {
+      background: transparent;
+      color: var(--bz-yellow);
+      border: 1px solid #444;
+    }
+    button.secondary:hover {
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.08);
+    }
+    button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    /* ── Inputs ─────────────────────────────────────────── */
+    textarea, input {
+      width: 100%;
+      font: inherit;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #333;
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+    textarea:focus, input:focus {
+      outline: none;
+      border-color: var(--bz-yellow);
+      box-shadow: 0 0 0 2px rgba(255,193,7,0.15);
+    }
+    textarea::placeholder, input::placeholder {
+      color: #555;
+    }
+
+    /* ── Job list rows ──────────────────────────────────── */
+    .jobrow {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: baseline;
+      cursor: pointer;
+      padding: 0.75rem 1rem;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+    .jobrow:hover { background: rgba(255,193,7,0.06); }
+    .tag {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--bz-yellow);
+      background: rgba(255,193,7,0.1);
+      padding: 0.2rem 0.5rem;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+
+    /* ── Template tiles ─────────────────────────────────── */
+    .templates {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+    }
+    @media (max-width: 600px) {
+      .templates { grid-template-columns: 1fr; }
+    }
+    .templates button {
+      width: 100%;
+      text-align: left;
+      background: var(--bz-panel);
+      color: #E8E8E8;
+      border: 1px solid #333;
+      font-size: 0.85rem;
+    }
+    .templates button:hover {
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.06);
+    }
+    .templates button.sel {
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.12);
+      color: var(--bz-yellow);
+    }
+    .templates button .muted { color: #777; font-size: 0.78rem; }
+
+    /* ── Chat bubbles ───────────────────────────────────── */
+    .bubble {
+      padding: 0.75rem 0.95rem;
+      margin: 0.5rem 0;
+      border: 1px solid #2A2A2A;
+      background: var(--bz-panel);
+      border-radius: 6px;
+      color: #D8D8D8;
+      font-size: 0.9rem;
+    }
+    .bubble.me {
+      background: var(--bz-col);
+      border-color: var(--bz-yellow-dim);
+      color: #E8E8E8;
+    }
+
+    /* ── Board ──────────────────────────────────────────── */
+    .board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.6rem;
+    }
+    @media (max-width: 800px) {
+      .board { grid-template-columns: 1fr 1fr; }
+    }
+    .col {
+      background: var(--bz-col);
+      border: 1px solid #2A2A2A;
+      border-top: 3px solid var(--bz-yellow);
+      border-radius: 4px;
+      min-height: 8rem;
+      padding: 0.6rem;
+    }
+    .col h3 {
+      margin: 0 0 0.5rem;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--bz-yellow);
+      font-weight: 700;
+    }
+    .chip {
+      border: 1px solid #3A3A3A;
+      padding: 0.45rem 0.55rem;
+      margin: 0.35rem 0;
+      font-size: 0.82rem;
+      background: var(--bz-charcoal);
+      border-radius: 3px;
+      color: #C8C8C8;
+    }
+    .chip.working {
+      border-color: var(--bz-status-blue);
+      color: var(--bz-status-blue);
+    }
+
+    /* ── Draft preview ──────────────────────────────────── */
+    .preview {
+      white-space: pre-wrap;
+      font-family: ui-monospace, 'Cascadia Code', Menlo, monospace;
+      font-size: 0.78rem;
+      background: var(--bz-charcoal);
+      padding: 0.85rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 4px;
+      color: #B8B8B8;
+      line-height: 1.5;
+    }
+
+    /* ── Filter checkbox ────────────────────────────────── */
+    label.filter {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      margin: 0.8rem 0;
+      color: #999;
+      cursor: pointer;
+    }
+    label.filter input[type="checkbox"] {
+      accent-color: var(--bz-yellow);
+      width: 15px;
+      height: 15px;
+    }
+
+    /* ── Row / spacing ──────────────────────────────────── */
+    .row {
+      display: flex;
+      gap: 0.6rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: var(--bz-panel);
+      border: 1px solid #2A2A2A;
+      padding: 1rem 1.1rem;
+      margin: 0.7rem 0;
+      border-radius: 4px;
+    }
+    .card h2 {
+      color: var(--bz-yellow);
+    }
+    .card p, .card li {
+      color: #C8C8C8;
+    }
+
     .hidden { display: none; }
-    .preview { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: .82rem; background: #f4f4f4; padding: .8rem; }
+
+    /* ── Steps list (in draft plan) ─────────────────────── */
+    .card ol {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .card ol li {
+      color: #C8C8C8;
+      margin-bottom: 0.3rem;
+    }
+    .card ul {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .card ul li {
+      color: #C8C8C8;
+      margin-bottom: 0.3rem;
+    }
+
+    /* ── Remember page ──────────────────────────────────── */
+    .remember-list ul {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .remember-list li {
+      color: #C8C8C8;
+      margin-bottom: 0.3rem;
+      font-size: 0.88rem;
+    }
+
+    /* ── Circuit-line decoration ────────────────────────── */
+    .circuit-deco {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 200px;
+      height: 200px;
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Step indicator in ask flow ─────────────────────── */
+    .step-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .step-indicator .hex-badge {
+      width: 24px;
+      height: 24px;
+      font-size: 0.7rem;
+    }
+    .step-indicator span {
+      font-size: 0.78rem;
+      color: var(--bz-yellow-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Fairness notes list ────────────────────────────── */
+    .fairness-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .fairness-list li {
+      position: relative;
+      padding-left: 1.2rem;
+      margin-bottom: 0.4rem;
+      color: #C8C8C8;
+      font-size: 0.88rem;
+    }
+    .fairness-list li::before {
+      content: '◆';
+      position: absolute;
+      left: 0;
+      color: var(--bz-yellow);
+      font-size: 0.6rem;
+      top: 0.55rem;
+    }
+
+    /* ── Result page ────────────────────────────────────── */
+    .result-cost {
+      font-size: 0.92rem;
+      color: #E8E8E8;
+      margin: 0.5rem 0;
+    }
+    .result-cost strong {
+      color: var(--bz-yellow);
+    }
   </style>
 </head>
 <body>
   <header>
-    <strong>BeeZilla</strong>
-    <span><a href="#jobs" id="jobsLink">Your jobs</a> · <a href="#talk" id="talkLink">Talk to BeeZilla</a> · <a href="#remember" id="memLink">What BeeZilla remembers</a> · <span id="phaseLabel">Your jobs</span></span>
+    <div class="brand">
+      <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+      <strong>BeeZilla</strong>
+    </div>
+    <nav>
+      <a href="#jobs" id="jobsLink">Your jobs</a>
+      <a href="#talk" id="talkLink">Talk to BeeZilla</a>
+      <a href="#experts" id="expertsLink">Experts</a>
+      <a href="#remember" id="memLink">What BeeZilla remembers</a>
+      <span class="phase" id="phaseLabel">Your jobs</span>
+    </nav>
   </header>
   <main id="app"></main>
   <script src="sow-pdf.js"></script>
+  <script src="experts.js"></script>
   <script>
     const QUESTIONS = [
       { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
@@ -258,10 +716,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const rows = list.length
         ? list.map((j) => {
             const when = new Date(j.createdAt || Date.now()).toLocaleDateString();
-            return "<div class='card jobrow' data-id='" + j.id + "'><div><strong>" + jobTitle(j).replace(/</g,"&lt;") + "</strong><p class='muted'>" + when + "</p></div><span class='tag'>" + jobStatus(j) + "</span></div>";
+            const statusClass = jobStatus(j) === "Done" ? " tag-done" : jobStatus(j) === "Working" ? " tag-working" : "";
+            return "<div class='jobrow' data-id='" + j.id + "'><div><strong>" + jobTitle(j).replace(/</g,"&lt;") + "</strong><p class='muted'>" + when + "</p></div><span class='tag'>" + jobStatus(j) + "</span></div>";
           }).join("")
         : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
       document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
         "<h1>Your jobs</h1>" +
         "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
         "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
@@ -286,6 +746,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return "<button class='secondary" + sel + "' data-id='" + t.id + "'><strong>" + t.name + "</strong><br><span class='muted'>" + t.hint + "</span></button>";
       }).join("");
       document.getElementById("app").innerHTML =
+        "<img class='mascot' src='brand/revision6_expressions_13-idea.png' alt='BeeZilla' />" +
         "<h1>What kind of job is this?</h1>" +
         "<p>Pick a template. Then tell BeeZilla the problem in your own words. The product is a chat — this is the start of that conversation.</p>" +
         "<div class='templates'>" + tiles + "</div>" +
@@ -306,6 +767,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const t = TEMPLATES.find((x) => x.id === state.template);
       setPhase((t && t.name) || "New job");
       document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
         "<h1>What's the problem?</h1>" +
         "<p class='muted'>" + (t ? t.name : "") + " — write it like you'd say it out loud. Nothing starts until you approve a draft later.</p>" +
         "<textarea id='prob' rows='7' placeholder='Describe what you need…'></textarea>" +
@@ -332,6 +794,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setPhase("Talk it through");
       const msgs = (state.messages || []).map((m) => "<div class='bubble" + (m.who === "me" ? " me" : "") + "'>" + String(m.text).replace(/</g,"&lt;").replace(/\n/g,"<br>") + "</div>").join("");
       document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>" + (t ? t.name : "Job") + "</h1>" +
         msgs +
         "<textarea id='more' rows='3' placeholder='Add more…'></textarea>" +
@@ -373,6 +836,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const q = QUESTIONS[state.q];
       setPhase("Question " + (state.q + 1) + " of 8");
       document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<div class='step-indicator'><span class='hex-badge'>" + (state.q + 1) + "</span><span>" + (state.q + 1) + " of 8</span></div>" +
         "<p class='muted'>You can skip this. I'll use a default.</p>" +
         "<h1>" + q.prompt + "</h1>" +
         "<textarea id='ans' rows='4' placeholder='Type here…'></textarea>" +
@@ -401,6 +866,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function goPause() {
       setPhase("Needs you");
       document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>Before we go further</h1><p>" + state.pause.question + "</p>" +
         "<div class='row'><button id='flex'>My budget is flexible</button>" +
         "<button id='stay' class='secondary'>I need to stay at my number</button></div>" +
@@ -437,14 +903,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         ? "BeeZilla finishes the draft, double-checks it, and hands you files. You'll see each step on the board."
         : "BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.";
       document.getElementById("app").innerHTML =
+        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
-        "<div class='card'><h2>What you asked for</h2><p>" + echo + "</p></div>" +
-        "<div class='card'><h2>The plan, in steps</h2><ol>" + plan + "</ol></div>" +
+        "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>What you asked for</h2><p>" + echo + "</p></div>" +
+        "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>The plan, in steps</h2><ol>" + plan + "</ol></div>" +
         "<div class='card'><h2>Document preview</h2><div class='preview'>" + draftDoc().replace(/</g,"&lt;") + "</div></div>" +
         "<div class='card'><h2>Typical cost check</h2><p>We could not confirm typical prices from two solid sources.</p><p>Putting this paperwork together is <strong>about $1–3</strong>.</p></div>" +
-        "<div class='card'><h2>Fairness notes</h2><ul>" + notes + "</ul></div>" +
+        "<div class='card'><h2>Fairness notes</h2><ul class='fairness-list'>" + notes + "</ul></div>" +
         "<div class='card'><h2>What happens after you approve</h2><p>" + after + "</p></div>" +
         "<p class='muted'>Draft version v" + state.version + "</p>" +
+        (window.BeeZillaExperts && window.BeeZillaExperts.renderSpendLine
+          ? window.BeeZillaExperts.renderSpendLine(state.id)
+          : "") +
         "<div class='row'><button id='ok'>Approve — go ahead</button><button id='chg' class='secondary'>Change something</button></div>";
       document.getElementById("ok").onclick = approve;
       document.getElementById("chg").onclick = () => {
@@ -506,6 +976,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return "<div class='col'><h3>" + name + "</h3>" + chips + "</div>";
       }).join("");
       document.getElementById("app").innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>Watch the work move</h1><p class='muted'>These steps only exist because you approved the draft.</p>" +
         "<div class='board'>" + cols + "</div>";
     }
@@ -516,6 +987,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         ? "<ul>" + QUESTIONS.map((q) => "<li>" + q.prompt.split("—")[0] + ": " + (state.answers[q.id] || "—") + "</li>").join("") + "</ul>"
         : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
       document.getElementById("app").innerHTML =
+        "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>What BeeZilla remembers</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
         "<div class='card'><h2>Across jobs</h2>" + (catalog.jobs.filter(jobComplete).length
@@ -537,14 +1009,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       };
     }
 
+    function goExperts() {
+      setPhase("Experts");
+      if (window.BeeZillaExperts && window.BeeZillaExperts.renderExpertsTab) {
+        window.BeeZillaExperts.renderExpertsTab(document.getElementById("app"));
+      }
+    }
+
     function goResult() {
       setPhase("Your documents are ready");
       document.getElementById("app").innerHTML =
+        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>Your documents are ready.</h1>" +
         "<p>Download the editable copy and a PDF.</p>" +
         "<div class='row'><button id='dl'>Download editable copy</button><button id='dlpdf' class='secondary'>Download PDF</button></div>" +
-        "<div class='card'><h2>Fairness notes</h2><ul>" + fairnessNotes().map((n) => "<li>" + n + "</li>").join("") + "</ul></div>" +
-        "<p>What it cost: <strong>about $1.50</strong>.</p>" +
+        "<div class='card'><h2>Fairness notes</h2><ul class='fairness-list'>" + fairnessNotes().map((n) => "<li>" + n + "</li>").join("") + "</ul></div>" +
+        "<p class='result-cost'>What it cost: <strong>about $1.50</strong>.</p>" +
+        (window.BeeZillaExperts && window.BeeZillaExperts.renderSpendLine
+          ? window.BeeZillaExperts.renderSpendLine(state.id)
+          : "") +
         "<p class='muted'>Optional later: compare quotes against this document. Not this job.</p>" +
         "<div class='row'><button id='backjobs' class='secondary'>Back to your jobs</button></div>";
       document.getElementById("dl").onclick = () => {
@@ -576,6 +1059,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       else if (state.screen === "board") goBoard();
       else if (state.screen === "result") goResult();
       else if (state.screen === "remember") goRemember();
+      else if (state.screen === "experts") goExperts();
       saveState();
     }
     const HONCHO_BASE = "https://honcho-api-production-215c.up.railway.app";
@@ -627,6 +1111,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("memLink").onclick = (e) => {
       e.preventDefault();
       state.screen = "remember";
+      render();
+    };
+    document.getElementById("expertsLink").onclick = (e) => {
+      e.preventDefault();
+      state.screen = "experts";
       render();
     };
     render();
