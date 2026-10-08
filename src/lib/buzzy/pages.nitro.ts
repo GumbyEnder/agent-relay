@@ -95,13 +95,17 @@ export default defineEventHandler(async (event) => {
     return html("<h1>Not found</h1>", 404);
   }
 
+  // /buzzy/library is the Library (documents vault) view of the app shell —
+  // same index.html, which opens the docs screen when the URL ends in /library.
+  const fileName = name === "library" ? "index" : name;
+
   // Dev: repo root/public/buzzy. Prod: cwd is the repo root too (startCommand
   // runs `node .output/server/index.mjs` from the project root).
-  const file = resolve(process.cwd(), "public", "buzzy", `${name}.html`);
-  let body = await readBuzzyFile(`${name}.html`);
+  const file = resolve(process.cwd(), "public", "buzzy", `${fileName}.html`);
+  let body = await readBuzzyFile(`${fileName}.html`);
   if (!body) {
     // Production fallback: Nitro copies public/ into .output/public.
-    body = await readBuzzyFile(join(".output", "public", "buzzy", `${name}.html`));
+    body = await readBuzzyFile(join(".output", "public", "buzzy", `${fileName}.html`));
   }
   if (!body) {
     setResponseStatus(event, 404);

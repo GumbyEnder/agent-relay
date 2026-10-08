@@ -568,6 +568,7 @@
         <a href="/buzzy/talk" id="talkLink">Chat</a>
         <a href="/buzzy/memory" id="memLink">Memory</a>
         <a href="/buzzy/experts">Experts</a>
+        <a href="/buzzy/library" id="libLink">Library</a>
         <a href="/login" class="account-link">Sign in</a>
         <span class="phase" id="phaseLabel">Jobs</span>
       </nav>
@@ -744,6 +745,10 @@
     }
 
     loadState();
+    // /buzzy/library lands directly on the Library (documents) screen.
+    if (window.location.pathname.replace(/\/+$/, "") === "/buzzy/library") {
+      state.screen = "docs";
+    }
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
