@@ -67,6 +67,7 @@ function extractSlotsFromReply(
 export interface ChatRequest {
   userId: string;
   jobId: string | null;
+  sessionId: string | null;
   message: string;
   model?: string;
   /** Context from the Jobs-card "Chat" button — project the agent is working. */
@@ -84,7 +85,7 @@ export interface ChatResponse {
 }
 
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
-  const { userId, jobId, message, model, jobContext } = req;
+  const { userId, jobId, sessionId, message, model, jobContext } = req;
 
   if (!message?.trim()) {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
@@ -205,14 +206,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Persist user message ───────────────────────────────────────────
   const msgId = jobId || `buzzy_${userId.slice(0, 8)}`;
   await sql`
-    INSERT INTO buzzy_chat_messages (user_id, job_id, role, content)
-    VALUES (${userId}, ${jobId}, 'user', ${message})
+    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
+    VALUES (${userId}, ${jobId}, ${sessionId}, 'user', ${message})
   `;
 
   // ── Persist assistant reply ────────────────────────────────────────
   await sql`
-    INSERT INTO buzzy_chat_messages (user_id, job_id, role, content)
-    VALUES (${userId}, ${jobId}, 'assistant', ${sanitizedReply})
+    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
+    VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${sanitizedReply})
   `;
 
   // ── Persist slot updates ───────────────────────────────────────────

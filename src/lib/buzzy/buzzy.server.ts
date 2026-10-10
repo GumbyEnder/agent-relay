@@ -44,10 +44,11 @@ export async function handleBuzzyRequest(request: Request): Promise<Response> {
     }
 
     const jobId: string | null = typeof body.jobId === "string" ? body.jobId : null;
+    const sessionId: string | null = typeof body.sessionId === "string" ? body.sessionId : null;
     const message: string = typeof body.message === "string" ? body.message : "";
     const model: string | undefined = typeof body.model === "string" ? body.model : undefined;
 
-    const result = await chatLoop({ userId, jobId, message, model });
+    const result = await chatLoop({ userId, jobId, sessionId, message, model });
     const status = result.ok ? 200 : 400;
     return new Response(JSON.stringify(result), {
       status,
