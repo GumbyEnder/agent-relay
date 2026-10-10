@@ -490,7 +490,7 @@ async function assertAgentReviewMove(
   machineAuth: MachineAuth,
   missionId: string,
   column: import("./types").MissionColumn | undefined,
-): Promise<Response | undefined> {
+): Promise<Response | "agent_move" | undefined> {
   if (machineAuth.type !== "ark" || !machineAuth.agentId) return undefined;
   const agentOrErr = await resolveVerbAgent({}, machineAuth);
   if (agentOrErr instanceof Response) return agentOrErr;
@@ -521,7 +521,21 @@ async function assertAgentReviewMove(
       "move_from_restricted",
     );
   }
-  return undefined;
+  // Valid ark reviewer move: authorized by skill + column restriction alone.
+  // Return the sentinel so the caller performs the agent move WITHOUT falling
+  // through to operator gating (an ark key has no operator session role).
+  return "agent_move";
+}
+
+/**
+ * Perform the reviewer move on behalf of an ark agent key.
+ */
+async function agentReviewMove(
+  missionId: string,
+  column: import("./types").MissionColumn,
+  agentName: string,
+): Promise<Response> {
+  return fromEngine(await boardOps.moveMission(missionId, column, `agent:${agentName}`));
 }
 
 /**
@@ -945,6 +959,12 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       if (verb === "move") {
         const column = str(body.column) as import("./types").MissionColumn | undefined;
         const agentGate = await assertAgentReviewMove(req, machineAuth, id, column);
+        if (agentGate === "agent_move") {
+          const agent = await resolveVerbAgent({}, machineAuth);
+          if (agent instanceof Response) return agent;
+          if (!column) return err(400, "column is required", "bad_request");
+          return agentReviewMove(id, column, agent);
+        }
         if (agentGate) return agentGate;
         const gate = await requireOperatorCap(req, "write_board");
         if (gate) return gate;
@@ -1813,6 +1833,12 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "move" && req.method === "POST") {
       const column = str(body.column) as import("./types").MissionColumn | undefined;
       const agentGate = await assertAgentReviewMove(req, machineAuth, parts[1]!, column);
+      if (agentGate === "agent_move") {
+        const agent = await resolveVerbAgent({}, machineAuth);
+        if (agent instanceof Response) return agent;
+        if (!column) return err(400, "column is required", "bad_request");
+        return agentReviewMove(parts[1]!, column, agent);
+      }
       if (agentGate) return agentGate;
       const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
