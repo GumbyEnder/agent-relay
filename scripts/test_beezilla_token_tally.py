@@ -516,6 +516,17 @@ class SanitizeAndLedgerTest(unittest.TestCase):
         self.assertNotIn("SECRET123", safe["billing_base_url"])
         self.assertNotIn("cwd", safe)
 
+    def test_source_descriptor_redacts_host_paths(self):
+        self.assertTrue(bz.redact_path(Path.home() / ".hermes" / "profiles" /
+                                       "aragorn" / "state.db").startswith("~/"))
+        r = bz.redact_path("/home/alice/x/state.db")
+        self.assertNotIn("alice", r)
+        self.assertIn("<redacted>", r)
+        self.assertIn("<redacted>", bz.redact_path("/mnt/nas/a/state.db"))
+        self.assertIn("<redacted>", bz.redact_path("/Users/bob/a/state.db"))
+        # Synthetic/relative temp paths stay usable, not blanket-redacted.
+        self.assertIn("state.db", bz.redact_path("relative/state.db"))
+
     def test_ledger_append_preserves_history(self):
         with tempfile.TemporaryDirectory() as td:
             lp = Path(td) / "ledger.md"

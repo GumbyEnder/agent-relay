@@ -98,6 +98,34 @@ def _profile_root() -> Path:
     return Path.home() / ".hermes" / "profiles"
 
 
+def redact_path(path) -> str:
+    """Host-independent rendering of a local filesystem path.
+
+    Paths under the user's home become ``~/…``; other host-sensitive
+    absolute paths (e.g. NAS mounts, /Users, Windows drives) are replaced,
+    keeping only the leading marker plus ``<redacted>``. Relative/synthetic
+    paths (test temp dirs) pass through unchanged so they stay usable.
+    """
+    p = Path(path)
+    home = Path.home()
+    try:
+        return "~/" + p.resolve().relative_to(home.resolve()).as_posix()
+    except (ValueError, OSError):
+        text = str(p)
+        for marker in ("/home/", "/mnt/", "/Users/", "C:\\"):
+            if marker in text:
+                return text.split(marker, 1)[0] + marker + "<redacted>"
+        return text
+
+
+def redact_source_descriptor(source: Dict[str, Any]) -> Dict[str, Any]:
+    """Display copy of a source descriptor with host paths redacted."""
+    copy = dict(source)
+    if "db" in copy:
+        copy["db"] = redact_path(copy["db"])
+    return copy
+
+
 def sanitize_base_url(url: Optional[str]) -> Optional[str]:
     """Strip query strings / fragments from a URL."""
     if not url:
@@ -734,7 +762,7 @@ def build_json(result: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "generated_utc": result["generated_utc"],
         "note": "Sanitized outward report. Real sources READ-ONLY.",
-        "sources": result["sources"],
+        "sources": [redact_source_descriptor(s) for s in result["sources"]],
         "scope": result["scope"],
         "aggregates": agg,
         "receipts": result.get("receipts"),
