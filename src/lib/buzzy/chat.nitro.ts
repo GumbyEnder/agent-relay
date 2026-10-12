@@ -9,6 +9,9 @@
  *   GET  /api/buzzy/models          — list available models (labels + ids)
  *   GET  /api/buzzy/memory          — aggregate memory for the Memory page
  *   GET  /api/buzzy/transcript      — restore chat (jobId or sessionId)
+ *   GET  /api/buzzy/profile         — account-scoped business profile + defaults
+ *   PUT  /api/buzzy/profile         — save profile fields (closed key set)
+ *   POST /api/buzzy/profile/reuse   — copy chosen defaults into a job
  *   GET  /api/buzzy/sessions        — list user's sessions
  *   POST /api/buzzy/sessions        — create a session
  *   PATCH /api/buzzy/sessions/:id   — rename session title
@@ -21,6 +24,7 @@ import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
+import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function headersFromEvent(event: any): Headers {
@@ -145,6 +149,68 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── GET /api/buzzy/profile — account-scoped business profile + defaults ──
+  if (method === "GET" && path === "/api/buzzy/profile") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const profile = await getProfile(sql, user.id);
+    return { fields: PROFILE_FIELDS, profile };
+  }
+
+  // ── PUT /api/buzzy/profile — save profile fields (closed key set) ──────
+  if (method === "PUT" && path === "/api/buzzy/profile") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const values =
+      body.fields && typeof body.fields === "object" && !Array.isArray(body.fields)
+        ? (body.fields as Record<string, unknown>)
+        : {};
+    const sql = await getSql();
+    const { saved, rejected } = await saveProfile(sql, user.id, values);
+    const profile = await getProfile(sql, user.id);
+    return { saved, rejected, profile };
+  }
+
+  // ── POST /api/buzzy/profile/reuse — copy chosen defaults into a job ─────
+  if (method === "POST" && path === "/api/buzzy/profile/reuse") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const jobId = typeof body.jobId === "string" && body.jobId ? body.jobId : null;
+    const keys = Array.isArray(body.keys)
+      ? body.keys.filter((k): k is string => typeof k === "string")
+      : [];
+    if (!jobId) {
+      setResponseStatus(event, 400);
+      return { error: "jobId is required", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const { reused, skipped } = await reuseDefaults(sql, user.id, jobId, keys);
+    return { reused, skipped };
+  }
 
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
   if (method === "GET" && path === "/api/buzzy/sessions") {

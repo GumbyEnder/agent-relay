@@ -44,6 +44,7 @@
     "mcp": "node scripts/mcp-server.mjs",
     "test:prod": "npx tsx scripts/test-prod-ready.ts",
     "test:auth-email": "npx tsx scripts/test-auth-email.ts",
+    "test:bz-f001-profile": "npx tsx scripts/test-bz-f001-profile.ts",
     "tui": "npm --prefix apps/tui run dev",
     "tui:status": "npm --prefix apps/tui run status",
     "tui:build": "npm --prefix apps/tui run build"
