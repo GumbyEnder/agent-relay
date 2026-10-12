@@ -263,6 +263,66 @@ export function claimMission(
   };
 }
 
+/**
+ * Release a claim. The claimant can always release their own. `force: true`
+ * allows another actor (reviewer-skill key / operator, gated at the API layer)
+ * to take over a stale claim — e.g. missions held by retired agent keys.
+ * The mission keeps its column; only the claim is cleared (running stays
+ * running so no work is silently re-queued).
+ */
+export function unclaimMission(
+  board: BoardData,
+  missionId: string,
+  agentRef: string,
+  opts?: { force?: boolean; note?: string },
+): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
+  const mission = board.missions.find((m) => m.id === missionId);
+  if (!mission) {
+    return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
+  }
+  if (mission.claimedBy && mission.claimedBy !== agent.id && !opts?.force) {
+    const holder = board.agents.find((a) => a.id === mission.claimedBy);
+    return {
+      ok: false,
+      status: 409,
+      error: `Mission is claimed by ${holder?.name ?? mission.claimedBy} — pass force to take over (reviewer/operator gate applies)`,
+      code: "not_claimer",
+    };
+  }
+  const now = Date.now();
+  const missions = board.missions.map((m) =>
+    m.id === missionId
+      ? touchMission(m, {
+          claimedBy: null,
+          claimedAt: null,
+          lastHeartbeat: now,
+        })
+      : m,
+  );
+  const agents = board.agents.map((a) => {
+    if (a.currentMissionId === missionId) {
+      return { ...a, currentMissionId: null, status: a.status === "busy" ? ("idle" as const) : a.status };
+    }
+    return a;
+  });
+  const next: BoardData = {
+    ...board,
+    missions,
+    agents,
+    events: pushEvent(board.events, {
+      missionId,
+      agentId: agent.id,
+      kind: "mission_unclaimed",
+      message: `${agent.name} released claim${opts?.force ? " (force)" : ""} · ${mission.title}${opts?.note ? ` — ${opts.note}` : ""}`,
+    }),
+  };
+  const updated = next.missions.find((m) => m.id === missionId)!;
+  return { ok: true, board: next, data: { mission: missionSummary(updated) } };
+}
+
 export function heartbeatMission(
   board: BoardData,
   missionId: string,

@@ -1006,6 +1006,37 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       if (verb === "claim") {
         return fromEngine(await boardOps.claim(id, agent));
       }
+      if (verb === "unclaim") {
+        // Claimant releases their own. Force (take over another's claim) requires
+        // a review-skill ark key or operator write_board — missions held by dead
+        // agent keys would otherwise be stuck forever (409 not_claimer dead-end).
+        const force = body.force === true;
+        if (force) {
+          if (machineAuth.type === "ark") {
+            const agentGate = await assertAgentReviewMove(req, machineAuth, id, "done");
+            // reuse the review-skill check: agentGate === undefined means the key
+            // holds a review-skill agent and read access. Column checks don't
+            // apply here (we're only releasing a claim), so ignore 403s about
+            // move targets — but a Response for skill/404 must pass through.
+            if (agentGate instanceof Response && agentGate.status === 403 && String((agentGate as unknown as { _body?: string })._body ?? "").includes("review_skill_required")) {
+              return agentGate;
+            }
+            if (agentGate instanceof Response && agentGate.status === 404) return agentGate;
+          } else if (machineAuth.type === "browser" || machineAuth.type === "open") {
+            const gate = await requireOperatorCap(req, "write_board");
+            if (gate) return gate;
+          } else {
+            return err(403, "force unclaim requires a review-skill agent key or operator session", "force_unclaim_forbidden");
+          }
+        }
+        const existing = await boardOps.getMission(id);
+        if (!existing) return err(404, `Unknown mission: ${id}`, "mission_not_found");
+        const denied = await assertCanReadMission(req, machineAuth, existing);
+        if (denied) return denied;
+        return fromEngine(
+          await boardOps.unclaim(id, agent, { force, note: str(body.note) }),
+        );
+      }
       if (verb === "heartbeat") {
         return fromEngine(await boardOps.heartbeat(id, agent, str(body.note)));
       }

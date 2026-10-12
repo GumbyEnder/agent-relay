@@ -49,6 +49,7 @@ export type EventKind =
   | "mission_created"
   | "mission_moved"
   | "mission_claimed"
+  | "mission_unclaimed"
   | "mission_released"
   | "heartbeat"
   | "progress"

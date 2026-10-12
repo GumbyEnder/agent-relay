@@ -1788,6 +1788,18 @@ export const durableBoard = {
       return result;
     }),
 
+  unclaim: (
+    missionId: string,
+    agent: string,
+    opts?: { force?: boolean; note?: string },
+  ) =>
+    applyEngine(
+      (b) => engine.unclaimMission(b, missionId, agent, opts),
+      agent,
+      "agent",
+      opts?.note,
+    ),
+
   heartbeat: (missionId: string, agent: string, note?: string) =>
     applyEngine((b) => engine.heartbeatMission(b, missionId, agent, note), agent, "agent", note),
 
