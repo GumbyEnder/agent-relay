@@ -1,7 +1,7 @@
 # BeeZilla worker token/cost accounting — `beezilla-token-tally.py`
 
 Read-only CLI that tallies BeeZilla worker token/cost usage from Hermes profile
-`state.db` files. Replaces the legacy `/mnt/nas/host-ops/beezilla-token-tally.py`
+`state.db` files. Replaces the legacy worker tally utility's
 behaviour (which only handled GLM + B70, silently treated missing records as
 zero, replaced the historical ledger, and re-priced old GLM calls at present
 promo rates).

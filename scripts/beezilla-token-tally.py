@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """BeeZilla worker token/cost accounting CLI (read-only native sources).
 
-Replacement for /mnt/nas/host-ops/beezilla-token-tally.py that:
+Replacement for the legacy worker tally utility that:
 
   * Reads Hermes `session_model_usage` from profile `state.db` files READ-ONLY.
   * Treats a missing profile/DB/table/schema as explicitly UNAVAILABLE / UNKNOWN,
