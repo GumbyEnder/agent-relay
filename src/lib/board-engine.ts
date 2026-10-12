@@ -463,6 +463,47 @@ export function heartbeatMission(
   };
 }
 
+/**
+ * Dedicated comment/progress thread. Unlike heartbeat, a comment does NOT touch
+ * lastHeartbeat — stale-detection can distinguish "alive" from "talkative".
+ * The claimant or any agent with read access may comment; own event kind
+ * ("comment") keeps the board journal readable.
+ */
+export function commentMission(
+  board: BoardData,
+  missionId: string,
+  agentRef: string,
+  note: string,
+): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
+  const mission = board.missions.find((m) => m.id === missionId);
+  if (!mission) {
+    return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
+  }
+  const text = note.trim();
+  if (!text) {
+    return { ok: false, status: 400, error: "note is required", code: "bad_request" };
+  }
+  const missions = board.missions.map((m) => (m.id === missionId ? touchMission(m, {}) : m));
+  const next: BoardData = {
+    ...board,
+    missions,
+    events: pushEvent(board.events, {
+      missionId,
+      agentId: agent.id,
+      kind: "comment",
+      message: `${agent.name} · ${text}`,
+    }),
+  };
+  return {
+    ok: true,
+    board: next,
+    data: { mission: missionSummary(next.missions.find((m) => m.id === missionId)!) },
+  };
+}
+
 export function escalateMission(
   board: BoardData,
   missionId: string,

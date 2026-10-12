@@ -1038,6 +1038,16 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           await boardOps.unclaim(id, agent, { force, note: str(body.note) }),
         );
       }
+      if (verb === "comment") {
+        // Any agent with read access may comment; does not touch lastHeartbeat.
+        const note = str(body.note) ?? str(body.comment);
+        if (!note?.trim()) return err(400, "note is required", "bad_request");
+        const existing = await boardOps.getMission(id);
+        if (!existing) return err(404, `Unknown mission: ${id}`, "mission_not_found");
+        const denied = await assertCanReadMission(req, machineAuth, existing);
+        if (denied) return denied;
+        return fromEngine(await boardOps.comment(id, agent, note));
+      }
       if (verb === "heartbeat") {
         return fromEngine(await boardOps.heartbeat(id, agent, str(body.note)));
       }

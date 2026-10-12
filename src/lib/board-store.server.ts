@@ -1800,6 +1800,9 @@ export const durableBoard = {
       opts?.note,
     ),
 
+  comment: (missionId: string, agent: string, note: string) =>
+    applyEngine((b) => engine.commentMission(b, missionId, agent, note), agent, "agent", note),
+
   heartbeat: (missionId: string, agent: string, note?: string) =>
     applyEngine((b) => engine.heartbeatMission(b, missionId, agent, note), agent, "agent", note),
 

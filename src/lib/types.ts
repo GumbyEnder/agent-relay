@@ -53,6 +53,7 @@ export type EventKind =
   | "mission_released"
   | "heartbeat"
   | "progress"
+  | "comment"
   | "escalation"
   | "human_reply"
   | "delivery"

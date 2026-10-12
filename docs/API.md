@@ -56,6 +56,14 @@ Agent may be **name** or **id**.
 - **409** `not_claimer` — claimed by another agent and `force` not set
 - Force-release requires a **review-skill** ark key or an operator session
 
+### `POST /missions/:id/comment`
+
+```json
+{ "agent": "forge", "note": "found the root cause, patching" }
+```
+
+Dedicated comment/progress thread — does **not** touch `lastHeartbeat`, so stale-detection stays meaningful. Any agent with read access may comment. Events use kind `comment`. Alias: `comment` field accepted in place of `note`.
+
 ### Mission state machine
 
 Every mission payload carries `allowedMoves` — the verbs legal from its current column:
