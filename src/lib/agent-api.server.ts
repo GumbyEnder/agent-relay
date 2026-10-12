@@ -63,8 +63,12 @@ function parseColumnParam(raw: string | undefined, fallback: MissionColumn): Mis
 }
 
 const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
+// Pretty-print JSON in dev only — in prod, indentation on deeply-nested payloads
+// (mission usage.raw chains) inflated the board snapshot to 204 MB and broke
+// every browser consumer. Compact JSON in production.
+const PRETTY_JSON = process.env.NODE_ENV !== "production";
 function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(PRETTY_JSON ? JSON.stringify(data, null, 2) : JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -621,6 +625,21 @@ function parseUsage(raw: unknown): import("./types").MissionUsage | null {
         .filter((x): x is [string, number] => x[1] !== undefined),
     );
   }
+  // Depth-cap the raw blob: self-nesting raw.raw.raw chains (440 levels in a
+  // legacy backfill) × pretty-printed JSON produced a 204 MB board snapshot and
+  // broke every browser consumer. Collapse single-key 'raw' wrappers and hard-cap
+  // the serialized size.
+  let rawOut = u as Record<string, unknown>;
+  const isSingleRawWrapper = (o: Record<string, unknown>) =>
+    Object.keys(o).length === 1 && "raw" in o && o.raw != null && typeof o.raw === "object" && !Array.isArray(o.raw);
+  let guard = 0;
+  while (isSingleRawWrapper(rawOut) && guard++ < 20) {
+    rawOut = rawOut.raw as Record<string, unknown>;
+  }
+  const RAW_MAX_BYTES = 64 * 1024;
+  if (JSON.stringify(rawOut).length > RAW_MAX_BYTES) {
+    rawOut = { truncated: true, note: "raw payload exceeded 64KB — dropped by ingest depth/size cap" };
+  }
   return {
     tokensIn: num(u.tokensIn ?? u.tokens_in),
     tokensOut: num(u.tokensOut ?? u.tokens_out),
@@ -633,7 +652,7 @@ function parseUsage(raw: unknown): import("./types").MissionUsage | null {
         : u.pricing_source != null
           ? String(u.pricing_source)
           : undefined,
-    raw: u as Record<string, unknown>,
+    raw: rawOut,
   };
 }
 
