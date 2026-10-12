@@ -936,6 +936,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         matchAgentSkills,
         projectId: requestedProject,
         allowedProjectIds: allowedOrErr,
+        cursor: url.searchParams.get("cursor") ?? undefined,
       });
       return fromEngine(result);
     }

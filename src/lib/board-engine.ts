@@ -99,6 +99,12 @@ export function pollMissions(
     projectId?: string;
     /** When set, restrict poll to these boards (agent-key scope). Empty = no boards. */
     allowedProjectIds?: string[] | null;
+    /**
+     * Opaque cursor from a previous page's `nextCursor`. Keyset over the sort
+     * tuple so clients can page through ALL matching missions (the ~500 slice
+     * cap previously truncated large columns silently).
+     */
+    cursor?: string;
   } = {},
 ): EngineResult<{
   missions: ReturnType<typeof missionSummary>[];
@@ -107,6 +113,7 @@ export function pollMissions(
   total: number;
   limit: number;
   truncated: boolean;
+  nextCursor?: string | null;
 }> {
   const column = opts.column ?? "ready";
   const limit = Math.min(Math.max(opts.limit ?? 5, 1), 500);
@@ -162,7 +169,46 @@ export function pollMissions(
     return rank[a.priority] - rank[b.priority] || a.createdAt - b.createdAt;
   });
 
+  // Cursor: opaque keyset over the sort tuple (skillHit, rank, createdAt, id).
+  // Format: b64("<skillHit>:<rank>:<createdAt>:<id>"). Applied after the sort so
+  // paging is stable across requests.
+  let cursorSk: number | null = null;
+  let cursorRank: number | null = null;
+  let cursorCreatedAt: number | null = null;
+  let cursorId: string | null = null;
+  if (opts.cursor) {
+    try {
+      const decoded = Buffer.from(opts.cursor, "base64").toString("utf8");
+      const [sk, rk, ca, cid] = decoded.split(":");
+      cursorSk = Number(sk);
+      cursorRank = Number(rk);
+      cursorCreatedAt = Number(ca);
+      cursorId = cid ?? null;
+      if (![Number.isFinite(cursorSk), Number.isFinite(cursorRank), Number.isFinite(cursorCreatedAt)].every(Boolean) || !cursorId) {
+        return { ok: false, status: 400, error: "Invalid cursor", code: "bad_cursor" };
+      }
+    } catch {
+      return { ok: false, status: 400, error: "Invalid cursor", code: "bad_cursor" };
+    }
+  }
+  if (cursorId != null) {
+    list = list.filter((m) => {
+      const sk = skillHit(m);
+      if (sk !== cursorSk) return sk > cursorSk!;
+      if (m.priority !== undefined && rank[m.priority] !== cursorRank) return rank[m.priority] > cursorRank!;
+      if (m.createdAt !== cursorCreatedAt) return m.createdAt > cursorCreatedAt!;
+      return m.id > cursorId!;
+    });
+  }
+
   const total = list.length;
+  const page = list.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor = total > limit && last
+    ? Buffer.from(
+        `${skillHit(last)}:${rank[last.priority]}:${last.createdAt}:${last.id}`,
+      ).toString("base64")
+    : null;
   return {
     ok: true,
     board,
@@ -178,7 +224,8 @@ export function pollMissions(
       total,
       limit,
       truncated: total > limit,
-      missions: list.slice(0, limit).map(missionSummary),
+      ...(nextCursor ? { nextCursor } : { nextCursor: null }),
+      missions: page.map(missionSummary),
     },
   };
 }
