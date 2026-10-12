@@ -463,6 +463,154 @@
 
     .hidden { display: none; }
 
+    /* ── Sessions drawer ──────────────────────────────────── */
+    .sessions-toggle {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+    }
+    .sessions-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 60;
+      display: flex;
+      justify-content: flex-end;
+    }
+    #sessionsDrawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 380px;
+      max-width: 92vw;
+      background: var(--bz-panel);
+      border-left: 1px solid #2A2A2A;
+      z-index: 61;
+      box-shadow: -6px 0 24px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.18s ease;
+    }
+    #sessionsDrawer.open { transform: translateX(0); }
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid #222;
+    }
+    .drawer-header h3 {
+      margin: 0;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--bz-yellow);
+      font-weight: 700;
+    }
+    .drawer-close {
+      background: transparent;
+      border: 1px solid #444;
+      color: #999;
+      padding: 0.25rem 0.6rem;
+      font-size: 0.8rem;
+    }
+    .drawer-close:hover { border-color: var(--bz-yellow); background: rgba(255,193,7,0.08); }
+    .drawer-actions { padding: 0.8rem 1rem; border-bottom: 1px solid #222; }
+    .drawer-actions button { width: 100%; }
+    .drawer-note {
+      padding: 0.5rem 1rem 0;
+      font-size: 0.82rem;
+      color: #888;
+    }
+    #sessionsList {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.6rem 1rem;
+    }
+    .session-card {
+      border: 1px solid #2A2A2A;
+      background: var(--bz-col);
+      border-radius: 6px;
+      padding: 0.7rem 0.8rem;
+      margin-bottom: 0.6rem;
+    }
+    .session-card .sc-title {
+      font-weight: 600;
+      color: #E8E8E8;
+      font-size: 0.9rem;
+      margin: 0 0 0.2rem;
+      word-break: break-word;
+    }
+    .session-card .sc-summary {
+      color: #888;
+      font-size: 0.8rem;
+      margin: 0 0 0.3rem;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .session-card .sc-meta {
+      color: #555;
+      font-size: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .session-card .sc-actions {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .session-card .sc-actions button {
+      padding: 0.22rem 0.55rem;
+      font-size: 0.75rem;
+    }
+    .session-card.active {
+      border-color: var(--bz-yellow-dim);
+    }
+    .sessions-empty {
+      color: #777;
+      font-size: 0.85rem;
+      text-align: center;
+      padding: 1.5rem 0;
+    }
+    .sessions-error {
+      color: var(--bz-status-red);
+      font-size: 0.85rem;
+      padding: 0.75rem 0.25rem;
+      margin-top: 0.5rem;
+    }
+
+    /* ── Explicit skip on decisions ────────────────────────── */
+    .slot-skip {
+      cursor: pointer;
+      color: #777;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      border: 1px solid #444;
+      border-radius: 3px;
+      margin-left: auto;
+      flex-shrink: 0;
+      align-self: center;
+      background: transparent;
+    }
+    .slot-skip:hover {
+      color: var(--bz-yellow);
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.08);
+    }
+    .slot-item.skipped .slot-value-headline {
+      color: #999;
+      font-style: italic;
+    }
+    .slot-item.skipped .slot-check {
+      background: #555;
+      border-color: #555;
+      color: #E8E8E8;
+    }
+
     /* ── Form tab styles ──────────────────────────────────── */
     .form-group {
       margin-bottom: 1rem;
@@ -554,6 +702,7 @@
             <select id="agentSelect" class="agent-select" title="Choose an agent model">
               <option value="">Loading agents…</option>
             </select>
+            <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Sessions</button>
           </div>
           <div class="chat-messages" id="chatMessages"></div>
           <div class="chat-input-row">
@@ -577,6 +726,20 @@
         </div>
       </div>
     </div>
+
+    <!-- Sessions drawer -->
+    <div id="sessionsOverlay" class="sessions-overlay hidden" aria-hidden="true"></div>
+    <aside id="sessionsDrawer" aria-label="Sessions" aria-hidden="true">
+      <div class="drawer-header">
+        <h3>Sessions</h3>
+        <button id="sessionsClose" class="drawer-close" type="button">Close</button>
+      </div>
+      <div class="drawer-actions">
+        <button id="drawerNewChat" class="secondary" type="button">Start a new chat</button>
+      </div>
+      <p class="drawer-note">Pick a past chat to reopen it, rename it, or get a quick summary.</p>
+      <div id="sessionsList"></div>
+    </aside>
   </main>
 
   <script src="sow-pdf.js"></script>
@@ -1265,16 +1428,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       done_right_check: "Done right means",
       quote_count: "Quote count",
       exclusions: "Exclusions",
+      challenge: "The Challenge",
+      difficulties: "Difficulties",
+      who_involved: "Who is involved",
+      end_goal: "What is the end goal",
     };
 
     let chatState = {
       jobId: null,
+      sessionId: null,
       slots: {},
       messages: [],
       draftReady: false,
       userId: null,
       model: null,
     };
+
+    // The four Decisions Made statements the owner may explicitly skip.
+    const SKIPPABLE_SLOTS = ["challenge", "difficulties", "who_involved", "end_goal"];
+    const SESSIONS_BASE = "/api/buzzy/sessions";
 
     let modelCatalog = [];
 
@@ -1362,10 +1534,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const container = document.getElementById("slotItems");
       const ids = Object.keys(SLOT_LABELS);
       const html = ids.map((id) => {
-        const filled = !!chatState.slots[id];
-        const escapedValue = (chatState.slots[id] || "").replace(/</g, "&lt;");
+        const value = chatState.slots[id];
+        const filled = !!value;
+        const skipped = value === "skipped";
         const escapedLabel = SLOT_LABELS[id].replace(/</g, "&lt;");
         if (filled) {
+          if (skipped) {
+            return '<div class="slot-item filled skipped" data-slot="' + id + '">' +
+              '<span class="slot-check">–</span>' +
+              '<span class="slot-value-headline">Skipped</span>' +
+              '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
+              '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
+              '</div>';
+          }
+          const escapedValue = String(value).replace(/</g, "&lt;");
           return '<div class="slot-item filled" data-slot="' + id + '">' +
             '<span class="slot-check">✓</span>' +
             '<span class="slot-value-headline">' + escapedValue + '</span>' +
@@ -1373,10 +1555,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
             '</div>';
         }
+        const skipBtn = SKIPPABLE_SLOTS.indexOf(id) !== -1
+          ? '<span class="slot-skip" data-slot="' + id + '" title="Skip this one">Skip</span>'
+          : "";
         return '<div class="slot-item">' +
           '<span class="slot-check"></span>' +
           '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
           '<span class="slot-still-open">still open</span>' +
+          skipBtn +
           '</div>';
       }).join("");
       container.innerHTML = html;
@@ -1386,6 +1572,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           startEditSlot(icon.getAttribute("data-slot"));
         });
       });
+      // Wire up skip affordances
+      container.querySelectorAll(".slot-skip").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          skipSlot(btn.getAttribute("data-slot"));
+        });
+      });
+    }
+
+    function skipSlot(slotId) {
+      saveSlotEdit(slotId, "skipped");
     }
 
     function setChatMascot(expr) {
@@ -1437,7 +1633,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       renderSlotChecklist();
       // Post through existing chat endpoint so model knows
       const label = SLOT_LABELS[slotId];
-      const editMsg = "Update: " + label + " is now \"" + newValue + "\".";
+      const editMsg = newValue === "skipped"
+        ? "Update: " + label + " was skipped."
+        : "Update: " + label + " is now \"" + newValue + "\".";
       chatState.messages.push({ role: "user", content: editMsg });
       renderChatMessages();
       // Disable input briefly while posting
@@ -1449,6 +1647,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId: chatState.jobId,
+          sessionId: chatState.sessionId || undefined,
           message: editMsg,
           model: selectedModel(),
         }),
@@ -1493,7 +1692,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     async function restoreTranscript() {
       try {
-        const q = chatState.jobId ? "?jobId=" + encodeURIComponent(chatState.jobId) : "";
+        const q = chatState.jobId
+        ? "?jobId=" + encodeURIComponent(chatState.jobId)
+        : chatState.sessionId
+          ? "?sessionId=" + encodeURIComponent(chatState.sessionId)
+          : "";
         // Timeout so a hung request can't leave the transcript blank forever
         // (seen live: stuck chat with no welcome message).
         const r = await fetch("/api/buzzy/transcript" + q, {
@@ -1573,6 +1776,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           },
           body: JSON.stringify({
             jobId: chatState.jobId,
+            sessionId: chatState.sessionId || undefined,
             message: text,
             model: selectedModel(),
             jobContext: chatState.jobContext || undefined,
@@ -1681,18 +1885,176 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Navigate to the jobs page for legacy flows
       window.location.href = "/buzzy/";
     };
-    document.getElementById("newChatBtn").onclick = () => {
-      chatState = {
-        jobId: null,
-        slots: {},
-        messages: [],
-        draftReady: false,
-        userId: null,
-        _signedOut: chatState._signedOut,
-      };
-      document.getElementById("draftBanner").classList.add("hidden");
-      showChatScreen();
-    };
+    // ── Sessions drawer ───────────────────────────────────────
+    function openSessionsDrawer() {
+      const drawer = document.getElementById("sessionsDrawer");
+      const overlay = document.getElementById("sessionsOverlay");
+      overlay.classList.remove("hidden");
+      drawer.classList.add("open");
+      drawer.setAttribute("aria-hidden", "false");
+      loadSessions();
+    }
+    function closeSessionsDrawer() {
+      const drawer = document.getElementById("sessionsDrawer");
+      const overlay = document.getElementById("sessionsOverlay");
+      drawer.classList.remove("open");
+      drawer.setAttribute("aria-hidden", "true");
+      setTimeout(function () { overlay.classList.add("hidden"); }, 180);
+    }
+    // Handle auth/errors with plain-language notes; 401 → sign in.
+    function sessionsError(msg) {
+      if (msg === "signed_out") {
+        window.location.href = "/login";
+        return;
+      }
+      const list = document.getElementById("sessionsList");
+      list.innerHTML = '<p class="sessions-error">' + msg + "</p>";
+    }
+    async function loadSessions() {
+      const list = document.getElementById("sessionsList");
+      list.innerHTML = '<p class="sessions-empty">Loading…</p>';
+      try {
+        const r = await fetch(SESSIONS_BASE, { credentials: "same-origin" });
+        if (r.status === 401) { sessionsError("signed_out"); return; }
+        if (!r.ok) { sessionsError("Couldn't load your sessions. Try again in a moment."); return; }
+        const data = await r.json();
+        const sessions = data.sessions || [];
+        if (!sessions.length) {
+          list.innerHTML = '<p class="sessions-empty">No sessions yet</p>';
+          return;
+        }
+        list.innerHTML = "";
+        sessions.forEach(function (s) {
+          const card = document.createElement("div");
+          card.className = "session-card" + (s.id === chatState.sessionId ? " active" : "");
+          const title = s.title || "Untitled session";
+          const summary = s.summary || "No summary yet.";
+          const mc = (s.messageCount != null ? s.messageCount : 0) + " message" + (s.messageCount === 1 ? "" : "s");
+          card.innerHTML =
+            '<p class="sc-title">' + title.replace(/</g, "&lt;") + "</p>" +
+            '<p class="sc-summary">' + summary.replace(/</g, "&lt;") + "</p>" +
+            '<p class="sc-meta">' + mc + "</p>" +
+            '<div class="sc-actions">' +
+            '<button type="button" class="sc-open">Open</button>' +
+            '<button type="button" class="sc-rename">Rename</button>' +
+            '<button type="button" class="sc-summarize">Summarize</button>' +
+            "</div>";
+          card.querySelector(".sc-open").addEventListener("click", function () { openSession(s); });
+          card.querySelector(".sc-rename").addEventListener("click", function () { renameSession(s, card); });
+          card.querySelector(".sc-summarize").addEventListener("click", function () { summarizeSession(s); });
+          list.appendChild(card);
+        });
+      } catch (e) {
+        sessionsError("Couldn't reach the server. Check your connection and try again.");
+      }
+    }
+    async function openSession(s) {
+      try {
+        const r = await fetch("/api/buzzy/transcript?sessionId=" + encodeURIComponent(s.id), {
+          credentials: "same-origin",
+        });
+        if (r.status === 401) { sessionsError("signed_out"); return; }
+        if (!r.ok) { sessionsError("Couldn't open that session."); return; }
+        const data = await r.json();
+        const msgs = (data.messages || []).map(function (m) {
+          return { role: m.role, content: m.content };
+        });
+        chatState.sessionId = s.id;
+        chatState.messages = msgs;
+        chatState.slots = {};
+        chatState.draftReady = false;
+        document.getElementById("draftBanner").classList.add("hidden");
+        document.getElementById("chatError").classList.add("hidden");
+        setChatMascot(msgs.length >= 2 ? "12-content" : "17-attentive");
+        renderChatMessages();
+        renderSlotChecklist();
+        closeSessionsDrawer();
+      } catch (e) {
+        sessionsError("Couldn't open that session. Try again in a moment.");
+      }
+    }
+    function renameSession(s, card) {
+      const current = s.title || "";
+      const next = prompt("Rename this session:", current);
+      if (!next || next.trim() === current) return;
+      const title = next.trim();
+      fetch(SESSIONS_BASE + "/" + encodeURIComponent(s.id), {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("rename failed");
+        return r.json();
+      }).then(function () {
+        s.title = title;
+        const t = card.querySelector(".sc-title");
+        if (t) t.textContent = title;
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't rename the session. Try again in a moment.");
+      });
+    }
+    function summarizeSession(s) {
+      fetch(SESSIONS_BASE + "/" + encodeURIComponent(s.id) + "/summary", {
+        method: "POST",
+        credentials: "same-origin",
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("summary failed");
+        return r.json();
+      }).then(function (data) {
+        s.summary = data.summary || s.summary;
+        // Refresh the list so the new summary shows.
+        loadSessions();
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't summarize that session right now. Try again in a moment.");
+      });
+    }
+    // Start a truly new chat: create a real session, then reset local state.
+    function startNewChat() {
+      return fetch(SESSIONS_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: chatState.jobId || undefined }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        return r.json();
+      }).then(function (data) {
+        const s = data.session;
+        chatState = {
+          jobId: chatState.jobId, // keep job-scoped behavior when a job is present
+          sessionId: s ? s.id : null,
+          slots: {},
+          messages: [],
+          draftReady: false,
+          userId: chatState.userId,
+          _signedOut: chatState._signedOut,
+          jobContext: chatState.jobContext,
+        };
+        document.getElementById("draftBanner").classList.add("hidden");
+        document.getElementById("chatError").classList.add("hidden");
+        closeSessionsDrawer();
+        showChatScreen();
+        return s;
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return null;
+        document.getElementById("chatError").textContent =
+          "Couldn't start a new chat. Try again in a moment.";
+        document.getElementById("chatError").classList.remove("hidden");
+        return null;
+      });
+    }
+    document.getElementById("newChatBtn").onclick = () => { startNewChat(); };
+    document.getElementById("sessionsToggle").onclick = () => { openSessionsDrawer(); };
+    document.getElementById("sessionsClose").onclick = () => { closeSessionsDrawer(); };
+    document.getElementById("drawerNewChat").onclick = () => { startNewChat(); };
+    document.getElementById("sessionsOverlay").addEventListener("click", function () {
+      closeSessionsDrawer();
+    });
 
     // Navigation
     document.getElementById("jobsLink").onclick = (e) => {

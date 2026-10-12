@@ -85,8 +85,44 @@ export const BUZZY_QUESTIONS: BuzzyQuestion[] = [
   },
 ];
 
+// ── Decisions Made statements (structured problem breakdown) ──────────
+// The four civilian statements every job definition must capture. Rides the
+// same slot storage (buzzy_user_memory) and [slot: value] extraction as the
+// question bank; each is explicitly skippable. Structure guides, never gates.
+export interface BuzzyStatement {
+  id: string;
+  label: string;
+  hint: string;
+}
+
+export const BUZZY_STATEMENTS: BuzzyStatement[] = [
+  {
+    id: "challenge",
+    label: "The Challenge",
+    hint: "What's wrong — one plain sentence.",
+  },
+  {
+    id: "difficulties",
+    label: "Difficulties",
+    hint: "What makes it hard.",
+  },
+  {
+    id: "who_involved",
+    label: "Who is involved",
+    hint: "People or parties affected.",
+  },
+  {
+    id: "end_goal",
+    label: "What is the end goal",
+    hint: "The outcome you want.",
+  },
+];
+
+/** The four statements appended to the question slots (required, skippable). */
+export const STATEMENT_IDS = BUZZY_STATEMENTS.map((s) => s.id);
+
 /** All slot ids in order. */
-export const SLOT_IDS = BUZZY_QUESTIONS.map((q) => q.id);
+export const SLOT_IDS = [...BUZZY_QUESTIONS.map((q) => q.id), ...STATEMENT_IDS];
 
 /** Required slot ids (all of them for Phase 1). */
 export const REQUIRED_SLOTS = SLOT_IDS;

@@ -18,7 +18,7 @@
 
 import { chatCompletion, getModels } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, SLOT_IDS, REQUIRED_SLOTS } from "./questions";
+import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, REQUIRED_SLOTS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
@@ -31,6 +31,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - Do not repeat back the user's answer as a restatement or react emotionally to it. Acknowledge in at most two words ("Got it.") or skip the acknowledgment entirely, then move to the next decision.
 - Never re-ask something already answered — the conversation state shows what's decided.
 - Track decisions, not stories: capture the decision, then move on.
+- MANDATED GOAL — the Decisions Made box: The Challenge, Difficulties, Who is involved, What is the end goal. Every reply must move at least one forward: either extract a statement from what the client just said (emit it as [challenge: …], [difficulties: …], [who_involved: …], or [end_goal: …]) or ask the single next question that fills a missing one. If the client says a statement cannot be answered, emit [id: skipped] for that id instead of inventing content — never fabricate a statement they did not give or approve. The job is not ready for a draft until all four are filled or explicitly skipped.
 - IMPORTANT — job type: if the client's message is clearly a different kind of job (creative writing, a story, copy, a poem, a technical explainer), work THAT job. Do not refuse it and do not drag in unrelated earlier problems. Only ask scope-of-work questions that fit the actual request.
 - Only use details from THIS conversation. Never mention or reuse problems from other jobs.
 You never mention models, tokens, or technical internals.`;
@@ -67,6 +68,7 @@ function extractSlotsFromReply(
 export interface ChatRequest {
   userId: string;
   jobId: string | null;
+  sessionId: string | null;
   message: string;
   model?: string;
   /** Context from the Jobs-card "Chat" button — project the agent is working. */
@@ -84,7 +86,7 @@ export interface ChatResponse {
 }
 
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
-  const { userId, jobId, message, model, jobContext } = req;
+  const { userId, jobId, sessionId, message, model, jobContext } = req;
 
   if (!message?.trim()) {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
@@ -138,12 +140,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         factsText.map(f => `- ${f.key}: ${f.value}`).join("\n")
       : "";
 
-  const nextQuestion = REQUIRED_SLOTS[filledCount];
-  const nextQ = nextQuestion ? BUZZY_QUESTIONS.find(q => q.id === nextQuestion) : null;
+  const nextSlot = REQUIRED_SLOTS.find(id => !slotValues[id]);
+  const nextQ = nextSlot ? BUZZY_QUESTIONS.find(q => q.id === nextSlot) : null;
+  const nextS = nextSlot ? BUZZY_STATEMENTS.find(s => s.id === nextSlot) : null;
 
   const guidance = nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"`
-    : "\n\nAll required details have been gathered. Generate a draft summary for the user to review.";
+    : nextS
+      ? `\n\nNext, capture the Decisions Made statement "${nextS.label}" (${nextS.hint}).`
+      : "\n\nAll required details have been gathered. Generate a draft summary for the user to review.";
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
@@ -205,14 +210,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Persist user message ───────────────────────────────────────────
   const msgId = jobId || `buzzy_${userId.slice(0, 8)}`;
   await sql`
-    INSERT INTO buzzy_chat_messages (user_id, job_id, role, content)
-    VALUES (${userId}, ${jobId}, 'user', ${message})
+    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
+    VALUES (${userId}, ${jobId}, ${sessionId}, 'user', ${message})
   `;
 
   // ── Persist assistant reply ────────────────────────────────────────
   await sql`
-    INSERT INTO buzzy_chat_messages (user_id, job_id, role, content)
-    VALUES (${userId}, ${jobId}, 'assistant', ${sanitizedReply})
+    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
+    VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${sanitizedReply})
   `;
 
   // ── Persist slot updates ───────────────────────────────────────────
