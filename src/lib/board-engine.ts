@@ -79,7 +79,43 @@ export function missionSummary(m: Mission) {
     source: m.source ?? null,
     usage: m.usage ?? null,
     updatedAt: m.updatedAt,
+    // Machine-readable state machine: which verbs are legal from the current
+    // column, so clients don't learn the rules by hitting 409s.
+    allowedMoves: allowedTransitions(m),
   };
+}
+
+/**
+ * Allowed transitions from the mission's current column, as a compact
+ * {verb, to?, who} list. Mirrors the rules the API actually enforces:
+ * - claim: ready/inbox (any agent), running (current claimant only)
+ * - deliver: running (claimant), needs_human (claimant resolves)
+ * - heartbeat/escalate: running or needs_human (claimant)
+ * - move: review→done|ready (reviewer-skill key or operator); operator can
+ *   move most columns; done is terminal
+ */
+function allowedTransitions(m: Mission) {
+  const claimed = Boolean(m.claimedBy);
+  const isDone = m.column === "done";
+  const isBlocked = m.column === "blocked";
+  if (isDone || isBlocked) return [];
+  const moves: Array<{ verb: string; to?: string; who: string }> = [];
+  if (m.column === "ready" || m.column === "inbox") {
+    if (!claimed) moves.push({ verb: "claim", to: "running", who: "any_agent" });
+    moves.push({ verb: "move", to: "running", who: "operator" });
+  } else if (m.column === "running") {
+    moves.push({ verb: "heartbeat", who: "claimant" });
+    moves.push({ verb: "deliver", to: "review", who: "claimant" });
+    moves.push({ verb: "escalate", to: "needs_human", who: "claimant" });
+    moves.push({ verb: "unclaim", who: "claimant" });
+    moves.push({ verb: "move", to: "ready|done", who: "operator" });
+  } else if (m.column === "review") {
+    moves.push({ verb: "move", to: "done|ready", who: "reviewer_or_operator" });
+  } else if (m.column === "needs_human") {
+    moves.push({ verb: "deliver", to: "review", who: "claimant" });
+    moves.push({ verb: "move", who: "operator" });
+  }
+  return moves;
 }
 
 export function pollMissions(
