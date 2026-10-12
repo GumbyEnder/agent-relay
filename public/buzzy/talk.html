@@ -477,6 +477,10 @@
       display: flex;
       justify-content: flex-end;
     }
+    /* `.sessions-overlay` sets display:flex, which (same specificity, later in
+       file) would override `.hidden{display:none}` and paint the dark backdrop
+       on load, blocking the page. Explicitly win the hidden state here. */
+    .sessions-overlay.hidden { display: none; }
     #sessionsDrawer {
       position: fixed;
       top: 0;
