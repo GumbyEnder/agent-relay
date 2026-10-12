@@ -152,3 +152,7 @@ curl -s -X POST localhost:8080/api/agent/missions/msn_agent_protocol_doc/claim \
   -H 'content-type: application/json' \
   -d '{"agent":"lens"}' | jq
 ```
+
+### `GET /openapi.json`
+
+Machine-readable OpenAPI 3.1 contract (schemas for Mission/Error, all paths, auth schemes). Typed clients and tool discovery read this; this file stays the narrative layer.

@@ -28,6 +28,7 @@ import { COLUMNS, HARNESS_IDS } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
 import { verifyGitHubSignature } from "./github-webhook";
+import { openApiSpec } from "./openapi";
 import {
   extractArtifactFromGitHubPayload,
   githubExternalId,
@@ -715,6 +716,11 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       }
     } catch {
       return err(400, "Invalid JSON body", "invalid_json");
+    }
+
+    // GET /openapi.json — machine-readable contract (API-6)
+    if (parts.length === 1 && parts[0] === "openapi.json" && req.method === "GET") {
+      return json(openApiSpec(url.origin));
     }
 
     // GET /health
