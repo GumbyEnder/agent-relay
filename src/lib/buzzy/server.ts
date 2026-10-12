@@ -18,7 +18,7 @@
 
 import { chatCompletion, getModels } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, SLOT_IDS, REQUIRED_SLOTS } from "./questions";
+import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, REQUIRED_SLOTS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
@@ -140,12 +140,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         factsText.map(f => `- ${f.key}: ${f.value}`).join("\n")
       : "";
 
-  const nextQuestion = REQUIRED_SLOTS[filledCount];
-  const nextQ = nextQuestion ? BUZZY_QUESTIONS.find(q => q.id === nextQuestion) : null;
+  const nextSlot = REQUIRED_SLOTS.find(id => !slotValues[id]);
+  const nextQ = nextSlot ? BUZZY_QUESTIONS.find(q => q.id === nextSlot) : null;
+  const nextS = nextSlot ? BUZZY_STATEMENTS.find(s => s.id === nextSlot) : null;
 
   const guidance = nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"`
-    : "\n\nAll required details have been gathered. Generate a draft summary for the user to review.";
+    : nextS
+      ? `\n\nNext, capture the Decisions Made statement "${nextS.label}" (${nextS.hint}).`
+      : "\n\nAll required details have been gathered. Generate a draft summary for the user to review.";
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
