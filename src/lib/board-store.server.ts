@@ -278,8 +278,8 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
       ? sql`select * from ar_missions where project_id = ${projectId} order by updated_at desc`
       : sql`select * from ar_missions order by updated_at desc`,
     projectId
-      ? sql`select * from ar_events where project_id = ${projectId} or project_id is null order by at desc limit 200`
-      : sql`select * from ar_events order by at desc limit 200`,
+      ? sql`select * from ar_events where project_id = ${projectId} or project_id is null order by at desc limit 2000`
+      : sql`select * from ar_events order by at desc limit 2000`,
     projectId
       ? sql`select * from ar_calls where project_id = ${projectId} or project_id is null order by created_at desc`
       : sql`select * from ar_calls order by created_at desc`,
