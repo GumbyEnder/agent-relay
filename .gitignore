@@ -16,3 +16,5 @@ dist/
 playwright-report/
 test-results/
 brand-assets/
+__pycache__/
+*.pyc

@@ -16,7 +16,9 @@ Replacement for the legacy worker tally utility that:
     workers), not only from model-name heuristics.
   * Preserves STORED estimated_cost_usd / actual_cost_usd and their provenance;
     defaults of 0.0 with unknown/None cost_status are reported as UNKNOWN cost,
-    never as measured free work.
+    never as measured free work. A measured actual is NEVER replaced by or added
+    to an estimate; the authoritative displayed actual is null when it is not
+    explicitly measured.
   * Does not blindly add reasoning_tokens back into billed totals (reasoning may
     overlap output). Cache counters are kept separate.
   * Reports approved-cloud vs local-B70 worker token shares as an operational
@@ -271,35 +273,107 @@ def _summer(row: Dict[str, Any]) -> Dict[str, float]:
         "actual_cost_usd")}
 
 
-def cost_for(row: Dict[str, Any]) -> Tuple[Optional[float], str, str]:
-    """Authoritative cost for a row.
+# Cost statuses that do NOT establish a measured/provider-known actual charge.
+# A stored number under one of these statuses is an estimate or a default, not
+# an explicitly measured billing actual.
+NON_KNOWN_ACTUAL_STATUSES = {
+    "", "unknown", "none", "null", "estimated", "estimated-free",
+}
 
-    Prefer explicit measured actual when available; otherwise preserve stored
-    estimate. Never add actual + estimate together. A default actual_cost_usd==0
-    with unknown/None provenance is UNKNOWN cost, not measured free work.
+
+def _is_known_actual(status: Any, source: Any) -> bool:
+    """True only when an actual is explicitly measured with real provenance.
+
+    A measured actual requires BOTH a non-empty cost_status and a non-empty
+    cost_source, and the status must not be one of the unknown/estimated
+    markers. This is what lets an explicit measured 0.0 (a real free/zero
+    charge with known provenance) be distinguished from a schema-default 0.0
+    carried under estimated/unknown/null status.
+    """
+    if status is None or source is None:
+        return False
+    s = str(status).strip()
+    if not s:
+        return False
+    return s.lower() not in NON_KNOWN_ACTUAL_STATUSES and \
+        str(source).strip() != ""
+
+
+def cost_for(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Authoritative cost provenance for a row (dict of independent fields).
+
+    An estimate is NEVER reported as a measured actual charge:
+
+      * actual_cost_usd   -> an explicitly measured actual cost (including a
+        real measured 0.0 with known status+source), else None. A default 0.0
+        with estimated/unknown/null status is NOT a known free actual.
+      * estimated_cost_usd -> the stored estimate preserved as-is, else None.
+      * preferred_cost_usd -> the single amount to display when one preferred
+        amount is called for: measured actual wins, else the stored estimate.
+        Never actual + estimate combined.
+      * The status/source for each field are reported separately and never
+        upgraded to "known" merely because a stored number exists.
     """
     act = row.get("actual_cost_usd")
     est = row.get("estimated_cost_usd")
     status = row.get("cost_status")
     source = row.get("cost_source")
-    has_status = bool(status)
-    has_source = bool(source)
-    if not has_status or not has_source:
-        # title-generation legacy estimate with null provenance
-        if row.get("task") == "title_generation" and _f(est) != 0.0:
-            return _f(est), "unknown/legacy", source or "unknown"
-        # default 0.0 with no provenance -> UNKNOWN, not free
-        return None, "unknown", source or "none"
-    if status == "unknown":
-        return None, "unknown", source or "none"
-    # explicit measured actual
-    if act is not None and _f(act) != 0.0:
-        return _f(act), status, source
-    # preserve stored estimate when no measured actual
+
+    # measured actual: only when explicitly supplied with known provenance.
+    # (A measured 0.0 yields actual == 0.0, which is a real known charge; a
+    # default 0.0 yields None.)
+    if act is not None and _is_known_actual(status, source):
+        actual: Optional[float] = _f(act)
+        actual_status = str(status)
+        actual_source = str(source)
+    else:
+        actual = None
+        actual_status = "unknown"
+        actual_source = source or "none"
+
+    # stored estimate: preserved as-is. Provenance never upgraded.
     if est is not None and _f(est) != 0.0:
-        return _f(est), status or "estimated", source or "provider_models_api"
-    # explicit but zero
-    return 0.0, status, source or "none"
+        estimate: Optional[float] = _f(est)
+        if row.get("task") == "title_generation" and \
+                (not bool(status) or not bool(source)):
+            est_status = "unknown/legacy"
+            est_source = source or "unknown"
+        elif _is_known_actual(status, source):
+            est_status = str(status)
+            est_source = str(source)
+        else:
+            est_status = "estimated"
+            est_source = source or "provider_models_api"
+    else:
+        estimate = None
+        est_status = "unknown"
+        est_source = source or "none"
+
+    # preferred display amount: measured actual wins, else estimate.
+    if actual is not None:
+        preferred: Optional[float] = actual
+        preferred_status = actual_status
+        preferred_source = actual_source
+    elif estimate is not None:
+        preferred = estimate
+        preferred_status = est_status
+        preferred_source = est_source
+    else:
+        preferred = None
+        preferred_status = "unknown"
+        preferred_source = source or "none"
+
+    return {
+        "actual_cost_usd": actual,
+        "actual_status": actual_status,
+        "actual_source": actual_source,
+        "estimated_cost_usd": estimate,
+        "estimate_status": est_status,
+        "estimate_source": est_source,
+        "preferred_cost_usd": preferred,
+        "preferred_status": preferred_status,
+        "preferred_source": preferred_source,
+    }
 
 
 def aggregate(sources: List[Dict[str, Any]],
@@ -309,6 +383,17 @@ def aggregate(sources: List[Dict[str, Any]],
     scope: (None, None)                           -> profile-wide
            ("SESSIONS", set_of_ids)               -> exact session scope
            ("SOURCE", set_of_source_strings)      -> session created_source/source
+
+    Cost aggregation keeps measured actuals and stored estimates SEPARATE:
+
+      * estimated_cost_usd is the stored-estimate sum (never treated as actual).
+      * actual_cost_usd is the FULL known actual sum only when EVERY row in the
+        bucket has an explicitly measured actual; otherwise it is None (the
+        scoped actual total is incomplete/unknown even if some rows are known).
+      * known_actual_cost_usd carries the partial known-row sum (with row
+        coverage counts) so a mixed bucket can still expose its known slice
+        without pretending the total is fully known.
+      * cost_unknown is True whenever any row lacks a measured actual.
     """
     seen_identity: Dict[Tuple[str, ...], str] = {}
     records: List[Dict[str, Any]] = []
@@ -317,14 +402,19 @@ def aggregate(sources: List[Dict[str, Any]],
     mirrored = 0
 
     def add(role: str, lane: str, sums: Dict[str, float],
-            cost: Optional[float], provenance: Tuple[str, str]) -> None:
+            cost: Dict[str, Any]) -> None:
         key = (role, lane)
         agg = aggregates.setdefault(key, {
             "api_calls": 0.0, "input": 0.0, "output": 0.0,
             "cache_read": 0.0, "cache_write": 0.0, "reasoning": 0.0,
-            "total_tokens": 0.0, "estimated_cost_usd": 0.0,
-            "actual_cost_usd": 0.0, "cost_unknown": True,
-            "rows": 0, "cost_provenance": provenance,
+            "total_tokens": 0.0,
+            "estimated_cost_usd": 0.0,
+            "actual_cost_usd": 0.0,
+            "known_actual_cost_usd": 0.0,
+            "actual_rows_known": 0,
+            "actual_rows_unknown": 0,
+            "cost_unknown": True,
+            "rows": 0,
         })
         agg["api_calls"] += sums["api_call_count"]
         agg["input"] += sums["input_tokens"]
@@ -335,10 +425,14 @@ def aggregate(sources: List[Dict[str, Any]],
         agg["total_tokens"] += (sums["input_tokens"] + sums["output_tokens"]
                                 + sums["cache_read_tokens"]
                                 + sums["cache_write_tokens"])
-        if cost is not None:
-            agg["actual_cost_usd"] += cost
-            agg["cost_unknown"] = False
+        # Estimates accumulate in their own field, never into actual.
         agg["estimated_cost_usd"] += sums["estimated_cost_usd"]
+        if cost["actual_cost_usd"] is not None:
+            # measured actual (incl. measured 0.0): accumulate partial known
+            agg["known_actual_cost_usd"] += cost["actual_cost_usd"]
+            agg["actual_rows_known"] += 1
+        else:
+            agg["actual_rows_unknown"] += 1
         agg["rows"] += 1
 
     for src in sources:
@@ -381,7 +475,6 @@ def aggregate(sources: List[Dict[str, Any]],
                     records.append(record)
                 else:
                     # same identity within one source -> duplicate row
-                    own2 = None
                     records.append({"kind": "duplicate-row",
                                     "identity": list(key),
                                     "source": profile,
@@ -391,9 +484,9 @@ def aggregate(sources: List[Dict[str, Any]],
                 continue
             role = resolve_role(profile, row, sessions)
             lane = _lane_of(row)
-            cost, status, csrc = cost_for(row)
+            cost = cost_for(row)
             sums = _summer(row)
-            add(role, lane, sums, cost, (status, csrc))
+            add(role, lane, sums, cost)
             rec = {"kind": "usage", "identity": list(key), "profile": profile,
                    "role": role, "lane": lane, **{
                        k: sums[k] for k in (
@@ -401,14 +494,34 @@ def aggregate(sources: List[Dict[str, Any]],
                            "cache_read_tokens", "cache_write_tokens",
                            "reasoning_tokens", "estimated_cost_usd",
                            "actual_cost_usd")},
-                   "cost_reported": cost,
-                   "cost_provenance": (status, csrc),
+                   "cost_reported": cost["preferred_cost_usd"],
+                   "cost_provenance": (cost["preferred_status"],
+                                       cost["preferred_source"]),
+                   "actual_cost_usd_known": cost["actual_cost_usd"],
+                   "actual_cost_status": cost["actual_status"],
+                   "estimated_cost_usd_stored": cost["estimated_cost_usd"],
+                   "estimate_status": cost["estimate_status"],
                    "task": row.get("task"),
                    "model": row.get("model"),
                    "billing_provider": row.get("billing_provider"),
                    "billing_mode": row.get("billing_mode"),
                    "session_id": sid}
             records.append(rec)
+
+    # After all rows are added, resolve actual vs partial-known vs unknown.
+    for key, agg in aggregates.items():
+        if agg["actual_rows_unknown"] == 0:
+            # every row measured: full known actual total (may be 0.0)
+            agg["actual_cost_usd"] = agg["known_actual_cost_usd"]
+            agg["known_actual_cost_usd"] = None
+            agg["cost_unknown"] = False
+        else:
+            # incomplete: authoritative actual is unknown (None); keep the
+            # partial known sum + coverage counts for honest reporting.
+            agg["actual_cost_usd"] = None
+            if agg["actual_rows_known"] == 0:
+                agg["known_actual_cost_usd"] = None
+            agg["cost_unknown"] = True
 
     return {"aggregates": aggregates, "records": records,
             "conflicts": conflicts,
@@ -420,7 +533,8 @@ def aggregate(sources: List[Dict[str, Any]],
 # ---------------------------------------------------------------------------
 
 RECEIPT_FIELDS = ("attempt_id", "mission", "task", "role", "profile", "model",
-                  "provider", "input_tokens", "output_tokens",
+                  "provider", "session_id", "native_session_id",
+                  "input_tokens", "output_tokens",
                   "cache_read_tokens", "cache_write_tokens", "reasoning_tokens",
                   "duration_s", "success", "retry", "actual_cost_usd",
                   "estimated_cost_usd", "cost_provenance")
@@ -467,61 +581,95 @@ def load_receipts(path: Path) -> Tuple[List[Dict[str, Any]], List[str]]:
 
 def dedup_receipts(receipts: List[Dict[str, Any]],
                    records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Dedup receipts by attempt_id and mark coverage by native records.
+    """Dedup receipts by attempt_id and classify coverage by native linkage.
 
-    A receipt is 'covered_by_native' when a native usage identity exists for the
-    same (model, provider, task). Covered receipts are NOT summed again, which
-    would double-count the native aggregate rows. Uncovered receipts (which can
-    carry per-attempt success/retry/duration) are summed as extra evidence.
+    A receipt is 'covered_by_native' ONLY when it carries an explicit native
+    session identity (session_id or native_session_id) that maps to EXACTLY ONE
+    native usage row matching its (model, provider, task). Matching only
+    (model, provider, task) is NOT sufficient: an attempt in a DIFFERENT session
+    cannot be proven covered by a native cumulative row. When more than one
+    native row matches, coverage is AMBIGUOUS (not proven).
+
+    Receipts without sufficient/unequivocal linkage are reported as
+    'unlinked/ambiguous' evidence (preserving failed/retried attempt detail) but
+    are NOT summed into cost/token totals, because we cannot prove they are not
+    already inside a native cumulative row -- summing them would risk
+    double-counting. Covered receipts are likewise never re-summed.
+
+    No native per-attempt breakdown is invented: native rows are cumulative, so
+    per-attempt success/retry/duration is only ever reported from receipts.
     """
-    native_ident = set()
+    # native linkage: session_id -> list of full composite identities
+    native_by_session: Dict[str, List[Tuple[str, ...]]] = {}
     for rec in records:
         if rec["kind"] != "usage":
             continue
-        native_ident.add((rec["identity"][1], rec["identity"][2],
-                          rec["identity"][5]))
-    seen: set[str] = set()
+        sid = str(rec.get("session_id") or "")
+        if not sid:
+            continue
+        ident = tuple(rec["identity"])
+        native_by_session.setdefault(sid, []).append(ident)
+
+    seen: set = set()
     unique: List[Dict[str, Any]] = []
     dup_ids = 0
-    uncovered: List[Dict[str, Any]] = []
     covered = 0
+    ambiguous = 0
+    unlinked: List[Dict[str, Any]] = []
     for rc in receipts:
         aid = rc.get("attempt_id")
         if aid is None:
             unique.append({**_pick(rc), "covered_by_native": False,
-                           "no_attempt_id": True})
+                           "linkage": "unlinked", "no_attempt_id": True})
+            unlinked.append(rc)
             continue
         if aid in seen:
             dup_ids += 1
             continue
         seen.add(aid)
-        ident = (rc.get("model"), rc.get("provider"), rc.get("task"))
-        is_covered = ident in native_ident
+        sid = str(rc.get("session_id") or rc.get("native_session_id") or "")
+        model = rc.get("model")
+        provider = rc.get("provider")
+        task = rc.get("task")
+        linkage = "unlinked"
+        is_covered = False
+        if sid and sid in native_by_session:
+            matches = [i for i in native_by_session[sid]
+                       if i[1] == model and i[2] == provider and i[5] == task]
+            if len(matches) == 1:
+                is_covered = True
+                linkage = "native"
+            elif len(matches) > 1:
+                linkage = "ambiguous"
+            # len(matches) == 0 -> stays unlinked
         if is_covered:
             covered += 1
+        elif linkage == "ambiguous":
+            ambiguous += 1
+            unlinked.append(rc)
         else:
-            uncovered.append(rc)
-        unique.append({**_pick(rc), "covered_by_native": is_covered})
+            unlinked.append(rc)
+        unique.append({**_pick(rc), "covered_by_native": is_covered,
+                       "linkage": linkage})
+
     out = {"attempts_total": len(unique), "unique_ids": len(seen),
            "duplicate_ids_dropped": dup_ids,
            "covered_by_native": covered,
-           "uncovered_extra": len(uncovered),
+           "ambiguous_linkage": ambiguous,
+           "unlinked_ambiguous": len(unlinked),
            "records": unique,
            "errors": []}
-    if uncovered:
-        s = {"attempts": 0, "input": 0.0, "output": 0.0,
-             "cache_read": 0.0, "cache_write": 0.0, "reasoning": 0.0,
-             "estimated_cost_usd": 0.0, "actual_cost_usd": 0.0}
-        for rc in uncovered:
+    # Unlinked/ambiguous receipts are evidence only; they are NOT summed into
+    # cost/token totals (cannot prove they are not already in a native row).
+    if unlinked:
+        s = {"attempts": 0, "success": 0, "retry": 0}
+        for rc in unlinked:
             s["attempts"] += 1
-            s["input"] += _f(rc.get("input_tokens"))
-            s["output"] += _f(rc.get("output_tokens"))
-            s["cache_read"] += _f(rc.get("cache_read_tokens"))
-            s["cache_write"] += _f(rc.get("cache_write_tokens"))
-            s["reasoning"] += _f(rc.get("reasoning_tokens"))
-            s["estimated_cost_usd"] += _f(rc.get("estimated_cost_usd"))
-            s["actual_cost_usd"] += _f(rc.get("actual_cost_usd"))
-        out["uncovered_totals"] = s
+            if rc.get("success"):
+                s["success"] += 1
+            if rc.get("retry"):
+                s["retry"] += 1
+        out["unlinked_evidence"] = s
     return out
 
 
@@ -539,7 +687,7 @@ def append_ledger(ledger_path: Path, snapshot: Dict[str, Any]) -> str:
         ledger.write_text("", encoding="utf-8")
     lines = [
         "\n",
-        "<!-- BeeZilla worker accounting snapshot (aragorn fallback attempt) -->",
+        "<!-- BeeZilla worker accounting snapshot -->",
         f"<!-- generated: {snapshot['generated_utc']} -->",
     ]
     agg = snapshot.get("result", {}).get("aggregates", {})
@@ -554,6 +702,10 @@ def append_ledger(ledger_path: Path, snapshot: Dict[str, Any]) -> str:
         lines.append(f"- reasoning: {a.get('reasoning')}")
         lines.append(f"- total_tokens: {a.get('total_tokens')}")
         lines.append(f"- actual_cost_usd (known): {a.get('actual_cost_usd')}")
+        lines.append(f"- known_actual_cost_usd (partial): "
+                     f"{a.get('known_actual_cost_usd')}")
+        lines.append(f"- actual rows known/unknown: {a.get('actual_rows_known')}"
+                     f" / {a.get('actual_rows_unknown')}")
         lines.append(f"- estimated_cost_usd (stored sum): "
                      f"{a.get('estimated_cost_usd')}")
         lines.append(f"- cost_unknown: {a.get('cost_unknown')}")
@@ -567,6 +719,13 @@ def append_ledger(ledger_path: Path, snapshot: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Report builders
 # ---------------------------------------------------------------------------
+
+def _fmt_usd(v: Optional[float]) -> str:
+    """Render a cost amount without crashing on null (unknown)."""
+    if v is None:
+        return "UNKNOWN"
+    return f"{v:.6f}"
+
 
 def build_json(result: Dict[str, Any]) -> Dict[str, Any]:
     agg = {}
@@ -606,16 +765,25 @@ def build_markdown(result: Dict[str, Any]) -> str:
               "## Buckets (role / lane)",
               "",
               "| Bucket | Rows | API calls | Input | Output | Cache-R | Cache-W | "
-              "Reasoning | Total tokens | Reported cost USD | Cost known |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+              "Reasoning | Total tokens | Stored estimate USD | Actual cost USD | "
+              "Cost known |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for key in sorted(agg):
         a = agg[key]
         lines.append(
             f"| {key[0]}/{key[1]} | {a['rows']} | {a['api_calls']:.0f} | "
             f"{a['input']:.0f} | {a['output']:.0f} | {a['cache_read']:.0f} | "
             f"{a['cache_write']:.0f} | {a['reasoning']:.0f} | "
-            f"{a['total_tokens']:.0f} | {a['actual_cost_usd']:.6f} | "
+            f"{a['total_tokens']:.0f} | {a['estimated_cost_usd']:.6f} | "
+            f"{_fmt_usd(a['actual_cost_usd'])} | "
             f"{'yes' if not a['cost_unknown'] else 'UNKNOWN'} |")
+        # honest partial coverage when the bucket is mixed known/unknown
+        if a["actual_rows_unknown"] and a["actual_rows_known"]:
+            lines.append(
+                f"> Partial known actual: "
+                f"{_fmt_usd(a['known_actual_cost_usd'])} "
+                f"({a['actual_rows_known']}/{a['rows']} rows measured); "
+                f"scoped actual total remains UNKNOWN.")
     cloud = 0.0
     b70 = 0.0
     for (role, lane), a in agg.items():
@@ -626,33 +794,40 @@ def build_markdown(result: Dict[str, Any]) -> str:
         elif lane == "cloud":
             cloud += a["total_tokens"]
     total_worker = cloud + b70
-    lines += ["",
-              "## Operational worker-token share preference (cloud vs local B70)",
-              "",
-              f"- approved-cloud worker tokens: {cloud:.0f}",
-              f"- local-B70 worker tokens: {b70:.0f}",
-              f"- cloud share of worker tokens: "
-              f"{100.0 * cloud / total_worker:.1f}%" if total_worker > 0
-              else "- NO worker tokens observed; share is not a measured 0%.",
-              ""]
+    lines.append("")
+    if total_worker > 0:
+        lines.append(
+            "## Operational worker-token share preference (cloud vs local B70)")
+        lines.append("")
+        lines.append(f"- approved-cloud worker tokens: {cloud:.0f}")
+        lines.append(f"- local-B70 worker tokens: {b70:.0f}")
+        lines.append(f"- cloud share of worker tokens: "
+                     f"{100.0 * cloud / total_worker:.1f}%")
+        lines.append("")
+    else:
+        lines.append("## Operational worker-token share preference")
+        lines.append("")
+        lines.append("- NO worker tokens observed; share is not a measured 0%.")
+        lines.append("")
     rc = result.get("receipts")
     if rc:
         lines += ["## Attempt receipts", "",
                   f"- total attempts: {rc.get('attempts_total')}",
                   f"- unique ids: {rc.get('unique_ids')}",
                   f"- duplicate ids dropped: {rc.get('duplicate_ids_dropped')}",
-                  f"- covered by native rows (not re-summed): "
-                  f"{rc.get('covered_by_native')}",
-                  f"- uncovered extra (summed): {rc.get('uncovered_extra')}", ""]
-        if rc.get("uncovered_totals"):
-            u = rc["uncovered_totals"]
-            lines += ["Uncovered attempt totals:",
-                      f"- attempts: {u['attempts']} input: {u['input']:.0f} "
-                      f"output: {u['output']:.0f} cache_r: {u['cache_read']:.0f} "
-                      f"cache_w: {u['cache_write']:.0f} "
-                      f"reasoning: {u['reasoning']:.0f}",
-                      f"- cost: est {u['estimated_cost_usd']:.6f} / "
-                      f"act {u['actual_cost_usd']:.6f}", ""]
+                  f"- covered by native rows (explicit session linkage, "
+                  f"not re-summed): {rc.get('covered_by_native')}",
+                  f"- ambiguous linkage (multiple matching native rows, "
+                  f"not summed): {rc.get('ambiguous_linkage')}",
+                  f"- unlinked/ambiguous (evidence only, not summed): "
+                  f"{rc.get('unlinked_ambiguous')}", ""]
+        if rc.get("unlinked_evidence"):
+            u = rc["unlinked_evidence"]
+            lines += ["Unlinked/ambiguous attempt evidence (NOT summed into "
+                      "cost/token totals; cannot prove they are not already in "
+                      "a native cumulative row):",
+                      f"- attempts: {u['attempts']} success: {u['success']} "
+                      f"retry: {u['retry']}", ""]
     if result.get("warnings"):
         lines += ["## Warnings", ""]
         lines += [f"- {w}" for w in result["warnings"]]
@@ -777,13 +952,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                   f"calls={a['api_calls']:.0f} "
                   f"total_tokens={a['total_tokens']:.0f} "
                   f"cost_known={bool(not a['cost_unknown'])} "
-                  f"reported_usd={a['actual_cost_usd']:.6f}")
+                  f"estimated_usd={a['estimated_cost_usd']:.6f} "
+                  f"actual_usd={_fmt_usd(a['actual_cost_usd'])}")
         if result["receipts"]:
             r = result["receipts"]
             print(f"receipts: total={r['attempts_total']} "
                   f"dup_dropped={r['duplicate_ids_dropped']} "
                   f"covered={r['covered_by_native']} "
-                  f"uncovered={r['uncovered_extra']}")
+                  f"ambiguous={r['ambiguous_linkage']} "
+                  f"unlinked_ambiguous={r['unlinked_ambiguous']}")
 
     if args.ledger:
         append_ledger(Path(args.ledger), snapshot)

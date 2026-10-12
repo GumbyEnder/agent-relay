@@ -60,14 +60,23 @@ records. The composite identity is:
 
 ## Cost provenance
 
-- Prefer explicit measured `actual_cost_usd` when present; otherwise preserve
-  the STORED `estimated_cost_usd`. Actual and estimate are never added for the
-  same usage.
-- A default `actual_cost_usd == 0.0` with `cost_status`/`cost_source` unknown or
-  null is reported as **UNKNOWN cost**, not measured free work.
+- A measured `actual_cost_usd` is reported ONLY when it is explicitly supplied
+  with known `cost_status` and `cost_source` provenance. A default
+  `actual_cost_usd == 0.0` carried under estimated/unknown/null status is
+  **UNKNOWN cost**, never a measured free charge.
+- An explicit measured `0.0` (a known real zero charge) is distinct from a
+  default `0.0`: the former is a known actual, the latter is unknown.
+- Stored `estimated_cost_usd` is always kept in its own field, separate from
+  any actual. Actual and estimate are never added together for one row, and an
+  estimate is never promoted to `actual_cost_usd`.
+- The authoritative scoped `actual_cost_usd` is `null` whenever ANY row in the
+  bucket lacks a measured actual (the total is incomplete/unknown). A mixed
+  bucket additionally exposes `known_actual_cost_usd` with row-coverage counts
+  so the known slice is visible without pretending the total is fully known.
 - A `title_generation` row with a nonzero stored `estimated_cost_usd` and null
-  `cost_status`/`cost_source` is preserved as a legacy/unknown estimate, not
-  re-priced at today's rates.
+  `cost_status`/`cost_source` is preserved as a legacy/unknown estimate (its
+  numeric value is kept, provenance is not upgraded, not re-priced at today's
+  rates).
 
 ## Role / lane classification
 
@@ -91,11 +100,16 @@ Optional JSON array or JSONL of attempt receipts with fields such as
 `estimated_cost_usd`, `cost_provenance`.
 
 - Receipts are deduped by `attempt_id`.
-- A receipt whose `(model, provider, task)` matches a native usage identity is
-  marked `covered_by_native` and is NOT summed again (avoids double counting
-  the native cumulative rows).
-- Uncovered receipts (which can carry per-attempt success/retry/duration) are
-  summed as extra attempt-level evidence.
+- A receipt is marked `covered_by_native` ONLY when it carries an explicit
+  native session identity (`session_id` or `native_session_id`) that maps to
+  EXACTLY ONE native usage row matching its `(model, provider, task)`.
+  Matching `(model, provider, task)` alone is NOT sufficient — an attempt in a
+  DIFFERENT session cannot be proven covered by a native cumulative row.
+- When more than one native row matches, coverage is `ambiguous` (not proven).
+- Unlinked/ambiguous receipts (which carry per-attempt success/retry/duration)
+  are preserved as **evidence only** and are NOT summed into cost/token totals,
+  because we cannot prove they are not already inside a native cumulative row
+  (summing would risk double counting).
 
 ## Sanitization
 
@@ -114,11 +128,14 @@ cd scripts && python3 -m unittest test_beezilla_token_tally -v
 All fixtures in `test_beezilla_token_tally.py` are SYNTHETIC test inputs, never
 runtime usage. They cover: the five exact cloud IDs, local B70, legacy GLM,
 coordinator root vs worker child lineage, unknown role, missing
-profile/DB/table/columns/counts/costs, mirror/duplicate dedup, divergent
-duplicate conflict, receipt dedup + native coverage, historical cost provenance,
-reasoning/cache accounting, no double-count of native+receipt, secret-bearing
-metadata sanitization, read-only sources, and append preserving an existing
-ledger.
+profile/DB/table/columns/counts/costs, mirror/duplicate dedup, the real
+estimate-only three-row pattern (actual null + stored estimate preserved),
+mixed known-actual + estimated rows (partial known coverage), measured actual
+zero versus default zero, separate-session and ambiguous receipt linkage,
+receipt dedup + native coverage, historical cost provenance, reasoning/cache
+accounting, no double-count of native+receipt, secret-bearing metadata
+sanitization, null-safe JSON/markdown formatting, read-only sources, and append
+preserving an existing ledger.
 
 ## Known limitations
 
