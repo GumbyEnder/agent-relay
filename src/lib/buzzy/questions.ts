@@ -93,6 +93,8 @@ export interface BuzzyStatement {
   id: string;
   label: string;
   hint: string;
+  /** The concrete question to ask the client to surface this statement. */
+  prompt: string;
 }
 
 export const BUZZY_STATEMENTS: BuzzyStatement[] = [
@@ -100,21 +102,25 @@ export const BUZZY_STATEMENTS: BuzzyStatement[] = [
     id: "challenge",
     label: "The Challenge",
     hint: "What's wrong — one plain sentence.",
+    prompt: "What's the situation or problem you need solved, in one plain sentence?",
   },
   {
     id: "difficulties",
     label: "Difficulties",
     hint: "What makes it hard.",
+    prompt: "What's making this hard or risky right now?",
   },
   {
     id: "who_involved",
     label: "Who is involved",
     hint: "People or parties affected.",
+    prompt: "Who's involved — who does this affect, besides you?",
   },
   {
     id: "end_goal",
     label: "What is the end goal",
     hint: "The outcome you want.",
+    prompt: "What does 'done right' look like — what outcome are you after?",
   },
 ];
 

@@ -158,8 +158,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const guidance = nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"`
     : nextS
-      ? `\n\nNext, capture the Decisions Made statement "${nextS.label}" (${nextS.hint}).`
-      : "\n\nAll required details have been gathered. Generate a draft summary for the user to review.";
+      ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.`
+      : "\n\nAll required details have been gathered. Generate the full draft now.";
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
