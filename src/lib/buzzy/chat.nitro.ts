@@ -18,7 +18,7 @@
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
  */
 
-import { defineEventHandler, getMethod, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, setResponseStatus, getQuery } from "h3";
 import { chatLoop } from "./server";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
@@ -61,13 +61,11 @@ export default defineEventHandler(async (event) => {
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
   // Accepts jobId (legacy) or sessionId (new) as an alternative.
   if (method === "GET" && path === "/api/buzzy/transcript") {
-    // Read the query string from the request URL — `event.req` is a Web Request
-    // (see agent-api.nitro.ts) whose `.url` carries the full `?…`. `event.path`
-    // alone has no query, which silently dropped jobId/sessionId here.
-    const url = new URL(event.req?.url ?? "/api/buzzy/transcript", "http://x");
-    const jobIdParam = url.searchParams.get("jobId");
+    // Read the query via h3 v2 `getQuery` — `event.path` carries no `?string`.
+    const query = getQuery(event);
+    const jobIdParam = typeof query.jobId === "string" ? query.jobId : null;
     const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
-    const sessionIdParam = url.searchParams.get("sessionId");
+    const sessionIdParam = typeof query.sessionId === "string" ? query.sessionId : null;
     const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
@@ -76,7 +74,7 @@ export default defineEventHandler(async (event) => {
     }
 
     if (!sessionId && !jobId) {
-      return { messages: [], debug: { path, reqUrl: (event as any).req?.url, jobId, sessionId } };
+      return { messages: [], v: 3 };
     }
 
     const sql = await getSql();
