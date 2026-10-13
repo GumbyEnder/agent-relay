@@ -61,42 +61,43 @@ export default defineEventHandler(async (event) => {
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
   // Accepts jobId (legacy) or sessionId (new) as an alternative.
   if (method === "GET" && path === "/api/buzzy/transcript") {
-    // Read the query via h3 v2 `getQuery` — `event.path` carries no `?string`.
-    const query = getQuery(event);
-    const jobIdParam = typeof query.jobId === "string" ? query.jobId : null;
-    const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
-    const sessionIdParam = typeof query.sessionId === "string" ? query.sessionId : null;
-    const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
-    const user = await getSessionUserFromHeaders(headersFromEvent(event));
-    if (!user) {
-      setResponseStatus(event, 401);
-      return { error: "Sign in required", code: "signed_out" };
+    try {
+      const query = getQuery(event);
+      const jobIdParam = typeof query.jobId === "string" ? query.jobId : null;
+      const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
+      const sessionIdParam = typeof query.sessionId === "string" ? query.sessionId : null;
+      const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
+      const user = await getSessionUserFromHeaders(headersFromEvent(event));
+      if (!user) {
+        setResponseStatus(event, 401);
+        return { error: "Sign in required", code: "signed_out" };
+      }
+      if (!sessionId && !jobId) {
+        return { messages: [] };
+      }
+      const sql = await getSql();
+      const rows = sessionId
+        ? await sql`
+            SELECT role, content, created_at FROM buzzy_chat_messages
+            WHERE user_id = ${user.id} AND session_id = ${sessionId}
+            ORDER BY created_at ASC LIMIT 50
+          `
+        : await sql`
+            SELECT job_id, role, content, created_at FROM buzzy_chat_messages
+            WHERE user_id = ${user.id} AND job_id = ${jobId}
+            ORDER BY created_at ASC LIMIT 50
+          `;
+      return {
+        messages: rows.map((r) => ({
+          jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
+          role: r.role,
+          content: r.content,
+          createdAt: r.created_at,
+        })),
+      };
+    } catch (err) {
+      return { error: "transcript_err", msg: err instanceof Error ? err.message : String(err) };
     }
-
-    if (!sessionId && !jobId) {
-      return { messages: [], v: 3 };
-    }
-
-    const sql = await getSql();
-    const rows = sessionId
-      ? await sql`
-          SELECT role, content, created_at FROM buzzy_chat_messages
-          WHERE user_id = ${user.id} AND session_id = ${sessionId}
-          ORDER BY created_at ASC LIMIT 50
-        `
-      : await sql`
-          SELECT job_id, role, content, created_at FROM buzzy_chat_messages
-          WHERE user_id = ${user.id} AND job_id = ${jobId}
-          ORDER BY created_at ASC LIMIT 50
-        `;
-    return {
-      messages: rows.map((r) => ({
-        jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
-        role: r.role,
-        content: r.content,
-        createdAt: r.created_at,
-      })),
-    };
   }
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
