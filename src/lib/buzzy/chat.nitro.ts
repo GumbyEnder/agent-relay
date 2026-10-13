@@ -18,7 +18,7 @@
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
  */
 
-import { defineEventHandler, getMethod, setResponseStatus, getQuery } from "h3";
+import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
@@ -61,13 +61,13 @@ export default defineEventHandler(async (event) => {
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
   // Accepts jobId (legacy) or sessionId (new) as an alternative.
   if (method === "GET" && path === "/api/buzzy/transcript") {
-    // Read the query string directly — `event.path` carries no `?…`, so a
-    // `new URL(event.path)` parse silently dropped jobId/sessionId (chat
-    // history never loaded from a job deep-link).
-    const q = getQuery(event);
-    const jobIdParam = typeof q.jobId === "string" ? q.jobId : null;
+    // Read the query string from the raw request URL — `event.path` carries no
+    // `?…`, so parsing it silently dropped jobId/sessionId (chat history never
+    // loaded from a job deep-link).
+    const url = new URL(event.node?.req?.url || "/api/buzzy/transcript", "http://x");
+    const jobIdParam = url.searchParams.get("jobId");
     const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
-    const sessionIdParam = typeof q.sessionId === "string" ? q.sessionId : null;
+    const sessionIdParam = url.searchParams.get("sessionId");
     const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
