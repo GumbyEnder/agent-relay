@@ -124,5 +124,7 @@ export const STATEMENT_IDS = BUZZY_STATEMENTS.map((s) => s.id);
 /** All slot ids in order. */
 export const SLOT_IDS = [...BUZZY_QUESTIONS.map((q) => q.id), ...STATEMENT_IDS];
 
-/** Required slot ids (all of them for Phase 1). */
-export const REQUIRED_SLOTS = SLOT_IDS;
+/** Required slot ids — the discovery statements every job must capture
+ *  through conversation (challenge, difficulties, who, end goal). The
+ *  Decisions Made box starts empty and fills as the agent extracts each. */
+export const REQUIRED_SLOTS = STATEMENT_IDS;

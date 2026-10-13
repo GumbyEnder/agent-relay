@@ -225,71 +225,76 @@
         .catch(function () {});
     })();
   </script>
+  <style>
+    .expert-card { cursor: pointer; transition: border-color 0.12s, transform 0.12s; }
+    .expert-card:hover, .expert-card:focus-visible { border-color: var(--bz-yellow); transform: translateY(-1px); outline: none; }
+    .view-hint { color: var(--bz-yellow); font-size: 0.78rem; font-weight: 600; margin-top: auto; }
+    .back-link { background: none; border: none; color: var(--bz-yellow); cursor: pointer; font-size: 0.9rem; font-weight: 600; padding: 0; margin: 0 0 1rem; }
+    .back-link:hover { text-decoration: underline; }
+    .expert-detail { background: var(--bz-panel); border: 1px solid #2A2A2A; border-top: 3px solid var(--bz-yellow); border-radius: 6px; padding: 1.75rem; max-width: 720px; }
+    .expert-detail h1 { margin: 0 0 0.25rem; font-size: 1.5rem; color: var(--bz-yellow); }
+    .expert-detail .detail-blurb { color: #C8C8C8; margin: 0 0 1.5rem; max-width: 60ch; }
+    .expert-detail h2 { font-size: 1rem; margin: 0 0 0.75rem; color: #E8E8E8; }
+    .skill-library { margin: 0 0 1.5rem; padding-left: 1.2rem; color: #D8D8D8; }
+    .skill-library li { margin: 0.45rem 0; font-size: 0.95rem; }
+    .disclaimer { font-size: 0.82rem; color: #777; border-top: 1px solid #222; padding-top: 1rem; margin: 0; }
+  </style>
   <main>
-    <h1>Experts</h1>
-    <p class="muted">Pick an expert area and BeeZilla will tailor the conversation.</p>
-    <div class="experts-grid">
-      <div class="expert-card">
-        <h2>Legal</h2>
-        <p>Letters, agreements, notices — not legal advice.</p>
-        <a href="/buzzy/talk?expert=legal"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Medical</h2>
-        <p>Insurance questions, billing disputes, patient rights.</p>
-        <a href="/buzzy/talk?expert=medical"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Software</h2>
-        <p>Debugging, architecture, code reviews, best practices.</p>
-        <a href="/buzzy/talk?expert=software"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Technology</h2>
-        <p>Hardware, infrastructure, deployment, ops.</p>
-        <a href="/buzzy/talk?expert=technology"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Accounting</h2>
-        <p>Budgets, invoices, tax questions, financial planning.</p>
-        <a href="/buzzy/talk?expert=accounting"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Home &amp; Contractors</h2>
-        <p>Repairs, renovations, hiring help, comparing quotes, permits.</p>
-        <a href="/buzzy/talk?expert=home"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Career &amp; Work</h2>
-        <p>Resumes, cover letters, job disputes, workplace communication.</p>
-        <a href="/buzzy/talk?expert=career"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Insurance</h2>
-        <p>Claims, denials, appeal letters, understanding your coverage.</p>
-        <a href="/buzzy/talk?expert=insurance"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Government &amp; Forms</h2>
-        <p>DMV, benefits, permits, citizenship paperwork, complaints.</p>
-        <a href="/buzzy/talk?expert=government"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Education</h2>
-        <p>School disputes, IEP/504 plans, applications, financial aid.</p>
-        <a href="/buzzy/talk?expert=education"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Landlord &amp; Tenant</h2>
-        <p>Leases, deposits, repairs, eviction questions, notices.</p>
-        <a href="/buzzy/talk?expert=landlord"><button>Chat with BeeZilla</button></a>
-      </div>
-      <div class="expert-card">
-        <h2>Travel</h2>
-        <p>Refunds, cancellations, disputes with airlines and hotels.</p>
-        <a href="/buzzy/talk?expert=travel"><button>Chat with BeeZilla</button></a>
-      </div>
-    </div>
+    <div id="expertsRoot"></div>
   </main>
+  <script>
+    (function () {
+      var EXPERTS = [
+        { id: "legal", name: "Legal", blurb: "Letters, agreements, notices — not legal advice.", skills: ["Demand letters and payment reminders", "Simple contracts and contractor agreements", "Landlord notices and roommate agreements", "NDAs and release forms", "Dispute and appeal letters", "Plain-English summaries of legal documents"] },
+        { id: "medical", name: "Medical", blurb: "Insurance questions, billing disputes, patient rights.", skills: ["Insurance denial and appeal letters", "Explanation-of-benefits walkthroughs", "Medical bill review and negotiation scripts", "Records request letters", "Patient-rights explainers", "Understanding your coverage"] },
+        { id: "software", name: "Software", blurb: "Debugging, architecture, code reviews, best practices.", skills: ["Debugging and root-cause writeups", "Architecture and design reviews", "Code review checklists", "Refactoring plans", "Best-practice and security guidance", "Readable technical docs"] },
+        { id: "technology", name: "Technology", blurb: "Hardware, infrastructure, deployment, ops.", skills: ["Infrastructure and hosting explainers", "Deployment runbooks", "Vendor and tool selection", "Migration plans", "Ops and maintenance checklists", "Plain-language tech specs for non-experts"] },
+        { id: "accounting", name: "Accounting", blurb: "Budgets, invoices, tax questions, financial planning.", skills: ["Invoice and late-fee policy templates", "Monthly budget and cash-flow forecasts", "Rate cards and pricing guidance", "Aging-report and collection templates", "Tax-season prep checklists", "Financial planning explainers"] },
+        { id: "home", name: "Home & Contractors", blurb: "Repairs, renovations, hiring help, comparing quotes, permits.", skills: ["Scope-of-work documents for quotes", "Quote comparison sheets", "Contractor vetting checklists", "Permit and licensing guidance", "Renovation planning", "Hiring and handover documents"] },
+        { id: "career", name: "Career & Work", blurb: "Resumes, cover letters, job disputes, workplace communication.", skills: ["Resumes and cover letters", "Negotiation and counter-offer scripts", "Workplace dispute letters", "Performance-review preparation", "Job-search plans", "Professional email templates"] },
+        { id: "insurance", name: "Insurance", blurb: "Claims, denials, appeal letters, understanding your coverage.", skills: ["Claim and denial appeal letters", "Policy explainers", "Coverage comparison", "Damage documentation checklists", "Escalation letters", "Understanding what you're covered for"] },
+        { id: "government", name: "Government & Forms", blurb: "DMV, benefits, permits, citizenship paperwork, complaints.", skills: ["Form-completion walkthroughs", "Permit and license guidance", "Benefits application help", "Complaint letters", "Citizenship and immigration paperwork explainers", "Deadline and doc checklists"] },
+        { id: "education", name: "Education", blurb: "School disputes, IEP/504 plans, applications, financial aid.", skills: ["IEP and 504 request letters", "School dispute correspondence", "Application and essay guidance", "Financial-aid explainers", "Advocacy talking points", "Meeting-preparation checklists"] },
+        { id: "landlord", name: "Landlord & Tenant", blurb: "Leases, deposits, repairs, eviction questions, notices.", skills: ["Lease and room-rental agreements", "Security-deposit returns and letters", "Repair request notices", "Eviction and notice guidance", "Move-in/move-out checklists", "Tenant rights explainers"] },
+        { id: "travel", name: "Travel", blurb: "Refunds, cancellations, disputes with airlines and hotels.", skills: ["Refund and cancellation requests", "Airline and hotel dispute letters", "Chargeback documentation", "Itinerary-change planning", "Rights explainers for travelers", "Escalation templates"] }
+      ];
+      var root = document.getElementById("expertsRoot");
+      function esc(s) { return String(s).replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+      function renderList() {
+        var cards = EXPERTS.map(function (e) {
+          return '<div class="expert-card" data-expert="' + e.id + '" role="button" tabindex="0">' +
+            '<h2>' + esc(e.name) + '</h2>' +
+            '<p>' + esc(e.blurb) + '</p>' +
+            '<span class="view-hint">View skills &rarr;</span>' +
+            '</div>';
+        }).join("");
+        root.innerHTML =
+          '<h1>Experts</h1>' +
+          '<p class="muted">Pick an area to see what BeeZilla excels at there.</p>' +
+          '<div class="experts-grid">' + cards + '</div>';
+        root.querySelectorAll(".expert-card").forEach(function (c) {
+          function open() { renderDetail(c.getAttribute("data-expert")); }
+          c.addEventListener("click", open);
+          c.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } });
+        });
+      }
+      function renderDetail(id) {
+        var e = EXPERTS.find(function (x) { return x.id === id; });
+        if (!e) return;
+        var skills = e.skills.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
+        root.innerHTML =
+          '<button type="button" class="back-link" id="backExperts">&larr; All experts</button>' +
+          '<div class="expert-detail">' +
+            '<h1>' + esc(e.name) + '</h1>' +
+            '<p class="detail-blurb">' + esc(e.blurb) + '</p>' +
+            '<h2>What BeeZilla excels at here</h2>' +
+            '<ul class="skill-library">' + skills + '</ul>' +
+            '<p class="disclaimer">AI assistant with curated domain knowledge &mdash; not a licensed professional.</p>' +
+          '</div>';
+        document.getElementById("backExperts").addEventListener("click", renderList);
+      }
+      renderList();
+    })();
+  </script>
 </body>
 </html>

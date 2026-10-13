@@ -1424,14 +1424,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // ── Chat-first screen (P1) ────────────────────────────────────
     const SLOT_LABELS = {
-      what_happened: "What happened",
-      rough_size: "Rough size",
-      material_supplier: "Material supplier",
-      budget_range: "Budget range",
-      timing: "Timing",
-      done_right_check: "Done right means",
-      quote_count: "Quote count",
-      exclusions: "Exclusions",
       challenge: "The Challenge",
       difficulties: "Difficulties",
       who_involved: "Who is involved",
@@ -1529,40 +1521,28 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function renderSlotChecklist() {
       const container = document.getElementById("slotItems");
-      const ids = Object.keys(SLOT_LABELS);
+      const ids = Object.keys(SLOT_LABELS).filter(function (id) { return !!chatState.slots[id]; });
       const html = ids.map((id) => {
         const value = chatState.slots[id];
-        const filled = !!value;
         const skipped = value === "skipped";
         const escapedLabel = SLOT_LABELS[id].replace(/</g, "&lt;");
-        if (filled) {
-          if (skipped) {
-            return '<div class="slot-item filled skipped" data-slot="' + id + '">' +
-              '<span class="slot-check">–</span>' +
-              '<span class="slot-value-headline">Skipped</span>' +
-              '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
-              '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
-              '</div>';
-          }
-          const escapedValue = String(value).replace(/</g, "&lt;");
-          return '<div class="slot-item filled" data-slot="' + id + '">' +
-            '<span class="slot-check">✓</span>' +
-            '<span class="slot-value-headline">' + escapedValue + '</span>' +
+        if (skipped) {
+          return '<div class="slot-item filled skipped" data-slot="' + id + '">' +
+            '<span class="slot-check">–</span>' +
+            '<span class="slot-value-headline">Skipped</span>' +
             '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
-            '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
             '</div>';
         }
-        const skipBtn = SKIPPABLE_SLOTS.indexOf(id) !== -1
-          ? '<span class="slot-skip" data-slot="' + id + '" title="Skip this one">Skip</span>'
-          : "";
-        return '<div class="slot-item">' +
-          '<span class="slot-check"></span>' +
+        const escapedValue = String(value).replace(/</g, "&lt;");
+        return '<div class="slot-item filled" data-slot="' + id + '">' +
+          '<span class="slot-check">✓</span>' +
+          '<span class="slot-value-headline">' + escapedValue + '</span>' +
           '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
-          '<span class="slot-still-open">still open</span>' +
-          skipBtn +
+          '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
           '</div>';
       }).join("");
-      container.innerHTML = html;
+      container.innerHTML = html ||
+        '<div style="color:#777;font-size:0.85rem;padding:0.5rem 0">No decisions yet — these fill in as we talk.</div>';
       // Wire up edit icons
       container.querySelectorAll(".slot-edit-icon").forEach(function (icon) {
         icon.addEventListener("click", function () {
