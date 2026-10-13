@@ -1764,6 +1764,20 @@ export const durableBoard = {
         }
         projectId = resolved;
       }
+      // Lazy sweep: auto-release claims with no heartbeat for >6h on running
+      // missions (configurable via STALE_CLAIM_RELEASE_HOURS; 0 disables).
+      // Prevents the dead-key dead-end that stranded missions for 14 months.
+      const staleHours = Number(process.env.STALE_CLAIM_RELEASE_HOURS ?? "6");
+      if (staleHours > 0) {
+        const cutoff = new Date(Date.now() - staleHours * 3600_000);
+        await sql`
+          update ar_missions
+          set claimed_by = null, claimed_at = null, updated_at = ${Date.now()}
+          where column_id = 'running'
+            and claimed_by is not null
+            and (last_heartbeat is null or last_heartbeat < ${cutoff})
+        `;
+      }
       const board = await loadBoard(sql, projectId ?? null);
       return engine.pollMissions(board, { ...opts, projectId });
     }),
@@ -2335,7 +2349,22 @@ export const durableBoard = {
         order by at asc
       `;
       const history = histRows.map((r) => rowHistory(r as Record<string, unknown>));
-      return renderMissionJournalMarkdown(mission, history);
+      const commentRows = await sql`
+        select e.at, e.message, a.name as agent_name
+        from ar_events e
+        left join ar_agents a on a.id = e.agent_id
+        where e.mission_id = ${missionId} and e.kind = 'comment'
+        order by e.at asc
+      `;
+      const comments = commentRows.map((r) => {
+        const x = r as Record<string, unknown>;
+        return {
+          at: Number(x.at),
+          author: String(x.agent_name ?? "system"),
+          text: String(x.message ?? "").replace(/^[^·]*·\s*/, ""),
+        };
+      });
+      return renderMissionJournalMarkdown(mission, history, comments);
     }),
 
   listApiKeys: (projectId: string) =>

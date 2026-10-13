@@ -68,15 +68,32 @@ const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
 // (mission usage.raw chains) inflated the board snapshot to 204 MB and broke
 // every browser consumer. Compact JSON in production.
 const PRETTY_JSON = process.env.NODE_ENV !== "production";
-function json(data: unknown, status = 200): Response {
+// CORS: wildcard default; set ALLOWED_ORIGINS="https://a.com,https://b.com" to
+// tighten. Non-matching origins get no access-control-allow-origin header (the
+// browser blocks the read). Token-authed only — session cookies are never
+// honored cross-origin regardless of this list.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+function corsOrigin(requestOrigin: string | null): string {
+  if (!ALLOWED_ORIGINS.length || !requestOrigin) return "*";
+  return ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : "null";
+}
+function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    "access-control-allow-origin": corsOrigin(origin),
+    "access-control-allow-headers": "content-type, authorization, x-agent-key",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  };
+}
+function json(data: unknown, status = 200, origin: string | null = null): Response {
   return new Response(PRETTY_JSON ? JSON.stringify(data, null, 2) : JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-      "access-control-allow-headers": "content-type, authorization, x-agent-key",
-      "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+      ...corsHeaders(origin),
     },
   });
 }
@@ -670,11 +687,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "access-control-allow-origin": "*",
-        "access-control-allow-headers": "content-type, authorization, x-agent-key",
-        "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
-      },
+      headers: corsHeaders(req.headers.get("origin")),
     });
   }
 

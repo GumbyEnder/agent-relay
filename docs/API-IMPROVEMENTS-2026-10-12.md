@@ -60,3 +60,10 @@ OPTIONS preflight → 204 with `access-control-allow-origin: *`, `allow-headers:
 2. **CI spec-sync check** — assert `openapi.json` paths match routes on every PR.
 3. **Configurable `ALLOWED_ORIGINS`** — tighten from `*` when third-party browser clients appear.
 4. **Auto-release stale claims** — complement the manual force-release: claims with no heartbeat for >N days release automatically (configurable).
+
+## Follow-up round (same day) — all four shipped
+
+1. **Comments in the journal** — `journalMarkdown` pulls `kind='comment'` events (joined to agent names) and renders a `## Comments` section: `- **<utc> · <author>:** <text>` below the timeline. The journal — UI panel, journal.md, API — is now the comment thread surface.
+2. **Spec-sync check** — `scripts/test-openapi-sync.mjs` (`npm run test:openapi-sync`): extracts all 16 spec paths, matches static routes by literal and verb routes by dispatch (`verb === "<verb>"`), exits 1 on mismatch. Verified: 16/16 pass.
+3. **Configurable CORS** — `ALLOWED_ORIGINS` env (comma-separated). Wildcard default preserved; when set, non-matching origins get no `allow-origin` header. Authed API responses + OPTIONS now honor it; public docs surfaces stay open.
+4. **Auto-release stale claims** — lazy sweep on every poll: running missions with no heartbeat for >6h (`STALE_CLAIM_RELEASE_HOURS`, 0 disables) have their claim cleared. Complements manual force-release; no more dead-key dead-ends even if nobody notices.

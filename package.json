@@ -47,7 +47,8 @@
     "test:bz-f001-profile": "npx tsx scripts/test-bz-f001-profile.ts",
     "tui": "npm --prefix apps/tui run dev",
     "tui:status": "npm --prefix apps/tui run status",
-    "tui:build": "npm --prefix apps/tui run build"
+    "tui:build": "npm --prefix apps/tui run build",
+    "test:openapi-sync": "node scripts/test-openapi-sync.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
