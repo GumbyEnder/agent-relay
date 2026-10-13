@@ -18,7 +18,7 @@
 
 import { chatCompletion, resolveModel } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, REQUIRED_SLOTS } from "./questions";
+import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
@@ -72,6 +72,46 @@ function stripSlotMarkers(text: string): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+// ── Discovery extraction (structural, model-independent) ────────────────
+// The reply model is unreliable at emitting [slot: …] markers inline, so the
+// Decisions Made box is filled by a dedicated extraction call that returns
+// JSON. Decoupled from the reply turn; a failed parse degrades to nothing
+// rather than inventing facts.
+const EXTRACT_SYS = `Extract these four facts from the user's message, using their own words. Respond with ONLY a JSON object (no prose, no markdown fences):
+"challenge"    = the core problem (what's wrong),
+"difficulties" = what makes it hard or risky,
+"who_involved" = who is affected,
+"end_goal"     = the outcome they want.
+Use null for any fact the message does not state. Never invent a value.
+Example: {"challenge":"client owes $4200, 90 days late","difficulties":null,"who_involved":"the client and my business","end_goal":"get paid via a final demand letter"}`;
+
+async function extractDecisions(
+  userMessage: string,
+  model?: string,
+): Promise<Record<string, string>> {
+  try {
+    const raw = await chatCompletion(
+      [
+        { role: "system", content: EXTRACT_SYS },
+        { role: "user", content: userMessage.slice(0, 3000) },
+      ],
+      { model, temperature: 0.2, maxTokens: 300 },
+    );
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    const obj = JSON.parse(cleaned) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const id of STATEMENT_IDS) {
+      const v = obj[id];
+      if (typeof v === "string" && v.trim() && v.trim() !== "null") {
+        out[id] = v.trim().slice(0, 200);
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 // ── Main chat loop ─────────────────────────────────────────────────────
@@ -139,6 +179,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const facts = await memory.get_facts();
     const fact = facts.find(f => f.key === slotId);
     if (fact) slotValues[slotId] = fact.value;
+  }
+
+  // ── Extract this turn's newly-revealed decisions (fills the box) ────
+  // Structural, separate from the reply turn: a dedicated JSON extraction
+  // populates the Decisions Made box whether or not the reply model emits
+  // markers. New extracts are persisted so later turns see them as answered.
+  const newlyExtracted = await extractDecisions(message, resolvedModel);
+  for (const [slotId, val] of Object.entries(newlyExtracted)) {
+    if (!slotValues[slotId]) {
+      slotValues[slotId] = val;
+      await memory.remember(slotId, val);
+    }
   }
 
   const filledCount = REQUIRED_SLOTS.filter(id => slotValues[id]).length;
