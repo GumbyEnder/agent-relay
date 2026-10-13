@@ -61,10 +61,10 @@ export default defineEventHandler(async (event) => {
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
   // Accepts jobId (legacy) or sessionId (new) as an alternative.
   if (method === "GET" && path === "/api/buzzy/transcript") {
-    // Read the query string from the raw request URL — `event.path` carries no
-    // `?…`, so parsing it silently dropped jobId/sessionId (chat history never
-    // loaded from a job deep-link).
-    const url = new URL(event.node?.req?.url || "/api/buzzy/transcript", "http://x");
+    // Read the query string from the request URL — `event.req` is a Web Request
+    // (see agent-api.nitro.ts) whose `.url` carries the full `?…`. `event.path`
+    // alone has no query, which silently dropped jobId/sessionId here.
+    const url = new URL(event.req?.url ?? "/api/buzzy/transcript", "http://x");
     const jobIdParam = url.searchParams.get("jobId");
     const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
     const sessionIdParam = url.searchParams.get("sessionId");
