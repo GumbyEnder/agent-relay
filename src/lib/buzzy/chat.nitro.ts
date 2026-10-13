@@ -26,6 +26,18 @@ import { getSql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 
+/** Parse JSON safely; return a fallback object on malformed input. */
+function safeParseJson(raw: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function headersFromEvent(event: any): Headers {
   const rawHeaders = event.node?.req?.headers ?? event.req?.headers;
@@ -40,9 +52,9 @@ export default defineEventHandler(async (event) => {
   const method = getMethod(event);
   const path = event.path ?? "";
 
-  // ── GET /api/buzzy/models — open catalog ─────────────────────────────
+  // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──
   if (method === "GET" && path === "/api/buzzy/models") {
-    const models = getModels();
+    const models = getModels().map((m) => ({ label: m.label, key: m.label }));
     return { models };
   }
 
@@ -212,6 +224,72 @@ export default defineEventHandler(async (event) => {
     return { reused, skipped };
   }
 
+  // ── GET /api/buzzy/jobs — list the user's durable jobs ──────────────
+  if (method === "GET" && path === "/api/buzzy/jobs") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, template, title, status, data, created_at, updated_at
+      FROM buzzy_jobs
+      WHERE user_id = ${user.id}
+      ORDER BY updated_at DESC
+      LIMIT 500
+    `;
+    return {
+      jobs: rows.map((r) => ({
+        id: r.id,
+        template: r.template,
+        title: r.title,
+        status: r.status,
+        data: typeof r.data === "string" ? safeParseJson(r.data) : r.data,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      })),
+    };
+  }
+
+  // ── POST /api/buzzy/jobs — upsert a job (durable persistence) ───────
+  if (method === "POST" && path === "/api/buzzy/jobs") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const id = typeof body.id === "string" && body.id ? body.id.slice(0, 120) : "";
+    if (!id) {
+      setResponseStatus(event, 400);
+      return { error: "id is required", code: "bad_request" };
+    }
+    const template = typeof body.template === "string" ? body.template.slice(0, 64) : null;
+    const title = typeof body.title === "string" ? body.title.slice(0, 200) : null;
+    const status = typeof body.status === "string" ? body.status.slice(0, 64) : null;
+    const data = body.data && typeof body.data === "object" ? body.data : {};
+    const dataJson = JSON.stringify(data);
+    const sql = await getSql();
+    await sql`
+      INSERT INTO buzzy_jobs (id, user_id, template, title, status, data, updated_at)
+      VALUES (${id}, ${user.id}, ${template}, ${title}, ${status}, ${dataJson}::jsonb, now())
+      ON CONFLICT (id) DO UPDATE SET
+        template = EXCLUDED.template,
+        title = EXCLUDED.title,
+        status = EXCLUDED.status,
+        data = EXCLUDED.data,
+        updated_at = now()
+    `;
+    return { ok: true, id };
+  }
+
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
   if (method === "GET" && path === "/api/buzzy/sessions") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
@@ -256,11 +334,15 @@ export default defineEventHandler(async (event) => {
       }
     } catch { /* empty body ok */ }
     const jobId = typeof body.jobId === "string" && body.jobId ? body.jobId : null;
+    // Honor a requested title; fall back to the DB default only when none given.
+    const title = typeof body.title === "string" && body.title.trim()
+      ? body.title.trim().slice(0, 120)
+      : "New session";
     const id = `sess_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     const sql = await getSql();
     const rows = await sql`
-      INSERT INTO buzzy_sessions (id, user_id, job_id)
-      VALUES (${id}, ${user.id}, ${jobId})
+      INSERT INTO buzzy_sessions (id, user_id, job_id, title)
+      VALUES (${id}, ${user.id}, ${jobId}, ${title})
       RETURNING id, job_id, title, summary, created_at, updated_at
     `;
     const s = rows[0];

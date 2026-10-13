@@ -69,6 +69,11 @@ export const PROFILE_FIELDS: ProfileField[] = [
 /** Storage key prefix for account-scoped profile rows (job_id = NULL). */
 export const PROFILE_PREFIX = "profile_";
 
+/** Human-friendly aliases → canonical field ids (dogfood B12). */
+const PROFILE_ALIASES: Record<string, string> = {
+  activity: "primary_activity",
+};
+
 export const PROFILE_KEYS: ReadonlySet<string> = new Set(
   PROFILE_FIELDS.map((f) => f.id),
 );
@@ -123,9 +128,10 @@ export async function saveProfile(
 ): Promise<{ saved: string[]; rejected: string[] }> {
   const saved: string[] = [];
   const rejected: string[] = [];
-  for (const [id, raw] of Object.entries(values)) {
+  for (const [rawId, raw] of Object.entries(values)) {
+    const id = PROFILE_ALIASES[rawId] ?? rawId;
     if (!PROFILE_KEYS.has(id)) {
-      rejected.push(id);
+      rejected.push(rawId); // report the id the caller used, not the canonical one
       continue;
     }
     const value = typeof raw === "string" ? raw.trim() : "";

@@ -1464,18 +1464,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     let _modelsStarted = false;
     function fallbackAgents(sel) {
       sel.innerHTML = "";
-      var defaultOpt = document.createElement("option");
-      defaultOpt.value = "";
-      defaultOpt.textContent = "Default agent";
-      sel.appendChild(defaultOpt);
-      [["z-ai/glm-5.3-flash", "Marvin"],
-       ["moonshotai/kimi-k3", "Kimi"],
-       ["qwen/qwen3-235b-a22b-thinking", "Qwen Thinking"]].forEach(function (p) {
+      ["Marvin", "Kimi", "Qwen Thinking"].forEach(function (label) {
         var opt = document.createElement("option");
-        opt.value = p[0];
-        opt.textContent = p[1];
+        opt.value = label;
+        opt.textContent = label;
         sel.appendChild(opt);
       });
+      if (sel.options.length) sel.selectedIndex = 0;
     }
     function loadModels() {
       // Single flight — never two overlapping fetches on the same selector.
@@ -1492,16 +1487,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             modelCatalog = data.models;
             if (!sel) return;
             sel.innerHTML = "";
-            var defaultOpt = document.createElement("option");
-            defaultOpt.value = "";
-            defaultOpt.textContent = "Default agent";
-            sel.appendChild(defaultOpt);
             modelCatalog.forEach(function (m) {
               var opt = document.createElement("option");
-              opt.value = m.model;
+              opt.value = m.label;
               opt.textContent = m.label;
               sel.appendChild(opt);
             });
+            // Default-select the first agent — no unmapped "Default agent" label.
+            if (sel.options.length) sel.selectedIndex = 0;
           } else if (sel && sel.options.length <= 1) {
             fallbackAgents(sel);
           }

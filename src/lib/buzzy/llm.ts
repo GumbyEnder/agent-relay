@@ -60,7 +60,11 @@ export async function chatCompletion(
     model,
     messages,
     temperature: opts?.temperature ?? 0.7,
-    max_tokens: opts?.maxTokens ?? 512,
+    // Reasoning/thinking models (glm, qwen-thinking, kimi) burn output budget
+    // on chain-of-thought before emitting the answer. 512 tokens often left
+    // content null (answer never reached), which made the old reasoning-tail
+    // fallback surface raw thinking. Give the answer room to appear.
+    max_tokens: opts?.maxTokens ?? 2048,
     stream: false,
   };
 
@@ -114,14 +118,15 @@ async function postCompletion(body: {
   const msg = json.choices?.[0]?.message;
   let content = msg?.content?.trim();
 
-  // glm-5.3-flash sometimes burns all tokens on reasoning and returns
-  // content: null with the answer in `reasoning` — fall back to it
-  // (dogfood 10004 empty-choice root cause).
+  // Thinking models may also return the answer in a `reasoning`-adjacent field
+  // ONLY when the provider folds it into content. We never surface chain-of-
+  // thought: if content is present, use it as-is; `reasoning` is disregarded
+  // entirely (the old fallback leaked raw reasoning — dogfood B1).
   if (!content && msg?.reasoning?.trim()) {
-    const r = msg.reasoning.trim();
-    // Reasoning text can be long — take the final usable chunk
-    const tail = r.length > 800 ? r.slice(-800) : r;
-    content = tail;
+    // No answer text this turn — the model spent the budget on thinking.
+    // Throw so chatCompletion retries (and chatLoop can degrade gracefully)
+    // rather than ever returning chain-of-thought as the reply.
+    throw new Error("LLM returned reasoning only (no content)");
   }
 
   if (!content) {
@@ -132,3 +137,18 @@ async function postCompletion(body: {
 }
 
 export { getModels };
+
+/**
+ * Resolve a client-supplied model reference to a real catalog model id.
+ * Accepts a friendly label ("Marvin") or a legacy raw id. Undefined when the
+ * reference isn't in the catalog. The client only ever sees labels — raw ids
+ * never cross the wire (dogfood B3).
+ */
+export function resolveModel(labelOrModel?: string): string | undefined {
+  if (!labelOrModel) return undefined;
+  const models = getModels();
+  const byLabel = models.find((m) => m.label === labelOrModel);
+  if (byLabel) return byLabel.model;
+  const byModel = models.find((m) => m.model === labelOrModel);
+  return byModel?.model;
+}

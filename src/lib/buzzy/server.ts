@@ -16,7 +16,7 @@
  * 9. Return structured response.
  */
 
-import { chatCompletion, getModels } from "./llm";
+import { chatCompletion, resolveModel } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, REQUIRED_SLOTS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -63,6 +63,16 @@ function extractSlotsFromReply(
   return updated;
 }
 
+/** Strip decision markers from the user-visible reply (they fill the
+ *  Decisions Made box, never the chat bubble) — dogfood B1. */
+function stripSlotMarkers(text: string): string {
+  return text
+    .replace(/\[\w+:\s*[^\]]*\]/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // ── Main chat loop ─────────────────────────────────────────────────────
 
 export interface ChatRequest {
@@ -92,15 +102,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
   }
 
-  // ── Validate model against catalog ──────────────────────────────────
+  // ── Validate model against catalog (client sends a label; resolve to id) ──
+  let resolvedModel: string | undefined;
   if (model) {
-    const allowed = getModels();
-    const valid = allowed.some(m => m.model === model);
-    if (!valid) {
+    resolvedModel = resolveModel(model);
+    if (!resolvedModel) {
       return {
         ok: false,
         reply: "",
-        error: `Unknown model "${model}". Available: ${allowed.map(m => m.label).join(", ")}`,
+        error: `Unknown agent "${model}".`,
         code: "invalid_model",
       };
     }
@@ -179,7 +189,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Call LLM ───────────────────────────────────────────────────────
   let reply: string;
   try {
-    reply = await chatCompletion(messages, { model });
+    reply = await chatCompletion(messages, { model: resolvedModel });
   } catch (err) {
     console.error("[buzzy/chat] LLM request failed:", err instanceof Error ? err.message : err);
     return {
@@ -192,6 +202,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // ── Sanitize reply ─────────────────────────────────────────────────
   const sanitizedReply = sanitizeMemoryText(reply);
+  // User-visible reply has decision markers removed; slots parse the raw
+  // sanitized text (markers are how the model reports decisions) — dogfood B1.
+  const cleanReply = stripSlotMarkers(sanitizedReply);
 
   if (leaksJargon(sanitizedReply)) {
     // Simple jargon replacement as a fallback
@@ -217,7 +230,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Persist assistant reply ────────────────────────────────────────
   await sql`
     INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
-    VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${sanitizedReply})
+    VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${cleanReply})
   `;
 
   // ── Persist slot updates ───────────────────────────────────────────
@@ -233,7 +246,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const sid = await ensureSession(msgId, userId);
     await syncMessages(sid, userId, [
       { content: message.slice(0, 4000), peer_id: userId },
-      { content: sanitizedReply.slice(0, 4000), peer_id: "beezilla" },
+      { content: cleanReply.slice(0, 4000), peer_id: "beezilla" },
     ]);
   }
 
@@ -242,7 +255,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   const response: ChatResponse = {
     ok: true,
-    reply: sanitizedReply,
+    reply: cleanReply,
   };
 
   if (newFillCount > filledCount) {

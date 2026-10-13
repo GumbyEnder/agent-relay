@@ -675,6 +675,59 @@
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog));
       } catch (_) { /* quota, private mode */ }
+      syncServerJob();
+    }
+
+    // Durable server persistence (dogfood B2) — jobs no longer live only in
+    // localStorage. Throttled so rapid saves coalesce into one POST.
+    var _syncTimer = null;
+    function syncServerJob() {
+      if (_syncTimer) return;
+      _syncTimer = setTimeout(function () {
+        _syncTimer = null;
+        try {
+          var j = state && state.id ? state : null;
+          if (!j || !j.id) return;
+          fetch("/api/buzzy/jobs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              id: j.id,
+              template: j.template || null,
+              title: jobTitle(j),
+              status: jobStatus(j),
+              data: j
+            })
+          }).catch(function () { /* offline or signed out */ });
+        } catch (_) { /* offline/private mode */ }
+      }, 400);
+    }
+
+    // Pull durable jobs from the server and merge any this device lacks into
+    // the catalog. Never deletes local state; server restores missing jobs.
+    function mergeServerJobs() {
+      fetch("/api/buzzy/jobs", { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !Array.isArray(d.jobs) || !d.jobs.length) return;
+          var have = {};
+          catalog.jobs.forEach(function (x) { if (x.id) have[x.id] = true; });
+          var added = false;
+          d.jobs.forEach(function (s) {
+            if (s && s.data && s.data.id && !have[s.data.id]) {
+              catalog.jobs.push(s.data);
+              have[s.data.id] = true;
+              added = true;
+            }
+          });
+          if (added) {
+            catalog.jobs.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
+            goJobs();
+          }
+        })
+        .catch(function () { /* signed out or network */ });
     }
 
     function loadState() {
@@ -765,6 +818,7 @@
     }
 
     function draftDoc() {
+      if (state.draftText) return state.draftText;
       if (state.problem) {
         return templateName() + " draft\nStatus: " + (state.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + state.version + "\n\nWhat you asked for:\n" + state.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";
       }
@@ -1118,6 +1172,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         syncHonchoChat();
         state.screen = "draft";
         render();
+        generateDraft();
       };
       document.getElementById("send").onclick = () => {
         const v = document.getElementById("more").value.trim();
@@ -1201,6 +1256,30 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       state.version += 1;
       state.approved = false;
       state.events.push({ type: "draft_version", version: "v" + state.version, at: Date.now() });
+    }
+
+    // Generate a real draft document via the chat endpoint (dogfood B11).
+    // The stub draftDoc() is only a fallback until the LLM returns.
+    function generateDraft() {
+      if (state.draftText || !state.problem) return;
+      const msg = "Write the full draft document for this job now, in plain language, ready to review. Job type: " +
+        (templateName() || "General") + ". Problem: " + state.problem;
+      fetch("/api/buzzy/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ message: msg })
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.ok && d.reply) {
+            const clean = String(d.reply).trim();
+            if (clean) {
+              state.draftText = clean;
+              // Re-render the draft screen with the real content in place.
+              if (state.screen === "draft") render();
+            }
+          }
+        }).catch(function () { /* signed out — keep the structured stub */ });
     }
 
     function goDraft() {
@@ -1456,6 +1535,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     });
 
     render();
+    mergeServerJobs();
   </script>
 </body>
 </html>
