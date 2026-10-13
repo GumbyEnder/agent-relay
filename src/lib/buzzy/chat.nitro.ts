@@ -18,7 +18,7 @@
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
  */
 
-import { defineEventHandler, getMethod, setResponseStatus, getQuery } from "h3";
+import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
@@ -50,7 +50,11 @@ function headersFromEvent(event: any): Headers {
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event);
-  const path = event.path ?? "";
+  // In this (tanstack/nitro) runtime `event.path` carries the query string, so
+  // route matching silently failed for any `/api/buzzy/…?x=y` URL ("Not found").
+  // Split it: `path` is the pathname, the query is parsed where needed.
+  const fullPath = event.path ?? "";
+  const path = fullPath.split("?")[0];
 
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──
   if (method === "GET" && path === "/api/buzzy/models") {
@@ -61,43 +65,40 @@ export default defineEventHandler(async (event) => {
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
   // Accepts jobId (legacy) or sessionId (new) as an alternative.
   if (method === "GET" && path === "/api/buzzy/transcript") {
-    try {
-      const query = getQuery(event);
-      const jobIdParam = typeof query.jobId === "string" ? query.jobId : null;
-      const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
-      const sessionIdParam = typeof query.sessionId === "string" ? query.sessionId : null;
-      const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
-      const user = await getSessionUserFromHeaders(headersFromEvent(event));
-      if (!user) {
-        setResponseStatus(event, 401);
-        return { error: "Sign in required", code: "signed_out" };
-      }
-      if (!sessionId && !jobId) {
-        return { messages: [] };
-      }
-      const sql = await getSql();
-      const rows = sessionId
-        ? await sql`
-            SELECT role, content, created_at FROM buzzy_chat_messages
-            WHERE user_id = ${user.id} AND session_id = ${sessionId}
-            ORDER BY created_at ASC LIMIT 50
-          `
-        : await sql`
-            SELECT job_id, role, content, created_at FROM buzzy_chat_messages
-            WHERE user_id = ${user.id} AND job_id = ${jobId}
-            ORDER BY created_at ASC LIMIT 50
-          `;
-      return {
-        messages: rows.map((r) => ({
-          jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
-          role: r.role,
-          content: r.content,
-          createdAt: r.created_at,
-        })),
-      };
-    } catch (err) {
-      return { error: "transcript_err", msg: err instanceof Error ? err.message : String(err) };
+    const qs = fullPath.includes("?") ? fullPath.slice(fullPath.indexOf("?") + 1) : "";
+    const params = new URLSearchParams(qs);
+    const jobIdParam = params.get("jobId");
+    const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
+    const sessionIdParam = params.get("sessionId");
+    const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
     }
+    if (!sessionId && !jobId) {
+      return { messages: [] };
+    }
+    const sql = await getSql();
+    const rows = sessionId
+      ? await sql`
+          SELECT role, content, created_at FROM buzzy_chat_messages
+          WHERE user_id = ${user.id} AND session_id = ${sessionId}
+          ORDER BY created_at ASC LIMIT 50
+        `
+      : await sql`
+          SELECT job_id, role, content, created_at FROM buzzy_chat_messages
+          WHERE user_id = ${user.id} AND job_id = ${jobId}
+          ORDER BY created_at ASC LIMIT 50
+        `;
+    return {
+      messages: rows.map((r) => ({
+        jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
+        role: r.role,
+        content: r.content,
+        createdAt: r.created_at,
+      })),
+    };
   }
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
