@@ -286,10 +286,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${cleanReply})
   `;
 
-  // ── Persist slot updates ───────────────────────────────────────────
-  const newSlots = extractSlotsFromReply(sanitizedReply, slotValues);
-  for (const [slotId, val] of Object.entries(newSlots)) {
+  // ── Persist any inline markers the reply emitted (empty-current returns
+  //    only markers this turn, not the whole slot set) ──────────────────
+  const markersFromReply = extractSlotsFromReply(sanitizedReply, {});
+  for (const [slotId, val] of Object.entries(markersFromReply)) {
     if (!slotValues[slotId] || slotValues[slotId] !== val) {
+      slotValues[slotId] = val;
       await memory.remember(slotId, val);
     }
   }
@@ -304,18 +306,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
 
   // ── Build response ─────────────────────────────────────────────────
-  const newFillCount = REQUIRED_SLOTS.filter(id => newSlots[id]).length;
+  // Slots filled this turn (structural extraction + inline markers) are
+  // broadcast so the client fills the Decisions Made box live.
+  const deltaSlots: Record<string, string> = { ...newlyExtracted, ...markersFromReply };
+  const nowFilled = REQUIRED_SLOTS.filter((id) => slotValues[id]).length;
 
   const response: ChatResponse = {
     ok: true,
     reply: cleanReply,
   };
 
-  if (newFillCount > filledCount) {
-    response.slots = newSlots;
+  if (Object.keys(deltaSlots).length > 0) {
+    response.slots = deltaSlots;
   }
 
-  if (newFillCount >= REQUIRED_SLOTS.length) {
+  if (nowFilled >= REQUIRED_SLOTS.length) {
     response.draft = true;
     response.done = true;
   }
