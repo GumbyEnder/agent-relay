@@ -76,7 +76,7 @@ export default defineEventHandler(async (event) => {
     }
 
     if (!sessionId && !jobId) {
-      return { messages: [] };
+      return { messages: [], debug: { path, reqUrl: (event as any).req?.url, jobId, sessionId } };
     }
 
     const sql = await getSql();
