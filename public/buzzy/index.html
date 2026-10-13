@@ -607,7 +607,7 @@
 
     function emptyJob(id) {
       return {
-        id: id || ("job_" + Date.now()),
+        id: id || ("job_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         template: null,

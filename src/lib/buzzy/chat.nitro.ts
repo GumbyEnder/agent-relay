@@ -18,7 +18,7 @@
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
  */
 
-import { defineEventHandler, getMethod, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, setResponseStatus, getQuery } from "h3";
 import { chatLoop } from "./server";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
@@ -61,15 +61,22 @@ export default defineEventHandler(async (event) => {
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──
   // Accepts jobId (legacy) or sessionId (new) as an alternative.
   if (method === "GET" && path === "/api/buzzy/transcript") {
-    const url = new URL(event.path ?? "/api/buzzy/transcript", "http://x");
-    const jobIdParam = url.searchParams.get("jobId");
+    // Read the query string directly — `event.path` carries no `?…`, so a
+    // `new URL(event.path)` parse silently dropped jobId/sessionId (chat
+    // history never loaded from a job deep-link).
+    const q = getQuery(event);
+    const jobIdParam = typeof q.jobId === "string" ? q.jobId : null;
     const jobId = jobIdParam && jobIdParam !== "null" ? jobIdParam : null;
-    const sessionIdParam = url.searchParams.get("sessionId");
+    const sessionIdParam = typeof q.sessionId === "string" ? q.sessionId : null;
     const sessionId = sessionIdParam && sessionIdParam !== "null" ? sessionIdParam : null;
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
       setResponseStatus(event, 401);
       return { error: "Sign in required", code: "signed_out" };
+    }
+
+    if (!sessionId && !jobId) {
+      return { messages: [] };
     }
 
     const sql = await getSql();
@@ -81,12 +88,12 @@ export default defineEventHandler(async (event) => {
         `
       : await sql`
           SELECT job_id, role, content, created_at FROM buzzy_chat_messages
-          WHERE user_id = ${user.id} AND job_id IS NOT DISTINCT FROM ${jobId}
+          WHERE user_id = ${user.id} AND job_id = ${jobId}
           ORDER BY created_at ASC LIMIT 50
         `;
     return {
       messages: rows.map((r) => ({
-        jobId: ("job_id" in r && r.job_id) ?? null,
+        jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
         role: r.role,
         content: r.content,
         createdAt: r.created_at,
