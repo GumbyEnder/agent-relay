@@ -14,6 +14,8 @@
  *   POST /api/buzzy/profile/reuse   — copy chosen defaults into a job
  *   GET  /api/buzzy/companies       — companies on this account
  *   POST /api/buzzy/companies       — add a company (name only)
+ *   POST /api/buzzy/companies/from-website — read a public site into a proposed card
+ *   POST /api/buzzy/companies/:id/lines — confirm, edit, or drop one card line
  *   GET  /api/buzzy/sessions        — list user's sessions (?companyId= scopes)
  *   POST /api/buzzy/sessions        — create a session
  *   PATCH /api/buzzy/sessions/:id   — rename session title
@@ -24,9 +26,10 @@ import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
-import { getSql } from "@/lib/db";
+import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
+import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -62,18 +65,77 @@ type CompanyRow = {
   id: string;
   name: string;
   one_liner: string;
+  website: string;
   created_at: string;
   updated_at: string;
 };
 
-function companyPayload(row: CompanyRow) {
+type FactRow = {
+  id: string;
+  company_id: string;
+  fact_key: string;
+  label: string;
+  value: string;
+  status: string;
+  source_label: string;
+  source_page: string;
+  original_value: string;
+};
+
+const FACT_ORDER = ["name", "does", "serves", "locations", "voice"];
+
+function linePayload(row: FactRow) {
+  return {
+    id: row.id,
+    key: row.fact_key,
+    label: row.label,
+    value: row.value,
+    status: row.status,
+    source: row.source_label,
+    page: row.source_page,
+    edited: row.original_value !== "" && row.value !== row.original_value,
+  };
+}
+
+function companyPayload(row: CompanyRow, facts: FactRow[] = []) {
+  const lines = facts
+    .filter((f) => f.company_id === row.id && f.status !== "dropped")
+    .sort((a, b) => FACT_ORDER.indexOf(a.fact_key) - FACT_ORDER.indexOf(b.fact_key))
+    .map(linePayload);
   return {
     id: row.id,
     name: row.name,
     oneLiner: row.one_liner || "",
+    website: row.website || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    lines,
+    facts: lines.filter((l) => l.status === "confirmed"),
   };
+}
+
+function factValue(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
+  return v || null;
+}
+
+async function companyFacts(sql: Sql, userId: string, companyId?: string): Promise<FactRow[]> {
+  return companyId
+    ? await sql<FactRow>`
+        SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+        FROM buzzy_company_facts
+        WHERE user_id = ${userId} AND company_id = ${companyId} AND status <> 'dropped'
+        ORDER BY created_at ASC
+        LIMIT 20
+      `
+    : await sql<FactRow>`
+        SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+        FROM buzzy_company_facts
+        WHERE user_id = ${userId} AND status <> 'dropped'
+        ORDER BY created_at ASC
+        LIMIT 250
+      `;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -278,13 +340,156 @@ export default defineEventHandler(async (event) => {
     }
     const sql = await getSql();
     const rows = await sql<CompanyRow>`
-      SELECT id, name, one_liner, created_at, updated_at
+      SELECT id, name, one_liner, website, created_at, updated_at
       FROM buzzy_companies
       WHERE user_id = ${user.id}
       ORDER BY created_at ASC
       LIMIT 50
     `;
-    return { companies: rows.map(companyPayload) };
+    const facts = await companyFacts(sql, user.id);
+    return { companies: rows.map((row) => companyPayload(row, facts)) };
+  }
+
+  // ── POST /api/buzzy/companies/from-website — proposed card, nothing confirmed ──
+  if (method === "POST" && path === "/api/buzzy/companies/from-website") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const read = await readPublicWebsite(body.url);
+    if (!read.ok) {
+      setResponseStatus(event, read.code === "bad_url" || read.code === "blocked" ? 400 : 422);
+      return { error: read.error, code: read.code };
+    }
+    const named = read.lines.find((l) => l.key === "name");
+    const name = companyName(named?.value) || fallbackCompanyName(read.page);
+    const id = `co_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const sql = await getSql();
+    const rows = await sql<CompanyRow>`
+      INSERT INTO buzzy_companies (id, user_id, name, website)
+      VALUES (${id}, ${user.id}, ${name}, ${read.page})
+      RETURNING id, name, one_liner, website, created_at, updated_at
+    `;
+    try {
+      for (const line of read.lines) {
+        const lineId = `ln_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+        await sql`
+          INSERT INTO buzzy_company_facts
+            (id, company_id, user_id, fact_key, label, value, status, source_label, source_page, original_value)
+          VALUES
+            (${lineId}, ${id}, ${user.id}, ${line.key}, ${line.label}, ${line.value},
+             'proposed', ${WEBSITE_SOURCE}, ${read.page}, ${line.value})
+        `;
+      }
+    } catch (err) {
+      await sql`DELETE FROM buzzy_company_facts WHERE company_id = ${id} AND user_id = ${user.id}`;
+      await sql`DELETE FROM buzzy_companies WHERE id = ${id} AND user_id = ${user.id}`;
+      throw err;
+    }
+    const facts = await companyFacts(sql, user.id, id);
+    setResponseStatus(event, 201);
+    return { company: companyPayload(rows[0], facts) };
+  }
+
+  // ── POST /api/buzzy/companies/:id/lines — confirm, edit, or drop one line ──
+  const lineMatch = path.match(/^\/api\/buzzy\/companies\/(co_[a-z0-9]{8,32})\/lines$/);
+  if (method === "POST" && lineMatch) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const companyId = lineMatch[1];
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const lineId = typeof body.lineId === "string" ? body.lineId : "";
+    const action = body.action;
+    if (!/^ln_[a-z0-9]{8,32}$/.test(lineId) || (action !== "confirm" && action !== "edit" && action !== "drop")) {
+      setResponseStatus(event, 400);
+      return { error: "Choose confirm, change, or drop for that line.", code: "bad_request" };
+    }
+    const edited = action === "edit" ? factValue(body.value) : null;
+    if (action === "edit" && !edited) {
+      setResponseStatus(event, 400);
+      return { error: "Type what this line should say.", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const owned = await sql<CompanyRow>`
+      SELECT id, name, one_liner, website, created_at, updated_at
+      FROM buzzy_companies
+      WHERE id = ${companyId} AND user_id = ${user.id}
+    `;
+    if (!owned.length) {
+      setResponseStatus(event, 404);
+      return { error: "Company not found", code: "not_found" };
+    }
+    const existing = await sql<FactRow>`
+      SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+      FROM buzzy_company_facts
+      WHERE id = ${lineId} AND company_id = ${companyId} AND user_id = ${user.id}
+    `;
+    if (!existing.length || existing[0].status === "dropped") {
+      setResponseStatus(event, 404);
+      return { error: "That line is not on the card.", code: "not_found" };
+    }
+    const row = existing[0];
+    if (action === "drop") {
+      await sql`
+        UPDATE buzzy_company_facts
+        SET status = 'dropped', updated_at = now()
+        WHERE id = ${lineId} AND user_id = ${user.id}
+      `;
+      if (row.fact_key === "does") {
+        await sql`
+          UPDATE buzzy_companies
+          SET one_liner = '', updated_at = now()
+          WHERE id = ${companyId} AND user_id = ${user.id} AND one_liner = ${row.value}
+        `;
+      }
+    } else {
+      const next = action === "edit" ? (edited as string) : row.value;
+      await sql`
+        UPDATE buzzy_company_facts
+        SET status = 'confirmed', value = ${next}, updated_at = now()
+        WHERE id = ${lineId} AND user_id = ${user.id}
+      `;
+      if (row.fact_key === "name") {
+        const renamed = companyName(next);
+        if (renamed) {
+          await sql`
+            UPDATE buzzy_companies
+            SET name = ${renamed}, updated_at = now()
+            WHERE id = ${companyId} AND user_id = ${user.id}
+          `;
+        }
+      } else if (row.fact_key === "does") {
+        await sql`
+          UPDATE buzzy_companies
+          SET one_liner = ${next.slice(0, 280)}, updated_at = now()
+          WHERE id = ${companyId} AND user_id = ${user.id}
+        `;
+      }
+    }
+    const fresh = await sql<CompanyRow>`
+      SELECT id, name, one_liner, website, created_at, updated_at
+      FROM buzzy_companies
+      WHERE id = ${companyId} AND user_id = ${user.id}
+    `;
+    const facts = await companyFacts(sql, user.id, companyId);
+    return { company: companyPayload(fresh[0], facts) };
   }
 
   // ── POST /api/buzzy/companies — add a company by the name the owner uses ──
@@ -311,7 +516,7 @@ export default defineEventHandler(async (event) => {
     const rows = await sql<CompanyRow>`
       INSERT INTO buzzy_companies (id, user_id, name)
       VALUES (${id}, ${user.id}, ${name})
-      RETURNING id, name, one_liner, created_at, updated_at
+      RETURNING id, name, one_liner, website, created_at, updated_at
     `;
     setResponseStatus(event, 201);
     return { company: companyPayload(rows[0]) };
