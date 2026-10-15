@@ -23,6 +23,7 @@
  *   POST /api/buzzy/papers          — read a dropped or pasted paper into proposed lines
  *   GET  /api/buzzy/papers          — latest paper on the active company (?companyId, ?jobId)
  *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
+ *   POST /api/buzzy/money-check — compare a draft to the paper and the brief
  */
 
 import { defineEventHandler, getMethod, setResponseStatus } from "h3";
@@ -33,6 +34,7 @@ import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
+import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -57,6 +59,24 @@ function queryValue(fullPath: string, key: string): string | null {
 
 function isCompanyId(id: string): boolean {
   return /^co_[a-z0-9]{8,32}$/.test(id);
+}
+
+function asMoneyBrief(raw: unknown): MoneyBriefLine[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MoneyBriefLine[] = [];
+  for (const row of raw.slice(0, 12)) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    const status = rec.status === "confirmed" || rec.status === "skipped" || rec.status === "open" || rec.status === "proposed"
+      ? rec.status
+      : "open";
+    out.push({
+      label: typeof rec.label === "string" ? rec.label.slice(0, 80) : "",
+      value: typeof rec.value === "string" ? rec.value.slice(0, 500) : "",
+      status,
+    });
+  }
+  return out;
 }
 
 function companyName(raw: unknown): string | null {
@@ -1044,6 +1064,61 @@ export default defineEventHandler(async (event) => {
       return { error: updated.error, code: updated.code };
     }
     return { ok: true, paper: updated.paper };
+  }
+
+  // ── POST /api/buzzy/money-check — compare; do not approve or send ──
+  if (method === "POST" && path === "/api/buzzy/money-check") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* the check still runs on an empty draft */ }
+    const draft = typeof body.draft === "string" ? body.draft.slice(0, 20000) : "";
+    const brief = asMoneyBrief(body.brief);
+    let facts: MoneyFact[] = [];
+    let kind = "";
+    const companyId = typeof body.companyId === "string" ? body.companyId : "";
+    if (companyId) {
+      if (!isCompanyId(companyId)) {
+        setResponseStatus(event, 400);
+        return { error: "Pick the company this draft belongs to first.", code: "bad_company" };
+      }
+      const sql = await getSql();
+      const owned = await sql`
+        SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}
+      `;
+      if (!owned.length) {
+        setResponseStatus(event, 404);
+        return { error: "Company not found", code: "not_found" };
+      }
+      const jobRaw = typeof body.jobId === "string" ? body.jobId.trim().slice(0, 120) : "";
+      const paper = await latestPaper(sql, user.id, companyId, jobRaw || null);
+      if (paper) {
+        kind = paper.kind;
+        facts = paper.facts.map((f) => ({
+          key: f.key,
+          label: f.label,
+          value: f.value,
+          status: f.status,
+          place: f.place,
+          source: f.source,
+        }));
+      }
+    }
+    const check = checkMoney({ draft, facts, brief, kind });
+    return {
+      ok: true,
+      items: check.items,
+      blocksApproval: check.blocksApproval,
+      draft: check.draft,
+    };
   }
 
   throw new Error("Not found");

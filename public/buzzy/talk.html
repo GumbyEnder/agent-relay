@@ -378,6 +378,28 @@
       font-weight: 600;
     }
     .draft-ready-banner.hidden { display: none; }
+    /* The money list is not display:flex. A later flex rule would beat .hidden. */
+    .draft-ready-banner .money-check {
+      text-align: left;
+      margin: 0.75rem 0 0.35rem;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #101010;
+    }
+    .draft-ready-banner .money-check p {
+      color: #E8E8E8;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+    .draft-ready-banner .money-check ul { margin: 0; padding-left: 1.1rem; }
+    .draft-ready-banner .money-check li {
+      margin: 0.28rem 0;
+      color: #D8D8D8;
+      font-weight: 400;
+    }
+    .draft-ready-banner .money-check li.wrong { color: #f0c36a; }
+    #moneyCheck.hidden { display: none; }
     /* Paper read: not display:flex, so .hidden cannot lose to a later flex rule. */
     .paper-drop {
       margin-top: 0.8rem;
@@ -818,6 +840,7 @@
             <p>A draft is ready for you to review.</p>
             <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
             <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
+            <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
             <p class="muted" id="draftMeta">Version 1 · not approved</p>
             <div class="row">
               <button type="button" id="approveDraft">Approve this version</button>
@@ -860,6 +883,7 @@
   </main>
 
   <script src="/buzzy/companies.js"></script>
+  <script src="/buzzy/money-check.js"></script>
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -1554,6 +1578,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       draftVersion: 1,
       approvedText: null,
       outwardConfirmed: false,
+      moneyBlocks: false,
+      paper: null,
       userId: null,
       model: null,
       boundCompanyId: null,
@@ -1718,6 +1744,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         });
       }
+      renderMoneyCheck();
     }
 
     function downloadPaper() {
@@ -1935,6 +1962,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           skipSlot(btn.getAttribute("data-slot"));
         });
       });
+      renderMoneyCheck();
     }
 
     function skipSlot(slotId) {
@@ -2025,10 +2053,114 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function approvalMatches() {
+      if (chatState.moneyBlocks) return false;
       var body = draftBodyEl();
       var text = body ? body.value : (chatState.draftText || "");
       return !!(chatState.approvedText != null && text === chatState.approvedText && text.trim());
     }
+
+    function briefLinesForCheck() {
+      return Object.keys(SLOT_LABELS).map(function (id) {
+        var value = chatState.slots[id] || "";
+        var status = !value ? "open" : (value === "skipped" ? "skipped" : "confirmed");
+        return { label: SLOT_LABELS[id], value: value === "skipped" ? "" : value, status: status };
+      });
+    }
+
+    function paperFactsForCheck() {
+      var paper = chatState.paper;
+      if (!paper) return [];
+      return (paper.facts || []).map(function (f) {
+        return {
+          key: f.key,
+          label: f.label,
+          value: f.value || "",
+          status: f.status,
+          place: f.place || "",
+          source: f.source || "",
+        };
+      });
+    }
+
+    function currentMoneyCheck() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      if (typeof checkMoney !== "function") return null;
+      return checkMoney({
+        draft: text,
+        facts: paperFactsForCheck(),
+        brief: briefLinesForCheck(),
+        kind: (chatState.paper && chatState.paper.kind) || "",
+      });
+    }
+
+    function renderMoneyCheck() {
+      var list = document.getElementById("moneyCheck");
+      var approve = document.getElementById("approveDraft");
+      var banner = document.getElementById("draftBanner");
+      var showing = !!(banner && !banner.classList.contains("hidden"));
+      var note = document.getElementById("draftSendNote");
+      if (!showing) {
+        chatState.moneyBlocks = false;
+        if (list) { list.classList.add("hidden"); list.innerHTML = ""; }
+        if (approve) approve.disabled = false;
+        return null;
+      }
+      if (typeof checkMoney !== "function") {
+        chatState.moneyBlocks = true;
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+        if (list) {
+          list.classList.remove("hidden");
+          list.innerHTML = "<p>Before you approve</p><ul><li class=\"wrong\">This draft could not be checked. Approval stays closed.</li></ul>";
+        }
+        if (approve) approve.disabled = true;
+        if (note) note.textContent = "Nothing was approved. The amount could not be checked, so this stays a draft.";
+        paintDraftGate();
+        return null;
+      }
+      var check = currentMoneyCheck();
+      chatState.moneyBlocks = !!(check && check.blocksApproval);
+      if (chatState.moneyBlocks) {
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+      }
+      if (list) {
+        var rows = (check && check.items) || [];
+        if (!rows.length) {
+          list.classList.add("hidden");
+          list.innerHTML = "";
+        } else {
+          list.classList.remove("hidden");
+          list.innerHTML = "<p>Before you approve</p><ul>" + rows.map(function (item) {
+            return "<li class=\"" + esc(item.tone) + "\">" + esc(item.text) + "</li>";
+          }).join("") + "</ul>";
+        }
+      }
+      if (approve) approve.disabled = !!chatState.moneyBlocks;
+      if (note && chatState.moneyBlocks) {
+        note.textContent = "Nothing was approved. The amount does not match, so this stays a draft.";
+      } else if (note && note.textContent.indexOf("Nothing was approved") === 0) {
+        note.textContent = "";
+      }
+      paintDraftGate();
+      return check;
+    }
+
+    window.bzApplyMoneyCheck = function (paper, slots, draft) {
+      chatState.paper = paper || null;
+      chatState.slots = slots || {};
+      chatState.draftReady = true;
+      chatState.draftText = draft || "";
+      chatState.approvedText = null;
+      chatState.outwardConfirmed = false;
+      var body = draftBodyEl();
+      if (body) body.value = chatState.draftText;
+      var banner = document.getElementById("draftBanner");
+      if (banner) banner.classList.remove("hidden");
+      renderSlotChecklist();
+      renderMoneyCheck();
+    };
 
     function paintDraftGate() {
       var meta = document.getElementById("draftMeta");
@@ -2055,6 +2187,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (onote) onote.textContent = "";
       var banner = document.getElementById("draftBanner");
       if (banner) banner.classList.add("hidden");
+      chatState.moneyBlocks = false;
+      var list = document.getElementById("moneyCheck");
+      if (list) { list.classList.add("hidden"); list.innerHTML = ""; }
+      var approve = document.getElementById("approveDraft");
+      if (approve) approve.disabled = false;
       paintDraftGate();
     }
 
@@ -2071,7 +2208,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (banner) banner.classList.remove("hidden");
       var body = draftBodyEl();
       if (body && !body.value) body.value = chatState.draftText;
-      paintDraftGate();
+      renderMoneyCheck();
     }
 
     function onDraftInput() {
@@ -2088,10 +2225,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var note = document.getElementById("draftSendNote");
         if (note) note.textContent = "That change clears the approval. Nothing can leave until you approve this version.";
       }
-      paintDraftGate();
+      renderMoneyCheck();
     }
 
     function onApproveDraft() {
+      var check = renderMoneyCheck();
+      if (chatState.moneyBlocks || (check && check.blocksApproval)) {
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+        paintDraftGate();
+        return;
+      }
       var body = draftBodyEl();
       var text = body ? body.value : "";
       if (!text.trim()) return;
@@ -2108,7 +2252,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function onDraftSend() {
       var note = document.getElementById("draftSendNote");
       if (!note) return;
-      if (!approvalMatches()) {
+      if (chatState.moneyBlocks || !approvalMatches()) {
         note.textContent = "Nothing left the company. Approve this version before it can leave.";
         return;
       }
@@ -2116,8 +2260,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function onConfirmOutward() {
-      if (!approvalMatches()) {
+      if (chatState.moneyBlocks || !approvalMatches()) {
         paintDraftGate();
+        var onote = document.getElementById("outwardNote");
+        if (onote && chatState.moneyBlocks) onote.textContent = "Nothing left the company.";
         return;
       }
       chatState.outwardConfirmed = true;
@@ -2608,6 +2754,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           draftVersion: 1,
           approvedText: null,
           outwardConfirmed: false,
+          moneyBlocks: false,
+          paper: null,
           userId: chatState.userId,
           _signedOut: chatState._signedOut,
           jobContext: chatState.jobContext,
