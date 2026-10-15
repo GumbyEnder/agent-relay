@@ -120,6 +120,34 @@ function factValue(raw: unknown): string | null {
   return v || null;
 }
 
+async function confirmedCompanyContext(
+  sql: Sql,
+  userId: string,
+  companyId: string,
+): Promise<{ name: string; facts: Array<{ label: string; value: string }> } | null> {
+  if (!isCompanyId(companyId)) return null;
+  const rows = await sql<CompanyRow>`
+    SELECT id, name, one_liner, website, created_at, updated_at
+    FROM buzzy_companies
+    WHERE id = ${companyId} AND user_id = ${userId}
+    LIMIT 1
+  `;
+  if (!rows.length) return null;
+  const facts = await sql<FactRow>`
+    SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+    FROM buzzy_company_facts
+    WHERE user_id = ${userId} AND company_id = ${companyId} AND status = 'confirmed'
+    ORDER BY created_at ASC
+    LIMIT 20
+  `;
+  return {
+    name: rows[0].name,
+    facts: facts
+      .filter((f) => typeof f.value === "string" && f.value.trim())
+      .map((f) => ({ label: f.label || f.fact_key, value: f.value })),
+  };
+}
+
 async function companyFacts(sql: Sql, userId: string, companyId?: string): Promise<FactRow[]> {
   return companyId
     ? await sql<FactRow>`
@@ -226,7 +254,31 @@ export default defineEventHandler(async (event) => {
     const model: string | undefined = typeof body.model === "string" ? body.model : undefined;
     const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
 
-    const result = await chatLoop({ userId, jobId, sessionId, message, model, jobContext });
+    const sql = await getSql();
+    let companyId: string | null = null;
+    if (typeof body.companyId === "string" && isCompanyId(body.companyId)) {
+      companyId = body.companyId;
+    } else if (sessionId) {
+      const sess = await sql<{ company_id: string | null }>`
+        SELECT company_id FROM buzzy_sessions
+        WHERE id = ${sessionId} AND user_id = ${userId}
+        LIMIT 1
+      `;
+      const fromSession = sess[0]?.company_id;
+      if (typeof fromSession === "string" && isCompanyId(fromSession)) companyId = fromSession;
+    }
+    const company = companyId ? await confirmedCompanyContext(sql, userId, companyId) : null;
+
+    const result = await chatLoop({
+      userId,
+      jobId,
+      sessionId,
+      message,
+      model,
+      jobContext,
+      companyName: company?.name ?? null,
+      companyFacts: company?.facts ?? [],
+    });
     return result;
   }
 

@@ -183,7 +183,29 @@
       display: flex;
       align-items: center;
       gap: 0.75rem;
+      min-width: 0;
     }
+    .chat-company-kicker {
+      margin: 0;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #888;
+      font-weight: 700;
+    }
+    .chat-company-name {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.2;
+    }
+    .brief-company {
+      margin: 0 0 0.55rem;
+      color: #aaa;
+      font-size: 0.8rem;
+    }
+    .slot-copy { min-width: 0; flex: 1; }
 
     /* FIX #4: mascot bigger and better aligned */
     .chat-mascot {
@@ -703,6 +725,10 @@
               <div class="chat-mascot">
                 <img id="chatMascot" src="brand/revision6_expressions_17-attentive.png" alt="BeeZilla" />
               </div>
+              <div class="chat-company-head">
+                <p class="chat-company-kicker" id="chatCompanyKicker">Working for</p>
+                <h1 class="chat-company-name" id="chatCompanyName">No company yet</h1>
+              </div>
             </div>
             <select id="agentSelect" class="agent-select" title="Choose an agent model">
               <option value="">Loading agents…</option>
@@ -726,10 +752,11 @@
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
         </div>
-        <div class="slot-checklist" id="slotChecklist">
-          <h3>Decisions made</h3>
+        <aside class="slot-checklist" id="briefPanel" aria-label="Brief">
+          <h3>Brief</h3>
+          <p id="briefCompany" class="brief-company"></p>
           <div id="slotItems"></div>
-        </div>
+        </aside>
       </div>
     </div>
 
@@ -1523,30 +1550,47 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       container.scrollTop = container.scrollHeight;
     }
 
+    function activeCompanyId() {
+      if (window.BZCompanies && typeof BZCompanies.activeId === "function" && BZCompanies.activeId()) {
+        return BZCompanies.activeId();
+      }
+      return chatState.boundCompanyId || undefined;
+    }
+
     function renderSlotChecklist() {
       const container = document.getElementById("slotItems");
-      const ids = Object.keys(SLOT_LABELS).filter(function (id) { return !!chatState.slots[id]; });
+      const ids = Object.keys(SLOT_LABELS);
       const html = ids.map((id) => {
         const value = chatState.slots[id];
         const skipped = value === "skipped";
         const escapedLabel = SLOT_LABELS[id].replace(/</g, "&lt;");
-        if (skipped) {
-          return '<div class="slot-item filled skipped" data-slot="' + id + '">' +
-            '<span class="slot-check">–</span>' +
-            '<span class="slot-value-headline">Skipped</span>' +
+        if (!value) {
+          return '<div class="slot-item open" data-brief="' + id + '" data-slot="' + id + '">' +
+            '<span class="slot-check"></span>' +
+            '<span class="slot-copy">' +
             '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
-            '</div>';
+            '<span class="slot-value-headline slot-still-open">Still open</span>' +
+            '</span></div>';
+        }
+        if (skipped) {
+          return '<div class="slot-item filled skipped" data-brief="' + id + '" data-slot="' + id + '">' +
+            '<span class="slot-check">–</span>' +
+            '<span class="slot-copy">' +
+            '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
+            '<span class="slot-value-headline">Skipped</span>' +
+            '</span></div>';
         }
         const escapedValue = String(value).replace(/</g, "&lt;");
-        return '<div class="slot-item filled" data-slot="' + id + '">' +
+        return '<div class="slot-item filled" data-brief="' + id + '" data-slot="' + id + '">' +
           '<span class="slot-check">✓</span>' +
-          '<span class="slot-value-headline">' + escapedValue + '</span>' +
+          '<span class="slot-copy">' +
           '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
+          '<span class="slot-value-headline">' + escapedValue + '</span>' +
+          '</span>' +
           '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
           '</div>';
       }).join("");
-      container.innerHTML = html ||
-        '<div style="color:#777;font-size:0.85rem;padding:0.5rem 0">No decisions yet — these fill in as we talk.</div>';
+      container.innerHTML = html;
       // Wire up edit icons
       container.querySelectorAll(".slot-edit-icon").forEach(function (icon) {
         icon.addEventListener("click", function () {
@@ -1629,6 +1673,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         body: JSON.stringify({
           jobId: chatState.jobId,
           sessionId: chatState.sessionId || undefined,
+          companyId: activeCompanyId(),
           message: editMsg,
           model: selectedModel(),
         }),
@@ -1649,8 +1694,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("draftBanner").classList.add("hidden");
       setChatMascot("17-attentive");
 
-      // Always show the decisions panel (form tab no longer needed)
+      // Brief lines are visible before any message. They start empty.
       document.body.dataset.intake = "chat";
+      renderSlotChecklist();
 
       // Load model catalog if not already loaded
       if (!modelCatalog.length) loadModels();
@@ -1758,6 +1804,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           body: JSON.stringify({
             jobId: chatState.jobId,
             sessionId: chatState.sessionId || undefined,
+            companyId: activeCompanyId(),
             message: text,
             model: selectedModel(),
             jobContext: chatState.jobContext || undefined,
@@ -1772,6 +1819,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (data.code === "signed_out") {
             input.disabled = true;
             document.getElementById("chatSend").disabled = true;
+          }
+          if (data.slots) {
+            Object.assign(chatState.slots, data.slots);
+            renderSlotChecklist();
           }
           document.getElementById("chatError").textContent = data.error || "Something went wrong.";
           document.getElementById("chatError").classList.remove("hidden");
@@ -2060,12 +2111,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     };
 
     function applyChatCompany(co) {
+      var nameEl = document.getElementById("chatCompanyName");
+      var kicker = document.getElementById("chatCompanyKicker");
+      var briefCo = document.getElementById("briefCompany");
       var line = document.getElementById("chatCompany");
-      if (line) {
-        line.textContent = co
-          ? "This chat is for " + co.name + "."
-          : "No company yet. Add one if this work belongs to a business.";
-      }
+      var name = co && co.name ? co.name : "";
+      if (nameEl) nameEl.textContent = name || "No company yet";
+      if (kicker) kicker.textContent = name ? "Working for" : "";
+      if (briefCo) briefCo.textContent = name ? "For " + name : "";
+      if (line) line.textContent = co && co.oneLiner ? co.oneLiner : "";
       var id = co ? co.id : null;
       if (chatState.boundCompanyId && id && chatState.boundCompanyId !== id) {
         chatState.boundCompanyId = id;

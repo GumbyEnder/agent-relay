@@ -26,7 +26,9 @@ export default defineEventHandler(async (event) => {
     return { error: "method not allowed" };
   }
 
-  const path = (event.path ?? "").replace(/\/+$/, "") || "/buzzy";
+  // event.path includes the query string in this runtime. Strip it before
+  // matching or /buzzy/talk?job=… is not a known page.
+  const path = (event.path ?? "").split("?")[0].replace(/\/+$/, "") || "/buzzy";
   const segments = path.split("/").filter(Boolean); // ["buzzy", maybe "talk"]
 
   let name: string;
