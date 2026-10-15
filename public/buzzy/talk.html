@@ -378,6 +378,47 @@
       font-weight: 600;
     }
     .draft-ready-banner.hidden { display: none; }
+    /* Paper read: not display:flex, so .hidden cannot lose to a later flex rule. */
+    .paper-drop {
+      margin-top: 0.8rem;
+      border: 1px dashed #3a3a3a;
+      border-radius: 6px;
+      padding: 0.7rem 0.8rem;
+      background: #101010;
+      text-align: left;
+    }
+    .paper-drop.over { border-color: var(--bz-yellow); }
+    .paper-drop p { margin: 0 0 0.35rem; }
+    .paper-drop textarea { width: 100%; min-height: 2.6rem; margin-top: 0.35rem; }
+    .paper-drop input[type="file"] { max-width: 100%; font-size: 0.82rem; color: #C9CDD2; }
+    #paperPanel {
+      margin-top: 0.8rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.8rem 0.9rem;
+      background: var(--bz-panel);
+      text-align: left;
+    }
+    #paperPanel.hidden { display: none; }
+    #paperBrief { margin-top: 0.8rem; }
+    #paperBrief.hidden { display: none; }
+    .paper-doc {
+      white-space: pre-wrap;
+      max-height: 9rem;
+      overflow: auto;
+      background: #0A0A0A;
+      border-radius: 4px;
+      padding: 0.6rem;
+      font-size: 0.82rem;
+      color: #D8D8D8;
+      margin: 0.4rem 0 0.6rem;
+    }
+    .paper-fact {
+      padding: 0.45rem 0;
+      border-bottom: 1px solid #1A1A1A;
+    }
+    .paper-fact button { margin: 0.3rem 0.35rem 0 0; }
+    .paper-fact input { width: 100%; margin-top: 0.3rem; }
     .row {
       display: flex;
       gap: 0.6rem;
@@ -759,6 +800,16 @@
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.55rem;font-size:0.92rem"></p>
           <div class="chat-messages" id="chatMessages"></div>
+          <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
+          <div id="paperDrop" class="paper-drop">
+            <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
+            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,application/pdf,text/plain" />
+            <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
+            <div class="row">
+              <button type="button" id="paperRead">Read it</button>
+            </div>
+            <p id="paperNote" class="muted" role="status"></p>
+          </div>
           <div class="chat-input-row">
             <textarea id="chatInput" rows="2" placeholder="Describe the job…" disabled></textarea>
             <button id="chatSend" disabled>Send</button>
@@ -788,6 +839,7 @@
           <h3>Brief</h3>
           <p id="briefCompany" class="brief-company"></p>
           <div id="slotItems"></div>
+          <div id="paperBrief" class="paper-brief hidden"></div>
         </aside>
       </div>
     </div>
@@ -1593,6 +1645,250 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return chatState.boundCompanyId || undefined;
     }
 
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    var paperLoad = 0;
+    var paperBusy = false;
+
+    function renderPaper(paper) {
+      chatState.paper = paper || null;
+      var panel = document.getElementById("paperPanel");
+      var brief = document.getElementById("paperBrief");
+      if (!paper) {
+        if (panel) { panel.classList.add("hidden"); panel.innerHTML = ""; }
+        if (brief) { brief.classList.add("hidden"); brief.innerHTML = ""; }
+        return;
+      }
+      var facts = paper.facts || [];
+      var factHtml = facts.map(function (f) {
+        var shown = f.value ? esc(f.value) : "Not on the page";
+        var later = f.source === "You corrected this" || f.source === "You added this" || f.source === "You confirmed this"
+          ? " Later notes use this line."
+          : "";
+        var buttons = "";
+        if (f.status !== "confirmed") {
+          if (f.value) buttons += '<button type="button" data-act="confirm" data-line="' + esc(f.id) + '">That\'s right</button>';
+          buttons += '<button type="button" data-act="edit" data-line="' + esc(f.id) + '">' + (f.value ? "Change" : "Add it") + "</button>";
+        } else {
+          buttons += '<button type="button" data-act="edit" data-line="' + esc(f.id) + '">Change</button>';
+        }
+        return '<div class="paper-fact" data-line="' + esc(f.id) + '">' +
+          "<strong>" + esc(f.label) + "</strong>" +
+          "<div>" + shown + "</div>" +
+          '<p class="muted">' + esc(f.source) + " · from " + esc(f.place || "the paper") + later + "</p>" +
+          buttons +
+          "</div>";
+      }).join("");
+      var gaps = (paper.gaps || []).map(function (g) {
+        return '<p class="muted">' + esc(g) + "</p>";
+      }).join("");
+      var doc = paper.text
+        ? '<div class="paper-doc">' + esc(paper.text) + "</div>"
+        : '<p class="muted">No words could be read on this.</p>';
+      if (panel) {
+        panel.classList.remove("hidden");
+        panel.innerHTML =
+          "<h3>The paper</h3>" +
+          "<p>" + esc(paper.filename || "Pasted letter") + "</p>" +
+          doc +
+          '<p class="muted">Nothing is sent, filed, or paid from this.</p>' +
+          '<div class="row"><button type="button" id="paperDownload">Download the paper</button></div>';
+        var dl = document.getElementById("paperDownload");
+        if (dl) dl.addEventListener("click", downloadPaper);
+      }
+      if (brief) {
+        brief.classList.remove("hidden");
+        brief.innerHTML =
+          "<h3>From the paper</h3>" +
+          (paper.question ? "<p>" + esc(paper.question) + "</p>" : "") +
+          gaps +
+          factHtml;
+        brief.querySelectorAll("button[data-act]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var act = btn.getAttribute("data-act");
+            var line = btn.getAttribute("data-line");
+            if (act === "confirm") postPaperLine(line, "confirm", null);
+            else startPaperEdit(line);
+          });
+        });
+      }
+    }
+
+    function downloadPaper() {
+      var paper = chatState.paper;
+      if (!paper) return;
+      var blob = new Blob([paper.text || ""], { type: "text/plain" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = paper.filename || "paper.txt";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function startPaperEdit(lineId) {
+      var brief = document.getElementById("paperBrief");
+      if (!brief || !chatState.paper) return;
+      var fact = (chatState.paper.facts || []).filter(function (f) { return f.id === lineId; })[0];
+      if (!fact) return;
+      var row = brief.querySelector('.paper-fact[data-line="' + lineId + '"]');
+      if (!row) return;
+      row.innerHTML =
+        "<strong>" + esc(fact.label) + "</strong>" +
+        '<input class="paper-edit" value="' + esc(fact.value || "") + '" />' +
+        '<div><button type="button" class="paper-save">Save</button> <button type="button" class="paper-cancel">Cancel</button></div>';
+      var input = row.querySelector(".paper-edit");
+      input.focus();
+      row.querySelector(".paper-save").addEventListener("click", function () {
+        postPaperLine(lineId, "edit", input.value);
+      });
+      row.querySelector(".paper-cancel").addEventListener("click", function () {
+        renderPaper(chatState.paper);
+      });
+    }
+
+    function postPaperLine(lineId, action, value) {
+      var paper = chatState.paper;
+      var note = document.getElementById("paperNote");
+      if (!paper || paperBusy) return;
+      paperBusy = true;
+      if (note) note.textContent = "";
+      fetch("/api/buzzy/papers/" + encodeURIComponent(paper.id) + "/lines", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineId: lineId, action: action, value: value || undefined }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+      }).then(function (res) {
+        if (!res.ok || !res.d.paper) {
+          if (note) note.textContent = (res.d && res.d.error) || "Couldn't update that line.";
+          return;
+        }
+        paperLoad++;
+        renderPaper(res.d.paper);
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        if (note) note.textContent = "Couldn't update that line.";
+      }).finally(function () { paperBusy = false; });
+    }
+
+    function loadCompanyPaper(companyId) {
+      var token = ++paperLoad;
+      if (!companyId) { renderPaper(null); return; }
+      var q = "/api/buzzy/papers?companyId=" + encodeURIComponent(companyId);
+      if (chatState.jobId) q += "&jobId=" + encodeURIComponent(chatState.jobId);
+      fetch(q, { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (token !== paperLoad) return;
+          if (!d || !d.paper) { renderPaper(null); return; }
+          if (d.paper.companyId && d.paper.companyId !== companyId) { renderPaper(null); return; }
+          if (d.paper.jobId && !chatState.jobId) chatState.jobId = d.paper.jobId;
+          renderPaper(d.paper);
+        })
+        .catch(function () { if (token === paperLoad) renderPaper(null); });
+    }
+
+    function bytesToBase64(bytes) {
+      var chunk = 0x8000;
+      var bin = "";
+      for (var i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(bin);
+    }
+
+    function readDroppedFile(file) {
+      return new Promise(function (resolve, reject) {
+        if (!file) { reject(new Error("Drop a file or paste the letter first.")); return; }
+        if (file.size > 1500000) { reject(new Error("That file is too large. Paste the letter instead.")); return; }
+        var isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+        var isText = /^text\//.test(file.type || "") || /\.(txt|md|csv)$/i.test(file.name || "");
+        var reader = new FileReader();
+        reader.onerror = function () { reject(new Error("Couldn't read that file.")); };
+        reader.onload = function () {
+          if (isPdf) {
+            var bytes = new Uint8Array(reader.result);
+            resolve({ filename: file.name || "paper.pdf", fileKind: "pdf", dataBase64: bytesToBase64(bytes), text: "" });
+            return;
+          }
+          if (isText) {
+            resolve({ filename: file.name || "paper.txt", fileKind: "text", text: String(reader.result || "") });
+            return;
+          }
+          resolve({ filename: file.name || "photo", fileKind: "photo", text: "" });
+        };
+        if (isText) reader.readAsText(file);
+        else reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function submitPaper(payload) {
+      var note = document.getElementById("paperNote");
+      var co = activeCompanyId();
+      if (!co) {
+        if (note) note.textContent = "Pick the company this paper belongs to first. A dropped file stays on that company.";
+        return Promise.resolve();
+      }
+      if (paperBusy) return Promise.resolve();
+      paperBusy = true;
+      if (note) note.textContent = "Reading…";
+      var userLine = payload.filename ? "Read this — " + payload.filename : "Read this.";
+      chatState.messages.push({ role: "user", content: userLine });
+      renderChatMessages();
+      return ensureChatSession().then(function () {
+        return fetch("/api/buzzy/papers", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId: co,
+            jobId: chatState.jobId || undefined,
+            sessionId: chatState.sessionId || undefined,
+            filename: payload.filename || "",
+            text: payload.text || "",
+            fileKind: payload.fileKind || "paste",
+            dataBase64: payload.dataBase64 || undefined,
+          }),
+        });
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+      }).then(function (res) {
+        if (!res.ok || !res.d.paper) {
+          if (note) note.textContent = (res.d && res.d.error) || "Couldn't read that.";
+          return;
+        }
+        if (res.d.paper.jobId) chatState.jobId = res.d.paper.jobId;
+        chatState.boundCompanyId = co;
+        paperLoad++;
+        renderPaper(res.d.paper);
+        chatState.messages.push({ role: "assistant", content: res.d.reply || res.d.paper.reply || "" });
+        renderChatMessages();
+        var paste = document.getElementById("paperPaste");
+        if (paste) paste.value = "";
+        var file = document.getElementById("paperFile");
+        if (file) file.value = "";
+        if (note) note.textContent = "These lines are proposed. Nothing is confirmed until you accept one.";
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        if (note) note.textContent = (e && e.message) || "Couldn't read that.";
+      }).finally(function () { paperBusy = false; });
+    }
+
+    function readThisBody(text) {
+      var m = String(text || "").match(/^\s*read this\b[:\s\-]*([\s\S]*)$/i);
+      if (!m) return null;
+      return (m[1] || "").trim();
+    }
+
     function renderSlotChecklist() {
       const container = document.getElementById("slotItems");
       const ids = Object.keys(SLOT_LABELS);
@@ -1849,6 +2145,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Brief lines are visible before any message. They start empty.
       document.body.dataset.intake = "chat";
       renderSlotChecklist();
+      var paperCo = activeCompanyId();
+      if (paperCo) loadCompanyPaper(paperCo);
 
       // Load model catalog if not already loaded
       if (!modelCatalog.length) loadModels();
@@ -1943,6 +2241,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
       if (!text) return;
+      var pastedPaper = readThisBody(text);
+      if (pastedPaper !== null) {
+        input.value = "";
+        if (!pastedPaper) {
+          chatState.messages.push({ role: "user", content: text });
+          chatState.messages.push({
+            role: "assistant",
+            content: "Drop the invoice, letter, or photo on this chat, or paste it in the box above.",
+          });
+          renderChatMessages();
+          return;
+        }
+        submitPaper({ filename: "", fileKind: "paste", text: pastedPaper });
+        return;
+      }
       try { await ensureChatSession(); } catch (e) {
         if (e && e.message === "signed_out") return;
       }
@@ -2084,6 +2397,47 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // Wire up chat events
     document.getElementById("chatSend").onclick = sendChatMessage;
+    document.getElementById("paperRead").onclick = function () {
+      var note = document.getElementById("paperNote");
+      var fileInput = document.getElementById("paperFile");
+      var file = fileInput && fileInput.files && fileInput.files[0];
+      var pasted = (document.getElementById("paperPaste").value || "").trim();
+      if (file) {
+        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (e) {
+          if (note) note.textContent = e.message || "Couldn't read that file.";
+        });
+        return;
+      }
+      if (!pasted) {
+        if (note) note.textContent = "Drop a file or paste the letter first.";
+        return;
+      }
+      submitPaper({ filename: "", fileKind: "paste", text: pasted });
+    };
+    (function wirePaperDrop() {
+      var zone = document.getElementById("paperDrop");
+      if (!zone) return;
+      ["dragenter", "dragover"].forEach(function (name) {
+        zone.addEventListener(name, function (e) {
+          e.preventDefault();
+          zone.classList.add("over");
+        });
+      });
+      ["dragleave", "drop"].forEach(function (name) {
+        zone.addEventListener(name, function (e) {
+          e.preventDefault();
+          zone.classList.remove("over");
+        });
+      });
+      zone.addEventListener("drop", function (e) {
+        var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        var note = document.getElementById("paperNote");
+        if (!file) return;
+        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (err) {
+          if (note) note.textContent = err.message || "Couldn't read that file.";
+        });
+      });
+    })();
     document.getElementById("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2319,6 +2673,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       } else if (!chatState.boundCompanyId) {
         chatState.boundCompanyId = id;
       }
+      // Load after a switch clears the previous job, so the other company's paper cannot follow.
+      loadCompanyPaper(id);
       var drawer = document.getElementById("sessionsDrawer");
       if (drawer && drawer.classList.contains("open")) loadSessions();
     }

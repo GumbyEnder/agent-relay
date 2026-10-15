@@ -20,6 +20,9 @@
  *   POST /api/buzzy/sessions        — create a session
  *   PATCH /api/buzzy/sessions/:id   — rename session title
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
+ *   POST /api/buzzy/papers          — read a dropped or pasted paper into proposed lines
+ *   GET  /api/buzzy/papers          — latest paper on the active company (?companyId, ?jobId)
+ *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
  */
 
 import { defineEventHandler, getMethod, setResponseStatus } from "h3";
@@ -30,6 +33,7 @@ import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
+import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -917,6 +921,129 @@ export default defineEventHandler(async (event) => {
       RETURNING summary
     `;
     return { summary: updated[0]?.summary ?? words };
+  }
+
+  // ── GET /api/buzzy/papers — latest paper on this company, not another ──
+  if (method === "GET" && path === "/api/buzzy/papers") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const companyId = queryValue(fullPath, "companyId");
+    if (!companyId || !isCompanyId(companyId)) {
+      setResponseStatus(event, 400);
+      return { error: "Pick the company this paper belongs to first.", code: "bad_company" };
+    }
+    const sql = await getSql();
+    const owned = await sql`
+      SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}
+    `;
+    if (!owned.length) {
+      setResponseStatus(event, 404);
+      return { error: "Company not found", code: "not_found" };
+    }
+    const jobId = queryValue(fullPath, "jobId");
+    const paper = await latestPaper(sql, user.id, companyId, jobId);
+    return { paper };
+  }
+
+  // ── POST /api/buzzy/papers — read a paper; lines stay proposed ──────
+  if (method === "POST" && path === "/api/buzzy/papers") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const companyId = typeof body.companyId === "string" ? body.companyId : "";
+    const jobId = typeof body.jobId === "string" && body.jobId.trim() ? body.jobId.trim().slice(0, 120) : null;
+    const sessionId = typeof body.sessionId === "string" && body.sessionId.trim()
+      ? body.sessionId.trim().slice(0, 80)
+      : null;
+    const filename = cleanFilename(body.filename);
+    const text = typeof body.text === "string" ? body.text.slice(0, 80000) : "";
+    const requested = body.fileKind;
+    const fileKind = requested === "text" || requested === "pdf" || requested === "photo" || requested === "paste"
+      ? requested
+      : "paste";
+    let pdfBytes: Uint8Array | null = null;
+    if (fileKind === "pdf") {
+      const raw = typeof body.dataBase64 === "string" ? body.dataBase64 : "";
+      if (!raw || raw.length > 2_100_000) {
+        setResponseStatus(event, 400);
+        return { error: "That PDF didn't come through. Paste the letter instead.", code: "bad_request" };
+      }
+      const buf = Buffer.from(raw, "base64");
+      if (!buf.length || buf.length > 1_500_000) {
+        setResponseStatus(event, 400);
+        return { error: "That file is too large. Paste the letter instead.", code: "bad_request" };
+      }
+      pdfBytes = buf;
+    } else if (fileKind !== "photo" && !text.trim()) {
+      setResponseStatus(event, 400);
+      return { error: "Paste the letter or drop the file first.", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const saved = await savePaper(sql, user.id, {
+      companyId,
+      jobId,
+      sessionId,
+      filename,
+      text: fileKind === "photo" ? "" : text,
+      fileKind,
+      pdfBytes,
+    });
+    if (!saved.ok) {
+      setResponseStatus(event, saved.status);
+      return { error: saved.error, code: saved.code };
+    }
+    return { ok: true, paper: saved.paper, reply: saved.paper.reply };
+  }
+
+  // ── POST /api/buzzy/papers/:id/lines — confirm or correct one line ──
+  const paperLine = path.match(/^\/api\/buzzy\/papers\/(pp_[a-z0-9]{8,32})\/lines$/);
+  if (method === "POST" && paperLine) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const lineId = typeof body.lineId === "string" ? body.lineId : "";
+    const action = body.action === "confirm" || body.action === "edit" || body.action === "drop"
+      ? body.action
+      : "";
+    if (!action) {
+      setResponseStatus(event, 400);
+      return { error: "Choose confirm, change, or drop for that line.", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const updated = await updatePaperLine(
+      sql,
+      user.id,
+      paperLine[1],
+      lineId,
+      action,
+      typeof body.value === "string" ? body.value : null,
+    );
+    if (!updated.ok) {
+      setResponseStatus(event, updated.status);
+      return { error: updated.error, code: updated.code };
+    }
+    return { ok: true, paper: updated.paper };
   }
 
   throw new Error("Not found");
