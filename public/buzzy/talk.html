@@ -355,7 +355,29 @@
     }
     .draft-ready-banner .muted {
       color: #888;
+      font-weight: 400;
     }
+    .draft-ready-banner textarea {
+      text-align: left;
+      margin-top: 0.7rem;
+      min-height: 8.5rem;
+    }
+    .draft-ready-banner .row { justify-content: center; }
+    /* The confirm stays on the page so it is a different control from Send.
+       It is not display:flex — a later flex rule would beat .hidden. */
+    .outward-confirm {
+      margin-top: 0.9rem;
+      padding: 0.85rem 0.9rem;
+      border: 1px solid var(--bz-yellow);
+      border-radius: 6px;
+      text-align: left;
+      background: rgba(255,193,7,0.06);
+    }
+    .outward-confirm p {
+      color: #E8E8E8;
+      font-weight: 600;
+    }
+    .draft-ready-banner.hidden { display: none; }
     .row {
       display: flex;
       gap: 0.6rem;
@@ -742,11 +764,21 @@
             <button id="chatSend" disabled>Send</button>
           </div>
           <div id="draftBanner" class="draft-ready-banner hidden">
-            <p>Everything BeeZilla needs has been gathered!</p>
-            <p class="muted">A draft is ready for you to review.</p>
-            <div class="row" style="justify-content:center;margin-top:0.8rem">
-              <button id="viewDraft" class="secondary">View draft</button>
-              <button id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+            <p>A draft is ready for you to review.</p>
+            <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
+            <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
+            <p class="muted" id="draftMeta">Version 1 · not approved</p>
+            <div class="row">
+              <button type="button" id="approveDraft">Approve this version</button>
+              <button type="button" id="downloadDraft" class="secondary">Download</button>
+              <button type="button" id="draftSend">Send</button>
+              <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+            </div>
+            <p id="draftSendNote" class="muted" role="status"></p>
+            <div id="outwardConfirm" class="outward-confirm">
+              <p>Sending, filing, paying, or publishing is a separate step.</p>
+              <button type="button" id="confirmOutward" disabled>Confirm send</button>
+              <p id="outwardNote" class="muted"></p>
             </div>
           </div>
           <div id="chatError" class="chat-error hidden"></div>
@@ -1466,6 +1498,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       slots: {},
       messages: [],
       draftReady: false,
+      draftText: "",
+      draftVersion: 1,
+      approvedText: null,
+      outwardConfirmed: false,
       userId: null,
       model: null,
       boundCompanyId: null,
@@ -1688,10 +1724,126 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
+    function draftBodyEl() {
+      return document.getElementById("draftBody");
+    }
+
+    function approvalMatches() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      return !!(chatState.approvedText != null && text === chatState.approvedText && text.trim());
+    }
+
+    function paintDraftGate() {
+      var meta = document.getElementById("draftMeta");
+      var approved = approvalMatches();
+      if (meta) {
+        meta.textContent = "Version " + (chatState.draftVersion || 1) + (approved ? " · approved" : " · not approved");
+      }
+      var confirmBtn = document.getElementById("confirmOutward");
+      if (confirmBtn) confirmBtn.disabled = !approved;
+      if (!approved) chatState.outwardConfirmed = false;
+    }
+
+    function resetDraftGate() {
+      chatState.draftReady = false;
+      chatState.draftText = "";
+      chatState.draftVersion = 1;
+      chatState.approvedText = null;
+      chatState.outwardConfirmed = false;
+      var body = draftBodyEl();
+      if (body) body.value = "";
+      var note = document.getElementById("draftSendNote");
+      if (note) note.textContent = "";
+      var onote = document.getElementById("outwardNote");
+      if (onote) onote.textContent = "";
+      var banner = document.getElementById("draftBanner");
+      if (banner) banner.classList.add("hidden");
+      paintDraftGate();
+    }
+
+    function openDraftReview(text) {
+      var incoming = typeof text === "string" ? text : "";
+      if (!chatState.draftText) {
+        chatState.draftText = incoming;
+        chatState.draftVersion = 1;
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+      }
+      chatState.draftReady = true;
+      var banner = document.getElementById("draftBanner");
+      if (banner) banner.classList.remove("hidden");
+      var body = draftBodyEl();
+      if (body && !body.value) body.value = chatState.draftText;
+      paintDraftGate();
+    }
+
+    function onDraftInput() {
+      var body = draftBodyEl();
+      if (!body) return;
+      var text = body.value;
+      chatState.draftText = text;
+      if (chatState.approvedText != null && text !== chatState.approvedText) {
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+        chatState.draftVersion = (chatState.draftVersion || 1) + 1;
+        var onote = document.getElementById("outwardNote");
+        if (onote) onote.textContent = "";
+        var note = document.getElementById("draftSendNote");
+        if (note) note.textContent = "That change clears the approval. Nothing can leave until you approve this version.";
+      }
+      paintDraftGate();
+    }
+
+    function onApproveDraft() {
+      var body = draftBodyEl();
+      var text = body ? body.value : "";
+      if (!text.trim()) return;
+      chatState.approvedText = text;
+      chatState.draftText = text;
+      chatState.outwardConfirmed = false;
+      var onote = document.getElementById("outwardNote");
+      if (onote) onote.textContent = "";
+      var note = document.getElementById("draftSendNote");
+      if (note) note.textContent = "Version " + chatState.draftVersion + " is approved. Sending still needs the confirm below.";
+      paintDraftGate();
+    }
+
+    function onDraftSend() {
+      var note = document.getElementById("draftSendNote");
+      if (!note) return;
+      if (!approvalMatches()) {
+        note.textContent = "Nothing left the company. Approve this version before it can leave.";
+        return;
+      }
+      note.textContent = "Use Confirm send. Nothing left the company from this button.";
+    }
+
+    function onConfirmOutward() {
+      if (!approvalMatches()) {
+        paintDraftGate();
+        return;
+      }
+      chatState.outwardConfirmed = true;
+      var onote = document.getElementById("outwardNote");
+      if (onote) onote.textContent = "Confirmed for version " + chatState.draftVersion + ". Nothing was emailed or published.";
+    }
+
+    function onDownloadDraft() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      var blob = new Blob([text], { type: "text/markdown" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "draft-v" + (chatState.draftVersion || 1) + ".md";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
     function showChatScreen() {
       document.getElementById("chatMessages").innerHTML = "";
       document.getElementById("chatError").classList.add("hidden");
-      document.getElementById("draftBanner").classList.add("hidden");
+      resetDraftGate();
       setChatMascot("17-attentive");
 
       // Brief lines are visible before any message. They start empty.
@@ -1875,11 +2027,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           Object.assign(chatState.slots, data.slots);
         }
 
-        // Check for draft readiness
+        // Check for draft readiness. The reply is the draft the owner reviews.
+        // Send on that step does not deliver it.
         if (data.draft) {
-          chatState.draftReady = true;
           setChatMascot("12-content");
-          document.getElementById("draftBanner").classList.remove("hidden");
+          openDraftReview(data.reply || "");
         } else {
           setChatMascot("17-attentive");
         }
@@ -1938,12 +2090,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sendChatMessage();
       }
     });
-    document.getElementById("viewDraft").onclick = () => {
-      // Switch to the existing draft flow
-      state.screen = "draft";
-      // Navigate to the jobs page for legacy flows
-      window.location.href = "/buzzy/";
-    };
+    document.getElementById("approveDraft").onclick = onApproveDraft;
+    document.getElementById("draftSend").onclick = onDraftSend;
+    document.getElementById("confirmOutward").onclick = onConfirmOutward;
+    document.getElementById("downloadDraft").onclick = onDownloadDraft;
+    document.getElementById("draftBody").addEventListener("input", onDraftInput);
     // ── Sessions drawer ───────────────────────────────────────
     function openSessionsDrawer() {
       const drawer = document.getElementById("sessionsDrawer");
@@ -2027,8 +2178,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
         chatState.messages = msgs;
         chatState.slots = {};
-        chatState.draftReady = false;
-        document.getElementById("draftBanner").classList.add("hidden");
+        resetDraftGate();
         document.getElementById("chatError").classList.add("hidden");
         setChatMascot(msgs.length >= 2 ? "12-content" : "17-attentive");
         renderChatMessages();
@@ -2100,13 +2250,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           slots: {},
           messages: [],
           draftReady: false,
+          draftText: "",
+          draftVersion: 1,
+          approvedText: null,
+          outwardConfirmed: false,
           userId: chatState.userId,
           _signedOut: chatState._signedOut,
           jobContext: chatState.jobContext,
           boundCompanyId: (s && s.companyId) || coId || null,
           expert: chatState.expert,
         };
-        document.getElementById("draftBanner").classList.add("hidden");
         document.getElementById("chatError").classList.add("hidden");
         closeSessionsDrawer();
         showChatScreen();
@@ -2154,13 +2307,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.jobId = null;
         chatState.jobContext = null;
         chatState.slots = {};
-        chatState.draftReady = false;
         chatState.messages = [{
           role: "assistant",
           content: "This chat is for " + co.name + ". Describe the job — what needs to be done.",
         }];
-        var banner = document.getElementById("draftBanner");
-        if (banner) banner.classList.add("hidden");
+        resetDraftGate();
         if (document.getElementById("chatMessages")) {
           renderChatMessages();
           renderSlotChecklist();
