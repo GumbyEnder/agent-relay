@@ -1763,10 +1763,37 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       renderSlotChecklist();
     }
 
+    function ensureChatSession() {
+      if (chatState.sessionId) return Promise.resolve(chatState.sessionId);
+      var coId = activeCompanyId();
+      return fetch(SESSIONS_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId: coId || undefined }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        return r.ok ? r.json() : null;
+      }).then(function (data) {
+        var s = data && data.session;
+        if (s && s.id) {
+          chatState.sessionId = s.id;
+          if (s.companyId) chatState.boundCompanyId = s.companyId;
+        }
+        return chatState.sessionId;
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") throw e;
+        return chatState.sessionId;
+      });
+    }
+
     async function sendChatMessage() {
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
       if (!text) return;
+      try { await ensureChatSession(); } catch (e) {
+        if (e && e.message === "signed_out") return;
+      }
 
       input.value = "";
       setChatMascot("08-thinking");

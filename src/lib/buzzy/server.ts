@@ -30,6 +30,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - Stay focused on the problem and the decisions needed: what's being done, scope, materials/supplier, budget, timing, and how success gets checked.
 - Do not repeat back the user's answer as a restatement or react emotionally to it. Acknowledge in at most two words ("Got it.") or skip the acknowledgment entirely, then move to the next decision.
 - Never re-ask something already answered — the conversation state shows what's decided.
+- Never write a price, penalty, or date the owner did not state. If they did not name an amount, leave it out.
 - Track decisions, not stories: capture the decision, then move on.
 - MANDATED GOAL — the Decisions Made box: The Challenge, Difficulties, Who is involved, What is the end goal. Every reply must move at least one forward: either extract a statement from what the client just said (emit it as [challenge: …], [difficulties: …], [who_involved: …], or [end_goal: …]) or ask the single next question that fills a missing one. If the client says a statement cannot be answered, emit [id: skipped] for that id instead of inventing content — never fabricate a statement they did not give or approve. The job is not ready for a draft until all four are filled or explicitly skipped.
 - DISCOVERY FIRST: do not write the final document, draft, or deliverable until the four Decisions Made statements are captured or skipped. Even when the request looks like a finished deliverable, first pull out what the client already told you (emit the [slot: …] markers) and ask for what is still missing, one decision at a time. The box fills in as the conversation uncovers each decision.
@@ -38,6 +39,16 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 You never mention models, tokens, or technical internals.`;
 
 // ── Helper: str ────────────────────────────────────────────────────────
+
+/** A dollar amount in the extract that the owner did not type is not a fact. */
+function mentionsInventedAmount(value: string, source: string): boolean {
+  const amounts = value.match(/\$\s?\d[\d,]*(?:\.\d+)?/g) || [];
+  const digits = source.replace(/\D/g, "");
+  return amounts.some((amount) => {
+    const n = amount.replace(/\D/g, "");
+    return n.length > 0 && !digits.includes(n);
+  });
+}
 
 function str(v: unknown): string | undefined {
   if (typeof v === "string") return v;
@@ -84,8 +95,8 @@ const EXTRACT_SYS = `Extract these four facts from the user's message, using the
 "difficulties" = what makes it hard or risky,
 "who_involved" = who is affected,
 "end_goal"     = the outcome they want.
-Use null for any fact the message does not state. Never invent a value.
-Example: {"challenge":"client owes $4200, 90 days late","difficulties":null,"who_involved":"the client and my business","end_goal":"get paid via a final demand letter"}`;
+Use null for any fact the message does not state. Never invent a value, a business, or an amount.
+The example is empty on purpose. Do not copy it into the answer: {"challenge":null,"difficulties":null,"who_involved":null,"end_goal":null}`;
 
 async function extractDecisions(
   userMessage: string,
@@ -105,7 +116,9 @@ async function extractDecisions(
     for (const id of STATEMENT_IDS) {
       const v = obj[id];
       if (typeof v === "string" && v.trim() && v.trim() !== "null") {
-        out[id] = v.trim().slice(0, 200);
+        const text = v.trim().slice(0, 200);
+        if (mentionsInventedAmount(text, userMessage)) continue;
+        out[id] = text;
       }
     }
     return out;
@@ -183,17 +196,27 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
 
   const sql = await getSql();
-  const memory = new DbMemory(sql, userId, jobId);
+  // A Talk with no job still needs its own brief. Key memory by the session
+  // so another chat's decisions are not already "known".
+  const memory = new DbMemory(sql, userId, jobId || sessionId);
 
   // ── Ensure Honcho peer ──────────────────────────────────────────────
   await ensurePeer(userId);
 
   // ── Load recent chat history ───────────────────────────────────────
-  const rows = await sql`
-    SELECT role, content FROM buzzy_chat_messages
-    WHERE user_id = ${userId} AND job_id IS NOT DISTINCT FROM ${jobId}
-    ORDER BY created_at DESC LIMIT 10
-  `;
+  // Session-scoped when this chat has one. A null job_id is shared by every
+  // loose Talk, so matching on job_id alone pulls another conversation in.
+  const rows = sessionId
+    ? await sql`
+        SELECT role, content FROM buzzy_chat_messages
+        WHERE user_id = ${userId} AND session_id = ${sessionId}
+        ORDER BY created_at DESC LIMIT 10
+      `
+    : await sql`
+        SELECT role, content FROM buzzy_chat_messages
+        WHERE user_id = ${userId} AND job_id IS NOT DISTINCT FROM ${jobId}
+        ORDER BY created_at DESC LIMIT 10
+      `;
 
   // Reverse to chronological order
   const history = rows.reverse() as Array<{ role: string; content: string }>;
@@ -320,6 +343,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   //    only markers this turn, not the whole slot set) ──────────────────
   const markersFromReply = extractSlotsFromReply(sanitizedReply, {});
   for (const [slotId, val] of Object.entries(markersFromReply)) {
+    // The extraction of the owner's words wins. A marker that adds an amount
+    // they did not state is not a brief line.
+    if (newlyExtracted[slotId] || mentionsInventedAmount(val, message)) continue;
     if (!slotValues[slotId] || slotValues[slotId] !== val) {
       slotValues[slotId] = val;
       await memory.remember(slotId, val);
@@ -338,7 +364,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Build response ─────────────────────────────────────────────────
   // Slots filled this turn (structural extraction + inline markers) are
   // broadcast so the client fills the Decisions Made box live.
-  const deltaSlots: Record<string, string> = { ...newlyExtracted, ...markersFromReply };
+  const safeMarkers: Record<string, string> = {};
+  for (const [slotId, val] of Object.entries(markersFromReply)) {
+    if (!newlyExtracted[slotId] && !mentionsInventedAmount(val, message)) safeMarkers[slotId] = val;
+  }
+  const deltaSlots: Record<string, string> = { ...safeMarkers, ...newlyExtracted };
   const nowFilled = REQUIRED_SLOTS.filter((id) => slotValues[id]).length;
 
   const response: ChatResponse = {
