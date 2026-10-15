@@ -628,16 +628,20 @@
     function jobComplete(j) {
       // screen is unreliable — leaving the result view overwrites it with
       // "jobs". The durable completion signal is the board: all 4 steps in Done
-      // (dogfood 10015 root cause).
+      // (dogfood 10015 root cause). A stored status of Done (server column or
+      // job JSON) counts too, so completed jobs reloaded from the account
+      // still land in the Library.
       if (!j) return false;
+      if (j.status === "Done") return true;
       if (j.screen === "result") return true;
       if (j.board && Array.isArray(j.board.Done) && j.board.Done.length >= 4) return true;
       return false;
     }
 
     function jobTitle(j) {
-      // Auto-title from the first user message (dogfood 10013); fall back to
-      // template name, then "New job".
+      // Prefer a stored title (server jobs). Otherwise auto-title from the
+      // first user message (dogfood 10013); fall back to template, then "New job".
+      if (j && j.title && String(j.title).trim()) return String(j.title).trim();
       const first = (j.messages || []).find((m) => m.who === "me" && m.text);
       if (first) return first.text.slice(0, 72);
       if (j.problem) return j.problem.slice(0, 72);
@@ -660,6 +664,10 @@
 
     const catalog = { currentId: null, hideCompleted: true, jobs: [], userId: null };
     let state = emptyJob();
+    // The first paint reads localStorage. Don't POST that copy until the
+    // account's server list has been merged, or a deleted demo job gets
+    // written back as the current job.
+    let serverMerged = false;
 
     function snapshotCurrent() {
       if (!state.id) return;
@@ -682,6 +690,7 @@
     // localStorage. Throttled so rapid saves coalesce into one POST.
     var _syncTimer = null;
     function syncServerJob() {
+      if (!serverMerged) return;
       if (_syncTimer) return;
       _syncTimer = setTimeout(function () {
         _syncTimer = null;
@@ -704,30 +713,66 @@
       }, 400);
     }
 
-    // Pull durable jobs from the server and merge any this device lacks into
-    // the catalog. Never deletes local state; server restores missing jobs.
+    // Row from GET /api/buzzy/jobs → the client job object the rest of the
+    // page already understands. `data` is the full job; title/status live on
+    // the row when an older seed forgot to copy them inside.
+    function normalizeServerJob(s) {
+      if (!s || typeof s !== "object") return null;
+      var data = s.data && typeof s.data === "object" ? s.data : {};
+      var job;
+      try { job = JSON.parse(JSON.stringify(data)); } catch (_) { job = {}; }
+      if (!job.id && s.id) job.id = s.id;
+      if (!job.id) return null;
+      if (s.title && !job.title) job.title = s.title;
+      if (s.template && !job.template) job.template = s.template;
+      if (s.status && !job.status) job.status = s.status;
+      if (!job.updatedAt && s.updatedAt) {
+        var u = Date.parse(s.updatedAt);
+        if (!isNaN(u)) job.updatedAt = u;
+      }
+      if (!job.createdAt && s.createdAt) {
+        var c = Date.parse(s.createdAt);
+        if (!isNaN(c)) job.createdAt = c;
+      }
+      return job;
+    }
+
+    // Signed-in catalog follows the account. Recent local-only jobs (typed
+    // in the last 10 minutes and not on the server yet) stay. Everything
+    // else the server no longer has is dropped, so a re-seed actually
+    // replaces the old readable-slug demo jobs.
     function mergeServerJobs() {
+      var prevScreen = state.screen;
+      var prevId = state.id;
       fetch("/api/buzzy/jobs", { headers: { Accept: "application/json" }, credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
-          if (!d || !Array.isArray(d.jobs) || !d.jobs.length) return;
-          var have = {};
-          catalog.jobs.forEach(function (x) { if (x.id) have[x.id] = true; });
-          var added = false;
+          serverMerged = true;
+          if (!d || !Array.isArray(d.jobs)) return;
+          var serverJobs = [];
           d.jobs.forEach(function (s) {
-            if (s && s.data && s.data.id && !have[s.data.id]) {
-              catalog.jobs.push(s.data);
-              have[s.data.id] = true;
-              added = true;
-            }
+            var job = normalizeServerJob(s);
+            if (job) serverJobs.push(job);
           });
-          if (added) {
-            catalog.jobs.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
-            goJobs();
-          }
+          if (!serverJobs.length) return;
+          var serverIds = {};
+          serverJobs.forEach(function (j) { serverIds[j.id] = true; });
+          var cutoff = Date.now() - 10 * 60 * 1000;
+          var pending = catalog.jobs.filter(function (j) {
+            return j && j.id && !serverIds[j.id] && (j.updatedAt || 0) >= cutoff &&
+              (j.problem || (j.messages && j.messages.length));
+          });
+          catalog.jobs = serverJobs.concat(pending);
+          catalog.jobs.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+          var cur = catalog.jobs.find(function (j) { return j.id === prevId; });
+          if (cur) state = cur;
+          else if (catalog.jobs[0]) { state = catalog.jobs[0]; catalog.currentId = state.id; }
+          state.screen = prevScreen || state.screen || "jobs";
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
+          if (state.screen === "docs") goDocs();
+          else if (state.screen === "jobs") goJobs();
         })
-        .catch(function () { /* signed out or network */ });
+        .catch(function () { serverMerged = true; });
     }
 
     function loadState() {
@@ -819,6 +864,7 @@
 
     function draftDoc() {
       if (state.draftText) return state.draftText;
+      if (state.draft) return state.draft;
       if (state.problem) {
         return templateName() + " draft\nStatus: " + (state.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + state.version + "\n\nWhat you asked for:\n" + state.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";
       }
@@ -956,9 +1002,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return String(s || "job").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "job";
     }
 
-    // Materialize the current draft + PDF copy into every job's folder.
+    // Materialize a real draft into the job's folder. Completed jobs with
+    // only a problem still get the structured fallback. Open jobs with no
+    // draft are left alone — a problem echo is not a Library document.
+    // A stored real draft replaces the file; a fallback never overwrites one.
     function syncJobDocs(j) {
-      const hasDoc = j.problem || (j.answers && Object.keys(j.answers || {}).length);
+      const real = String(j.draftText || j.draft || "").trim();
+      const complete = jobComplete(j);
+      if (!real && !complete) return;
+      const hasDoc = real || j.problem || (j.answers && Object.keys(j.answers || {}).length);
       if (!hasDoc) return;
       const all = loadDocs();
       const folder = all[j.id] || (all[j.id] = []);
@@ -966,7 +1018,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const name = slugify(jobTitle(j)) + "-v" + (j.version || 0) + ".md";
       const existing = folder.find((d) => d.name === name);
       if (existing) {
-        if (existing.md !== md) { existing.md = md; existing.updatedAt = Date.now(); }
+        if (real && existing.md !== md) { existing.md = md; existing.updatedAt = Date.now(); }
       } else {
         folder.push({ name: name, md: md, createdAt: Date.now(), updatedAt: Date.now() });
       }
@@ -977,6 +1029,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // Same content as draftDoc() but for any job (not just `state`).
     function draftDocFor(j) {
+      if (j.draftText) return j.draftText;
       if (j.draft) return j.draft; // the real LLM-generated draft (durable)
       if (j.problem) {
         const t = TEMPLATES.find((x) => x.id === j.template);
@@ -1096,7 +1149,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           ? folders.map((f) =>
               "<div class='docfolder' data-folder='" + f.id + "'>" +
                 "<div class='df-name'>📁 " + escHtml(f.job ? jobTitle(f.job) : f.id) + "</div>" +
-                "<div class='df-meta'>" + f.docs.length + " document" + (f.docs.length === 1 ? "" : "s") + " · latest " + new Date(f.docs[0].updatedAt || f.docs[0].createdAt).toLocaleDateString() + "</div>" +
+                "<div class='df-meta'>" + f.docs.length + " document" + (f.docs.length === 1 ? "" : "s") +
+                  (f.job && jobComplete(f.job) ? " · approved draft" : "") +
+                  " · latest " + new Date(f.docs[0].updatedAt || f.docs[0].createdAt).toLocaleDateString() + "</div>" +
               "</div>").join("")
           : "<p class='muted'>No documents yet. Documents appear here as your jobs produce drafts and deliverables.</p>") +
         "</div>";
