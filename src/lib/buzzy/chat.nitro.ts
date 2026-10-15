@@ -12,7 +12,9 @@
  *   GET  /api/buzzy/profile         — account-scoped business profile + defaults
  *   PUT  /api/buzzy/profile         — save profile fields (closed key set)
  *   POST /api/buzzy/profile/reuse   — copy chosen defaults into a job
- *   GET  /api/buzzy/sessions        — list user's sessions
+ *   GET  /api/buzzy/companies       — companies on this account
+ *   POST /api/buzzy/companies       — add a company (name only)
+ *   GET  /api/buzzy/sessions        — list user's sessions (?companyId= scopes)
  *   POST /api/buzzy/sessions        — create a session
  *   PATCH /api/buzzy/sessions/:id   — rename session title
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
@@ -36,6 +38,42 @@ function safeParseJson(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function queryValue(fullPath: string, key: string): string | null {
+  const qs = fullPath.includes("?") ? fullPath.slice(fullPath.indexOf("?") + 1) : "";
+  if (!qs) return null;
+  const v = new URLSearchParams(qs).get(key);
+  if (!v || v === "null") return null;
+  return v;
+}
+
+function isCompanyId(id: string): boolean {
+  return /^co_[a-z0-9]{8,32}$/.test(id);
+}
+
+function companyName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const name = raw.trim().replace(/\s+/g, " ").slice(0, 80);
+  return name || null;
+}
+
+type CompanyRow = {
+  id: string;
+  name: string;
+  one_liner: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function companyPayload(row: CompanyRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    oneLiner: row.one_liner || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -231,6 +269,54 @@ export default defineEventHandler(async (event) => {
     return { reused, skipped };
   }
 
+  // ── GET /api/buzzy/companies — tabs for this account ────────────────
+  if (method === "GET" && path === "/api/buzzy/companies") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql<CompanyRow>`
+      SELECT id, name, one_liner, created_at, updated_at
+      FROM buzzy_companies
+      WHERE user_id = ${user.id}
+      ORDER BY created_at ASC
+      LIMIT 50
+    `;
+    return { companies: rows.map(companyPayload) };
+  }
+
+  // ── POST /api/buzzy/companies — add a company by the name the owner uses ──
+  if (method === "POST" && path === "/api/buzzy/companies") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const name = companyName(body.name);
+    if (!name) {
+      setResponseStatus(event, 400);
+      return { error: "Type the company name.", code: "bad_request" };
+    }
+    const id = `co_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const sql = await getSql();
+    const rows = await sql<CompanyRow>`
+      INSERT INTO buzzy_companies (id, user_id, name)
+      VALUES (${id}, ${user.id}, ${name})
+      RETURNING id, name, one_liner, created_at, updated_at
+    `;
+    setResponseStatus(event, 201);
+    return { company: companyPayload(rows[0]) };
+  }
+
   // ── GET /api/buzzy/jobs — list the user's durable jobs ──────────────
   if (method === "GET" && path === "/api/buzzy/jobs") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
@@ -239,19 +325,42 @@ export default defineEventHandler(async (event) => {
       return { error: "Sign in required", code: "signed_out" };
     }
     const sql = await getSql();
-    const rows = await sql`
-      SELECT id, template, title, status, data, created_at, updated_at
-      FROM buzzy_jobs
-      WHERE user_id = ${user.id}
-      ORDER BY updated_at DESC
-      LIMIT 500
-    `;
+    const companyFilter = queryValue(fullPath, "companyId");
+    if (companyFilter) {
+      if (!isCompanyId(companyFilter)) {
+        setResponseStatus(event, 400);
+        return { error: "Unknown company.", code: "bad_company" };
+      }
+      const owned = await sql`
+        SELECT id FROM buzzy_companies WHERE id = ${companyFilter} AND user_id = ${user.id}
+      `;
+      if (!owned.length) {
+        setResponseStatus(event, 404);
+        return { error: "Company not found", code: "not_found" };
+      }
+    }
+    const rows = companyFilter
+      ? await sql`
+          SELECT id, template, title, status, company_id, data, created_at, updated_at
+          FROM buzzy_jobs
+          WHERE user_id = ${user.id} AND company_id = ${companyFilter}
+          ORDER BY updated_at DESC
+          LIMIT 500
+        `
+      : await sql`
+          SELECT id, template, title, status, company_id, data, created_at, updated_at
+          FROM buzzy_jobs
+          WHERE user_id = ${user.id}
+          ORDER BY updated_at DESC
+          LIMIT 500
+        `;
     return {
       jobs: rows.map((r) => ({
         id: r.id,
         template: r.template,
         title: r.title,
         status: r.status,
+        companyId: typeof r.company_id === "string" ? r.company_id : null,
         data: typeof r.data === "string" ? safeParseJson(r.data) : r.data,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
@@ -281,20 +390,64 @@ export default defineEventHandler(async (event) => {
     const template = typeof body.template === "string" ? body.template.slice(0, 64) : null;
     const title = typeof body.title === "string" ? body.title.slice(0, 200) : null;
     const status = typeof body.status === "string" ? body.status.slice(0, 64) : null;
-    const data = body.data && typeof body.data === "object" ? body.data : {};
-    const dataJson = JSON.stringify(data);
+    // Missing companyId leaves the column alone so an older client cannot
+    // unfile a job. null files it to no company. A string must be ours.
+    let companyId: string | null | undefined;
+    if (Object.prototype.hasOwnProperty.call(body, "companyId")) {
+      if (body.companyId === null || body.companyId === "") companyId = null;
+      else if (typeof body.companyId === "string" && isCompanyId(body.companyId)) companyId = body.companyId;
+      else {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+    }
+    const dataObj: Record<string, unknown> =
+      body.data && typeof body.data === "object" && !Array.isArray(body.data)
+        ? { ...(body.data as Record<string, unknown>) }
+        : {};
+    if (companyId !== undefined) dataObj.companyId = companyId;
+    const dataJson = JSON.stringify(dataObj);
     const sql = await getSql();
-    await sql`
-      INSERT INTO buzzy_jobs (id, user_id, template, title, status, data, updated_at)
-      VALUES (${id}, ${user.id}, ${template}, ${title}, ${status}, ${dataJson}::jsonb, now())
-      ON CONFLICT (id) DO UPDATE SET
-        template = EXCLUDED.template,
-        title = EXCLUDED.title,
-        status = EXCLUDED.status,
-        data = EXCLUDED.data,
-        updated_at = now()
-    `;
-    return { ok: true, id };
+    if (typeof companyId === "string") {
+      const owned = await sql`
+        SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}
+      `;
+      if (!owned.length) {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+    }
+    const rows = companyId !== undefined
+      ? await sql`
+          INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+          VALUES (${id}, ${user.id}, ${template}, ${title}, ${status}, ${companyId}, ${dataJson}::jsonb, now())
+          ON CONFLICT (id) DO UPDATE SET
+            template = EXCLUDED.template,
+            title = EXCLUDED.title,
+            status = EXCLUDED.status,
+            company_id = EXCLUDED.company_id,
+            data = EXCLUDED.data,
+            updated_at = now()
+          WHERE buzzy_jobs.user_id = EXCLUDED.user_id
+          RETURNING id
+        `
+      : await sql`
+          INSERT INTO buzzy_jobs (id, user_id, template, title, status, data, updated_at)
+          VALUES (${id}, ${user.id}, ${template}, ${title}, ${status}, ${dataJson}::jsonb, now())
+          ON CONFLICT (id) DO UPDATE SET
+            template = EXCLUDED.template,
+            title = EXCLUDED.title,
+            status = EXCLUDED.status,
+            data = EXCLUDED.data,
+            updated_at = now()
+          WHERE buzzy_jobs.user_id = EXCLUDED.user_id
+          RETURNING id
+        `;
+    if (!rows.length) {
+      setResponseStatus(event, 409);
+      return { error: "That job belongs to someone else.", code: "conflict" };
+    }
+    return { ok: true, id, companyId: companyId === undefined ? undefined : companyId };
   }
 
   // ── DELETE /api/buzzy/jobs/:id — remove a job (ownership enforced) ──
@@ -322,20 +475,44 @@ export default defineEventHandler(async (event) => {
       return { error: "Sign in required", code: "signed_out" };
     }
     const sql = await getSql();
-    const rows = await sql`
-      SELECT s.id, s.job_id, s.title, s.summary, s.created_at, s.updated_at,
-        (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count
-      FROM buzzy_sessions s
-      WHERE s.user_id = ${user.id}
-      ORDER BY s.updated_at DESC
-      LIMIT 100
-    `;
+    const companyFilter = queryValue(fullPath, "companyId");
+    if (companyFilter) {
+      if (!isCompanyId(companyFilter)) {
+        setResponseStatus(event, 400);
+        return { error: "Unknown company.", code: "bad_company" };
+      }
+      const owned = await sql`
+        SELECT id FROM buzzy_companies WHERE id = ${companyFilter} AND user_id = ${user.id}
+      `;
+      if (!owned.length) {
+        setResponseStatus(event, 404);
+        return { error: "Company not found", code: "not_found" };
+      }
+    }
+    const rows = companyFilter
+      ? await sql`
+          SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.created_at, s.updated_at,
+            (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count
+          FROM buzzy_sessions s
+          WHERE s.user_id = ${user.id} AND s.company_id = ${companyFilter}
+          ORDER BY s.updated_at DESC
+          LIMIT 100
+        `
+      : await sql`
+          SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.created_at, s.updated_at,
+            (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count
+          FROM buzzy_sessions s
+          WHERE s.user_id = ${user.id}
+          ORDER BY s.updated_at DESC
+          LIMIT 100
+        `;
     return {
       sessions: rows.map((r) => ({
         id: r.id,
         jobId: r.job_id,
         title: r.title,
         summary: r.summary,
+        companyId: typeof r.company_id === "string" ? r.company_id : null,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
         messageCount: Number(r.message_count),
@@ -362,18 +539,36 @@ export default defineEventHandler(async (event) => {
     const title = typeof body.title === "string" && body.title.trim()
       ? body.title.trim().slice(0, 120)
       : "New session";
+    let companyId: string | null = null;
+    if (typeof body.companyId === "string" && body.companyId) {
+      if (!isCompanyId(body.companyId)) {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+      companyId = body.companyId;
+    }
     const id = `sess_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     const sql = await getSql();
+    if (companyId) {
+      const owned = await sql`
+        SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}
+      `;
+      if (!owned.length) {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+    }
     const rows = await sql`
-      INSERT INTO buzzy_sessions (id, user_id, job_id, title)
-      VALUES (${id}, ${user.id}, ${jobId}, ${title})
-      RETURNING id, job_id, title, summary, created_at, updated_at
+      INSERT INTO buzzy_sessions (id, user_id, job_id, title, company_id)
+      VALUES (${id}, ${user.id}, ${jobId}, ${title}, ${companyId})
+      RETURNING id, job_id, title, summary, company_id, created_at, updated_at
     `;
     const s = rows[0];
     setResponseStatus(event, 201);
     return {
       session: {
         id: s.id, jobId: s.job_id, title: s.title, summary: s.summary,
+        companyId: typeof s.company_id === "string" ? s.company_id : null,
         createdAt: s.created_at, updatedAt: s.updated_at, messageCount: 0,
       },
     };

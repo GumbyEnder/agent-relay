@@ -217,9 +217,11 @@
       </nav>
   </div>
   </header>
+  <div id="companyTabs"></div>
   <main>
     <div id="content"><p class="empty">Loading memory…</p></div>
   </main>
+  <script src="/buzzy/companies.js"></script>
   <script>
     // Session-aware account link (same as talk.html) — memory.html previously
     // had no account code, so signed-in users always saw "Sign in" (dogfood 10003).
@@ -271,10 +273,13 @@
       d.textContent = String(s ?? "");
       return d.innerHTML;
     }
-    (async () => {
+    var memGen = 0;
+    async function loadMemory() {
+      var gen = ++memGen;
       try {
       const res = await fetch("/api/buzzy/memory", { credentials: "same-origin" });
       const root = document.getElementById("content");
+      if (gen !== memGen) return;
       if (res.status === 401) {
         root.innerHTML =
           '<div class="signout"><p class="muted">Memory is tied to your account.</p><a href="/login">Sign in</a></div>';
@@ -285,8 +290,22 @@
         return;
       }
       const data = await res.json();
-      const facts = data.facts || [];
-      const messages = data.messages || [];
+      var facts = data.facts || [];
+      var messages = data.messages || [];
+      var company = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.active() : null;
+      if (company) {
+        var jr = await fetch("/api/buzzy/jobs?companyId=" + encodeURIComponent(company.id), { credentials: "same-origin" });
+        if (gen !== memGen) return;
+        if (!jr.ok) {
+          root.innerHTML = '<p class="empty">Couldn\u2019t open memory for this company. Try refreshing.</p>';
+          return;
+        }
+        var jd = await jr.json();
+        var allowed = {};
+        (jd.jobs || []).forEach(function (j) { if (j && j.id) allowed[j.id] = true; });
+        facts = facts.filter(function (f) { return f.jobId && allowed[f.jobId]; });
+        messages = messages.filter(function (m) { return m.jobId && allowed[m.jobId]; });
+      }
       const honcho = data.honchoAvailable;
       const jobLabel = (id) => (id ? id.slice(0, 8) : "General");
 
@@ -343,7 +362,11 @@
             .join("")
         : '<p class="empty">No conversations yet.</p>';
 
+      var coTitle = company
+        ? '<h1 style="font-size:1.45rem;margin:0 0 0.8rem">Memory for ' + esc(company.name) + '</h1>'
+        : '';
       root.innerHTML =
+        coTitle +
         stats +
         summaryCard +
         '<section><h2>By job</h2>' + jobsHtml + '</section>' +
@@ -359,10 +382,13 @@
         });
       });
       } catch (err) {
+        if (gen !== memGen) return;
         const root = document.getElementById("content");
         if (root) root.innerHTML = '<p class="empty">Couldn\u2019t load memory right now. Try refreshing.</p>';
       }
-    })();
+    }
+    if (window.BZCompanies) BZCompanies.onChange(function () { loadMemory(); });
+    else loadMemory();
   </script>
 </body>
 </html>

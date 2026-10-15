@@ -693,6 +693,7 @@
     </nav>
     </div>
   </header>
+  <div id="companyTabs"></div>
   <main>
     <div id="chatScreen">
       <div class="chat-layout">
@@ -708,6 +709,7 @@
             </select>
             <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Sessions</button>
           </div>
+          <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.55rem;font-size:0.92rem"></p>
           <div class="chat-messages" id="chatMessages"></div>
           <div class="chat-input-row">
             <textarea id="chatInput" rows="2" placeholder="Describe the job…" disabled></textarea>
@@ -746,6 +748,7 @@
     </aside>
   </main>
 
+  <script src="/buzzy/companies.js"></script>
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -1438,6 +1441,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       draftReady: false,
       userId: null,
       model: null,
+      boundCompanyId: null,
     };
 
     // The four Decisions Made statements the owner may explicitly skip.
@@ -1891,11 +1895,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const list = document.getElementById("sessionsList");
       list.innerHTML = '<p class="sessions-empty">Loading…</p>';
       try {
-        const r = await fetch(SESSIONS_BASE, { credentials: "same-origin" });
+        var sessionsCo = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.activeId() : null;
+        const r = await fetch(
+          sessionsCo ? SESSIONS_BASE + "?companyId=" + encodeURIComponent(sessionsCo) : SESSIONS_BASE,
+          { credentials: "same-origin" },
+        );
         if (r.status === 401) { sessionsError("signed_out"); return; }
         if (!r.ok) { sessionsError("Couldn't load your sessions. Try again in a moment."); return; }
         const data = await r.json();
-        const sessions = data.sessions || [];
+        var sessions = data.sessions || [];
+        if (sessionsCo) sessions = sessions.filter(function (s) { return s.companyId === sessionsCo; });
         if (!sessions.length) {
           list.innerHTML = '<p class="sessions-empty">No sessions yet</p>';
           return;
@@ -1937,6 +1946,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return { role: m.role, content: m.content };
         });
         chatState.sessionId = s.id;
+        chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
         chatState.messages = msgs;
         chatState.slots = {};
         chatState.draftReady = false;
@@ -1992,11 +2002,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     // Start a truly new chat: create a real session, then reset local state.
     function startNewChat() {
+      var coId = window.BZCompanies && BZCompanies.activeId && BZCompanies.activeId();
       return fetch(SESSIONS_BASE, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: chatState.jobId || undefined }),
+        body: JSON.stringify({
+          jobId: chatState.jobId || undefined,
+          companyId: coId || undefined,
+        }),
       }).then(function (r) {
         if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
         return r.json();
@@ -2011,6 +2025,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           userId: chatState.userId,
           _signedOut: chatState._signedOut,
           jobContext: chatState.jobContext,
+          boundCompanyId: (s && s.companyId) || coId || null,
+          expert: chatState.expert,
         };
         document.getElementById("draftBanner").classList.add("hidden");
         document.getElementById("chatError").classList.add("hidden");
@@ -2042,6 +2058,39 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       e.preventDefault();
       window.location.href = "/buzzy/memory";
     };
+
+    function applyChatCompany(co) {
+      var line = document.getElementById("chatCompany");
+      if (line) {
+        line.textContent = co
+          ? "This chat is for " + co.name + "."
+          : "No company yet. Add one if this work belongs to a business.";
+      }
+      var id = co ? co.id : null;
+      if (chatState.boundCompanyId && id && chatState.boundCompanyId !== id) {
+        chatState.boundCompanyId = id;
+        chatState.sessionId = null;
+        chatState.jobId = null;
+        chatState.jobContext = null;
+        chatState.slots = {};
+        chatState.draftReady = false;
+        chatState.messages = [{
+          role: "assistant",
+          content: "This chat is for " + co.name + ". Describe the job — what needs to be done.",
+        }];
+        var banner = document.getElementById("draftBanner");
+        if (banner) banner.classList.add("hidden");
+        if (document.getElementById("chatMessages")) {
+          renderChatMessages();
+          renderSlotChecklist();
+        }
+      } else if (!chatState.boundCompanyId) {
+        chatState.boundCompanyId = id;
+      }
+      var drawer = document.getElementById("sessionsDrawer");
+      if (drawer && drawer.classList.contains("open")) loadSessions();
+    }
+    if (window.BZCompanies) BZCompanies.onChange(applyChatCompany);
 
     // Show chat screen on load
     showChatScreen();
