@@ -977,6 +977,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // Same content as draftDoc() but for any job (not just `state`).
     function draftDocFor(j) {
+      if (j.draft) return j.draft; // the real LLM-generated draft (durable)
       if (j.problem) {
         const t = TEMPLATES.find((x) => x.id === j.template);
         return ((t && t.name) || "Job") + " draft\nStatus: " + (j.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + (j.version || 0) + "\n\nWhat you asked for:\n" + j.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";

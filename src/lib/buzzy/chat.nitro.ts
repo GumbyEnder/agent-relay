@@ -297,6 +297,23 @@ export default defineEventHandler(async (event) => {
     return { ok: true, id };
   }
 
+  // ── DELETE /api/buzzy/jobs/:id — remove a job (ownership enforced) ──
+  if (method === "DELETE" && path.startsWith("/api/buzzy/jobs/")) {
+    const id = path.slice("/api/buzzy/jobs/".length);
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    if (!id) {
+      setResponseStatus(event, 400);
+      return { error: "id is required", code: "bad_request" };
+    }
+    const sql = await getSql();
+    await sql`DELETE FROM buzzy_jobs WHERE id = ${id} AND user_id = ${user.id}`;
+    return { ok: true };
+  }
+
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
   if (method === "GET" && path === "/api/buzzy/sessions") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
