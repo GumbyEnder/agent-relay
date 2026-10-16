@@ -598,6 +598,8 @@
     .rw-item:hover { border-color: #FFC107; }
     .rw-item .rw-title { display: block; color: #fff; font-weight: 700; font-size: 0.95rem; }
     .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
+    .rw-item.needs-input { border-color: #5a4a1a; border-left: 3px solid #FFC107; }
+    .rw-item.needs-input .rw-title { color: #FFC107; }
     .rw-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
     .rw-all { color: #C9CDD2; font-size: 0.9rem; }
     .chat-layout.no-brief { grid-template-columns: minmax(0, 760px); }
@@ -2518,8 +2520,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         jobs.forEach(function (j) {
           if (seen[j.id]) return;
           seen[j.id] = true;
-          items.push({ kind: "job", job: j, title: j.title || "Untitled job", sub: (j.status || "Discovering") + (j.template ? " · " + j.template : "") });
+          var needsInput = !!(j.data && j.data.draft && !j.data.approved);
+          items.push({
+            kind: "job", job: j, needsInput: needsInput,
+            title: j.title || "Untitled job",
+            sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") + (j.template ? " · " + j.template : ""),
+          });
         });
+        // Drafts awaiting the owner's approval float to the top.
+        items.sort(function (a, b) { return (b.needsInput ? 1 : 0) - (a.needsInput ? 1 : 0); });
         var shown = items.slice(0, 8);
         var html = '<div class="recent-work">' +
           '<h3 class="rw-head">Recent work</h3>' +
@@ -2528,7 +2537,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           html += '<p class="muted">No work yet. Start by describing a job.</p>';
         } else {
           shown.forEach(function (it, idx) {
-            html += '<button type="button" class="rw-item" data-idx="' + idx + '">' +
+            html += '<button type="button" class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '">' +
               '<span class="rw-title">' + esc(it.title) + '</span>' +
               '<span class="rw-sub">' + esc(it.sub) + '</span>' +
               '</button>';
