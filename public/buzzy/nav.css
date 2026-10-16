@@ -54,6 +54,7 @@ header nav {
   gap: 1rem;
   flex-wrap: wrap;
   align-items: center;
+  line-height: 1.55;
 }
 header nav a {
   color: #999;
@@ -66,7 +67,7 @@ header nav a {
   border: none;
 }
 header nav a:hover { color: var(--bz-yellow, #ffc107); }
-header nav a.active { color: var(--bz-yellow, #ffc107); font-weight: 600; }
+header nav a.active { color: var(--bz-yellow, #ffc107); font-weight: 600; background: none; border-radius: 0; }
 header nav .phase {
   color: var(--bz-yellow, #ffc107);
   font-weight: 600;
