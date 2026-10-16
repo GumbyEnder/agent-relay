@@ -401,6 +401,21 @@
     .draft-ready-banner .money-check li.wrong { color: #f0c36a; }
     #moneyCheck.hidden { display: none; }
     /* Paper read: not display:flex, so .hidden cannot lose to a later flex rule. */
+    .paper-attach { margin-top: 0.8rem; }
+    .paper-toggle {
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.34rem 0.7rem;
+      border-radius: 6px;
+      border: 1px dashed #3a3a3a;
+      background: transparent;
+      color: #9a9a9a;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .paper-toggle:hover { color: #FFC107; border-color: #B8860B; }
+    .paper-toggle[aria-expanded="true"] { color: #FFC107; border-color: #FFC107; }
+    .paper-drop.hidden { display: none; }
     .paper-drop {
       margin-top: 0.8rem;
       border: 1px dashed #3a3a3a;
@@ -779,6 +794,40 @@
       padding: 0.4rem 0.6rem;
     }
     .header-inner, header { position: relative; }
+    /* Promise marks are not display:flex. A later flex rule would beat .hidden. */
+    .draft-ready-banner .promise-check {
+      text-align: left;
+      margin: 0.75rem 0 0.35rem;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #f0c36a;
+      border-radius: 6px;
+      background: #101010;
+    }
+    .draft-ready-banner .promise-check p {
+      color: #E8E8E8;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+    .draft-ready-banner .promise-check .promise-words {
+      background: rgba(240, 195, 106, 0.22);
+      border-left: 3px solid #f0c36a;
+      padding: 0.45rem 0.65rem;
+      margin: 0.45rem 0 0.2rem;
+      color: #fff8e8;
+      font-weight: 600;
+    }
+    .draft-ready-banner .promise-check .promise-reason {
+      color: #f0c36a;
+      font-weight: 400;
+      margin: 0.15rem 0 0.25rem;
+    }
+    .draft-ready-banner .promise-check label {
+      display: block;
+      color: #D8D8D8;
+      font-weight: 400;
+      margin: 0 0 0.55rem;
+    }
+    #promiseCheck.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -822,8 +871,15 @@
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.55rem;font-size:0.92rem"></p>
           <div class="chat-messages" id="chatMessages"></div>
+          <div class="chat-input-row">
+            <textarea id="chatInput" rows="2" placeholder="Describe the job…" disabled></textarea>
+            <button id="chatSend" disabled>Send</button>
+          </div>
+          <div class="paper-attach">
+            <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
+          </div>
           <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
-          <div id="paperDrop" class="paper-drop">
+          <div id="paperDrop" class="paper-drop hidden">
             <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
             <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,application/pdf,text/plain" />
             <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
@@ -832,15 +888,12 @@
             </div>
             <p id="paperNote" class="muted" role="status"></p>
           </div>
-          <div class="chat-input-row">
-            <textarea id="chatInput" rows="2" placeholder="Describe the job…" disabled></textarea>
-            <button id="chatSend" disabled>Send</button>
-          </div>
           <div id="draftBanner" class="draft-ready-banner hidden">
             <p>A draft is ready for you to review.</p>
             <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
             <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
             <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
+            <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
             <p class="muted" id="draftMeta">Version 1 · not approved</p>
             <div class="row">
               <button type="button" id="approveDraft">Approve this version</button>
@@ -884,6 +937,7 @@
 
   <script src="/buzzy/companies.js"></script>
   <script src="/buzzy/money-check.js"></script>
+  <script src="/buzzy/promise-check.js"></script>
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -1579,6 +1633,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       approvedText: null,
       outwardConfirmed: false,
       moneyBlocks: false,
+      promiseBlocks: false,
+      acceptedPromises: {},
       paper: null,
       userId: null,
       model: null,
@@ -2584,6 +2640,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
       });
     })();
+    document.getElementById("paperToggle").onclick = function () {
+      var zone = document.getElementById("paperDrop");
+      var toggle = document.getElementById("paperToggle");
+      if (zone.classList.contains("hidden")) {
+        zone.classList.remove("hidden");
+        toggle.setAttribute("aria-expanded", "true");
+      } else {
+        zone.classList.add("hidden");
+        toggle.setAttribute("aria-expanded", "false");
+      }
+    };
     document.getElementById("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
