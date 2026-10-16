@@ -1529,6 +1529,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     // ── Intake mode tabs: chat (default) / form ────────────────────────
+    let chatState = {
+      jobId: null,
+      sessionId: null,
+      slots: {},
+      messages: [],
+      draftReady: false,
+      draftText: "",
+      draftVersion: 1,
+      approvedText: null,
+      outwardConfirmed: false,
+      moneyBlocks: false,
+      promiseBlocks: false,
+      acceptedPromises: {},
+      paper: null,
+      userId: null,
+      model: null,
+      boundCompanyId: null,
+    };
+
     // ── Expert query param ─────────────────────────────────────────────
     var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
     if (expertFromUrl) {
@@ -1637,25 +1656,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       difficulties: "Difficulties",
       who_involved: "Who is involved",
       end_goal: "What is the end goal",
-    };
-
-    let chatState = {
-      jobId: null,
-      sessionId: null,
-      slots: {},
-      messages: [],
-      draftReady: false,
-      draftText: "",
-      draftVersion: 1,
-      approvedText: null,
-      outwardConfirmed: false,
-      moneyBlocks: false,
-      promiseBlocks: false,
-      acceptedPromises: {},
-      paper: null,
-      userId: null,
-      model: null,
-      boundCompanyId: null,
     };
 
     // The four Decisions Made statements the owner may explicitly skip.
