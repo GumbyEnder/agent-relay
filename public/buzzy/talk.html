@@ -598,12 +598,15 @@
     }
     .rw-item:hover { border-color: #FFC107; }
     .rw-item .rw-title { display: block; color: #fff; font-weight: 700; font-size: 0.95rem; padding-right: 2.2rem; }
-    .rw-rename {
-      position: absolute; top: 0.5rem; right: 0.6rem;
+    .rw-tools {
+      position: absolute; top: 0.5rem; right: 0.6rem; display: inline-flex; gap: 0.3rem;
+    }
+    .rw-rename, .rw-delete {
       background: transparent; border: 1px solid #2A2A2A; color: #888;
       border-radius: 5px; padding: 0.05rem 0.45rem; font-size: 0.8rem; cursor: pointer; line-height: 1.4;
     }
     .rw-rename:hover { color: #FFC107; border-color: #FFC107; }
+    .rw-delete:hover { color: #ff6b6b; border-color: #ff6b6b; }
     .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
     .rw-item.needs-input { border-color: #5a4a1a; border-left: 3px solid #FFC107; }
     .rw-item.needs-input .rw-title { color: #FFC107; }
@@ -2567,6 +2570,24 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
+    function deleteJob(it, done) {
+      if (!confirm("Delete this job? This can't be undone.")) { done(); return; }
+      fetch("/api/buzzy/jobs/" + encodeURIComponent(it.job.id), {
+        method: "DELETE",
+        credentials: "same-origin",
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("delete failed");
+        return r.json();
+      }).then(function () {
+        done();
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't delete that job. Try again.");
+        done();
+      });
+    }
+
     function showRecentWork() {
       var co = activeCompanyId();
       var container = document.getElementById("chatMessages");
@@ -2609,7 +2630,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0">' +
               '<span class="rw-title">' + esc(it.title) + '</span>' +
               '<span class="rw-sub">' + esc(it.sub) + '</span>' +
-              (it.kind === "job" ? '<button type="button" class="rw-rename" title="Rename">✎</button>' : '') +
+              (it.kind === "job" ? '<span class="rw-tools"><button type="button" class="rw-rename" title="Rename">✎</button><button type="button" class="rw-delete" title="Delete">🗑</button></span>' : '') +
               '</div>';
           });
         }
@@ -2645,6 +2666,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 if (t) t.textContent = title;
               }
             });
+          });
+        });
+        container.querySelectorAll(".rw-delete").forEach(function (el) {
+          el.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            var it = shown[Number(el.closest(".rw-item").getAttribute("data-idx"))];
+            if (!it) return;
+            deleteJob(it, function () { showRecentWork(); });
           });
         });
         container.querySelector(".rw-new").addEventListener("click", newChatNow);
