@@ -165,6 +165,7 @@ export interface ChatResponse {
   draft?: boolean;
   done?: boolean;
   warning?: string;
+  jobId?: string;
   error?: string;
   code?: string;
 }
@@ -421,6 +422,26 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     if (mentionsInventedAmount(cleanReply, ownerText)) {
       response.warning = "This draft includes a dollar amount you didn't mention — check it before approving.";
     }
+    // Persist the draft as a durable job so it surfaces in Work/Library and
+    // can wait on the owner's approval (needs-input), instead of living only in
+    // this chat. A chat with no job id gets one now (stable per session).
+    const recordId = jobId || sessionId || `job_${Date.now()}`;
+    response.jobId = recordId;
+    const baseTitle =
+      slotValues.end_goal && slotValues.end_goal !== "skipped"
+        ? slotValues.end_goal
+        : slotValues.challenge && slotValues.challenge !== "skipped"
+          ? slotValues.challenge
+          : message;
+    await sql`
+      INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+      VALUES (
+        ${recordId}, ${userId}, null, ${baseTitle.slice(0, 80)}, 'Draft ready', null,
+        ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false })}::jsonb, now()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
+    `;
   }
 
   return response;

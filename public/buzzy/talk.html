@@ -2835,6 +2835,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           setChatMascot("12-content");
           openDraftReview(data.reply || "");
           setDraftWarning(data.warning);
+          if (data.jobId) chatState.jobId = data.jobId;
         } else {
           setChatMascot("17-attentive");
         }
