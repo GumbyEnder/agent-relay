@@ -592,6 +592,12 @@
     .recent-work { padding: 0.25rem 0; max-width: 42rem; }
     .recent-work .rw-head { margin: 0 0 0.15rem; font-size: 1.1rem; }
     .recent-work .rw-lead { margin: 0 0 0.7rem; }
+    .rw-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.7rem; }
+    .rw-ex {
+      background: transparent; border: 1px solid #2A2A2A; color: #C9CDD2;
+      border-radius: 999px; padding: 0.25rem 0.7rem; font-size: 0.82rem; cursor: pointer;
+    }
+    .rw-ex:hover { border-color: #FFC107; color: #FFC107; }
     .rw-item {
       display: block; width: 100%; text-align: left; font: inherit;
       background: #0A0A0A; border: 1px solid #2A2A2A; border-radius: 8px;
@@ -2737,9 +2743,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Drafts awaiting the owner's approval float to the top.
         items.sort(function (a, b) { return (b.needsInput ? 1 : 0) - (a.needsInput ? 1 : 0); });
         var shown = rwShowAll ? items : items.slice(0, 8);
+        var RW_EXAMPLES = ["Write a welcome email for new customers", "Draft a polite payment reminder", "Turn my services into a price list"];
         var html = '<div class="recent-work">' +
           '<h3 class="rw-head">Recent work</h3>' +
-          '<p class="muted rw-lead">Pick up where you left off, or start something new.</p>';
+          '<p class="muted rw-lead">Pick up where you left off, or start something new.</p>' +
+          '<div class="rw-examples">' +
+          RW_EXAMPLES.map(function (ex) { return '<button type="button" class="rw-ex" data-ex="' + esc(ex) + '">' + esc(ex) + "</button>"; }).join("") +
+          '</div>';
         if (!shown.length) {
           html += '<p class="muted">No work yet. Start by describing a job.</p>';
         } else {
@@ -2796,6 +2806,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         container.querySelector(".rw-new").addEventListener("click", newChatNow);
         var allBtn = container.querySelector(".rw-all");
         if (allBtn) allBtn.addEventListener("click", function () { rwShowAll = !rwShowAll; showRecentWork(); });
+        container.querySelectorAll(".rw-ex").forEach(function (el) {
+          el.addEventListener("click", function () {
+            var ex = el.getAttribute("data-ex") || "";
+            newChatNow();
+            var input = document.getElementById("chatInput");
+            if (input) input.value = ex;
+          });
+        });
       });
     }
 
