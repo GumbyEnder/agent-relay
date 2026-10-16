@@ -164,6 +164,7 @@ export interface ChatResponse {
   slots?: Record<string, string>;
   draft?: boolean;
   done?: boolean;
+  warning?: string;
   error?: string;
   code?: string;
 }
@@ -414,6 +415,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (wereAllFilled || requestedDraft) {
     response.draft = true;
     response.done = true;
+    // Self-check: a draft must not invent a dollar amount the owner never gave.
+    const ownerText = [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" ");
+    if (mentionsInventedAmount(cleanReply, ownerText)) {
+      response.warning = "This draft includes a dollar amount you didn't mention — check it before approving.";
+    }
   }
 
   return response;

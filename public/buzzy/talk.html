@@ -378,6 +378,8 @@
       font-weight: 600;
     }
     .draft-ready-banner.hidden { display: none; }
+    .draft-warning { color: #f0c36a; font-size: 0.85rem; font-weight: 600; background: rgba(240,195,106,0.08); border: 1px solid #B8860B; border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.35rem 0; }
+    .draft-warning.hidden { display: none; }
     /* The money list is not display:flex. A later flex rule would beat .hidden. */
     .draft-ready-banner .money-check {
       text-align: left;
@@ -908,6 +910,7 @@
           <div id="draftBanner" class="draft-ready-banner hidden">
             <p>A draft is ready for you to review.</p>
             <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
+            <p id="draftWarning" class="draft-warning hidden" role="alert"></p>
             <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
             <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
             <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
@@ -2252,6 +2255,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.draftVersion = 1;
       chatState.approvedText = null;
       chatState.outwardConfirmed = false;
+      setDraftWarning("");
       var body = draftBodyEl();
       if (body) body.value = "";
       var note = document.getElementById("draftSendNote");
@@ -2282,6 +2286,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var body = draftBodyEl();
       if (body && !body.value) body.value = chatState.draftText;
       renderMoneyCheck();
+    }
+
+    function setDraftWarning(text) {
+      var el = document.getElementById("draftWarning");
+      if (!el) return;
+      if (text) {
+        el.textContent = text;
+        el.classList.remove("hidden");
+      } else {
+        el.textContent = "";
+        el.classList.add("hidden");
+      }
     }
 
     function onDraftInput() {
@@ -2671,6 +2687,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (data.draft) {
           setChatMascot("12-content");
           openDraftReview(data.reply || "");
+          setDraftWarning(data.warning);
         } else {
           setChatMascot("17-attentive");
         }
