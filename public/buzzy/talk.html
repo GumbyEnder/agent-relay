@@ -380,6 +380,8 @@
     .draft-ready-banner.hidden { display: none; }
     .draft-warning { color: #f0c36a; font-size: 0.85rem; font-weight: 600; background: rgba(240,195,106,0.08); border: 1px solid #B8860B; border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.35rem 0; }
     .draft-warning.hidden { display: none; }
+    .row-tools { margin-top: 0.45rem; }
+    .row-tools button { font-size: 0.85rem; }
     /* The money list is not display:flex. A later flex rule would beat .hidden. */
     .draft-ready-banner .money-check {
       text-align: left;
@@ -926,12 +928,14 @@
             <p class="muted" id="draftMeta">Version 1 · not approved</p>
             <div class="row">
               <button type="button" id="approveDraft">Approve this version</button>
-              <button type="button" id="downloadDraft" class="secondary">Download</button>
-              <button type="button" id="downloadWord" class="secondary">Word</button>
-              <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
-              <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
-              <button type="button" id="downloadPdf" class="secondary">PDF</button>
               <button type="button" id="draftSend">Send</button>
+            </div>
+            <div class="row row-tools">
+              <button type="button" id="downloadDraft" class="secondary">Download .md</button>
+              <button type="button" id="downloadWord" class="secondary">Word</button>
+              <button type="button" id="downloadPdf" class="secondary">PDF</button>
+              <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
+              <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
               <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
             </div>
             <p id="draftSendNote" class="muted" role="status"></p>
