@@ -31,6 +31,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - Do not repeat back the user's answer as a restatement or react emotionally to it. Acknowledge in at most two words ("Got it.") or skip the acknowledgment entirely, then move to the next decision.
 - Never re-ask something already answered — the conversation state shows what's decided.
 - Never write a price, penalty, or date the owner did not state. If they did not name an amount, leave it out.
+- Never add a refund, a deadline, a discount, a penalty, an admission, or a legal position the owner did not state. Do not soften one they did write.
 - Track decisions, not stories: capture the decision, then move on.
 - MANDATED GOAL — the Decisions Made box: The Challenge, Difficulties, Who is involved, What is the end goal. Every reply must move at least one forward: either extract a statement from what the client just said (emit it as [challenge: …], [difficulties: …], [who_involved: …], or [end_goal: …]) or ask the single next question that fills a missing one. If the client says a statement cannot be answered, emit [id: skipped] for that id instead of inventing content — never fabricate a statement they did not give or approve. The job is not ready for a draft until all four are filled or explicitly skipped.
 - DISCOVERY FIRST: do not write the final document, draft, or deliverable until the four Decisions Made statements are captured or skipped. Even when the request looks like a finished deliverable, first pull out what the client already told you (emit the [slot: …] markers) and ask for what is still missing, one decision at a time. The box fills in as the conversation uncovers each decision.
@@ -90,22 +91,31 @@ function stripSlotMarkers(text: string): string {
 // Decisions Made box is filled by a dedicated extraction call that returns
 // JSON. Decoupled from the reply turn; a failed parse degrades to nothing
 // rather than inventing facts.
-const EXTRACT_SYS = `Extract these four facts from the user's message, using their own words. Respond with ONLY a JSON object (no prose, no markdown fences):
-"challenge"    = the core problem (what's wrong),
-"difficulties" = what makes it hard or risky,
-"who_involved" = who is affected,
-"end_goal"     = the outcome they want.
-Use null for any fact the message does not state. Never invent a value, a business, or an amount.
-The example is empty on purpose. Do not copy it into the answer: {"challenge":null,"difficulties":null,"who_involved":null,"end_goal":null}`;
+function extractSystemPrompt(existing?: Record<string, string>): string {
+  const base = `Extract these four facts from the user's message, using their own words. Respond with ONLY a JSON object (no prose, no markdown fences):\n"challenge"    = the core problem (what's wrong),\n"difficulties" = what makes it hard or risky,\n"who_involved" = who is affected,\n"end_goal"     = the outcome they want.\nUse null for any fact the message does not state. Never invent a value, a business, or an amount.`;
+  const already =
+    existing && Object.keys(existing).length
+      ? `\n\nThese are already captured. Return null for any of them UNLESS this message corrects one or makes it clearly more specific. Never overwrite a captured decision with a vaguer restatement of the same idea:\n` +
+        Object.entries(existing)
+          .map(([k, v]) => `- ${k}: ${v}`)
+          .join("\n")
+      : "";
+  return (
+    base +
+    already +
+    '\n\nThe example is empty on purpose. Do not copy it into the answer: {"challenge":null,"difficulties":null,"who_involved":null,"end_goal":null}'
+  );
+}
 
 async function extractDecisions(
   userMessage: string,
   model?: string,
+  existing?: Record<string, string>,
 ): Promise<Record<string, string>> {
   try {
     const raw = await chatCompletion(
       [
-        { role: "system", content: EXTRACT_SYS },
+        { role: "system", content: extractSystemPrompt(existing) },
         { role: "user", content: userMessage.slice(0, 3000) },
       ],
       { model, temperature: 0.2, maxTokens: 300 },
@@ -228,20 +238,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const fact = facts.find(f => f.key === slotId);
     if (fact) slotValues[slotId] = fact.value;
   }
+  // Were all four decisions already captured before this turn's message?
+  // That's the signal the owner has now confirmed — the draft is gated on it.
+  const wereAllFilled = REQUIRED_SLOTS.every(id => slotValues[id]);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
   // populates the Decisions Made box whether or not the reply model emits
   // markers. New extracts are persisted so later turns see them as answered.
-  const newlyExtracted = await extractDecisions(message, resolvedModel);
+  const newlyExtracted = await extractDecisions(message, resolvedModel, slotValues);
   for (const [slotId, val] of Object.entries(newlyExtracted)) {
     if (!slotValues[slotId]) {
       slotValues[slotId] = val;
       await memory.remember(slotId, val);
     }
   }
-
-  const filledCount = REQUIRED_SLOTS.filter(id => slotValues[id]).length;
 
   // ── Build system prompt ────────────────────────────────────────────
   const factsText = await memory.get_facts();
@@ -262,7 +273,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ? `\n\nYour next question should be: "${nextQ.prompt}"${knownCompany}`
     : nextS
       ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
-      : `\n\nAll required details have been gathered. Generate the full draft now.${knownCompany}`;
+      : !wereAllFilled
+        ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
+        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}`;
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
@@ -368,8 +381,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   for (const [slotId, val] of Object.entries(markersFromReply)) {
     if (!newlyExtracted[slotId] && !mentionsInventedAmount(val, message)) safeMarkers[slotId] = val;
   }
-  const deltaSlots: Record<string, string> = { ...safeMarkers, ...newlyExtracted };
-  const nowFilled = REQUIRED_SLOTS.filter((id) => slotValues[id]).length;
+  const deltaSlots: Record<string, string> = { ...safeMarkers };
+  for (const [slotId, val] of Object.entries(newlyExtracted)) {
+    // Never broadcast a re-extraction that regresses an already-captured
+    // decision to a vaguer restatement (only strictly-more-specific wins).
+    const existing = slotValues[slotId];
+    if (existing && val.length <= existing.length) continue;
+    deltaSlots[slotId] = val;
+  }
 
   const response: ChatResponse = {
     ok: true,
@@ -380,7 +399,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     response.slots = deltaSlots;
   }
 
-  if (nowFilled >= REQUIRED_SLOTS.length) {
+  // Draft only on the turn AFTER all four were already captured (the owner
+  // is confirming), never the instant the fourth statement lands.
+  if (wereAllFilled) {
     response.draft = true;
     response.done = true;
   }
