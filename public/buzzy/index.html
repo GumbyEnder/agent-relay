@@ -1154,6 +1154,41 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     }
 
+    // Word (.doc) export without a dependency: Word opens HTML saved with an
+    // msword MIME. Markdown maps to a minimal heading/list/paragraph body.
+    function mdToWordHtml(md) {
+      var lines = String(md || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split(/\n+/);
+      var out = "";
+      var inList = false;
+      lines.forEach(function (line) {
+        var t = line.trim();
+        var h = t.match(/^(#{1,6})\s/);
+        if (h) {
+          if (inList) { out += "</ul>"; inList = false; }
+          var lvl = Math.min(h[1].length, 3);
+          out += "<h" + (lvl + 1) + ">" + t.replace(/^#+\s*/, "") + "</h" + (lvl + 1) + ">";
+        } else if (/^[-*]\s/.test(t)) {
+          if (!inList) { out += "<ul>"; inList = true; }
+          out += "<li>" + t.replace(/^[-*]\s*/, "") + "</li>";
+        } else if (t) {
+          if (inList) { out += "</ul>"; inList = false; }
+          out += "<p>" + t + "</p>";
+        }
+      });
+      if (inList) out += "</ul>";
+      return out;
+    }
+
+    function downloadWord(name, md) {
+      var full = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body>' + mdToWordHtml(md) + "</body></html>";
+      var blob = new Blob(["\ufeff", full], { type: "application/msword" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name.replace(/\.md$/, "") + ".doc";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
     function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
     function goDocs() {
@@ -1179,7 +1214,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           "<div class='docs-back'><button id='docsBackList' class='secondary'>← " + escHtml(job ? jobTitle(job) : docsOpenFolder) + "</button></div>" +
           "<h1>" + escHtml(doc.name) + "</h1>" +
           "<p class='muted'>Updated " + new Date(doc.updatedAt || doc.createdAt).toLocaleString() + "</p>" +
-          "<div class='row'><button id='docDl'>Download .md</button><button id='docDlPdf' class='secondary'>Download PDF</button><button id='docCopy' class='secondary'>Copy text</button></div>" +
+          "<div class='row'><button id='docDl'>Download .md</button><button id='docDlWord' class='secondary'>Download Word</button><button id='docDlPdf' class='secondary'>Download PDF</button><button id='docCopy' class='secondary'>Copy text</button></div>" +
           "<div class='docviewer'>" + escHtml(doc.md) + "</div>";
         document.getElementById("docsBackList").onclick = () => { docsOpenDoc = null; goDocs(); };
         document.getElementById("docDl").onclick = () => downloadText(doc.name, doc.md, "text/markdown");
@@ -1195,6 +1230,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             downloadText(doc.name, doc.md, "text/markdown");
           }
         };
+        document.getElementById("docDlWord").onclick = () => downloadWord(doc.name, doc.md);
         document.getElementById("docCopy").onclick = (e) => {
           navigator.clipboard && navigator.clipboard.writeText(doc.md);
           e.target.textContent = "Copied";

@@ -917,6 +917,7 @@
             <div class="row">
               <button type="button" id="approveDraft">Approve this version</button>
               <button type="button" id="downloadDraft" class="secondary">Download</button>
+              <button type="button" id="downloadWord" class="secondary">Word</button>
               <button type="button" id="draftSend">Send</button>
               <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
             </div>
@@ -2370,6 +2371,41 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     }
 
+    function mdToWordHtml(md) {
+      var lines = String(md || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split(/\n+/);
+      var out = "";
+      var inList = false;
+      lines.forEach(function (line) {
+        var t = line.trim();
+        var h = t.match(/^(#{1,6})\s/);
+        if (h) {
+          if (inList) { out += "</ul>"; inList = false; }
+          var lvl = Math.min(h[1].length, 3);
+          out += "<h" + (lvl + 1) + ">" + t.replace(/^#+\s*/, "") + "</h" + (lvl + 1) + ">";
+        } else if (/^[-*]\s/.test(t)) {
+          if (!inList) { out += "<ul>"; inList = true; }
+          out += "<li>" + t.replace(/^[-*]\s*/, "") + "</li>";
+        } else if (t) {
+          if (inList) { out += "</ul>"; inList = false; }
+          out += "<p>" + t + "</p>";
+        }
+      });
+      if (inList) out += "</ul>";
+      return out;
+    }
+
+    function onDownloadWord() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      var full = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body>' + mdToWordHtml(text) + "</body></html>";
+      var blob = new Blob(["\ufeff", full], { type: "application/msword" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "draft-v" + (chatState.draftVersion || 1) + ".doc";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
     function showChatScreen() {
       document.getElementById("chatMessages").innerHTML = "";
       document.getElementById("chatError").classList.add("hidden");
@@ -2808,6 +2844,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("draftSend").onclick = onDraftSend;
     document.getElementById("confirmOutward").onclick = onConfirmOutward;
     document.getElementById("downloadDraft").onclick = onDownloadDraft;
+    document.getElementById("downloadWord").onclick = onDownloadWord;
     document.getElementById("draftBody").addEventListener("input", onDraftInput);
     // ── Sessions drawer ───────────────────────────────────────
     function openSessionsDrawer() {
