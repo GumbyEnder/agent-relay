@@ -598,6 +598,8 @@
     .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
     .rw-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
     .rw-all { color: #C9CDD2; font-size: 0.9rem; }
+    .chat-layout.no-brief { grid-template-columns: minmax(0, 760px); }
+    .back-recent { flex-shrink: 0; }
 
     /* ── Sessions drawer ──────────────────────────────────── */
     .sessions-toggle {
@@ -881,6 +883,7 @@
             <select id="agentSelect" class="agent-select" title="Choose an agent model">
               <option value="">Loading agents…</option>
             </select>
+            <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
             <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Work</button>
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.55rem;font-size:0.92rem"></p>
@@ -2371,11 +2374,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // server-side transcript for this job (dogfood 10007) before falling
       // back to the job-context opener or the welcome message.
       if (chatState.messages.length > 0) {
+        setBrief(true);
+        setBackVisible(true);
         renderChatMessages();
         renderSlotChecklist();
       } else if (chatState.jobId || chatState.sessionId || chatState.jobContext || chatState.expert) {
+        setBrief(true);
+        setBackVisible(true);
         restoreTranscript();
       } else {
+        setBrief(false);
+        setBackVisible(false);
         showRecentWork();
       }
 
@@ -2431,6 +2440,30 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       renderSlotChecklist();
     }
 
+    function setBrief(show) {
+      var layout = document.querySelector(".chat-layout");
+      var brief = document.getElementById("briefPanel");
+      if (layout) layout.classList.toggle("no-brief", !show);
+      if (brief) brief.classList.toggle("hidden", !show);
+    }
+
+    function setBackVisible(show) {
+      var btn = document.getElementById("backToRecent");
+      if (btn) btn.classList.toggle("hidden", !show);
+    }
+
+    function goBackToRecent() {
+      chatState.sessionId = null;
+      chatState.jobId = null;
+      chatState.jobContext = null;
+      chatState.slots = {};
+      chatState.messages = [];
+      chatState.paper = null;
+      resetDraftGate();
+      try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      showRecentWork();
+    }
+
     function welcomeMessage() {
       return "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.";
     }
@@ -2441,6 +2474,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.jobContext = null;
       chatState.slots = {};
       chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
+      setBrief(true);
+      setBackVisible(true);
       resetDraftGate();
       setChatMascot("17-attentive");
       renderChatMessages();
@@ -2834,6 +2869,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
         chatState.messages = msgs;
         chatState.slots = {};
+        setBrief(true);
+        setBackVisible(true);
         resetDraftGate();
         document.getElementById("chatError").classList.add("hidden");
         setChatMascot(msgs.length >= 2 ? "12-content" : "17-attentive");
@@ -2932,6 +2969,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     document.getElementById("newChatBtn").onclick = () => { startNewChat(); };
     document.getElementById("sessionsToggle").onclick = () => { openSessionsDrawer(); };
+    document.getElementById("backToRecent").onclick = goBackToRecent;
     document.getElementById("sessionsClose").onclick = () => { closeSessionsDrawer(); };
     document.getElementById("drawerNewChat").onclick = () => { startNewChat(); };
     document.getElementById("sessionsOverlay").addEventListener("click", function () {
