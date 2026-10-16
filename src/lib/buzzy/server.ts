@@ -241,6 +241,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const fact = facts.find(f => f.key === slotId);
     if (fact) slotValues[slotId] = fact.value;
   }
+  // Has this job already produced a draft? Follow-ups are then revisions, not
+  // further discovery — the owner isn't still answering questions.
+  let hasExistingDraft = false;
+  if (jobId) {
+    const jrows = await sql`SELECT data->>'draft' AS draft FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
+    hasExistingDraft = !!(jrows[0] && jrows[0].draft && String(jrows[0].draft).trim());
+  }
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
   const wereAllFilled = [...REQUIRED_SLOTS, ...DEEPENING_IDS].every(id => slotValues[id]);
@@ -285,7 +292,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     [message, ...history.filter((h) => h.role === "user").map((h) => h.content), ...Object.values(slotValues)].join(" "),
   );
   const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
-  const guidance = requestedDraft
+  const guidance = hasExistingDraft
+    ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
+    : requestedDraft
     ? `\n\nThe owner has asked for the deliverable now. Generate the full draft — fold in everything captured so far and note anything still unknown rather than inventing it.${knownCompany}${typeHint}`
     : nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"${knownCompany}`
@@ -419,7 +428,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // Draft only on the turn AFTER all four were already captured (the owner
   // is confirming), never the instant the fourth statement lands.
-  if (wereAllFilled || requestedDraft) {
+  if (wereAllFilled || requestedDraft || hasExistingDraft) {
     response.draft = true;
     response.done = true;
     // Self-check: a draft must not invent a dollar amount the owner never gave.
