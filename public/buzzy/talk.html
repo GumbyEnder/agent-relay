@@ -929,6 +929,7 @@
               <button type="button" id="downloadDraft" class="secondary">Download</button>
               <button type="button" id="downloadWord" class="secondary">Word</button>
               <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
+              <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
               <button type="button" id="draftSend">Send</button>
               <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
             </div>
@@ -2297,6 +2298,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var body = draftBodyEl();
       if (body && !body.value) body.value = chatState.draftText;
       renderMoneyCheck();
+      var csvBtn = document.getElementById("downloadCsvBtn");
+      if (csvBtn) csvBtn.classList.toggle("hidden", !mdTableToCsv(chatState.draftText || ""));
     }
 
     function setDraftWarning(text) {
@@ -2423,6 +2426,33 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       if (inList) out += "</ul>";
       return out;
+    }
+
+    function mdTableToCsv(md) {
+      var rows = [];
+      String(md || "").split("\n").forEach(function (line) {
+        var t = line.trim();
+        if (!/^\|.*\|$/.test(t)) return;
+        if (/^[\s|\-:]+$/.test(t)) return; // alignment separator row
+        rows.push(t.replace(/^\||\|$/g, "").split("|").map(function (c) { return c.trim(); }));
+      });
+      if (!rows.length) return null;
+      return rows.map(function (r) {
+        return r.map(function (c) {
+          return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+        }).join(",");
+      }).join("\n");
+    }
+
+    function downloadCsv(name, md) {
+      var csv = mdTableToCsv(md);
+      if (!csv) { alert("This deliverable has no table to export."); return; }
+      var blob = new Blob([csv], { type: "text/csv" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name.replace(/\.(md|doc|docx)$/, "") + ".csv";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     }
 
     function onDownloadWord() {
@@ -2992,6 +3022,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("downloadWord").onclick = onDownloadWord;
     document.getElementById("draftBody").addEventListener("input", onDraftInput);
     document.getElementById("restorePrevious").onclick = onRestorePrevious;
+    document.getElementById("downloadCsvBtn").onclick = function () {
+      var body = draftBodyEl();
+      downloadCsv("draft-v" + (chatState.draftVersion || 1), body ? body.value : (chatState.draftText || ""));
+    };
     // ── Sessions drawer ───────────────────────────────────────
     function openSessionsDrawer() {
       const drawer = document.getElementById("sessionsDrawer");
