@@ -55,7 +55,10 @@
       ".bz-co-edit input{font:inherit;padding:0.4rem 0.55rem;border-radius:6px;border:1px solid #333;background:#141414;color:#fff;width:min(36rem,100%);display:block;margin:0.35rem 0}" +
       ".bz-co-tools{margin-left:auto;display:inline-flex;gap:0.4rem;align-items:center}" +
       ".bz-co-view,.bz-co-edit-btn{font:inherit;font-size:0.8rem;padding:0.32rem 0.6rem;border-radius:6px;border:1px solid #3a3a3a;background:transparent;color:#C9CDD2;cursor:pointer;font-weight:600}" +
-      ".bz-co-view.is-on,.bz-co-edit-btn.is-on{background:#2A2A2A;color:#FFC107;border-color:#FFC107}";
+      ".bz-co-view.is-on,.bz-co-edit-btn.is-on{background:#2A2A2A;color:#FFC107;border-color:#FFC107}" +
+      ".bz-co-details{margin:0.4rem 0 0.8rem}" +
+      ".bz-co-details input{font:inherit;padding:0.4rem 0.55rem;border-radius:6px;border:1px solid #333;background:#141414;color:#fff;width:min(36rem,100%);display:block;margin:0.2rem 0 0.5rem}" +
+      ".bz-co-save-details{font:inherit;font-size:0.85rem;padding:0.42rem 0.75rem;border-radius:6px;border:1px solid #FFC107;background:#FFC107;color:#0A0A0A;font-weight:800;cursor:pointer}";
     document.head.appendChild(style);
   }
 
@@ -97,14 +100,19 @@
 
   function cardHtml(company, readOnly) {
     var lines = (company && company.lines) || [];
-    if (!lines.length) return "";
-    var proposed = lines.some(function (l) { return l.status !== "confirmed"; });
     var html = '<section class="bz-co-card"><div class="bz-co-card-inner">';
-    html += proposed && !readOnly
-      ? "<h2>Check this company</h2>" +
-        '<p class="bz-co-lead">BeeZilla read the public website. Each line is from that page. Confirm it, change it, or drop it. Only a line you confirm is kept.</p>'
-      : "<h2>About " + esc(company.name) + "</h2>" +
-        '<p class="bz-co-lead">These are the lines you kept. Dropped lines are not company facts.</p>';
+    if (readOnly) {
+      html += "<h2>About " + esc(company.name) + "</h2>";
+      if (company.oneLiner) html += '<p class="bz-co-lead">' + esc(company.oneLiner) + "</p>";
+    } else {
+      html += '<div class="bz-co-details">' +
+        '<label class="bz-co-k">Company name</label>' +
+        '<input data-name value="' + esc(company.name) + '" maxlength="80">' +
+        '<label class="bz-co-k">What they do — one line</label>' +
+        '<input data-oneliner value="' + esc(company.oneLiner || "") + '" maxlength="280">' +
+        '<button type="button" class="bz-co-save-details" data-act="save-details">Save details</button>' +
+        "</div>";
+    }
     lines.forEach(function (line) {
       var confirmed = line.status === "confirmed";
       html += '<div class="bz-co-line" data-line="' + esc(line.id) + '">';
@@ -144,7 +152,7 @@
         (on ? ' title="Current company"' : "") + ">" + esc(c.name) + "</button>";
     });
     html += '<button type="button" class="bz-co-add">Add company</button>';
-    if (current && current.lines && current.lines.length) {
+    if (current) {
       html += '<span class="bz-co-tools">' +
         '<button type="button" class="bz-co-view' + (cardMode === "view" ? " is-on" : "") + '" data-tool="view">View</button>' +
         '<button type="button" class="bz-co-edit-btn' + (cardMode === "edit" ? " is-on" : "") + '" data-tool="edit">Edit</button>' +
@@ -255,6 +263,14 @@
           if (act === "drop") actLine(current.id, lineId, "drop");
         });
       });
+    });
+    var saveDetails = el.querySelector("[data-act='save-details']");
+    if (saveDetails) saveDetails.addEventListener("click", function () {
+      var nameEl = el.querySelector("[data-name]");
+      var oneEl = el.querySelector("[data-oneliner]");
+      var name = nameEl ? nameEl.value.trim() : "";
+      if (!name) { err = "Type the company name."; renderAll(); return; }
+      saveCompanyDetails(current.id, name, oneEl ? oneEl.value.trim() : "");
     });
   }
 
@@ -395,6 +411,30 @@
     }).catch(function () {
       busy = false;
       err = "Couldn't update that line. Try again.";
+      renderAll();
+    });
+  }
+
+  function saveCompanyDetails(companyId, name, oneLiner) {
+    if (!companyId || busy) return;
+    err = "";
+    busy = true;
+    fetch("/api/buzzy/companies/" + encodeURIComponent(companyId), {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ name: name, one_liner: oneLiner }),
+    }).then(readJson).then(function (res) {
+      busy = false;
+      if (res.status === 401) { err = "Sign in to edit this company."; renderAll(); return; }
+      var company = res.data && res.data.company;
+      if (!res.ok || !company) { err = (res.data && res.data.error) || "Couldn't save the company."; renderAll(); return; }
+      replaceCompany(company);
+      renderAll();
+      emit();
+    }).catch(function () {
+      busy = false;
+      err = "Couldn't save the company. Try again.";
       renderAll();
     });
   }

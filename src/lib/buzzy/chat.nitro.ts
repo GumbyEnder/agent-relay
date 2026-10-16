@@ -24,6 +24,7 @@
  *   GET  /api/buzzy/papers          — latest paper on the active company (?companyId, ?jobId)
  *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
  *   POST /api/buzzy/money-check — compare a draft to the paper and the brief
+ *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
  */
 
 import { defineEventHandler, getMethod, setResponseStatus } from "h3";
@@ -35,6 +36,7 @@ import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
+import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -596,6 +598,59 @@ export default defineEventHandler(async (event) => {
     `;
     setResponseStatus(event, 201);
     return { company: companyPayload(rows[0]) };
+  }
+
+  // ── PATCH /api/buzzy/companies/:id — rename + edit the one-liner ─────
+  const patchCompany = path.match(/^\/api\/buzzy\/companies\/(co_[a-z0-9]{8,32})$/);
+  if (method === "PATCH" && patchCompany) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const companyId = patchCompany[1];
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const hasName = Object.prototype.hasOwnProperty.call(body, "name");
+    const hasOneLiner = Object.prototype.hasOwnProperty.call(body, "one_liner");
+    if (!hasName && !hasOneLiner) {
+      setResponseStatus(event, 400);
+      return { error: "Nothing to update.", code: "bad_request" };
+    }
+    const name = hasName ? companyName(body.name) : null;
+    if (hasName && !name) {
+      setResponseStatus(event, 400);
+      return { error: "Type the company name.", code: "bad_request" };
+    }
+    const cleanOneLiner =
+      hasOneLiner && typeof body.one_liner === "string"
+        ? body.one_liner.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
+        : null;
+    const sql = await getSql();
+    const owned = await sql<CompanyRow>`
+      SELECT id, name, one_liner, website, created_at, updated_at
+      FROM buzzy_companies
+      WHERE id = ${companyId} AND user_id = ${user.id}
+    `;
+    if (!owned.length) {
+      setResponseStatus(event, 404);
+      return { error: "Company not found", code: "not_found" };
+    }
+    const newName = hasName && name ? name : owned[0].name;
+    const newOneLiner = cleanOneLiner !== null ? cleanOneLiner : owned[0].one_liner;
+    const updated = await sql<CompanyRow>`
+      UPDATE buzzy_companies
+      SET name = ${newName}, one_liner = ${newOneLiner}, updated_at = now()
+      WHERE id = ${companyId} AND user_id = ${user.id}
+      RETURNING id, name, one_liner, website, created_at, updated_at
+    `;
+    const facts = await companyFacts(sql, user.id, companyId);
+    return { company: companyPayload(updated[0], facts) };
   }
 
   // ── GET /api/buzzy/jobs — list the user's durable jobs ──────────────
