@@ -567,13 +567,13 @@
         </div>
       </a>
       <nav>
-        <a href="/buzzy/" id="jobsLink" class="active">Jobs</a>
+        <a href="/buzzy/" id="jobsLink" class="active">Work</a>
         <a href="/buzzy/talk" id="talkLink">Chat</a>
         <a href="/buzzy/memory" id="memLink">Memory</a>
         <a href="/buzzy/experts">Experts</a>
         <a href="/buzzy/library" id="libLink">Library</a>
         <a href="/login" class="account-link">Sign in</a>
-        <span class="phase" id="phaseLabel">Jobs</span>
+        <span class="phase" id="phaseLabel">Work</span>
       </nav>
   </div>
   </header>
@@ -737,6 +737,26 @@
       return jobCompanyId(j) === cid;
     }
 
+    // Unassigned jobs (no company yet) belong to the first company, so they
+    // surface under it instead of floating in a "not in a company" limbo.
+    function firstCompanyId() {
+      if (!window.BZCompanies || !BZCompanies.ready()) return null;
+      var list = BZCompanies.list();
+      return list.length ? list[0].id : null;
+    }
+
+    function assignUnassignedToFirstCompany() {
+      var first = firstCompanyId();
+      if (!first) return;
+      var changed = [];
+      catalog.jobs.forEach(function (j) {
+        if (j && j.id && !j.companyId) { j.companyId = first; changed.push(j); }
+      });
+      if (!changed.length) return;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
+      changed.forEach(function (j) { pushJob(j); });
+    }
+
     // A blank job started before the tabs loaded belongs to the active company.
     function applyActiveCompanyToFreshJob() {
       var co = workspaceCompanyId();
@@ -816,6 +836,7 @@
           state.screen = prevScreen || state.screen || "jobs";
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
           if (applyActiveCompanyToFreshJob()) pushJob(state);
+          assignUnassignedToFirstCompany();
           if (state.screen === "docs") goDocs();
           else if (state.screen === "jobs") goJobs();
         })
@@ -964,13 +985,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         "<div class='jobcard-bottom'>" +
           "<span class='muted' style='font-size:0.75rem'>" + esc(j.template || "General") + "</span>" +
           (moveLabel ? "<button class='secondary movebtn' data-move='" + j.id + "'>Move to " + esc(moveLabel) + "</button>" : "") +
-          (hasChat ? "<button class='secondary chatbtn' data-chat='" + j.id + "'>Chat</button>" : "") +
         "</div>" +
       "</div>";
     }
 
     function goJobs() {
-      setPhase("Jobs");
+      setPhase("Work");
       snapshotCurrent();
       const co = window.BZCompanies && BZCompanies.ready() ? BZCompanies.active() : null;
       const list = catalog.jobs.filter((j) => inWorkspace(j) && !(catalog.hideCompleted && jobComplete(j)));
@@ -990,7 +1010,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         : "";
       document.getElementById("app").innerHTML =
         "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
-        "<h1>" + (co ? "Jobs for " + esc(co.name) : "Jobs") + "</h1>" +
+        "<h1>" + (co ? "Work for " + esc(co.name) : "Work") + "</h1>" +
         "<p>" + (co
           ? "Only " + esc(co.name) + " is on this desk. Another company's jobs stay on their own tab."
           : "Current and past work. Completed jobs stay here unless you hide them.") + "</p>" +
@@ -1006,19 +1026,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveState();
         goJobs();
       };
-      document.getElementById("newjob").onclick = newJob;
+      document.getElementById("newjob").onclick = () => { window.location.href = "/buzzy/talk.html"; };
       document.getElementById("opendocs").onclick = () => { snapshotCurrent(); state.screen = "docs"; render(); };
       document.querySelectorAll(".jobcard").forEach((el) => {
-        el.onclick = (e) => {
-          // The Chat button has its own action — don't double-handle
-          if (e.target.closest(".chatbtn")) return;
-          openJob(el.getAttribute("data-id"));
-        };
-      });
-      document.querySelectorAll(".chatbtn").forEach((el) => {
-        el.onclick = (e) => {
-          e.stopPropagation();
-          openJobChat(el.getAttribute("data-chat"));
+        el.onclick = () => {
+          openJobChat(el.getAttribute("data-id"));
         };
       });
       document.querySelectorAll(".movebtn").forEach((el) => {
@@ -1687,6 +1699,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     mergeServerJobs();
     if (window.BZCompanies) {
       BZCompanies.onChange(function () {
+        assignUnassignedToFirstCompany();
         if (applyActiveCompanyToFreshJob()) pushJob(state);
         if (state.screen === "docs") { goDocs(); return; }
         if (state.screen === "jobs") { goJobs(); return; }
