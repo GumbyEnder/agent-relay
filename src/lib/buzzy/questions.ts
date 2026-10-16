@@ -140,3 +140,37 @@ export const REQUIRED_SLOTS = STATEMENT_IDS;
  *  fence-specific ones (what_happened, rough_size, material_supplier,
  *  quote_count) do not, so they stay out of the guided flow. */
 export const DEEPENING_IDS = ["budget_range", "timing", "done_right_check", "exclusions"];
+
+// ── Job-type classification (draft guidance only, never a gate) ──────
+export type JobType =
+  | "legal"
+  | "creative"
+  | "technical"
+  | "marketing"
+  | "operations"
+  | "general";
+
+export function classifyJobType(text: string): JobType {
+  const t = (text || "").toLowerCase();
+  if (/\b(lawyer|legal|demand letter|cease and desist|lawsuit|court|contract|terms|liability|compliance|notice|agreement|tenant|landlord|settlement)\b/.test(t)) return "legal";
+  if (/\b(copy|brand|logo|design|social media|post|content|slogan|name|story|video|flyer|creative|commercial)\b/.test(t)) return "creative";
+  if (/\b(app|software|website|api|database|server|code|bug|integration|automation|data|spreadsheet|csv|script|technical|frontend|backend)\b/.test(t)) return "technical";
+  if (/\b(campaign|advert|marketing|audience|launch|seo|funnel|lead gen|sales|newsletter|promotion|growth|blurb)\b/.test(t)) return "marketing";
+  if (/\b(hire|staff|schedule|process|workflow|inventory|order|supplier|logistics|procedure|policy|training|onboard|operations)\b/.test(t)) return "operations";
+  return "general";
+}
+
+/** Draft-shaping hint per job type, appended to the draft guidance only. */
+export const TYPE_DRAFT_HINTS: Record<JobType, string> = {
+  legal:
+    "Identify the parties, the exact demand or obligation, the deadline, and any amount owed — and add a plain-language line that this is a draft, not legal advice.",
+  creative:
+    "Pin the tone and audience (voice, who reads it, where it lives) so the deliverable drops straight into the real medium.",
+  technical:
+    "State input, output, and constraints concretely (data, tools, success check) and flag anything an engineer must confirm.",
+  marketing:
+    "Name the audience, the channel, and the one metric that shows it worked — and tie scope to the budget.",
+  operations:
+    "Capture the current step, the exact thing that's broken, the owner, and the definition of done so the change is unambiguous.",
+  general: "",
+};

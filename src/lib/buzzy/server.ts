@@ -18,7 +18,7 @@
 
 import { chatCompletion, resolveModel } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS } from "./questions";
+import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
@@ -280,15 +280,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const knownCompany = companyName
     ? " Confirmed company facts are already known — do not ask for them again."
     : "";
+  // Sharpen the draft for the detected job type (guidance only, never a gate).
+  const jobType = classifyJobType(
+    [message, ...history.filter((h) => h.role === "user").map((h) => h.content), ...Object.values(slotValues)].join(" "),
+  );
+  const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
   const guidance = requestedDraft
-    ? `\n\nThe owner has asked for the deliverable now. Generate the full draft — fold in everything captured so far and note anything still unknown rather than inventing it.${knownCompany}`
+    ? `\n\nThe owner has asked for the deliverable now. Generate the full draft — fold in everything captured so far and note anything still unknown rather than inventing it.${knownCompany}${typeHint}`
     : nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"${knownCompany}`
     : nextS
       ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
       : !wereAllFilled
         ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
-        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}`;
+        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`;
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
