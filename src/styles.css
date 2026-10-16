@@ -591,3 +591,40 @@ html[data-density="compact"] .density-compact,
 }
 
 } /* / [data-brand="beezilla"] */
+
+/* ── BeeZilla signed-out landing (/) ─────────────────────────────── */
+.bz-landing {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: #0A0A0A;
+  color: #E8E8E8;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+.bz-landing-logo { width: 120px; height: auto; }
+.bz-landing-title {
+  color: #FFC107;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 800;
+  font-size: 1.6rem;
+  margin: 0 0 1rem;
+}
+.bz-landing-actions { display: flex; gap: 0.9rem; }
+.bz-landing-btn {
+  display: inline-block;
+  padding: 0.65rem 1.6rem;
+  border-radius: 6px;
+  border: 1px solid #FFC107;
+  color: #FFC107;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background .15s, color .15s;
+}
+.bz-landing-btn:hover { background: rgba(255,193,7,.12); }
+.bz-landing-btn.primary { background: #FFC107; color: #0A0A0A; }
+.bz-landing-btn.primary:hover { background: #e0ac06; }

@@ -62,10 +62,19 @@
     }
   }
 
+  // Signed-out visitors never see console pages — send them to the landing.
+  function gateSignedOut() {
+    resolveSession().then(function (user) {
+      if (!user) window.location.replace("/");
+    });
+  }
+
   window.__bzSession = resolveSession;
+  window.__bzGate = gateSignedOut;
   window.__bzHeader = function (active) {
     renderHeader(active);
     renderAccount();
+    gateSignedOut();
   };
 
   // Auto-run when the page declares its active tab via <body data-bz-active="...">,
@@ -73,6 +82,7 @@
   if (document.body && document.body.getAttribute("data-bz-active")) {
     document.addEventListener("DOMContentLoaded", function () {
       window.__bzHeader(document.body.getAttribute("data-bz-active"));
+      gateSignedOut();
     });
   }
 })();
