@@ -2534,6 +2534,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("chatInput").focus();
     }
 
+    var rwShowAll = false;
+
     function showRecentWork() {
       var co = activeCompanyId();
       var container = document.getElementById("chatMessages");
@@ -2565,7 +2567,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
         // Drafts awaiting the owner's approval float to the top.
         items.sort(function (a, b) { return (b.needsInput ? 1 : 0) - (a.needsInput ? 1 : 0); });
-        var shown = items.slice(0, 8);
+        var shown = rwShowAll ? items : items.slice(0, 8);
         var html = '<div class="recent-work">' +
           '<h3 class="rw-head">Recent work</h3>' +
           '<p class="muted rw-lead">Pick up where you left off, or start something new.</p>';
@@ -2581,7 +2583,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
         html += '<div class="rw-actions">' +
           '<button type="button" class="primary rw-new">New chat</button>' +
-          '<a class="secondary rw-all" href="/buzzy/">Browse all work</a>' +
+          (items.length > 8
+            ? (rwShowAll
+                ? '<button type="button" class="secondary rw-all">Show less</button>'
+                : '<button type="button" class="secondary rw-all">Show all work (' + items.length + ')</button>')
+            : '') +
           '</div>' +
           '</div>';
         container.innerHTML = html;
@@ -2594,6 +2600,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         });
         container.querySelector(".rw-new").addEventListener("click", newChatNow);
+        var allBtn = container.querySelector(".rw-all");
+        if (allBtn) allBtn.addEventListener("click", function () { rwShowAll = !rwShowAll; showRecentWork(); });
       });
     }
 
