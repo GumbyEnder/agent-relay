@@ -594,9 +594,16 @@
       display: block; width: 100%; text-align: left; font: inherit;
       background: #0A0A0A; border: 1px solid #2A2A2A; border-radius: 8px;
       padding: 0.65rem 0.85rem; margin: 0 0 0.5rem; cursor: pointer;
+      position: relative;
     }
     .rw-item:hover { border-color: #FFC107; }
-    .rw-item .rw-title { display: block; color: #fff; font-weight: 700; font-size: 0.95rem; }
+    .rw-item .rw-title { display: block; color: #fff; font-weight: 700; font-size: 0.95rem; padding-right: 2.2rem; }
+    .rw-rename {
+      position: absolute; top: 0.5rem; right: 0.6rem;
+      background: transparent; border: 1px solid #2A2A2A; color: #888;
+      border-radius: 5px; padding: 0.05rem 0.45rem; font-size: 0.8rem; cursor: pointer; line-height: 1.4;
+    }
+    .rw-rename:hover { color: #FFC107; border-color: #FFC107; }
     .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
     .rw-item.needs-input { border-color: #5a4a1a; border-left: 3px solid #FFC107; }
     .rw-item.needs-input .rw-title { color: #FFC107; }
@@ -2536,6 +2543,30 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     var rwShowAll = false;
 
+    function renameJob(it, done) {
+      var current = (it.job && it.job.title) || "";
+      var next = prompt("Rename this job:", current);
+      if (!next || next.trim() === current) { done(null); return; }
+      var title = next.trim();
+      fetch("/api/buzzy/jobs/" + encodeURIComponent(it.job.id), {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("rename failed");
+        return r.json();
+      }).then(function () {
+        it.job.title = title;
+        done(title);
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't rename that job. Try again.");
+        done(null);
+      });
+    }
+
     function showRecentWork() {
       var co = activeCompanyId();
       var container = document.getElementById("chatMessages");
@@ -2575,10 +2606,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           html += '<p class="muted">No work yet. Start by describing a job.</p>';
         } else {
           shown.forEach(function (it, idx) {
-            html += '<button type="button" class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '">' +
+            html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0">' +
               '<span class="rw-title">' + esc(it.title) + '</span>' +
               '<span class="rw-sub">' + esc(it.sub) + '</span>' +
-              '</button>';
+              (it.kind === "job" ? '<button type="button" class="rw-rename" title="Rename">✎</button>' : '') +
+              '</div>';
           });
         }
         html += '<div class="rw-actions">' +
@@ -2597,6 +2629,22 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (!it) return;
             if (it.kind === "session") { openSession(it.session); }
             else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+          });
+          el.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
+          });
+        });
+        container.querySelectorAll(".rw-rename").forEach(function (el) {
+          el.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            var it = shown[Number(el.closest(".rw-item").getAttribute("data-idx"))];
+            if (!it) return;
+            renameJob(it, function (title) {
+              if (title) {
+                var t = el.closest(".rw-item").querySelector(".rw-title");
+                if (t) t.textContent = title;
+              }
+            });
           });
         });
         container.querySelector(".rw-new").addEventListener("click", newChatNow);

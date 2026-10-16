@@ -803,6 +803,43 @@ export default defineEventHandler(async (event) => {
     return { ok: true };
   }
 
+  // ── PATCH /api/buzzy/jobs/:id — rename the job title ─────────────────
+  if (method === "PATCH" && path.startsWith("/api/buzzy/jobs/")) {
+    const id = path.slice("/api/buzzy/jobs/".length);
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    if (!id) {
+      setResponseStatus(event, 400);
+      return { error: "id is required", code: "bad_request" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch { /* handled below */ }
+    const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+    if (!title) {
+      setResponseStatus(event, 400);
+      return { error: "title is required", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      UPDATE buzzy_jobs SET title = ${title}, updated_at = now()
+      WHERE id = ${id} AND user_id = ${user.id}
+      RETURNING id, title, status
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { error: "job not found", code: "not_found" };
+    }
+    return { job: { id: rows[0].id, title: rows[0].title, status: rows[0].status } };
+  }
+
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
   if (method === "GET" && path === "/api/buzzy/sessions") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
