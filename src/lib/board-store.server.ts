@@ -555,6 +555,9 @@ export async function ensureBoardReady(): Promise<void> {
         await new Promise((r) => setTimeout(r, 200));
         await sql`select 1 from ar_missions limit 1`;
       }
+      // Events retention (REVIEW-F9): cold table must exist before journal
+      // reads union it. IF NOT EXISTS keeps this idempotent with 0023.
+      await sql`create table if not exists ar_events_cold (like ar_events including all)`;
       await seedIfEmpty(sql);
     })().catch((err) => {
       globalRef.__arBoardReady__ = undefined;
@@ -2355,9 +2358,12 @@ export const durableBoard = {
       const history = histRows.map((r) => rowHistory(r as Record<string, unknown>));
       const commentRows = await sql`
         select e.at, e.message, a.name as agent_name
-        from ar_events e
+        from (
+          select * from ar_events where mission_id = ${missionId} and kind = 'comment'
+          union all
+          select * from ar_events_cold where mission_id = ${missionId} and kind = 'comment'
+        ) e
         left join ar_agents a on a.id = e.agent_id
-        where e.mission_id = ${missionId} and e.kind = 'comment'
         order by e.at asc
       `;
       const comments = commentRows.map((r) => {

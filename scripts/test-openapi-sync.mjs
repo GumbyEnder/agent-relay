@@ -50,3 +50,23 @@ if (failures) {
   process.exit(1);
 }
 console.log(`✓ ${specPaths.length} spec paths all match server routes`);
+
+// Leak assertion (REVIEW-F13): the spec must never embed deployment-specific
+// hostnames or internal addresses — only relative paths and the reflected
+// origin placeholder are acceptable.
+const LEAK_PATTERNS = [
+  /railway\.app/i,
+  /railway\.internal/i,
+  /up\.rlt\.net/i,
+  /\b10\.\d+\.\d+\.\d+\b/,
+  /\b192\.168\.\d+\.\d+\b/,
+  /\b172\.(1[6-9]|2\d|3[01])\.\d+\.\d+\b/,
+  /127\.0\.0\.1/,
+  /localhost/,
+];
+const leaks = LEAK_PATTERNS.filter((re) => re.test(specSrc));
+if (leaks.length) {
+  console.error(`✗ spec contains deployment-specific strings: ${leaks.map((r) => r.source).join(", ")}`);
+  process.exit(1);
+}
+console.log("✓ no deployment-specific hosts/addresses in spec");
