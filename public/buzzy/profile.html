@@ -107,7 +107,7 @@
         <a href="/buzzy/remember.html" id="memLink">What BeeZilla remembers</a>
         <a href="/buzzy/profile.html" id="profLink" class="active">About your business</a>
         <a href="/buzzy/library" id="libLink">Library</a>
-        <a href="/login" class="account-link">Sign in</a>
+        <a href="/buzzy/landing" class="account-link">Sign in</a>
         <span class="phase" id="phaseLabel">About your business</span>
       </nav>
     </div>
@@ -281,7 +281,7 @@
     loadProfile()
       .then(render)
       .catch(function (e) {
-        $("<h1>About your business</h1><p class='muted'>" + escapeHtml(e.message) + "</p><p>Please sign in to set up your business profile.</p><div class='row'><a href='/login'><button>Sign in</button></a></div>");
+        $("<h1>About your business</h1><p class='muted'>" + escapeHtml(e.message) + "</p><p>Please sign in to set up your business profile.</p><div class='row'><a href='/buzzy/landing'><button>Sign in</button></a></div>");
       });
   </script>
 </body>

@@ -215,7 +215,7 @@
         <a href="/buzzy/memory" id="memLink" class="active">Memory</a>
         <a href="/buzzy/experts">Experts</a>
         <a href="/buzzy/library" id="libLink">Library</a>
-        <a href="/login" class="account-link">Sign in</a>
+        <a href="/buzzy/landing" class="account-link">Sign in</a>
       </nav>
   </div>
   </header>
@@ -284,7 +284,7 @@
       if (gen !== memGen) return;
       if (res.status === 401) {
         root.innerHTML =
-          '<div class="signout"><p class="muted">Memory is tied to your account.</p><a href="/login">Sign in</a></div>';
+          '<div class="signout"><p class="muted">Memory is tied to your account.</p><a href="/buzzy/landing">Sign in</a></div>';
         return;
       }
       if (!res.ok) {

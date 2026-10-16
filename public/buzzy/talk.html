@@ -883,7 +883,7 @@
       <a href="/buzzy/memory" id="memLink">Memory</a>
       <a href="/buzzy/experts">Experts</a>
         <a href="/buzzy/library" id="libLink">Library</a>
-      <a href="/login" class="account-link">Sign in</a>
+      <a href="/buzzy/landing" class="account-link">Sign in</a>
     </nav>
     </div>
   </header>
@@ -1890,7 +1890,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lineId: lineId, action: action, value: value || undefined }),
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.json().then(function (d) { return { ok: r.ok, d: d }; });
       }).then(function (res) {
         if (!res.ok || !res.d.paper) {
@@ -1985,7 +1985,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }),
         });
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.json().then(function (d) { return { ok: r.ok, d: d }; });
       }).then(function (res) {
         if (!res.ok || !res.d.paper) {
@@ -2645,7 +2645,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title }),
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         if (!r.ok) throw new Error("rename failed");
         return r.json();
       }).then(function () {
@@ -2664,7 +2664,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         method: "DELETE",
         credentials: "same-origin",
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         if (!r.ok) throw new Error("delete failed");
         return r.json();
       }).then(function () {
@@ -2826,7 +2826,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ companyId: coId || undefined }),
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.ok ? r.json() : null;
       }).then(function (data) {
         var s = data && data.session;
@@ -3097,7 +3097,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // Handle auth/errors with plain-language notes; 401 → sign in.
     function sessionsError(msg) {
       if (msg === "signed_out") {
-        window.location.href = "/login";
+        window.location.href = "/buzzy/landing";
         return;
       }
       const list = document.getElementById("sessionsList");
@@ -3184,7 +3184,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title }),
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         if (!r.ok) throw new Error("rename failed");
         return r.json();
       }).then(function () {
@@ -3201,7 +3201,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         method: "POST",
         credentials: "same-origin",
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         if (!r.ok) throw new Error("summary failed");
         return r.json();
       }).then(function (data) {
@@ -3225,7 +3225,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           companyId: coId || undefined,
         }),
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = "/login"; throw new Error("signed_out"); }
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.json();
       }).then(function (data) {
         const s = data.session;

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeeZilla — Your work, handled</title>
+  <link rel="icon" href="/brand/bz-favicon-180.png" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      background: #0A0A0A;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #222;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header .brand { display: flex; align-items: center; gap: 0.6rem; }
+    header .brand img { width: 28px; height: 28px; border-radius: 4px; }
+    header .brand strong {
+      letter-spacing: 0.06em; font-size: 1.15rem; color: #ffc107;
+      text-transform: uppercase; font-weight: 800;
+    }
+    main { flex: 1; display: grid; place-items: center; padding: 2rem 1.5rem; }
+    .hero { max-width: 460px; width: 100%; text-align: center; }
+    .hero .mascot {
+      width: 128px; height: 128px; object-fit: contain; margin-bottom: 1rem;
+      filter: drop-shadow(0 8px 24px rgba(0,0,0,0.6));
+    }
+    .hero h1 { font-size: 1.9rem; font-weight: 800; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+    .hero p { color: #9a9a9a; font-size: 1rem; line-height: 1.5; margin: 0 0 1.75rem; }
+    .actions { display: flex; flex-direction: column; gap: 0.7rem; }
+    .btn {
+      display: block; width: 100%; padding: 0.8rem 1rem; border-radius: 8px;
+      font-size: 1rem; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer;
+    }
+    .btn-primary { background: #ffc107; color: #0A0A0A; border: 1px solid #ffc107; }
+    .btn-primary:hover { background: #ffd43b; }
+    .btn-secondary { background: transparent; color: #fff; border: 1px solid #3a3a3a; }
+    .btn-secondary:hover { border-color: #ffc107; color: #ffc107; }
+    footer {
+      padding: 1rem 1.5rem; text-align: center; color: #666;
+      font-size: 0.8rem; border-top: 1px solid #222;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img src="brand/revision6_expressions_16-smiling.png" alt="" />
+      <strong>BeeZilla</strong>
+    </div>
+  </header>
+  <main>
+    <div class="hero">
+      <img class="mascot" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla mascot" />
+      <h1>Your work, handled.</h1>
+      <p>Describe a job and BeeZilla turns it into a clear, checked deliverable — your drafts, decisions, and documents kept in one place.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/login">Log in</a>
+        <a class="btn btn-secondary" href="/register">Register</a>
+      </div>
+    </div>
+  </main>
+  <footer>BeeZilla helps you get the work done — this is not legal or financial advice.</footer>
+</body>
+</html>
