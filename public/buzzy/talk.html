@@ -2695,10 +2695,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (seen[j.id]) return;
           seen[j.id] = true;
           var needsInput = !!(j.data && j.data.draft && !j.data.approved);
+          var d = j.data || {};
+          var revised = !!d.previous_draft;
+          var decided = d.slots ? Object.keys(d.slots).filter(function (k) {
+            var v = d.slots[k];
+            return v && v !== "skipped";
+          }).length : 0;
+          var tooltip = [
+            d.challenge || (d.slots && d.slots.challenge),
+            d.end_goal || (d.slots && d.slots.end_goal),
+          ].filter(Boolean).join(" → ").trim();
           items.push({
             kind: "job", job: j, needsInput: needsInput,
             title: j.title || "Untitled job",
-            sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") + (j.template ? " · " + j.template : "") + (j.updatedAt ? " · updated " + timeAgo(j.updatedAt) : ""),
+            tooltip: tooltip,
+            sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") +
+              (revised ? " · revised" : "") +
+              (decided ? " · " + decided + " detail" + (decided === 1 ? "" : "s") : "") +
+              (j.template ? " · " + j.template : "") +
+              (j.updatedAt ? " · updated " + timeAgo(j.updatedAt) : ""),
           });
         });
         // Drafts awaiting the owner's approval float to the top.
@@ -2711,7 +2726,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           html += '<p class="muted">No work yet. Start by describing a job.</p>';
         } else {
           shown.forEach(function (it, idx) {
-            html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0">' +
+            html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0" title="' + esc(it.tooltip || it.title) + '">' +
               '<span class="rw-title">' + esc(it.title) + '</span>' +
               '<span class="rw-sub">' + esc(it.sub) + '</span>' +
               (it.kind === "job" ? '<span class="rw-tools"><button type="button" class="rw-rename" title="Rename">✎</button><button type="button" class="rw-delete" title="Delete">🗑</button></span>' : '') +
