@@ -67,3 +67,25 @@ OPTIONS preflight → 204 with `access-control-allow-origin: *`, `allow-headers:
 2. **Spec-sync check** — `scripts/test-openapi-sync.mjs` (`npm run test:openapi-sync`): extracts all 16 spec paths, matches static routes by literal and verb routes by dispatch (`verb === "<verb>"`), exits 1 on mismatch. Verified: 16/16 pass.
 3. **Configurable CORS** — `ALLOWED_ORIGINS` env (comma-separated). Wildcard default preserved; when set, non-matching origins get no `allow-origin` header. Authed API responses + OPTIONS now honor it; public docs surfaces stay open.
 4. **Auto-release stale claims** — lazy sweep on every poll: running missions with no heartbeat for >6h (`STALE_CLAIM_RELEASE_HOURS`, 0 disables) have their claim cleared. Complements manual force-release; no more dead-key dead-ends even if nobody notices.
+
+## Review findings (2026-10-13) — F1–F13
+
+Full six-lens review (multi-tenancy, trust, agent experience, reliability, brand, security) with prod evidence.
+
+**Shipped immediately:**
+- **F10** — prod Postgres nightly backup: Railway SSH tunnel → docker pg18 client → NAS (`/mnt/nas/host-ops/devboards-backup.sh`, cron 03:15, 30-day retention, sanity-checked, restorability verified). First dump on NAS 2026-10-13.
+- **F11** — `mailFromAddress` defaults to `brandLabel()` (commit 9224743): BZ_BRAND deployments never leak "Dev Boards" branding.
+- **F2** — shared (owner-less) boards gated to admins or `SHARED_BOARDS=1` (commit 9224743): demo debris out of every signup's rail.
+- **F6** — re-register guard (commit 9224743): existing agent names require the agent's own key or operator session; skill-stripping via open upsert closed. New names stay open for onboarding.
+
+**Ticketed (DevBoard APP board, review label):**
+- 9601 F1 per-key quotas + request budget (p0)
+- 9602 F3 activation: seeded board + connect-first-agent (p1)
+- 9603 F4 delivery evidence verification + default usage model (p1)
+- 9605 F7 self-serve agent key wizard (p1)
+- 9607 F9 ar_events retention (p1)
+- 9604 F5 operator digest (p2)
+- 9606 F8 per-board lock sharding (p2)
+- 9608 F13 OpenAPI leak test (p3)
+
+**No finding:** webhook signature verification (timing-safe, fail-closed), operator caps — F12 clean.
