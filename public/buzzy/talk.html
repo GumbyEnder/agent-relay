@@ -585,6 +585,20 @@
 
     .hidden { display: none; }
 
+    .recent-work { padding: 0.25rem 0; max-width: 42rem; }
+    .recent-work .rw-head { margin: 0 0 0.15rem; font-size: 1.1rem; }
+    .recent-work .rw-lead { margin: 0 0 0.7rem; }
+    .rw-item {
+      display: block; width: 100%; text-align: left; font: inherit;
+      background: #0A0A0A; border: 1px solid #2A2A2A; border-radius: 8px;
+      padding: 0.65rem 0.85rem; margin: 0 0 0.5rem; cursor: pointer;
+    }
+    .rw-item:hover { border-color: #FFC107; }
+    .rw-item .rw-title { display: block; color: #fff; font-weight: 700; font-size: 0.95rem; }
+    .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
+    .rw-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
+    .rw-all { color: #C9CDD2; font-size: 0.9rem; }
+
     /* ── Sessions drawer ──────────────────────────────────── */
     .sessions-toggle {
       padding: 0.4rem 0.8rem;
@@ -2359,8 +2373,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (chatState.messages.length > 0) {
         renderChatMessages();
         renderSlotChecklist();
-      } else {
+      } else if (chatState.jobId || chatState.sessionId || chatState.jobContext || chatState.expert) {
         restoreTranscript();
+      } else {
+        showRecentWork();
       }
 
       // FIX #5: enable/disable input based on auth state
@@ -2413,6 +2429,79 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       renderChatMessages();
       renderSlotChecklist();
+    }
+
+    function welcomeMessage() {
+      return "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.";
+    }
+
+    function newChatNow() {
+      chatState.sessionId = null;
+      chatState.jobId = null;
+      chatState.jobContext = null;
+      chatState.slots = {};
+      chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
+      resetDraftGate();
+      setChatMascot("17-attentive");
+      renderChatMessages();
+      renderSlotChecklist();
+      document.getElementById("chatInput").focus();
+    }
+
+    function showRecentWork() {
+      var co = activeCompanyId();
+      var container = document.getElementById("chatMessages");
+      container.innerHTML = '<p class="muted" style="padding:0.5rem 0">Loading your recent work…</p>';
+      var jobsP = fetch("/api/buzzy/jobs" + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      var sessP = fetch(SESSIONS_BASE + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      Promise.all([jobsP, sessP]).then(function (res) {
+        var jobs = (res[0] && res[0].jobs) || [];
+        var sessions = (res[1] && res[1].sessions) || [];
+        var items = [];
+        var seen = {};
+        sessions.forEach(function (s) {
+          var key = s.jobId || ("s:" + s.id);
+          if (seen[key]) return;
+          seen[key] = true;
+          items.push({ kind: "session", session: s, title: s.title || "Untitled chat", sub: s.summary || "Pick up this conversation" });
+        });
+        jobs.forEach(function (j) {
+          if (seen[j.id]) return;
+          seen[j.id] = true;
+          items.push({ kind: "job", job: j, title: j.title || "Untitled job", sub: (j.status || "Discovering") + (j.template ? " · " + j.template : "") });
+        });
+        var shown = items.slice(0, 8);
+        var html = '<div class="recent-work">' +
+          '<h3 class="rw-head">Recent work</h3>' +
+          '<p class="muted rw-lead">Pick up where you left off, or start something new.</p>';
+        if (!shown.length) {
+          html += '<p class="muted">No work yet. Start by describing a job.</p>';
+        } else {
+          shown.forEach(function (it, idx) {
+            html += '<button type="button" class="rw-item" data-idx="' + idx + '">' +
+              '<span class="rw-title">' + esc(it.title) + '</span>' +
+              '<span class="rw-sub">' + esc(it.sub) + '</span>' +
+              '</button>';
+          });
+        }
+        html += '<div class="rw-actions">' +
+          '<button type="button" class="primary rw-new">New chat</button>' +
+          '<a class="secondary rw-all" href="/buzzy/">Browse all work</a>' +
+          '</div>' +
+          '</div>';
+        container.innerHTML = html;
+        container.querySelectorAll(".rw-item").forEach(function (el) {
+          el.addEventListener("click", function () {
+            var it = shown[Number(el.getAttribute("data-idx"))];
+            if (!it) return;
+            if (it.kind === "session") { openSession(it.session); }
+            else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+          });
+        });
+        container.querySelector(".rw-new").addEventListener("click", newChatNow);
+      });
     }
 
     function ensureChatSession() {
