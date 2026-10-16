@@ -14,6 +14,7 @@
   var draftName = "";
   var editingId = "";
   var editDraft = "";
+  var cardMode = "hidden"; // hidden | view | edit
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -51,7 +52,10 @@
       ".bz-co-src{color:#9a9a9a;font-size:0.78rem;margin:0.15rem 0 0.45rem}" +
       ".bz-co-src a{color:#FFC107}" +
       ".bz-co-confirmed{color:#8FCB9B;font-size:0.78rem;font-weight:700}" +
-      ".bz-co-edit input{font:inherit;padding:0.4rem 0.55rem;border-radius:6px;border:1px solid #333;background:#141414;color:#fff;width:min(36rem,100%);display:block;margin:0.35rem 0}";
+      ".bz-co-edit input{font:inherit;padding:0.4rem 0.55rem;border-radius:6px;border:1px solid #333;background:#141414;color:#fff;width:min(36rem,100%);display:block;margin:0.35rem 0}" +
+      ".bz-co-tools{margin-left:auto;display:inline-flex;gap:0.4rem;align-items:center}" +
+      ".bz-co-view,.bz-co-edit-btn{font:inherit;font-size:0.8rem;padding:0.32rem 0.6rem;border-radius:6px;border:1px solid #3a3a3a;background:transparent;color:#C9CDD2;cursor:pointer;font-weight:600}" +
+      ".bz-co-view.is-on,.bz-co-edit-btn.is-on{background:#2A2A2A;color:#FFC107;border-color:#FFC107}";
     document.head.appendChild(style);
   }
 
@@ -91,21 +95,21 @@
     return lead + (link ? " · " + link : "");
   }
 
-  function cardHtml(company) {
+  function cardHtml(company, readOnly) {
     var lines = (company && company.lines) || [];
     if (!lines.length) return "";
     var proposed = lines.some(function (l) { return l.status !== "confirmed"; });
     var html = '<section class="bz-co-card"><div class="bz-co-card-inner">';
-    html += proposed
+    html += proposed && !readOnly
       ? "<h2>Check this company</h2>" +
         '<p class="bz-co-lead">BeeZilla read the public website. Each line is from that page. Confirm it, change it, or drop it. Only a line you confirm is kept.</p>'
-      : "<h2>Confirmed about " + esc(company.name) + "</h2>" +
+      : "<h2>About " + esc(company.name) + "</h2>" +
         '<p class="bz-co-lead">These are the lines you kept. Dropped lines are not company facts.</p>';
     lines.forEach(function (line) {
       var confirmed = line.status === "confirmed";
       html += '<div class="bz-co-line" data-line="' + esc(line.id) + '">';
       html += '<div class="bz-co-k">' + esc(line.label || line.key) + "</div>";
-      if (editingId === line.id) {
+      if (!readOnly && editingId === line.id) {
         html += '<div class="bz-co-edit">' +
           '<input data-edit value="' + esc(editDraft) + '" maxlength="280">' +
           '<button type="button" data-act="save">Save</button>' +
@@ -116,9 +120,11 @@
         html += '<div class="bz-co-src">' +
           (confirmed ? '<span class="bz-co-confirmed">Confirmed</span> · ' : "") +
           sourceHtml(line) + "</div>";
-        if (!confirmed) html += '<button type="button" data-act="confirm">Confirm</button>';
-        html += '<button type="button" class="bz-co-quiet" data-act="change">Change</button>';
-        html += '<button type="button" class="bz-co-drop" data-act="drop">Drop</button>';
+        if (!readOnly) {
+          if (!confirmed) html += '<button type="button" data-act="confirm">Confirm</button>';
+          html += '<button type="button" class="bz-co-quiet" data-act="change">Change</button>';
+          html += '<button type="button" class="bz-co-drop" data-act="drop">Drop</button>';
+        }
       }
       html += "</div>";
     });
@@ -128,6 +134,7 @@
   }
 
   function renderInto(el) {
+    var current = active();
     var html = '<div class="bz-co-bar" role="tablist" aria-label="Companies">';
     if (!state.companies.length) html += '<span class="bz-co-empty">No company yet</span>';
     state.companies.forEach(function (c) {
@@ -136,7 +143,14 @@
         (on ? "true" : "false") + '" data-co="' + esc(c.id) + '"' +
         (on ? ' title="Current company"' : "") + ">" + esc(c.name) + "</button>";
     });
-    html += '<button type="button" class="bz-co-add">Add company</button></div>';
+    html += '<button type="button" class="bz-co-add">Add company</button>';
+    if (current && current.lines && current.lines.length) {
+      html += '<span class="bz-co-tools">' +
+        '<button type="button" class="bz-co-view' + (cardMode === "view" ? " is-on" : "") + '" data-tool="view">View</button>' +
+        '<button type="button" class="bz-co-edit-btn' + (cardMode === "edit" ? " is-on" : "") + '" data-tool="edit">Edit</button>' +
+        "</span>";
+    }
+    html += "</div>";
     if (adding && busy) {
       html += '<p class="bz-co-wait">' +
         (addMode === "name" ? "Adding this company…" : "Reading the public website…") +
@@ -158,8 +172,7 @@
         (err ? '<span class="bz-co-err">' + esc(err) + "</span>" : "") +
         "</form>";
     }
-    var current = active();
-    if (current && !adding) html += cardHtml(current);
+    if (current && !adding && cardMode !== "hidden") html += cardHtml(current, cardMode === "view");
     el.innerHTML = html;
     el.querySelectorAll(".bz-co-tab").forEach(function (btn) {
       btn.addEventListener("click", function () {
@@ -170,12 +183,22 @@
         select(id);
       });
     });
+    el.querySelectorAll("[data-tool]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var t = btn.getAttribute("data-tool");
+        cardMode = cardMode === t ? "hidden" : t;
+        err = "";
+        editingId = "";
+        renderAll();
+      });
+    });
     var add = el.querySelector(".bz-co-add");
     if (add) add.addEventListener("click", function () {
       adding = true;
       addMode = "website";
       err = "";
       editingId = "";
+      cardMode = "hidden";
       renderAll();
     });
     var form = el.querySelector(".bz-co-form");
@@ -245,6 +268,7 @@
     var known = state.companies.some(function (c) { return c.id === id; });
     if (!known) return;
     state.activeId = id;
+    cardMode = "hidden";
     try { localStorage.setItem(KEY, id); } catch (e) { /* private mode */ }
     renderAll();
     emit();
@@ -290,6 +314,7 @@
     draftUrl = "";
     draftName = "";
     editingId = "";
+    cardMode = company && company.lines && company.lines.length ? "edit" : "hidden";
     renderAll();
     emit();
   }
