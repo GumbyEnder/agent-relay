@@ -365,6 +365,9 @@
       border-radius: 3px;
       font-weight: 600;
     }
+    .tag-done { color: var(--bz-status-green); background: rgba(91,175,107,0.12); }
+    .tag-approved { color: var(--bz-status-blue); background: rgba(91,141,184,0.12); }
+    .tag-draft { color: var(--bz-status-lavender); background: rgba(155,142,196,0.12); }
     .templates {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -655,13 +658,10 @@
 
     function jobStatus(j) {
       if (jobComplete(j)) return "Done";
-      if (j.screen === "board") return "Working";
-      if (j.approved) return "Working";
-      if (j.screen === "draft") return "Needs you";
-      if (j.problem) return "In progress";
-      if (j.template) return "In progress";
-      if (j.q > 0) return "In progress";
-      return "Not started";
+      if (j.approved || j.screen === "board") return "Approved";
+      if (j.screen === "draft") return "Draft ready";
+      if (j.draft || j.draftText) return "Draft ready";
+      return "Discovering";
     }
 
     const catalog = { currentId: null, hideCompleted: true, jobs: [], userId: null };
@@ -948,7 +948,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function jobCardHtml(j, moveLabel) {
       const status = jobStatus(j);
-      const statusClass = status === "Done" ? " tag-done" : status === "Working" ? " tag-working" : "";
+      const statusClass = status === "Done" ? " tag-done" : status === "Approved" ? " tag-approved" : status === "Draft ready" ? " tag-draft" : "";
       const hasChat = !!(j.problem || (j.messages && j.messages.length) || j.template);
       const esc = (s) => String(s).replace(/</g, "&lt;");
       const fmt = (ts) => new Date(ts || Date.now()).toLocaleDateString();
