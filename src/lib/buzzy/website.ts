@@ -66,17 +66,23 @@ export function normalizeWebsiteUrl(raw: unknown): string | null {
 function isPrivateIp(ip: string): boolean {
   const v = ip.toLowerCase().replace(/^::ffff:/, "");
   if (isIP(v) === 4) {
-    const [a, b] = v.split(".").map((n) => Number(n));
+    const [a, b, c] = v.split(".").map((n) => Number(n));
     if (a === 0 || a === 10 || a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a >= 224) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+    if (a === 169 && b === 254) return true; // link-local / cloud metadata 169.254.0.0/16
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0.0/24 + 192.0.2.0/24 (TEST-NET-1)
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 (benchmark)
+    if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24 (TEST-NET-2)
+    if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24 (TEST-NET-3)
+    if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved + broadcast
     return false;
   }
-  if (v === "::1" || v === "::") return true;
-  if (v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80")) return true;
+  if (v === "::1" || v === "::") return true; // loopback + unspecified
+  if (/^f[cd]/.test(v)) return true; // ULA fc00::/7
+  if (/^fe[89ab]/.test(v)) return true; // link-local fe80::/10 (fe80–febf)
+  if (/^ff/.test(v)) return true; // multicast ff00::/8
   return false;
 }
 
