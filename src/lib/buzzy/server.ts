@@ -242,6 +242,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
   const wereAllFilled = [...REQUIRED_SLOTS, ...DEEPENING_IDS].every(id => slotValues[id]);
+  // The owner can declare discovery done and ask for the deliverable directly
+  // ("write it up", "go ahead") even if the precision pass was skipped — that
+  // satisfies the draft gate as surely as answering every question.
+  const statementsCaptured = REQUIRED_SLOTS.every(id => slotValues[id]);
+  const requestedDraft =
+    statementsCaptured &&
+    /\b(write|draft|produce|prepare|go ahead|just write|whenever|send it)\b/i.test(message);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -270,7 +277,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const knownCompany = companyName
     ? " Confirmed company facts are already known — do not ask for them again."
     : "";
-  const guidance = nextQ
+  const guidance = requestedDraft
+    ? `\n\nThe owner has asked for the deliverable now. Generate the full draft — fold in everything captured so far and note anything still unknown rather than inventing it.${knownCompany}`
+    : nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"${knownCompany}`
     : nextS
       ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
@@ -402,7 +411,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // Draft only on the turn AFTER all four were already captured (the owner
   // is confirming), never the instant the fourth statement lands.
-  if (wereAllFilled) {
+  if (wereAllFilled || requestedDraft) {
     response.draft = true;
     response.done = true;
   }
