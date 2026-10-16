@@ -16,7 +16,7 @@
  * 9. Return structured response.
  */
 
-import { chatCompletion, resolveModel } from "./llm";
+import { chatCompletion, resolveModel, resolveReasoningModel } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -338,7 +338,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Call LLM ───────────────────────────────────────────────────────
   let reply: string;
   try {
-    reply = await chatCompletion(messages, { model: resolvedModel });
+    // Route high-stakes job types (legal, technical) to a reasoning model when
+    // the catalog has one; everything else stays on the cheap default.
+    const routedModel =
+      resolvedModel ??
+      ((jobType === "legal" || jobType === "technical") ? resolveReasoningModel() : undefined);
+    reply = await chatCompletion(messages, { model: routedModel });
   } catch (err) {
     console.error("[buzzy/chat] LLM request failed:", err instanceof Error ? err.message : err);
     return {

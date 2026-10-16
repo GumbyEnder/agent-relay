@@ -152,3 +152,14 @@ export function resolveModel(labelOrModel?: string): string | undefined {
   const byModel = models.find((m) => m.model === labelOrModel);
   return byModel?.model;
 }
+
+/**
+ * A reasoning-capable model id from the catalog, if one is present — used for
+ * high-stakes job types (legal, technical) where a thinking model helps.
+ * Undefined when the catalog has no obvious reasoning entry, so callers fall
+ * back to the default.
+ */
+export function resolveReasoningModel(): string | undefined {
+  const m = getModels().find((x) => /think|reason|kimi|qwen/i.test((x.label || "") + " " + (x.model || "")));
+  return m?.model;
+}
