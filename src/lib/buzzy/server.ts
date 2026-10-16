@@ -244,12 +244,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // That's the signal the owner has now confirmed — the draft is gated on it.
   const wereAllFilled = [...REQUIRED_SLOTS, ...DEEPENING_IDS].every(id => slotValues[id]);
   // The owner can declare discovery done and ask for the deliverable directly
-  // ("write it up", "go ahead") even if the precision pass was skipped — that
-  // satisfies the draft gate as surely as answering every question.
-  const statementsCaptured = REQUIRED_SLOTS.every(id => slotValues[id]);
+  // ("write it up", "go ahead", "that's enough"). That directive is itself the
+  // confirmation, so it satisfies the draft gate even when outstanding
+  // statements are only marked "skipped" this same turn. Deliberately explicit
+  // phrases — not the bare words "write"/"produce"/"prepare"/"whenever", which
+  // owners also use in innocent descriptions ("I write quotes by hand").
   const requestedDraft =
-    statementsCaptured &&
-    /\b(write|draft|produce|prepare|go ahead|just write|whenever|send it)\b/i.test(message);
+    /\b(write it up|just write|go ahead|draft it|that'?s enough|finalize|whenever you'?re ready)\b/i.test(message);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
