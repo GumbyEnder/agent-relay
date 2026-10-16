@@ -99,9 +99,9 @@ export default defineEventHandler(async (event) => {
 
   // /buzzy/library is the Library (documents vault) view of the app shell —
   // same index.html, which opens the docs screen when the URL ends in /library.
-  // Root /buzzy is the consolidated Work interface (talk.html: conversation +
-  // jobs/sessions list). /buzzy/library still opens index.html's documents view.
-  const fileName = name === "library" ? "index" : name === "index" ? "talk" : name;
+  // The root /buzzy/* is the consolidated Work interface: index.html itself
+  // redirects non-library routes to talk.html.
+  const fileName = name === "library" ? "index" : name;
 
   // Dev: repo root/public/buzzy. Prod: cwd is the repo root too (startCommand
   // runs `node .output/server/index.mjs` from the project root).

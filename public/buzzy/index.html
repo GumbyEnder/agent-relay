@@ -912,6 +912,12 @@
       render();
     }
 
+    // index.html now serves ONLY the Library (documents). Any other /buzzy/
+    // route is the consolidated Work interface, so leave for it immediately.
+    if (window.location.pathname.replace(/\/+$/, "") !== "/buzzy/library") {
+      window.location.replace("/buzzy/talk");
+    }
+
     loadState();
     // /buzzy/library lands directly on the Library (documents) screen.
     if (window.location.pathname.replace(/\/+$/, "") === "/buzzy/library") {
