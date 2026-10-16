@@ -2341,6 +2341,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.approvedText = text;
       chatState.draftText = text;
       chatState.outwardConfirmed = false;
+      // Persist the approval so the job leaves "needs your input" and the
+      // Library holds the approved draft (not just the LLM's first pass).
+      if (chatState.jobId) {
+        fetch("/api/buzzy/jobs/" + encodeURIComponent(chatState.jobId), {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Approved", approved: true, draft: text }),
+        }).catch(function () { /* offline or signed out */ });
+      }
       var onote = document.getElementById("outwardNote");
       if (onote) onote.textContent = "";
       var note = document.getElementById("draftSendNote");

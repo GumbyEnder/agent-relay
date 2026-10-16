@@ -822,14 +822,30 @@ export default defineEventHandler(async (event) => {
         body = parsed as Record<string, unknown>;
       }
     } catch { /* handled below */ }
-    const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
-    if (!title) {
+    const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : null;
+    const hasTitle = title !== null;
+    if (hasTitle && !title) {
       setResponseStatus(event, 400);
       return { error: "title is required", code: "bad_request" };
     }
+    const status = typeof body.status === "string" ? body.status.slice(0, 64) : null;
+    const hasStatus = status !== null;
+    const hasApproved = typeof body.approved === "boolean";
+    const hasDraft = typeof body.draft === "string";
+    if (!hasTitle && !hasStatus && !hasApproved && !hasDraft) {
+      setResponseStatus(event, 400);
+      return { error: "Nothing to update.", code: "bad_request" };
+    }
+    const dataPatch: Record<string, unknown> = {};
+    if (hasApproved) dataPatch.approved = body.approved;
+    if (hasDraft) dataPatch.draft = body.draft;
     const sql = await getSql();
     const rows = await sql`
-      UPDATE buzzy_jobs SET title = ${title}, updated_at = now()
+      UPDATE buzzy_jobs SET
+        title = COALESCE(${title}, title),
+        status = COALESCE(${status}, status),
+        data = COALESCE(data, '{}'::jsonb) || ${JSON.stringify(dataPatch)}::jsonb,
+        updated_at = now()
       WHERE id = ${id} AND user_id = ${user.id}
       RETURNING id, title, status
     `;
