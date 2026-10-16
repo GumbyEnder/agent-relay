@@ -45,7 +45,11 @@ function brandLabel(): string {
 }
 
 export function mailFromAddress(): string {
-  return env("SMTP_FROM") || env("MAIL_FROM") || "Dev Boards <noreply@localhost>";
+  return (
+    env("SMTP_FROM") ||
+    env("MAIL_FROM") ||
+    `${brandLabel()} <noreply@localhost>`
+  );
 }
 
 export function isSmtpConfigured(): boolean {

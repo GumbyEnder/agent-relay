@@ -987,8 +987,12 @@ export const durableBoard = {
       const sql = await getSql();
       await ensureProjects(sql);
       const owner = opts?.ownerUserId?.trim() || null;
-      const includeShared = opts?.includeShared !== false;
       const admin = opts?.admin === true;
+      // Shared (owner-less) boards: admins always; non-admin operators only when
+      // SHARED_BOARDS=1 (demo mode). Keeps QA debris out of every signup's rail.
+      const includeShared =
+        (opts?.includeShared !== false) &&
+        (admin || process.env.SHARED_BOARDS === "1");
       const includeArchived = opts?.includeArchived === true;
       let rows: Record<string, unknown>[];
       if (admin || !owner) {

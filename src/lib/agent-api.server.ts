@@ -1151,6 +1151,26 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
             issueKeyRaw === "1" ||
             issueKeyRaw === "true";
 
+      // Re-register guard (F6): registerAgent upserts by name and REPLACES the
+      // skill list wholesale. Re-registering an existing name without authority
+      // lets anyone strip e.g. the `review` skill that gates force-release.
+      // New names stay open (self-serve onboarding). Existing names require a
+      // bound ark key (that agent) or an operator session.
+      const existingProfile = await boardOps.getAgentProfile(name);
+      const existingAgent = existingProfile ? { agent: existingProfile.agent } : null;
+      const ownsAgent =
+        machineAuth.type === "ark" &&
+        (machineAuth.agentId === existingProfile?.agent.id ||
+          machineAuth.agentId === name);
+      const isOperator = machineAuth.type === "browser" || machineAuth.type === "open";
+      if (existingAgent && !ownsAgent && !isOperator) {
+        return err(
+          403,
+          `Agent "${name}" already exists — re-registration requires the agent's own key or an operator session`,
+          "re_register_forbidden",
+        );
+      }
+
       const result = await boardOps.registerAgent({
         name,
         harness,
