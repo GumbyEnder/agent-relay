@@ -159,21 +159,26 @@
       cursor: not-allowed;
     }
   </style>
+<link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
 <body>
   <header>
-    <div class="brand">
-      <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-      <strong>BeeZilla</strong>
+    <div class="header-inner">
+      <a href="/buzzy/" class="brand-link">
+        <div class="brand">
+          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <strong>BeeZilla</strong>
+        </div>
+      </a>
+      <nav>
+        <a href="/buzzy/" id="jobsLink">Work</a>
+        <a href="/buzzy/talk.html" id="talkLink">Talk to BeeZilla</a>
+        <a href="/buzzy/remember.html" id="memLink" class="active">What BeeZilla remembers</a>
+        <a href="/buzzy/library" id="libLink">Library</a>
+        <a href="/login" class="account-link">Sign in</a>
+        <span class="phase" id="phaseLabel">What BeeZilla remembers</span>
+      </nav>
     </div>
-    <nav>
-      <a href="/buzzy/" id="jobsLink">Work</a>
-      <a href="/buzzy/talk.html" id="talkLink">Talk to BeeZilla</a>
-      <a href="/buzzy/remember.html" id="memLink" class="active">What BeeZilla remembers</a>
-      <a href="/buzzy/library" id="libLink">Library</a>
-      <a href="/login" class="account-link">Sign in</a>
-      <span class="phase" id="phaseLabel">What BeeZilla remembers</span>
-    </nav>
   </header>
   <main id="app"></main>
 
