@@ -2376,6 +2376,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return;
       }
       chatState.outwardConfirmed = true;
+      // Persist completion so the job reaches "Done" (Discovering → Draft ready
+      // → Approved → Done) durably, not just in this page.
+      if (chatState.jobId) {
+        fetch("/api/buzzy/jobs/" + encodeURIComponent(chatState.jobId), {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Done" }),
+        }).catch(function () { /* offline or signed out */ });
+      }
       var onote = document.getElementById("outwardNote");
       if (onote) onote.textContent = "Confirmed for version " + chatState.draftVersion + ". Nothing was emailed or published.";
     }
