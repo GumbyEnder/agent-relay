@@ -928,6 +928,7 @@
               <button type="button" id="approveDraft">Approve this version</button>
               <button type="button" id="downloadDraft" class="secondary">Download</button>
               <button type="button" id="downloadWord" class="secondary">Word</button>
+              <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
               <button type="button" id="draftSend">Send</button>
               <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
             </div>
@@ -2436,6 +2437,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     }
 
+    function onRestorePrevious() {
+      var prev = chatState.previousDraft;
+      if (!prev) return;
+      var body = draftBodyEl();
+      if (body) body.value = prev;
+      chatState.draftText = prev;
+      chatState.approvedText = null;
+      chatState.previousDraft = null;
+      paintDraftGate();
+      var btn = document.getElementById("restorePrevious");
+      if (btn) btn.classList.add("hidden");
+    }
+
     function showChatScreen() {
       document.getElementById("chatMessages").innerHTML = "";
       document.getElementById("chatError").classList.add("hidden");
@@ -2856,6 +2870,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           openDraftReview(data.reply || "");
           setDraftWarning(data.warning);
           if (data.jobId) chatState.jobId = data.jobId;
+          if (data.previousDraft) {
+            chatState.previousDraft = data.previousDraft;
+            var rpBtn = document.getElementById("restorePrevious");
+            if (rpBtn) rpBtn.classList.remove("hidden");
+          }
         } else {
           setChatMascot("17-attentive");
         }
@@ -2972,6 +2991,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("downloadDraft").onclick = onDownloadDraft;
     document.getElementById("downloadWord").onclick = onDownloadWord;
     document.getElementById("draftBody").addEventListener("input", onDraftInput);
+    document.getElementById("restorePrevious").onclick = onRestorePrevious;
     // ── Sessions drawer ───────────────────────────────────────
     function openSessionsDrawer() {
       const drawer = document.getElementById("sessionsDrawer");

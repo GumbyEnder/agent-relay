@@ -166,6 +166,7 @@ export interface ChatResponse {
   done?: boolean;
   warning?: string;
   jobId?: string;
+  previousDraft?: string;
   error?: string;
   code?: string;
 }
@@ -244,9 +245,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Has this job already produced a draft? Follow-ups are then revisions, not
   // further discovery — the owner isn't still answering questions.
   let hasExistingDraft = false;
+  let previousDraft: string | null = null;
   if (jobId) {
     const jrows = await sql`SELECT data->>'draft' AS draft FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
-    hasExistingDraft = !!(jrows[0] && jrows[0].draft && String(jrows[0].draft).trim());
+    const prev = jrows[0] && jrows[0].draft ? String(jrows[0].draft).trim() : null;
+    hasExistingDraft = !!prev;
+    if (prev) previousDraft = prev;
   }
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
@@ -441,6 +445,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // this chat. A chat with no job id gets one now (stable per session).
     const recordId = jobId || sessionId || `job_${Date.now()}`;
     response.jobId = recordId;
+    if (previousDraft) response.previousDraft = previousDraft;
     const baseTitle =
       slotValues.end_goal && slotValues.end_goal !== "skipped"
         ? slotValues.end_goal
@@ -451,7 +456,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
       VALUES (
         ${recordId}, ${userId}, null, ${baseTitle.slice(0, 80)}, 'Draft ready', null,
-        ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false })}::jsonb, now()
+        ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false, previous_draft: previousDraft })}::jsonb, now()
       )
       ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
