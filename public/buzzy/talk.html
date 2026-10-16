@@ -2588,6 +2588,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
+    function timeAgo(iso) {
+      if (!iso) return "";
+      var d = new Date(iso);
+      var s = Math.floor((Date.now() - d.getTime()) / 1000);
+      if (isNaN(s) || s < 0) return "";
+      if (s < 60) return "just now";
+      var m = Math.floor(s / 60);
+      if (m < 60) return m + "m ago";
+      var h = Math.floor(m / 60);
+      if (h < 24) return h + "h ago";
+      var d2 = Math.floor(h / 24);
+      if (d2 < 7) return d2 + "d ago";
+      return d.toLocaleDateString();
+    }
+
     function showRecentWork() {
       var co = activeCompanyId();
       var container = document.getElementById("chatMessages");
@@ -2605,7 +2620,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var key = s.jobId || ("s:" + s.id);
           if (seen[key]) return;
           seen[key] = true;
-          items.push({ kind: "session", session: s, title: s.title || "Untitled chat", sub: s.summary || "Pick up this conversation" });
+          items.push({
+            kind: "session", session: s, title: s.title || "Untitled chat",
+            sub: (s.summary || "Pick up this conversation") +
+              (s.messageCount != null ? " · " + s.messageCount + " message" + (s.messageCount === 1 ? "" : "s") : "") +
+              (s.updatedAt ? " · updated " + timeAgo(s.updatedAt) : ""),
+          });
         });
         jobs.forEach(function (j) {
           if (seen[j.id]) return;
@@ -2614,7 +2634,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           items.push({
             kind: "job", job: j, needsInput: needsInput,
             title: j.title || "Untitled job",
-            sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") + (j.template ? " · " + j.template : ""),
+            sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") + (j.template ? " · " + j.template : "") + (j.updatedAt ? " · updated " + timeAgo(j.updatedAt) : ""),
           });
         });
         // Drafts awaiting the owner's approval float to the top.
