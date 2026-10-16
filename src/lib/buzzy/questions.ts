@@ -134,3 +134,9 @@ export const SLOT_IDS = [...BUZZY_QUESTIONS.map((q) => q.id), ...STATEMENT_IDS];
  *  through conversation (challenge, difficulties, who, end goal). The
  *  Decisions Made box starts empty and fills as the agent extracts each. */
 export const REQUIRED_SLOTS = STATEMENT_IDS;
+
+/** Universal practical questions asked AFTER the four decisions are captured.
+ *  Budget / timing / done-right / exclusions generalize to most jobs; the
+ *  fence-specific ones (what_happened, rough_size, material_supplier,
+ *  quote_count) do not, so they stay out of the guided flow. */
+export const DEEPENING_IDS = ["budget_range", "timing", "done_right_check", "exclusions"];

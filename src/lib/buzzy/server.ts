@@ -18,7 +18,7 @@
 
 import { chatCompletion, resolveModel } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS } from "./questions";
+import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
@@ -35,6 +35,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - Track decisions, not stories: capture the decision, then move on.
 - MANDATED GOAL — the Decisions Made box: The Challenge, Difficulties, Who is involved, What is the end goal. Every reply must move at least one forward: either extract a statement from what the client just said (emit it as [challenge: …], [difficulties: …], [who_involved: …], or [end_goal: …]) or ask the single next question that fills a missing one. If the client says a statement cannot be answered, emit [id: skipped] for that id instead of inventing content — never fabricate a statement they did not give or approve. The job is not ready for a draft until all four are filled or explicitly skipped.
 - DISCOVERY FIRST: do not write the final document, draft, or deliverable until the four Decisions Made statements are captured or skipped. Even when the request looks like a finished deliverable, first pull out what the client already told you (emit the [slot: …] markers) and ask for what is still missing, one decision at a time. The box fills in as the conversation uncovers each decision.
+- PRECISION PASS: once the four statements are captured or skipped, ask the remaining practical questions one at a time — budget, timing, how the owner will know it's done right, and anything to exclude. Each answer sharpens the draft. If the owner says "skip", "not sure", or "that's enough — just write it", accept it: mark the unanswered ones skipped and move to the draft.
 - IMPORTANT — job type: if the client's message is clearly a different kind of job (creative writing, a story, copy, a poem, a technical explainer), work THAT job. Do not refuse it and do not drag in unrelated earlier problems. Only ask scope-of-work questions that fit the actual request.
 - Only use details from THIS conversation. Never mention or reuse problems from other jobs.
 You never mention models, tokens, or technical internals.`;
@@ -240,7 +241,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
-  const wereAllFilled = REQUIRED_SLOTS.every(id => slotValues[id]);
+  const wereAllFilled = [...REQUIRED_SLOTS, ...DEEPENING_IDS].every(id => slotValues[id]);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -262,7 +263,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         factsText.map(f => `- ${f.key}: ${f.value}`).join("\n")
       : "";
 
-  const nextSlot = REQUIRED_SLOTS.find(id => !slotValues[id]);
+  const nextSlot = [...REQUIRED_SLOTS, ...DEEPENING_IDS].find(id => !slotValues[id]);
   const nextQ = nextSlot ? BUZZY_QUESTIONS.find(q => q.id === nextSlot) : null;
   const nextS = nextSlot ? BUZZY_STATEMENTS.find(s => s.id === nextSlot) : null;
 
