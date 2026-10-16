@@ -930,6 +930,7 @@
               <button type="button" id="downloadWord" class="secondary">Word</button>
               <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
               <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
+              <button type="button" id="downloadPdf" class="secondary">PDF</button>
               <button type="button" id="draftSend">Send</button>
               <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
             </div>
@@ -2467,6 +2468,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     }
 
+    function onDownloadPdf() {
+      if (!window.beezillaSowPdf) { alert("PDF export isn't available right now."); return; }
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      var bytes = window.beezillaSowPdf(text);
+      var blob = new Blob([bytes], { type: "application/pdf" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "draft-v" + (chatState.draftVersion || 1) + ".pdf";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
     function onRestorePrevious() {
       var prev = chatState.previousDraft;
       if (!prev) return;
@@ -3041,6 +3055,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var body = draftBodyEl();
       downloadCsv("draft-v" + (chatState.draftVersion || 1), body ? body.value : (chatState.draftText || ""));
     };
+    document.getElementById("downloadPdf").onclick = onDownloadPdf;
     // ── Sessions drawer ───────────────────────────────────────
     function openSessionsDrawer() {
       const drawer = document.getElementById("sessionsDrawer");
