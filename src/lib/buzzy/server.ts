@@ -359,7 +359,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const routedModel =
       resolvedModel ??
       ((jobType === "legal" || jobType === "technical") ? resolveReasoningModel() : undefined);
-    reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice });
+    reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
 
     // Bounded model-paced loop: execute render_document calls and feed the
     // result back until the model returns a final answer or we hit the cap.
@@ -388,7 +388,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           followUpMessages.push({ role: "user", content: `render_document arguments could not be read: ${perr instanceof Error ? perr.message : String(perr)}. Reply without the tool.` });
         }
       }
-      reply = await chatCompletionFull(followUpMessages, { model: routedModel });
+      reply = await chatCompletionFull(followUpMessages, { model: routedModel, maxTokens: loopTools ? 4096 : undefined });
     }
     // Limit-trip rule: if we exited on iterations with tool calls still pending,
     // reply.content holds the model's last text — surface it as-is below. Never silent.
