@@ -47,6 +47,7 @@ import { setDocumentAcceptance, materializeDraft, summarizeChanges } from "./doc
 import { ensureExecutionBoard } from "./execution";
 import { renderTextPdf } from "./pdf";
 import { renderDocument } from "./artifact";
+import { TOOL_REGISTRY } from "./tools";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -251,6 +252,15 @@ export default defineEventHandler(async (event) => {
       content: link.content,
       note: "Shared by the owner as a read-only link. It expires and can be turned off at any time.",
     };
+  }
+
+  // ── GET /api/buzzy/tools — the declared capability surface (BZ-F013) ────
+  // Every tool the chat loop can execute, with its input/output contract,
+  // sensitivity, cost class, side effects, permission need, verification and
+  // failure behavior. The loop's allowlist IS this registry — a model
+  // instruction alone mints nothing beyond it.
+  if (method === "GET" && path === "/api/buzzy/tools") {
+    return { tools: TOOL_REGISTRY };
   }
 
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──

