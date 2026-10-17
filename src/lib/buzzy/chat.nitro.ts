@@ -1403,13 +1403,21 @@ export default defineEventHandler(async (event) => {
     const hasStatus = status !== null;
     const hasApproved = typeof body.approved === "boolean";
     const hasDraft = typeof body.draft === "string";
-    if (!hasTitle && !hasStatus && !hasApproved && !hasDraft) {
+    // BZ-F026: explicit due date, stored exactly as given (ISO with the
+    // owner's timezone offset) — never inferred, never silently shifted.
+    const hasDueDate = typeof body.dueDate === "string" && !Number.isNaN(Date.parse(body.dueDate));
+    if (typeof body.dueDate === "string" && body.dueDate && !hasDueDate) {
+      setResponseStatus(event, 400);
+      return { error: "That due date didn't parse — use a date like 2026-11-15 or a full ISO timestamp.", code: "bad_date" };
+    }
+    if (!hasTitle && !hasStatus && !hasApproved && !hasDraft && !hasDueDate) {
       setResponseStatus(event, 400);
       return { error: "Nothing to update.", code: "bad_request" };
     }
     const dataPatch: Record<string, unknown> = {};
     if (hasApproved) dataPatch.approved = body.approved;
     if (hasDraft) dataPatch.draft = body.draft;
+    if (hasDueDate) dataPatch.due_date = body.dueDate;
     let executionInfo: { projectId: string; created: boolean } | null = null;
     const sql = await getSql();
     const rows = await sql`
@@ -2119,6 +2127,58 @@ export default defineEventHandler(async (event) => {
           ...(snippet ? { snippet } : {}),
         };
       }),
+    };
+  }
+
+  // ── GET /api/buzzy/today — the truthful attention list (BZ-F026) ──────
+  // Three honest buckets, assembled from real state only — never an
+  // AI-generated feed, never a card moved by timer: needs your decision
+  // (draft waiting on you), ready for your review (documents in 'ready'),
+  // and due/overdue work (explicit due dates the owner set).
+  if (method === "GET" && path === "/api/buzzy/today") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const needsDecision = await sql`
+      SELECT id, title, status, updated_at FROM buzzy_jobs
+      WHERE user_id = ${user.id}
+        AND data->>'draft' IS NOT NULL
+        AND data->>'approved' IS DISTINCT FROM 'true'
+        AND status IS DISTINCT FROM 'Archived'
+        AND status IS DISTINCT FROM 'Cancelled'
+      ORDER BY updated_at DESC LIMIT 20
+    `;
+    const readyDocs = await sql`
+      SELECT d.id, d.title, d.current_version, d.updated_at FROM buzzy_documents d
+      WHERE d.user_id = ${user.id} AND d.status = 'ready'
+      ORDER BY d.updated_at DESC LIMIT 20
+    `;
+    const dueJobs = await sql`
+      SELECT id, title, status, data->>'due_date' AS due_date, updated_at FROM buzzy_jobs
+      WHERE user_id = ${user.id}
+        AND data->>'due_date' IS NOT NULL
+        AND status IS DISTINCT FROM 'Archived'
+        AND status IS DISTINCT FROM 'Cancelled'
+        AND status IS DISTINCT FROM 'Done'
+      ORDER BY (data->>'due_date') ASC LIMIT 30
+    `;
+    const now = Date.now();
+    const due = dueJobs.map((j) => ({
+      id: j.id,
+      title: j.title,
+      status: j.status,
+      dueDate: j.due_date,
+      overdue: j.due_date ? Date.parse(String(j.due_date)) < now : false,
+      updatedAt: j.updated_at,
+    }));
+    return {
+      needsDecision: needsDecision.map((j) => ({ id: j.id, title: j.title, status: j.status, updatedAt: j.updated_at, href: `/buzzy/talk?job=${j.id}` })),
+      readyForReview: readyDocs.map((d) => ({ id: d.id, title: d.title, currentVersion: d.current_version, updatedAt: d.updated_at })),
+      due: due.map((j) => ({ ...j, href: `/buzzy/talk?job=${j.id}` })),
+      note: "Everything here is real state — drafts waiting on you, documents ready for review, and due dates you set. Nothing is generated to fill the page.",
     };
   }
 

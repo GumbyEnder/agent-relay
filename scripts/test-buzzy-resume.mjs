@@ -690,6 +690,37 @@ check(
   JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version, cv: r.json?.document?.current_version, expected: preRevisionVersion + 1 }),
 );
 
+// 19. BZ-F026: Today view — real state only
+r = await api(cookieA, "POST", "/api/buzzy/jobs", { id: `job_${run}_today`, title: "Undecided draft job", data: { draft: "half-done thing", approved: false } });
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_today`, { dueDate: "2020-01-01T00:00:00-05:00" });
+check("BZ-F026 due date stored", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { dueDate: "2999-01-01" });
+r = await api(cookieA, "GET", "/api/buzzy/today");
+check(
+  "BZ-F026 needs-your-decision bucket holds the undecided draft",
+  (r.json?.needsDecision ?? []).some((j) => j.id === `job_${run}_today` && j.href),
+  JSON.stringify(r.json?.needsDecision).slice(0, 200),
+);
+check(
+  "BZ-F026 ready-for-review bucket holds the ready document",
+  (r.json?.readyForReview ?? []).some((d) => d.id === docId),
+  JSON.stringify(r.json?.readyForReview).slice(0, 200),
+);
+check(
+  "BZ-F026 overdue computed from explicit due dates (not inferred)",
+  (r.json?.due ?? []).some((j) => j.id === `job_${run}_today` && j.overdue === true) &&
+    (r.json?.due ?? []).some((j) => j.id === docJob && j.overdue === false),
+  JSON.stringify(r.json?.due).slice(0, 300),
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_today`, { dueDate: "not-a-date" });
+check("BZ-F026 unparseable due date → useful 400", r.status === 400 && r.json?.code === "bad_date", `status ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/today");
+check(
+  "BZ-F026 Today never crosses accounts (QA-05)",
+  (r.json?.needsDecision ?? []).length === 0 && (r.json?.readyForReview ?? []).length === 0 && (r.json?.due ?? []).length === 0,
+  JSON.stringify(r.json),
+);
+
 stub.close();
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
