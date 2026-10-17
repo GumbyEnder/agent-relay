@@ -905,11 +905,41 @@ export default defineEventHandler(async (event) => {
         data = COALESCE(data, '{}'::jsonb) || ${JSON.stringify(dataPatch)}::jsonb,
         updated_at = now()
       WHERE id = ${id} AND user_id = ${user.id}
-      RETURNING id, title, status
+      RETURNING id, title, status, company_id
     `;
     if (!rows.length) {
       setResponseStatus(event, 404);
       return { error: "job not found", code: "not_found" };
+    }
+    // ── Company KB derivation (plan doc 23, component #1) ─────────────
+    // When a job with a company is approved, its confirmed paper facts
+    // (approved-document facts only — never raw chats) become PROPOSED
+    // company facts. They stay suggestions until the owner confirms them
+    // in the company card — the approval surface stays one-click.
+    if (hasApproved && body.approved === true && rows[0].company_id) {
+      const cid = rows[0].company_id as string;
+      const paperFacts = await sql`
+        SELECT DISTINCT ON (fact_key) fact_key, label, value
+        FROM buzzy_paper_facts
+        WHERE user_id = ${user.id} AND company_id = ${cid}
+          AND status = 'confirmed' AND value <> ''
+        ORDER BY fact_key, updated_at DESC
+        LIMIT 12
+      `;
+      for (const pf of paperFacts) {
+        await sql`
+          INSERT INTO buzzy_company_facts
+            (id, company_id, user_id, fact_key, label, value, status,
+             source_label, source_page, original_value)
+          VALUES (
+            ${"kb_" + pf.fact_key + "_" + id.slice(-8)}, ${cid}, ${user.id},
+            ${pf.fact_key}, ${pf.label}, ${pf.value}, 'proposed',
+            'from your approved documents', ${id}, ''
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            value = EXCLUDED.value, updated_at = now()
+        `;
+      }
     }
     return { job: { id: rows[0].id, title: rows[0].title, status: rows[0].status } };
   }
