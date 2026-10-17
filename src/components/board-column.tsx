@@ -20,6 +20,8 @@ export function BoardColumn({
   onAcceptAllReview,
   showBoardName = false,
   boardNameById = {},
+  collapsed = false,
+  onToggleCollapse,
 }: {
   columnId: MissionColumn;
   missions: Mission[];
@@ -37,6 +39,9 @@ export function BoardColumn({
   /** All-boards mode: label each card with its board name */
   showBoardName?: boolean;
   boardNameById?: Record<string, string>;
+  /** Empty-column auto-collapse rail (KANBAN-A2) */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const meta = COLUMNS.find((c) => c.id === columnId)!;
   const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
@@ -52,6 +57,59 @@ export function BoardColumn({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
+
+  // Collapsed rail: vertical label + count, click to expand, drag-over expands.
+  if (collapsed) {
+    return (
+      <section
+        role="button"
+        tabIndex={0}
+        aria-label={`Expand ${meta.label} column (${missions.length})`}
+        title={`${meta.label} — ${missions.length} · click to expand`}
+        className={cn(
+          "flex w-11 shrink-0 cursor-pointer flex-col items-center gap-2 rounded-[var(--radius-lg)] bg-bg/40 py-2 transition-colors hover:bg-bg-subtle/60",
+          dragOver && "ring-2 ring-[var(--color-status-ready)]",
+        )}
+        onClick={() => onToggleCollapse?.()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggleCollapse?.();
+          }
+        }}
+        onDragOver={(e) => {
+          // Expand first so the drop target is a real lane
+          e.preventDefault();
+          if (!dragOver) {
+            setDragOver(true);
+            onToggleCollapse?.();
+          }
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const id = e.dataTransfer.getData("text/mission-id");
+          if (id) onDropMission(id, columnId);
+        }}
+      >
+        <span
+          aria-hidden
+          className="bz-hex h-2.5 w-2.5 shrink-0"
+          style={{ background: COLUMN_STATUS_COLOR[columnId] }}
+        />
+        <span className="tabular rounded-full bg-bg-subtle px-1.5 py-0.5 text-[10px] text-fg-muted">
+          {missions.length}
+        </span>
+        <span
+          className="mt-1 whitespace-nowrap text-[11px] font-medium uppercase tracking-wide text-fg-subtle"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          {meta.label}
+        </span>
+      </section>
+    );
+  }
 
   return (
     <section
