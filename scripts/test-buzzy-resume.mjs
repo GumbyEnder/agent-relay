@@ -448,6 +448,39 @@ check(
 r = await api(cookieB, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "paste", text: "snooping" });
 check("BZ-F007 other account cannot file papers on A's company (QA-05)", r.status === 400 || r.status === 404, `got ${r.status}`);
 
+// 13. BZ-F020: exports match the chosen version (QA-12)
+// docJob is at v3 ("FRIENDLY v3…") by now — but that revision lands AFTER this
+// section runs? No: the QA-20 revision is below. Here docJob is at v2.
+const DL = "/api/buzzy/documents";
+let dl = await fetch(`${BASE}${DL}/${docId}?version=1&format=md`, { headers: { cookie: cookieA } });
+check(
+  "BZ-F020 markdown export of v1 is exactly the v1 text (QA-12)",
+  dl.status === 200 && (dl.headers.get("content-type") || "").includes("markdown") && (await dl.text()) === "DEMAND v1 — pay what you owe, first edition.",
+  `status ${dl.status}`,
+);
+dl = await fetch(`${BASE}${DL}/${docId}?version=2&format=pdf`, { headers: { cookie: cookieA } });
+const pdfBytes = Buffer.from(await dl.arrayBuffer());
+check(
+  "BZ-F020 pdf export of v2: valid %PDF containing the v2 text",
+  dl.status === 200 && (dl.headers.get("content-type") || "").includes("pdf") && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pdfBytes.toString("latin1").includes("FORMAL v2"),
+  `status ${dl.status} bytes ${pdfBytes.length}`,
+);
+dl = await fetch(`${BASE}${DL}/${docId}?version=2&format=docx`, { headers: { cookie: cookieA } });
+const docxBytes = Buffer.from(await dl.arrayBuffer());
+check(
+  "BZ-F020 docx export of v2: real Office zip, non-trivial size",
+  dl.status === 200 && docxBytes.subarray(0, 2).toString() === "PK" && docxBytes.length > 2000,
+  `status ${dl.status} bytes ${docxBytes.length}`,
+);
+dl = await fetch(`${BASE}${DL}/${docId}?version=99&format=pdf`, { headers: { cookie: cookieA } });
+check("BZ-F020 unknown version export → 404", dl.status === 404, `got ${dl.status}`);
+dl = await fetch(`${BASE}${DL}/${docId}?format=bogus`, { headers: { cookie: cookieA } });
+check("BZ-F020 unknown format → useful 400 (QA-11)", dl.status === 400, `got ${dl.status}`);
+dl = await fetch(`${BASE}${DL}/${docId}?format=csv`, { headers: { cookie: cookieA } });
+check("BZ-F020 non-tabular version → CSV explains itself (QA-11)", dl.status === 422 && (await dl.json())?.code === "no_table", `got ${dl.status}`);
+dl = await fetch(`${BASE}${DL}/${docId}?format=pdf`, { headers: { cookie: cookieB } });
+check("BZ-F020 other account export → 404 (QA-05)", dl.status === 404, `got ${dl.status}`);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);

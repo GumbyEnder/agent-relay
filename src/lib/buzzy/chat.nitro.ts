@@ -45,6 +45,8 @@ import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 import { setDocumentAcceptance } from "./documents";
 import { ensureExecutionBoard } from "./execution";
+import { renderTextPdf } from "./pdf";
+import { renderDocument } from "./artifact";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -1517,6 +1519,83 @@ export default defineEventHandler(async (event) => {
       FROM buzzy_document_versions
       WHERE doc_id = ${docMatch[1]} ORDER BY version DESC
     `;
+
+    // ── BZ-F020: exports match the CHOSEN version (QA-12) ──────────────
+    // format=pdf|docx|md|csv renders THIS version's canonical text on demand —
+    // the export can never drift from the version the owner picked.
+    const format = (queryValue(fullPath, "format") ?? "").toLowerCase();
+    if (format) {
+      const title = String(docs[0].title ?? "document");
+      const text = String(vrows[0].content ?? "");
+      const base = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "document";
+      const versionTag = `-v${vrows[0].version}`;
+      if (format === "md") {
+        return new Response(text, {
+          status: 200,
+          headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${base}${versionTag}.md"` },
+        });
+      }
+      if (format === "pdf") {
+        const bytes = renderTextPdf(title, text);
+        return new Response(bytes as unknown as BodyInit, {
+          status: 200,
+          headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}${versionTag}.pdf"` },
+        });
+      }
+      if (format === "docx") {
+        // Map canonical text to the typed renderer: markdown-ish headings are
+        // sections, everything else is paragraphs. Unsupported shapes are a
+        // useful error, never a silent empty file (QA-11).
+        const sections: Array<{ heading: string; paragraphs: string[] }> = [];
+        let current: { heading: string; paragraphs: string[] } = { heading: title, paragraphs: [] };
+        for (const raw of text.split("\n")) {
+          const h = raw.match(/^#{1,3}\s+(.*)$/);
+          if (h) {
+            if (current.paragraphs.length || sections.length === 0) sections.push(current);
+            current = { heading: h[1].slice(0, 120), paragraphs: [] };
+          } else if (raw.trim()) {
+            current.paragraphs.push(raw.trim().slice(0, 2000));
+          }
+        }
+        sections.push(current);
+        const shaped = sections.filter((s) => s.paragraphs.length).slice(0, 25);
+        if (!shaped.length) {
+          setResponseStatus(event, 422);
+          return { error: "That version has no readable text to put in a Word file — download the Markdown instead.", code: "empty_document" };
+        }
+        const rendered = await renderDocument({ title, sections: shaped });
+        if (!rendered.ok || !rendered.bytes) {
+          setResponseStatus(event, 422);
+          return { error: rendered.error ?? "The Word render failed — the Markdown download still works.", code: "render_failed" };
+        }
+        return new Response(rendered.bytes as unknown as BodyInit, {
+          status: 200,
+          headers: {
+            "Content-Type": rendered.contentType ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "Content-Disposition": `attachment; filename="${rendered.filename?.replace(/\.docx$/, "") ?? base}${versionTag}.docx"`,
+          },
+        });
+      }
+      if (format === "csv") {
+        // Tabular text: |-delimited rows, skipping the markdown separator row.
+        const lines = text.split("\n").filter((l) => l.includes("|") && /[a-z0-9]/i.test(l.replace(/[|\-\s:]/g, "")));
+        if (!lines.length) {
+          setResponseStatus(event, 422);
+          return { error: "That version has no table to export — CSV only works for tabular content. This is a value export: formulas are evaluated to their shown values.", code: "no_table" };
+        }
+        const q = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+        const csv = lines
+          .map((l) => l.split("|").slice(1, -1).map((c) => q(c.trim())).join(","))
+          .join("\n") + "\n";
+        return new Response(csv, {
+          status: 200,
+          headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${base}${versionTag}.csv"` },
+        });
+      }
+      setResponseStatus(event, 400);
+      return { error: `Unknown format "${format.slice(0, 16)}". Try pdf, docx, md, or csv.`, code: "bad_format", supported: ["pdf", "docx", "md", "csv"] };
+    }
+
     return { document: { ...docs[0], content: vrows[0].content, version: vrows[0].version }, versions };
   }
 
