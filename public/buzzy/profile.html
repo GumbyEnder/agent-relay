@@ -257,8 +257,9 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (session) {
           var user = session && session.user;
-          if (!user || !user.name) return;
-          link.textContent = user.name;
+          if (!user) { window.location.replace("/buzzy/landing"); return; }
+          var bzDisplayName = user.name || user.email || "Account";
+          link.textContent = bzDisplayName;
           link.removeAttribute("href");
           link.style.cursor = "default";
           var out = document.createElement("a");

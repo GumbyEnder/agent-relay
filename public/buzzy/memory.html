@@ -234,8 +234,9 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (session) {
           var user = session && session.user;
-          if (!user || !user.name) return;
-          link.textContent = user.name;
+          if (!user) { window.location.replace("/buzzy/landing"); return; }
+          var bzDisplayName = user.name || user.email || "Account";
+          link.textContent = bzDisplayName;
           link.href = "#";
           link.style.cursor = "pointer";
           // Profile menu: clicking the name opens a small account panel
@@ -243,7 +244,7 @@
           menu.className = "account-menu";
           menu.style.display = "none";
           menu.innerHTML =
-            '<div class="am-name">' + user.name + "</div>" +
+            '<div class="am-name">' + bzDisplayName + "</div>" +
             '<div class="am-email">' + (user.email || "") + "</div>" +
             '<button type="button" class="am-signout">Log out</button>';
           var out = menu.querySelector(".am-signout");
