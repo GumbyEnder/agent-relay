@@ -309,6 +309,47 @@ export default defineEventHandler(async (event) => {
     return result;
   }
 
+  // ── GET /api/buzzy/jobs/:id/document — approval-gated artifact download ─
+  // The .docx produced by render_document is downloadable ONLY after the
+  // owner has approved the job (plan doc 23 Phase 1 acceptance).
+  const pathParts = path.split("/"); // ["", "api", "buzzy", "jobs", ":id", "document"]
+  if (method === "GET" && pathParts[2] === "buzzy" && pathParts[3] === "jobs" && pathParts[5] === "document") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const jobId = pathParts[4];
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT data->>'approved' AS approved, data->'artifact' AS artifact
+      FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${user.id}
+    `;
+    const row = rows[0];
+    if (!row || !row.artifact) {
+      setResponseStatus(event, 404);
+      return { error: "No document on this job", code: "not_found" };
+    }
+    if (row.approved !== "true") {
+      setResponseStatus(event, 403);
+      return { error: "Approve the document first, then download it.", code: "approval_required" };
+    }
+    const artifact = row.artifact as { filename?: string; bytesB64?: string; contentType?: string };
+    if (!artifact.bytesB64) {
+      setResponseStatus(event, 404);
+      return { error: "No document on this job", code: "not_found" };
+    }
+    const bytes = Buffer.from(artifact.bytesB64, "base64");
+    setResponseStatus(event, 200);
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": artifact.contentType ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Disposition": `attachment; filename="${artifact.filename ?? "document.docx"}"`,
+      },
+    });
+  }
+
   // ── GET /api/buzzy/digest — weekly civilian activity log ────────────
   if (method === "GET" && path === "/api/buzzy/digest") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));

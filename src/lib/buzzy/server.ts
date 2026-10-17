@@ -17,6 +17,7 @@
  */
 
 import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
+import { renderDocument, RENDER_DOCUMENT_TOOL, parseToolArguments } from "./artifact";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -336,14 +337,54 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   ];
 
   // ── Call LLM ───────────────────────────────────────────────────────
+  // Phase 1 (plan doc 23): when the draft gate is satisfied, the model gets
+  // the render_document tool and may run a bounded loop (max 3 iterations).
+  // Read-only tool execution only — render-to-memory is autonomous per the
+  // side-effect classification; the artifact itself stays approval-gated.
+  const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft;
+  const loopTools = draftGateOpen ? [RENDER_DOCUMENT_TOOL] : undefined;
+  const toolMax = 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
+  let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
   try {
     // Route high-stakes job types (legal, technical) to a reasoning model when
     // the catalog has one; everything else stays on the cheap default.
     const routedModel =
       resolvedModel ??
       ((jobType === "legal" || jobType === "technical") ? resolveReasoningModel() : undefined);
-    reply = await chatCompletionFull(messages, { model: routedModel });
+    reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools });
+
+    // Bounded model-paced loop: execute render_document calls and feed the
+    // result back until the model returns a final answer or we hit the cap.
+    for (let iteration = 0; iteration < toolMax && reply.toolCalls.length > 0; iteration++) {
+      const followUpMessages: Array<{ role: string; content: string }> = [...messages];
+      followUpMessages.push({ role: "assistant", content: reply.content || "" });
+      for (const tc of reply.toolCalls) {
+        if (tc.name !== "render_document") {
+          followUpMessages.push({ role: "user", content: `Tool ${tc.name} is not available.` });
+          continue;
+        }
+        try {
+          const content = parseToolArguments(tc.arguments);
+          const result = await renderDocument(content);
+          if (result.ok && result.bytes && result.filename) {
+            renderedDocument = {
+              filename: result.filename,
+              bytesB64: Buffer.from(result.bytes).toString("base64"),
+              contentType: result.contentType ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            };
+            followUpMessages.push({ role: "user", content: `render_document succeeded: ${result.filename} (${result.bytes.length} bytes). The file is ready and waiting for the owner's approval. Reply to the owner now — do not call the tool again.` });
+          } else {
+            followUpMessages.push({ role: "user", content: `render_document failed: ${result.error ?? "unknown error"}. Fix the content and try once more, or reply without the tool.` });
+          }
+        } catch (perr) {
+          followUpMessages.push({ role: "user", content: `render_document arguments could not be read: ${perr instanceof Error ? perr.message : String(perr)}. Reply without the tool.` });
+        }
+      }
+      reply = await chatCompletionFull(followUpMessages, { model: routedModel });
+    }
+    // Limit-trip rule: if we exited on iterations with tool calls still pending,
+    // reply.content holds the model's last text — surface it as-is below. Never silent.
   } catch (err) {
     console.error("[buzzy/chat] LLM request failed:", err instanceof Error ? err.message : err);
     return {
@@ -466,7 +507,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
       VALUES (
         ${recordId}, ${userId}, null, ${baseTitle.slice(0, 80)}, 'Draft ready', null,
-        ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false, previous_draft: previousDraft })}::jsonb, now()
+        ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false, previous_draft: previousDraft, artifact: renderedDocument })}::jsonb, now()
       )
       ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
