@@ -1779,7 +1779,7 @@ export const durableBoard = {
         const cutoff = new Date(Date.now() - staleHours * 3600_000);
         await sql`
           update ar_missions
-          set claimed_by = null, claimed_at = null, updated_at = ${Date.now()}
+          set claimed_by = null, claimed_at = null, updated_at = ${ts(Date.now())}
           where column_id = 'running'
             and claimed_by is not null
             and (last_heartbeat is null or last_heartbeat < ${cutoff})
