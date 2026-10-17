@@ -43,7 +43,8 @@ export interface WeeklyDigest {
 
 function civilianDollars(usd: number): string {
   if (usd < 0.005) return "under a penny";
-  if (usd < 1) return `about ${usd.toFixed(2).replace(/^0/, "")} dollars`;
+  if (usd < 0.1) return `about ${(usd * 100).toFixed(0)} cents`;
+  if (usd < 1) return `about $${usd.toFixed(2)}`;
   return `about $${usd.toFixed(2)}`;
 }
 
