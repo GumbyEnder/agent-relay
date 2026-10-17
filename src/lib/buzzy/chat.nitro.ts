@@ -535,6 +535,27 @@ export default defineEventHandler(async (event) => {
     return { ok: true, deleted: receipt };
   }
 
+  // ── GET /api/buzzy/notifications — draft-bearing notification payload ─
+  if (method === "GET" && path === "/api/buzzy/notifications") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, title, updated_at FROM buzzy_jobs
+      WHERE user_id = ${user.id} AND data->>'draft' IS NOT NULL
+        AND data->>'approved' IS DISTINCT FROM 'true'
+      ORDER BY updated_at DESC LIMIT 5
+    `;
+    return {
+      ok: true,
+      pendingDrafts: rows.length,
+      newest: rows[0] ? { title: rows[0].title, jobId: rows[0].id } : null,
+    };
+  }
+
   // ── GET /api/buzzy/templates — the owner's template library ─────────
   if (method === "GET" && path === "/api/buzzy/templates") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));

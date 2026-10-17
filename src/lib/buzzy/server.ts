@@ -264,6 +264,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const rawHistory = rows.reverse() as Array<{ role: string; content: string }>;
   const { messages: history, compacted, droppedCount } = compactHistory(rawHistory, 12000, 6);
 
+  // ── Session resume recap (mobile/async: the conversation follows the owner)
+  let resumeRecap = "";
+  if (sessionId) {
+    const lastRows = await sql`
+      SELECT created_at, content FROM buzzy_chat_messages
+      WHERE user_id = ${userId} AND session_id = ${sessionId}
+      ORDER BY created_at DESC LIMIT 1
+    `;
+    const last = lastRows[0];
+    if (last && (Date.now() - new Date(String(last.created_at)).getTime()) > 24 * 3600 * 1000) {
+      resumeRecap = `\n\nWelcome back — picking up where we left off. Last time: ${String(last.content).slice(0, 140)}`;
+    }
+  }
+
   // ── Load current slot values ───────────────────────────────────────
   const slotValues: Record<string, string> = {};
   for (const slotId of SLOT_IDS) {
@@ -337,7 +351,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
       : !wereAllFilled
         ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
-        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`) + planFirst + playbookBlock;
+        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`) + planFirst + playbookBlock + resumeRecap;
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =

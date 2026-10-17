@@ -866,6 +866,14 @@
       margin: 0 0 0.55rem;
     }
     #promiseCheck.hidden { display: none; }
+
+/* ── Mobile/async pass (plan doc 23): one-thumb approval + legibility ── */
+@media (max-width: 640px) {
+  button, [role="button"] { min-height: 48px; min-width: 48px; font-size: 16px; }
+  .bz-digest { font-size: 15px; padding: 10px 12px; }
+}
+.bz-approve-bar { position: sticky; bottom: 0; background: var(--bz-panel, #141414); padding: 10px; display: flex; gap: 8px; }
+.bz-approve-bar button { flex: 1; min-height: 52px; }
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
@@ -3344,6 +3352,46 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       card.style.display = "block";
     })
     .catch(function () { /* never surface an error for the digest */ });
+})();
+</script>
+
+<script>
+/* ── Mobile/async: dictation input + draft notifications ────────────── */
+(function () {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    var input = document.querySelector("#chatInput, textarea, input[type=text]");
+    if (input) {
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.textContent = "\uD83C\uDFA4"; btn.setAttribute("aria-label", "Speak your message");
+      btn.style.marginLeft = "6px";
+      btn.addEventListener("click", function () {
+        try {
+          var rec = new SR();
+          rec.lang = "en-US"; rec.interimResults = false;
+          rec.onresult = function (e) { input.value += (input.value ? " " : "") + e.results[0][0].transcript; };
+          rec.start();
+        } catch (err) { /* never surface dictation errors */ }
+      });
+      input.parentElement && input.parentElement.appendChild(btn);
+    }
+  }
+  if ("Notification" in window && Notification.permission === "default") {
+    var askOnce = sessionStorage.getItem("bzNotifAsked");
+    if (!askOnce) {
+      sessionStorage.setItem("bzNotifAsked", "1");
+      Notification.requestPermission().then(function (perm) {
+        if (perm !== "granted") return;
+        fetch("/api/buzzy/notifications", { credentials: "include" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (d && d.ok && d.pendingDrafts > 0 && d.newest) {
+              new Notification("Buzzy: " + d.pendingDrafts + " draft" + (d.pendingDrafts === 1 ? "" : "s") + " waiting", { body: d.newest.title });
+            }
+          }).catch(function () {});
+      });
+    }
+  }
 })();
 </script>
 </body>
