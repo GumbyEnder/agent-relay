@@ -16,7 +16,7 @@
  * 9. Return structured response.
  */
 
-import { chatCompletion, resolveModel, resolveReasoningModel } from "./llm";
+import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -336,14 +336,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   ];
 
   // ── Call LLM ───────────────────────────────────────────────────────
-  let reply: string;
+  let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   try {
     // Route high-stakes job types (legal, technical) to a reasoning model when
     // the catalog has one; everything else stays on the cheap default.
     const routedModel =
       resolvedModel ??
       ((jobType === "legal" || jobType === "technical") ? resolveReasoningModel() : undefined);
-    reply = await chatCompletion(messages, { model: routedModel });
+    reply = await chatCompletionFull(messages, { model: routedModel });
   } catch (err) {
     console.error("[buzzy/chat] LLM request failed:", err instanceof Error ? err.message : err);
     return {
@@ -356,7 +356,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
 
   // ── Sanitize reply ─────────────────────────────────────────────────
-  const sanitizedReply = sanitizeMemoryText(reply);
+  const sanitizedReply = sanitizeMemoryText(reply.content);
   // User-visible reply has decision markers removed; slots parse the raw
   // sanitized text (markers are how the model reports decisions) — dogfood B1.
   const cleanReply = stripSlotMarkers(sanitizedReply);
@@ -382,10 +382,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     VALUES (${userId}, ${jobId}, ${sessionId}, 'user', ${message})
   `;
 
-  // ── Persist assistant reply ────────────────────────────────────────
+  // ── Persist assistant reply (with per-turn usage — Phase 0 accounting) ─
   await sql`
-    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
-    VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${cleanReply})
+    INSERT INTO buzzy_chat_messages
+      (user_id, job_id, session_id, role, content,
+       prompt_tokens, completion_tokens, total_tokens, latency_ms, model)
+    VALUES
+      (${userId}, ${jobId}, ${sessionId}, 'assistant', ${cleanReply},
+       ${reply.usage?.promptTokens ?? null}, ${reply.usage?.completionTokens ?? null},
+       ${reply.usage?.totalTokens ?? null}, ${reply.latencyMs}, ${reply.model})
   `;
 
   // ── Persist any inline markers the reply emitted (empty-current returns

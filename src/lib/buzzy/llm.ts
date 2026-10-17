@@ -41,22 +41,55 @@ if (!API_KEY) {
 }
 
 /**
- * Call the chat completions endpoint.
- * @param messages — chat messages.
- * @param opts — optional model override, temperature, max tokens.
- * @returns the assistant text from the first choice.
+ * Full chat-completion result: content + tool calls + usage + latency.
+ * Phase 0 of the Tools & Agent Loop plan (plan doc 23): one change, three
+ * unlocks — tools, the bounded model loop, and observability.
  */
-export async function chatCompletion(
+export interface ToolCall {
+  id: string;
+  type: string;
+  name: string;
+  arguments: string;
+}
+
+export interface CompletionUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface FullCompletion {
+  content: string;
+  toolCalls: ToolCall[];
+  usage: CompletionUsage | null;
+  latencyMs: number;
+  model: string;
+  finishReason: string | null;
+}
+
+/**
+ * Call the chat completions endpoint, returning everything the wire offers:
+ * assistant text, tool calls, token usage, and latency.
+ * @param messages — chat messages.
+ * @param opts — optional model override, temperature, max tokens, tool schemas.
+ */
+export async function chatCompletionFull(
   messages: Array<{ role: string; content: string }>,
-  opts?: { model?: string; temperature?: number; maxTokens?: number },
-): Promise<string> {
+  opts?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    tools?: unknown[];
+    toolChoice?: string | object;
+  },
+): Promise<FullCompletion> {
   const model = opts?.model || DEFAULT_MODEL;
   // BASE_URL may or may not end in "/v1" — join paths, never use new URL()
   // (an absolute path would REPLACE the base path and drop "/v1").
   const url = new URL(
     BASE_URL.replace(/\/+$/, "") + "/chat/completions",
   );
-  const body = {
+  const body: Record<string, unknown> = {
     model,
     messages,
     temperature: opts?.temperature ?? 0.7,
@@ -67,6 +100,10 @@ export async function chatCompletion(
     max_tokens: opts?.maxTokens ?? 2048,
     stream: false,
   };
+  if (opts?.tools?.length) {
+    body.tools = opts.tools;
+    if (opts.toolChoice !== undefined) body.tool_choice = opts.toolChoice;
+  }
 
   // One retry on an empty/failed completion — glm occasionally returns an
   // empty first choice; a single immediate retry usually recovers (dogfood #10004).
@@ -76,7 +113,7 @@ export async function chatCompletion(
       body.temperature = Math.min((opts?.temperature ?? 0.7) + 0.2, 1);
     }
     try {
-      return await postCompletion(body);
+      return await postCompletionFull(body);
     } catch (err) {
       lastError = err;
       if (err instanceof Error && /LLM request failed \((4\d\d)\)/.test(err.message)) {
@@ -87,15 +124,11 @@ export async function chatCompletion(
   throw lastError instanceof Error ? lastError : new Error("LLM call failed");
 }
 
-async function postCompletion(body: {
-  model: string;
-  messages: Array<{ role: string; content: string }>;
-  temperature: number;
-  max_tokens: number;
-}): Promise<string> {
+async function postCompletionFull(body: Record<string, unknown>): Promise<FullCompletion> {
   const url = new URL(
     BASE_URL.replace(/\/+$/, "") + "/chat/completions",
   );
+  const started = Date.now();
 
   const res = await fetch(url.toString(), {
     method: "POST",
@@ -112,28 +145,84 @@ async function postCompletion(body: {
   }
 
   const json = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string; reasoning?: string } }>;
+    choices?: Array<{
+      message?: {
+        content?: string;
+        reasoning?: string;
+        tool_calls?: Array<{
+          id?: string;
+          type?: string;
+          function?: { name?: string; arguments?: string };
+        }>;
+      };
+      finish_reason?: string | null;
+    }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    } | null;
+    model?: string;
   };
 
   const msg = json.choices?.[0]?.message;
-  let content = msg?.content?.trim();
+  const content = msg?.content?.trim() ?? "";
+
+  // Tool calls: a tool-call turn legitimately has empty content, so the
+  // guards below only fire when there are ALSO no tool calls.
+  const toolCalls: ToolCall[] = (msg?.tool_calls ?? [])
+    .map((tc) => ({
+      id: tc.id ?? "",
+      type: tc.type ?? "function",
+      name: tc.function?.name ?? "",
+      arguments: tc.function?.arguments ?? "{}",
+    }))
+    .filter((tc) => tc.name !== "");
+
+  const usage = json.usage
+    ? {
+        promptTokens: json.usage.prompt_tokens ?? 0,
+        completionTokens: json.usage.completion_tokens ?? 0,
+        totalTokens: json.usage.total_tokens ?? 0,
+      }
+    : null;
 
   // Thinking models may also return the answer in a `reasoning`-adjacent field
   // ONLY when the provider folds it into content. We never surface chain-of-
   // thought: if content is present, use it as-is; `reasoning` is disregarded
   // entirely (the old fallback leaked raw reasoning — dogfood B1).
-  if (!content && msg?.reasoning?.trim()) {
-    // No answer text this turn — the model spent the budget on thinking.
-    // Throw so chatCompletion retries (and chatLoop can degrade gracefully)
-    // rather than ever returning chain-of-thought as the reply.
-    throw new Error("LLM returned reasoning only (no content)");
-  }
-
-  if (!content) {
+  if (!content && toolCalls.length === 0) {
+    if (msg?.reasoning?.trim()) {
+      // No answer text this turn — the model spent the budget on thinking.
+      // Throw so the retry loop recovers rather than ever returning
+      // chain-of-thought as the reply.
+      throw new Error("LLM returned reasoning only (no content)");
+    }
     throw new Error("LLM returned no content in first choice");
   }
 
-  return content.trim();
+  return {
+    content,
+    toolCalls,
+    usage,
+    latencyMs: Date.now() - started,
+    model: json.model ?? String(body.model ?? ""),
+    finishReason: json.choices?.[0]?.finish_reason ?? null,
+  };
+}
+
+/**
+ * Call the chat completions endpoint.
+ * @param messages — chat messages.
+ * @param opts — optional model override, temperature, max tokens.
+ * @returns the assistant text from the first choice.
+ */
+export async function chatCompletion(
+  messages: Array<{ role: string; content: string }>,
+  opts?: { model?: string; temperature?: number; maxTokens?: number },
+): Promise<string> {
+  const full = await chatCompletionFull(messages, opts);
+  return full.content;
 }
 
 export { getModels };
