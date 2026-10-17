@@ -650,6 +650,35 @@ check("BZ-F021 other account cannot share A's document (QA-05)", r.status === 40
 r = await api(cookieB, "GET", "/api/buzzy/shares");
 check("BZ-F021 other account sees no shares (QA-05)", (r.json?.shares ?? []).length === 0);
 
+// 18. BZ-F018: save accepted structure as a reusable template (QA-14)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: false });
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/save-as-template`, { name: "Premature skeleton" });
+check(
+  "BZ-F018 non-accepted document cannot become a template",
+  r.status === 409 && r.json?.code === "not_accepted",
+  `status ${r.status}`,
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "MANUAL EDIT — hand-tuned final wording." });
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/save-as-template`, { name: "Demand letter skeleton", exclude: ["hand-tuned"] });
+const tplId = r.json?.template?.id;
+check(
+  "BZ-F018 accepted structure saves with private terms blanked",
+  r.status === 201 && typeof tplId === "string" && (r.json?.template?.variables ?? []).includes("detail_1"),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/templates");
+const tpl = (r.json?.templates ?? []).find((t) => t.id === tplId);
+const tplBody = JSON.stringify(tpl?.structure ?? {});
+check(
+  "BZ-F018 template carries structure, never the private wording (QA-14)",
+  tpl && tplBody.length > 10 && !/hand-tuned/i.test(tplBody) && /\{\{detail_1\}\}/.test(tplBody),
+  tplBody.slice(0, 250),
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/save-as-template`, { name: "hostile" });
+check("BZ-F018 other account cannot templatize A's document (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/templates");
+check("BZ-F018 other account sees no templates (QA-05)", !(r.json?.templates ?? []).some((t) => t.id === tplId));
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
 const preRevisionVersion = r.json?.document?.current_version;

@@ -1872,6 +1872,91 @@ export default defineEventHandler(async (event) => {
     return { ok: true, revoked: rows.length > 0 };
   }
 
+  // ── POST /api/buzzy/documents/:id/save-as-template — reuse structure (BZ-F018) ─
+  // From an ACCEPTED document: save its structure (headings + paragraph
+  // shapes) as a reusable template with project/private values replaced by
+  // clear variables (QA-14 — a template never smuggles a prior client's
+  // facts into the next job). `exclude` terms the owner names are stripped
+  // to variables too ("what must not be reused").
+  const docTemplate = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/save-as-template$/);
+  if (method === "POST" && docTemplate) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* defaults */ }
+    const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 120) : "Reusable structure";
+    const exclude = Array.isArray(body.exclude)
+      ? body.exclude.filter((x): x is string => typeof x === "string" && x.trim().length > 1).slice(0, 20)
+      : [];
+    const sql = await getSql();
+    const docs = await sql`
+      SELECT id, job_id, status, accepted_version, current_version FROM buzzy_documents
+      WHERE id = ${docTemplate[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const doc = docs[0];
+    // Templates come from ACCEPTED outputs only — same bar as sharing.
+    if (doc.status !== "accepted" || doc.accepted_version == null) {
+      setResponseStatus(event, 409);
+      return { error: "Only an accepted document can become a template — accept the final version first.", code: "not_accepted" };
+    }
+    const vrows = await sql`
+      SELECT content, brief_revision FROM buzzy_document_versions
+      WHERE doc_id = ${doc.id} AND version = ${doc.accepted_version} LIMIT 1
+    `;
+    if (!vrows.length) {
+      setResponseStatus(event, 404);
+      return { error: "The accepted version is missing.", code: "not_found" };
+    }
+    const brief = typeof vrows[0].brief_revision === "string"
+      ? safeParseJson(vrows[0].brief_revision)
+      : (vrows[0].brief_revision ?? {});
+    let templateBody = String(vrows[0].content ?? "");
+    const variables: string[] = [];
+    // Replace each brief value (project/private specifics) with a variable.
+    for (const [key, value] of Object.entries(brief as Record<string, unknown>)) {
+      if (typeof value === "string" && value.trim().length > 2 && value !== "skipped") {
+        const needle = value.trim();
+        if (templateBody.includes(needle)) {
+          templateBody = templateBody.split(needle).join(`{{${key}}}`);
+          variables.push(key);
+        }
+      }
+    }
+    // Replace owner-named never-reuse terms.
+    exclude.forEach((term, i) => {
+      const t = term.trim();
+      if (templateBody.toLowerCase().includes(t.toLowerCase())) {
+        const re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+        templateBody = templateBody.replace(re, `{{detail_${i + 1}}}`);
+        variables.push(`detail_${i + 1}`);
+      }
+    });
+    const id = "tpl_" + crypto.randomUUID().replace(/-/g, "").slice(0, 10) + Date.now().toString(36);
+    await sql`
+      INSERT INTO buzzy_templates (id, user_id, company_id, name, kind, structure)
+      VALUES (${id}, ${user.id}, NULL, ${name}, 'document',
+              ${JSON.stringify({ sourceDocId: doc.id, sourceVersion: doc.accepted_version, body: templateBody, variables })}::jsonb)
+    `;
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      template: { id, name, variables, sourceVersion: doc.accepted_version },
+      note: variables.length
+        ? "Structure saved with the project-specific parts as blanks — none of this job's private details ride along."
+        : "Structure saved. No project-specific values were found to blank out — check it once before reusing.",
+    };
+  }
+
   // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────
   // a name match NEVER merges entities — duplicates are flagged, not fused.
   if (method === "GET" && path === "/api/buzzy/contacts") {
