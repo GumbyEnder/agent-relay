@@ -2229,6 +2229,152 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── Outbound actions (BZ-F033): preview → one-shot approval → receipt ──
+  // Sending/sharing is its own gate. Approval binds to the EXACT version +
+  // recipient; changing either requires a new action. Delivery reports the
+  // truth — with no channel configured, nothing is sent and the receipt says so.
+  if (method === "POST" && path.startsWith("/api/buzzy/documents/") && path.endsWith("/outbound")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const m = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/outbound$/);
+    if (!m) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const recipient = typeof body.recipient === "string" ? body.recipient.trim().slice(0, 200) : "";
+    if (!recipient || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient)) {
+      setResponseStatus(event, 400);
+      return { error: "Who is this going to? Give me one email address.", code: "bad_recipient" };
+    }
+    const kind = body.kind === "share_link" ? "share_link" : "email";
+    const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
+      ? body.idempotencyKey.trim().slice(0, 80)
+      : `out_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    const sql = await getSql();
+    // Retry idempotent: the same key returns the same action, never a duplicate.
+    const prior = await sql`
+      SELECT id, status, doc_id, version, recipient, receipt FROM buzzy_outbound_actions
+      WHERE user_id = ${user.id} AND idempotency_key = ${idempotencyKey} LIMIT 1
+    `;
+    if (prior.length) {
+      return { ok: true, created: false, action: prior[0] };
+    }
+    const docs = await sql`
+      SELECT id, title, status, current_version, accepted_version FROM buzzy_documents
+      WHERE id = ${m[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const doc = docs[0];
+    if (doc.status !== "accepted" || doc.accepted_version == null) {
+      setResponseStatus(event, 409);
+      return { error: "Only an accepted version can be sent or shared — accept it first.", code: "not_accepted" };
+    }
+    const id = `out_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await sql`
+      INSERT INTO buzzy_outbound_actions (id, user_id, doc_id, version, kind, recipient, status, idempotency_key)
+      VALUES (${id}, ${user.id}, ${doc.id}, ${doc.accepted_version}, ${kind}, ${recipient}, 'pending', ${idempotencyKey})
+    `;
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      created: true,
+      action: { id, docId: doc.id, version: doc.accepted_version, kind, recipient, status: "pending" },
+      preview: {
+        content: `Version ${doc.accepted_version} of "${doc.title ?? "the document"}"`,
+        recipient,
+        consequence: kind === "email" ? "One email leaves your account to this address." : "A read-only link to this exact version is created.",
+        note: "Nothing has been sent. Approving applies to this version and this recipient only — change either and you decide again.",
+      },
+    };
+  }
+
+  const outboundDecide = path.match(/^\/api\/buzzy\/outbound\/(out_[A-Za-z0-9]{8,32})\/(approve|cancel)$/);
+  if (method === "POST" && outboundDecide) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql<{ id: string; doc_id: string; version: number; kind: string; recipient: string; status: string }>`
+      SELECT id, doc_id, version, kind, recipient, status FROM buzzy_outbound_actions
+      WHERE id = ${outboundDecide[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { error: "That action isn't on your account.", code: "not_found" };
+    }
+    const action = rows[0];
+    if (outboundDecide[2] === "cancel") {
+      await sql`UPDATE buzzy_outbound_actions SET status = 'cancelled', decided_at = now(),
+                receipt = ${JSON.stringify({ result: "cancelled by owner", at: new Date().toISOString() })}::jsonb
+                WHERE id = ${action.id} AND user_id = ${user.id}`;
+      return { ok: true, action: { ...action, status: "cancelled" } };
+    }
+    // Approve: re-verify the pinned version is still the accepted one — a
+    // material change since preview invalidates this approval (QA-16/QA-20).
+    const docs = await sql<{ title: string | null; status: string; accepted_version: number | null }>`
+      SELECT title, status, accepted_version FROM buzzy_documents
+      WHERE id = ${action.doc_id} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length || docs[0].status !== "accepted" || docs[0].accepted_version !== action.version) {
+      await sql`UPDATE buzzy_outbound_actions SET status = 'cancelled', decided_at = now(),
+                receipt = ${JSON.stringify({ result: "invalidated: the accepted version changed since preview", at: new Date().toISOString() })}::jsonb
+                WHERE id = ${action.id} AND user_id = ${user.id}`;
+      setResponseStatus(event, 409);
+      return {
+        error: "What you previewed is no longer the accepted version — review the latest and approve again.",
+        code: "stale_action",
+      };
+    }
+    // Delivery: no outbound mail channel is configured for this deployment.
+    // Say so explicitly — a receipt that claims sending would be a lie.
+    const receipt = {
+      result: "not_sent",
+      reason: "no delivery channel configured for this deployment",
+      target: action.recipient,
+      version: action.version,
+      at: new Date().toISOString(),
+    };
+    await sql`
+      UPDATE buzzy_outbound_actions SET status = 'blocked', decided_at = now(),
+        receipt = ${JSON.stringify(receipt)}::jsonb
+      WHERE id = ${action.id} AND user_id = ${user.id}
+    `;
+    return {
+      ok: true,
+      action: { ...action, status: "blocked" },
+      receipt,
+      note: "Approved — but nothing was sent: this deployment has no mail delivery channel. Wire one before promising delivery.",
+    };
+  }
+
+  if (method === "GET" && path === "/api/buzzy/outbound") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, doc_id, version, kind, recipient, status, receipt, created_at, decided_at
+      FROM buzzy_outbound_actions WHERE user_id = ${user.id}
+      ORDER BY created_at DESC LIMIT 100
+    `;
+    return { actions: rows };
+  }
+
   // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────
   // a name match NEVER merges entities — duplicates are flagged, not fused.
   if (method === "GET" && path === "/api/buzzy/contacts") {

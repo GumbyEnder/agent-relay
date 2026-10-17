@@ -1019,6 +1019,55 @@ check(
 r = await api(cookieB, "GET", "/api/buzzy/connections");
 check("BZ-F032 other account sees no connections (QA-05)", (r.json?.connections ?? []).length === 0);
 
+// 29. BZ-F033: outbound actions — preview, one-shot approval, truthful receipt
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const curVersion = r.json?.document?.current_version;
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=${curVersion}`);
+const curText = r.json?.document?.content;
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: curText });
+check("BZ-F033 document accepted for outbound test", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "dana@example.test", idempotencyKey: `out_${run}_1` });
+const outboundId = r.json?.action?.id;
+check(
+  "BZ-F033 preview pins exact version + recipient and sends nothing",
+  r.status === 201 && r.json?.action?.status === "pending" &&
+    r.json?.preview?.recipient === "dana@example.test" && /Nothing has been sent/i.test(r.json?.preview?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "dana@example.test", idempotencyKey: `out_${run}_1` });
+check(
+  "BZ-F033 retry with the same key is idempotent (no duplicate action)",
+  r.status === 200 && r.json?.created === false && r.json?.action?.id === outboundId,
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/outbound/${outboundId}/approve`, {});
+check(
+  "BZ-F033 approval yields a TRUTHFUL receipt (nothing sent, no channel)",
+  r.status === 200 && r.json?.action?.status === "blocked" &&
+    r.json?.receipt?.result === "not_sent" && /no delivery channel/i.test(r.json?.receipt?.reason ?? ""),
+  JSON.stringify(r.json).slice(0, 300),
+);
+// The old action is invalidated by a material change (QA-16/20)
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "dana@example.test", idempotencyKey: `out_${run}_2` });
+const staleAction = r.json?.action?.id;
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/edit`, { content: curText + "\n\nP.S. One more line, hand-added." });
+check("BZ-F033 material change applied", r.status === 200 && r.json?.changed === true, JSON.stringify(r.json).slice(0, 150));
+r = await api(cookieA, "POST", `/api/buzzy/outbound/${staleAction}/approve`, {});
+check(
+  "BZ-F033 material change invalidates the pending approval (409 stale_action)",
+  r.status === 409 && r.json?.code === "stale_action",
+  `status ${r.status}`,
+);
+r = await api(cookieA, "GET", "/api/buzzy/outbound");
+check(
+  "BZ-F033 outbound ledger records every action + receipt",
+  (r.json?.actions ?? []).some((a) => a.id === outboundId && a.status === "blocked") &&
+    (r.json?.actions ?? []).some((a) => a.id === staleAction && a.status === "cancelled"),
+  JSON.stringify(r.json?.actions).slice(0, 300),
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "evil@example.test" });
+check("BZ-F033 other account cannot queue outbound (QA-05)", r.status === 404, `got ${r.status}`);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
