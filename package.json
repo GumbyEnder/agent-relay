@@ -52,6 +52,14 @@
     "tui:build": "npm --prefix apps/tui run build",
     "test:openapi-sync": "node scripts/test-openapi-sync.mjs"
   },
+  "overrides": {
+    "pptxgenjs": {
+      "image-size": "^2.0.3"
+    },
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
     "@hookform/resolvers": "^5.0.0",
@@ -79,10 +87,10 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/vite": "^4.1.0",
     "@tanstack/react-query": "^5.90.0",
-    "@tanstack/react-router": "^1.160.0",
-    "@tanstack/react-start": "^1.160.0",
+    "@tanstack/react-router": "^1.170.45",
+    "@tanstack/react-start": "^1.169.3",
     "@tanstack/react-table": "^8.21.0",
-    "@tanstack/router-plugin": "^1.160.0",
+    "@tanstack/router-plugin": "^1.168.47",
     "better-auth": "^1.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -92,7 +100,7 @@
     "exceljs": "+4.4.0",
     "kysely": "^0.28.5",
     "lucide-react": "^0.510.0",
-    "nodemailer": "^6.10.0",
+    "nodemailer": "^10.1.2",
     "pg": "^8.16.3",
     "pptxgenjs": "+4.0.1",
     "react": "^19.1.0",
