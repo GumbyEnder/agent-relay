@@ -150,8 +150,16 @@
       max-width: 1120px;
       margin: 0 auto;
     }
+    /* Editing a brief item needs room to write — widen the brief column
+       while an editor is open, and put it back on save/cancel. */
+    .chat-layout.brief-editing {
+      grid-template-columns: minmax(0, 720px) 440px;
+    }
     @media (max-width: 900px) {
       .chat-layout {
+        grid-template-columns: 1fr;
+      }
+      .chat-layout.brief-editing {
         grid-template-columns: 1fr;
       }
     }
@@ -2162,6 +2170,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
       });
       renderMoneyCheck();
+      // If the re-render removed the open editor, collapse the wide column.
+      if (!container.querySelector(".slot-edit-input")) setBriefEditWidth(false);
     }
 
     function skipSlot(slotId) {
@@ -2178,6 +2188,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const container = document.getElementById("slotItems");
       const item = container.querySelector('[data-slot="' + slotId + '"]');
       if (!item) return;
+      setBriefEditWidth(true);
       const currentValue = chatState.slots[slotId] || "";
       const label = SLOT_LABELS[slotId];
       const escapedLabel = label.replace(/</g, "&lt;");
@@ -2204,19 +2215,30 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveSlotEdit(slotId, input.value.trim());
       });
       item.querySelector(".slot-edit-cancel").addEventListener("click", function () {
-        renderSlotChecklist();
+        cancelSlotEdit();
       });
       input.addEventListener("keydown", function (e) {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           saveSlotEdit(slotId, input.value.trim());
         } else if (e.key === "Escape") {
-          renderSlotChecklist();
+          cancelSlotEdit();
         }
       });
     }
 
+    function setBriefEditWidth(on) {
+      var layout = document.querySelector(".chat-layout");
+      if (layout) layout.classList.toggle("brief-editing", !!on);
+    }
+
+    function cancelSlotEdit() {
+      setBriefEditWidth(false);
+      renderSlotChecklist();
+    }
+
     function saveSlotEdit(slotId, newValue) {
+      setBriefEditWidth(false);
       if (!newValue) {
         renderSlotChecklist();
         return;
