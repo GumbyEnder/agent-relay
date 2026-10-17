@@ -690,7 +690,41 @@ check(
   JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version, cv: r.json?.document?.current_version, expected: preRevisionVersion + 1 }),
 );
 
-// 19. BZ-F026: Today view — real state only
+// 19. BZ-F036: plain-language + accessible surface
+r = await api(cookieA, "GET", "/api/buzzy/models");
+const modelLabels = JSON.stringify(r.json?.models ?? []);
+check(
+  "BZ-F036 model catalog exposes friendly labels only — no raw provider ids",
+  r.status === 200 && (r.json?.models ?? []).length > 0 && !/glm|kimi|qwen|deepseek|claude|gpt|openrouter|nous/i.test(modelLabels),
+  modelLabels.slice(0, 200),
+);
+// The chat reply (stub) passes the jargon guard: no platform vocabulary
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_plain`, message: "hello", attemptId: `att_${run}_plain` });
+check(
+  "BZ-F036 chat replies carry no platform vocabulary",
+  r.status === 200 && !/\b(mission|claim|token|dev boards|gpt|claude)\b/i.test(r.json?.reply ?? ""),
+  r.json?.reply,
+);
+// Static page accessibility surface
+const talkPage = await (await fetch(`${BASE}/buzzy/talk`)).text();
+check(
+  "BZ-F036 talk page: viewport, labeled input, focus styles, alt text",
+  /viewport/.test(talkPage) && /aria-label="Describe the job/.test(talkPage) && /:focus/.test(talkPage) && /alt=/.test(talkPage),
+);
+const expertsPage = await (await fetch(`${BASE}/buzzy/experts`)).text();
+check(
+  "BZ-F036 experts page: keyboard-navigable cards + disclaimers in plain language",
+  /tabindex="0"/.test(expertsPage) && /not a licensed professional/i.test(expertsPage),
+);
+// user-facing error strings are plain and actionable (sample of live copy)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { dueDate: "gibberish" });
+check(
+  "BZ-F036 error copy is plain-language with a next action",
+  r.status === 400 && /use a date like/i.test(r.json?.error ?? "") && !/\b(NaN|ISO 8601|string)\b/i.test(r.json?.error ?? ""),
+  r.json?.error,
+);
+
+// 20. BZ-F026: Today view — real state only
 r = await api(cookieA, "POST", "/api/buzzy/jobs", { id: `job_${run}_today`, title: "Undecided draft job", data: { draft: "half-done thing", approved: false } });
 r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_today`, { dueDate: "2020-01-01T00:00:00-05:00" });
 check("BZ-F026 due date stored", r.status === 200, `status ${r.status}`);
