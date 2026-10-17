@@ -220,6 +220,39 @@ export default defineEventHandler(async (event) => {
   const fullPath = event.path ?? "";
   const path = fullPath.split("?")[0];
 
+  // ── GET /api/buzzy/shared/:token — PUBLIC controlled-share read (BZ-F021) ─
+  // The ONLY unauthenticated buzzy route. Serves exactly one pinned version
+  // of one document while the link is unexpired and unrevoked. Completion
+  // never makes anything public — a human created this link explicitly.
+  const sharedMatch = path.match(/^\/api\/buzzy\/shared\/(sh_[A-Za-z0-9]{20,40})$/);
+  if (method === "GET" && sharedMatch) {
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT s.id, s.doc_id, s.version, s.expires_at, s.revoked_at,
+             d.title, (SELECT content FROM buzzy_document_versions v
+                        WHERE v.doc_id = s.doc_id AND v.version = s.version) AS content
+      FROM buzzy_share_links s
+      JOIN buzzy_documents d ON d.id = s.doc_id
+      WHERE s.token = ${sharedMatch[1]}
+      LIMIT 1
+    `;
+    const link = rows[0];
+    if (!link || link.revoked_at || new Date(String(link.expires_at)).getTime() < Date.now()) {
+      setResponseStatus(event, 410);
+      return { error: "That link has expired or been turned off. Ask the owner for a fresh one.", code: "link_gone" };
+    }
+    if (link.content == null) {
+      setResponseStatus(event, 410);
+      return { error: "That document version is no longer available.", code: "link_gone" };
+    }
+    return {
+      title: link.title,
+      version: link.version,
+      content: link.content,
+      note: "Shared by the owner as a read-only link. It expires and can be turned off at any time.",
+    };
+  }
+
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──
   if (method === "GET" && path === "/api/buzzy/models") {
     const models = getModels().map((m) => ({ label: m.label, key: m.label }));
@@ -1695,6 +1728,148 @@ export default defineEventHandler(async (event) => {
       return { error: "One of those versions does not exist.", code: "not_found" };
     }
     return { diff: summarizeChanges(String(va.content), String(vb.content), from, to) };
+  }
+
+  // ── GET /api/buzzy/documents/:id/pack — "Take the work" bundle (BZ-F021) ─
+  // The accepted document + brief/decision summary + provenance + open
+  // caveats, assembled owner-side. Sending it externally is a DIFFERENT,
+  // separately approved action — this route only packs, never sends.
+  const docPack = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/pack$/);
+  if (method === "GET" && docPack) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const docs = await sql`
+      SELECT id, job_id, title, status, current_version, accepted_version, created_at, updated_at
+      FROM buzzy_documents WHERE id = ${docPack[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const doc = docs[0];
+    const version = doc.accepted_version ?? doc.current_version;
+    const vrows = await sql`
+      SELECT version, content, brief_revision, review, accepted_at, accepted_by
+      FROM buzzy_document_versions WHERE doc_id = ${doc.id} AND version = ${version} LIMIT 1
+    `;
+    const v = vrows[0];
+    if (!v) {
+      setResponseStatus(event, 404);
+      return { error: "No readable version on this document.", code: "not_found" };
+    }
+    const brief = typeof v.brief_revision === "string" ? safeParseJson(v.brief_revision) : (v.brief_revision ?? {});
+    const review = Array.isArray(v.review) ? v.review : (typeof v.review === "string" ? (() => { try { return JSON.parse(v.review); } catch { return []; } })() : []);
+    return {
+      pack: {
+        title: doc.title,
+        status: doc.status,
+        version,
+        accepted: doc.status === "accepted" && doc.accepted_version === version,
+        content: v.content,
+        brief,
+        evidence: {
+          acceptedAt: v.accepted_at ?? null,
+          reviewChecks: (review as Array<{ label?: string; verdict?: string }>).map((c) => ({ label: c.label ?? "", verdict: c.verdict ?? "" })),
+        },
+        caveats: doc.status === "accepted"
+          ? []
+          : ["This version is not accepted yet — it is a working draft, not a final document."],
+        note: "Packed for you to take. Emailing or sending it to anyone is a separate step you'll be asked about first.",
+      },
+    };
+  }
+
+  // ── POST /api/buzzy/documents/:id/share — explicit, pinned, expiring ──────
+  const docShare = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/share$/);
+  if (method === "POST" && docShare) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* defaults */ }
+    const ttlHours = Math.min(Math.max(Number(body.ttlHours) || 72, 1), 24 * 30);
+    const sql = await getSql();
+    const docs = await sql`
+      SELECT id, status, current_version, accepted_version FROM buzzy_documents
+      WHERE id = ${docShare[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const doc = docs[0];
+    const version = typeof body.version === "number" ? body.version : (doc.accepted_version ?? doc.current_version);
+    // Scoped to REVIEWED versions: you can only share the exact accepted
+    // version — never a working draft (QA-16 exact approved version).
+    if (doc.status !== "accepted" || version !== doc.accepted_version) {
+      setResponseStatus(event, 409);
+      return {
+        error: "Only the accepted version can be shared. Review and accept it first — sharing a draft is exactly what this gate prevents.",
+        code: "not_accepted_version",
+        acceptedVersion: doc.accepted_version,
+      };
+    }
+    // Retry idempotent (QA-16): an active link for the same doc+version is
+    // returned, never duplicated.
+    const active = await sql`
+      SELECT id, token, expires_at FROM buzzy_share_links
+      WHERE user_id = ${user.id} AND doc_id = ${doc.id} AND version = ${version}
+        AND revoked_at IS NULL AND expires_at > now()
+      ORDER BY created_at DESC LIMIT 1
+    `;
+    if (active.length) {
+      return { ok: true, created: false, share: { id: active[0].id, token: active[0].token, expiresAt: active[0].expires_at, url: `/api/buzzy/shared/${active[0].token}` } };
+    }
+    const token = "sh_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+    const id = "shl_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    await sql`
+      INSERT INTO buzzy_share_links (id, user_id, doc_id, version, token, expires_at)
+      VALUES (${id}, ${user.id}, ${doc.id}, ${version}, ${token}, now() + (${ttlHours}::text || ' hours')::interval)
+    `;
+    setResponseStatus(event, 201);
+    return { ok: true, created: true, share: { id, token, expiresAt: null, url: `/api/buzzy/shared/${token}` } };
+  }
+
+  // ── GET /api/buzzy/shares — the recorded links on this account ──────────
+  if (method === "GET" && path === "/api/buzzy/shares") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT s.id, s.doc_id, s.version, s.expires_at, s.revoked_at, s.created_at, d.title
+      FROM buzzy_share_links s JOIN buzzy_documents d ON d.id = s.doc_id
+      WHERE s.user_id = ${user.id}
+      ORDER BY s.created_at DESC LIMIT 100
+    `;
+    return { shares: rows };
+  }
+
+  // ── DELETE /api/buzzy/shares/:id — revoke (turn the link off) ──────────
+  if (method === "DELETE" && path.startsWith("/api/buzzy/shares/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      UPDATE buzzy_share_links SET revoked_at = now()
+      WHERE id = ${path.slice("/api/buzzy/shares/".length)} AND user_id = ${user.id} AND revoked_at IS NULL
+      RETURNING id
+    `;
+    return { ok: true, revoked: rows.length > 0 };
   }
 
   // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────

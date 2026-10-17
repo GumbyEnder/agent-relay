@@ -593,6 +593,63 @@ check("BZ-F016 other account cannot edit (QA-05)", r.status === 404, `got ${r.st
 r = await api(cookieB, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=2`);
 check("BZ-F016 other account cannot diff (QA-05)", r.status === 404, `got ${r.status}`);
 
+// 17. BZ-F021: delivery pack + controlled sharing
+// Re-accept the manual-edit version first (sharing requires the accepted version)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "MANUAL EDIT — hand-tuned final wording." });
+check("BZ-F021 manual version re-accepted", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/pack`);
+check(
+  "BZ-F021 pack carries accepted content + brief + evidence, no caveats",
+  r.status === 200 && r.json?.pack?.accepted === true &&
+    r.json?.pack?.content === "MANUAL EDIT — hand-tuned final wording." &&
+    (r.json?.pack?.caveats ?? []).length === 0 && r.json?.pack?.evidence,
+  JSON.stringify(r.json?.pack).slice(0, 300),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/share`, { version: 1 });
+check(
+  "BZ-F021 sharing a non-accepted version is refused (QA-16)",
+  r.status === 409 && r.json?.code === "not_accepted_version",
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/share`, { ttlHours: 24 });
+const shareToken = r.json?.share?.token;
+const shareId = r.json?.share?.id;
+check(
+  "BZ-F021 accepted version shares with an unguessable token",
+  r.status === 201 && typeof shareToken === "string" && shareToken.length > 30,
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/share`, { ttlHours: 24 });
+check(
+  "BZ-F021 repeat share is idempotent (same link, no duplicate)",
+  r.status === 200 && r.json?.created === false && r.json?.share?.token === shareToken,
+  JSON.stringify(r.json?.share),
+);
+let pub = await fetch(`${BASE}/api/buzzy/shared/${shareToken}`);
+const pubJson = await pub.json();
+check(
+  "BZ-F021 public link serves exactly the pinned version, no auth",
+  pub.status === 200 && pubJson?.version === 3 && pubJson?.content === "MANUAL EDIT — hand-tuned final wording.",
+  `status ${pub.status} ${JSON.stringify(pubJson).slice(0, 200)}`,
+);
+r = await api(cookieA, "GET", "/api/buzzy/shares");
+check(
+  "BZ-F021 share is recorded on the account",
+  (r.json?.shares ?? []).some((s) => s.id === shareId),
+);
+r = await api(cookieA, "DELETE", `/api/buzzy/shares/${shareId}`);
+check("BZ-F021 owner revokes the link", r.status === 200 && r.json?.revoked === true);
+pub = await fetch(`${BASE}/api/buzzy/shared/${shareToken}`);
+check(
+  "BZ-F021 revoked link is dead (410), document never silently public",
+  pub.status === 410,
+  `got ${pub.status}`,
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/share`, {});
+check("BZ-F021 other account cannot share A's document (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/shares");
+check("BZ-F021 other account sees no shares (QA-05)", (r.json?.shares ?? []).length === 0);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
 const preRevisionVersion = r.json?.document?.current_version;
