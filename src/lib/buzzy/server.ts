@@ -17,7 +17,16 @@
  */
 
 import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
-import { renderDocument, RENDER_DOCUMENT_TOOL, parseToolArguments } from "./artifact";
+import {
+  renderDocument,
+  renderPresentation,
+  renderSheet,
+  RENDER_DOCUMENT_TOOL,
+  RENDER_PRESENTATION_TOOL,
+  RENDER_SHEET_TOOL,
+  parseToolArguments,
+  reviewDraft,
+} from "./artifact";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -168,6 +177,7 @@ export interface ChatResponse {
   warning?: string;
   jobId?: string;
   previousDraft?: string;
+  review?: Array<{ label: string; verdict: "verified" | "stated" | "warning"; detail?: string }>;
   error?: string;
   code?: string;
 }
@@ -342,7 +352,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Read-only tool execution only — render-to-memory is autonomous per the
   // side-effect classification; the artifact itself stays approval-gated.
   const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft;
-  const loopTools = draftGateOpen ? [RENDER_DOCUMENT_TOOL] : undefined;
+  const loopTools = draftGateOpen ? [RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL] : undefined;
   // glm-class models treat an optional tool as optional and answer in prose.
   // When the owner EXPLICITLY asks for the file, force the tool call (plan doc
   // 23, open decision #3: native tool_calls with a fallback path).
@@ -367,25 +377,28 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       const followUpMessages: Array<{ role: string; content: string }> = [...messages];
       followUpMessages.push({ role: "assistant", content: reply.content || "" });
       for (const tc of reply.toolCalls) {
-        if (tc.name !== "render_document") {
+        if (!["render_document", "render_presentation", "render_sheet"].includes(tc.name)) {
           followUpMessages.push({ role: "user", content: `Tool ${tc.name} is not available.` });
           continue;
         }
         try {
           const content = parseToolArguments(tc.arguments);
-          const result = await renderDocument(content);
+          const result =
+            tc.name === "render_document" ? await renderDocument(content)
+            : tc.name === "render_presentation" ? await renderPresentation(content)
+            : await renderSheet(content);
           if (result.ok && result.bytes && result.filename) {
             renderedDocument = {
               filename: result.filename,
               bytesB64: Buffer.from(result.bytes).toString("base64"),
-              contentType: result.contentType ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              contentType: result.contentType ?? "application/octet-stream",
             };
-            followUpMessages.push({ role: "user", content: `render_document succeeded: ${result.filename} (${result.bytes.length} bytes). The file is ready and waiting for the owner's approval. Reply to the owner now — do not call the tool again.` });
+            followUpMessages.push({ role: "user", content: `${tc.name} succeeded: ${result.filename} (${result.bytes.length} bytes). The file is ready and waiting for the owner's approval. Reply to the owner now — do not call a tool again.` });
           } else {
-            followUpMessages.push({ role: "user", content: `render_document failed: ${result.error ?? "unknown error"}. Fix the content and try once more, or reply without the tool.` });
+            followUpMessages.push({ role: "user", content: `${tc.name} failed: ${result.error ?? "unknown error"}. Fix the content and try once more, or reply without the tool.` });
           }
         } catch (perr) {
-          followUpMessages.push({ role: "user", content: `render_document arguments could not be read: ${perr instanceof Error ? perr.message : String(perr)}. Reply without the tool.` });
+          followUpMessages.push({ role: "user", content: `${tc.name} arguments could not be read: ${perr instanceof Error ? perr.message : String(perr)}. Reply without the tool.` });
         }
       }
       reply = await chatCompletionFull(followUpMessages, { model: routedModel, maxTokens: loopTools ? 4096 : undefined });
@@ -493,6 +506,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (wereAllFilled || requestedDraft || hasExistingDraft) {
     response.draft = true;
     response.done = true;
+    // Multi-step review (component #8): deterministic approval-time checks,
+    // rendered by the client as the "I checked" lines.
+    const ownerReviewText = [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" ");
+    response.review = reviewDraft(cleanReply, ownerReviewText);
     // Self-check: a draft must not invent a dollar amount the owner never gave.
     const ownerText = [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" ");
     if (mentionsInventedAmount(cleanReply, ownerText)) {
