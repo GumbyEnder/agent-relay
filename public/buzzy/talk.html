@@ -867,6 +867,22 @@
     }
     #promiseCheck.hidden { display: none; }
 
+    /* ── Activity digest — centered on the chat column, never full-bleed left ──
+       #digestCard is a direct child of <main>, so it must carry its own
+       max-width + auto margins or its text pins to the viewport edge. */
+    .bz-digest {
+      max-width: 760px;
+      margin: 0 auto 0.9rem;
+      padding: 10px 14px;
+      background: var(--bz-panel);
+      border: 1px solid var(--bz-col);
+      border-left: 3px solid var(--bz-yellow);
+      border-radius: 6px;
+      color: var(--bz-silver);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
 /* ── Mobile/async pass (plan doc 23): one-thumb approval + legibility ── */
 @media (max-width: 640px) {
   button, [role="button"] { min-height: 48px; min-width: 48px; font-size: 16px; }
@@ -3389,7 +3405,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   </script>
 
 <script>
-/* ── Your week with Buzzy — activity digest (plan doc 23 #7) ──────────
+/* ── Your week with BeeZilla — activity digest (plan doc 23 #7) ────────
    Skippable by design: any failure or an empty week renders nothing. */
 (function () {
   var card = document.getElementById("digestCard");
@@ -3409,7 +3425,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var money = "under a penny";
       if (d.dollarsEstimate >= 0.005) money = "about $" + d.dollarsEstimate.toFixed(2);
       bits.push(money + " this week");
-      card.textContent = "Your week with Buzzy: " + bits.join(", ") + ".";
+      card.textContent = "Your week with BeeZilla: " + bits.join(", ") + ".";
       card.style.display = "block";
     })
     .catch(function () { /* never surface an error for the digest */ });
@@ -3447,7 +3463,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (d) {
             if (d && d.ok && d.pendingDrafts > 0 && d.newest) {
-              new Notification("Buzzy: " + d.pendingDrafts + " draft" + (d.pendingDrafts === 1 ? "" : "s") + " waiting", { body: d.newest.title });
+              new Notification("BeeZilla: " + d.pendingDrafts + " draft" + (d.pendingDrafts === 1 ? "" : "s") + " waiting", { body: d.newest.title });
             }
           }).catch(function () {});
       });
