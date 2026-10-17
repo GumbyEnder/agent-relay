@@ -316,8 +316,54 @@ check(
   JSON.stringify(r.json).slice(0, 200),
 );
 
+// 9. BZ-F024: attempt reconciliation + pause/cancel gates
+const recJob = `job_${run}_rec`;
+const attId = `att_${run}_1`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "I need a demand letter — write it up", attemptId: attId });
+check("BZ-F024 first attempt runs", r.status === 200 && r.json?.ok === true, JSON.stringify(r.json).slice(0, 150));
+const firstReply = r.json?.reply;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "I need a demand letter — write it up", attemptId: attId });
+check(
+  "BZ-F024 same attemptId reconciles to the stored reply (no duplicate call)",
+  r.status === 200 && r.json?.reconciled === true && r.json?.reply === firstReply,
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F024 retried attempt stored no duplicate messages",
+  (r.json?.messages ?? []).length === 2,
+  `messages=${(r.json?.messages ?? []).length}`,
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "make it more formal", attemptId: `att_${run}_2` });
+check("BZ-F024 a new attempt id runs normally", r.status === 200 && r.json?.ok === true && !r.json?.reconciled);
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Paused" });
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "hello?", attemptId: `att_${run}_3` });
+check(
+  "BZ-F024 paused job refuses new turns, consequences explained (QA-15)",
+  r.status === 409 && r.json?.code === "job_paused" && /paused/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Cancelled" });
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "hello?", attemptId: `att_${run}_4` });
+check(
+  "BZ-F024 cancelled job refuses new turns, consequences explained (QA-15)",
+  r.status === 409 && r.json?.code === "job_cancelled" && /cancelled/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Draft ready" });
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "back to work", attemptId: `att_${run}_5` });
+check("BZ-F024 resumed job accepts turns again", r.status === 200 && r.json?.ok === true, `status ${r.status}`);
+// A cancelled job made no further model calls: transcript holds only the turns before the gates
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F024 gated turns never reached the transcript",
+  (r.json?.messages ?? []).filter((m) => m.role === "user").length === 3,
+  `user messages=${(r.json?.messages ?? []).filter((m) => m.role === "user").length}`,
+);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
-r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
+ r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
 check(
   "BZ-F017 revision after acceptance re-opens review, clears accepted_version (QA-20)",

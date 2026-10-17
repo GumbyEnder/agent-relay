@@ -175,6 +175,9 @@ export interface ChatRequest {
   sessionId: string | null;
   message: string;
   model?: string;
+  /** BZ-F024: idempotency key for this send — a retry with the same key
+   *  reconciles to the stored reply instead of re-calling the model. */
+  attemptId?: string | null;
   /** Context from the Jobs-card "Chat" button — project the agent is working. */
   jobContext?: Record<string, unknown>;
   /** Active company tab. Confirmed facts only — proposed lines are not facts. */
@@ -498,11 +501,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   await sql`
     INSERT INTO buzzy_chat_messages
       (user_id, job_id, session_id, role, content,
-       prompt_tokens, completion_tokens, total_tokens, latency_ms, model)
+       prompt_tokens, completion_tokens, total_tokens, latency_ms, model, attempt_id)
     VALUES
       (${userId}, ${jobId}, ${sessionId}, 'assistant', ${cleanReply},
        ${reply.usage?.promptTokens ?? null}, ${reply.usage?.completionTokens ?? null},
-       ${reply.usage?.totalTokens ?? null}, ${reply.latencyMs}, ${reply.model})
+       ${reply.usage?.totalTokens ?? null}, ${reply.latencyMs}, ${reply.model},
+       ${req.attemptId ?? null})
   `;
 
   // ── Persist any inline markers the reply emitted (empty-current returns

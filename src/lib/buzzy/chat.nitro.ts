@@ -312,9 +312,68 @@ export default defineEventHandler(async (event) => {
     const sessionId: string | null = typeof body.sessionId === "string" ? body.sessionId : null;
     const message: string = typeof body.message === "string" ? body.message : "";
     const model: string | undefined = typeof body.model === "string" ? body.model : undefined;
+    const attemptId: string | null = typeof body.attemptId === "string" && body.attemptId.trim()
+      ? body.attemptId.trim().slice(0, 80)
+      : null;
     const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
 
     const sql = await getSql();
+
+    // ── BZ-F024: pause/cancel stops future work (QA-15) ───────────────
+    // A cancelled or paused job takes no new turns — no further model calls
+    // happen against it until the owner deliberately resumes. Plain-language
+    // consequences, never a silent no-op.
+    if (jobId) {
+      const st = await sql<{ status: string | null }>`
+        SELECT status FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId} LIMIT 1
+      `;
+      const status = st[0]?.status ?? null;
+      if (status === "Cancelled") {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          error: "This job is cancelled — nothing more will run on it. Start a new job if you want to pick the idea up again.",
+          code: "job_cancelled",
+        };
+      }
+      if (status === "Paused") {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          error: "This job is paused — no work (and no spend) is happening. Resume it when you're ready and we'll pick up where we stopped.",
+          code: "job_paused",
+        };
+      }
+    }
+
+    // ── BZ-F024: attempt reconciliation (QA-09/10) ─────────────────────
+    // A retried send with the same attemptId returns the STORED reply —
+    // the model is not called twice, so no duplicate charge or artifact.
+    if (attemptId) {
+      const prior = await sql<{ content: string }>`
+        SELECT content FROM buzzy_chat_messages
+        WHERE user_id = ${userId}
+          AND COALESCE(job_id, '') = COALESCE(${jobId}, '')
+          AND COALESCE(session_id, '') = COALESCE(${sessionId}, '')
+          AND attempt_id = ${attemptId}
+          AND role = 'assistant'
+        ORDER BY created_at ASC LIMIT 1
+      `;
+      if (prior.length) {
+        // Return the current brief so a retry after a reload still fills the box.
+        const slotRows = await sql<{ key: string; value: string }>`
+          SELECT key, value FROM buzzy_user_memory
+          WHERE user_id = ${userId} AND job_id IS NOT DISTINCT FROM ${jobId || sessionId}
+        `;
+        const known = new Set([...STATEMENT_IDS, ...DEEPENING_IDS]);
+        const slots: Record<string, string> = {};
+        for (const r of slotRows) {
+          if (known.has(r.key) && r.value?.trim()) slots[r.key] = r.value;
+        }
+        return { ok: true, reply: prior[0].content, reconciled: true, slots };
+      }
+    }
+
     let companyId: string | null = null;
     if (typeof body.companyId === "string" && isCompanyId(body.companyId)) {
       companyId = body.companyId;
@@ -349,6 +408,7 @@ export default defineEventHandler(async (event) => {
       sessionId,
       message,
       model,
+      attemptId,
       jobContext,
       companyName: company?.name ?? null,
       companyFacts: company?.facts ?? [],

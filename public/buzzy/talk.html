@@ -2934,25 +2934,40 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("chatSend").disabled = true;
 
       try {
+        // BZ-F024: one attempt id per send. On a timeout/connection failure we
+        // retry ONCE with the SAME id — the server reconciles to the stored
+        // reply instead of running (and charging for) the turn twice (QA-09/10).
+        const attemptId =
+          "att_" + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : String(Date.now()));
+        const sendBody = {
+          jobId: chatState.jobId,
+          sessionId: chatState.sessionId || undefined,
+          companyId: activeCompanyId(),
+          message: text,
+          model: selectedModel(),
+          jobContext: chatState.jobContext || undefined,
+          attemptId: attemptId,
+        };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
-        const resp = await fetch(CHAT_BASE, {
-          method: "POST",
-          credentials: "same-origin",
-          signal: AbortSignal.timeout(60000),
-          headers: {
-            "Content-Type": "application/json",
-            ...getAuthHeaders(),
-          },
-          body: JSON.stringify({
-            jobId: chatState.jobId,
-            sessionId: chatState.sessionId || undefined,
-            companyId: activeCompanyId(),
-            message: text,
-            model: selectedModel(),
-            jobContext: chatState.jobContext || undefined,
-          }),
-        });
+        const postOnce = function () {
+          return fetch(CHAT_BASE, {
+            method: "POST",
+            credentials: "same-origin",
+            signal: AbortSignal.timeout(60000),
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(sendBody),
+          });
+        };
+        let resp;
+        try {
+          resp = await postOnce();
+        } catch (firstErr) {
+          resp = await postOnce(); // bounded: exactly one retry, same attemptId
+        }
 
         const data = await resp.json();
 
