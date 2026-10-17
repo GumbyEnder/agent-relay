@@ -1295,6 +1295,86 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── GET /api/buzzy/search — work search across ALL of the user's companies
+  // Matches job titles, captured problem text, and chat message content, so a
+  // user can find work by what was said in it, not just its title. Archived
+  // jobs stay out. Results carry the company name for the cross-company view.
+  if (method === "GET" && path === "/api/buzzy/search") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const raw = (queryValue(fullPath, "q") ?? "").trim();
+    if (raw.length < 2) {
+      return { ok: true, query: raw, jobs: [], sessions: [], totals: { jobs: 0, sessions: 0 } };
+    }
+    const pattern = "%" + raw.slice(0, 120).replace(/[%_]/g, (m) => "\\" + m) + "%";
+    const sql = await getSql();
+    const jobRows = await sql`
+      SELECT j.id, j.title, j.status, j.company_id, c.name AS company_name, j.updated_at,
+        COALESCE(j.data->>'problem', j.data->'slots'->>'challenge', '') AS snippet
+      FROM buzzy_jobs j
+      LEFT JOIN buzzy_companies c ON c.id = j.company_id AND c.user_id = j.user_id
+      WHERE j.user_id = ${user.id}
+        AND j.status IS DISTINCT FROM 'Archived'
+        AND (
+          j.title ILIKE ${pattern}
+          OR COALESCE(j.data->>'problem', '') ILIKE ${pattern}
+          OR COALESCE(j.data->'slots'->>'challenge', '') ILIKE ${pattern}
+          OR COALESCE(j.data->'slots'->>'end_goal', '') ILIKE ${pattern}
+          OR EXISTS (
+            SELECT 1 FROM buzzy_chat_messages m
+            WHERE m.job_id = j.id AND m.user_id = ${user.id} AND m.content ILIKE ${pattern}
+          )
+        )
+      ORDER BY j.updated_at DESC
+      LIMIT 25
+    `;
+    const sessionRows = await sql`
+      SELECT s.id, s.title, s.job_id, s.company_id, c.name AS company_name, s.updated_at,
+        (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count,
+        COALESCE(s.summary, '') AS snippet
+      FROM buzzy_sessions s
+      LEFT JOIN buzzy_companies c ON c.id = s.company_id AND c.user_id = s.user_id
+      WHERE s.user_id = ${user.id}
+        AND (
+          s.title ILIKE ${pattern}
+          OR COALESCE(s.summary, '') ILIKE ${pattern}
+          OR EXISTS (
+            SELECT 1 FROM buzzy_chat_messages m
+            WHERE m.session_id = s.id AND m.user_id = ${user.id} AND m.content ILIKE ${pattern}
+          )
+        )
+      ORDER BY s.updated_at DESC
+      LIMIT 25
+    `;
+    return {
+      ok: true,
+      query: raw,
+      jobs: jobRows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        companyId: typeof r.company_id === "string" ? r.company_id : null,
+        companyName: typeof r.company_name === "string" ? r.company_name : null,
+        snippet: typeof r.snippet === "string" ? r.snippet.slice(0, 180) : "",
+        updatedAt: r.updated_at,
+      })),
+      sessions: sessionRows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        jobId: typeof r.job_id === "string" ? r.job_id : null,
+        companyId: typeof r.company_id === "string" ? r.company_id : null,
+        companyName: typeof r.company_name === "string" ? r.company_name : null,
+        snippet: typeof r.snippet === "string" ? r.snippet.slice(0, 180) : "",
+        messageCount: Number(r.message_count),
+        updatedAt: r.updated_at,
+      })),
+      totals: { jobs: jobRows.length, sessions: sessionRows.length },
+    };
+  }
+
   // ── POST /api/buzzy/jobs — upsert a job (durable persistence) ───────
   if (method === "POST" && path === "/api/buzzy/jobs") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));

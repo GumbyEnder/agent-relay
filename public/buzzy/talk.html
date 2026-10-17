@@ -618,6 +618,19 @@
     .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
     .rw-item.needs-input { border-color: #5a4a1a; border-left: 3px solid #FFC107; }
     .rw-item.needs-input .rw-title { color: #FFC107; }
+    .rw-search { margin: 0 0 0.9rem; }
+    .rw-search input {
+      width: 100%; box-sizing: border-box; padding: 0.6rem 0.85rem;
+      border: 1px solid #2A2A2A; border-radius: 8px; background: #0A0A0A;
+      color: #fff; font: inherit; font-size: 0.9rem;
+    }
+    .rw-search input::placeholder { color: #777; }
+    .rw-search input:focus { outline: none; border-color: #FFC107; }
+    .rw-group {
+      margin: 0.9rem 0 0.4rem; font-size: 0.72rem; letter-spacing: 0.09em;
+      text-transform: uppercase; color: #9a9a9a;
+    }
+    .rw-item.rw-session { border-left: 3px solid #444; }
     .rw-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
     .rw-all { color: #C9CDD2; font-size: 0.9rem; }
     .chat-layout.no-brief { grid-template-columns: minmax(0, 760px); }
@@ -2755,8 +2768,115 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return d.toLocaleDateString();
     }
 
+    // ── Work search across all of the user's companies ─────────────────
+    var rwSearchQuery = "";
+
+    function workSearchBoxHtml() {
+      return '<div class="rw-search"><input id="rwSearch" type="search" ' +
+        'placeholder="Search all work across your companies…" autocomplete="off" ' +
+        'aria-label="Search all work across your companies" value="' + esc(rwSearchQuery) + '"></div>';
+    }
+
+    function bindWorkSearchBox(container) {
+      var el = container.querySelector("#rwSearch");
+      if (!el) return;
+      var t = null;
+      el.addEventListener("input", function () {
+        var q = el.value.trim();
+        clearTimeout(t);
+        t = setTimeout(function () {
+          rwSearchQuery = q;
+          if (q.length >= 2) { renderWorkSearch(q); }
+          else if (!q) { rwSearchQuery = ""; showRecentWork(); }
+        }, 300);
+      });
+      // Esc clears the search and returns to recent work.
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { el.value = ""; rwSearchQuery = ""; showRecentWork(); }
+      });
+    }
+
+    function renderWorkSearch(q) {
+      var container = document.getElementById("chatMessages");
+      container.innerHTML = '<div class="recent-work">' +
+        workSearchBoxHtml() +
+        '<p class="muted rw-lead" id="rwSearchStatus">Searching…</p>' +
+        '<div id="rwSearchResults"></div>' +
+        '<div class="rw-actions"><button type="button" class="primary rw-new">New chat</button></div>' +
+        '</div>';
+      bindWorkSearchBox(container);
+      var input = container.querySelector("#rwSearch");
+      if (input) { input.focus(); }
+      container.querySelector(".rw-new").addEventListener("click", newChatNow);
+      fetch("/api/buzzy/search?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+        .then(function (r) {
+          if (r.status === 401) { window.location.href = "/buzzy/landing"; return null; }
+          return r.ok ? r.json() : null;
+        })
+        .then(function (d) {
+          var status = container.querySelector("#rwSearchStatus");
+          if (!status) return; // re-rendered by a newer query
+          if (!d || d.ok === false) { status.textContent = "Couldn't search right now. Try again in a moment."; return; }
+          var jobs = d.jobs || [];
+          var sessions = d.sessions || [];
+          var total = jobs.length + sessions.length;
+          if (!total) { status.textContent = 'No work matches "' + q + '".'; return; }
+          status.textContent = total + " result" + (total === 1 ? "" : "s") + ' for "' + q + '"';
+          var items = [];
+          jobs.forEach(function (j) {
+            items.push({
+              kind: "job", job: j, title: j.title || "Untitled job", company: j.companyName || "No company",
+              sub: (j.status || "Discovering") + (j.updatedAt ? " · updated " + timeAgo(j.updatedAt) : "") +
+                (j.snippet ? " · " + j.snippet : ""),
+            });
+          });
+          sessions.forEach(function (s) {
+            items.push({
+              kind: "session", session: s, title: s.title || "Untitled chat", company: s.companyName || "No company",
+              sub: (s.messageCount != null ? s.messageCount + " message" + (s.messageCount === 1 ? "" : "s") : "chat") +
+                (s.updatedAt ? " · updated " + timeAgo(s.updatedAt) : "") + (s.snippet ? " · " + s.snippet : ""),
+            });
+          });
+          var groups = {}, order = [];
+          items.forEach(function (it) {
+            if (!groups[it.company]) { groups[it.company] = []; order.push(it.company); }
+            groups[it.company].push(it);
+          });
+          var html = "";
+          order.forEach(function (g) {
+            html += '<h4 class="rw-group">' + esc(g) + '</h4>';
+            groups[g].forEach(function (it) {
+              var idx = items.indexOf(it);
+              html += '<div class="rw-item' + (it.kind === "session" ? " rw-session" : "") + '" data-idx="' + idx +
+                '" role="button" tabindex="0" title="' + esc(it.title) + '">' +
+                '<span class="rw-title">' + esc(it.title) + '</span>' +
+                '<span class="rw-sub">' + esc(it.sub) + '</span></div>';
+            });
+          });
+          var res = container.querySelector("#rwSearchResults");
+          if (!res) return;
+          res.innerHTML = html;
+          res.querySelectorAll(".rw-item").forEach(function (el) {
+            el.addEventListener("click", function () {
+              var it = items[Number(el.getAttribute("data-idx"))];
+              if (!it) return;
+              if (it.kind === "session") { openSession(it.session); }
+              else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+            });
+            el.addEventListener("keydown", function (e) {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
+            });
+          });
+        })
+        .catch(function () {
+          var s = container.querySelector("#rwSearchStatus");
+          if (s) s.textContent = "Couldn't search right now. Try again in a moment.";
+        });
+    }
+
     function showRecentWork() {
       var co = activeCompanyId();
+      if (rwSearchQuery && rwSearchQuery.length >= 2) { renderWorkSearch(rwSearchQuery); return; }
       var container = document.getElementById("chatMessages");
       container.innerHTML = '<p class="muted" style="padding:0.5rem 0">Loading your recent work…</p>';
       var jobsP = fetch("/api/buzzy/jobs" + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" })
@@ -2809,6 +2929,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var shown = rwShowAll ? items : items.slice(0, 8);
         var RW_EXAMPLES = ["Write a welcome email for new customers", "Draft a polite payment reminder", "Turn my services into a price list"];
         var html = '<div class="recent-work">' +
+          workSearchBoxHtml() +
           '<h3 class="rw-head">Recent work</h3>' +
           '<p class="muted rw-lead">Pick up where you left off, or start something new.</p>' +
           '<div class="rw-examples">' +
@@ -2878,6 +2999,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (input) input.value = ex;
           });
         });
+        bindWorkSearchBox(container);
       });
     }
 
