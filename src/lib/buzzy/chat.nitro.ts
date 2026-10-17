@@ -39,6 +39,7 @@ import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 import { buildWeeklyDigest } from "./digest";
+import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -295,6 +296,20 @@ export default defineEventHandler(async (event) => {
       if (typeof fromSession === "string" && isCompanyId(fromSession)) companyId = fromSession;
     }
     const company = companyId ? await confirmedCompanyContext(sql, userId, companyId) : null;
+    // Customer memory (component #2): inject approved-work history so later
+    // jobs don't re-ask what earlier approvals already established.
+    let customerMemoryBlock = "";
+    if (companyId) {
+      try {
+        const memRows = await sql`
+          SELECT customer_memory FROM buzzy_companies
+          WHERE id = ${companyId} AND user_id = ${userId} AND customer_memory != '[]'::jsonb
+          LIMIT 1
+        `;
+        const mem = memRows[0]?.customer_memory as CustomerMemoryEntry[] | undefined;
+        if (Array.isArray(mem) && mem.length > 0) customerMemoryBlock = memoryContextBlock(mem);
+      } catch { /* memory is additive — never block the chat */ }
+    }
 
     const result = await chatLoop({
       userId,
@@ -305,6 +320,7 @@ export default defineEventHandler(async (event) => {
       jobContext,
       companyName: company?.name ?? null,
       companyFacts: company?.facts ?? [],
+      customerMemoryBlock,
     });
     return result;
   }
@@ -348,6 +364,57 @@ export default defineEventHandler(async (event) => {
         "Content-Disposition": `attachment; filename="${artifact.filename ?? "document.docx"}"`,
       },
     });
+  }
+
+  // ── GET /api/buzzy/templates — the owner's template library ─────────
+  if (method === "GET" && path === "/api/buzzy/templates") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, company_id, name, kind, structure, created_at
+      FROM buzzy_templates WHERE user_id = ${user.id}
+      ORDER BY created_at DESC LIMIT 50
+    `;
+    return { ok: true, templates: rows };
+  }
+
+  // ── POST /api/buzzy/templates — upload a .docx, extract its structure ─
+  if (method === "POST" && path === "/api/buzzy/templates") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const b64 = typeof body.docxB64 === "string" ? body.docxB64 : "";
+    const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "Uploaded template";
+    const companyId = typeof body.companyId === "string" && isCompanyId(body.companyId) ? body.companyId : null;
+    if (!b64) {
+      setResponseStatus(event, 400);
+      return { error: "docxB64 is required", code: "bad_request" };
+    }
+    let structure;
+    try {
+      structure = await extractTemplateStructure(new Uint8Array(Buffer.from(b64, "base64")));
+    } catch (terr) {
+      setResponseStatus(event, 400);
+      return { error: terr instanceof Error ? terr.message : "not a readable .docx", code: "bad_file" };
+    }
+    const sql = await getSql();
+    const id = "tpl_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    await sql`
+      INSERT INTO buzzy_templates (id, user_id, company_id, name, kind, structure)
+      VALUES (${id}, ${user.id}, ${companyId}, ${name}, 'document', ${JSON.stringify(structure)}::jsonb)
+    `;
+    return { ok: true, template: { id, name, structure } };
   }
 
   // ── GET /api/buzzy/digest — weekly civilian activity log ────────────
@@ -918,6 +985,13 @@ export default defineEventHandler(async (event) => {
     // in the company card — the approval surface stays one-click.
     if (hasApproved && body.approved === true && rows[0].company_id) {
       const cid = rows[0].company_id as string;
+      // Customer memory rollup (component #2): rebuilt from approved jobs on
+      // every approval — the most recent state always wins.
+      try {
+        await rebuildCustomerMemory(sql, user.id, cid);
+      } catch (merr) {
+        console.error("[buzzy] customer memory rebuild failed:", merr instanceof Error ? merr.message : merr);
+      }
       const paperFacts = await sql`
         SELECT DISTINCT ON (fact_key) fact_key, label, value
         FROM buzzy_paper_facts

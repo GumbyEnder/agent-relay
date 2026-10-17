@@ -166,6 +166,8 @@ export interface ChatRequest {
   /** Active company tab. Confirmed facts only — proposed lines are not facts. */
   companyName?: string | null;
   companyFacts?: ConfirmedCompanyFact[];
+  /** Customer memory rollup (component #2) — approved-work history block. */
+  customerMemoryBlock?: string;
 }
 
 export interface ChatResponse {
@@ -334,7 +336,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       : "";
 
   const systemPrompt =
-    PERSONA + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + factsSection + guidance;
+    PERSONA + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   const messages: Array<{ role: string; content: string }> = [
