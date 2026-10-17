@@ -422,6 +422,32 @@ check(
 r = await api(cookieB, "DELETE", "/api/buzzy/memory", { jobId });
 check("BZ-F031 other account cannot forget A's memory (QA-05)", r.status === 200 && r.json?.forgotten === 0, JSON.stringify(r.json));
 
+// 12. BZ-F007: intake boundaries — unsupported types + locked PDFs
+r = await api(cookieA, "POST", "/api/buzzy/companies", { name: "QA07 Intake Co" });
+const coId = r.json?.company?.id;
+check("BZ-F007 company for intake", r.status === 201 && typeof coId === "string", JSON.stringify(r.json).slice(0, 150));
+r = await api(cookieA, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "docx", text: "some doc text" });
+check(
+  "BZ-F007 unsupported type → useful next action, not silent fallback (QA-11)",
+  r.status === 400 && r.json?.code === "unsupported_type" && /paste the text/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+const lockedPdf = Buffer.from("%PDF-1.4\n1 0 obj<</Encrypt 2 0 R>>endobj\n%%EOF").toString("base64");
+r = await api(cookieA, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "pdf", dataBase64: lockedPdf, filename: "locked.pdf" });
+check(
+  "BZ-F007 locked PDF detected with an explicit next action",
+  r.status === 422 && r.json?.code === "locked_pdf" && /paste the text/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "pdf", dataBase64: Buffer.from("%PDF-1.1\n%%EOF").toString("base64"), filename: "blank.pdf" });
+check(
+  "BZ-F007 unreadable PDF → lines stay unknown, nothing final-ready (QA-11)",
+  r.status === 200 && (r.json?.paper?.accepted ?? []).length === 0 && /couldn't read/i.test(r.json?.paper?.sentence ?? ""),
+  JSON.stringify(r.json?.paper).slice(0, 250),
+);
+r = await api(cookieB, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "paste", text: "snooping" });
+check("BZ-F007 other account cannot file papers on A's company (QA-05)", r.status === 400 || r.status === 404, `got ${r.status}`);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);

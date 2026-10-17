@@ -604,13 +604,23 @@ export async function savePaper(
 
   let text = input.fileKind === "photo" ? "" : input.text.slice(0, 80000);
   let unreadable = input.fileKind === "photo";
+  let locked = false;
   if (input.fileKind === "pdf") {
+    // BZ-F007: encrypted PDFs get their own next action — "unlock it" is more
+    // useful than a generic unreadable. Deterministic marker scan, no parser.
+    if (input.pdfBytes && input.pdfBytes.length) {
+      const head = Buffer.from(input.pdfBytes.slice(0, 65536)).toString("latin1");
+      locked = /\/Encrypt\b/.test(head);
+    }
     try {
-      text = input.pdfBytes && input.pdfBytes.length ? textFromPdf(input.pdfBytes).slice(0, 80000) : "";
+      text = locked || !input.pdfBytes?.length ? "" : textFromPdf(input.pdfBytes).slice(0, 80000);
     } catch {
       text = "";
     }
     unreadable = text.trim().length < 12;
+  }
+  if (locked) {
+    return { ok: false, error: "That PDF is locked with a password. Open it on your device, then paste the text here instead.", code: "locked_pdf", status: 422 };
   }
 
   const read = readPaper({

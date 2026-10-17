@@ -1867,6 +1867,18 @@ export default defineEventHandler(async (event) => {
     const filename = cleanFilename(body.filename);
     const text = typeof body.text === "string" ? body.text.slice(0, 80000) : "";
     const requested = body.fileKind;
+    // BZ-F007: supported types are restricted EXPLICITLY. An unsupported type
+    // gets a useful next action, never a silent paste-fallback or an empty
+    // analysis (QA-11).
+    const SUPPORTED_FILE_KINDS = new Set(["text", "pdf", "photo", "paste"]);
+    if (typeof requested === "string" && requested && !SUPPORTED_FILE_KINDS.has(requested)) {
+      setResponseStatus(event, 400);
+      return {
+        error: `That file type (${requested.slice(0, 24)}) isn't supported yet. Paste the text, or drop a PDF or a photo instead.`,
+        code: "unsupported_type",
+        supported: [...SUPPORTED_FILE_KINDS],
+      };
+    }
     const fileKind = requested === "text" || requested === "pdf" || requested === "photo" || requested === "paste"
       ? requested
       : "paste";
