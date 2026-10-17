@@ -52,6 +52,7 @@ import { reviewSeparately, type ReviewCheck } from "./review";
 import { STARTERS, getStarter } from "./starters";
 import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemetry";
 import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
+import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -2249,6 +2250,219 @@ export default defineEventHandler(async (event) => {
       job: { id: newId, title, status: "Discovering", repeatedFrom: src.id },
       firstQuestion: "Same kind of job as before — what time period is this for, who is it for, and what's changed?",
       note: "The structure came across. The old approval, draft and files did not — this run needs your fresh answers and a new approval.",
+    };
+  }
+
+  // ── Team (BZ-F041): invitations, membership, scoped access ────────────
+  // Members are real signed-in accounts. The owner's data stays keyed by the
+  // owner's id; a member request resolves to it THROUGH membership. Every
+  // owner-only action is gated by canPerform(), not by prose.
+  if (path === "/api/buzzy/team" && method !== "POST") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null,
+      queryValue(fullPath, "owner"));
+    const own = await sql`
+      SELECT id, email, role, status, invited_at, accepted_at
+      FROM buzzy_team_members WHERE owner_user_id = ${user.id}
+      ORDER BY invited_at DESC
+    `;
+    const belonging = await sql`
+      SELECT m.id, m.owner_user_id, m.role, m.status, m.accepted_at
+      FROM buzzy_team_members m WHERE m.member_user_id = ${user.id} AND m.status = 'active'
+    `;
+    return {
+      ok: true,
+      acting: { accountId: acting.accountId, role: acting.role, isOwner: acting.role === "owner" },
+      members: own,
+      memberOf: belonging,
+      roles: {
+        owner: Array.from(new Set([...TEAM_ACTIONS])),
+        admin: TEAM_ACTIONS.filter((a) => canPerform("admin", a)),
+        member: TEAM_ACTIONS.filter((a) => canPerform("member", a)),
+        reviewer: TEAM_ACTIONS.filter((a) => canPerform("reviewer", a)),
+      },
+      note: "Each teammate signs in with their own email. Nobody shares a magic link.",
+    };
+  }
+
+  if (method === "POST" && path === "/api/buzzy/team/invite") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const deny = guard("manage_team", acting);
+    if (deny) {
+      setResponseStatus(event, 403);
+      return { error: deny, code: "role_denied", role: acting.role };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase().slice(0, 200) : "";
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setResponseStatus(event, 400);
+      return { error: "Give me one email address to invite.", code: "bad_email" };
+    }
+    const role: MemberRole = body.role === "admin" || body.role === "reviewer" ? body.role : "member";
+    if (email === (user.email ?? "").toLowerCase()) {
+      setResponseStatus(event, 400);
+      return { error: "That's your own address — you're already the owner.", code: "bad_email" };
+    }
+    const existing = await sql`
+      SELECT id, status FROM buzzy_team_members
+      WHERE owner_user_id = ${acting.accountId} AND email = ${email} LIMIT 1
+    `;
+    const memberId = existing.length ? String(existing[0].id) : `tm_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    if (existing.length) {
+      await sql`
+        UPDATE buzzy_team_members SET role = ${role}, status = 'invited',
+          invited_at = now(), accepted_at = NULL, member_user_id = NULL
+        WHERE id = ${memberId} AND owner_user_id = ${acting.accountId}
+      `;
+    } else {
+      await sql`
+        INSERT INTO buzzy_team_members (id, owner_user_id, email, role, status)
+        VALUES (${memberId}, ${acting.accountId}, ${email}, ${role}, 'invited')
+      `;
+    }
+    const token = crypto.randomUUID().replace(/-/g, "");
+    await sql`
+      INSERT INTO buzzy_team_invites (token, member_id, expires_at)
+      VALUES (${token}, ${memberId}, now() + interval '7 days')
+    `;
+    await recordTelemetry(sql, { userId: acting.accountId, event: "project_started",
+      props: { kind: "team_invite", role } });
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      member: { id: memberId, email, role, status: "invited" },
+      // No mail channel is wired on this deployment — hand back the link and
+      // say so, instead of claiming an email went out.
+      inviteUrl: `/buzzy/team/join?token=${token}`,
+      note: "Invitation created. No email was sent (this deployment has no delivery channel) — send this link to them yourself. It expires in 7 days.",
+      expiresInDays: 7,
+    };
+  }
+
+  if (method === "POST" && path === "/api/buzzy/team/accept") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const token = typeof body.token === "string" ? body.token.trim().slice(0, 80) : "";
+    if (!token) {
+      setResponseStatus(event, 400);
+      return { error: "That invitation link is missing its token.", code: "bad_token" };
+    }
+    const sql = await getSql();
+    const invites = await sql`
+      SELECT i.token, i.member_id, i.expires_at, i.used_at, m.owner_user_id, m.email, m.role, m.status
+      FROM buzzy_team_invites i JOIN buzzy_team_members m ON m.id = i.member_id
+      WHERE i.token = ${token} LIMIT 1
+    `;
+    if (!invites.length) {
+      setResponseStatus(event, 404);
+      return { error: "That invitation doesn't exist.", code: "not_found" };
+    }
+    const inv = invites[0];
+    if (inv.used_at) {
+      setResponseStatus(event, 409);
+      return { error: "That invitation was already used.", code: "already_used" };
+    }
+    if (new Date(String(inv.expires_at)).getTime() < Date.now()) {
+      setResponseStatus(event, 409);
+      return { error: "That invitation has expired — ask for a new one.", code: "expired" };
+    }
+    if (String(inv.email).toLowerCase() !== (user.email ?? "").toLowerCase()) {
+      setResponseStatus(event, 403);
+      return {
+        error: `This invitation is for ${inv.email}. Sign in with that address to accept it.`,
+        code: "wrong_account",
+      };
+    }
+    if (String(inv.owner_user_id) === user.id) {
+      setResponseStatus(event, 409);
+      return { error: "You already own this account.", code: "already_owner" };
+    }
+    await sql`
+      UPDATE buzzy_team_members SET member_user_id = ${user.id}, status = 'active', accepted_at = now()
+      WHERE id = ${inv.member_id}
+    `;
+    await sql`UPDATE buzzy_team_invites SET used_at = now() WHERE token = ${token}`;
+    return {
+      ok: true,
+      joined: { accountId: String(inv.owner_user_id), role: String(inv.role) },
+      note: `You joined as ${inv.role}. You'll work inside that account with your own sign-in.`,
+    };
+  }
+
+  const teamMember = path.match(/^\/api\/buzzy\/team\/(tm_[A-Za-z0-9]{8,32})$/);
+  if (method === "DELETE" && teamMember) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const deny = guard("manage_team", acting);
+    if (deny) {
+      setResponseStatus(event, 403);
+      return { error: deny, code: "role_denied", role: acting.role };
+    }
+    const rows = await sql`
+      UPDATE buzzy_team_members SET status = 'revoked', member_user_id = NULL
+      WHERE id = ${teamMember[1]} AND owner_user_id = ${acting.accountId}
+      RETURNING id, email, role
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { error: "That teammate isn't on your account.", code: "not_found" };
+    }
+    await sql`DELETE FROM buzzy_team_invites WHERE member_id = ${teamMember[1]}`;
+    return { ok: true, revoked: rows[0], note: "Access removed. Their own account and their own work are untouched." };
+  }
+
+  // Proof that scoping works: what this sign-in can see, and why.
+  if (method === "GET" && path === "/api/buzzy/team/scope") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null,
+      queryValue(fullPath, "owner"));
+    const jobs = await sql<{ n: number }>`
+      SELECT count(*)::int AS n FROM buzzy_jobs WHERE user_id = ${acting.accountId}
+    `;
+    const docs = await sql<{ n: number }>`
+      SELECT count(*)::int AS n FROM buzzy_documents WHERE user_id = ${acting.accountId}
+    `;
+    return {
+      ok: true,
+      acting: { accountId: acting.accountId, role: acting.role, membershipId: acting.membershipId },
+      visible: { jobs: Number(jobs[0]?.n ?? 0), documents: Number(docs[0]?.n ?? 0) },
+      can: TEAM_ACTIONS.filter((a) => canPerform(acting.role, a)),
+      cannot: TEAM_ACTIONS.filter((a) => !canPerform(acting.role, a)).map((a) => ({
+        action: a, reason: denialReason(acting.role, a),
+      })),
     };
   }
 
