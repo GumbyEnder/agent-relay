@@ -1479,6 +1479,111 @@ export default defineEventHandler(async (event) => {
     return { document: { ...docs[0], content: vrows[0].content, version: vrows[0].version }, versions };
   }
 
+  // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────
+  // a name match NEVER merges entities — duplicates are flagged, not fused.
+  if (method === "GET" && path === "/api/buzzy/contacts") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, company_id, kind, name, role, contact, status, source_label, created_at, updated_at
+      FROM buzzy_contacts WHERE user_id = ${user.id}
+      ORDER BY updated_at DESC LIMIT 200
+    `;
+    return { contacts: rows };
+  }
+
+  if (method === "POST" && path === "/api/buzzy/contacts") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const name = typeof body.name === "string" ? body.name.trim().replace(/\s+/g, " ").slice(0, 120) : "";
+    if (!name) {
+      setResponseStatus(event, 400);
+      return { error: "Type the person's or business's name.", code: "bad_request" };
+    }
+    const kind = body.kind === "customer" || body.kind === "supplier" ? body.kind : "person";
+    const role = typeof body.role === "string" ? body.role.trim().slice(0, 120) : null;
+    const contactIn = body.contact && typeof body.contact === "object" && !Array.isArray(body.contact)
+      ? body.contact as Record<string, unknown>
+      : {};
+    const contact: Record<string, string> = {};
+    for (const k of ["email", "phone"]) {
+      if (typeof contactIn[k] === "string" && contactIn[k].trim()) contact[k] = String(contactIn[k]).trim().slice(0, 200);
+    }
+    const companyId = typeof body.companyId === "string" && isCompanyId(body.companyId) ? body.companyId : null;
+    const sql = await getSql();
+    if (companyId) {
+      const owned = await sql`SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}`;
+      if (!owned.length) {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+    }
+    // Disambiguation: same-name EXISTING contacts are surfaced so the owner
+    // can tell apart "Acme (the supplier)" from "Acme (the customer)" — the
+    // new record is still created as its own entity, never merged (QA-14).
+    const dupes = await sql<{ id: string; kind: string; role: string | null }>`
+      SELECT id, kind, role FROM buzzy_contacts
+      WHERE user_id = ${user.id} AND lower(name) = lower(${name}) AND status <> 'dropped'
+      LIMIT 5
+    `;
+    const id = `ct_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await sql`
+      INSERT INTO buzzy_contacts (id, user_id, company_id, kind, name, role, contact, status, source_label)
+      VALUES (${id}, ${user.id}, ${companyId}, ${kind}, ${name}, ${role},
+              ${JSON.stringify(contact)}::jsonb, 'proposed',
+              ${typeof body.source === "string" ? body.source.slice(0, 120) : "added by you"})
+    `;
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      contact: { id, kind, name, role, contact, status: "proposed", companyId },
+      ...(dupes.length ? { possibleDuplicates: dupes } : {}),
+    };
+  }
+
+  const contactConfirm = path.match(/^\/api\/buzzy\/contacts\/(ct_[a-z0-9]{8,32})\/confirm$/);
+  if (method === "POST" && contactConfirm) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      UPDATE buzzy_contacts SET status = 'confirmed', updated_at = now()
+      WHERE id = ${contactConfirm[1]} AND user_id = ${user.id} AND status = 'proposed'
+      RETURNING id, kind, name, status
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { error: "Contact not found (or already confirmed).", code: "not_found" };
+    }
+    return { ok: true, contact: rows[0] };
+  }
+
+  if (method === "DELETE" && path.startsWith("/api/buzzy/contacts/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    await sql`DELETE FROM buzzy_contacts WHERE id = ${path.slice("/api/buzzy/contacts/".length)} AND user_id = ${user.id}`;
+    return { ok: true };
+  }
+
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
   if (method === "GET" && path === "/api/buzzy/sessions") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));

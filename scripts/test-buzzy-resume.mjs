@@ -362,6 +362,28 @@ check(
   `user messages=${(r.json?.messages ?? []).filter((m) => m.role === "user").length}`,
 );
 
+// 10. BZ-F030: contacts directory — proposed→confirmed, no name-merge
+r = await api(cookieA, "POST", "/api/buzzy/contacts", { name: "Acme Supplies", kind: "supplier", role: "Main vendor", contact: { email: "sales@acme.test" } });
+const ct1 = r.json?.contact?.id;
+check("BZ-F030 contact created as proposed", r.status === 201 && r.json?.contact?.status === "proposed" && typeof ct1 === "string", JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "POST", "/api/buzzy/contacts", { name: "Acme Supplies", kind: "customer", role: "Other division" });
+const ct2 = r.json?.contact?.id;
+check(
+  "BZ-F030 same name creates a NEW entity + flags the duplicate (never merges)",
+  r.status === 201 && ct2 && ct2 !== ct1 && (r.json?.possibleDuplicates ?? []).some((d) => d.id === ct1),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/contacts");
+check("BZ-F030 both same-name entities coexist", (r.json?.contacts ?? []).filter((c) => c.name === "Acme Supplies").length === 2);
+r = await api(cookieA, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
+check("BZ-F030 owner confirms a proposed contact", r.status === 200 && r.json?.contact?.status === "confirmed", JSON.stringify(r.json));
+r = await api(cookieA, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
+check("BZ-F030 re-confirm is a clean 404", r.status === 404);
+r = await api(cookieB, "GET", "/api/buzzy/contacts");
+check("BZ-F030 other account sees no contacts (QA-05)", (r.json?.contacts ?? []).length === 0);
+r = await api(cookieB, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
+check("BZ-F030 other account cannot confirm (QA-05)", r.status === 404, `got ${r.status}`);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);

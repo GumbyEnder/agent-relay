@@ -102,6 +102,7 @@ const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_papers: "DELETE FROM buzzy_papers WHERE user_id = $1 RETURNING 1",
   buzzy_company_facts: "DELETE FROM buzzy_company_facts WHERE user_id = $1 RETURNING 1",
   buzzy_companies: "DELETE FROM buzzy_companies WHERE user_id = $1 RETURNING 1",
+  buzzy_contacts: "DELETE FROM buzzy_contacts WHERE user_id = $1 RETURNING 1",
   buzzy_sessions: "DELETE FROM buzzy_sessions WHERE user_id = $1 RETURNING 1",
   buzzy_job_events: "DELETE FROM buzzy_job_events WHERE user_id = $1 RETURNING 1",
   buzzy_scheduled_jobs: "DELETE FROM buzzy_scheduled_jobs WHERE user_id = $1 RETURNING 1",
