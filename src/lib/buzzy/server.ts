@@ -614,7 +614,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // BZ-F015: materialize the actual produced text as a durable document
     // with immutable versions — never reconstruct it later from the brief.
     try {
-      await materializeDraft(sql, userId, recordId, baseTitle, cleanReply);
+      await materializeDraft(sql, userId, recordId, baseTitle, cleanReply, {
+        slots: slotValues,
+        review: response.review,
+        creator: userId,
+      });
     } catch (derr) {
       console.error("[buzzy/documents] materialize failed:", derr instanceof Error ? derr.message : derr);
     }

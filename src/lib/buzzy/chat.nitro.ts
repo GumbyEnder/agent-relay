@@ -1269,9 +1269,24 @@ export default defineEventHandler(async (event) => {
     if (hasApproved) {
       await recordJobEvent(sql, id, user.id, "approve",
         body.approved === true ? "approved" : "approval revoked");
-      // BZ-F015: approval state flows into the document lifecycle.
+      // BZ-F015/F017: approval state flows into the document lifecycle —
+      // and references the EXACT version being approved (QA-08). When the
+      // client supplies the text it approved, a mismatch with the document's
+      // current version is a stale approval: reject it, never silently
+      // apply it to newer content.
       try {
-        await setDocumentAcceptance(sql, user.id, id, body.approved === true);
+        const acc = await setDocumentAcceptance(
+          sql, user.id, id, body.approved === true,
+          typeof body.draft === "string" ? body.draft : null,
+        );
+        if (!acc.ok) {
+          setResponseStatus(event, 409);
+          return {
+            error: "That draft changed since you opened it — review the latest version, then approve.",
+            code: acc.code,
+            currentVersion: acc.currentVersion,
+          };
+        }
       } catch (derr) {
         console.error("[buzzy/documents] acceptance sync failed:", derr instanceof Error ? derr.message : derr);
       }
@@ -1355,7 +1370,7 @@ export default defineEventHandler(async (event) => {
     }
     const sql = await getSql();
     const docs = await sql`
-      SELECT id, job_id, title, type, status, current_version, expert, created_at, updated_at
+      SELECT id, job_id, title, type, status, current_version, accepted_version, expert, created_at, updated_at
       FROM buzzy_documents WHERE id = ${docMatch[1]} AND user_id = ${user.id} LIMIT 1
     `;
     if (!docs.length) {
@@ -1376,7 +1391,9 @@ export default defineEventHandler(async (event) => {
       return { error: "That version does not exist", code: "not_found" };
     }
     const versions = await sql`
-      SELECT version, created_at FROM buzzy_document_versions
+      SELECT version, parent_version, creator, expert, brief_revision, review,
+             accepted_at, accepted_by, created_at
+      FROM buzzy_document_versions
       WHERE doc_id = ${docMatch[1]} ORDER BY version DESC
     `;
     return { document: { ...docs[0], content: vrows[0].content, version: vrows[0].version }, versions };

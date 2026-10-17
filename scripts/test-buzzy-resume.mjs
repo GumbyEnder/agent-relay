@@ -39,9 +39,11 @@ const stub = createServer((req, res) => {
       const lastUser = String([...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "");
       content = sys.includes("Extract these four facts")
         ? JSON.stringify({ challenge: CHALLENGE, difficulties: null, who_involved: null, end_goal: null })
-        : /more formal/i.test(lastUser)
-          ? "FORMAL v2 — revised demand letter, second edition."
-          : "DEMAND v1 — pay what you owe, first edition.";
+        : /friendlier/i.test(lastUser)
+          ? "FRIENDLY v3 — third edition, warmer tone."
+          : /more formal/i.test(lastUser)
+            ? "FORMAL v2 — revised demand letter, second edition."
+            : "DEMAND v1 — pay what you owe, first edition.";
     } catch {
       content = "Got it.";
     }
@@ -248,6 +250,45 @@ r = await api(cookieB, "GET", "/api/buzzy/documents");
 check("BZ-F015 other account's library excludes the doc", !(r.json?.documents ?? []).some((d) => d.id === docId));
 r = await api(cookieB, "GET", `/api/buzzy/documents/${docId}`);
 check("BZ-F015 other account doc read → 404 (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 7. BZ-F017: per-version provenance + exact-version acceptance (QA-08)
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const ledger = r.json?.versions ?? [];
+const v2 = ledger.find((v) => v.version === 2);
+check(
+  "BZ-F017 v2 records parent version + brief snapshot + creator",
+  v2 && v2.parent_version === 1 && v2.creator && v2.brief_revision && typeof v2.brief_revision === "object",
+  JSON.stringify(v2).slice(0, 250),
+);
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "STALE TEXT the owner never had on screen" });
+check(
+  "BZ-F017 stale-version approval rejected (QA-08)",
+  r.status === 409 && r.json?.code === "stale_version" && r.json?.currentVersion === 2,
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F017 rejected approval left document ready", r.json?.document?.status === "ready", JSON.stringify(r.json?.document?.status));
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "FORMAL v2 — revised demand letter, second edition." });
+check("BZ-F017 exact-version approval succeeds", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F017 acceptance references the exact version",
+  r.json?.document?.status === "accepted" && r.json?.document?.accepted_version === 2,
+  JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version }),
+);
+const acceptedV2 = (r.json?.versions ?? []).find((v) => v.version === 2);
+check("BZ-F017 accepted version row stamped (accepted_at/by)", Boolean(acceptedV2?.accepted_at && acceptedV2?.accepted_by), JSON.stringify(acceptedV2).slice(0, 200));
+
+// A new revision after acceptance re-opens review and clears the pointer (QA-20)
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F017 revision after acceptance re-opens review, clears accepted_version (QA-20)",
+  r.json?.document?.status === "ready" && r.json?.document?.accepted_version === null && r.json?.document?.current_version === 3,
+  JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version, cv: r.json?.document?.current_version }),
+);
 
 stub.close();
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
