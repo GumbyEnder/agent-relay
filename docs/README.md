@@ -11,6 +11,7 @@
 | [HARNESSES.md](./HARNESSES.md) | Hermes, Grok/xAI, OMP, OpenClaw, MCP, … |
 | [MCP.md](./MCP.md) | MCP server wrapper |
 | [PRODUCT_VISION.md](./PRODUCT_VISION.md) | North star |
+| [BEEZILLA-CAPABILITIES.md](./BEEZILLA-CAPABILITIES.md) | Capability layers: tools, gates, team authority, gaps, roadmap |
 | [AGENT_RELAY.md](./AGENT_RELAY.md) | Original product + eng spec |
 | [TOPOLOGY.md](./TOPOLOGY.md) | Company → team → user → agents → projects |
 | [INTEGRATIONS.md](./INTEGRATIONS.md) | GitHub, CI/CD, markdown journal |
