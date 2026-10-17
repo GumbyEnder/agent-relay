@@ -1177,8 +1177,13 @@ export default defineEventHandler(async (event) => {
       return { error: "id is required", code: "bad_request" };
     }
     const sql = await getSql();
-    await recordJobEvent(sql, id, user.id, "delete", "job deleted by owner");
-    await sql`DELETE FROM buzzy_jobs WHERE id = ${id} AND user_id = ${user.id}`;
+    // Attribution event only when the caller actually owns and deletes the job —
+    // otherwise a non-owner DELETE attempt would stamp their event onto someone
+    // else's job (QA-05 negative, BZ-F002 / #158).
+    const deleted = await sql`DELETE FROM buzzy_jobs WHERE id = ${id} AND user_id = ${user.id} RETURNING id`;
+    if (deleted.length) {
+      await recordJobEvent(sql, id, user.id, "delete", "job deleted by owner");
+    }
     return { ok: true };
   }
 

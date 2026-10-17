@@ -34,6 +34,7 @@
     "test:tenancy-endpoints": "npx tsx scripts/test-tenancy-endpoints.ts",
     "test:github-ingest": "npx tsx scripts/test-github-ingest-extras.ts && npx tsx scripts/test-ingest-authz.ts",
     "test:api": "node scripts/agent-api-smoke.mjs",
+    "test:buzzy-jobs": "node scripts/test-buzzy-jobs-ownership.mjs",
     "smoke": "npm run test:engine && npm run test:api",
     "start": "node scripts/migrate.mjs && HOST=0.0.0.0 NITRO_HOST=0.0.0.0 node .output/server/index.mjs",
     "postbuild": "echo build complete",
