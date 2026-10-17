@@ -2158,6 +2158,58 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── POST /api/buzzy/jobs/:id/repeat — clone structure, ask fresh inputs ──
+  // BZ-F029: repeating a job copies the playbook/template and permitted
+  // reusable structure — NEVER the old approval, draft or document. The new
+  // job starts in Discovering and explicitly asks for a fresh time period,
+  // party details and changed goals.
+  const jobRepeat = path.match(/^\/api\/buzzy\/jobs\/([A-Za-z0-9_-]{3,120})\/repeat$/);
+  if (method === "POST" && jobRepeat) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql<{ id: string; template: string | null; title: string | null; company_id: string | null; data: unknown }>`
+      SELECT id, template, title, company_id, data FROM buzzy_jobs
+      WHERE id = ${jobRepeat[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { error: "Job not found", code: "not_found" };
+    }
+    const src = rows[0];
+    const srcData = typeof src.data === "string" ? safeParseJson(src.data) : (src.data ?? {});
+    const starterId = typeof (srcData as Record<string, unknown>).starter === "string"
+      ? String((srcData as Record<string, unknown>).starter) : null;
+    const starter = starterId ? getStarter(starterId) : undefined;
+    const newId = `job_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
+    const title = `${(src.title ?? "Job").slice(0, 60)} (repeat)`;
+    await sql`
+      INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+      VALUES (${newId}, ${user.id}, ${src.template}, ${title}, 'Discovering', ${src.company_id},
+              ${JSON.stringify({
+                repeatedFrom: src.id,
+                starter: starterId,
+                outcome: starter?.outcome ?? null,
+                freshInputsRequired: [
+                  "the new time period",
+                  "party-specific details (who/what this run is for)",
+                  "any changed goals or scope",
+                ],
+                approved: false,
+              })}::jsonb, now())
+    `;
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      job: { id: newId, title, status: "Discovering", repeatedFrom: src.id },
+      firstQuestion: "Same kind of job as before — what time period is this for, who is it for, and what's changed?",
+      note: "The structure came across. The old approval, draft and files did not — this run needs your fresh answers and a new approval.",
+    };
+  }
+
   // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────
   // a name match NEVER merges entities — duplicates are flagged, not fused.
   if (method === "GET" && path === "/api/buzzy/contacts") {

@@ -964,6 +964,32 @@ check("BZ-F028 unknown starter → 404", r.status === 404, `got ${r.status}`);
 r = await api(cookieA, "POST", "/api/buzzy/starters/customer-proposal/start", { companyId: coId });
 check("BZ-F028 starter can bind to an owned company", r.status === 201, `status ${r.status}`);
 
+// 27. BZ-F029: repeat clones structure, never the approval
+r = await api(cookieA, "POST", `/api/buzzy/jobs/${docJob}/repeat`, {});
+const repeatJob = r.json?.job?.id;
+check(
+  "BZ-F029 repeat creates a fresh Discovering job asking for new inputs",
+  r.status === 201 && typeof repeatJob === "string" && /time period/i.test(r.json?.firstQuestion ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+check(
+  "BZ-F029 repeat explicitly disclaims carrying the old approval",
+  /approval.*did not|did not.*approval/i.test(r.json?.note ?? ""),
+  r.json?.note,
+);
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+const repeated = (r.json?.jobs ?? []).find((j) => j.id === repeatJob);
+check(
+  "BZ-F029 repeated job carries structure refs but no approval/draft",
+  repeated?.data?.repeatedFrom === docJob && repeated?.data?.approved === false &&
+    repeated?.status === "Discovering" && !repeated?.data?.draft,
+  JSON.stringify(repeated?.data).slice(0, 250),
+);
+r = await api(cookieA, "POST", `/api/buzzy/jobs/${repeatJob}/repeat`, {});
+check("BZ-F029 repeating a repeat works (chain preserved)", r.status === 201 && r.json?.job?.repeatedFrom === repeatJob);
+r = await api(cookieB, "POST", `/api/buzzy/jobs/${docJob}/repeat`, {});
+check("BZ-F029 other account cannot repeat A's job (QA-05)", r.status === 404, `got ${r.status}`);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
