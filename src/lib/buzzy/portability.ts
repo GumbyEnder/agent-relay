@@ -83,24 +83,31 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
 }
 
 /** Tables holding owner data, in deletion order (children first is unnecessary —
- *  no FKs between them — but listed for the audit trail). */
-const DELETION_TABLES = [
-  "buzzy_chat_messages",
-  "buzzy_user_memory",
-  "buzzy_jobs",
-  "buzzy_templates",
-  "buzzy_paper_facts",
-  "buzzy_papers",
-  "buzzy_company_facts",
-  "buzzy_companies",
-  "buzzy_sessions",
-] as const;
+ *  no FKs between them — but listed for the audit trail). Statements are
+ *  explicit (no dynamic identifiers) so they run identically on prod Postgres
+ *  and the embedded PGLite dialect, where sql(table) parametrizes instead of
+ *  quoting an identifier. buzzy_action_authority is a global constant table
+ *  with no user data and is intentionally absent. */
+const DELETION_STATEMENTS: Record<string, string> = {
+  buzzy_chat_messages: "DELETE FROM buzzy_chat_messages WHERE user_id = $1 RETURNING 1",
+  buzzy_user_memory: "DELETE FROM buzzy_user_memory WHERE user_id = $1 RETURNING 1",
+  buzzy_jobs: "DELETE FROM buzzy_jobs WHERE user_id = $1 RETURNING 1",
+  buzzy_templates: "DELETE FROM buzzy_templates WHERE user_id = $1 RETURNING 1",
+  buzzy_paper_facts: "DELETE FROM buzzy_paper_facts WHERE user_id = $1 RETURNING 1",
+  buzzy_papers: "DELETE FROM buzzy_papers WHERE user_id = $1 RETURNING 1",
+  buzzy_company_facts: "DELETE FROM buzzy_company_facts WHERE user_id = $1 RETURNING 1",
+  buzzy_companies: "DELETE FROM buzzy_companies WHERE user_id = $1 RETURNING 1",
+  buzzy_sessions: "DELETE FROM buzzy_sessions WHERE user_id = $1 RETURNING 1",
+  buzzy_job_events: "DELETE FROM buzzy_job_events WHERE user_id = $1 RETURNING 1",
+  buzzy_scheduled_jobs: "DELETE FROM buzzy_scheduled_jobs WHERE user_id = $1 RETURNING 1",
+  buzzy_connections: "DELETE FROM buzzy_connections WHERE user_id = $1 RETURNING 1",
+};
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */
 export async function deleteAccountData(sql: any, userId: string): Promise<Record<string, number>> {
   const receipt: Record<string, number> = {};
-  for (const table of DELETION_TABLES) {
-    const rows = await sql`DELETE FROM ${sql(table)} WHERE user_id = ${userId} RETURNING 1`;
+  for (const [table, statement] of Object.entries(DELETION_STATEMENTS)) {
+    const rows = await sql.query(statement, [userId]);
     receipt[table] = rows.length;
   }
   return receipt;
