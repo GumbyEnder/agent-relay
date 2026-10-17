@@ -50,6 +50,7 @@ import { renderDocument } from "./artifact";
 import { TOOL_REGISTRY } from "./tools";
 import { reviewSeparately, type ReviewCheck } from "./review";
 import { STARTERS, getStarter } from "./starters";
+import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemetry";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -449,6 +450,8 @@ export default defineEventHandler(async (event) => {
       } catch { /* memory is additive — never block the chat */ }
     }
 
+    const turnStarted = Date.now();
+    await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface: "chat" } });
     const result = await chatLoop({
       userId,
       jobId,
@@ -461,6 +464,11 @@ export default defineEventHandler(async (event) => {
       companyFacts: company?.facts ?? [],
       customerMemoryBlock,
     });
+    // BZ-F039: a draft was shown to the human (no content recorded — ids and
+    // timing only). Check verdicts travel as their own events.
+    const replyText = typeof (result as { reply?: unknown }).reply === "string" ? String((result as { reply: string }).reply) : "";
+    await recordTelemetry(sql, { userId, jobId, event: "draft_shown",
+      props: { surface: "chat", ms: Date.now() - turnStarted, count: replyText.length > 0 ? 1 : 0 } });
     return result;
   }
 
@@ -495,6 +503,8 @@ export default defineEventHandler(async (event) => {
       return { error: "No document on this job", code: "not_found" };
     }
     const bytes = Buffer.from(artifact.bytesB64, "base64");
+    await recordTelemetry(sql, { userId: user.id, jobId, event: "exported",
+      props: { format: artifact.contentType ?? "docx" } });
     setResponseStatus(event, 200);
     return new Response(bytes, {
       status: 200,
@@ -1468,6 +1478,9 @@ export default defineEventHandler(async (event) => {
     if (hasApproved) {
       await recordJobEvent(sql, id, user.id, "approve",
         body.approved === true ? "approved" : "approval revoked");
+      await recordTelemetry(sql, { userId: user.id, jobId: id,
+        event: body.approved === true ? "approval_recorded" : "reopened",
+        props: { action: body.approved === true ? "approve" : "revoke" } });
       // BZ-F015/F017: approval state flows into the document lifecycle —
       // and references the EXACT version being approved (QA-08). When the
       // client supplies the text it approved, a mismatch with the document's
@@ -1613,12 +1626,16 @@ export default defineEventHandler(async (event) => {
       FROM buzzy_document_versions
       WHERE doc_id = ${docMatch[1]} ORDER BY version DESC
     `;
+    await recordTelemetry(sql, { userId: user.id, jobId: String(docs[0].job_id ?? ""), docId: docMatch[1],
+      event: "retrieved", props: { version: Number(vrows[0].version), status: String(docs[0].status ?? "") } });
 
     // ── BZ-F020: exports match the CHOSEN version (QA-12) ──────────────
     // format=pdf|docx|md|csv renders THIS version's canonical text on demand —
     // the export can never drift from the version the owner picked.
     const format = (queryValue(fullPath, "format") ?? "").toLowerCase();
     if (format) {
+      await recordTelemetry(sql, { userId: user.id, jobId: String(docs[0].job_id ?? ""), docId: docMatch[1],
+        event: "exported", props: { format, version: Number(vrows[0].version) } });
       const title = String(docs[0].title ?? "document");
       const text = String(vrows[0].content ?? "");
       const base = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "document";
@@ -2107,6 +2124,9 @@ export default defineEventHandler(async (event) => {
       INSERT INTO buzzy_document_decisions (doc_id, user_id, version, action, role, note)
       VALUES (${doc.id}, ${user.id}, ${version}, ${action}, ${role}, ${note})
     `;
+    await recordTelemetry(sql, { userId: user.id, jobId: String(doc.job_id ?? doc.id), docId: String(doc.id),
+      event: action === "accept" ? "human_accepted" : action === "request_changes" ? "reopened" : "needs_you_answered",
+      props: { action, role, version } });
     if (action === "accept" && role === "internal") {
       // Internal acceptance moves the document lifecycle (customer acceptance
       // is a distinct record and never flips the internal state by itself).
@@ -2168,6 +2188,8 @@ export default defineEventHandler(async (event) => {
       VALUES (${jobId}, ${user.id}, ${starter.playbook}, ${starter.name}, 'Discovering', ${companyId},
               ${JSON.stringify({ starter: starter.id, outcome: starter.outcome, boundary: starter.boundary })}::jsonb, now())
     `;
+    await recordTelemetry(sql, { userId: user.id, jobId, event: "project_started",
+      props: { starter: starter.id, playbook: starter.playbook } });
     setResponseStatus(event, 201);
     return {
       ok: true,
@@ -2226,6 +2248,26 @@ export default defineEventHandler(async (event) => {
       job: { id: newId, title, status: "Discovering", repeatedFrom: src.id },
       firstQuestion: "Same kind of job as before — what time period is this for, who is it for, and what's changed?",
       note: "The structure came across. The old approval, draft and files did not — this run needs your fresh answers and a new approval.",
+    };
+  }
+
+  // ── Telemetry (BZ-F039): success summary + plain disclosure ───────────
+  // The business signal is accepted, retrievable, useful outputs — not chat
+  // counts. Infrastructure uptime is deliberately absent here.
+  if (method === "GET" && path === "/api/buzzy/telemetry") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const daysRaw = Number(queryValue(fullPath, "days"));
+    const days = Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 365 ? Math.floor(daysRaw) : 30;
+    return {
+      ok: true,
+      success: await successSummary(sql as never, user.id, days),
+      disclosure: TELEMETRY_DISCLOSURE,
+      note: "Success means accepted, retrievable, useful outputs — not messages or tokens.",
     };
   }
 

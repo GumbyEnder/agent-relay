@@ -1068,6 +1068,36 @@ check(
 r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "evil@example.test" });
 check("BZ-F033 other account cannot queue outbound (QA-05)", r.status === 404, `got ${r.status}`);
 
+// 30. BZ-F039: success telemetry + real journey verification
+const secretToken = `ZZTELEMETRYSECRET${run}`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: `note this ${secretToken} please`, attemptId: `att_${run}_tel` });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?format=md`);
+r = await api(cookieA, "GET", "/api/buzzy/telemetry");
+const tel = r.json?.success ?? {};
+check(
+  "BZ-F039 journey emits the real event set (started/draft/approval/accepted/retrieved/exported)",
+  (tel.events?.project_started ?? 0) >= 1 && (tel.events?.draft_shown ?? 0) >= 1 &&
+    (tel.events?.approval_recorded ?? 0) >= 1 && (tel.events?.human_accepted ?? 0) >= 1 &&
+    (tel.events?.retrieved ?? 0) >= 1 && (tel.events?.exported ?? 0) >= 1,
+  JSON.stringify(tel.events),
+);
+check(
+  "BZ-F039 success metrics count accepted + retrievable outputs, not chats",
+  tel.acceptedOutputs >= 1 && tel.retrievableOutputs >= 1 && typeof tel.approvalRate === "number",
+  JSON.stringify({ a: tel.acceptedOutputs, r: tel.retrievableOutputs, rate: tel.approvalRate }),
+);
+check(
+  "BZ-F039 disclosure states what is collected and what never is",
+  /Chat messages/i.test(r.json?.disclosure?.neverCollects ?? "") &&
+    /accepted, retrievable/i.test(r.json?.disclosure?.purpose ?? ""),
+  JSON.stringify(r.json?.disclosure).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=999`);
+check("BZ-F039 unknown-version read still 404s (no false telemetry)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/telemetry");
+check("BZ-F039 other account cannot read A's telemetry (QA-05)", r.status === 200 && (r.json?.success?.acceptedOutputs ?? 0) === 0, JSON.stringify(r.json?.success ?? {}).slice(0, 120));
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
