@@ -926,6 +926,44 @@ check(
 r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "request_changes" });
 check("BZ-F027 correction without a specific ask is refused", r.status === 400 && r.json?.code === "note_required", `status ${r.status}`);
 
+// 26. BZ-F028: three outcome-first starter journeys
+r = await api(cookieA, "GET", "/api/buzzy/starters");
+const starters = r.json?.starters ?? [];
+check(
+  "BZ-F028 exactly three working starters, each with outcome/discovery/outputs/checks/boundary",
+  starters.length === 3 && starters.every((s) =>
+    s.id && s.name && s.outcome && s.discovery?.length && s.outputs?.length &&
+    s.requiredChecks?.length && s.boundary && s.firstQuestion),
+  JSON.stringify(starters.map((s) => s.id)),
+);
+check(
+  "BZ-F028 starter set is reminder / proposal / handover",
+  JSON.stringify(starters.map((s) => s.id).sort()) === JSON.stringify(["customer-proposal", "overdue-reminder", "team-handover"]),
+  starters.map((s) => s.id).join(","),
+);
+check(
+  "BZ-F028 reminder boundary keeps sending separately approved",
+  /Draft only/i.test(starters.find((s) => s.id === "overdue-reminder")?.boundary ?? ""),
+);
+r = await api(cookieA, "POST", "/api/buzzy/starters/overdue-reminder/start", {});
+const starterJob = r.json?.job?.id;
+check(
+  "BZ-F028 starting a journey creates a Discovering job with the first question",
+  r.status === 201 && typeof starterJob === "string" && /invoice/i.test(r.json?.firstQuestion ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+const startedJob = (r.json?.jobs ?? []).find((j) => j.id === starterJob);
+check(
+  "BZ-F028 started journey is durable with its starter marker",
+  startedJob?.data?.starter === "overdue-reminder" && startedJob?.status === "Discovering",
+  JSON.stringify(startedJob?.data).slice(0, 200),
+);
+r = await api(cookieA, "POST", "/api/buzzy/starters/nope/start", {});
+check("BZ-F028 unknown starter → 404", r.status === 404, `got ${r.status}`);
+r = await api(cookieA, "POST", "/api/buzzy/starters/customer-proposal/start", { companyId: coId });
+check("BZ-F028 starter can bind to an owned company", r.status === 201, `status ${r.status}`);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(

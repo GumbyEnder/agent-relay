@@ -49,6 +49,7 @@ import { renderTextPdf } from "./pdf";
 import { renderDocument } from "./artifact";
 import { TOOL_REGISTRY } from "./tools";
 import { reviewSeparately, type ReviewCheck } from "./review";
+import { STARTERS, getStarter } from "./starters";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -2109,6 +2110,51 @@ export default defineEventHandler(async (event) => {
         : action === "accept"
           ? `Accepted version ${version}${role === "customer" ? " (customer acceptance)" : ""}. Earlier versions stay intact.`
           : "Kept as a draft — nothing is treated as final.",
+    };
+  }
+
+  // ── Starters (BZ-F028): three outcome-first journeys ──────────────────
+  if (method === "GET" && path === "/api/buzzy/starters") {
+    return { starters: STARTERS };
+  }
+  const starterStart = path.match(/^\/api\/buzzy\/starters\/([a-z-]{3,40})\/start$/);
+  if (method === "POST" && starterStart) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const starter = getStarter(starterStart[1]);
+    if (!starter) {
+      setResponseStatus(event, 404);
+      return { error: "That starter doesn't exist.", code: "not_found" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* defaults */ }
+    const companyId = typeof body.companyId === "string" && isCompanyId(body.companyId) ? body.companyId : null;
+    const sql = await getSql();
+    if (companyId) {
+      const owned = await sql`SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}`;
+      if (!owned.length) {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+    }
+    const jobId = `job_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
+    await sql`
+      INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+      VALUES (${jobId}, ${user.id}, ${starter.playbook}, ${starter.name}, 'Discovering', ${companyId},
+              ${JSON.stringify({ starter: starter.id, outcome: starter.outcome, boundary: starter.boundary })}::jsonb, now())
+    `;
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      job: { id: jobId, title: starter.name, status: "Discovering", starter: starter.id },
+      firstQuestion: starter.firstQuestion,
+      boundary: starter.boundary,
     };
   }
 
