@@ -51,6 +51,7 @@ import { TOOL_REGISTRY } from "./tools";
 import { reviewSeparately, type ReviewCheck } from "./review";
 import { STARTERS, getStarter } from "./starters";
 import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemetry";
+import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -2248,6 +2249,112 @@ export default defineEventHandler(async (event) => {
       job: { id: newId, title, status: "Discovering", repeatedFrom: src.id },
       firstQuestion: "Same kind of job as before — what time period is this for, who is it for, and what's changed?",
       note: "The structure came across. The old approval, draft and files did not — this run needs your fresh answers and a new approval.",
+    };
+  }
+
+  // ── Recipes (BZ-J04…J11): configured business playbooks ───────────────
+  // A recipe is discoverable, startable, and its boundary is checkable BEFORE
+  // anything is accepted or sent. Boundaries are enforced in code, not prose.
+  if (method === "GET" && path === "/api/buzzy/recipes") {
+    return {
+      universalStatements: UNIVERSAL_STATEMENTS,
+      recipes: RECIPES.map((r) => ({
+        id: r.id, name: r.name, outcome: r.outcome, playbook: r.playbook,
+        discovery: r.discovery, checklist: r.checklist,
+        permittedSources: r.permittedSources, tools: r.tools,
+        outputContract: r.outputContract, domainChecks: r.domainChecks,
+        boundary: r.boundary, firstQuestion: r.firstQuestion,
+        configured: validateRecipe(r).length === 0,
+      })),
+    };
+  }
+
+  const recipeStart = path.match(/^\/api\/buzzy\/recipes\/([a-z0-9-]{3,48})\/start$/);
+  if (method === "POST" && recipeStart) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const recipe = getRecipe(recipeStart[1]);
+    if (!recipe) {
+      setResponseStatus(event, 404);
+      return { error: "That recipe doesn't exist.", code: "not_found" };
+    }
+    const problems = validateRecipe(recipe);
+    if (problems.length) {
+      setResponseStatus(event, 400);
+      return { error: "This recipe is not fully configured.", code: "recipe_incomplete", problems };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* defaults */ }
+    const companyId = typeof body.companyId === "string" && isCompanyId(body.companyId) ? body.companyId : null;
+    const sql = await getSql();
+    if (companyId) {
+      const owned = await sql`SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}`;
+      if (!owned.length) {
+        setResponseStatus(event, 400);
+        return { error: "That company isn't on your account.", code: "bad_company" };
+      }
+    }
+    const jobId = `job_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
+    await sql`
+      INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+      VALUES (${jobId}, ${user.id}, ${recipe.playbook}, ${recipe.name}, 'Discovering', ${companyId},
+              ${JSON.stringify({
+                recipe: recipe.id, outcome: recipe.outcome, boundary: recipe.boundary,
+                outputContract: recipe.outputContract,
+              })}::jsonb, now())
+    `;
+    await recordTelemetry(sql, { userId: user.id, jobId, event: "project_started",
+      props: { starter: recipe.id, playbook: recipe.playbook } });
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      job: { id: jobId, title: recipe.name, status: "Discovering", recipe: recipe.id, template: recipe.playbook },
+      firstQuestion: recipe.firstQuestion,
+      checklist: recipe.checklist,
+      outputContract: recipe.outputContract,
+      boundary: recipe.boundary,
+    };
+  }
+
+  // Boundary pre-check: does a draft cross this recipe's line?
+  const recipeCheck = path.match(/^\/api\/buzzy\/recipes\/([a-z0-9-]{3,48})\/boundary-check$/);
+  if (method === "POST" && recipeCheck) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const recipe = getRecipe(recipeCheck[1]);
+    if (!recipe) {
+      setResponseStatus(event, 404);
+      return { error: "That recipe doesn't exist.", code: "not_found" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const draft = typeof body.draft === "string" ? body.draft : "";
+    if (!draft.trim()) {
+      setResponseStatus(event, 400);
+      return { error: "Give me the draft text to check.", code: "bad_request" };
+    }
+    const hits = boundaryViolations(recipe, draft);
+    return {
+      ok: true,
+      recipe: recipe.id,
+      blocked: hits.length > 0,
+      violations: hits,
+      boundary: recipe.boundary,
+      note: hits.length
+        ? `This crosses the recipe's line: ${recipe.boundary} Fix those before it can be accepted.`
+        : `Within the recipe's boundary: ${recipe.boundary}`,
     };
   }
 
