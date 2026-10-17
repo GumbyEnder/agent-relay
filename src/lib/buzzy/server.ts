@@ -17,6 +17,7 @@
  */
 
 import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
+import { selectModel } from "./modelPolicy";
 import {
   renderDocument,
   renderPresentation,
@@ -411,11 +412,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
   try {
-    // Route high-stakes job types (legal, technical) to a reasoning model when
-    // the catalog has one; everything else stays on the cheap default.
-    const routedModel =
-      resolvedModel ??
-      ((jobType === "legal" || jobType === "technical") ? resolveReasoningModel() : undefined);
+    // BZ-F012: versioned, reasoned model-selection policy. The decision
+    // (policy version + phase + reason) is persisted internally per turn.
+    const decision = selectModel({
+      jobType,
+      phase: draftGateOpen ? "deliverable" : "discovery",
+      overrideModel: resolvedModel,
+    });
+    if (jobId) {
+      try {
+        await sql`
+          INSERT INTO buzzy_job_events (job_id, user_id, actor, action, detail)
+          VALUES (${jobId}, ${userId}, ${userId}, 'model_decision',
+                  ${JSON.stringify({ policyVersion: decision.policyVersion, phase: decision.phase, label: decision.label, reason: decision.reason })})
+        `;
+      } catch { /* decision logging never blocks the turn */ }
+    }
+    const routedModel = decision.model || undefined;
     reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
 
     // Bounded model-paced loop: execute render_document calls and feed the

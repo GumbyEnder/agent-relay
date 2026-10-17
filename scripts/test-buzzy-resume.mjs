@@ -870,6 +870,15 @@ check(
 r = await api(cookieB, "POST", "/api/buzzy/review", { documentId: docId });
 check("BZ-F014 other account cannot review A's stored document (QA-05)", r.status === 404, `got ${r.status}`);
 
+// 24. BZ-F012: model decisions recorded with policy version + reason
+r = await api(cookieA, "GET", `/api/buzzy/jobs/${docJob}/events`);
+const decisionEvent = (r.json?.events ?? []).find((e) => e.action === "model_decision");
+check(
+  "BZ-F012 each turn records a versioned, reasoned model decision internally",
+  Boolean(decisionEvent) && /mp-1\.0\.0/.test(decisionEvent.detail) && /reason|default Value|catalog/i.test(decisionEvent.detail),
+  JSON.stringify(r.json?.events).slice(0, 300),
+);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
