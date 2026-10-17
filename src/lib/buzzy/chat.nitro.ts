@@ -43,7 +43,7 @@ import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, ty
 import { buildExportBundle, deleteAccountData } from "./portability";
 import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
-import { setDocumentAcceptance } from "./documents";
+import { setDocumentAcceptance, materializeDraft, summarizeChanges } from "./documents";
 import { ensureExecutionBoard } from "./execution";
 import { renderTextPdf } from "./pdf";
 import { renderDocument } from "./artifact";
@@ -1619,6 +1619,82 @@ export default defineEventHandler(async (event) => {
     }
 
     return { document: { ...docs[0], content: vrows[0].content, version: vrows[0].version }, versions };
+  }
+
+  // ── POST /api/buzzy/documents/:id/edit — owner manual edit (BZ-F016) ──
+  // A manual edit materializes a NEW immutable version with manual-edit
+  // provenance; an accepted document re-opens for review (QA-20), and the
+  // earlier version is kept untouched (QA-12).
+  const docEdit = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/edit$/);
+  if (method === "POST" && docEdit) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const content = typeof body.content === "string" ? body.content.slice(0, 80000) : "";
+    if (!content.trim()) {
+      setResponseStatus(event, 400);
+      return { error: "Type the document text.", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const docs = await sql<{ job_id: string | null; title: string }>`
+      SELECT job_id, title FROM buzzy_documents WHERE id = ${docEdit[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const result = await materializeDraft(sql, user.id, docs[0].job_id ?? docEdit[1], docs[0].title, content, {
+      creator: user.id,
+      expert: "manual edit",
+    });
+    return {
+      ok: true,
+      version: result.version,
+      changed: result.changed,
+      note: result.changed
+        ? `Saved as version ${result.version}. The earlier version is kept, and this document is waiting for your review again.`
+        : "That matches the current version exactly — nothing new to save.",
+    };
+  }
+
+  // ── GET /api/buzzy/documents/:id/diff?from=N&to=M — changed-section summary ─
+  const docDiff = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/diff$/);
+  if (method === "GET" && docDiff) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const owned = await sql`SELECT id, current_version FROM buzzy_documents WHERE id = ${docDiff[1]} AND user_id = ${user.id} LIMIT 1`;
+    if (!owned.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const to = Number(queryValue(fullPath, "to") ?? owned[0].current_version);
+    const from = Number(queryValue(fullPath, "from") ?? (to - 1));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < 1 || from >= to) {
+      setResponseStatus(event, 400);
+      return { error: "Pick two versions to compare, like ?from=1&to=2.", code: "bad_request" };
+    }
+    const vrows = await sql`
+      SELECT version, content FROM buzzy_document_versions
+      WHERE doc_id = ${docDiff[1]} AND version IN (${from}, ${to})
+    `;
+    const va = vrows.find((v) => v.version === from);
+    const vb = vrows.find((v) => v.version === to);
+    if (!va || !vb) {
+      setResponseStatus(event, 404);
+      return { error: "One of those versions does not exist.", code: "not_found" };
+    }
+    return { diff: summarizeChanges(String(va.content), String(vb.content), from, to) };
   }
 
   // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────

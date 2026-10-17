@@ -94,6 +94,57 @@ export async function materializeDraft(
   return { id, version: nextVersion, changed: true };
 }
 
+// ── BZ-F016: changed-section summary ─────────────────────────────────────
+
+export interface DiffSummary {
+  from: number;
+  to: number;
+  added: string[];
+  removed: string[];
+  sectionsChanged: string[];
+  /** True when the two versions are byte-identical (no false "changed"). */
+  identical: boolean;
+}
+
+function sectionOf(headings: Array<{ at: number; name: string }>, lineIdx: number): string {
+  let name = "(opening)";
+  for (const h of headings) {
+    if (h.at <= lineIdx) name = h.name;
+  }
+  return name;
+}
+
+/**
+ * Line-level changed-section summary between two canonical texts. Deliberately
+ * a summary, not a Myers diff: lines unique to each side plus the section
+ * headings those lines fall under.
+ */
+export function summarizeChanges(fromText: string, toText: string, from: number, to: number): DiffSummary {
+  const aLines = fromText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const bLines = toText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const aHeads = fromText.split("\n").map((l, i) => ({ at: i, name: l.replace(/^#{1,3}\s+/, "").trim() })).filter((h) => /^#{1,3}\s/.test(fromText.split("\n")[h.at] ?? ""));
+  const bHeads = toText.split("\n").map((l, i) => ({ at: i, name: l.replace(/^#{1,3}\s+/, "").trim() })).filter((h) => /^#{1,3}\s/.test(toText.split("\n")[h.at] ?? ""));
+  const aSet = new Set(aLines);
+  const bSet = new Set(bLines);
+  const added = bLines.filter((l) => !aSet.has(l)).slice(0, 20);
+  const removed = aLines.filter((l) => !bSet.has(l)).slice(0, 20);
+  const sections = new Set<string>();
+  toText.split("\n").forEach((l, i) => {
+    if (l.trim() && !aSet.has(l.trim())) sections.add(sectionOf(bHeads, i));
+  });
+  fromText.split("\n").forEach((l, i) => {
+    if (l.trim() && !bSet.has(l.trim())) sections.add(sectionOf(aHeads, i));
+  });
+  return {
+    from,
+    to,
+    added,
+    removed,
+    sectionsChanged: [...sections].slice(0, 10),
+    identical: fromText === toText,
+  };
+}
+
 export type AcceptanceResult =
   | { ok: true }
   | { ok: false; code: "stale_version"; currentVersion: number };

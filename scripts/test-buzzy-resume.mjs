@@ -555,13 +555,53 @@ check(
   JSON.stringify(r.json),
 );
 
+// 16. BZ-F016: manual edit + changed-section summary
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const preEditVersion = r.json?.document?.current_version;
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/edit`, { content: "MANUAL EDIT — hand-tuned final wording." });
+check(
+  "BZ-F016 manual edit materializes a new version",
+  r.status === 200 && r.json?.changed === true && r.json?.version === preEditVersion + 1,
+  JSON.stringify(r.json),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=${preEditVersion}`);
+check(
+  "BZ-F016 earlier version kept immutable (QA-12)",
+  r.json?.document?.content === "FORMAL v2 — revised demand letter, second edition.",
+  JSON.stringify(r.json?.document).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/edit`, { content: "MANUAL EDIT — hand-tuned final wording." });
+check(
+  "BZ-F016 identical edit is an honest no-op (no false change)",
+  r.status === 200 && r.json?.changed === false && /matches the current version/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=2`);
+check(
+  "BZ-F016 diff summary names added and removed lines",
+  (r.json?.diff?.added ?? []).some((l) => /FORMAL v2/.test(l)) &&
+    (r.json?.diff?.removed ?? []).some((l) => /DEMAND v1/.test(l)) &&
+    r.json?.diff?.identical === false,
+  JSON.stringify(r.json?.diff).slice(0, 300),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=1`);
+check("BZ-F016 same-version diff → useful 400", r.status === 400, `got ${r.status}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=99`);
+check("BZ-F016 unknown version in diff → 404", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/edit`, { content: "hostile takeover" });
+check("BZ-F016 other account cannot edit (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=2`);
+check("BZ-F016 other account cannot diff (QA-05)", r.status === 404, `got ${r.status}`);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const preRevisionVersion = r.json?.document?.current_version;
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
 check(
   "BZ-F017 revision after acceptance re-opens review, clears accepted_version (QA-20)",
-  r.json?.document?.status === "ready" && r.json?.document?.accepted_version === null && r.json?.document?.current_version === 3,
-  JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version, cv: r.json?.document?.current_version }),
+  r.json?.document?.status === "ready" && r.json?.document?.accepted_version === null && r.json?.document?.current_version === preRevisionVersion + 1,
+  JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version, cv: r.json?.document?.current_version, expected: preRevisionVersion + 1 }),
 );
 
 stub.close();
