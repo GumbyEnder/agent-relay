@@ -1769,6 +1769,39 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return '<div class="' + cls + '">' + escaped + "</div>";
       }).join("");
       container.innerHTML = html;
+      // BZ-F011: expert handoff suggestion (never an auto-switch). Re-appended
+      // after every render because this container is rebuilt from state.
+      if (chatState.expertSuggestion && !chatState.expert) {
+        const s = chatState.expertSuggestion;
+        const card = document.createElement("div");
+        card.className = "bubble expert-suggestion";
+        card.style.border = "1px solid var(--yellow, #f5c518)";
+        const txt = document.createElement("div");
+        txt.textContent = s.reason;
+        card.appendChild(txt);
+        const switchBtn = document.createElement("button");
+        switchBtn.type = "button";
+        switchBtn.textContent = "Switch to the " + s.name + " expert";
+        switchBtn.style.marginRight = "8px";
+        switchBtn.addEventListener("click", function () {
+          // Handoff: the confirmed brief (slots) and history stay exactly as
+          // they are — only the expert context changes.
+          chatState.expert = s.id;
+          chatState.expertSuggestion = null;
+          chatState.messages.push({ role: "assistant", content: "Switched to the " + s.name + " expert. Everything we captured carries over." });
+          renderChatMessages();
+        });
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.textContent = "Not now";
+        dismiss.addEventListener("click", function () {
+          chatState.expertSuggestion = null;
+          renderChatMessages();
+        });
+        card.appendChild(switchBtn);
+        card.appendChild(dismiss);
+        container.appendChild(card);
+      }
       container.scrollTop = container.scrollHeight;
     }
 
@@ -2956,6 +2989,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Update slots if present
         if (data.slots) {
           Object.assign(chatState.slots, data.slots);
+        }
+
+        // BZ-F011: expert handoff suggestion from intent (first turn only)
+        if (data.expertSuggestion) {
+          chatState.expertSuggestion = data.expertSuggestion;
         }
 
         // Check for draft readiness. The reply is the draft the owner reviews.

@@ -162,6 +162,44 @@ check(
   JSON.stringify(r.json).slice(0, 200),
 );
 
+// 5. BZ-F011: expert suggestion from intent — first turn, confident mapping only
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_legal`,
+  message: "I need a demand letter for a client who won't pay their invoice",
+});
+check(
+  "BZ-F011 legal intent suggests the Legal expert with a reason",
+  r.status === 200 && r.json?.expertSuggestion?.id === "legal" && typeof r.json?.expertSuggestion?.reason === "string" && r.json.expertSuggestion.reason.length > 10,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_legal`,
+  message: "They owe me for three months of work",
+});
+check(
+  "BZ-F011 suggestion fires on the first turn only",
+  r.status === 200 && r.json?.expertSuggestion === undefined,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_gen`,
+  message: "I need to organize my garage this weekend",
+});
+check(
+  "BZ-F011 no suggestion without a real registry mapping",
+  r.status === 200 && r.json?.expertSuggestion === undefined,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_fromexp`,
+  message: "Context: the user came from the legal experts page.\n\nI need a contract reviewed",
+});
+check(
+  "BZ-F011 no suggestion when already in an expert context",
+  r.status === 200 && r.json?.expertSuggestion === undefined,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+
 stub.close();
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

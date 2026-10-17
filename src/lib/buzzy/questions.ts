@@ -174,3 +174,23 @@ export const TYPE_DRAFT_HINTS: Record<JobType, string> = {
     "Capture the current step, the exact thing that's broken, the owner, and the definition of done so the change is unambiguous.",
   general: "",
 };
+
+/**
+ * BZ-F011 — expert suggestion from intent. Maps a confidently-classified job
+ * type to a REAL entry in the Experts registry (public/buzzy/experts.html);
+ * types without an honest domain mapping stay silent — a suggestion is only
+ * ever surfaced when the registry actually has the specialty. The `reason`
+ * is the plain-language "why" the handoff card shows the owner.
+ */
+export const EXPERT_SUGGESTIONS: Partial<Record<JobType, { id: string; name: string; reason: string }>> = {
+  legal: {
+    id: "legal",
+    name: "Legal",
+    reason: "A contracts review is useful before an agreement or letter like this is finalized.",
+  },
+  technical: {
+    id: "software",
+    name: "Software",
+    reason: "A software specialist can sanity-check the approach, the risks, and the success criteria.",
+  },
+};

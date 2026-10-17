@@ -41,7 +41,7 @@ import {
 } from "./info";
 import { compactHistory, normalizeToolResult, estimateTokens } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS } from "./questions";
+import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
@@ -194,6 +194,8 @@ export interface ChatResponse {
   previousDraft?: string;
   review?: Array<{ label: string; verdict: "verified" | "stated" | "warning"; detail?: string }>;
   estimate?: { estimateLow: number; estimateHigh: number; civilian: string; free: boolean };
+  /** BZ-F011: suggestion only — never an auto-switch. */
+  expertSuggestion?: { id: string; name: string; reason: string };
   error?: string;
   code?: string;
 }
@@ -554,6 +556,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   if (Object.keys(deltaSlots).length > 0) {
     response.slots = deltaSlots;
+  }
+
+  // ── BZ-F011: expert suggestion from intent ─────────────────────────
+  // First turn only, never when the owner already came from an expert page,
+  // and only for job types with a real registry specialty. Suggestion, never
+  // an auto-switch — the confirmed brief (slots) is untouched either way.
+  const cameFromExpert =
+    message.startsWith("Context: the user came from the ") ||
+    history.some((h) => typeof h.content === "string" && h.content.startsWith("Context: the user came from the "));
+  if (rawHistory.length === 0 && !cameFromExpert) {
+    const suggestion = EXPERT_SUGGESTIONS[jobType];
+    if (suggestion) response.expertSuggestion = suggestion;
   }
 
   // Draft only on the turn AFTER all four were already captured (the owner
