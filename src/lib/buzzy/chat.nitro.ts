@@ -688,7 +688,7 @@ export default defineEventHandler(async (event) => {
     }
     const sql = await getSql();
     const rows = await sql`
-      SELECT kind, scope, status, last_error, connected_at
+      SELECT kind, scope, status, last_error, connected_at, scope_detail
       FROM buzzy_connections WHERE user_id = ${user.id} ORDER BY connected_at DESC
     `;
     const known = Object.keys(CONNECTION_CONSENT);
@@ -713,14 +713,33 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: "Unknown integration kind", code: "bad_request" };
     }
+    // BZ-F032: the owner selects exactly what is shared (labels/folders/
+    // messages) — never a silent full-mailbox grant. Read-only first is the
+    // default; the selection is stored so the UI can explain and revoke it.
+    const selected = Array.isArray(body.selected)
+      ? (body.selected as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+          .map((s: string) => s.trim().slice(0, 120)).slice(0, 20)
+      : [];
+    const scopeDetail = { selected, readOnly: scope === "read" };
     const sql = await getSql();
     await sql`
-      INSERT INTO buzzy_connections (id, user_id, kind, scope, status)
-      VALUES (${"conn_" + Math.random().toString(36).slice(2, 10)}, ${user.id}, ${kind}, ${scope}, 'connected')
+      INSERT INTO buzzy_connections (id, user_id, kind, scope, status, scope_detail)
+      VALUES (${"conn_" + Math.random().toString(36).slice(2, 10)}, ${user.id}, ${kind}, ${scope}, 'connected',
+              ${JSON.stringify(scopeDetail)}::jsonb)
       ON CONFLICT (user_id, kind) DO UPDATE SET
-        scope = EXCLUDED.scope, status = 'connected', last_error = '', updated_at = now()
+        scope = EXCLUDED.scope, status = 'connected', last_error = '', updated_at = now(),
+        scope_detail = EXCLUDED.scope_detail
     `;
-    return { ok: true, kind, scope, consent: CONNECTION_CONSENT[kind] };
+    return {
+      ok: true,
+      kind,
+      scope,
+      selected,
+      consent: CONNECTION_CONSENT[kind],
+      note: selected.length
+        ? `Connected to ${selected.length} selected item${selected.length === 1 ? "" : "s"} — nothing outside that selection is read.`
+        : "Connected read-only, but nothing is selected yet — pick the folders or messages you want shared.",
+    };
   }
 
   if (method === "DELETE" && path.startsWith("/api/buzzy/connections/")) {

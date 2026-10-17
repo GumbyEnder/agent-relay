@@ -990,6 +990,35 @@ check("BZ-F029 repeating a repeat works (chain preserved)", r.status === 201 && 
 r = await api(cookieB, "POST", `/api/buzzy/jobs/${docJob}/repeat`, {});
 check("BZ-F029 other account cannot repeat A's job (QA-05)", r.status === 404, `got ${r.status}`);
 
+// 28. BZ-F032: connected tools — explicit selection, revoke, outage tolerance
+r = await api(cookieA, "POST", "/api/buzzy/connections", { kind: "email", scope: "read", selected: ["Invoices", "Suppliers"] });
+check(
+  "BZ-F032 connection stores the exact selection (read-only first)",
+  r.status === 200 && (r.json?.selected ?? []).length === 2 && /selected/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/connections");
+const emailConn = (r.json?.connections ?? []).find((c) => c.kind === "email");
+check(
+  "BZ-F032 list surfaces scope detail for explanation/revocation",
+  emailConn?.scope_detail?.readOnly === true &&
+    JSON.stringify(emailConn?.scope_detail?.selected ?? []) === JSON.stringify(["Invoices", "Suppliers"]),
+  JSON.stringify(emailConn).slice(0, 250),
+);
+r = await api(cookieA, "DELETE", "/api/buzzy/connections/email");
+check("BZ-F032 revoke works", r.status === 200 && r.json?.ok === true);
+r = await api(cookieA, "GET", "/api/buzzy/connections");
+check("BZ-F032 revoked connection disappears", !(r.json?.connections ?? []).some((c) => c.kind === "email"));
+// Outage/revoke tolerance: saved work stays readable without the connection
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F032 authored files survive disconnection (no connector dependency)",
+  r.status === 200 && typeof r.json?.document?.content === "string",
+  `status ${r.status}`,
+);
+r = await api(cookieB, "GET", "/api/buzzy/connections");
+check("BZ-F032 other account sees no connections (QA-05)", (r.json?.connections ?? []).length === 0);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
