@@ -38,6 +38,7 @@ import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./websit
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
+import { buildWeeklyDigest } from "./digest";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -306,6 +307,22 @@ export default defineEventHandler(async (event) => {
       companyFacts: company?.facts ?? [],
     });
     return result;
+  }
+
+  // ── GET /api/buzzy/digest — weekly civilian activity log ────────────
+  if (method === "GET" && path === "/api/buzzy/digest") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const weeksRaw = queryValue(fullPath, "weeks");
+    const weeks = weeksRaw ? Number(weeksRaw) : 1;
+    const sql = await getSql();
+    const digest = await buildWeeklyDigest(sql, user.id, {
+      weeks: Number.isFinite(weeks) ? weeks : 1,
+    });
+    return { ok: true, digest };
   }
 
   // ── GET /api/buzzy/memory — aggregate memory for the Memory page ─────

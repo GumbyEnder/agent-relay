@@ -889,6 +889,7 @@
   </header>
   <div id="companyTabs"></div>
   <main>
+    <div id="digestCard" class="bz-digest hidden" style="display:none"></div>
     <div id="chatScreen">
       <div class="chat-layout">
         <div class="chat-main">
@@ -3317,5 +3318,33 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // Show chat screen on load
     showChatScreen();
   </script>
+
+<script>
+/* ── Your week with Buzzy — activity digest (plan doc 23 #7) ──────────
+   Skippable by design: any failure or an empty week renders nothing. */
+(function () {
+  var card = document.getElementById("digestCard");
+  if (!card) return;
+  fetch("/api/buzzy/digest", { credentials: "include" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (!data || !data.ok || !data.digest) return;
+      var d = data.digest;
+      if (!d.turns && !d.draftsCreated) return; // quiet empty state
+      var bits = [];
+      bits.push(d.turns + " conversation" + (d.turns === 1 ? "" : "s"));
+      if (d.draftsCreated > 0) {
+        bits.push(d.draftsCreated + " draft" + (d.draftsCreated === 1 ? "" : "s") +
+          (d.draftsApproved > 0 ? " (" + d.draftsApproved + " approved)" : " ready for you"));
+      }
+      var money = "under a penny";
+      if (d.dollarsEstimate >= 0.005) money = "about $" + d.dollarsEstimate.toFixed(2);
+      bits.push(money + " this week");
+      card.textContent = "Your week with Buzzy: " + bits.join(", ") + ".";
+      card.style.display = "block";
+    })
+    .catch(function () { /* never surface an error for the digest */ });
+})();
+</script>
 </body>
 </html>
