@@ -2570,6 +2570,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         const msgs = (data.messages || []).map((m) => ({ role: m.role, content: m.content }));
         if (msgs.length >= 2) {
           chatState.messages = msgs;
+          // BZ-F004: restore the structured Decisions captured so far — the
+          // box must show server state on reopen, not wait for the next turn.
+          if (data.slots && typeof data.slots === "object") {
+            Object.assign(chatState.slots, data.slots);
+          }
           renderChatMessages();
           renderSlotChecklist();
           setChatMascot("12-content");
@@ -3169,7 +3174,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.sessionId = s.id;
         chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
         chatState.messages = msgs;
-        chatState.slots = {};
+        // BZ-F004: restore structured Decisions from the server instead of
+        // blanking the box until the next turn.
+        chatState.slots = (data.slots && typeof data.slots === "object") ? data.slots : {};
         setBrief(true);
         setBackVisible(true);
         resetDraftGate();

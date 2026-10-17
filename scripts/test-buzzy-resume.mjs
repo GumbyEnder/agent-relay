@@ -1,0 +1,167 @@
+#!/usr/bin/env node
+/**
+ * test-buzzy-resume.mjs — BZ-F004 E2E: resume restores structured Decisions.
+ *
+ * Runs its own deterministic stub LLM in-process (so the app server must be
+ * started with BZ_CHAT_BASE_URL=http://127.0.0.1:4111/v1 BZ_CHAT_KEY=test).
+ * The stub answers the decisions-extraction prompt with fixed JSON and every
+ * other prompt with a canned reply.
+ *
+ * Asserts:
+ *  1. A chat turn persists the extracted decision server-side
+ *  2. GET /api/buzzy/transcript?jobId= returns slots + messages (BZ-F004)
+ *  3. ?sessionId= resolves the session's job and returns the same slots
+ *  4. Another account sees neither messages nor slots (ownership negative)
+ *
+ * Usage: node scripts/test-buzzy-resume.mjs [baseUrl] [mailLogPath]
+ */
+import { createServer } from "node:http";
+import { readFileSync, existsSync } from "node:fs";
+
+const BASE = process.argv[2] || "http://127.0.0.1:8090";
+const MAIL_LOG = process.argv[3] || ".data/outbound-mail.jsonl";
+const STUB_PORT = 4111;
+const CHALLENGE = "Losing half my quotes before they go out";
+
+// ── stub LLM ────────────────────────────────────────────────────────────
+const stub = createServer((req, res) => {
+  if (req.method !== "POST" || !req.url?.includes("chat/completions")) {
+    res.writeHead(404).end("{}");
+    return;
+  }
+  let raw = "";
+  req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    let content;
+    try {
+      const body = JSON.parse(raw);
+      const sys = String(body.messages?.[0]?.content ?? "");
+      content = sys.includes("Extract these four facts")
+        ? JSON.stringify({ challenge: CHALLENGE, difficulties: null, who_involved: null, end_goal: null })
+        : "Got it — I noted that. What makes quotes hard to get out on time?";
+    } catch {
+      content = "Got it.";
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      id: "stub",
+      object: "chat.completion",
+      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+    }));
+  });
+});
+await new Promise((r) => stub.listen(STUB_PORT, "127.0.0.1", r));
+
+let failures = 0;
+function check(name, cond, detail = "") {
+  const ok = Boolean(cond);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : "  — " + detail}`);
+  if (!ok) failures++;
+}
+
+async function readMailUrl(email) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (existsSync(MAIL_LOG)) {
+      const lines = readFileSync(MAIL_LOG, "utf8").trim().split("\n").reverse();
+      for (const line of lines) {
+        try {
+          const mail = JSON.parse(line);
+          if (mail.to === email) {
+            const url =
+              mail.actionUrl ||
+              (mail.html || "").match(/href="([^"]*magic-link\/verify[^"]*)"/)?.[1] ||
+              (mail.text || "").match(/https?:\/\/\S*magic-link\/verify\S*/)?.[0];
+            if (url) return url.replace(/&amp;/g, "&");
+          }
+        } catch { /* partial line */ }
+      }
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`no magic-link mail found for ${email}`);
+}
+
+async function signIn(email) {
+  const res = await fetch(`${BASE}/api/auth/sign-in/magic-link`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE },
+    body: JSON.stringify({ email, callbackURL: "/" }),
+  });
+  if (!res.ok) throw new Error(`magic-link request failed ${res.status}: ${await res.text()}`);
+  const url = await readMailUrl(email);
+  const vres = await fetch(url, { redirect: "manual" });
+  const cookie = (vres.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
+  if (!cookie.includes("session_token")) throw new Error("no session cookie from verify");
+  return cookie;
+}
+
+async function api(cookie, method, path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "content-type": "application/json", origin: BASE, ...(cookie ? { cookie } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let json = null;
+  try { json = JSON.parse(await res.text()); } catch { /* non-json */ }
+  return { status: res.status, json };
+}
+
+const run = `rs${Date.now().toString(36)}`;
+const emailA = `bz-resume-${run}@test.local`;
+const emailB = `bz-resume2-${run}@test.local`;
+const jobId = `job_${run}_resume`;
+
+console.log(`base=${BASE} run=${run} stub=:${STUB_PORT}`);
+
+const cookieA = await signIn(emailA);
+const cookieB = await signIn(emailB);
+
+// 1. a chat turn persists the extracted decision server-side
+let r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId,
+  message: "I keep losing half my quotes before they go out",
+});
+check("chat turn accepted", r.status === 200 && typeof r.json?.reply === "string", JSON.stringify(r.json).slice(0, 200));
+
+// 2. transcript?jobId restores slots + messages
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${jobId}`);
+check(
+  "BZ-F004 transcript returns stored decision slot",
+  r.status === 200 && r.json?.slots?.challenge === CHALLENGE,
+  JSON.stringify(r.json?.slots),
+);
+check(
+  "BZ-F004 transcript returns both turns",
+  (r.json?.messages ?? []).length >= 2,
+  `messages=${(r.json?.messages ?? []).length}`,
+);
+
+// 3. session-bound restore resolves the job and returns the same slots
+r = await api(cookieA, "POST", "/api/buzzy/sessions", { jobId, title: "Resume QA" });
+const sessId = r.json?.session?.id;
+check("session created bound to job", r.status === 201 && typeof sessId === "string", JSON.stringify(r.json));
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId,
+  sessionId: sessId,
+  message: "It happens mostly on bigger jobs",
+});
+check("session chat turn accepted", r.status === 200, JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "GET", `/api/buzzy/transcript?sessionId=${sessId}`);
+check(
+  "BZ-F004 session transcript resolves job slots",
+  r.status === 200 && r.json?.slots?.challenge === CHALLENGE,
+  JSON.stringify(r.json?.slots),
+);
+
+// 4. ownership negative: B sees nothing
+r = await api(cookieB, "GET", `/api/buzzy/transcript?jobId=${jobId}`);
+check(
+  "BZ-F004 other account gets no messages or slots",
+  r.status === 200 && (r.json?.messages ?? []).length === 0 && Object.keys(r.json?.slots ?? {}).length === 0,
+  JSON.stringify(r.json).slice(0, 200),
+);
+
+stub.close();
+console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
+process.exit(failures === 0 ? 0 : 1);

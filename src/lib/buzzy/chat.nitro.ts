@@ -43,6 +43,7 @@ import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, ty
 import { buildExportBundle, deleteAccountData } from "./portability";
 import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
+import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -250,6 +251,31 @@ export default defineEventHandler(async (event) => {
           WHERE user_id = ${user.id} AND job_id = ${jobId}
           ORDER BY created_at ASC LIMIT 50
         `;
+    // BZ-F004: resume at the server-confirmed state — restore the structured
+    // Decisions (buzzy_user_memory) alongside the messages, so reopening a
+    // job/session re-fills the Decisions box instead of showing it empty
+    // until the next chat turn.
+    let resolvedJobId = jobId;
+    if (!resolvedJobId && sessionId) {
+      const sj = await sql<{ job_id: string | null }>`
+        SELECT job_id FROM buzzy_sessions
+        WHERE id = ${sessionId} AND user_id = ${user.id} LIMIT 1
+      `;
+      resolvedJobId = sj[0]?.job_id ?? null;
+    }
+    const slots: Record<string, string> = {};
+    if (resolvedJobId) {
+      const slotRows = await sql<{ key: string; value: string }>`
+        SELECT key, value FROM buzzy_user_memory
+        WHERE user_id = ${user.id} AND job_id = ${resolvedJobId}
+      `;
+      const known = new Set([...STATEMENT_IDS, ...DEEPENING_IDS]);
+      for (const r of slotRows) {
+        if (known.has(r.key) && typeof r.value === "string" && r.value.trim()) {
+          slots[r.key] = r.value;
+        }
+      }
+    }
     return {
       messages: rows.map((r) => ({
         jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
@@ -257,6 +283,7 @@ export default defineEventHandler(async (event) => {
         content: r.content,
         createdAt: r.created_at,
       })),
+      slots,
     };
   }
 
