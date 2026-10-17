@@ -1976,6 +1976,142 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── GET /api/buzzy/documents/:id/check-sheet — compact acceptance sheet ──
+  // What was produced · what was checked · what remains uncertain · how to use
+  // the files. Deterministic; the human decides from this, not from vibes.
+  const docSheet = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/check-sheet$/);
+  if (method === "GET" && docSheet) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const docs = await sql`
+      SELECT id, job_id, title, status, current_version, accepted_version, expert
+      FROM buzzy_documents WHERE id = ${docSheet[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const doc = docs[0];
+    const version = doc.accepted_version ?? doc.current_version;
+    const vrows = await sql`
+      SELECT version, content, brief_revision, review, accepted_at FROM buzzy_document_versions
+      WHERE doc_id = ${doc.id} AND version = ${version} LIMIT 1
+    `;
+    const decisions = await sql`
+      SELECT version, action, role, note, created_at FROM buzzy_document_decisions
+      WHERE doc_id = ${doc.id} AND user_id = ${user.id}
+      ORDER BY created_at DESC LIMIT 10
+    `;
+    const review = (() => {
+      const raw = vrows[0]?.review;
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === "string") { try { return JSON.parse(raw); } catch { return []; } }
+      return [];
+    })() as Array<{ label?: string; verdict?: string; detail?: string }>;
+    return {
+      sheet: {
+        produced: { title: doc.title, version, status: doc.status, expert: doc.expert ?? null },
+        checked: review.map((c) => ({ label: c.label ?? "", verdict: c.verdict ?? "" })),
+        uncertain: review.filter((c) => c.verdict === "warning").map((c) => ({ label: c.label ?? "", detail: c.detail ?? "" })),
+        files: {
+          markdown: `/api/buzzy/documents/${doc.id}?version=${version}&format=md`,
+          pdf: `/api/buzzy/documents/${doc.id}?version=${version}&format=pdf`,
+          docx: `/api/buzzy/documents/${doc.id}?version=${version}&format=docx`,
+          csv: `/api/buzzy/documents/${doc.id}?version=${version}&format=csv`,
+        },
+        decisions,
+      },
+    };
+  }
+
+  // ── POST /api/buzzy/documents/:id/decision — Accept / Request changes / Keep draft ─
+  // Internal and customer acceptance are DISTINCT records (role). Requesting
+  // changes creates a BOUNDED correction note tied to this exact version —
+  // one revision request, not a fresh unlimited job.
+  const docDecision = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)\/decision$/);
+  if (method === "POST" && docDecision) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const action = body.action;
+    if (action !== "accept" && action !== "request_changes" && action !== "keep_draft") {
+      setResponseStatus(event, 400);
+      return { error: "Choose Accept, Request changes, or Keep as a draft.", code: "bad_action" };
+    }
+    const role = body.role === "customer" ? "customer" : "internal";
+    const note = typeof body.note === "string" ? body.note.trim().slice(0, 1000) : "";
+    if (action === "request_changes" && !note) {
+      setResponseStatus(event, 400);
+      return { error: "Tell me what to change — a correction needs a specific ask.", code: "note_required" };
+    }
+    const sql = await getSql();
+    const docs = await sql`
+      SELECT id, job_id, title, status, current_version, accepted_version
+      FROM buzzy_documents WHERE id = ${docDecision[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const doc = docs[0];
+    const version = typeof body.version === "number" ? body.version : (doc.accepted_version ?? doc.current_version);
+    // Decisions bind to a version that must exist (and, to accept, the current
+    // one — a stale accept is refused, never silently applied).
+    const vrows = await sql`
+      SELECT content FROM buzzy_document_versions WHERE doc_id = ${doc.id} AND version = ${version} LIMIT 1
+    `;
+    if (!vrows.length) {
+      setResponseStatus(event, 404);
+      return { error: "That version does not exist.", code: "not_found" };
+    }
+    if (action === "accept" && version !== doc.current_version) {
+      setResponseStatus(event, 409);
+      return {
+        error: "That version is not the latest — review the current one before accepting.",
+        code: "stale_version",
+        currentVersion: doc.current_version,
+      };
+    }
+    await sql`
+      INSERT INTO buzzy_document_decisions (doc_id, user_id, version, action, role, note)
+      VALUES (${doc.id}, ${user.id}, ${version}, ${action}, ${role}, ${note})
+    `;
+    if (action === "accept" && role === "internal") {
+      // Internal acceptance moves the document lifecycle (customer acceptance
+      // is a distinct record and never flips the internal state by itself).
+      try {
+        await setDocumentAcceptance(sql, user.id, String(doc.job_id ?? doc.id), true,
+          typeof body.draft === "string" ? body.draft : null);
+      } catch (derr) {
+        console.error("[buzzy/documents] acceptance sync failed:", derr instanceof Error ? derr.message : derr);
+      }
+    }
+    if (action === "request_changes") {
+      await recordJobEvent(sql, String(doc.job_id ?? doc.id), user.id, "correction_requested",
+        JSON.stringify({ version, bound: "one revision", note: note.slice(0, 200) }));
+    }
+    return {
+      ok: true,
+      decision: { version, action, role },
+      note: action === "request_changes"
+        ? `Noted — one bounded correction on version ${version}: "${note.slice(0, 120)}". Revise and re-review; this stays tied to that version.`
+        : action === "accept"
+          ? `Accepted version ${version}${role === "customer" ? " (customer acceptance)" : ""}. Earlier versions stay intact.`
+          : "Kept as a draft — nothing is treated as final.",
+    };
+  }
+
   // ── Contacts directory (BZ-F030) — proposed until the owner accepts; ────
   // a name match NEVER merges entities — duplicates are flagged, not fused.
   if (method === "GET" && path === "/api/buzzy/contacts") {

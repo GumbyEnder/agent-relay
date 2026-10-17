@@ -879,6 +879,53 @@ check(
   JSON.stringify(r.json?.events).slice(0, 300),
 );
 
+// 25. BZ-F027: acceptance check sheet + human decision loop
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/check-sheet`);
+check(
+  "BZ-F027 check sheet lists produced / checked / uncertain / files",
+  r.status === 200 && r.json?.sheet?.produced?.version >= 1 &&
+    Array.isArray(r.json?.sheet?.checked) && r.json?.sheet?.files?.pdf &&
+    Array.isArray(r.json?.sheet?.uncertain),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "request_changes", note: "Make the payment paragraph firmer." });
+check(
+  "BZ-F027 request-changes is a bounded, version-tied correction",
+  r.status === 200 && r.json?.decision?.action === "request_changes" &&
+    r.json?.decision?.role === "internal" && /bounded correction/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "accept", role: "customer", version: 1 });
+check(
+  "BZ-F027 stale customer accept is refused (not the latest version)",
+  r.status === 409 && r.json?.code === "stale_version",
+  `status ${r.status}`,
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "accept", role: "customer" });
+check(
+  "BZ-F027 customer acceptance records a DISTINCT record",
+  r.status === 200 && r.json?.decision?.role === "customer",
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/check-sheet`);
+const sheetDecisions = r.json?.sheet?.decisions ?? [];
+check(
+  "BZ-F027 both internal correction and customer acceptance appear in the ledger",
+  sheetDecisions.some((d) => d.action === "request_changes" && d.role === "internal") &&
+    sheetDecisions.some((d) => d.action === "accept" && d.role === "customer"),
+  JSON.stringify(sheetDecisions).slice(0, 300),
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "accept" });
+check("BZ-F027 other account cannot decide (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "keep_draft" });
+check(
+  "BZ-F027 keep-as-draft is recorded without finalizing",
+  r.status === 200 && r.json?.decision?.action === "keep_draft",
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "request_changes" });
+check("BZ-F027 correction without a specific ask is refused", r.status === 400 && r.json?.code === "note_required", `status ${r.status}`);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
