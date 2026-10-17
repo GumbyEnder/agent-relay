@@ -52,7 +52,7 @@ import { reviewSeparately, type ReviewCheck } from "./review";
 import { STARTERS, getStarter } from "./starters";
 import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemetry";
 import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
-import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, type MemberRole } from "./team";
+import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -2095,15 +2095,34 @@ export default defineEventHandler(async (event) => {
       return { error: "Tell me what to change — a correction needs a specific ask.", code: "note_required" };
     }
     const sql = await getSql();
+    // BZ-F034: a teammate acts on the OWNER's account through membership, and
+    // the action itself is authorized by role or an explicit delegation (with
+    // its cap) — scope is never granted by being signed in.
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const needAction = action === "accept" ? "accept_document" : action === "request_changes" ? "request_changes" : "read";
     const docs = await sql`
       SELECT id, job_id, title, status, current_version, accepted_version
-      FROM buzzy_documents WHERE id = ${docDecision[1]} AND user_id = ${user.id} LIMIT 1
+      FROM buzzy_documents WHERE id = ${docDecision[1]} AND user_id = ${acting.accountId} LIMIT 1
     `;
     if (!docs.length) {
       setResponseStatus(event, 404);
       return { error: "Document not found", code: "not_found" };
     }
     const doc = docs[0];
+    if (needAction !== "read") {
+      // The space comes from the owning job, not the document row.
+      const spaceRows = doc.job_id
+        ? await sql<{ company_id: string | null }>`
+            SELECT company_id FROM buzzy_jobs WHERE id = ${String(doc.job_id)} AND user_id = ${acting.accountId} LIMIT 1
+          `
+        : [];
+      const decision = await authorize(sql as never, acting, needAction as never,
+        { companyId: spaceRows[0]?.company_id ?? null });
+      if (!decision.allowed) {
+        setResponseStatus(event, 403);
+        return { error: decision.reason, code: "role_denied", role: acting.role, via: decision.via };
+      }
+    }
     const version = typeof body.version === "number" ? body.version : (doc.accepted_version ?? doc.current_version);
     // Decisions bind to a version that must exist (and, to accept, the current
     // one — a stale accept is refused, never silently applied).
@@ -2124,7 +2143,7 @@ export default defineEventHandler(async (event) => {
     }
     await sql`
       INSERT INTO buzzy_document_decisions (doc_id, user_id, version, action, role, note)
-      VALUES (${doc.id}, ${user.id}, ${version}, ${action}, ${role}, ${note})
+      VALUES (${doc.id}, ${acting.accountId}, ${version}, ${action}, ${role}, ${note})
     `;
     await recordTelemetry(sql, { userId: user.id, jobId: String(doc.job_id ?? doc.id), docId: String(doc.id),
       event: action === "accept" ? "human_accepted" : action === "request_changes" ? "reopened" : "needs_you_answered",
@@ -2466,6 +2485,118 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── Delegations (BZ-F034): grant one action, in one space, under a cap ──
+  const delegationCreate = path.match(/^\/api\/buzzy\/team\/(tm_[A-Za-z0-9]{8,32})\/delegations$/);
+  if (method === "POST" && delegationCreate) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const deny = guard("manage_team", acting);
+    if (deny) {
+      setResponseStatus(event, 403);
+      return { error: deny, code: "role_denied", role: acting.role };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const action = typeof body.action === "string" && (DELEGATABLE as readonly string[]).includes(body.action)
+      ? body.action : "";
+    if (!action) {
+      setResponseStatus(event, 400);
+      return { error: `Choose one of: ${DELEGATABLE.join(", ")}.`, code: "bad_action" };
+    }
+    const member = await sql`
+      SELECT id, email, role, status FROM buzzy_team_members
+      WHERE id = ${delegationCreate[1]} AND owner_user_id = ${acting.accountId} LIMIT 1
+    `;
+    if (!member.length) {
+      setResponseStatus(event, 404);
+      return { error: "That teammate isn't on your account.", code: "not_found" };
+    }
+    if (String(member[0].status) !== "active") {
+      setResponseStatus(event, 409);
+      return { error: "That teammate hasn't accepted the invitation yet.", code: "not_active" };
+    }
+    const scopeCompanyId = typeof body.companyId === "string" && isCompanyId(body.companyId) ? body.companyId : null;
+    if (scopeCompanyId) {
+      const owned = await sql`SELECT id FROM buzzy_companies WHERE id = ${scopeCompanyId} AND user_id = ${acting.accountId}`;
+      if (!owned.length) {
+        setResponseStatus(event, 400);
+        return { error: "That business space isn't on your account.", code: "bad_company" };
+      }
+    }
+    const maxAmount = Number.isFinite(Number(body.maxAmountCents)) ? Math.max(0, Math.floor(Number(body.maxAmountCents))) : null;
+    const days = Number.isFinite(Number(body.expiresInDays)) ? Math.min(365, Math.max(1, Math.floor(Number(body.expiresInDays)))) : null;
+    const id = `dl_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await sql`
+      INSERT INTO buzzy_delegations (id, member_id, owner_user_id, action, scope_company_id, max_amount_cents, expires_at)
+      VALUES (${id}, ${delegationCreate[1]}, ${acting.accountId}, ${action}, ${scopeCompanyId}, ${maxAmount},
+              ${days ? new Date(Date.now() + days * 86400000).toISOString() : null})
+    `;
+    setResponseStatus(event, 201);
+    return {
+      ok: true,
+      delegation: { id, action, scopeCompanyId, maxAmountCents: maxAmount, expiresInDays: days },
+      note: `Delegated ${action.replace(/_/g, " ")}${scopeCompanyId ? " in that business space" : " across the account"}${maxAmount != null ? `, capped at ${(maxAmount / 100).toFixed(2)}` : ""}. It applies only to that action — nothing else is implied.`,
+    };
+  }
+
+  const delegationList = path.match(/^\/api\/buzzy\/team\/(tm_[A-Za-z0-9]{8,32})\/delegations$/);
+  if (method === "GET" && delegationList) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const member = await sql`
+      SELECT id FROM buzzy_team_members WHERE id = ${delegationList[1]} AND owner_user_id = ${acting.accountId} LIMIT 1
+    `;
+    if (!member.length) {
+      setResponseStatus(event, 404);
+      return { error: "That teammate isn't on your account.", code: "not_found" };
+    }
+    const rows = await sql`
+      SELECT id, action, scope_company_id, max_amount_cents, expires_at, revoked_at, created_at
+      FROM buzzy_delegations WHERE member_id = ${delegationList[1]}
+      ORDER BY created_at DESC
+    `;
+    return { ok: true, delegations: rows, delegatable: DELEGATABLE };
+  }
+
+  const delegationDelete = path.match(/^\/api\/buzzy\/team\/delegations\/(dl_[A-Za-z0-9]{8,32})$/);
+  if (method === "DELETE" && delegationDelete) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const deny = guard("manage_team", acting);
+    if (deny) {
+      setResponseStatus(event, 403);
+      return { error: deny, code: "role_denied", role: acting.role };
+    }
+    const rows = await sql`
+      UPDATE buzzy_delegations SET revoked_at = now()
+      WHERE id = ${delegationDelete[1]} AND owner_user_id = ${acting.accountId} AND revoked_at IS NULL
+      RETURNING id, action
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { error: "That delegation isn't active on your account.", code: "not_found" };
+    }
+    return { ok: true, revoked: rows[0], note: "Delegation revoked — that action needs the owner or an admin again." };
+  }
+
   // ── Recipes (BZ-J04…J11): configured business playbooks ───────────────
   // A recipe is discoverable, startable, and its boundary is checkable BEFORE
   // anything is accepted or sent. Boundaries are enforced in code, not prose.
@@ -2685,11 +2816,19 @@ export default defineEventHandler(async (event) => {
                 WHERE id = ${action.id} AND user_id = ${user.id}`;
       return { ok: true, action: { ...action, status: "cancelled" } };
     }
+    // BZ-F034: sending is authorized by role or an explicit delegation, in the
+    // acting account's scope — never merely because the caller is signed in.
+    const acting = await resolveActingAccount(sql as never, user.id, user.email ?? null);
+    const sendDecision = await authorize(sql as never, acting, "send_outbound", {});
+    if (!sendDecision.allowed) {
+      setResponseStatus(event, 403);
+      return { error: sendDecision.reason, code: "role_denied", role: acting.role, via: sendDecision.via };
+    }
     // Approve: re-verify the pinned version is still the accepted one — a
     // material change since preview invalidates this approval (QA-16/QA-20).
     const docs = await sql<{ title: string | null; status: string; accepted_version: number | null }>`
       SELECT title, status, accepted_version FROM buzzy_documents
-      WHERE id = ${action.doc_id} AND user_id = ${user.id} LIMIT 1
+      WHERE id = ${action.doc_id} AND user_id = ${acting.accountId} LIMIT 1
     `;
     if (!docs.length || docs[0].status !== "accepted" || docs[0].accepted_version !== action.version) {
       await sql`UPDATE buzzy_outbound_actions SET status = 'cancelled', decided_at = now(),

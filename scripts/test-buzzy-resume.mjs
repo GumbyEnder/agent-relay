@@ -43,6 +43,24 @@ const stub = createServer((req, res) => {
       // BZ-F038 calculator scenario: the "model" delegates arithmetic to the
       // deterministic tool. Trigger phrase decides the expression; a second
       // call carrying the tool result answers with the exact value.
+      // BZ-F042: reproduce the false "I can't save files" refusal the owner hit.
+      if (/\blibrary\b/i.test(lastUser) && /save|markdown|md\b/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "I can't save files to a library — no file-storage tool on my end — but I'll write the policy as markdown text here so you can copy it.",
+            },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
       if (/add up the invoice/i.test(lastUser) && !/calculate result/i.test(lastUser)) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({
@@ -1107,6 +1125,32 @@ check(
 );
 r = await api(cookieA, "POST", "/api/buzzy/documents/doc_nope/decision", { action: "accept" });
 check("BZ-P04 unknown document still 404s (unchanged)", r.status === 404, `got ${r.status}`);
+
+// 32. BZ-F042: never claim the product cannot save files; asking to save IS a draft
+const libJob = `job_${run}_library`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: libJob, message: "save the privacy policy as markdown in my library", attemptId: `att_${run}_lib` });
+check(
+  "BZ-F042 reply never claims the product cannot save files",
+  !/can'?t save files|no file-storage tool|file-storage/i.test(r.json?.reply ?? ""),
+  (r.json?.reply ?? "").slice(0, 160),
+);
+check(
+  "BZ-F042 the turn is treated as a deliverable request (draft gate opens)",
+  r.json?.draft === true,
+  JSON.stringify({ draft: r.json?.draft, done: r.json?.done }).slice(0, 120),
+);
+r = await api(cookieA, "GET", "/api/buzzy/documents");
+const libDoc = (r.json?.documents ?? []).find((d) => d.job_id === libJob);
+check(
+  "BZ-F042 asking for a saved file materializes a real Library document",
+  Boolean(libDoc?.id),
+  JSON.stringify((r.json?.documents ?? []).map((d) => d.job_id)).slice(0, 200),
+);
+check(
+  "BZ-F042 the saved document is versioned and readable",
+  libDoc?.current_version >= 1 && (libDoc?.status === "ready" || libDoc?.status === "draft" || libDoc?.status === "accepted"),
+  JSON.stringify(libDoc ?? {}).slice(0, 160),
+);
 
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });

@@ -18,9 +18,46 @@
  * Usage: node scripts/test-buzzy-team.mjs [baseUrl] [mailLogPath]
  */
 import { readFileSync, existsSync } from "node:fs";
+import { createServer } from "node:http";
 
 const BASE = process.argv[2] || "http://127.0.0.1:8090";
 const MAIL_LOG = process.argv[3] || ".data/outbound-mail.jsonl";
+const STUB_PORT = 4111;
+
+// Minimal deterministic LLM so chat turns materialize a real document. Without
+// it the suite silently produces no draft and every decision check 404s.
+const stub = createServer((req, res) => {
+  if (req.method !== "POST" || !req.url?.includes("chat/completions")) {
+    res.writeHead(404).end("{}");
+    return;
+  }
+  let raw = "";
+  req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    let content = "DRAFT: supplier comparison prepared for review.";
+    try {
+      const body = JSON.parse(raw);
+      const sys = String(body.messages?.[0]?.content ?? "");
+      // The extraction turn asks for JSON slots; answering with all four lets
+      // the NEXT turn satisfy the "all filled" rule and produce a draft.
+      if (/json|extract|statement|slot/i.test(sys)) {
+        content = JSON.stringify({
+          challenge: "compare supplier quotes",
+          difficulties: "none identified",
+          who_is_involved: "me and my teammate",
+          end_goal: "a comparison we can both sign off",
+        });
+      }
+    } catch { /* canned reply is fine */ }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      id: "stub", object: "chat.completion",
+      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+    }));
+  });
+});
+await new Promise((r) => stub.listen(STUB_PORT, "127.0.0.1", r));
 
 let failures = 0;
 function check(name, cond, detail = "") {
@@ -213,5 +250,103 @@ check("BZ-F041 stranger cannot revoke someone else's teammate (404)", r.status =
 r = await api(null, "GET", "/api/buzzy/team");
 check("BZ-F041 anonymous team read → 401", r.status === 401, `status ${r.status}`);
 
+// ── BZ-F034: team spaces + delegated approvals with caps ────────────────
+// Re-invite the member (revoked above) and build a document to decide on.
+r = await api(owner, "POST", "/api/buzzy/team/invite", { email: memberEmail, role: "member" });
+const t2 = (r.json?.inviteUrl ?? "").split("token=")[1] ?? "";
+const mem2 = r.json?.member?.id;
+r = await api(member, "POST", "/api/buzzy/team/accept", { token: t2 });
+check("BZ-F034 re-invited member rejoins", r.status === 200, `status ${r.status}`);
+
+// Owner creates a space (company), a job in it, and a document to decide.
+r = await api(owner, "POST", "/api/buzzy/companies", { name: `Space ${run}`, oneLiner: "Team space test" });
+const spaceId = r.json?.company?.id;
+check("BZ-F034 owner creates a business space", r.status === 201 && typeof spaceId === "string", JSON.stringify(r.json).slice(0, 150));
+await api(owner, "POST", "/api/buzzy/chat", { jobId: ownerJob, message: "The challenge is comparing supplier quotes", attemptId: `att_${run}_f034a` });
+r = await api(owner, "POST", "/api/buzzy/chat", { jobId: ownerJob, message: "That's everything — draft it", attemptId: `att_${run}_f034b` });
+check("setup: owner chat turn produced a draft", r.json?.draft === true || r.status === 200, `status ${r.status} ${JSON.stringify(r.json).slice(0, 120)}`);
+r = await api(owner, "GET", `/api/buzzy/documents`);
+const ownerDocId = (r.json?.documents ?? [])[0]?.id;
+check("setup: owner has a document to decide on", typeof ownerDocId === "string", JSON.stringify(r.json).slice(0, 200));
+
+// Without a delegation the member cannot accept it.
+r = await api(member, "POST", `/api/buzzy/documents/${ownerDocId}/decision`, { action: "accept" });
+check(
+  "BZ-F034 member WITHOUT delegation cannot accept the owner's document (403)",
+  r.status === 403 && r.json?.code === "role_denied",
+  `status ${r.status} ${JSON.stringify(r.json).slice(0, 150)}`,
+);
+check(
+  "BZ-F034 refusal explains which authority is missing",
+  /reserved|needs the owner/i.test(r.json?.error ?? ""),
+  r.json?.error,
+);
+
+// Grant accept_document in THIS space, capped at 500.00.
+r = await api(owner, "POST", `/api/buzzy/team/${mem2}/delegations`, {
+  action: "accept_document", companyId: spaceId, maxAmountCents: 50000, expiresInDays: 3,
+});
+const delegationId = r.json?.delegation?.id;
+check(
+  "BZ-F034 owner delegates accept_document in one space with a cap",
+  r.status === 201 && typeof delegationId === "string" && r.json?.delegation?.maxAmountCents === 50000,
+  JSON.stringify(r.json).slice(0, 250),
+);
+check(
+  "BZ-F034 delegation note states the action and cap plainly",
+  /capped at 500\.00/.test(r.json?.note ?? ""),
+  r.json?.note,
+);
+
+// A delegation for one action must not leak into another.
+r = await api(member, "POST", `/api/buzzy/documents/${ownerDocId}/outbound`, { recipient: "x@example.test" });
+check(
+  "BZ-F034 delegation for accept does NOT grant sending",
+  r.status === 403 || r.status === 404,
+  `status ${r.status}`,
+);
+
+// With the delegation, accepting works (document is unscoped, delegation is
+// space-scoped: that mismatch must refuse — proving the space check is real).
+r = await api(member, "POST", `/api/buzzy/documents/${ownerDocId}/decision`, { action: "accept" });
+check(
+  "BZ-F034 space-scoped delegation does not apply to work outside that space",
+  r.status === 403 && /different business space/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json).slice(0, 160)}`,
+);
+
+// Revoke it, then grant an account-wide one — now accepting is allowed.
+r = await api(owner, "DELETE", `/api/buzzy/team/delegations/${delegationId}`);
+check("BZ-F034 owner can revoke a delegation", r.status === 200 && r.json?.ok === true, `status ${r.status}`);
+r = await api(owner, "POST", `/api/buzzy/team/${mem2}/delegations`, { action: "accept_document" });
+const wideDelegation = r.json?.delegation?.id;
+check("BZ-F034 owner grants account-wide delegation", r.status === 201, JSON.stringify(r.json).slice(0, 150));
+r = await api(member, "POST", `/api/buzzy/documents/${ownerDocId}/decision`, { action: "accept" });
+check(
+  "BZ-F034 delegated member CAN accept within their delegation",
+  r.status === 200 && r.json?.decision?.action === "accept",
+  `status ${r.status} ${JSON.stringify(r.json).slice(0, 200)}`,
+);
+
+// Listing shows the live delegation and the delegatable action set.
+r = await api(owner, "GET", `/api/buzzy/team/${mem2}/delegations`);
+check(
+  "BZ-F034 delegation list shows the grant and what can be delegated",
+  (r.json?.delegations ?? []).some((d) => d.id === wideDelegation) &&
+    (r.json?.delegatable ?? []).includes("send_outbound"),
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(member, "GET", `/api/buzzy/team/${mem2}/delegations`);
+check(
+  "BZ-F034 delegated member can see the delegations that govern them",
+  r.status === 200 && (r.json?.delegations ?? []).length >= 1,
+  `status ${r.status}`,
+);
+r = await api(stranger, "GET", `/api/buzzy/team/${mem2}/delegations`);
+check("BZ-F034 stranger cannot list another account's delegations (404)", r.status === 404, `status ${r.status}`);
+r = await api(stranger, "POST", `/api/buzzy/team/${mem2}/delegations`, { action: "send_outbound" });
+check("BZ-F034 stranger cannot grant a delegation (404)", r.status === 404, `status ${r.status}`);
+
+stub.close();
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

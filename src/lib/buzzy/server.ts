@@ -64,6 +64,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - PRECISION PASS: once the four statements are captured or skipped, ask the remaining practical questions one at a time — budget, timing, how the owner will know it's done right, and anything to exclude. Each answer sharpens the draft. If the owner says "skip", "not sure", or "that's enough — just write it", accept it: mark the unanswered ones skipped and move to the draft.
 - IMPORTANT — job type: if the client's message is clearly a different kind of job (creative writing, a story, copy, a poem, a technical explainer), work THAT job. Do not refuse it and do not drag in unrelated earlier problems. Only ask scope-of-work questions that fit the actual request.
 - Only use details from THIS conversation. Never mention or reuse problems from other jobs.
+- FILES AND THE LIBRARY: every deliverable you produce is saved automatically as a versioned document in the owner's Library, with Markdown, PDF and Word copies. You have no filesystem of your own, but that does not matter — never say you "can't save files", have "no file-storage tool", or ask the owner to copy text out of the chat. If the owner asks to save something to their Library, produce or revise the deliverable so it is saved there, and tell them it's in the Library.
 You never mention models, tokens, or technical internals.`;
 
 // ── Helper: str ────────────────────────────────────────────────────────
@@ -312,7 +313,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // statements are only marked "skipped" this same turn. Deliberately explicit
   // phrases — not the bare words "write"/"produce"/"prepare"/"whenever", which
   // owners also use in innocent descriptions ("I write quotes by hand").
+  // BZ-F042: asking for the artifact as a saved file IS a draft request. Without
+  // this the gate stays shut, no render tool is offered, and the model improvises
+  // a "I can't save files" refusal that the product can actually fulfil.
+  const wantsLibraryFile =
+    /\b(save|store|put|add)\b[^.\n]{0,40}\b(library|my files?|documents?)\b/i.test(message) ||
+    /\b(as|in)\s+(an?\s+)?(md|markdown|pdf|docx?|word)\b/i.test(message) ||
+    /\bsave (a )?copy\b/i.test(message) ||
+    /\b(download|export) (it|this|that)\b/i.test(message);
   const requestedDraft =
+    wantsLibraryFile ||
     /\b(write it up|just write|go ahead|draft it|that'?s enough|finalize|whenever you'?re ready)\b/i.test(message);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
@@ -496,7 +506,30 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const sanitizedReply = sanitizeMemoryText(reply.content);
   // User-visible reply has decision markers removed; slots parse the raw
   // sanitized text (markers are how the model reports decisions) — dogfood B1.
-  const cleanReply = stripSlotMarkers(sanitizedReply);
+  // BZ-F042: a model must never tell the owner the product cannot save files —
+  // the Library is real. If the model still claims that limitation, drop the
+  // false sentence instead of shipping it, and mark the turn for review.
+  const CAPABILITY_LIE =
+    /\b(i can'?t (save|write|store|create) files?|no file[- ]?storage tool|cannot save (files|documents)|i don'?t have (access to )?(a )?file(system)?|no way to save)\b/i;
+  let guardedReply = stripSlotMarkers(sanitizedReply);
+  let capabilityLieStripped = false;
+  if (CAPABILITY_LIE.test(guardedReply)) {
+    capabilityLieStripped = true;
+    guardedReply = guardedReply
+      .split(/(?<=[.!?])\s+/)
+      .filter((sentence) => !CAPABILITY_LIE.test(sentence))
+      .join(" ")
+      .trim();
+    if (!guardedReply) {
+      guardedReply = "That's saved in your Library as a versioned document — you can open it as Markdown, PDF or Word.";
+    }
+  }
+  if (capabilityLieStripped) {
+    // Observable, not silent: a model claiming it cannot save files is a
+    // prompt/tool-wiring regression that should surface in the logs.
+    console.warn("[buzzy] stripped false file-storage refusal from reply");
+  }
+  const cleanReply = guardedReply;
 
   if (leaksJargon(sanitizedReply)) {
     // Simple jargon replacement as a fallback

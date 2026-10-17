@@ -138,3 +138,84 @@ export function guard(action: TeamAction, acting: ActingAccount): string | null 
   if (canPerform(acting.role, action)) return null;
   return denialReason(acting.role, action);
 }
+
+/** Delegatable actions — a member may be granted these explicitly, with caps. */
+export const DELEGATABLE = [
+  "accept_document", "request_changes", "send_outbound", "share_link",
+] as const;
+export type DelegatableAction = (typeof DELEGATABLE)[number];
+
+export interface DelegationContext {
+  /** Which space (company) the work belongs to, when it is scoped. */
+  companyId?: string | null;
+  /** Amount involved, in cents — compared against the delegation's cap. */
+  amountCents?: number | null;
+}
+
+export interface DelegationDecision {
+  allowed: boolean;
+  /** "role" when the role itself permits; "delegation" when a grant applies. */
+  via: "role" | "delegation" | "none";
+  delegationId?: string;
+  /** Why it was refused, in plain language. */
+  reason?: string;
+}
+
+/**
+ * BZ-F034: decide an action against role AND delegation.
+ *
+ * A role that already permits the action wins. Otherwise a live delegation for
+ * that exact action may permit it — but only within its space and amount cap.
+ * Expired and revoked delegations never apply, and a cap is a ceiling, not a
+ * suggestion.
+ */
+export async function authorize(
+  sql: SqlLike,
+  acting: ActingAccount,
+  action: TeamAction,
+  ctx: DelegationContext = {},
+): Promise<DelegationDecision> {
+  if (canPerform(acting.role, action)) return { allowed: true, via: "role" };
+  if (!acting.membershipId || !(DELEGATABLE as readonly string[]).includes(action)) {
+    return { allowed: false, via: "none", reason: denialReason(acting.role, action) };
+  }
+  const rows = (await sql`
+    SELECT id, scope_company_id, max_amount_cents, expires_at
+    FROM buzzy_delegations
+    WHERE member_id = ${acting.membershipId} AND action = ${action}
+      AND revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > now())
+  `) as Array<{
+    id: string; scope_company_id: string | null; max_amount_cents: number | null; expires_at: string | null;
+  }>;
+  if (!rows.length) {
+    return { allowed: false, via: "none", reason: denialReason(acting.role, action) };
+  }
+  // A space-scoped grant applies only inside that space; an unscoped grant
+  // applies anywhere on the account.
+  const spaceOk = rows.filter((r) =>
+    r.scope_company_id == null || (ctx.companyId != null && r.scope_company_id === ctx.companyId),
+  );
+  if (!spaceOk.length) {
+    const spaces = rows.map((r) => r.scope_company_id).filter(Boolean);
+    return {
+      allowed: false,
+      via: "none",
+      reason: `Not allowed: your delegation for this action covers ${spaces.length === 1 ? "a different business space" : "other business spaces"}, not this one.`,
+    };
+  }
+  // Cap check: any grant whose ceiling covers the amount (or has no ceiling).
+  const capOk = spaceOk.find((r) =>
+    r.max_amount_cents == null ||
+    (ctx.amountCents != null && ctx.amountCents <= r.max_amount_cents),
+  );
+  if (!capOk) {
+    const ceiling = Math.max(...spaceOk.map((r) => r.max_amount_cents ?? 0));
+    return {
+      allowed: false,
+      via: "none",
+      reason: `Not allowed: this delegation is capped at ${(ceiling / 100).toFixed(2)} and the amount involved is higher. Ask the owner to raise the cap.`,
+    };
+  }
+  return { allowed: true, via: "delegation", delegationId: capOk.id };
+}
