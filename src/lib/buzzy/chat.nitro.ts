@@ -1306,9 +1306,17 @@ export default defineEventHandler(async (event) => {
       return { error: "Sign in required", code: "signed_out" };
     }
     const raw = (queryValue(fullPath, "q") ?? "").trim();
-    if (raw.length < 2) {
-      return { ok: true, query: raw, jobs: [], sessions: [], totals: { jobs: 0, sessions: 0 } };
+    // A one-character search is not a search — say so instead of returning an
+    // empty 200 that looks like "no matches" (BZ-F019 contract, kept).
+    if (raw.length === 1) {
+      setResponseStatus(event, 400);
+      return { error: "Type at least 2 characters to search.", code: "bad_query" };
     }
+    if (raw.length === 0) {
+      return { ok: true, query: "", jobs: [], documents: [], sessions: [], totals: { jobs: 0, documents: 0, sessions: 0 } };
+    }
+    const statusFilter = queryValue(fullPath, "status");
+    const typeFilter = queryValue(fullPath, "type"); // "jobs" | "documents" | null
     const pattern = "%" + raw.slice(0, 120).replace(/[%_]/g, (m) => "\\" + m) + "%";
     const sql = await getSql();
     const jobRows = await sql`
@@ -1349,10 +1357,25 @@ export default defineEventHandler(async (event) => {
       ORDER BY s.updated_at DESC
       LIMIT 25
     `;
+    // Documents are part of "find my work" — title OR current-version content,
+    // with a snippet so the result explains itself (BZ-F019).
+    const docRows = typeFilter === "jobs" ? [] : await sql`
+      SELECT d.id, d.job_id, d.title, d.status, d.current_version, d.updated_at,
+             (SELECT content FROM buzzy_document_versions v
+               WHERE v.doc_id = d.id AND v.version = d.current_version) AS content
+      FROM buzzy_documents d
+      WHERE d.user_id = ${user.id}
+        AND (d.title ILIKE ${pattern}
+             OR (SELECT content FROM buzzy_document_versions v
+                  WHERE v.doc_id = d.id AND v.version = d.current_version) ILIKE ${pattern})
+        AND (${statusFilter}::text IS NULL OR d.status = ${statusFilter})
+      ORDER BY d.updated_at DESC LIMIT 25
+    `;
+    const ql = raw.toLowerCase();
     return {
       ok: true,
       query: raw,
-      jobs: jobRows.map((r) => ({
+      jobs: typeFilter === "documents" ? [] : jobRows.map((r) => ({
         id: r.id,
         title: r.title,
         status: r.status,
@@ -1371,7 +1394,19 @@ export default defineEventHandler(async (event) => {
         messageCount: Number(r.message_count),
         updatedAt: r.updated_at,
       })),
-      totals: { jobs: jobRows.length, sessions: sessionRows.length },
+      documents: docRows.map((d) => {
+        const content = String(d.content ?? "");
+        const at = content.toLowerCase().indexOf(ql);
+        const snippet = at >= 0
+          ? content.slice(Math.max(0, at - 60), at + raw.length + 60).replace(/\s+/g, " ").trim()
+          : "";
+        return {
+          id: d.id, jobId: d.job_id, title: d.title, status: d.status,
+          currentVersion: d.current_version, updatedAt: d.updated_at,
+          ...(snippet ? { snippet } : {}),
+        };
+      }),
+      totals: { jobs: typeFilter === "documents" ? 0 : jobRows.length, documents: docRows.length, sessions: sessionRows.length },
     };
   }
 
@@ -3060,66 +3095,6 @@ export default defineEventHandler(async (event) => {
     const sql = await getSql();
     await sql`DELETE FROM buzzy_contacts WHERE id = ${path.slice("/api/buzzy/contacts/".length)} AND user_id = ${user.id}`;
     return { ok: true };
-  }
-
-  // ── GET /api/buzzy/search — ownership-scoped search (BZ-F019) ─────────
-  // Titles AND content across the account's jobs and documents; filters by
-  // status/company/type. Search NEVER crosses accounts — a broad query
-  // returns exactly what the caller owns and nothing more (QA-05).
-  if (method === "GET" && path === "/api/buzzy/search") {
-    const user = await getSessionUserFromHeaders(headersFromEvent(event));
-    if (!user) {
-      setResponseStatus(event, 401);
-      return { error: "Sign in required", code: "signed_out" };
-    }
-    const q = (queryValue(fullPath, "q") ?? "").trim().slice(0, 120);
-    if (q.length < 2) {
-      setResponseStatus(event, 400);
-      return { error: "Type at least 2 characters to search.", code: "bad_query" };
-    }
-    const statusFilter = queryValue(fullPath, "status");
-    const companyFilter = queryValue(fullPath, "companyId");
-    const typeFilter = queryValue(fullPath, "type"); // "jobs" | "documents" | null
-    const needle = `%${q.replace(/[%_\\]/g, (c) => "\\" + c)}%`;
-    const sql = await getSql();
-    const jobs = typeFilter === "documents" ? [] : await sql`
-      SELECT id, title, status, company_id, updated_at
-      FROM buzzy_jobs
-      WHERE user_id = ${user.id}
-        AND title ILIKE ${needle}
-        AND (${statusFilter}::text IS NULL OR status = ${statusFilter})
-        AND (${companyFilter}::text IS NULL OR company_id = ${companyFilter})
-      ORDER BY updated_at DESC LIMIT 50
-    `;
-    const docs = typeFilter === "jobs" ? [] : await sql`
-      SELECT d.id, d.job_id, d.title, d.status, d.current_version, d.updated_at,
-             (SELECT content FROM buzzy_document_versions v
-               WHERE v.doc_id = d.id AND v.version = d.current_version) AS content
-      FROM buzzy_documents d
-      WHERE d.user_id = ${user.id}
-        AND (d.title ILIKE ${needle}
-             OR (SELECT content FROM buzzy_document_versions v
-                  WHERE v.doc_id = d.id AND v.version = d.current_version) ILIKE ${needle})
-        AND (${statusFilter}::text IS NULL OR d.status = ${statusFilter})
-      ORDER BY d.updated_at DESC LIMIT 50
-    `;
-    const ql = q.toLowerCase();
-    return {
-      q,
-      jobs: jobs.map((j) => ({ id: j.id, title: j.title, status: j.status, companyId: j.company_id, updatedAt: j.updated_at })),
-      documents: docs.map((d) => {
-        const content = String(d.content ?? "");
-        const at = content.toLowerCase().indexOf(ql);
-        const snippet = at >= 0
-          ? content.slice(Math.max(0, at - 60), at + q.length + 60).replace(/\s+/g, " ").trim()
-          : "";
-        return {
-          id: d.id, jobId: d.job_id, title: d.title, status: d.status,
-          currentVersion: d.current_version, updatedAt: d.updated_at,
-          ...(snippet ? { snippet } : {}),
-        };
-      }),
-    };
   }
 
   // ── GET /api/buzzy/today — the truthful attention list (BZ-F026) ──────

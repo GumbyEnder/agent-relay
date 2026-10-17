@@ -570,6 +570,24 @@ check(
   (r.json?.documents ?? []).every((d) => d.status === "accepted") && (r.json?.jobs ?? []).length === 0,
   JSON.stringify(r.json).slice(0, 250),
 );
+// Cross-company search (59c344e): results must carry company context so the
+// Work view can group them, and sessions must be searchable too.
+const coSearchJob = `job_${run}_cosearch`;
+await api(cookieA, "POST", "/api/buzzy/recipes/quote-comparison/start", { companyId: coId });
+r = await api(cookieA, "GET", "/api/buzzy/search?q=supplier");
+check(
+  "BZ-F019 search works across companies and names the company",
+  r.status === 200 && (r.json?.jobs ?? []).every((j) => "companyName" in j),
+  JSON.stringify((r.json?.jobs ?? []).slice(0, 1)),
+);
+check(
+  "BZ-F019 search returns sessions and documents alongside jobs",
+  Array.isArray(r.json?.sessions) && Array.isArray(r.json?.documents) && Array.isArray(r.json?.jobs),
+  JSON.stringify(Object.keys(r.json ?? {})),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=");
+check("BZ-F019 empty query returns an empty set, not an error", r.status === 200 && (r.json?.jobs ?? []).length === 0, `status ${r.status}`);
+
 r = await api(cookieA, "GET", "/api/buzzy/search?q=z");
 check("BZ-F019 one-character query → useful 400", r.status === 400, `got ${r.status}`);
 r = await api(cookieB, "GET", "/api/buzzy/search?q=quotes");
