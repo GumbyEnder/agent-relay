@@ -1,7 +1,8 @@
 # BeeZilla — Capability Layers
 
 **Status:** current implementation reference
-**Last verified against:** `6a69181` (2026-10-17), production deployment `146fc8c3`
+**Last verified against:** `0025841` (2026-10-17) — suites 175/41/47/41/9, all passing
+**Production:** beezilla `146fc8c3` (built from `6a69181`; the commits since are docs and UI only)
 **Audience:** engineers extending the agent loop; operators deciding what to promise customers
 
 BeeZilla's capabilities are deliberately layered. Nothing the model says can create a
