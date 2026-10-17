@@ -27,6 +27,7 @@ import {
   parseToolArguments,
   reviewDraft,
 } from "./artifact";
+import { playbookGuidance, playbookChecks } from "./playbooks";
 import {
   lookupMarketRate,
   fetchWebsitePage,
@@ -323,6 +324,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   );
   const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
   const planFirst = shouldPlanFirst(message) ? PLAN_FIRST_INSTRUCTION : "";
+  const playbookBlock = playbookGuidance(jobType);
   const guidance = (hasExistingDraft
     ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
     : requestedDraft
@@ -333,7 +335,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
       : !wereAllFilled
         ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
-        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`) + planFirst;
+        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`) + planFirst + playbookBlock;
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
@@ -539,7 +541,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // Multi-step review (component #8): deterministic approval-time checks,
     // rendered by the client as the "I checked" lines.
     const ownerReviewText = [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" ");
-    response.review = reviewDraft(cleanReply, ownerReviewText);
+    const universalChecks = reviewDraft(cleanReply, ownerReviewText);
+    const typeChecks = playbookChecks(jobType).map((c: { label: string; run: (d: string, o: string) => { verdict: "verified" | "stated" | "warning"; detail: string } }) => {
+      const r = c.run(cleanReply, ownerReviewText);
+      return { label: c.label, verdict: r.verdict, detail: r.detail };
+    });
+    response.review = [...universalChecks, ...typeChecks];
     // Self-check: a draft must not invent a dollar amount the owner never gave.
     const ownerText = [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" ");
     if (mentionsInventedAmount(cleanReply, ownerText)) {
