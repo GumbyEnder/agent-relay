@@ -509,6 +509,52 @@ check(
   JSON.stringify(r.json),
 );
 
+// 15. BZ-F037: archive retains, delete cascades and explains scope
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Archived" });
+check("BZ-F037 job archived", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+check(
+  "BZ-F037 archived job leaves the active view",
+  !(r.json?.jobs ?? []).some((j) => j.id === recJob),
+);
+r = await api(cookieA, "GET", "/api/buzzy/jobs?archived=1");
+check(
+  "BZ-F037 archived job retained and retrievable with ?archived=1",
+  (r.json?.jobs ?? []).some((j) => j.id === recJob && j.status === "Archived"),
+);
+// its conversation/history survive archiving (retained, not deleted)
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F037 archive retains history (QA-17)",
+  (r.json?.messages ?? []).length >= 2,
+  `messages=${(r.json?.messages ?? []).length}`,
+);
+// delete cascades with an explained scope
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Draft ready" });
+r = await api(cookieA, "DELETE", `/api/buzzy/jobs/${recJob}`);
+check(
+  "BZ-F037 delete cascades and explains scope",
+  r.status === 200 && r.json?.deleted?.job === 1 && typeof r.json?.deleted?.messages === "number" && /backups/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F037 deleted job's messages are gone (propagation)",
+  (r.json?.messages ?? []).length === 0,
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F037 unrelated work unaffected by the delete",
+  r.status === 200 && typeof r.json?.document?.content === "string",
+  `status ${r.status}`,
+);
+r = await api(cookieB, "DELETE", `/api/buzzy/jobs/${docJob}`);
+check(
+  "BZ-F037 other account delete is a no-op with an honest note",
+  r.status === 200 && r.json?.deleted?.job === 0,
+  JSON.stringify(r.json),
+);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);

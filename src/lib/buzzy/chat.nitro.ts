@@ -1185,11 +1185,15 @@ export default defineEventHandler(async (event) => {
         return { error: "Company not found", code: "not_found" };
       }
     }
+    // BZ-F037: Archived jobs leave the ACTIVE view but keep documents and
+    // history — they return only with ?archived=1.
+    const includeArchived = queryValue(fullPath, "archived") === "1";
     const rows = companyFilter
       ? await sql`
           SELECT id, template, title, status, company_id, data, created_at, updated_at
           FROM buzzy_jobs
           WHERE user_id = ${user.id} AND company_id = ${companyFilter}
+            AND (${includeArchived}::boolean OR status IS DISTINCT FROM 'Archived')
           ORDER BY updated_at DESC
           LIMIT 500
         `
@@ -1197,6 +1201,7 @@ export default defineEventHandler(async (event) => {
           SELECT id, template, title, status, company_id, data, created_at, updated_at
           FROM buzzy_jobs
           WHERE user_id = ${user.id}
+            AND (${includeArchived}::boolean OR status IS DISTINCT FROM 'Archived')
           ORDER BY updated_at DESC
           LIMIT 500
         `;
@@ -1316,7 +1321,24 @@ export default defineEventHandler(async (event) => {
     if (deleted.length) {
       await recordJobEvent(sql, id, user.id, "delete", "job deleted by owner");
     }
-    return { ok: true };
+    // BZ-F037: deletion PROPAGATES per policy and says so. A deleted job takes
+    // its messages, remembered facts, documents (+versions) and execution
+    // linkage with it; the response spells out scope, including what no
+    // consumer delete can touch (backups / legally required audit).
+    if (deleted.length) {
+      const docId = "doc_" + id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 100);
+      const cascade: Record<string, number> = {};
+      cascade.messages = (await sql`DELETE FROM buzzy_chat_messages WHERE user_id = ${user.id} AND job_id = ${id} RETURNING 1`).length;
+      cascade.memory = (await sql`DELETE FROM buzzy_user_memory WHERE user_id = ${user.id} AND job_id = ${id} RETURNING 1`).length;
+      cascade.document_versions = (await sql`DELETE FROM buzzy_document_versions WHERE doc_id = ${docId} RETURNING 1`).length;
+      cascade.documents = (await sql`DELETE FROM buzzy_documents WHERE id = ${docId} AND user_id = ${user.id} RETURNING 1`).length;
+      return {
+        ok: true,
+        deleted: { job: 1, ...cascade },
+        note: "The job, its conversation, its remembered details and its documents are deleted. This does not reach encrypted backups or legally required audit records, which age out on their own schedule.",
+      };
+    }
+    return { ok: true, deleted: { job: 0 }, note: "Nothing was deleted — that job isn't on your account." };
   }
 
   // ── PATCH /api/buzzy/jobs/:id — rename the job title ─────────────────
