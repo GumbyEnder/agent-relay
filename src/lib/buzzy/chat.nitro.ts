@@ -41,6 +41,7 @@ import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper"
 import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 import { buildExportBundle, deleteAccountData } from "./portability";
+import { recordJobEvent } from "./jobEvents";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -365,6 +366,22 @@ export default defineEventHandler(async (event) => {
         "Content-Disposition": `attachment; filename="${artifact.filename ?? "document.docx"}"`,
       },
     });
+  }
+
+  // ── GET /api/buzzy/jobs/:id/events — attribution audit trail ─────────
+  if (method === "GET" && pathParts?.[2] === "buzzy" && pathParts?.[3] === "jobs" && pathParts?.[5] === "events") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT actor, action, detail, created_at FROM buzzy_job_events
+      WHERE job_id = ${pathParts[4]} AND user_id = ${user.id}
+      ORDER BY created_at DESC LIMIT 100
+    `;
+    return { ok: true, events: rows };
   }
 
   // ── GET /api/buzzy/export — one-click data export (plan doc 23) ──────
@@ -964,6 +981,7 @@ export default defineEventHandler(async (event) => {
       return { error: "id is required", code: "bad_request" };
     }
     const sql = await getSql();
+    await recordJobEvent(sql, id, user.id, "delete", "job deleted by owner");
     await sql`DELETE FROM buzzy_jobs WHERE id = ${id} AND user_id = ${user.id}`;
     return { ok: true };
   }
@@ -1017,6 +1035,14 @@ export default defineEventHandler(async (event) => {
     if (!rows.length) {
       setResponseStatus(event, 404);
       return { error: "job not found", code: "not_found" };
+    }
+    // ── Per-human attribution (multi-owner groundwork) ─────────────────
+    if (hasApproved) {
+      await recordJobEvent(sql, id, user.id, "approve",
+        body.approved === true ? "approved" : "approval revoked");
+    }
+    if (hasStatus) {
+      await recordJobEvent(sql, id, user.id, "status", String(body.status));
     }
     // ── Company KB derivation (plan doc 23, component #1) ─────────────
     // When a job with a company is approved, its confirmed paper facts
