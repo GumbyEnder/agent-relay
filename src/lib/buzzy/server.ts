@@ -343,6 +343,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // side-effect classification; the artifact itself stays approval-gated.
   const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft;
   const loopTools = draftGateOpen ? [RENDER_DOCUMENT_TOOL] : undefined;
+  // glm-class models treat an optional tool as optional and answer in prose.
+  // When the owner EXPLICITLY asks for the file, force the tool call (plan doc
+  // 23, open decision #3: native tool_calls with a fallback path).
+  const explicitDocumentRequest = /\b(word document|\.docx|actual document|make the (file|document)|produce the (file|document)|as a (file|document|word)|download(able)? (file|document))\b/i.test(message);
+  const toolChoice = draftGateOpen && explicitDocumentRequest
+    ? { type: "function", function: { name: "render_document" } }
+    : undefined;
   const toolMax = 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
@@ -352,7 +359,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const routedModel =
       resolvedModel ??
       ((jobType === "legal" || jobType === "technical") ? resolveReasoningModel() : undefined);
-    reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools });
+    reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice });
 
     // Bounded model-paced loop: execute render_document calls and feed the
     // result back until the model returns a final answer or we hit the cap.
