@@ -36,9 +36,12 @@ const stub = createServer((req, res) => {
     try {
       const body = JSON.parse(raw);
       const sys = String(body.messages?.[0]?.content ?? "");
+      const lastUser = String([...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "");
       content = sys.includes("Extract these four facts")
         ? JSON.stringify({ challenge: CHALLENGE, difficulties: null, who_involved: null, end_goal: null })
-        : "Got it — I noted that. What makes quotes hard to get out on time?";
+        : /more formal/i.test(lastUser)
+          ? "FORMAL v2 — revised demand letter, second edition."
+          : "DEMAND v1 — pay what you owe, first edition.";
     } catch {
       content = "Got it.";
     }
@@ -199,6 +202,52 @@ check(
   r.status === 200 && r.json?.expertSuggestion === undefined,
   JSON.stringify(r.json?.expertSuggestion),
 );
+
+// 6. BZ-F015: durable documents — materialize, immutable versions, lifecycle
+const docJob = `job_${run}_docs`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: docJob,
+  message: "I need a demand letter for Acme who won't pay — write it up",
+});
+check("BZ-F015 draft produced", r.status === 200 && r.json?.draft === true, JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "GET", `/api/buzzy/documents?jobId=${docJob}`);
+const doc = (r.json?.documents ?? [])[0];
+check(
+  "BZ-F015 draft materialized as ready document v1 with exact output",
+  doc && doc.status === "ready" && doc.current_version === 1 && doc.content === "DEMAND v1 — pay what you owe, first edition.",
+  JSON.stringify(doc).slice(0, 250),
+);
+const docId = doc?.id;
+
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "make it more formal" });
+check("BZ-F015 revision produced", r.status === 200 && r.json?.draft === true, JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F015 revision bumped to v2",
+  r.json?.document?.current_version === 2 && r.json?.document?.content === "FORMAL v2 — revised demand letter, second edition.",
+  JSON.stringify(r.json?.document).slice(0, 250),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=1`);
+check(
+  "BZ-F015 prior version immutable (QA-12)",
+  r.json?.document?.version === 1 && r.json?.document?.content === "DEMAND v1 — pay what you owe, first edition.",
+  JSON.stringify(r.json?.document).slice(0, 250),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=99`);
+check("BZ-F015 unknown version is a clean 404", r.status === 404, `got ${r.status}`);
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true });
+check("BZ-F015 job approval accepted", r.status === 200, JSON.stringify(r.json).slice(0, 150));
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F015 approval marks document accepted", r.json?.document?.status === "accepted", JSON.stringify(r.json?.document?.status));
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: false });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F015 revoked approval returns document to ready", r.json?.document?.status === "ready", JSON.stringify(r.json?.document?.status));
+
+r = await api(cookieB, "GET", "/api/buzzy/documents");
+check("BZ-F015 other account's library excludes the doc", !(r.json?.documents ?? []).some((d) => d.id === docId));
+r = await api(cookieB, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F015 other account doc read → 404 (QA-05)", r.status === 404, `got ${r.status}`);
 
 stub.close();
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

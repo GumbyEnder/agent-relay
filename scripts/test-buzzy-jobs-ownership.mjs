@@ -233,7 +233,7 @@ r = await api(cookieA, "POST", "/api/buzzy/jobs", { id: `job_${run}_a2`, title: 
 check("A seeds second job pre-deletion", r.status === 200);
 r = await api(cookieA, "DELETE", "/api/buzzy/account", { confirm: "delete my business" });
 check("QA-17 account delete accepted", r.status === 200 && r.json?.ok === true, JSON.stringify(r.json));
-for (const [path, key] of [["/api/buzzy/jobs", "jobs"], ["/api/buzzy/sessions", "sessions"], ["/api/buzzy/companies", "companies"], ["/api/buzzy/scheduled", "scheduled"], ["/api/buzzy/connections", "connections"]]) {
+for (const [path, key] of [["/api/buzzy/jobs", "jobs"], ["/api/buzzy/sessions", "sessions"], ["/api/buzzy/companies", "companies"], ["/api/buzzy/scheduled", "scheduled"], ["/api/buzzy/connections", "connections"], ["/api/buzzy/documents", "documents"]]) {
   const rr = await api(cookieA, "GET", path);
   check(`QA-17 ${key} empty after account deletion`, rr.status === 200 && (rr.json?.[key] ?? []).length === 0, JSON.stringify(rr.json).slice(0, 200));
 }

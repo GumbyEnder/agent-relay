@@ -44,6 +44,7 @@ import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
+import { materializeDraft } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
@@ -610,6 +611,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
     `;
+    // BZ-F015: materialize the actual produced text as a durable document
+    // with immutable versions — never reconstruct it later from the brief.
+    try {
+      await materializeDraft(sql, userId, recordId, baseTitle, cleanReply);
+    } catch (derr) {
+      console.error("[buzzy/documents] materialize failed:", derr instanceof Error ? derr.message : derr);
+    }
   }
 
   return response;

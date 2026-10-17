@@ -92,6 +92,11 @@ const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_chat_messages: "DELETE FROM buzzy_chat_messages WHERE user_id = $1 RETURNING 1",
   buzzy_user_memory: "DELETE FROM buzzy_user_memory WHERE user_id = $1 RETURNING 1",
   buzzy_jobs: "DELETE FROM buzzy_jobs WHERE user_id = $1 RETURNING 1",
+  // BZ-F015: versions go first (FK child of documents; cascade also covers it,
+  // but the explicit pass keeps the receipt truthful).
+  buzzy_document_versions:
+    "DELETE FROM buzzy_document_versions WHERE doc_id IN (SELECT id FROM buzzy_documents WHERE user_id = $1) RETURNING 1",
+  buzzy_documents: "DELETE FROM buzzy_documents WHERE user_id = $1 RETURNING 1",
   buzzy_templates: "DELETE FROM buzzy_templates WHERE user_id = $1 RETURNING 1",
   buzzy_paper_facts: "DELETE FROM buzzy_paper_facts WHERE user_id = $1 RETURNING 1",
   buzzy_papers: "DELETE FROM buzzy_papers WHERE user_id = $1 RETURNING 1",

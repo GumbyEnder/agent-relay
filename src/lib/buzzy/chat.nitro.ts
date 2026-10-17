@@ -43,6 +43,7 @@ import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, ty
 import { buildExportBundle, deleteAccountData } from "./portability";
 import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
+import { setDocumentAcceptance } from "./documents";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -1268,6 +1269,12 @@ export default defineEventHandler(async (event) => {
     if (hasApproved) {
       await recordJobEvent(sql, id, user.id, "approve",
         body.approved === true ? "approved" : "approval revoked");
+      // BZ-F015: approval state flows into the document lifecycle.
+      try {
+        await setDocumentAcceptance(sql, user.id, id, body.approved === true);
+      } catch (derr) {
+        console.error("[buzzy/documents] acceptance sync failed:", derr instanceof Error ? derr.message : derr);
+      }
     }
     if (hasStatus) {
       await recordJobEvent(sql, id, user.id, "status", String(body.status));
@@ -1310,6 +1317,69 @@ export default defineEventHandler(async (event) => {
       }
     }
     return { job: { id: rows[0].id, title: rows[0].title, status: rows[0].status } };
+  }
+
+  // ── GET /api/buzzy/documents — durable document library (BZ-F015) ────
+  // Drafts, ready-for-review and accepted versions are visibly different
+  // states; every row is the materialized output, never a reconstructed echo.
+  if (method === "GET" && path === "/api/buzzy/documents") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const jobFilter = queryValue(fullPath, "jobId");
+    const statusFilter = queryValue(fullPath, "status");
+    const rows = await sql`
+      SELECT d.id, d.job_id, d.title, d.type, d.status, d.current_version,
+             d.expert, d.created_at, d.updated_at,
+             (SELECT content FROM buzzy_document_versions v
+               WHERE v.doc_id = d.id AND v.version = d.current_version) AS content
+      FROM buzzy_documents d
+      WHERE d.user_id = ${user.id}
+        AND (${jobFilter}::text IS NULL OR d.job_id = ${jobFilter})
+        AND (${statusFilter}::text IS NULL OR d.status = ${statusFilter})
+      ORDER BY d.updated_at DESC LIMIT 200
+    `;
+    return { documents: rows };
+  }
+
+  // ── GET /api/buzzy/documents/:id?version=N — one document, chosen version ─
+  const docMatch = path.match(/^\/api\/buzzy\/documents\/(doc_[A-Za-z0-9_-]+)$/);
+  if (method === "GET" && docMatch) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const docs = await sql`
+      SELECT id, job_id, title, type, status, current_version, expert, created_at, updated_at
+      FROM buzzy_documents WHERE id = ${docMatch[1]} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!docs.length) {
+      setResponseStatus(event, 404);
+      return { error: "Document not found", code: "not_found" };
+    }
+    const versionRaw = queryValue(fullPath, "version");
+    const version = versionRaw ? Number(versionRaw) : docs[0].current_version;
+    // QA-12: the chosen version is returned exactly as stored — exports and
+    // renders always match it; unknown versions are a clean 404, never a
+    // silent fall-through to the latest.
+    const vrows = await sql`
+      SELECT version, content, created_at FROM buzzy_document_versions
+      WHERE doc_id = ${docMatch[1]} AND version = ${Number.isFinite(version) ? version : -1} LIMIT 1
+    `;
+    if (!vrows.length) {
+      setResponseStatus(event, 404);
+      return { error: "That version does not exist", code: "not_found" };
+    }
+    const versions = await sql`
+      SELECT version, created_at FROM buzzy_document_versions
+      WHERE doc_id = ${docMatch[1]} ORDER BY version DESC
+    `;
+    return { document: { ...docs[0], content: vrows[0].content, version: vrows[0].version }, versions };
   }
 
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
