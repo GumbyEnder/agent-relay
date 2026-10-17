@@ -813,6 +813,47 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── DELETE /api/buzzy/memory — forget, with propagation (BZ-F031) ─────
+  // Removes remembered facts for one job (or one key). Memory is derived at
+  // READ time from buzzy_user_memory, so the next chat turn provably no
+  // longer applies the forgotten items. Approved documents and the Library
+  // are NOT deleted — forgetting memory never implies deleting the work.
+  if (method === "DELETE" && path === "/api/buzzy/memory") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const jobId = typeof body.jobId === "string" && body.jobId.trim() ? body.jobId.trim().slice(0, 120) : null;
+    const key = typeof body.key === "string" && body.key.trim() ? body.key.trim().slice(0, 80) : null;
+    if (!jobId) {
+      setResponseStatus(event, 400);
+      return { error: "Tell me which job to forget memory for.", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const rows = key
+      ? await sql`
+          DELETE FROM buzzy_user_memory
+          WHERE user_id = ${user.id} AND job_id = ${jobId} AND key = ${key}
+          RETURNING 1
+        `
+      : await sql`
+          DELETE FROM buzzy_user_memory
+          WHERE user_id = ${user.id} AND job_id = ${jobId}
+          RETURNING 1
+        `;
+    return {
+      ok: true,
+      forgotten: rows.length,
+      note: "Those remembered details are gone and won't be used again. Approved documents and your Library are untouched — delete a job or the account for that.",
+    };
+  }
+
   // ── GET /api/buzzy/profile — account-scoped business profile + defaults ──
   if (method === "GET" && path === "/api/buzzy/profile") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));

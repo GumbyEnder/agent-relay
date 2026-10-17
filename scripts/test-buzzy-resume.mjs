@@ -384,6 +384,44 @@ check("BZ-F030 other account sees no contacts (QA-05)", (r.json?.contacts ?? [])
 r = await api(cookieB, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
 check("BZ-F030 other account cannot confirm (QA-05)", r.status === 404, `got ${r.status}`);
 
+// 11. BZ-F031: visible memory + forget propagation
+// (the first chat turn on `jobId` persisted the extracted challenge to memory)
+r = await api(cookieA, "GET", "/api/buzzy/memory");
+check(
+  "BZ-F031 memory shows the stored fact",
+  (r.json?.facts ?? []).some((f) => f.jobId === jobId && f.key === "challenge" && f.value === CHALLENGE),
+  JSON.stringify(r.json?.facts).slice(0, 250),
+);
+r = await api(cookieA, "DELETE", "/api/buzzy/memory", { jobId });
+check(
+  "BZ-F031 forget reports what was removed (and the Library is untouched)",
+  r.status === 200 && r.json?.ok === true && r.json?.forgotten >= 1 && /Library/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json),
+);
+r = await api(cookieA, "GET", "/api/buzzy/memory");
+check(
+  "BZ-F031 forgotten facts no longer readable for that job",
+  !(r.json?.facts ?? []).some((f) => f.jobId === jobId),
+  JSON.stringify(r.json?.facts).slice(0, 200),
+);
+// propagation to retrieval: a fresh transcript for the job returns no slots either
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${jobId}`);
+check(
+  "BZ-F031 forget propagates to derived retrieval (no slots surface)",
+  Object.keys(r.json?.slots ?? {}).length === 0,
+  JSON.stringify(r.json?.slots),
+);
+// forgetting the DOC job's memory leaves its materialized document untouched
+r = await api(cookieA, "DELETE", "/api/buzzy/memory", { jobId: docJob });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F031 job work survives a memory forget (forget ≠ delete)",
+  r.status === 200 && typeof r.json?.document?.content === "string" && r.json.document.content.length > 0,
+  `status ${r.status}`,
+);
+r = await api(cookieB, "DELETE", "/api/buzzy/memory", { jobId });
+check("BZ-F031 other account cannot forget A's memory (QA-05)", r.status === 200 && r.json?.forgotten === 0, JSON.stringify(r.json));
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);

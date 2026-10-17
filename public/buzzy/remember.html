@@ -273,6 +273,18 @@
         "<p class='muted'>Device id (will be your Honcho peer later): " + escapeHtml(catalog.userId || "—") + "</p>" +
         "<div class='row'><button id='forgetJob' class='secondary'>Forget this job</button><button id='back' class='secondary'>Back</button></div>";
       document.getElementById("forgetJob").onclick = () => {
+        // BZ-F031: forget propagates to the SERVER memory, not just this
+        // device. The note from the server says exactly what was (and was
+        // not) forgotten — the Library and approved documents stay.
+        const jobId = state.id;
+        if (jobId) {
+          fetch("/api/buzzy/memory", {
+            method: "DELETE",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: jobId }),
+          }).catch(() => {});
+        }
         state.answers = {};
         state.skipped = {};
         state.q = 0;
