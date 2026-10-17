@@ -44,6 +44,7 @@ import { buildExportBundle, deleteAccountData } from "./portability";
 import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 import { setDocumentAcceptance } from "./documents";
+import { ensureExecutionBoard } from "./execution";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -1251,6 +1252,7 @@ export default defineEventHandler(async (event) => {
     const dataPatch: Record<string, unknown> = {};
     if (hasApproved) dataPatch.approved = body.approved;
     if (hasDraft) dataPatch.draft = body.draft;
+    let executionInfo: { projectId: string; created: boolean } | null = null;
     const sql = await getSql();
     const rows = await sql`
       UPDATE buzzy_jobs SET
@@ -1289,6 +1291,21 @@ export default defineEventHandler(async (event) => {
         }
       } catch (derr) {
         console.error("[buzzy/documents] acceptance sync failed:", derr instanceof Error ? derr.message : derr);
+      }
+      // BZ-REUSE-159: on Approve, create (idempotently) the shop-floor board
+      // + agent + first ticket under the hood. The durable approval audit
+      // (job approval + document accepted_version) is the first_ticket_cut
+      // gate — ensureExecutionBoard refuses without it.
+      if (body.approved === true) {
+        try {
+          const exec = await ensureExecutionBoard(sql, user.id, id);
+          if (exec.ok) {
+            executionInfo = { projectId: exec.execution.projectId, created: exec.created };
+          }
+        } catch (exerr) {
+          // Execution linkage is additive — the approval itself already landed.
+          console.error("[buzzy/execution] board creation failed:", exerr instanceof Error ? exerr.message : exerr);
+        }
       }
     }
     if (hasStatus) {
@@ -1331,7 +1348,10 @@ export default defineEventHandler(async (event) => {
         `;
       }
     }
-    return { job: { id: rows[0].id, title: rows[0].title, status: rows[0].status } };
+    return {
+      job: { id: rows[0].id, title: rows[0].title, status: rows[0].status },
+      ...(executionInfo ? { execution: executionInfo } : {}),
+    };
   }
 
   // ── GET /api/buzzy/documents — durable document library (BZ-F015) ────

@@ -281,6 +281,41 @@ check(
 const acceptedV2 = (r.json?.versions ?? []).find((v) => v.version === 2);
 check("BZ-F017 accepted version row stamped (accepted_at/by)", Boolean(acceptedV2?.accepted_at && acceptedV2?.accepted_by), JSON.stringify(acceptedV2).slice(0, 200));
 
+// 8. BZ-REUSE-159: on Approve, shop-floor board + agent created idempotently
+// (the exact-version approval PATCH above already fired it)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "FORMAL v2 — revised demand letter, second edition." });
+check(
+  "REUSE-159 approval returns execution linkage",
+  r.status === 200 && typeof r.json?.execution?.projectId === "string" && r.json.execution.projectId.length > 0,
+  JSON.stringify(r.json).slice(0, 250),
+);
+const execProject = r.json?.execution?.projectId;
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+const execJob = (r.json?.jobs ?? []).find((j) => j.id === docJob);
+check(
+  "REUSE-159 job stores board + agent + ticket linkage",
+  execJob?.data?.execution?.projectId === execProject &&
+    typeof execJob?.data?.execution?.agentName === "string" &&
+    typeof execJob?.data?.execution?.missionId === "string" &&
+    execJob?.data?.execution?.acceptedVersion === 2,
+  JSON.stringify(execJob?.data?.execution),
+);
+// Repeated approval must NOT duplicate the work set (QA-08/09)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "FORMAL v2 — revised demand letter, second edition." });
+check(
+  "REUSE-159 repeated approval reuses the same board (no duplicates)",
+  r.status === 200 && r.json?.execution?.projectId === execProject && r.json?.execution?.created === false,
+  JSON.stringify(r.json?.execution),
+);
+// Gate: approving a job with no versioned document creates nothing
+r = await api(cookieA, "POST", "/api/buzzy/jobs", { id: `job_${run}_nodoc`, title: "No doc job", data: {} });
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_nodoc`, { approved: true });
+check(
+  "REUSE-159 no versioned approval audit → no execution items",
+  r.status === 200 && r.json?.execution === undefined,
+  JSON.stringify(r.json).slice(0, 200),
+);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
