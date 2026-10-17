@@ -42,6 +42,7 @@ import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 import { buildExportBundle, deleteAccountData } from "./portability";
 import { recordJobEvent } from "./jobEvents";
+import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -366,6 +367,117 @@ export default defineEventHandler(async (event) => {
         "Content-Disposition": `attachment; filename="${artifact.filename ?? "document.docx"}"`,
       },
     });
+  }
+
+  // ── Scheduled jobs (plan doc 23, component #5) ──────────────────────
+  // Create/list/delete: owner-facing. Run: cron-friendly, secret-gated.
+  if (method === "POST" && path === "/api/buzzy/scheduled") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const body = await event.req.json().then((b: any) => (b && typeof b === "object" ? b : {})).catch(() => ({}));
+    const name = typeof body.name === "string" ? body.name.trim().slice(0, 80) : "";
+    const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 2000) : "";
+    const cadence = ["daily", "weekly", "monthly"].includes(body.cadence) ? body.cadence : "weekly";
+    const companyId = typeof body.companyId === "string" && isCompanyId(body.companyId) ? body.companyId : null;
+    if (!name || !prompt) {
+      setResponseStatus(event, 400);
+      return { error: "name and prompt are required", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const id = "sch_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    await sql`
+      INSERT INTO buzzy_scheduled_jobs (id, user_id, company_id, name, prompt, cadence)
+      VALUES (${id}, ${user.id}, ${companyId}, ${name}, ${prompt}, ${cadence})
+    `;
+    return { ok: true, scheduled: { id, name, cadence } };
+  }
+  if (method === "GET" && path === "/api/buzzy/scheduled") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, name, prompt, cadence, next_run_at, last_result, enabled
+      FROM buzzy_scheduled_jobs WHERE user_id = ${user.id}
+      ORDER BY created_at DESC LIMIT 50
+    `;
+    return { ok: true, scheduled: rows };
+  }
+  if (method === "DELETE" && path.startsWith("/api/buzzy/scheduled/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    await sql`DELETE FROM buzzy_scheduled_jobs WHERE id = ${path.slice("/api/buzzy/scheduled/".length)} AND user_id = ${user.id}`;
+    return { ok: true };
+  }
+  // Cron runner: each due run lands a DRAFT in the approve queue. Never sends.
+  if (method === "GET" && path === "/api/buzzy/scheduled/run") {
+    const runnerSecret = process.env.BZ_SCHEDULER_SECRET ?? "";
+    const provided = queryValue(fullPath, "secret") ?? "";
+    if (!runnerSecret || provided !== runnerSecret) {
+      setResponseStatus(event, 403);
+      return { error: "Runner secret required", code: "forbidden" };
+    }
+    const sql = await getSql();
+    const due = await dueScheduledJobs(sql, 3);
+    const results: Array<{ id: string; draftId?: string; error?: string }> = [];
+    for (const job of due) {
+      try {
+        const userId = job.user_id;
+        const result = await chatLoop({
+          userId,
+          jobId: null,
+          sessionId: null,
+          message: job.prompt + "\n\n(This is a scheduled run — produce the draft; it will wait for approval.)",
+          jobContext: undefined,
+          companyName: null,
+          companyFacts: [],
+        });
+        if (result.ok && result.reply) {
+          const draftId = await saveScheduledDraft(sql, job, result.reply);
+          await markScheduledRun(sql, job.id, "draft created: " + draftId, "weekly");
+          results.push({ id: job.id, draftId });
+        } else {
+          await markScheduledRun(sql, job.id, "run failed: " + (result.error ?? "unknown"), "weekly");
+          results.push({ id: job.id, error: result.error ?? "unknown" });
+        }
+      } catch (err) {
+        await markScheduledRun(sql, job.id, "run threw: " + String(err), "weekly");
+        results.push({ id: job.id, error: String(err) });
+      }
+    }
+    return { ok: true, ran: results.length, results };
+  }
+
+  // ── Inbox actions (component #4): READ-ONLY digest; sending never exists
+  // as an autonomous path. Without a connection: clean not-connected state —
+  // the zero-config harness stays fully useful.
+  if (method === "GET" && path === "/api/buzzy/inbox/digest") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const conn = await sql`
+      SELECT status, last_error FROM buzzy_connections
+      WHERE user_id = ${user.id} AND kind = 'email' AND scope = 'read' LIMIT 1
+    `;
+    if (!conn.length || conn[0].status !== "connected") {
+      return { ok: true, connected: false, message: "No mailbox connected yet. Connect one any time — until then, everything else works as usual." };
+    }
+    if (conn[0].last_error) {
+      return { ok: true, connected: true, degraded: true, message: `I can't reach your mailbox right now (${conn[0].last_error}). Reconnect from settings when you can.` };
+    }
+    return { ok: true, connected: true, items: [], message: "Mailbox connected. Digest items appear here as drafted replies waiting on your approval." };
   }
 
   // ── GET /api/buzzy/jobs/:id/events — attribution audit trail ─────────
