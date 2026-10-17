@@ -28,6 +28,7 @@ import {
   reviewDraft,
 } from "./artifact";
 import { playbookGuidance, playbookChecks } from "./playbooks";
+import { buildJobEstimate } from "./digest";
 import {
   lookupMarketRate,
   fetchWebsitePage,
@@ -192,6 +193,7 @@ export interface ChatResponse {
   jobId?: string;
   previousDraft?: string;
   review?: Array<{ label: string; verdict: "verified" | "stated" | "warning"; detail?: string }>;
+  estimate?: { estimateLow: number; estimateHigh: number; civilian: string; free: boolean };
   error?: string;
   code?: string;
 }
@@ -528,6 +530,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ok: true,
     reply: cleanReply,
   };
+  // Pricing surface (stack item 12): the per-job estimate disclosed with the
+  // draft — before the owner approves work, never after.
+  if (draftGateOpen) {
+    try {
+      response.estimate = await buildJobEstimate(sql, userId, draftGateOpen);
+    } catch { /* estimate is additive — never block the reply */ }
+  }
 
   if (Object.keys(deltaSlots).length > 0) {
     response.slots = deltaSlots;

@@ -144,3 +144,49 @@ export async function buildWeeklyDigest(
     notes,
   };
 }
+
+
+/** ── Pricing surface (plan doc 23, stack item 12) ───────────────────────
+ * Per-job cost estimate disclosed BEFORE the loop runs, and the
+ * free-until-first-file promise. No billing system exists yet — this is the
+ * trust surface: the estimate, the free promise, and the receipt (the
+ * weekly digest) that a later billing integration must reconcile with.
+ */
+
+export const FREE_UNTIL_FIRST_FILE = true;
+
+/** Rough civilian estimate for a job before it runs. */
+export async function buildJobEstimate(
+  sql: any,
+  userId: string,
+  hasFileTool: boolean,
+): Promise<{ estimateLow: number; estimateHigh: number; civilian: string; free: boolean }> {
+  const rows = (await sql`
+    SELECT COALESCE(AVG(total_tokens), 800) AS avg_tokens
+    FROM buzzy_chat_messages
+    WHERE user_id = ${userId} AND role = 'assistant' AND created_at >= now() - interval '30 days'
+  `) as Array<{ avg_tokens: string | number }>;
+  const avgTokens = Math.max(Number(rows[0]?.avg_tokens) || 800, 400);
+  // A loop job runs the same turn 2-4x; document turns run heavier.
+  const expectedLow = Math.round(avgTokens * (hasFileTool ? 2.5 : 1.2));
+  const expectedHigh = Math.round(avgTokens * (hasFileTool ? 4 : 1.8));
+  const low = expectedLow * 0.000002;
+  const high = expectedHigh * 0.000002;
+  const fmt = (v: number) => (v < 0.01 ? "under a penny" : `about $${v.toFixed(2)}`);
+  return {
+    estimateLow: low,
+    estimateHigh: high,
+    civilian: `This should cost ${fmt(low)} to ${fmt(high)} (an estimate). Your first real file was free.`,
+    free: FREE_UNTIL_FIRST_FILE,
+  };
+}
+
+/** Has this owner already had their free first real file? */
+export async function hasFirstFile(sql: any, userId: string): Promise<boolean> {
+  const rows = (await sql`
+    SELECT 1 FROM buzzy_jobs
+    WHERE user_id = ${userId} AND data->>'approved' = 'true' AND data->'artifact' IS NOT NULL
+    LIMIT 1
+  `) as unknown[];
+  return rows.length > 0;
+}
