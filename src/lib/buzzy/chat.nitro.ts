@@ -48,6 +48,7 @@ import { ensureExecutionBoard } from "./execution";
 import { renderTextPdf } from "./pdf";
 import { renderDocument } from "./artifact";
 import { TOOL_REGISTRY } from "./tools";
+import { reviewSeparately, type ReviewCheck } from "./review";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
@@ -2520,6 +2521,53 @@ export default defineEventHandler(async (event) => {
       return { error: updated.error, code: updated.code };
     }
     return { ok: true, paper: updated.paper };
+  }
+
+  // ── POST /api/buzzy/review — the SEPARATE risk-aware check (BZ-F014) ────
+  // Independent of the writing turn: contract-matched checks with tool
+  // evidence (the calculator recomputes stated totals). A warning is named
+  // plainly — never smoothed into "looks fine" (QA-11).
+  if (method === "POST" && path === "/api/buzzy/review") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    let text = typeof body.draft === "string" ? body.draft.slice(0, 40000) : "";
+    // Or review a stored document version (server-fetched, ownership-scoped).
+    if (!text && typeof body.documentId === "string" && body.documentId) {
+      const sql = await getSql();
+      const vrows = await sql<{ content: string }>`
+        SELECT v.content FROM buzzy_document_versions v
+        JOIN buzzy_documents d ON d.id = v.doc_id
+        WHERE v.doc_id = ${body.documentId.slice(0, 120)} AND d.user_id = ${user.id}
+          AND v.version = d.current_version LIMIT 1
+      `;
+      if (!vrows.length) {
+        setResponseStatus(event, 404);
+        return { error: "Document not found", code: "not_found" };
+      }
+      text = String(vrows[0].content ?? "");
+    }
+    if (!text.trim()) {
+      setResponseStatus(event, 400);
+      return { error: "Give me the draft (or a document) to check.", code: "bad_request" };
+    }
+    const checks = reviewSeparately(text);
+    const warnings = checks.filter((c: ReviewCheck) => c.verdict === "warning");
+    return {
+      ok: true,
+      independent: true,
+      note: "This is a separate check — the draft did not grade itself. Arithmetic was recomputed by the calculator, not the writer.",
+      checks,
+      hasWarnings: warnings.length > 0,
+      blocksReady: warnings.length > 0,
+    };
   }
 
   // ── POST /api/buzzy/money-check — compare; do not approve or send ──

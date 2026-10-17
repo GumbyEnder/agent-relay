@@ -838,6 +838,38 @@ check(
   rogueTranscript.slice(0, 300),
 );
 
+// 23. BZ-F014: the separate risk-aware review (calculator-backed)
+const goodDraft = "From: ACME Landscaping\nTo: Dana Reyes\n\n- Spring cleanup: $450.00\n- Mulch refresh: $300.00\n- Haul-away: $150.00\n\nTotal due: $900.00\n";
+r = await api(cookieA, "POST", "/api/buzzy/review", { draft: goodDraft });
+check(
+  "BZ-F014 separate check verifies matching arithmetic + named parties",
+  r.status === 200 && r.json?.independent === true && r.json?.hasWarnings === false &&
+    (r.json?.checks ?? []).some((c) => c.label === "Line items add up to the stated total" && c.verdict === "verified"),
+  JSON.stringify(r.json).slice(0, 300),
+);
+const badDraft = goodDraft.replace("Total due: $900.00", "Total due: $950.00");
+r = await api(cookieA, "POST", "/api/buzzy/review", { draft: badDraft });
+check(
+  "BZ-F014 calculator catches a wrong total — warning blocks ready (QA-11)",
+  r.status === 200 && r.json?.blocksReady === true &&
+    (r.json?.checks ?? []).some((c) => c.verdict === "warning" && /\$900\.00/.test(c.detail ?? "") ),
+  JSON.stringify(r.json).slice(0, 400),
+);
+r = await api(cookieA, "POST", "/api/buzzy/review", { draft: "From: A\nTo: B\n\nWe will sue you if you do not pay." });
+check(
+  "BZ-F014 fabricated legal threat is named as a warning (QA-13)",
+  (r.json?.checks ?? []).some((c) => c.label.includes("legal threats") && c.verdict === "warning"),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "POST", "/api/buzzy/review", { documentId: docId });
+check(
+  "BZ-F014 review accepts a stored document (ownership-scoped)",
+  r.status === 200 && Array.isArray(r.json?.checks),
+  `status ${r.status}`,
+);
+r = await api(cookieB, "POST", "/api/buzzy/review", { documentId: docId });
+check("BZ-F014 other account cannot review A's stored document (QA-05)", r.status === 404, `got ${r.status}`);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
