@@ -1,0 +1,127 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "pct": 100,
+  "passCount": 20,
+  "runs": [
+    {
+      "label": "round1/shape1",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round1/shape2",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round1/shape3",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round1/shape4",
+      "pass": true,
+      "failures": [],
+      "finish": "stop"
+    },
+    {
+      "label": "round2/shape1",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round2/shape2",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round2/shape3",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round2/shape4",
+      "pass": true,
+      "failures": [],
+      "finish": "stop"
+    },
+    {
+      "label": "round3/shape1",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round3/shape2",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round3/shape3",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round3/shape4",
+      "pass": true,
+      "failures": [],
+      "finish": "stop"
+    },
+    {
+      "label": "round4/shape1",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round4/shape2",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round4/shape3",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round4/shape4",
+      "pass": true,
+      "failures": [],
+      "finish": "stop"
+    },
+    {
+      "label": "round5/shape1",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round5/shape2",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round5/shape3",
+      "pass": true,
+      "failures": [],
+      "finish": "tool_calls"
+    },
+    {
+      "label": "round5/shape4",
+      "pass": true,
+      "failures": [],
+      "finish": "stop"
+    }
+  ]
+}
