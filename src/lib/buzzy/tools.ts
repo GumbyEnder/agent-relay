@@ -88,6 +88,17 @@ export const TOOL_REGISTRY: ToolDeclaration[] = [
     verification: "ownership-scoped query; nothing confirmed → 'ask the owner', never a guess",
     failureBehavior: "empty result is stated plainly; no cross-account data can surface",
   },
+  {
+    name: "calculate",
+    inputs: "{ expression } — one arithmetic line (numbers, + - * / %, parentheses)",
+    output: "the exact computed value with the shown working",
+    sensitivity: "none",
+    costClass: "free",
+    sideEffects: "read-only",
+    permission: "session_user",
+    verification: "deterministic parser — the model never computes; errors (bad token, division by zero) are explicit",
+    failureBehavior: "invalid input returns a named error, never a guessed number (QA-11); missing inputs stay missing",
+  },
 ];
 
 /** Names the chat loop may execute — anything else is "not available". */

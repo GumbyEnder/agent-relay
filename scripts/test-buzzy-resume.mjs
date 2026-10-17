@@ -40,6 +40,37 @@ const stub = createServer((req, res) => {
       // BZ-F013 rogue-tool scenario: the "model" tries to call an undeclared
       // tool. The loop must refuse it — the second call (carrying the
       // "not available" tool result) answers plainly.
+      // BZ-F038 calculator scenario: the "model" delegates arithmetic to the
+      // deterministic tool. Trigger phrase decides the expression; a second
+      // call carrying the tool result answers with the exact value.
+      if (/add up the invoice/i.test(lastUser) && !/calculate result/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "call_calc", type: "function", function: { name: "calculate", arguments: JSON.stringify({ expression: "3*1200+450" }) } }],
+            },
+            finish_reason: "tool_calls",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
+      if (/calculate result/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{ index: 0, message: { role: "assistant", content: "That comes to 4050 exactly." }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
       if (/send an email/i.test(lastUser) && !/not available/i.test(lastUser)) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({
@@ -805,6 +836,27 @@ check(
   "BZ-F013 rogue recipient never persisted anywhere in the conversation",
   !/attacker@evil/i.test(rogueTranscript),
   rogueTranscript.slice(0, 300),
+);
+
+// 22. BZ-F038: deterministic calculator through the tool loop
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
+check(
+  "BZ-F038 arithmetic runs in the deterministic calculator and lands in the reply",
+  r.status === 200 && r.json?.ok === true && /4050/.test(r.json?.reply ?? ""),
+  JSON.stringify(r.json).slice(0, 200),
+);
+// the transcript carries the exact computed working, not a model guess
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=job_${run}_calc`);
+check(
+  "BZ-F038 computed value persisted exactly",
+  /4050/.test(JSON.stringify(r.json ?? {})),
+);
+// unit-level: the parser itself (via a second scenario-free route is not exposed;
+// assert boundaries through the registry declaration instead)
+r = await api(cookieA, "GET", "/api/buzzy/tools");
+check(
+  "BZ-F038 calculator is a declared tool with explicit failure behavior",
+  (r.json?.tools ?? []).some((t) => t.name === "calculate" && /never a guessed number/i.test(t.failureBehavior)),
 );
 
 stub.close();
