@@ -3066,5 +3066,8 @@ export default defineEventHandler(async (event) => {
     };
   }
 
-  throw new Error("Not found");
+  // BZ-P04 review finding: an unmatched /api/buzzy route is a 404, not an
+  // unhandled 500. A typo must read as "wrong path", never as "server broke".
+  setResponseStatus(event, 404);
+  return { ok: false, error: "That API path doesn't exist.", code: "not_found", path };
 });

@@ -1098,6 +1098,16 @@ check("BZ-F039 unknown-version read still 404s (no false telemetry)", r.status =
 r = await api(cookieB, "GET", "/api/buzzy/telemetry");
 check("BZ-F039 other account cannot read A's telemetry (QA-05)", r.status === 200 && (r.json?.success?.acceptedOutputs ?? 0) === 0, JSON.stringify(r.json?.success ?? {}).slice(0, 120));
 
+// 31. BZ-P04 review finding: unmatched API path is a clean 404, not a 500
+r = await api(cookieA, "GET", "/api/buzzy/definitely-not-a-route");
+check(
+  "BZ-P04 unreliable-path hygiene: unknown /api/buzzy route → 404 not_found",
+  r.status === 404 && r.json?.code === "not_found",
+  `status ${r.status} ${JSON.stringify(r.json).slice(0, 120)}`,
+);
+r = await api(cookieA, "POST", "/api/buzzy/documents/doc_nope/decision", { action: "accept" });
+check("BZ-P04 unknown document still 404s (unchanged)", r.status === 404, `got ${r.status}`);
+
 // 22. BZ-F038: deterministic calculator through the tool loop
 r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
 check(
