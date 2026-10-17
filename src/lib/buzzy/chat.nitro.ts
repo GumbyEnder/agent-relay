@@ -40,6 +40,7 @@ import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
+import { buildExportBundle, deleteAccountData } from "./portability";
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -364,6 +365,45 @@ export default defineEventHandler(async (event) => {
         "Content-Disposition": `attachment; filename="${artifact.filename ?? "document.docx"}"`,
       },
     });
+  }
+
+  // ── GET /api/buzzy/export — one-click data export (plan doc 23) ──────
+  if (method === "GET" && path === "/api/buzzy/export") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const bundle = await buildExportBundle(sql, user.id);
+    return new Response(bundle.bytes as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${bundle.filename}"`,
+      },
+    });
+  }
+
+  // ── DELETE /api/buzzy/account — one-action, plain-confirmation deletion ─
+  if (method === "DELETE" && path === "/api/buzzy/account") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    if (body.confirm !== "delete my business") {
+      setResponseStatus(event, 400);
+      return { error: 'This removes everything. Send {"confirm":"delete my business"} to proceed.', code: "confirmation_required" };
+    }
+    const sql = await getSql();
+    const receipt = await deleteAccountData(sql, user.id);
+    return { ok: true, deleted: receipt };
   }
 
   // ── GET /api/buzzy/templates — the owner's template library ─────────
