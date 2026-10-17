@@ -535,6 +535,69 @@ export default defineEventHandler(async (event) => {
     return { ok: true, deleted: receipt };
   }
 
+  // ── Integrations: connection framework (plan doc 23, read-only first) ─
+  // One consent moment per connection, plain language, scope as buckets.
+  const CONNECTION_CONSENT: Record<string, string> = {
+    email: "May I read your email to learn about your customers? You'll see everything I learn, and I'll never send anything without asking.",
+    calendar: "May I read your calendar to keep scheduling language realistic? I'll only propose events as drafts, never create them myself.",
+    documents: "May I read documents you choose, to learn your templates? New files land in your folder only after you approve them.",
+    invoicing: "May I read paid/unpaid status to ground what I know about your customers? I will never write to your invoicing system.",
+  };
+
+  if (method === "GET" && path === "/api/buzzy/connections") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT kind, scope, status, last_error, connected_at
+      FROM buzzy_connections WHERE user_id = ${user.id} ORDER BY connected_at DESC
+    `;
+    const known = Object.keys(CONNECTION_CONSENT);
+    return {
+      ok: true,
+      connections: rows,
+      available: known.map((kind) => ({ kind, consent: CONNECTION_CONSENT[kind] })),
+    };
+  }
+
+  if (method === "POST" && path === "/api/buzzy/connections") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const body = await event.req.json().then((b: any) => (b && typeof b === "object" ? b : {})).catch(() => ({}));
+    const kind = typeof body.kind === "string" && CONNECTION_CONSENT[body.kind] ? body.kind : null;
+    // Write scope exists ONLY as draft-creation; outward writes do not exist.
+    const scope = body.scope === "write" ? "write" : "read";
+    if (!kind) {
+      setResponseStatus(event, 400);
+      return { error: "Unknown integration kind", code: "bad_request" };
+    }
+    const sql = await getSql();
+    await sql`
+      INSERT INTO buzzy_connections (id, user_id, kind, scope, status)
+      VALUES (${"conn_" + Math.random().toString(36).slice(2, 10)}, ${user.id}, ${kind}, ${scope}, 'connected')
+      ON CONFLICT (user_id, kind) DO UPDATE SET
+        scope = EXCLUDED.scope, status = 'connected', last_error = '', updated_at = now()
+    `;
+    return { ok: true, kind, scope, consent: CONNECTION_CONSENT[kind] };
+  }
+
+  if (method === "DELETE" && path.startsWith("/api/buzzy/connections/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    await sql`DELETE FROM buzzy_connections WHERE user_id = ${user.id} AND kind = ${path.slice("/api/buzzy/connections/".length)}`;
+    return { ok: true };
+  }
+
   // ── GET /api/buzzy/notifications — draft-bearing notification payload ─
   if (method === "GET" && path === "/api/buzzy/notifications") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
