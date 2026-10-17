@@ -559,6 +559,34 @@
       display: flex;
       gap: 0.4rem;
     }
+    .slot-edit-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #9a9a9a;
+    }
+    /* Room to actually write: the brief editor is a multi-line box, not a
+       one-line field, and it grows with the text. */
+    .slot-edit-row textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 8rem;
+      font: inherit;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid var(--bz-yellow);
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 4px;
+      resize: vertical;
+    }
+    .slot-edit-row textarea:focus { outline: none; box-shadow: 0 0 0 2px rgba(255,193,7,0.25); }
+    .slot-edit-hint { color: #777; font-size: 0.7rem; align-self: center; }
+    .slot-edit-row .edit-actions {
+      flex-wrap: wrap;
+      align-items: center;
+    }
     .slot-edit-row .edit-actions button {
       padding: 0.25rem 0.6rem;
       font-size: 0.75rem;
@@ -2156,14 +2184,22 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       item.classList.remove("filled");
       item.innerHTML =
         '<div class="slot-edit-row">' +
-        '<input type="text" class="slot-edit-input" value="' + currentValue.replace(/"/g, '&quot;') + '" data-slot="' + slotId + '" />' +
+        '<label class="slot-edit-label">' + escapedLabel + '</label>' +
+        '<textarea class="slot-edit-input" rows="6" data-slot="' + slotId + '" ' +
+        'aria-label="Edit ' + escapedLabel + '">' + esc(currentValue) + '</textarea>' +
         '<div class="edit-actions">' +
         '<button class="slot-edit-save" data-slot="' + slotId + '">Save</button>' +
         '<button class="slot-edit-cancel" data-slot="' + slotId + '">Cancel</button>' +
+        '<span class="slot-edit-hint">Enter saves · Shift+Enter adds a line</span>' +
         '</div></div>';
       const input = item.querySelector(".slot-edit-input");
       input.focus();
       input.select();
+      input.addEventListener("input", function () {
+        // Grow with the content instead of trapping long text behind a scrollbar.
+        input.style.height = "auto";
+        input.style.height = Math.max(128, input.scrollHeight) + "px";
+      });
       item.querySelector(".slot-edit-save").addEventListener("click", function () {
         saveSlotEdit(slotId, input.value.trim());
       });
@@ -2171,7 +2207,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         renderSlotChecklist();
       });
       input.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
           saveSlotEdit(slotId, input.value.trim());
         } else if (e.key === "Escape") {
           renderSlotChecklist();
