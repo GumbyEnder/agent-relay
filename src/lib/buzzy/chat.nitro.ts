@@ -1704,6 +1704,66 @@ export default defineEventHandler(async (event) => {
     return { ok: true };
   }
 
+  // ── GET /api/buzzy/search — ownership-scoped search (BZ-F019) ─────────
+  // Titles AND content across the account's jobs and documents; filters by
+  // status/company/type. Search NEVER crosses accounts — a broad query
+  // returns exactly what the caller owns and nothing more (QA-05).
+  if (method === "GET" && path === "/api/buzzy/search") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const q = (queryValue(fullPath, "q") ?? "").trim().slice(0, 120);
+    if (q.length < 2) {
+      setResponseStatus(event, 400);
+      return { error: "Type at least 2 characters to search.", code: "bad_query" };
+    }
+    const statusFilter = queryValue(fullPath, "status");
+    const companyFilter = queryValue(fullPath, "companyId");
+    const typeFilter = queryValue(fullPath, "type"); // "jobs" | "documents" | null
+    const needle = `%${q.replace(/[%_\\]/g, (c) => "\\" + c)}%`;
+    const sql = await getSql();
+    const jobs = typeFilter === "documents" ? [] : await sql`
+      SELECT id, title, status, company_id, updated_at
+      FROM buzzy_jobs
+      WHERE user_id = ${user.id}
+        AND title ILIKE ${needle}
+        AND (${statusFilter}::text IS NULL OR status = ${statusFilter})
+        AND (${companyFilter}::text IS NULL OR company_id = ${companyFilter})
+      ORDER BY updated_at DESC LIMIT 50
+    `;
+    const docs = typeFilter === "jobs" ? [] : await sql`
+      SELECT d.id, d.job_id, d.title, d.status, d.current_version, d.updated_at,
+             (SELECT content FROM buzzy_document_versions v
+               WHERE v.doc_id = d.id AND v.version = d.current_version) AS content
+      FROM buzzy_documents d
+      WHERE d.user_id = ${user.id}
+        AND (d.title ILIKE ${needle}
+             OR (SELECT content FROM buzzy_document_versions v
+                  WHERE v.doc_id = d.id AND v.version = d.current_version) ILIKE ${needle})
+        AND (${statusFilter}::text IS NULL OR d.status = ${statusFilter})
+      ORDER BY d.updated_at DESC LIMIT 50
+    `;
+    const ql = q.toLowerCase();
+    return {
+      q,
+      jobs: jobs.map((j) => ({ id: j.id, title: j.title, status: j.status, companyId: j.company_id, updatedAt: j.updated_at })),
+      documents: docs.map((d) => {
+        const content = String(d.content ?? "");
+        const at = content.toLowerCase().indexOf(ql);
+        const snippet = at >= 0
+          ? content.slice(Math.max(0, at - 60), at + q.length + 60).replace(/\s+/g, " ").trim()
+          : "";
+        return {
+          id: d.id, jobId: d.job_id, title: d.title, status: d.status,
+          currentVersion: d.current_version, updatedAt: d.updated_at,
+          ...(snippet ? { snippet } : {}),
+        };
+      }),
+    };
+  }
+
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
   if (method === "GET" && path === "/api/buzzy/sessions") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));

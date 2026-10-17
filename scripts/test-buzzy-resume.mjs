@@ -481,6 +481,34 @@ check("BZ-F020 non-tabular version → CSV explains itself (QA-11)", dl.status =
 dl = await fetch(`${BASE}${DL}/${docId}?format=pdf`, { headers: { cookie: cookieB } });
 check("BZ-F020 other account export → 404 (QA-05)", dl.status === 404, `got ${dl.status}`);
 
+// 14. BZ-F019: ownership-scoped search across work and documents
+r = await api(cookieA, "GET", "/api/buzzy/search?q=quotes");
+check(
+  "BZ-F019 title search finds the job and document",
+  (r.json?.jobs ?? []).some((j) => j.id === docJob) && (r.json?.documents ?? []).some((d) => d.id === docId),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=second+edition");
+check(
+  "BZ-F019 content search finds the document with a snippet",
+  (r.json?.documents ?? []).some((d) => d.id === docId && /second edition/i.test(d.snippet ?? "")),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=quotes&status=accepted&type=documents");
+check(
+  "BZ-F019 status + type filters apply",
+  (r.json?.documents ?? []).every((d) => d.status === "accepted") && (r.json?.jobs ?? []).length === 0,
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=z");
+check("BZ-F019 one-character query → useful 400", r.status === 400, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/search?q=quotes");
+check(
+  "BZ-F019 search never crosses accounts (QA-05)",
+  (r.json?.jobs ?? []).length === 0 && (r.json?.documents ?? []).length === 0,
+  JSON.stringify(r.json),
+);
+
 // A new revision after acceptance re-opens review and clears the pointer (QA-20)
  r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
 r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
