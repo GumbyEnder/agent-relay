@@ -12,7 +12,7 @@ import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-const PAGES = new Set(["index", "talk", "memory", "remember", "form", "experts", "library", "profile", "landing"]);
+const PAGES = new Set(["index", "talk", "memory", "remember", "form", "experts", "library", "profile", "landing", "recipes"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {
