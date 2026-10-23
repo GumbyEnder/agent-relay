@@ -137,31 +137,152 @@
       color: #555;
     }
 
-    /* ── Chat layout ────────────────────────────────────── */
-    /* FIX #1: wider chat column, narrower decisions panel.
-       Desktop discipline: the whole workspace sits in a centered container
-       and the transcript never exceeds a readable measure. */
+    /* ── Chat layout ──────────────────────────────────────
+       The session brief lives in a persistent rail on the right. Collapsed it
+       is a 64px spine, so the conversation gets the width; expanded it is a
+       full panel. Present in BOTH Chat and Work mode — it is the session's
+       brief, not a chat-only sidebar. */
     .chat-layout {
       display: grid;
-      grid-template-columns: minmax(0, 760px) 300px;
-      gap: 1.5rem;
+      grid-template-columns: minmax(0, 820px) 64px;
+      gap: 1.25rem;
       align-items: start;
       justify-content: center;
-      max-width: 1120px;
+      max-width: 1180px;
       margin: 0 auto;
     }
-    /* Editing a brief item needs room to write — widen the brief column
-       while an editor is open, and put it back on save/cancel. */
-    .chat-layout.brief-editing {
-      grid-template-columns: minmax(0, 720px) 440px;
+    .chat-layout.brief-open {
+      grid-template-columns: minmax(0, 820px) 340px;
     }
+    /* Editing a brief item needs room to write — widen the rail while an
+       editor is open, and put it back on save/cancel. */
+    .chat-layout.brief-editing {
+      grid-template-columns: minmax(0, 700px) 440px;
+    }
+
+    /* ── Brief rail ─────────────────────────────────────── */
+    .brief-rail {
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+      min-width: 0;
+    }
+    .rail-toggle {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.55rem;
+      width: 100%;
+      padding: 0.7rem 0.3rem;
+      background: var(--bz-panel);
+      border: 1px solid #2A2A2A;
+      border-radius: 999px;
+      color: #9A9A9A;
+      font: inherit;
+      font-size: 0.75rem;
+      cursor: pointer;
+      min-height: 0;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .rail-toggle:hover { border-color: var(--bz-yellow); color: var(--bz-yellow); }
+    .rail-chevron { font-size: 0.95rem; line-height: 1; }
+    .rail-label {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .rail-count {
+      font-size: 0.66rem;
+      color: var(--bz-yellow);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+    }
+    .rail-dots { display: flex; flex-direction: column; gap: 4px; margin-bottom: 2px; }
+    .rail-dots span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      border: 1px solid #3A3A3A;
+      background: transparent;
+    }
+    .rail-dots span.filled { background: var(--bz-yellow); border-color: var(--bz-yellow); }
+    .rail-dots span.skipped { background: #555; border-color: #555; }
+    .rail-dots span.pulse { animation: railPulse 0.6s ease-out; }
+    @keyframes railPulse {
+      0% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.55); }
+      100% { box-shadow: 0 0 0 7px rgba(255, 193, 7, 0); }
+    }
+    .brief-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .rail-close {
+      background: none;
+      border: none;
+      color: #8A8A8A;
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0.25rem 0.45rem;
+      min-height: 0;
+      min-width: 0;
+    }
+    .rail-close:hover { color: var(--bz-yellow); }
+    /* The panel only exists while the rail is open. */
+    .brief-rail .slot-checklist { display: none; position: static; }
+    .chat-layout.brief-open .brief-rail .slot-checklist,
+    .chat-layout.brief-editing .brief-rail .slot-checklist { display: block; }
+    .chat-layout.brief-open .rail-toggle,
+    .chat-layout.brief-editing .rail-toggle { display: none; }
+    .rail-scrim { display: none; }
+
     @media (max-width: 900px) {
-      .chat-layout {
-        grid-template-columns: 1fr;
+      .chat-layout,
+      .chat-layout.brief-open,
+      .chat-layout.brief-editing { grid-template-columns: 1fr; }
+      /* Mobile: the rail is a fixed pill in the corner; opening it slides the
+         panel over the conversation with a scrim to dismiss. */
+      .brief-rail {
+        position: fixed;
+        top: 76px;
+        right: 10px;
+        width: auto;
+        z-index: 61;
       }
-      .chat-layout.brief-editing {
-        grid-template-columns: 1fr;
+      .rail-toggle {
+        flex-direction: row;
+        gap: 0.4rem;
+        width: auto;
+        padding: 0.42rem 0.7rem;
+        border-radius: 999px;
+        background: var(--bz-panel);
       }
+      .rail-label { writing-mode: horizontal-tb; transform: none; }
+      .rail-dots { flex-direction: row; margin-bottom: 0; }
+      .chat-layout.brief-open .brief-rail,
+      .chat-layout.brief-editing .brief-rail { top: 0; right: 0; }
+      .chat-layout.brief-open .brief-rail .slot-checklist,
+      .chat-layout.brief-editing .brief-rail .slot-checklist {
+        width: min(84vw, 360px);
+        max-height: 100vh;
+        overflow-y: auto;
+        border-radius: 0;
+        padding: 1rem;
+        box-shadow: -24px 0 48px rgba(0, 0, 0, 0.55);
+      }
+      .rail-scrim {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 60;
+      }
+      .rail-scrim.show { display: block; }
     }
     header > .header-inner,
     .header-inner {
@@ -672,7 +793,6 @@
     .rw-item.rw-session { border-left: 3px solid #444; }
     .rw-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
     .rw-all { color: #C9CDD2; font-size: 0.9rem; }
-    .chat-layout.no-brief { grid-template-columns: minmax(0, 760px); }
     .back-recent { flex-shrink: 0; }
 
     /* ── Sessions drawer ──────────────────────────────────── */
@@ -1232,12 +1352,27 @@
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
         </div>
-        <aside class="slot-checklist" id="briefPanel" aria-label="Brief">
-          <h3>Brief</h3>
-          <p id="briefCompany" class="brief-company"></p>
-          <div id="slotItems"></div>
-          <div id="paperBrief" class="paper-brief hidden"></div>
+        <!-- Session brief: always present off to the side, in Chat and Work
+             mode alike. Collapsed to a 64px spine by default so the
+             conversation keeps the width; expands on demand. -->
+        <aside class="brief-rail" id="briefRail" aria-label="Session brief">
+          <button type="button" class="rail-toggle" id="railToggle" aria-expanded="false" aria-controls="briefPanel" title="Show the session brief">
+            <span class="rail-chevron" aria-hidden="true">&#8249;</span>
+            <span class="rail-label">Brief</span>
+            <span class="rail-count" id="railCount">0/4</span>
+            <span class="rail-dots" id="railDots" aria-hidden="true"></span>
+          </button>
+          <div class="slot-checklist" id="briefPanel" role="region" aria-label="Brief">
+            <div class="brief-head">
+              <h3>Brief</h3>
+              <button type="button" class="rail-close" id="railClose" aria-label="Hide the brief">&#215;</button>
+            </div>
+            <p id="briefCompany" class="brief-company"></p>
+            <div id="slotItems"></div>
+            <div id="paperBrief" class="paper-brief hidden"></div>
+          </div>
         </aside>
+        <div class="rail-scrim" id="railScrim"></div>
       </div>
     </div>
 
@@ -2412,6 +2547,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
       });
       renderMoneyCheck();
+      renderRailStatus();
       // If the re-render removed the open editor, collapse the wide column.
       if (!container.querySelector(".slot-edit-input")) setBriefEditWidth(false);
     }
@@ -2472,6 +2608,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function setBriefEditWidth(on) {
       var layout = document.querySelector(".chat-layout");
       if (layout) layout.classList.toggle("brief-editing", !!on);
+      // An editor cannot live in a shut rail.
+      if (on) setBrief(true);
     }
 
     function cancelSlotEdit() {
@@ -2600,7 +2738,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
       // The form is the definition, so Work mode drops the chat brief column
       // (duplicating "The Challenge" next to "The actual task" is confusing).
-      setBrief(mode !== "work");
       document.querySelectorAll("#modeTabs .mode-tab").forEach(function (b) {
         var on = b.getAttribute("data-mode") === mode;
         b.classList.toggle("active", on);
@@ -2628,7 +2765,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       } else {
         // Back to chat: the decisions column only belongs on screen once
         // there is a conversation to attach it to.
-        if (!chatState.messages.length && !chatState.sessionId && !chatState.jobId) setBrief(false);
         var input = document.getElementById("chatInput");
         if (input && !input.disabled) input.focus();
       }
@@ -3043,12 +3179,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // server-side transcript for this job (dogfood 10007) before falling
       // back to the job-context opener or the welcome message.
       if (chatState.messages.length > 0) {
-        setBrief(true);
         setBackVisible(true);
         renderChatMessages();
         renderSlotChecklist();
       } else if (chatState.jobId || chatState.sessionId || chatState.jobContext || chatState.expert) {
-        setBrief(true);
         setBackVisible(true);
         restoreTranscript();
       } else {
@@ -3057,7 +3191,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         showRecentWork();
       }
 
-      if (chatState.mode === "work") setBrief(false);
 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
@@ -3116,11 +3249,57 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       renderSlotChecklist();
     }
 
-    function setBrief(show) {
+    // The brief rail is always mounted; this only opens or closes it.
+    // State is the user's choice (persisted), never a side effect of mode or
+    // of whether a conversation exists.
+    function setBrief(open) {
       var layout = document.querySelector(".chat-layout");
-      var brief = document.getElementById("briefPanel");
-      if (layout) layout.classList.toggle("no-brief", !show);
-      if (brief) brief.classList.toggle("hidden", !show);
+      if (!layout) return;
+      var isOpen = !!open;
+      layout.classList.toggle("brief-open", isOpen);
+      var btn = document.getElementById("railToggle");
+      if (btn) btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      var scrim = document.getElementById("railScrim");
+      if (scrim) scrim.classList.toggle("show", isOpen);
+      try { localStorage.setItem("bz_brief_open", isOpen ? "1" : "0"); } catch (_) {}
+      if (!isOpen) setBriefEditWidth(false);
+    }
+
+    function briefOpen() {
+      var layout = document.querySelector(".chat-layout");
+      return !!(layout && (layout.classList.contains("brief-open") || layout.classList.contains("brief-editing")));
+    }
+
+    // Rail status: n/4 captured + one dot per statement.
+    function renderRailStatus() {
+      var ids = Object.keys(SLOT_LABELS);
+      var count = document.getElementById("railCount");
+      var dots = document.getElementById("railDots");
+      var filled = 0;
+      var html = "";
+      ids.forEach(function (id) {
+        var v = chatState.slots[id];
+        var state = !v ? "open" : (v === "skipped" ? "skipped" : "filled");
+        if (state === "filled") filled++;
+        html += '<span class="' + state + '" data-dot="' + id + '" title="' +
+          SLOT_LABELS[id] + ": " + (state === "open" ? "still open" : state === "skipped" ? "skipped" : v) +
+          '"></span>';
+      });
+      if (count) count.textContent = filled + "/" + ids.length;
+      if (dots) {
+        // Pulse only the dot that just changed state.
+        var prev = chatState._railFilled || {};
+        dots.innerHTML = html;
+        ids.forEach(function (id) {
+          var now = !!(chatState.slots[id] && chatState.slots[id] !== "skipped");
+          if (now && !prev[id]) {
+            var el = dots.querySelector('[data-dot="' + id + '"]');
+            if (el) el.classList.add("pulse");
+          }
+          prev[id] = now;
+        });
+        chatState._railFilled = prev;
+      }
     }
 
     function setBackVisible(show) {
@@ -3150,7 +3329,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.jobContext = null;
       chatState.slots = {};
       chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
-      setBrief(true);
       setBackVisible(true);
       resetDraftGate();
       setChatMascot("17-attentive");
@@ -3691,6 +3869,28 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         el.addEventListener("input", renderWorkProgress);
         el.addEventListener("change", renderWorkProgress);
       });
+      // ── Session brief rail ─────────────────────────────────────
+      // Always mounted; open/closed is the user's remembered choice.
+      var railToggle = document.getElementById("railToggle");
+      if (railToggle) {
+        railToggle.addEventListener("click", function () { setBrief(!briefOpen()); });
+      }
+      var closeRail = function () {
+        if (document.querySelector(".slot-edit-input")) cancelSlotEdit();
+        setBrief(false);
+      };
+      var railClose = document.getElementById("railClose");
+      if (railClose) railClose.addEventListener("click", closeRail);
+      var scrim = document.getElementById("railScrim");
+      if (scrim) scrim.addEventListener("click", closeRail);
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && briefOpen() && !document.querySelector(".slot-edit-input")) setBrief(false);
+      });
+      var savedOpen = null;
+      try { savedOpen = localStorage.getItem("bz_brief_open"); } catch (_) {}
+      setBrief(savedOpen === "1");
+      renderRailStatus();
+
       renderWorkProgress();
       // Deep link: /buzzy/talk?mode=work starts in the definition panel.
       var m = new URLSearchParams(window.location.search).get("mode");
@@ -3852,7 +4052,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // BZ-F004: restore structured Decisions from the server instead of
         // blanking the box until the next turn.
         chatState.slots = (data.slots && typeof data.slots === "object") ? data.slots : {};
-        setBrief(true);
         setBackVisible(true);
         resetDraftGate();
         document.getElementById("chatError").classList.add("hidden");
