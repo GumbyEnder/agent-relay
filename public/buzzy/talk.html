@@ -983,10 +983,20 @@
   margin-top: 0.6rem;
 }
 .chat-main.mode-work .work-def { display: block; }
+/* Work mode with no conversation open: the recent-work landing list is noise —
+   the form is the whole task. */
+.chat-main.mode-work-empty .chat-messages { display: none; }
 .chat-main.mode-work .chat-input-row,
 .chat-main.mode-work .paper-attach,
 .chat-main.mode-work .paper-panel,
 .chat-main.mode-work .paper-drop { display: none; }
+.wd-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.wd-progress { white-space: nowrap; }
 .work-def h2 {
   margin: 0 0 0.2rem;
   font-size: 0.98rem;
@@ -1126,7 +1136,10 @@
           <!-- Work mode: the harness makes you say what the task actually is,
                before it will send a single turn or build a draft. -->
           <form id="workDef" class="work-def" autocomplete="off">
-            <h2>Define the work</h2>
+            <div class="wd-head">
+              <h2>Define the work</h2>
+              <span class="wd-progress" id="wdProgress">0 of 4 required</span>
+            </div>
             <p class="wd-sub">Say what the task actually is. I'll turn this into one draft — nothing runs until you approve that draft.</p>
             <div class="wd-grid">
               <div class="wd-field full" data-wd="task">
@@ -1173,7 +1186,6 @@
             <div class="wd-foot">
               <button type="submit" id="wdSubmit">Send the definition</button>
               <button type="button" class="secondary" id="wdChatInstead">Just chat instead</button>
-              <span class="wd-progress" id="wdProgress">0 of 4 required</span>
             </div>
             <p class="muted" id="wdNote" role="status" style="margin:0.6rem 0 0"></p>
           </form>
@@ -2581,7 +2593,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       mode = mode === "work" ? "work" : "chat";
       chatState.mode = mode;
       var main = document.querySelector(".chat-main");
-      if (main) main.classList.toggle("mode-work", mode === "work");
+      if (main) {
+        main.classList.toggle("mode-work", mode === "work");
+        var noConversation = !chatState.messages.length && !chatState.sessionId && !chatState.jobId;
+        main.classList.toggle("mode-work-empty", mode === "work" && noConversation);
+      }
+      // The form is the definition, so Work mode drops the chat brief column
+      // (duplicating "The Challenge" next to "The actual task" is confusing).
+      setBrief(mode !== "work");
       document.querySelectorAll("#modeTabs .mode-tab").forEach(function (b) {
         var on = b.getAttribute("data-mode") === mode;
         b.classList.toggle("active", on);
@@ -2607,6 +2626,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (el && formEl && formEl.scrollIntoView) formEl.scrollIntoView({ block: "nearest" });
         }
       } else {
+        // Back to chat: the decisions column only belongs on screen once
+        // there is a conversation to attach it to.
+        if (!chatState.messages.length && !chatState.sessionId && !chatState.jobId) setBrief(false);
         var input = document.getElementById("chatInput");
         if (input && !input.disabled) input.focus();
       }
@@ -3034,6 +3056,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         setBackVisible(false);
         showRecentWork();
       }
+
+      if (chatState.mode === "work") setBrief(false);
 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
