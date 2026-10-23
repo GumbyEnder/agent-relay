@@ -366,6 +366,9 @@ export default defineEventHandler(async (event) => {
       ? body.attemptId.trim().slice(0, 80)
       : null;
     const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
+    // UI mode: "work" steers toward a work effort, "chat" is ordinary
+    // conversation. Unknown values fall back to chat inside chatLoop.
+    const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
 
     const sql = await getSql();
 
@@ -462,6 +465,7 @@ export default defineEventHandler(async (event) => {
       model,
       attemptId,
       jobContext,
+      mode,
       companyName: company?.name ?? null,
       companyFacts: company?.facts ?? [],
       customerMemoryBlock,

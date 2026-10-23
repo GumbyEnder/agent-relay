@@ -68,6 +68,22 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - FILES AND THE LIBRARY: every deliverable you produce is saved automatically as a versioned document in the owner's Library, with Markdown, PDF and Word copies. You have no filesystem of your own, but that does not matter — never say you "can't save files", have "no file-storage tool", or ask the owner to copy text out of the chat. If the owner asks to save something to their Library, produce or revise the deliverable so it is saved there, and tell them it's in the Library.
 You never mention models, tokens, or technical internals.`;
 
+/** The persona is the only thing that differs between the two UI modes. */
+export function personaForMode(mode: "chat" | "work"): string {
+  return mode === "work" ? PERSONA : CHAT_PERSONA;
+}
+
+// Conversation mode: ordinary chat. No scope interview, no decisions box.
+const CHAT_PERSONA = `You are BeeZilla in conversation. This is ordinary chat — the person may ask you anything: an explanation, a draft of an email, a calculation, an opinion, a plan, a question about their business. Be a genuinely useful assistant.
+- Answer what was actually asked in the first sentence, then stop. Two to five sentences unless they asked for a document, a list, or a step-by-step.
+- No filler: no "great question", no "I'd be happy to help", no restating their message back at them, no emotional acknowledgement.
+- You may ask one clarifying question — only when the answer would change what you'd say, and only one per turn.
+- Do NOT run a scope interview. Do not ask about the challenge, the difficulties, who is involved, or the end goal unless they are asking you to get a real piece of work done.
+- If they ask you to actually accomplish something that needs a real effort (get bids, chase a refund, prepare a contract), answer what you can here, then say in one sentence that you can set it up as work — the Work tab does that. Offer once; never push twice.
+- Never write a price, penalty, date, or fact the person did not state. If you do not know, say so.
+- Only use details from THIS conversation.
+You never mention models, tokens, or technical internals.`;
+
 // ── Helper: str ────────────────────────────────────────────────────────
 
 /** A dollar amount in the extract that the owner did not type is not a fact. */
@@ -189,6 +205,9 @@ export interface ChatRequest {
   companyFacts?: ConfirmedCompanyFact[];
   /** Customer memory rollup (component #2) — approved-work history block. */
   customerMemoryBlock?: string;
+  /** UI mode. "work" steers the conversation toward a work effort (scope
+   *  interview + decisions). "chat" (default) is ordinary conversation. */
+  mode?: "chat" | "work";
 }
 
 export interface ChatResponse {
@@ -227,6 +246,7 @@ function confirmedCompanySection(
 
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const { userId, jobId, sessionId, message, model, jobContext, companyName, companyFacts } = req;
+  const mode: "chat" | "work" = req.mode === "work" ? "work" : "chat";
 
   if (!message?.trim()) {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
@@ -360,7 +380,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
   const planFirst = shouldPlanFirst(message) ? PLAN_FIRST_INSTRUCTION : "";
   const playbookBlock = playbookGuidance(jobType);
-  const guidance = (hasExistingDraft
+  const chatGuidance = hasExistingDraft
+    ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
+    : requestedDraft
+    ? `\n\nThey asked for the deliverable now. Produce it — fold in everything captured so far and mark anything still unknown rather than inventing it.${knownCompany}${typeHint}`
+    : `\n\nCONVERSATION MODE — this is ordinary chat, not a scope interview. Answer their message directly. Do not ask about the challenge, difficulties, who is involved, or the end goal. If they want something actually done, help as far as chat allows and mention that the Work tab can set it up as a work effort.${knownCompany}`;
+
+  const guidance = mode === "work" ? (hasExistingDraft
     ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
     : requestedDraft
     ? `\n\nThe owner has asked for the deliverable now. Generate the full draft — fold in everything captured so far and note anything still unknown rather than inventing it.${knownCompany}${typeHint}`
@@ -370,7 +396,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
       : !wereAllFilled
         ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
-        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`) + planFirst + playbookBlock + resumeRecap;
+        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`)
+    : chatGuidance;
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
@@ -386,8 +413,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         ". Stay on this job."
       : "";
 
+  const persona = personaForMode(mode) + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
   const systemPrompt =
-    PERSONA + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance;
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   const messages: Array<{ role: string; content: string }> = [

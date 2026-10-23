@@ -1093,98 +1093,8 @@
   border-color: var(--bz-yellow);
   color: var(--bz-black);
 }
-.mode-hint { color: #777; font-size: 0.76rem; margin-left: 0.3rem; }
 
 /* Work definition panel — replaces the composer in work mode */
-.work-def {
-  display: none;
-  border: 1px solid #2A2A2A;
-  border-left: 3px solid var(--bz-yellow);
-  border-radius: 8px;
-  background: var(--bz-panel);
-  padding: 1rem 1.1rem 1.05rem;
-  margin-top: 0.6rem;
-}
-.chat-main.mode-work .work-def { display: block; }
-/* Work mode with no conversation open: the recent-work landing list is noise —
-   the form is the whole task. */
-.chat-main.mode-work-empty .chat-messages { display: none; }
-.chat-main.mode-work .chat-input-row,
-.chat-main.mode-work .paper-attach,
-.chat-main.mode-work .paper-panel,
-.chat-main.mode-work .paper-drop { display: none; }
-.wd-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.wd-progress { white-space: nowrap; }
-.work-def h2 {
-  margin: 0 0 0.2rem;
-  font-size: 0.98rem;
-  color: var(--bz-yellow);
-  font-weight: 700;
-}
-.work-def .wd-sub { margin: 0 0 0.85rem; color: #8F8F8F; font-size: 0.8rem; }
-.wd-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.7rem 0.9rem;
-}
-.wd-field { display: flex; flex-direction: column; gap: 0.28rem; min-width: 0; }
-.wd-field.full { grid-column: 1 / -1; }
-.wd-field label {
-  font-size: 0.74rem;
-  color: #B4B4B4;
-  letter-spacing: 0.02em;
-  font-weight: 600;
-}
-.wd-field .req {
-  color: var(--bz-yellow);
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-left: 0.25rem;
-}
-.wd-field input,
-.wd-field textarea,
-.wd-field select {
-  font: inherit;
-  font-size: 0.85rem;
-  color: #E8E8E8;
-  background: #0F0F0F;
-  border: 1px solid #2E2E2E;
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-  width: 100%;
-  resize: vertical;
-}
-.wd-field textarea { min-height: 2.6rem; line-height: 1.5; }
-.wd-field input:focus,
-.wd-field textarea:focus,
-.wd-field select:focus {
-  outline: none;
-  border-color: var(--bz-yellow);
-  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.18);
-}
-.wd-field.invalid input,
-.wd-field.invalid textarea { border-color: var(--bz-status-red); }
-.wd-foot {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.9rem;
-  flex-wrap: wrap;
-}
-.wd-foot button { min-height: 0; }
-.wd-progress {
-  margin-left: auto;
-  font-size: 0.74rem;
-  color: #8A8A8A;
-  font-variant-numeric: tabular-nums;
-}
-.wd-progress strong { color: var(--bz-yellow); font-weight: 600; }
 .work-offer {
   border: 1px solid var(--bz-yellow);
   border-radius: 8px;
@@ -1199,10 +1109,6 @@
 .work-offer p { margin: 0; font-size: 0.86rem; color: #DADADA; }
 .work-offer .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .work-offer button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.85rem; }
-@media (max-width: 760px) {
-  .wd-grid { grid-template-columns: 1fr; }
-  .mode-hint { display: none; }
-}
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
@@ -1251,66 +1157,10 @@
               <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
             </div>
             <div class="chat-input-row">
-              <textarea id="chatInput" rows="2" placeholder="What do you need done?" aria-label="Describe the job for BeeZilla" disabled></textarea>
+              <textarea id="chatInput" rows="2" placeholder="What do you want to talk about" aria-label="Describe the job for BeeZilla" disabled></textarea>
               <button id="chatSend" disabled>Send</button>
             </div>
 
-          <!-- Work mode: the harness makes you say what the task actually is,
-               before it will send a single turn or build a draft. -->
-          <form id="workDef" class="work-def" autocomplete="off">
-            <div class="wd-head">
-              <h2>Define the work</h2>
-              <span class="wd-progress" id="wdProgress">0 of 4 required</span>
-            </div>
-            <p class="wd-sub">Say what the task actually is. I'll turn this into one draft — nothing runs until you approve that draft.</p>
-            <div class="wd-grid">
-              <div class="wd-field full" data-wd="task">
-                <label for="wd_task">The actual task <span class="req">required</span></label>
-                <textarea id="wd_task" rows="2" placeholder="e.g. Get three written bids to repair the back fence"></textarea>
-              </div>
-              <div class="wd-field" data-wd="people">
-                <label for="wd_people">Who is involved <span class="req">required</span></label>
-                <input id="wd_people" type="text" placeholder="e.g. me, two contractors, HOA" />
-              </div>
-              <div class="wd-field" data-wd="endstate">
-                <label for="wd_endstate">What done looks like <span class="req">required</span></label>
-                <textarea id="wd_endstate" rows="2" placeholder="e.g. Best bid picked, work scheduled"></textarea>
-              </div>
-              <div class="wd-field" data-wd="check">
-                <label for="wd_check">How you'll know it's right <span class="req">required</span></label>
-                <input id="wd_check" type="text" placeholder="e.g. Same scope line by line, total adds up" />
-              </div>
-              <div class="wd-field" data-wd="obstacle">
-                <label for="wd_obstacle">What's in the way</label>
-                <textarea id="wd_obstacle" rows="2" placeholder="e.g. Bids never come back itemized"></textarea>
-              </div>
-              <div class="wd-field" data-wd="deliverable">
-                <label for="wd_deliverable">What I hand you</label>
-                <input id="wd_deliverable" type="text" placeholder="e.g. Bid comparison + scope of work" />
-              </div>
-              <div class="wd-field" data-wd="format">
-                <label for="wd_format">Format</label>
-                <select id="wd_format">
-                  <option value="">Pick one</option>
-                  <option value="document">Document</option>
-                  <option value="spreadsheet">Spreadsheet</option>
-                  <option value="letter">Letter</option>
-                  <option value="plan">Plan</option>
-                  <option value="checklist">Checklist</option>
-                  <option value="other">Something else</option>
-                </select>
-              </div>
-              <div class="wd-field full" data-wd="constraints">
-                <label for="wd_constraints">Must not / hard limits</label>
-                <textarea id="wd_constraints" rows="2" placeholder="e.g. No deposit before work starts, nothing over $4,000"></textarea>
-              </div>
-            </div>
-            <div class="wd-foot">
-              <button type="submit" id="wdSubmit">Send the definition</button>
-              <button type="button" class="secondary" id="wdChatInstead">Just chat instead</button>
-            </div>
-            <p class="muted" id="wdNote" role="status" style="margin:0.6rem 0 0"></p>
-          </form>
           <div class="paper-attach">
               <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
             </div>
@@ -2228,7 +2078,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           setMode("work");
           chatState.messages.push({
             role: "assistant",
-            content: "Work mode. Fill in what's missing — then I'll build one draft for you to approve.",
+            content: "Work it is. What are we going to accomplish together?",
           });
           renderChatMessages();
         });
@@ -2663,22 +2513,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // before a single turn is sent: required fields, one composed message,
     // then the normal draft-then-approve path. Nothing here bypasses the
     // server's slot extraction or the draft gate.
-    var WORK_FIELDS = [
-      { key: "task", label: "the actual task", el: "wd_task", slot: "challenge", required: true },
-      { key: "people", label: "who is involved", el: "wd_people", slot: "who_involved", required: true },
-      { key: "endstate", label: "what done looks like", el: "wd_endstate", slot: "end_goal", required: true },
-      { key: "check", label: "how you'll know it's right", el: "wd_check", slot: null, required: true },
-      { key: "obstacle", label: "what's in the way", el: "wd_obstacle", slot: "difficulties", required: false },
-      { key: "deliverable", label: "what I hand you", el: "wd_deliverable", slot: null, required: false },
-      { key: "format", label: "format", el: "wd_format", slot: null, required: false },
-      { key: "constraints", label: "hard limits", el: "wd_constraints", slot: null, required: false },
-    ];
-
-    function wdValue(f) {
-      var el = document.getElementById(f.el);
-      return el ? String(el.value || "").trim() : "";
-    }
-
     function filledDecisions() {
       return Object.keys(SLOT_LABELS).filter(function (id) {
         var v = chatState.slots[id];
@@ -2686,113 +2520,27 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
-    function renderWorkProgress() {
-      var req = WORK_FIELDS.filter(function (f) { return f.required; });
-      var done = req.filter(function (f) { return wdValue(f); }).length;
-      var p = document.getElementById("wdProgress");
-      if (p) p.innerHTML = "<strong>" + done + "</strong> of " + req.length + " required";
-      // Clear a "still need…" warning the moment the definition is complete.
-      var noteEl = document.getElementById("wdNote");
-      if (noteEl && done === req.length && noteEl.textContent) noteEl.textContent = "";
-      WORK_FIELDS.forEach(function (f) {
-        var field = document.querySelector('#workDef .wd-field[data-wd="' + f.key + '"]');
-        if (!field) return;
-        field.classList.toggle("invalid", !!chatState._wdTried && f.required && !wdValue(f));
-      });
-    }
-
-    // Fill empty fields from what the chat already captured. Never clobber
-    // something the user is typing.
-    function prefillWorkDef() {
-      WORK_FIELDS.forEach(function (f) {
-        if (!f.slot) return;
-        var el = document.getElementById(f.el);
-        if (!el || String(el.value || "").trim()) return;
-        var v = chatState.slots[f.slot];
-        if (v && v !== "skipped") el.value = v;
-      });
-      var taskEl = document.getElementById("wd_task");
-      if (taskEl && !String(taskEl.value || "").trim()) {
-        if (chatState.jobContext && chatState.jobContext.problem) {
-          taskEl.value = chatState.jobContext.problem;
-        } else {
-          for (var i = chatState.messages.length - 1; i >= 0; i--) {
-            if (chatState.messages[i].role === "user") {
-              taskEl.value = chatState.messages[i].content.slice(0, 400);
-              break;
-            }
-          }
-        }
-      }
-      renderWorkProgress();
-    }
-
+    // Both modes are the same free-form chat box. The mode changes the
+    // prompt and the steering the server applies — not the interface.
     function setMode(mode, opts) {
       mode = mode === "work" ? "work" : "chat";
       chatState.mode = mode;
       var main = document.querySelector(".chat-main");
-      if (main) {
-        main.classList.toggle("mode-work", mode === "work");
-        var noConversation = !chatState.messages.length && !chatState.sessionId && !chatState.jobId;
-        main.classList.toggle("mode-work-empty", mode === "work" && noConversation);
-      }
-      // The form is the definition, so Work mode drops the chat brief column
-      // (duplicating "The Challenge" next to "The actual task" is confusing).
+      if (main) main.classList.toggle("mode-work", mode === "work");
       document.querySelectorAll("#modeTabs .mode-tab").forEach(function (b) {
         var on = b.getAttribute("data-mode") === mode;
         b.classList.toggle("active", on);
         b.setAttribute("aria-selected", on ? "true" : "false");
       });
-      var hint = document.getElementById("modeHint");
-      if (hint) {
-        hint.textContent = mode === "work"
-          ? "Say what the task is — nothing runs until it's defined."
-          : "Talk it through — I'll ask if it turns into a project.";
+      var input = document.getElementById("chatInput");
+      if (input) {
+        input.placeholder = mode === "work"
+          ? "What are we going to accomplish together"
+          : "What do you want to talk about";
       }
       var briefH = document.querySelector("#briefPanel h3");
-      if (briefH) briefH.textContent = mode === "work" ? "Work definition" : "Brief";
-      if (mode === "work") {
-        prefillWorkDef();
-        if (!(opts && opts.noFocus)) {
-          var first = WORK_FIELDS.filter(function (f) { return f.required && !wdValue(f); })[0];
-          var el = first && document.getElementById(first.el);
-          if (el) el.focus();
-          // A cold start shows the recent-work list above the form; bring the
-          // form into view so Work mode never looks like "nothing happened".
-          var formEl = document.getElementById("workDef");
-          if (el && formEl && formEl.scrollIntoView) formEl.scrollIntoView({ block: "nearest" });
-        }
-      } else {
-        // Back to chat: the decisions column only belongs on screen once
-        // there is a conversation to attach it to.
-        var input = document.getElementById("chatInput");
-        if (input && !input.disabled) input.focus();
-      }
-    }
-
-    function submitWorkDef(e) {
-      if (e) e.preventDefault();
-      chatState._wdTried = true;
-      renderWorkProgress();
-      var note = document.getElementById("wdNote");
-      var missing = WORK_FIELDS.filter(function (f) { return f.required && !wdValue(f); });
-      if (missing.length) {
-        if (note) note.textContent = "Still need: " + missing.map(function (f) { return f.label; }).join(", ") + ".";
-        var bad = document.getElementById(missing[0].el);
-        if (bad) bad.focus();
-        return;
-      }
-      if (note) note.textContent = "";
-      var lines = ["Work definition:"];
-      WORK_FIELDS.forEach(function (f) {
-        var v = wdValue(f);
-        if (v) lines.push("- " + f.label.charAt(0).toUpperCase() + f.label.slice(1) + ": " + v);
-      });
-      var composed = lines.join("\n");
-      setMode("chat");
-      var input = document.getElementById("chatInput");
-      if (input) input.value = composed;
-      sendChatMessage();
+      if (briefH) briefH.textContent = "Brief";
+      if (input && !input.disabled && !(opts && opts.noFocus)) input.focus();
     }
 
     function shouldOfferWork() {
@@ -3733,6 +3481,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           message: text,
           model: selectedModel(),
           jobContext: chatState.jobContext || undefined,
+          mode: chatState.mode || "chat",
           attemptId: attemptId,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
@@ -3873,22 +3622,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           setMode(b.getAttribute("data-mode"));
         });
       }
-      var form = document.getElementById("workDef");
-      if (form) form.addEventListener("submit", submitWorkDef);
-      var alt = document.getElementById("wdChatInstead");
-      if (alt) {
-        alt.addEventListener("click", function () {
-          setMode("chat");
-          var input = document.getElementById("chatInput");
-          if (input && !input.disabled) input.focus();
-        });
-      }
-      WORK_FIELDS.forEach(function (f) {
-        var el = document.getElementById(f.el);
-        if (!el) return;
-        el.addEventListener("input", renderWorkProgress);
-        el.addEventListener("change", renderWorkProgress);
-      });
       // ── Inline brief strip ─────────────────────────────────────
       var barToggle = document.getElementById("briefBarToggle");
       if (barToggle) {
@@ -3900,8 +3633,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setBrief(false);
       updateChrome();
 
-      renderWorkProgress();
-      // Deep link: /buzzy/talk?mode=work starts in the definition panel.
+      // Deep link: /buzzy/talk?mode=work opens the chat already in work mode.
       var m = new URLSearchParams(window.location.search).get("mode");
       if (m === "work") setMode("work", { noFocus: true });
     })();
