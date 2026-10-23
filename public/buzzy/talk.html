@@ -175,7 +175,9 @@
     }
     .composer-card #chatInput:focus { outline: none; box-shadow: none; }
     .composer-card .paper-attach { margin-top: 0.45rem; }
-    .chat-main.is-conversation .composer-card { order: 6; }
+    /* The composer never moves. A conversation adds a transcript below it. */
+.chat-messages:empty { flex: 0 0 auto; max-height: none; padding: 0; }
+.recent-below { order: 6; margin-top: 1.1rem; }
 
     /* Inline brief: one line, expands in place. */
     .brief-bar {
@@ -1066,6 +1068,60 @@
 .bz-approve-bar { position: sticky; bottom: 0; background: var(--bz-panel, #141414); padding: 10px; display: flex; gap: 8px; }
 .bz-approve-bar button { flex: 1; min-height: 52px; }
 
+/* ── Voice: optional spoken replies + talk/listen/respond ─────── */
+.voice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px solid #2E2E2E;
+  color: #9A9A9A;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-height: 0;
+  min-width: 0;
+}
+.voice-toggle:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
+.voice-toggle.on {
+  color: var(--bz-black);
+  background: var(--bz-yellow);
+  border-color: var(--bz-yellow);
+  font-weight: 600;
+}
+.vt-icon { font-size: 0.85rem; }
+.mic-btn {
+  background: transparent;
+  border: 1px solid #2E2E2E;
+  color: #9A9A9A;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  align-self: stretch;
+  min-height: 0;
+  min-width: 0;
+}
+.mic-btn:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
+.mic-btn.on {
+  color: var(--bz-black);
+  background: var(--bz-yellow);
+  border-color: var(--bz-yellow);
+  animation: micPulse 1.6s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 193, 7, 0); }
+}
+.voice-status {
+  margin: 0.4rem 0 0;
+  font-size: 0.76rem;
+  color: var(--bz-yellow);
+}
+
 /* ── Chat / Work modes ─────────────────────────────────────────────── */
 .mode-tabs {
   display: flex;
@@ -1122,7 +1178,7 @@
       </div>
     </a>
     <nav>
-      <a href="/buzzy/" id="jobsLink" class="active">Work</a>
+      <a href="/buzzy/" id="jobsLink" class="active">Talk</a>
       <a href="/buzzy/memory" id="memLink">Memory</a>
       <a href="/buzzy/experts">Experts</a>
         <a href="/buzzy/recipes">Recipes</a>
@@ -1148,6 +1204,9 @@
               </div>
             </div>
             <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
+            <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read replies aloud">
+              <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Voice</span>
+            </button>
             <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
@@ -1158,8 +1217,10 @@
             </div>
             <div class="chat-input-row">
               <textarea id="chatInput" rows="2" placeholder="What do you want to talk about" aria-label="Describe the job for BeeZilla" disabled></textarea>
+              <button id="micBtn" class="mic-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">&#127908;</button>
               <button id="chatSend" disabled>Send</button>
             </div>
+            <p id="voiceStatus" class="voice-status hidden" role="status"></p>
 
           <div class="paper-attach">
               <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
@@ -1221,6 +1282,9 @@
               <p id="outwardNote" class="muted"></p>
             </div>
           </div>
+          <!-- History of work sits below the chat, in every state, so the
+               page never reflows when a conversation starts. -->
+          <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
         </div>
@@ -2520,6 +2584,160 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
+    // ── Voice: optional spoken replies + talk → listen → respond ────
+    // The flag up top controls whether replies are read aloud. The mic turns
+    // the page into a hands-free loop: listen, send, speak, listen again.
+    var VOICE_KEY = "bz_voice_replies";
+    var voice = { replies: false, mic: false, rec: null, speaking: false, sending: false };
+
+    function voicePref() {
+      try { return localStorage.getItem(VOICE_KEY) === "1"; } catch (_) { return false; }
+    }
+    function saveVoicePref(on) {
+      try { localStorage.setItem(VOICE_KEY, on ? "1" : "0"); } catch (_) {}
+    }
+
+    function paintVoice() {
+      var t = document.getElementById("voiceToggle");
+      if (t) {
+        t.classList.toggle("on", voice.replies);
+        t.setAttribute("aria-pressed", voice.replies ? "true" : "false");
+      }
+      var m = document.getElementById("micBtn");
+      if (m) {
+        m.classList.toggle("on", voice.mic);
+        m.setAttribute("aria-pressed", voice.mic ? "true" : "false");
+        m.textContent = voice.mic ? (voice.speaking ? "\uD83D\uDD0A" : "\uD83C\uDF99") : "\uD83C\uDFA4";
+      }
+      var s = document.getElementById("voiceStatus");
+      if (s) {
+        var msg = voice.speaking
+          ? "Speaking — I'll listen again when I'm done."
+          : voice.mic
+            ? "Listening — speak, then pause."
+            : "";
+        s.textContent = msg;
+        s.classList.toggle("hidden", !msg);
+      }
+    }
+
+    function stopSpeaking() {
+      try { window.speechSynthesis.cancel(); } catch (_) {}
+      voice.speaking = false;
+      paintVoice();
+    }
+
+    function speakReply(text) {
+      if (!text || !("speechSynthesis" in window)) {
+        if (voice.mic) startListening();
+        return;
+      }
+      try {
+        window.speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(String(text).slice(0, 1800));
+        u.lang = "en-US";
+        u.rate = 1.02;
+        voice.speaking = true;
+        paintVoice();
+        var done = function () {
+          voice.speaking = false;
+          paintVoice();
+          if (voice.mic) startListening();
+        };
+        u.onend = done;
+        u.onerror = done;
+        window.speechSynthesis.speak(u);
+      } catch (_) {
+        voice.speaking = false;
+        paintVoice();
+      }
+    }
+
+    // One spoken turn: returns the final transcript, or "" if nothing heard.
+    function startListening() {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR || voice.rec) return;
+      var rec = new SR();
+      rec.lang = "en-US";
+      rec.continuous = false;
+      rec.interimResults = true;
+      voice.rec = rec;
+      rec.onresult = function (e) {
+        var finalText = "";
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+        }
+        if (finalText.trim()) {
+          stopListening();
+          var input = document.getElementById("chatInput");
+          if (input) input.value = finalText.trim();
+          voice.sending = true;
+          paintVoice();
+          sendChatMessage();
+        }
+      };
+      rec.onerror = function (e) {
+        if (e && e.error === "not-allowed") {
+          voice.mic = false;
+          paintVoice();
+        }
+      };
+      rec.onend = function () {
+        voice.rec = null;
+        if (voice.mic && !voice.speaking && !voice.sending) {
+          setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
+        }
+      };
+      try { rec.start(); } catch (_) { voice.rec = null; }
+      paintVoice();
+    }
+
+    function stopListening() {
+      if (!voice.rec) return;
+      try { voice.rec.stop(); } catch (_) {}
+      voice.rec = null;
+      paintVoice();
+    }
+
+    function toggleMic() {
+      voice.mic = !voice.mic;
+      if (voice.mic) {
+        // A spoken conversation needs spoken answers.
+        if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
+        startListening();
+      } else {
+        stopListening();
+        stopSpeaking();
+      }
+      paintVoice();
+    }
+
+    function toggleVoiceReplies() {
+      voice.replies = !voice.replies;
+      saveVoicePref(voice.replies);
+      if (!voice.replies) stopSpeaking();
+      paintVoice();
+    }
+
+    // Called after a turn lands. Drafts are read only as a short heads-up.
+    function maybeSpeak(data) {
+      if (!data || !data.ok) return;
+      if (!voice.mic && !voice.replies) return;
+      var text = data.draft
+        ? "I've put a draft together. It's on screen for you to review."
+        : data.reply;
+      speakReply(text);
+    }
+
+    function initVoice() {
+      voice.replies = voicePref();
+      var t = document.getElementById("voiceToggle");
+      if (t) t.addEventListener("click", toggleVoiceReplies);
+      var m = document.getElementById("micBtn");
+      if (m) m.addEventListener("click", toggleMic);
+      paintVoice();
+    }
+
     // Both modes are the same free-form chat box. The mode changes the
     // prompt and the steering the server applies — not the interface.
     function setMode(mode, opts) {
@@ -2540,6 +2758,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
       var briefH = document.querySelector("#briefPanel h3");
       if (briefH) briefH.textContent = "Brief";
+      if (typeof updateChrome === "function") updateChrome();
       if (input && !input.disabled && !(opts && opts.noFocus)) input.focus();
     }
 
@@ -2934,11 +3153,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         setBackVisible(true);
         restoreTranscript();
       } else {
-        setBrief(false);
         setBackVisible(false);
-        showRecentWork();
       }
-
+      // History is always below the chat — same place in every state.
+      showRecentWork();
 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
@@ -3022,8 +3240,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var inConversation = !!(chatState.messages.length || chatState.sessionId || chatState.jobId);
       if (main) main.classList.toggle("is-conversation", inConversation);
       var bar = document.getElementById("briefBar");
-      if (bar) bar.classList.toggle("hidden", !inConversation);
-      if (!inConversation) setBrief(false);
+      // The brief is a work-mode instrument; ordinary chat stays clean.
+      var showBrief = inConversation && chatState.mode === "work";
+      if (bar) bar.classList.toggle("hidden", !showBrief);
+      if (!showBrief) setBrief(false);
       renderBriefStatus();
     }
 
@@ -3192,7 +3412,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function renderWorkSearch(q) {
-      var container = document.getElementById("chatMessages");
+      var container = document.getElementById("recentBelow");
       container.innerHTML = '<div class="recent-work">' +
         '<div class="rw-head-row">' +
         '<h3 class="rw-head">Search</h3>' +
@@ -3273,7 +3493,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function showRecentWork() {
       var co = activeCompanyId();
       if (rwSearchQuery && rwSearchQuery.length >= 2) { renderWorkSearch(rwSearchQuery); return; }
-      var container = document.getElementById("chatMessages");
+      var container = document.getElementById("recentBelow");
+      if (!container) return;
       container.innerHTML = '<p class="muted" style="padding:0.5rem 0">Loading your recent work…</p>';
       var jobsP = fetch("/api/buzzy/jobs" + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
@@ -3565,6 +3786,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         renderChatMessages();
         renderSlotChecklist();
+        maybeSpeak(data);
 
       } catch (err) {
         setChatMascot("18-unimpressed");
@@ -3574,6 +3796,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             : "Couldn't reach the server. Check your connection and try again.";
         document.getElementById("chatError").classList.remove("hidden");
       } finally {
+        voice.sending = false;
+        // A spoken turn ended without a reply: go back to listening.
+        if (voice.mic && !voice.speaking) setTimeout(function () {
+          if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
+        }, 600);
         // Only re-enable if not signed out
         if (chatState._signedOut) {
           input.disabled = true;
@@ -3632,6 +3859,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       setBrief(false);
       updateChrome();
+      initVoice();
 
       // Deep link: /buzzy/talk?mode=work opens the chat already in work mode.
       var m = new URLSearchParams(window.location.search).get("mode");
@@ -3984,24 +4212,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script>
 /* ── Mobile/async: dictation input + draft notifications ────────────── */
 (function () {
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SR) {
-    var input = document.querySelector("#chatInput, textarea, input[type=text]");
-    if (input) {
-      var btn = document.createElement("button");
-      btn.type = "button"; btn.textContent = "\uD83C\uDFA4"; btn.setAttribute("aria-label", "Speak your message");
-      btn.style.marginLeft = "6px";
-      btn.addEventListener("click", function () {
-        try {
-          var rec = new SR();
-          rec.lang = "en-US"; rec.interimResults = false;
-          rec.onresult = function (e) { input.value += (input.value ? " " : "") + e.results[0][0].transcript; };
-          rec.start();
-        } catch (err) { /* never surface dictation errors */ }
-      });
-      input.parentElement && input.parentElement.appendChild(btn);
-    }
-  }
+  // Dictation is now the #micBtn control (talk → listen → respond), wired in
+  // initVoice(). This block only handles draft notifications.
   if ("Notification" in window && Notification.permission === "default") {
     var askOnce = sessionStorage.getItem("bzNotifAsked");
     if (!askOnce) {
