@@ -7,7 +7,8 @@
  */
 import { defineEventHandler, getMethod, readBody, setResponseHeader, setResponseStatus } from "h3";
 import { getSql } from "@/lib/db";
-import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
+import { resolveOperatorContext } from "@/lib/auth/verify.server";
+import { chatCompletion } from "@/lib/buzzy/llm";
 import { createRouteDeps, routeRecipes, type RouteDeps } from "./routes";
 import { FsStorage } from "./storage";
 
@@ -35,6 +36,13 @@ async function getDeps(): Promise<RouteDeps> {
         storage: new FsStorage(process.env.RECIPE_SEAL_STORAGE_DIR ?? ".data/recipe-seal"),
         // Absent KEK is a valid state: verify works, run answers 503.
         kek: kekFromEnv(),
+        // Inject the execution lane. Without this the paid `run` path answers 503
+        // in production no matter what, so licensing and metering would only ever
+        // be exercised by the test suite. Absent a configured chat lane the model
+        // stays undefined and `run` honestly reports 503 instead of pretending.
+        model: process.env.BZ_CHAT_KEY || process.env.BZ_CHAT_BASE_URL
+          ? (prompt: string) => chatCompletion([{ role: "user", content: prompt }], { temperature: 0 })
+          : undefined,
       });
     })();
   }
@@ -61,17 +69,19 @@ export default defineEventHandler(async (event) => {
 
   const rawHeaders = (event.node?.req?.headers ?? {}) as Record<string, string | string[] | undefined>;
   const headers = toHeaders(rawHeaders);
-  const user = await getSessionUserFromHeaders(headers).catch(() => null);
+  // Role, not mere presence: publish and licence issue gate on `manage_keys`.
+  const opCtx = await resolveOperatorContext(headers).catch(() => null);
 
   const authorization = headers.get("authorization") ?? "";
   const token = authorization.toLowerCase().startsWith("bearer ")
     ? authorization.slice(7).trim()
     : null;
 
-  const callerKey =
-    (headers.get("x-forwarded-for") ?? "").split(",")[0].trim() ||
-    event.node?.req?.socket?.remoteAddress ||
-    "unknown";
+  // Take the LAST hop: the client controls the start of x-forwarded-for, but the
+  // edge proxy appends the address it actually saw. Using [0] made the 60/min
+  // anti-probing limit bypassable by sending a fresh header on every request.
+  const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  const callerKey = hops.at(-1) || event.node?.req?.socket?.remoteAddress || "unknown";
 
   let body: unknown = undefined;
   if (method === "POST" || method === "PUT" || method === "PATCH") {
@@ -80,7 +90,8 @@ export default defineEventHandler(async (event) => {
 
   const deps = await getDeps();
   const result = await routeRecipes(
-    { method, path, body, token, operatorId: user?.id ?? null, callerKey },
+    { method, path, body, token, operatorId: opCtx?.user?.id ?? null,
+      operatorRole: opCtx?.role ?? null, authRequired: opCtx?.authRequired ?? true, callerKey },
     deps,
   );
 

@@ -15,9 +15,10 @@
 import { verifyBundle, partsOf, openSemantic, inspectBundle, sha256Hex, type RecipeManifest } from "./bundle";
 import {
   authenticate, getBundle, getUsage, issueLicense, listBundles, publishBundle, recordRun,
-  reserveRun, splitCost, type LicenseRow, type QueryFn,
+  releaseRun, reserveRun, splitCost, type LicenseRow, type QueryFn,
 } from "./registry";
 import { LIMITS, RateLimiter, verifyBatch, verifyDraft, type VerifyResult } from "./verify";
+import { gateCapability, type OperatorCapability, type OperatorRole } from "../auth/roles";
 import { bundleKey, checksKey, semanticKey, type BundleStorage } from "./storage";
 import { runSealedRecipe, type SemanticHalf } from "./pipeline";
 import { createSafeLogger, memorySink, type LogSink } from "./safe-log";
@@ -31,6 +32,12 @@ export interface RouteRequest {
   token?: string | null;
   /** Operator identity from the app session (adapter supplies it). */
   operatorId?: string | null;
+  /** Resolved operator role. Publish/licence gate on `manage_keys`, not on
+   *  "somebody is signed in" — an independent review proved a `viewer` could
+   *  otherwise mint a million-run licence at price 0. */
+  operatorRole?: OperatorRole | null;
+  /** False in local-open mode, where every operator capability is granted. */
+  authRequired?: boolean;
   /** Anonymous caller key for rate limiting (IP). */
   callerKey?: string;
 }
@@ -62,6 +69,21 @@ export interface RecipeError {
 
 const err = (status: number, code: string, error: string): RouteResponse =>
   ({ status, body: { ok: false, error, code } satisfies RecipeError });
+
+/**
+ * Gate an operator capability. Truthiness of `operatorId` is NOT authorisation:
+ * any signed-in viewer satisfies that, which let a viewer mint an unlimited
+ * licence at price 0 in an independent review.
+ */
+function requireOperator(req: RouteRequest, cap: OperatorCapability): RouteResponse | null {
+  const gate = gateCapability(req.operatorRole ?? null, cap, {
+    authRequired: req.authRequired ?? true,
+  });
+  if (gate.ok) return null;
+  return gate.reason === "signed_out"
+    ? err(401, "signed_out", "sign in required")
+    : err(403, "forbidden", `role '${req.operatorRole ?? "none"}' cannot ${cap}`);
+}
 
 export function createRouteDeps(deps: Partial<RouteDeps> & { q: QueryFn; storage: BundleStorage }): RouteDeps {
   const now = deps.now ?? (() => Date.now());
@@ -99,7 +121,8 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
 
   // ── POST /api/recipes (collection) — publish a sealed bundle ───────────────
   if (rest.length === 0 && method === "POST" && body.bundle) {
-    if (!req.operatorId) return err(403, "signed_out", "operator session required");
+    const denied = requireOperator(req, "manage_keys");
+    if (denied) return denied;
     const bytes = new Uint8Array(Buffer.from(String(body.bundle), "base64"));
     const verified = verifyBundle(bytes);
     if (!verified.ok || !verified.manifest) {
@@ -139,6 +162,9 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
   if (rest.length === 2 && rest[1] === "manifest" && method === "GET") {
     const bundle = await getBundle(q, hash);
     if (!bundle) return err(404, "unknown_bundle", "no such bundle");
+    // A withdrawn recipe must stop serving immediately — the manifest names the
+    // codes and pricing, and a revoked bundle is no longer licensed at all.
+    if (bundle.status === "revoked") return err(410, "bundle_revoked", "this recipe has been withdrawn");
     return { status: 200, body: { ok: true, manifest: bundle.manifest } };
   }
 
@@ -150,6 +176,11 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       return { status: 429, body: { ok: false, error: "rate limited", code: "rate_limited" },
         headers: { "Retry-After": String(Math.ceil(gate.retryAfterMs / 1000)) } };
     }
+    const bundleRow = await getBundle(q, hash);
+    if (!bundleRow) return err(404, "unknown_bundle", "no such bundle");
+    // Revocation must stop the free oracle too: verify reports exactly which
+    // rules a draft violated, which is valuable to a competitor after withdrawal.
+    if (bundleRow.status === "revoked") return err(410, "bundle_revoked", "this recipe has been withdrawn");
     const partsBundle = await loadBundleParts(storage, hash);
     if (!partsBundle) return err(404, "unknown_bundle", "no such bundle");
     const manifest = partsBundle.manifest;
@@ -162,6 +193,9 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       return err(413, "batch_too_large", `max ${LIMITS.batchMax} drafts per call`);
     }
     if (drafts.length === 0) return err(400, "invalid_body", "drafts must be a non-empty array");
+    const batchBundle = await getBundle(q, hash);
+    if (!batchBundle) return err(404, "unknown_bundle", "no such bundle");
+    if (batchBundle.status === "revoked") return err(410, "bundle_revoked", "this recipe has been withdrawn");
     const partsBundle = await loadBundleParts(storage, hash);
     if (!partsBundle) return err(404, "unknown_bundle", "no such bundle");
     const manifest = partsBundle.manifest;
@@ -185,7 +219,10 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     if (!reserved.ok) return quotaFailure(reserved.reason);
 
     const opened = openSemantic(partsBundle, deps.kek);
-    if (!opened.ok) return err(500, "semantic_unavailable", "recipe could not be opened");
+    if (!opened.ok) {
+      await releaseRun(q, auth.license.id);   // never charge for a failed open
+      return err(500, "semantic_unavailable", "recipe could not be opened");
+    }
 
     const rules = loadRules(partsBundle.checksWasm);
     const log = createSafeLogger(deps.logSink!, { level: "info", now: deps.now });
@@ -200,14 +237,23 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     });
 
     const idem = typeof body.idempotencyKey === "string" ? body.idempotencyKey : null;
-    const run = await recordRun(q, {
-      licenseId: auth.license.id, bundleHash: auth.bundleHash, idemKey: idem,
-      inputsHash: sha256Hex(JSON.stringify(body.inputs ?? {})),
-      outputHash: result.artifact ? sha256Hex(JSON.stringify(result.artifact)) : null,
-      verdict: { ok: result.ok, codes: result.codes, warnings: result.verdict?.warnings ?? [] },
-      costCents: Number((bundleRow.manifest as RecipeManifest | null)?.pricing?.amount_cents ?? 0),
-      tokensIn: result.tokensIn, tokensOut: result.tokensOut, lane: "api", ms: result.ms,
-    });
+    let run;
+    try {
+      run = await recordRun(q, {
+        licenseId: auth.license.id, bundleHash: auth.bundleHash, idemKey: idem,
+        inputsHash: sha256Hex(JSON.stringify(body.inputs ?? {})),
+        outputHash: result.artifact ? sha256Hex(JSON.stringify(result.artifact)) : null,
+        verdict: { ok: result.ok, codes: result.codes, warnings: result.verdict?.warnings ?? [] },
+        costCents: Number((bundleRow.manifest as RecipeManifest | null)?.pricing?.amount_cents ?? 0),
+        tokensIn: result.tokensIn, tokensOut: result.tokensOut, lane: "api", ms: result.ms,
+      });
+    } catch {
+      await releaseRun(q, auth.license.id);   // no ledger row, no charge
+      return err(500, "run_not_recorded", "the run could not be recorded");
+    }
+    // An idempotent retry must not cost a second unit: refund the reservation it
+    // made before we discovered the original run.
+    if (run.deduped) await releaseRun(q, auth.license.id);
 
     return { status: 200, body: {
       ok: result.ok, artifact: result.artifact, codes: result.codes,
@@ -224,22 +270,33 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
 
   // ── operator routes ────────────────────────────────────────────────────────
   if (rest.length === 2 && rest[1] === "license" && method === "POST") {
-    if (!req.operatorId) return err(403, "signed_out", "operator session required");
+    const denied = requireOperator(req, "manage_keys");
+    if (denied) return denied;
     const bundleRow = await getBundle(q, hash);
     if (!bundleRow) return err(404, "unknown_bundle", "no such bundle");
     const licenseeId = typeof body.licenseeId === "string" ? body.licenseeId : null;
     if (!licenseeId) return err(400, "invalid_body", "licenseeId is required");
-    const issued = await issueLicense(q, {
-      bundleHash: hash,
-      licenseeKind: (body.licenseeKind as "account" | "agent" | "org") ?? "account",
-      licenseeId,
-      quota: typeof body.quota === "number" ? body.quota : 500,
-      scopes: Array.isArray(body.scopes)
-        ? (body.scopes.filter((s) => typeof s === "string") as ("run" | "verify" | "usage")[])
-        : undefined,
-      expiresAt: typeof body.expiresAt === "string" ? new Date(body.expiresAt) : null,
-      priceCents: typeof body.priceCents === "number" ? body.priceCents : 0,
-    });
+    if (bundleRow.status === "revoked") return err(409, "bundle_revoked", "this recipe has been withdrawn");
+    let issued;
+    try {
+      issued = await issueLicense(q, {
+        bundleHash: hash,
+        licenseeKind: (body.licenseeKind as "account" | "agent" | "org") ?? "account",
+        licenseeId,
+        quota: typeof body.quota === "number" ? body.quota : 500,
+        scopes: Array.isArray(body.scopes)
+          ? (body.scopes.filter((s) => typeof s === "string") as ("run" | "verify" | "usage")[])
+          : undefined,
+        expiresAt: typeof body.expiresAt === "string" ? new Date(body.expiresAt) : null,
+        priceCents: typeof body.priceCents === "number" ? body.priceCents : 0,
+      });
+    } catch (cause) {
+      // Never let a domain error escape as a 500 with a Postgres message in it.
+      const code = (cause as Error).message;
+      if (code === "bundle_revoked") return err(409, "bundle_revoked", "this recipe has been withdrawn");
+      if (code === "unknown_bundle") return err(404, "unknown_bundle", "no such bundle");
+      return err(500, "license_failed", "the licence could not be issued");
+    }
     // The secret is returned exactly once.
     return { status: 201, body: { ok: true, licenseId: issued.licenseId, token: issued.tokenSecret } };
   }

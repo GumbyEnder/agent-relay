@@ -56,6 +56,33 @@ export interface RecipeManifest {
   signature?: string;
 }
 
+/**
+ * The only keys a manifest may carry. Without this, `verifyBundle` would happily
+ * sign and serve a hand-built manifest containing prose under any invented key
+ * (`guidance`, `checklist`, `firstQuestion` …). An independent review proved the
+ * DB constraint alone was a naming ban and therefore bypassable.
+ */
+export const MANIFEST_KEYS = [
+  "protocol", "id", "version", "created_at", "author", "capability", "checks",
+  "semantic", "dek_wrapped", "evals", "pricing", "chain", "signature",
+] as const;
+export const CAPABILITY_KEYS = ["inputs", "outputs", "tools", "forbidden_tools", "boundary_summary"] as const;
+
+/** Returns the offending keys, or an empty array when the manifest is in shape. */
+export function manifestShapeErrors(manifest: unknown): string[] {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return ["not_an_object"];
+  const m = manifest as Record<string, unknown>;
+  const extra = Object.keys(m).filter((k) => !(MANIFEST_KEYS as readonly string[]).includes(k));
+  const errors: string[] = extra.map((k) => `unexpected_key:${k}`);
+  const cap = m.capability;
+  if (cap && typeof cap === "object" && !Array.isArray(cap)) {
+    for (const k of Object.keys(cap as Record<string, unknown>)) {
+      if (!(CAPABILITY_KEYS as readonly string[]).includes(k)) errors.push(`unexpected_capability_key:${k}`);
+    }
+  }
+  return errors;
+}
+
 export const BUNDLE_REASONS = [
   "NOT_ZIP", "MISSING_ENTRY", "NO_CHECKS", "MANIFEST_SCHEMA", "UNSUPPORTED_PROTOCOL",
   "BAD_SIGNATURE", "HASH_MISMATCH_CHECKS", "HASH_MISMATCH_SEMANTIC",
@@ -234,6 +261,13 @@ export function verifyBundle(bytes: Uint8Array): VerifyResult {
   }
   if (manifest.protocol !== PROTOCOL) return { ok: false, reason: "UNSUPPORTED_PROTOCOL" };
   if (!manifest.signature) return { ok: false, reason: "MANIFEST_SCHEMA", detail: "missing signature" };
+  // Structural allow-list: a self-signed manifest is only trustworthy if it is
+  // also in shape, otherwise "verified" just means "self-consistent" and a
+  // publisher could smuggle prose in under an invented key.
+  const shapeErrors = manifestShapeErrors(manifest);
+  if (shapeErrors.length > 0) {
+    return { ok: false, reason: "MANIFEST_SCHEMA", detail: shapeErrors.join(",") };
+  }
 
   const digest = digestOf(manifest);
   const publicKey = createPublicKey({

@@ -236,6 +236,11 @@ export function rulesFor(recipeId: string): Rule[] {
   return rules;
 }
 
+/**
+ * 32 executable rules: 24 domain rules (C01–C24) plus 8 boundary rules
+ * (C30–C37). The Step 1 commit message says "24 rules" because the domain set
+ * was the headline number; the suite asserts 32, which is the true count.
+ */
 export const ALL_RULES: Rule[] = Object.values(RECIPE_RULES).flat();
 
 export function allCodes(): string[] {

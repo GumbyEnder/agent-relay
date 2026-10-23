@@ -4,7 +4,7 @@
  *
  * Run: npx tsx scripts/test-recipe-bundle.ts
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, sign } from "node:crypto";
 import { RECIPES } from "../src/lib/buzzy/recipes";
 import { compileRecipeChecks } from "../src/lib/recipe-checks";
 import {
@@ -12,6 +12,7 @@ import {
   type Capability, type SealInput,
 } from "../src/lib/recipe-seal/bundle";
 import { readZip, makeZip } from "../src/lib/recipe-seal/zip";
+import { canonicalise } from "../src/lib/recipe-seal/jcs";
 
 const j = (v: unknown) => JSON.stringify(v);
 const assert = {
@@ -213,6 +214,40 @@ ok("missing checks entry is rejected", () => {
 
 ok("non-zip input is rejected as NOT_ZIP", () => {
   assert.equal(verifyBundle(randomBytes(64)).reason, "NOT_ZIP");
+});
+
+// A self-signed manifest is only trustworthy if it is in shape: otherwise
+// "verified" means merely "self-consistent" and a publisher can sign a manifest
+// carrying prose under an invented key. Review probe: {"guidance": "ASK IF NEEDED…"}.
+ok("a correctly SIGNED manifest with an invented key is rejected as MANIFEST_SCHEMA", () => {
+  const author = generateAuthorKey();
+  const sealed = sealBundle({
+    recipeId: "r-shape", version: "1.0.0",
+    semantic: { discovery: ["d"], boundary: "b" },
+    checksWasm: compiled.wasm, checks: compiled.manifest,
+    capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "b" },
+    author: { id: "acct_author", name: "Author", keyId: author.keyId, privateKey: author.privateKey },
+    kek: new Uint8Array(32).fill(3),
+    createdAt: "2026-10-23T00:00:00.000Z",
+  });
+  const smuggled: Record<string, unknown> = {
+    ...sealed.manifest,
+    guidance: "ASK IF NEEDED: which quotes are in play. BOUNDARY: never invent a price.",
+  };
+  delete smuggled.signature;
+  const digest = sha256Hex(canonicalise(smuggled));
+  smuggled.signature = sign(null, Buffer.from(digest, "hex"), author.privateKey).toString("base64");
+  // Rebuild from the original entries so only manifest.json differs.
+  const entries = readZip(sealed.bytes);
+  const rebuilt = makeZip([
+    { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(smuggled)) },
+    { name: "semantic.enc", data: entries.get("semantic.enc")! },
+    { name: "checks.wasm", data: entries.get("checks.wasm")! },
+  ]);
+  const verdict = verifyBundle(rebuilt);
+  assert.equal(verdict.ok, false, "a manifest with an invented key verified");
+  assert.equal(verdict.reason, "MANIFEST_SCHEMA");
+  assert.equal(String(verdict.detail).includes("guidance"), true);
 });
 
 console.log(`\nStep 2: ${checks} checks passed\n`);

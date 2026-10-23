@@ -38,7 +38,8 @@ const q: QueryFn = async (text, params) => (await pool.query(text, params as unk
 
 async function migrate() {
   for (const f of ["0039_recipe_seal_bundles.sql", "0040_recipe_seal_licenses.sql",
-                   "0041_recipe_seal_tokens.sql", "0042_recipe_seal_metering.sql"]) {
+                   "0041_recipe_seal_tokens.sql", "0042_recipe_seal_metering.sql",
+                   "0043_recipe_seal_structural_guards.sql"]) {
     const sql = readFileSync(join(process.cwd(), "migrations", f), "utf8");
     await pool.query(sql);
   }
@@ -49,7 +50,11 @@ async function reset() {
     DROP TABLE IF EXISTS ar_recipe_run, ar_recipe_token, ar_recipe_license, ar_recipe_bundle CASCADE;`);
 }
 
-const MANIFEST = { protocol: "recipe-seal/1", id: "quote-comparison", version: "1.0.0", codes: { C01: "x" } };
+// Realistic shape: codes live under `checks`, and there are no keys outside the
+// protocol's allow-list (0043 rejects anything else, including the old fixture's
+// top-level `codes`).
+const MANIFEST = { protocol: "recipe-seal/1", id: "quote-comparison", version: "1.0.0",
+  checks: { module: "checks.wasm", sha256: "0".repeat(64), rules: 24, codes: { C01: "x" }, engine: "srb-vm/1" } };
 
 (async () => {
   console.log("\nStep 4 — registry, licensing, metering (real Postgres)\n");
@@ -196,6 +201,28 @@ const MANIFEST = { protocol: "recipe-seal/1", id: "quote-comparison", version: "
       assert.equal(["prompt", "text", "draft", "semantic_text"].includes(r.column_name), false,
         `unexpected column ${r.column_name}`);
     }
+  });
+
+  // 0039's guard was a naming ban: it rejected semantic_text/prompt/discovery and
+  // let {"guidance": …} through. 0043 replaces it with a key allow-list, so this
+  // asserts the actual attack the reviewer used, not a column-name lookup.
+  await ok("a manifest carrying prose under an invented key is rejected by the DB", async () => {
+    let threw = false;
+    try {
+      await q(`UPDATE ar_recipe_bundle SET manifest = manifest || $2::jsonb WHERE hash = $1`,
+        [hashA, JSON.stringify({ guidance: "ASK IF NEEDED: which quotes are in play. BOUNDARY: never invent a price." })]);
+    } catch { threw = true; }
+    assert.ok(threw, "a manifest with an unexpected top-level key was stored");
+    const still = await q<{ manifest: unknown }>(`SELECT manifest FROM ar_recipe_bundle WHERE hash = $1`, [hashA]);
+    assert.equal(JSON.stringify(still[0]?.manifest ?? {}).includes("ASK IF NEEDED"), false);
+  });
+
+  await ok("quota cannot be overspent, even by a direct UPDATE", async () => {
+    let threw = false;
+    try {
+      await q(`UPDATE ar_recipe_license SET used = quota + 1 WHERE id = $1`, [issued.licenseId]);
+    } catch { threw = true; }
+    assert.ok(threw, "used > quota was accepted by the database");
   });
 
   await ok("the run verdict constraint rejects prose payloads", async () => {

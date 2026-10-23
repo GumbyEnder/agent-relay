@@ -76,12 +76,27 @@ export class RateLimiter {
     private readonly limit: number,
     private readonly windowMs: number,
     private readonly now: () => number = () => Date.now(),
+    /** Hard cap on tracked keys. The key is caller-supplied, so an unbounded map
+     *  is a memory-exhaustion vector: sweep expired buckets, then evict oldest. */
+    private readonly maxKeys = 10_000,
   ) {}
+
+  private evict(t: number): void {
+    if (this.buckets.size < this.maxKeys) return;
+    for (const [k, b] of this.buckets) {
+      if (b.resetAt <= t) this.buckets.delete(k);
+    }
+    for (const [k] of this.buckets) {
+      if (this.buckets.size < this.maxKeys) break;
+      this.buckets.delete(k);
+    }
+  }
 
   /** Returns {allowed, remaining, retryAfterMs}. */
   take(key: string): { allowed: boolean; remaining: number; retryAfterMs: number } {
     const t = this.now();
     const b = this.buckets.get(key);
+    if (!b) this.evict(t);
     if (!b || b.resetAt <= t) {
       this.buckets.set(key, { count: 1, resetAt: t + this.windowMs });
       return { allowed: true, remaining: this.limit - 1, retryAfterMs: 0 };

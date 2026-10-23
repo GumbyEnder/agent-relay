@@ -109,17 +109,40 @@ const ATTACKS = [
 
 // Async suite: run explicitly and report at the end.
 (async () => {
+  // Each attempt must actually differ: the model is told to quote the prose AND
+  // the prose is planted in a different field per attempt. An earlier revision
+  // ran one echo model 25× and always planted the text in sections[].body, so it
+  // proved a single case 25 times — an independent review caught that.
+  const PLANT: Array<[string, (prose: string) => Record<string, unknown>]> = [
+    ["sections[].body", (p) => ({ ...GOOD_DRAFT, sections: [{ id: "s1", title: "N", body: p }] })],
+    ["sections[].title", (p) => ({ ...GOOD_DRAFT, sections: [{ id: "s1", title: p, body: "Supplier B is cheaper per unit." }] })],
+    ["citations[].locator", (p) => ({ ...GOOD_DRAFT, citations: [{ id: "c1", text: "q2", sourceId: "q2", locator: p }] })],
+    ["domain.legalQuestions", (p) => ({ ...GOOD_DRAFT, domain: { units: ["ea"], legalQuestions: [p] } })],
+    ["meta", (p) => ({ ...GOOD_DRAFT, meta: { note: p, generatedAt: "2026-10-21T00:00:00Z" } })],
+  ];
   let leakedResponses = 0;
   let leakedLogs = 0;
-  for (const attack of ATTACKS) {
-    const { result, lines } = await run(echoModel);
+  const fieldsExercised = new Set<string>();
+  for (const [i, attack] of ATTACKS.entries()) {
+    const [where, plant] = PLANT[i % PLANT.length];
+    fieldsExercised.add(where);
+    // The model answers the specific attack and echoes the prompt into `where`.
+    const attacked = async (prompt: string) => {
+      assert.ok(prompt.length > 0, "model called with an empty prompt");
+      return j(plant(renderPrompt(SEMANTIC, {})));
+    };
+    const { result, lines } = await run(attacked, { inputs: { attack, quotes: ["a", "b"] } });
     const responseText = j(result);
-    if (leaksIn(responseText).length > 0) leakedResponses++;
+    if (leaksIn(responseText).length > 0) {
+      leakedResponses++;
+      console.error(`    LEAK via ${where} (${attack}): ${leaksIn(responseText)[0]}`);
+    }
     if (leaksIn(lines.join("\n")).length > 0) leakedLogs++;
   }
   assert.equal(leakedResponses, 0, "responses leaked semantic shingles");
   assert.equal(leakedLogs, 0, "logs leaked semantic shingles");
-  console.log(`  ok  25 extraction attempts: 0 response leaks, 0 log leaks`);
+  assert.equal(fieldsExercised.size, PLANT.length, "not every response field was exercised");
+  console.log(`  ok  ${ATTACKS.length} extraction attempts across ${fieldsExercised.size} response fields: 0 response leaks, 0 log leaks`);
   checks++;
 
   // ── log audit ───────────────────────────────────────────────────────────────

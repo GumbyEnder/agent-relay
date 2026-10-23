@@ -230,6 +230,20 @@ export async function reserveRun(q: QueryFn, licenseId: string): Promise<Reserve
   return { ok: false, reason: "quota_exhausted" };
 }
 
+/**
+ * Return a reserved unit. Called when the request fails after reserving (bad
+ * KEK, storage miss, ledger write error) or when an idempotent retry is
+ * deduped — otherwise quota is burned for work that produced no ledger row.
+ */
+export async function releaseRun(q: QueryFn, licenseId: string): Promise<boolean> {
+  const rows = await q(
+    `UPDATE ar_recipe_license SET used = GREATEST(used - 1, 0)
+      WHERE id = $1 RETURNING used`,
+    [licenseId],
+  );
+  return rows.length > 0;
+}
+
 // ── run ledger ────────────────────────────────────────────────────────────────
 export interface RecordRunInput {
   licenseId: string;

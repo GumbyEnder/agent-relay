@@ -4,8 +4,8 @@
  *
  * Run: npx tsx scripts/test-recipe-verify.ts
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
 import { rulesFor } from "../src/lib/recipe-checks";
 import { PIPELINE_CODES, runSealedRecipe } from "../src/lib/recipe-seal/pipeline";
 import { createSafeLogger, memorySink } from "../src/lib/recipe-seal/safe-log";
@@ -77,16 +77,25 @@ const BAD = {
     assert.equal(bucketMs(50), ">=50");
   });
 
-  await ok("NO-PLAINTEXT: verify works with RECIPE_SEAL_KEK unset", () => {
-    // Prove the property at the environment level: the opener needs this key.
-    const saved = process.env.RECIPE_SEAL_KEK;
-    delete process.env.RECIPE_SEAL_KEK;
-    try {
-      const r = verifyDraft({ checksWasm: compiled.wasm, draft: GOOD, descriptions: DESCRIPTIONS });
-      assert.equal(r.ok, true);
-    } finally {
-      if (saved !== undefined) process.env.RECIPE_SEAL_KEK = saved;
-    }
+  await ok("NO-PLAINTEXT: nothing in verify's module graph reads the environment", () => {
+    // Deleting RECIPE_SEAL_KEK from process.env proves nothing about a pure
+    // function — an independent review called the old assertion hollow. The real
+    // property is structural: no file reachable from verify.ts reads process.env
+    // at all, so KEK state cannot influence the free tier.
+    const seen = new Set<string>();
+    const walk = (rel: string): void => {
+      if (seen.has(rel)) return;
+      seen.add(rel);
+      const src = readFileSync(join(process.cwd(), rel), "utf8");
+      assert.equal(src.includes("process.env"), false, `${rel} reads process.env`);
+      for (const m of src.matchAll(/from\s+"(\.\.?\/[^"]+)"/g)) {
+        const base = normalize(join(dirname(rel), m[1]));
+        const cand = [`${base}.ts`, join(base, "index.ts")].find((p) => existsSync(join(process.cwd(), p)));
+        if (cand) walk(cand);
+      }
+    };
+    walk("src/lib/recipe-seal/verify.ts");
+    assert.ok(seen.size >= 2, `expected to walk verify.ts's imports, saw ${[...seen].join(",")}`);
   });
 
   await ok("NO-PLAINTEXT: verify.ts does not reference the bundle opener at all", () => {

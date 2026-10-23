@@ -70,7 +70,8 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
   await pool.query(`DROP VIEW IF EXISTS ar_recipe_metering;
     DROP TABLE IF EXISTS ar_recipe_run, ar_recipe_token, ar_recipe_license, ar_recipe_bundle CASCADE;`);
   for (const f of ["0039_recipe_seal_bundles.sql", "0040_recipe_seal_licenses.sql",
-                   "0041_recipe_seal_tokens.sql", "0042_recipe_seal_metering.sql"]) {
+                   "0041_recipe_seal_tokens.sql", "0042_recipe_seal_metering.sql",
+                   "0043_recipe_seal_structural_guards.sql"]) {
     await pool.query(readFileSync(join(process.cwd(), "migrations", f), "utf8"));
   }
 
@@ -87,11 +88,13 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
   await ok("publish is refused without an operator session", async () => {
     const r = await routeRecipes({ method: "POST", path: "/api/recipes",
       body: { bundle: Buffer.from(sealed.bytes).toString("base64") } }, deps);
-    assert.equal(r.status, 403);
+    // No session at all is 401 (signed_out); a session without `manage_keys` is 403.
+    assert.equal(r.status, 401);
+    assert.equal((r.body as { code: string }).code, "signed_out");
   });
 
   await ok("publish accepts a verified bundle and stores it content-addressed", async () => {
-    const r = await routeRecipes({ method: "POST", path: "/api/recipes", operatorId: "op_1",
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes", operatorId: "op_1", operatorRole: "admin", authRequired: true,
       body: { bundle: Buffer.from(sealed.bytes).toString("base64") } }, deps);
     assert.equal(r.status, 201, `publish failed: ${j(r.body)}`);
     hash = (r.body as { hash: string }).hash;
@@ -113,7 +116,7 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
       kek: new Uint8Array(32).fill(7),
       createdAt: "2026-10-22T00:00:00.000Z",   // ... different hash
     });
-    const r = await routeRecipes({ method: "POST", path: "/api/recipes", operatorId: "op_1",
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes", operatorId: "op_1", operatorRole: "admin", authRequired: true,
       body: { bundle: Buffer.from(other.bytes).toString("base64") } }, deps);
     assert.equal(r.status, 409, `expected 409, got ${r.status}: ${j(r.body)}`);
     assert.equal((r.body as { code: string }).code, "version_exists");
@@ -193,10 +196,26 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal((r.body as { results: unknown[] }).results.length, 3);
   });
 
+  // ── authorisation: a signed-in viewer is not an operator ───────────────────
+  await ok("a viewer cannot publish", async () => {
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "user_viewer", operatorRole: "viewer", authRequired: true,
+      body: { bundle: Buffer.from(sealed.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 403, `viewer published: ${j(r.body)}`);
+  });
+
+  await ok("a viewer cannot mint a licence (the unlimited-quota probe)", async () => {
+    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+      operatorId: "user_viewer", operatorRole: "viewer", authRequired: true,
+      body: { licenseeId: "attacker", quota: 1_000_000, priceCents: 0 } }, deps);
+    assert.equal(r.status, 403, `viewer minted a licence: ${j(r.body)}`);
+  });
+
   let token = "";
   await ok("operator issues a licence and receives the token exactly once", async () => {
     const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
-      operatorId: "op_1", body: { licenseeId: "agent_a", licenseeKind: "agent", quota: 2,
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { licenseeId: "agent_a", licenseeKind: "agent", quota: 2,
         scopes: ["run", "verify", "usage"] } }, deps);
     assert.equal(r.status, 201, `license failed: ${j(r.body)}`);
     token = (r.body as { token: string }).token;
@@ -240,22 +259,29 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const r = await routeRecipes({ method: "GET", path: `/api/recipes/${hash}/license/usage`, token }, deps);
     assert.equal(r.status, 200);
     const u = (r.body as { usage: { runs: number; used: number; quota: number | null } }).usage;
-    // two physical attempts, one ledger row (idempotent retry); quota charged twice
+    // Two physical attempts, one ledger row, and ONE unit charged: the retry's
+    // reservation is refunded when the duplicate is detected. (An earlier
+    // revision asserted used === 2, i.e. it enshrined double-charging.)
     assert.equal(u.runs, 1);
-    assert.equal(u.used, 2);
+    assert.equal(u.used, 1, `idempotent retry double-charged: used=${u.used}`);
     assert.equal(u.quota, 2);
   });
 
   await ok("quota exhaustion is a 402 on the next run", async () => {
-    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
+    // One unit remains after the refunded retry: this run spends it …
+    const last = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
       token, body: { inputs: { quotes: ["b"] }, idempotencyKey: "idem-2" } }, deps);
+    assert.equal(last.status, 200, `expected the final unit to be spendable: ${j(last.body)}`);
+    // … and the next distinct run is refused.
+    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
+      token, body: { inputs: { quotes: ["c"] }, idempotencyKey: "idem-3" } }, deps);
     assert.equal(r.status, 402);
     assert.equal((r.body as { code: string }).code, "quota_exhausted");
   });
 
   await ok("revoked licence refuses the run with 403", async () => {
     const lic = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
-      operatorId: "op_1", body: { licenseeId: "agent_b", licenseeKind: "agent", quota: 5 } }, deps);
+      operatorId: "op_1", operatorRole: "admin", authRequired: true, body: { licenseeId: "agent_b", licenseeKind: "agent", quota: 5 } }, deps);
     const t = (lic.body as { token: string }).token;
     const id = (lic.body as { licenseId: string }).licenseId;
     await q(`UPDATE ar_recipe_license SET revoked_at = now() WHERE id = $1`, [id]);
@@ -273,6 +299,18 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
       assert.equal(text.includes(phrase.slice(0, 24)), false, "ledger leaked prose");
     }
     assert.equal(rows.every((r) => /^[0-9a-f]{64}$/.test(r.inputs_hash)), true);
+  });
+
+  // ── withdrawal must stop serving, not just hide the catalogue row ──────────
+  await ok("a revoked bundle stops serving verify, batch and manifest", async () => {
+    await q(`UPDATE ar_recipe_bundle SET status = 'revoked' WHERE hash = $1`, [hash]);
+    const draft = { sections: [{ id: "s1", title: "T", body: "B" }] };
+    const v = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify`, body: { draft } }, deps);
+    assert.equal(v.status, 410, `verify served a withdrawn recipe: ${j(v.body)}`);
+    const b = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify/batch`, body: { drafts: [draft] } }, deps);
+    assert.equal(b.status, 410);
+    const m = await routeRecipes({ method: "GET", path: `/api/recipes/${hash}/manifest` }, deps);
+    assert.equal(m.status, 410, `manifest served a withdrawn recipe: ${j(m.body)}`);
   });
 
   console.log(`\nRoutes: ${checks} checks passed\n`);
