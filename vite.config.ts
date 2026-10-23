@@ -428,6 +428,14 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/auth-api.nitro.ts",
               },
               {
+                route: "/api/recipes",
+                handler: "./src/lib/recipe-seal/recipes.nitro.ts",
+              },
+              {
+                route: "/api/recipes/**",
+                handler: "./src/lib/recipe-seal/recipes.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/chat",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
