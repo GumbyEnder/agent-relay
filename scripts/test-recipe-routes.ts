@@ -99,6 +99,26 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.ok(await storage.get(`bundles/${hash}.srb`));
   });
 
+  await ok("republishing the same version with different content is a 409, not a 500", async () => {
+    // Independent review finding: the unique (recipe_id, version) violation
+    // surfaced as an unhandled Postgres 23505 -> Nitro 500.
+    const { sealBundle: reseal, generateAuthorKey: genKey } = await import("../src/lib/recipe-seal/bundle");
+    const k2 = genKey();
+    const other = reseal({
+      recipeId: recipe.id, version: "1.0.0",   // same recipe + version ...
+      semantic: { discovery: ["different content"], boundary: "b" },
+      checksWasm: compiled.wasm, checks: compiled.manifest,
+      capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "b" },
+      author: { id: "acct_author", name: "Author", keyId: k2.keyId, privateKey: k2.privateKey },
+      kek: new Uint8Array(32).fill(7),
+      createdAt: "2026-10-22T00:00:00.000Z",   // ... different hash
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes", operatorId: "op_1",
+      body: { bundle: Buffer.from(other.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 409, `expected 409, got ${r.status}: ${j(r.body)}`);
+    assert.equal((r.body as { code: string }).code, "version_exists");
+  });
+
   await ok("catalogue lists the recipe", async () => {
     const r = await routeRecipes({ method: "GET", path: "/api/recipes" }, deps);
     assert.equal(r.status, 200);

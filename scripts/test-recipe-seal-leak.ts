@@ -176,6 +176,26 @@ const ATTACKS = [
     checks++;
   }
 
+  {
+    // Independent review finding: redaction walked only body/text/table fields,
+    // so prose echoed into a title, a locator, a domain string or meta survived.
+    const phrase = "Which quotes are in play, and what does each one cover";
+    const draft = {
+      version: 1,
+      sections: [{ id: "s1", title: phrase, body: "Supplier B is cheaper per unit." }],
+      citations: [{ id: "c1", text: "quoted", sourceId: "q2", locator: phrase }],
+      claims: [{ id: "k1", text: "Quoted 12.40", sourceId: "q2" }],
+      values: [{ id: "total-1", kind: "money", raw: "1240.00", normalised: 124000, source: "calculator" }],
+      domain: { units: ["ea"], legalQuestions: [phrase] },
+      meta: { note: phrase, generatedAt: "2026-10-21T00:00:00Z" },
+    };
+    const { result } = await run(async () => j(draft));
+    const flat = j(result.artifact ?? {});
+    assert.equal(flat.includes(phrase), false, `prose survived in a non-body field: ${flat.slice(0, 200)}`);
+    console.log("  ok  prose in title/locator/domain/meta is scrubbed by the deep walk");
+    checks++;
+  }
+
   // ── schema gate + repair ────────────────────────────────────────────────────
   {
     const { result } = await run(async () => "not json");

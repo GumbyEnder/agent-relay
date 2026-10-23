@@ -107,15 +107,24 @@ export interface LeakReport {
   text: string;
 }
 
-function collectText(draft: Draft): string {
-  const parts: string[] = [];
-  for (const s of draft.sections ?? []) parts.push(s.body);
-  for (const c of draft.claims ?? []) parts.push(c.text);
-  for (const c of draft.citations ?? []) parts.push(c.text);
-  for (const t of draft.tables ?? []) {
-    for (const row of t.rows) for (const v of Object.values(row)) if (typeof v === "string") parts.push(v);
+/**
+ * Every string anywhere in the artifact, not a hand-picked list of fields.
+ *
+ * An enumerated list was the defect an independent review found: prose echoed
+ * into `sections[].title`, `citations[].locator`, a `domain.*` string or `meta`
+ * passed the filter untouched because those fields were never inspected.
+ */
+function collectStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) for (const v of value) collectStrings(v, out);
+  else if (value && typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) collectStrings(v, out);
   }
-  return parts.join("\n");
+  return out;
+}
+
+function collectText(draft: Draft): string {
+  return collectStrings(draft).join("\n");
 }
 
 /** Replace any span that reproduces the semantic half verbatim at shingle width. */
@@ -170,21 +179,18 @@ export function redactDraft(
     if (stripMetaToo) out = stripMeta(out).text;
     return out;
   };
-  const out: Draft = {
-    ...draft,
-    sections: draft.sections?.map((s) => ({ ...s, body: clean(s.body) })),
-    claims: draft.claims?.map((c) => ({ ...c, text: clean(c.text) })),
-    citations: draft.citations?.map((c) => ({ ...c, text: clean(c.text) })),
-    tables: draft.tables?.map((t) => ({
-      ...t,
-      rows: t.rows.map((row) => {
-        const next: Record<string, string | number | null> = {};
-        for (const [k, v] of Object.entries(row)) next[k] = typeof v === "string" ? clean(v) : v;
-        return next;
-      }),
-    })),
+  // Deep walk: every string in the artifact is cleaned, wherever it sits.
+  const walk = (value: unknown): unknown => {
+    if (typeof value === "string") return clean(value);
+    if (Array.isArray(value)) return value.map(walk);
+    if (value && typeof value === "object") {
+      const next: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) next[k] = walk(v);
+      return next;
+    }
+    return value;
   };
-  return out;
+  return walk(draft) as Draft;
 }
 
 // ── meta-refusal ──────────────────────────────────────────────────────────────

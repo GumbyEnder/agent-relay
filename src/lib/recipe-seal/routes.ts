@@ -110,12 +110,25 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     await storage.put(bundleKey(verified.digest!), bytes);
     await storage.put(semanticKey(verified.digest!), bundleParts.semanticEnc);
     await storage.put(checksKey(verified.digest!), bundleParts.checksWasm);
-    const row = await publishBundle(q, {
-      hash: verified.digest!, recipeId: manifest.id, version: manifest.version,
-      authorId: manifest.author.id, manifest,
-      bundleRef: bundleKey(verified.digest!), semanticRef: semanticKey(verified.digest!),
-      checksRef: checksKey(verified.digest!),
-    });
+    let row;
+    try {
+      row = await publishBundle(q, {
+        hash: verified.digest!, recipeId: manifest.id, version: manifest.version,
+        authorId: manifest.author.id, manifest,
+        bundleRef: bundleKey(verified.digest!), semanticRef: semanticKey(verified.digest!),
+        checksRef: checksKey(verified.digest!),
+      });
+    } catch (cause) {
+      // (recipe_id, version) is unique: republishing changed content under an
+      // existing version is a client error, not a 500. An independent review
+      // found this surfacing as an unhandled Postgres 23505.
+      if ((cause as { code?: string }).code === "23505") {
+        return err(409, "version_exists",
+          `version ${manifest.version} of ${manifest.id} is already published with a different hash; ` +
+          `publish a new version instead`);
+      }
+      throw cause;
+    }
     return { status: 201, body: { ok: true, hash: row.hash, id: row.recipe_id, version: row.version } };
   }
 
