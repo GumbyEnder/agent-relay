@@ -38,6 +38,8 @@ export interface PipelineOptions {
   shingleSize?: number;
   /** Max characters returned to a consumer. */
   maxOutputChars?: number;
+  /** Share of a single string that may be protected wording before it is withheld. */
+  withholdRatio?: number;
 }
 
 export interface RunResult {
@@ -123,41 +125,76 @@ function collectStrings(value: unknown, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * Every string in the draft, *including object keys*. Values-only collection let a
+ * model smuggle the prompt as a key (`{"<prompt>": 1}`) with the leak filter
+ * reporting clean — an independent review proved exactly that.
+ */
 function collectText(draft: Draft): string {
-  return collectStrings(draft).join("\n");
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") { out.push(value); return; }
+    if (Array.isArray(value)) { value.forEach(walk); return; }
+    if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) { out.push(k); walk(v); }
+    }
+  };
+  walk(draft);
+  return out.join("\n");
 }
 
-/** Replace any span that reproduces the semantic half verbatim at shingle width. */
+/**
+ * Replace any span that reproduces the semantic half.
+ *
+ * Two widths are checked. 8-token shingles catch ordinary paraphrase-adjacent
+ * copying; **4-token** shingles catch the short strings that never reach 8 tokens
+ * at all ("never invents a price", "comparison table with source column") — an
+ * independent review proved a single-width filter left those completely intact.
+ *
+ * Redaction is *sentence-scoped*, not whole-string: wiping an entire field
+ * because 15% of it overlapped destroyed legitimate output (a 40-token body plus
+ * one boundary sentence came back as ""). Only a string that is mostly protected
+ * wording is withheld outright.
+ */
 export function filterLeak(text: string, semantic: SemanticHalf, opts: PipelineOptions = {}): LeakReport {
   const size = opts.shingleSize ?? 8;
+  const shortSize = Math.min(4, size);
   const maxRatio = opts.maxShingleRatio ?? 0.15;
+  /** Above this share of a *single string*, the whole string is withheld. */
+  const withholdRatio = opts.withholdRatio ?? 0.6;
   const semanticText = renderPrompt(semantic, {});
-  const protectedShingles = shingles(semanticText, size);
-  if (protectedShingles.size === 0) return { ratio: 0, matched: 0, rejected: false, text };
+  const protectedLong = shingles(semanticText, size);
+  const protectedShort = shingles(semanticText, shortSize);
+  if (protectedShort.size === 0) return { ratio: 0, matched: 0, rejected: false, text };
 
   const tokens = tokenise(text);
-  const draftShingles: string[] = [];
-  for (let i = 0; i + size <= tokens.length; i++) draftShingles.push(tokens.slice(i, i + size).join(" "));
-
+  const longShingles: string[] = [];
+  for (let i = 0; i + size <= tokens.length; i++) longShingles.push(tokens.slice(i, i + size).join(" "));
   let matched = 0;
-  for (const s of draftShingles) if (protectedShingles.has(s)) matched++;
-  const ratio = draftShingles.length ? matched / draftShingles.length : 0;
+  for (const s of longShingles) if (protectedLong.has(s)) matched++;
+  const ratio = longShingles.length ? matched / longShingles.length : 0;
 
-  if (ratio > maxRatio) {
-    return { ratio, matched, rejected: true, text: "" };
+  // Short-window match: does any 4-token run of this string appear in the prose?
+  let shortMatches = 0;
+  for (let i = 0; i + shortSize <= tokens.length; i++) {
+    if (protectedShort.has(tokens.slice(i, i + shortSize).join(" "))) shortMatches++;
   }
-  if (matched === 0) return { ratio, matched, rejected: false, text };
+  if (shortMatches === 0) return { ratio, matched, rejected: false, text };
 
-  // Replace matched runs in the original text. Shingles are punctuation-free
-  // (tokenised), so the pattern must tolerate 1-4 non-alphanumeric characters
-  // between tokens — otherwise a comma in the draft defeats the replacement.
-  let out = text;
-  const gap = "[^a-z0-9]{1,4}";
-  for (const s of protectedShingles) {
-    const pattern = new RegExp(s.split(" ").map(escapeRe).join(gap), "gi");
-    out = out.replace(pattern, "[redacted]");
-  }
-  return { ratio, matched, rejected: false, text: out };
+  const shortRatio = tokens.length >= shortSize ? shortMatches / (tokens.length - shortSize + 1) : 1;
+  const rejected = ratio > 0.5 || shortRatio >= withholdRatio;
+  if (rejected) return { ratio, matched: shortMatches, rejected: true, text: "" };
+
+  // Sentence-scoped scrub: drop only the sentences carrying protected wording.
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const cleaned = sentences.map((sentence) => {
+    const st = tokenise(sentence);
+    for (let i = 0; i + shortSize <= st.length; i++) {
+      if (protectedShort.has(st.slice(i, i + shortSize).join(" "))) return "[redacted]";
+    }
+    return sentence;
+  });
+  return { ratio, matched: shortMatches, rejected: false, text: cleaned.join(" ") };
 }
 
 function escapeRe(s: string): string {
@@ -185,7 +222,16 @@ export function redactDraft(
     if (Array.isArray(value)) return value.map(walk);
     if (value && typeof value === "object") {
       const next: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) next[k] = walk(v);
+      let n = 0;
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        // Keys are strings too: clean them, and never let a scrubbed key collapse
+        // into a duplicate.
+        const cleanedKey = clean(k);
+        let key = cleanedKey;
+        if (key in next) key = `${cleanedKey}_${n}`;
+        n++;
+        next[key] = walk(v);
+      }
       return next;
     }
     return value;
@@ -292,7 +338,7 @@ export async function runSealedRecipe(opts: RunOptions): Promise<RunResult> {
   // measuring by ratio, not by absolute count, because one 11-word sentence
   // produces four overlapping 8-token shingles and would otherwise trip a
   // count-based rule on a legitimate draft.
-  if (probe.matched > 0 && probe.ratio > (opts.maxShingleRatio ?? 0.5)) {
+  if (probe.rejected) {
     opts.log.warn({ ...logBase, event: "disclosure_risk", errCode: PIPELINE_CODES.disclosureRisk,
       ms: Date.now() - started, attempt });
     return { ok: false, codes: [PIPELINE_CODES.disclosureRisk], tokensIn, tokensOut,

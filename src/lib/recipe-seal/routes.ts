@@ -15,7 +15,7 @@
 import { verifyBundle, partsOf, openSemantic, inspectBundle, sha256Hex, type RecipeManifest } from "./bundle";
 import {
   authenticate, getBundle, getUsage, issueLicense, listBundles, publishBundle, recordRun,
-  releaseRun, reserveRun, splitCost, type LicenseRow, type QueryFn,
+  findRunByKey, releaseRun, reserveRun, splitCost, type LicenseRow, type QueryFn,
 } from "./registry";
 import { LIMITS, RateLimiter, verifyBatch, verifyDraft, type VerifyResult } from "./verify";
 import { gateCapability, type OperatorCapability, type OperatorRole } from "../auth/roles";
@@ -53,6 +53,8 @@ export interface RouteDeps {
   storage: BundleStorage;
   /** 32-byte KEK. Absent proves the verify path needs no plaintext. */
   kek?: Uint8Array | null;
+  /** Local-open mode opt-in (RECIPE_SEAL_ALLOW_OPEN). Off unless explicitly enabled. */
+  allowOpen?: boolean;
   /** Injected model for `run`. If absent, `run` returns 503. */
   model?: (prompt: string) => Promise<string>;
   logSink?: LogSink;
@@ -75,9 +77,17 @@ const err = (status: number, code: string, error: string): RouteResponse =>
  * any signed-in viewer satisfies that, which let a viewer mint an unlimited
  * licence at price 0 in an independent review.
  */
-function requireOperator(req: RouteRequest, cap: OperatorCapability): RouteResponse | null {
+function requireOperator(req: RouteRequest, cap: OperatorCapability, deps: RouteDeps): RouteResponse | null {
+  // `authRequired: false` is the app's local-open mode, and it is a master key:
+  // humanAuthRequired() returns false whenever BETTER_AUTH_URL is unset, which
+  // would hand publish/licence to anyone the moment that var goes missing. Only
+  // honour open mode when the deployment explicitly opts in (RECIPE_SEAL_ALLOW_OPEN=1),
+  // and never for an absent session.
+  const openOptIn = req.authRequired === false && deps.allowOpen === true;
   const gate = gateCapability(req.operatorRole ?? null, cap, {
-    authRequired: req.authRequired ?? true,
+    // Anything short of an explicit opt-in must still demand a role. The earlier
+    // expression let `authRequired:false` fall through to "no auth needed".
+    authRequired: !openOptIn,
   });
   if (gate.ok) return null;
   return gate.reason === "signed_out"
@@ -121,7 +131,7 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
 
   // ── POST /api/recipes (collection) — publish a sealed bundle ───────────────
   if (rest.length === 0 && method === "POST" && body.bundle) {
-    const denied = requireOperator(req, "manage_keys");
+    const denied = requireOperator(req, "manage_keys", deps);
     if (denied) return denied;
     const bytes = new Uint8Array(Buffer.from(String(body.bundle), "base64"));
     const verified = verifyBundle(bytes);
@@ -145,10 +155,16 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       // (recipe_id, version) is unique: republishing changed content under an
       // existing version is a client error, not a 500. An independent review
       // found this surfacing as an unhandled Postgres 23505.
-      if ((cause as { code?: string }).code === "23505") {
+      const dbCode = (cause as { code?: string }).code;
+      if (dbCode === "23505") {
         return err(409, "version_exists",
           `version ${manifest.version} of ${manifest.id} is already published with a different hash; ` +
           `publish a new version instead`);
+      }
+      // A constraint rejection is bad client input (a manifest shape the DB
+      // refuses), not a server fault — and the Postgres message must not escape.
+      if (dbCode === "23514") {
+        return err(422, "invalid_manifest", "the manifest violates the protocol's structural constraints");
       }
       throw cause;
     }
@@ -184,7 +200,16 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     const partsBundle = await loadBundleParts(storage, hash);
     if (!partsBundle) return err(404, "unknown_bundle", "no such bundle");
     const manifest = partsBundle.manifest;
-    return verifyResponse(partsBundle.checksWasm, manifest, body.draft);
+    // Probing signal: distinct drafts per caller per hour. LIMITS.probingDraftsPerHour
+    // was dead code because nothing ever called this.
+    const probeCount = deps.anonymousLimiter?.noteDraftHash(req.callerKey ?? "unknown") ?? 0;
+    const response = verifyResponse(partsBundle.checksWasm, manifest, body.draft);
+    if (probeCount === LIMITS.probingDraftsPerHour || probeCount === LIMITS.probingDraftsPerHour * 2) {
+      // Safe logger serialises an allow-list; nothing but counts and hashes here.
+      deps.logSink?.write(JSON.stringify({ level: "warn", event: "draft_probing",
+        drafts: probeCount, recipeHash: hash, caller: req.callerKey ?? "unknown" }));
+    }
+    return response;
   }
 
   if (rest.length === 3 && rest[1] === "verify" && rest[2] === "batch" && method === "POST") {
@@ -193,6 +218,11 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       return err(413, "batch_too_large", `max ${LIMITS.batchMax} drafts per call`);
     }
     if (drafts.length === 0) return err(400, "invalid_body", "drafts must be a non-empty array");
+    // Single verify rejects a non-object draft with 400; batch used to score
+    // null/42 as a draft and return C01/C02 verdicts, which is a different
+    // contract for the same input.
+    const badDraft = drafts.findIndex((d) => !d || typeof d !== "object" || Array.isArray(d));
+    if (badDraft >= 0) return err(400, "invalid_body", `drafts[${badDraft}] is not an object`);
     const batchBundle = await getBundle(q, hash);
     if (!batchBundle) return err(404, "unknown_bundle", "no such bundle");
     if (batchBundle.status === "revoked") return err(410, "bundle_revoked", "this recipe has been withdrawn");
@@ -215,6 +245,23 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     const partsBundle = await loadBundleParts(storage, auth.bundleHash);
     if (!partsBundle) return err(404, "unknown_bundle", "bundle bytes missing");
 
+    // Replay check BEFORE reserving or calling the model. Detecting the duplicate
+    // only at INSERT meant a holder could loop the same idempotency key and get
+    // free inference (charged, then refunded) — and a replay at exact exhaustion
+    // returned 402 instead of the original result.
+    const idem = typeof body.idempotencyKey === "string" ? body.idempotencyKey : null;
+    if (idem) {
+      const prior = await findRunByKey(q, auth.license.id, idem);
+      if (prior) {
+        const v = (prior.verdict ?? {}) as { ok?: boolean; codes?: string[]; warnings?: string[] };
+        return { status: 200, body: {
+          ok: v.ok ?? false, artifact: null, codes: v.codes ?? [], warnings: v.warnings ?? [],
+          traceId: null, run: prior.id, deduped: true, replay: true,
+          note: "replayed from the run ledger; no inference was performed and no quota was charged",
+        } };
+      }
+    }
+
     const reserved = await reserveRun(q, auth.license.id);
     if (!reserved.ok) return quotaFailure(reserved.reason);
 
@@ -236,7 +283,6 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       licenseId: auth.license.id,
     });
 
-    const idem = typeof body.idempotencyKey === "string" ? body.idempotencyKey : null;
     let run;
     try {
       run = await recordRun(q, {
@@ -270,25 +316,51 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
 
   // ── operator routes ────────────────────────────────────────────────────────
   if (rest.length === 2 && rest[1] === "license" && method === "POST") {
-    const denied = requireOperator(req, "manage_keys");
+    const denied = requireOperator(req, "manage_keys", deps);
     if (denied) return denied;
     const bundleRow = await getBundle(q, hash);
     if (!bundleRow) return err(404, "unknown_bundle", "no such bundle");
     const licenseeId = typeof body.licenseeId === "string" ? body.licenseeId : null;
     if (!licenseeId) return err(400, "invalid_body", "licenseeId is required");
     if (bundleRow.status === "revoked") return err(409, "bundle_revoked", "this recipe has been withdrawn");
+
+    // Validate operator input before it reaches SQL: quota=1.5, quota=1e20,
+    // scopes=["root"] and expiresAt="garbage" all used to end as a 500, and an
+    // operator (or anyone with the keys) could mint 1,000,000 runs at price 0
+    // from a recipe priced otherwise.
+    const manifest = bundleRow.manifest as RecipeManifest | null;
+    const recipeQuota = manifest?.pricing?.quota_default ?? null;
+    const recipePrice = manifest?.pricing?.amount_cents ?? 0;
+    const quota = typeof body.quota === "number" ? body.quota : (recipeQuota ?? 500);
+    if (!Number.isSafeInteger(quota) || quota < 0) return err(400, "invalid_quota", "quota must be a non-negative integer");
+    if (recipeQuota !== null && quota > recipeQuota) {
+      return err(400, "quota_exceeds_recipe", `this recipe licenses at most ${recipeQuota} runs`);
+    }
+    const priceCents = typeof body.priceCents === "number" ? body.priceCents : recipePrice;
+    if (!Number.isSafeInteger(priceCents) || priceCents < 0) return err(400, "invalid_price", "priceCents must be a non-negative integer");
+    if (priceCents !== recipePrice) {
+      return err(409, "price_mismatch", `this recipe is licensed at ${recipePrice} cents per run`);
+    }
+    const scopeList = Array.isArray(body.scopes)
+      ? (body.scopes.filter((x) => typeof x === "string") as string[])
+      : ["run", "verify", "usage"];
+    const badScope = scopeList.find((x) => !["run", "verify", "usage"].includes(x));
+    if (badScope) return err(400, "invalid_scope", `unknown scope '${badScope}'`);
+    let expiresAt: Date | null = null;
+    if (typeof body.expiresAt === "string") {
+      expiresAt = new Date(body.expiresAt);
+      if (Number.isNaN(expiresAt.getTime())) return err(400, "invalid_expiry", "expiresAt is not a date");
+    }
     let issued;
     try {
       issued = await issueLicense(q, {
         bundleHash: hash,
         licenseeKind: (body.licenseeKind as "account" | "agent" | "org") ?? "account",
         licenseeId,
-        quota: typeof body.quota === "number" ? body.quota : 500,
-        scopes: Array.isArray(body.scopes)
-          ? (body.scopes.filter((s) => typeof s === "string") as ("run" | "verify" | "usage")[])
-          : undefined,
-        expiresAt: typeof body.expiresAt === "string" ? new Date(body.expiresAt) : null,
-        priceCents: typeof body.priceCents === "number" ? body.priceCents : 0,
+        quota,
+        scopes: scopeList as ("run" | "verify" | "usage")[],
+        expiresAt,
+        priceCents,
       });
     } catch (cause) {
       // Never let a domain error escape as a 500 with a Postgres message in it.

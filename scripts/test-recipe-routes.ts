@@ -46,9 +46,12 @@ const sealed = sealBundle({
   checksWasm: compiled.wasm,
   checks: compiled.manifest,
   capability: {
+    // Capability is a machine-readable descriptor, NOT a copy of the prose. The
+    // seal path now refuses a manifest that reproduces the semantic half, and
+    // these fixtures used to copy outputContract/boundary verbatim into it.
     inputs: [{ name: "quotes", type: "file[]", required: true }],
-    outputs: recipe.outputContract, tools: recipe.tools,
-    forbidden_tools: ["send", "email"], boundary_summary: recipe.boundary,
+    outputs: ["comparison-table", "recommendation"], tools: recipe.tools,
+    forbidden_tools: ["send", "email"], boundary_summary: "read-only; nothing is sent",
   },
   author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
   kek: KEK,
@@ -75,9 +78,10 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     await pool.query(readFileSync(join(process.cwd(), "migrations", f), "utf8"));
   }
 
+  let modelCalls = 0;
   let deps: RouteDeps = createRouteDeps({
     q, storage, kek: KEK,
-    model: async () => j(GOOD),
+    model: async () => { modelCalls++; return j(GOOD); },
     anonymousLimiter: new RateLimiter(60, 60_000, () => 0),
     tokenLimiter: new RateLimiter(600, 60_000, () => 0),
     logSink: memorySink(),
@@ -211,6 +215,30 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal(r.status, 403, `viewer minted a licence: ${j(r.body)}`);
   });
 
+  await ok("open mode is not a master key: authRequired=false alone is refused", async () => {
+    // humanAuthRequired() is false whenever BETTER_AUTH_URL is unset, so relying
+    // on it would hand publish to anyone if that var went missing. The routes
+    // require an explicit opt-in AND a real role.
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: null, operatorRole: null, authRequired: false,
+      body: { bundle: Buffer.from(sealed.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 401, `open mode let an anonymous publish through: ${j(r.body)}`);
+  });
+
+  await ok("open mode with an explicit opt-in and an admin role publishes", async () => {
+    const openDeps = createRouteDeps({
+      q, storage, kek: KEK, model: async () => j(GOOD), allowOpen: true,
+      anonymousLimiter: new RateLimiter(60, 60_000, () => 0),
+      tokenLimiter: new RateLimiter(600, 60_000, () => 0), logSink: memorySink(),
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "dev_user", operatorRole: "admin", authRequired: false,
+      body: { bundle: Buffer.from(sealed.bytes).toString("base64") } }, openDeps);
+    // 201 on a fresh store, 409 if this recipe+version already exists: either way
+    // the gate opened, which is what this check is about.
+    assert.equal([201, 409].includes(r.status), true, `opt-in open mode refused: ${r.status} ${j(r.body)}`);
+  });
+
   let token = "";
   await ok("operator issues a licence and receives the token exactly once", async () => {
     const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
@@ -265,6 +293,77 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal(u.runs, 1);
     assert.equal(u.used, 1, `idempotent retry double-charged: used=${u.used}`);
     assert.equal(u.quota, 2);
+  });
+
+  await ok("a replayed idempotency key runs no inference and charges nothing", async () => {
+    const lic = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { licenseeId: "agent_replay", licenseeKind: "agent", quota: 3 } }, deps);
+    const t = (lic.body as { token: string }).token;
+    const before = modelCalls;
+    const first = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
+      token: t, body: { inputs: { quotes: ["a"] }, idempotencyKey: "replay-1" } }, deps);
+    assert.equal(first.status, 200);
+    assert.equal(modelCalls, before + 1, "the first run did not call the model");
+    // Replaying used to re-run inference and refund afterwards: free compute.
+    for (let i = 0; i < 3; i++) {
+      const again = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
+        token: t, body: { inputs: { quotes: ["a"] }, idempotencyKey: "replay-1" } }, deps);
+      assert.equal(again.status, 200);
+      assert.equal((again.body as { deduped: boolean }).deduped, true);
+      assert.equal((again.body as { replay?: boolean }).replay, true);
+    }
+    assert.equal(modelCalls, before + 1, `replays ran inference: ${modelCalls - before - 1} extra model calls`);
+    const u = await routeRecipes({ method: "GET", path: `/api/recipes/${hash}/license/usage`, token: t }, deps);
+    assert.equal((u.body as { usage: { used: number; runs: number } }).usage.used, 1);
+    assert.equal((u.body as { usage: { runs: number } }).usage.runs, 1);
+  });
+
+  await ok("a replay at exact exhaustion returns the original result, not 402", async () => {
+    const lic = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { licenseeId: "agent_last", licenseeKind: "agent", quota: 1 } }, deps);
+    const t = (lic.body as { token: string }).token;
+    const first = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
+      token: t, body: { inputs: { quotes: ["a"] }, idempotencyKey: "last-1" } }, deps);
+    assert.equal(first.status, 200);
+    const again = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/run`,
+      token: t, body: { inputs: { quotes: ["a"] }, idempotencyKey: "last-1" } }, deps);
+    assert.equal(again.status, 200, `replay at exhaustion -> ${again.status} ${j(again.body)}`);
+    assert.equal((again.body as { deduped: boolean }).deduped, true);
+  });
+
+  await ok("licence input is validated instead of reaching a 500", async () => {
+    const bad: Array<[string, Record<string, unknown>]> = [
+      ["fractional quota", { quota: 1.5 }],
+      ["astronomical quota", { quota: 1e20 }],
+      ["unknown scope", { scopes: ["root"] }],
+      ["garbage expiry", { expiresAt: "not-a-date" }],
+      ["negative price", { priceCents: -1 }],
+    ];
+    for (const [label, extra] of bad) {
+      const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+        operatorId: "op_1", operatorRole: "admin", authRequired: true,
+        body: { licenseeId: "agent_bad", ...extra } }, deps);
+      assert.equal(r.status, 400, `${label} -> ${r.status} ${j(r.body)}`);
+    }
+  });
+
+  await ok("a licence cannot exceed the recipe's own quota", async () => {
+    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { licenseeId: "agent_greedy", quota: 1_000_000, priceCents: 4 } }, deps);
+    assert.equal(r.status, 400, `expected 400, got ${r.status}: ${j(r.body)}`);
+    assert.equal((r.body as { code: string }).code, "quota_exceeds_recipe");
+  });
+
+  await ok("batch rejects non-object drafts like single verify does", async () => {
+    const b = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify/batch`,
+      body: { drafts: [null] } }, deps);
+    assert.equal(b.status, 400, `batch accepted [null]: ${j(b.body)}`);
+    const s1 = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify`,
+      body: { draft: null } }, deps);
+    assert.equal(s1.status, 400);
   });
 
   await ok("quota exhaustion is a 402 on the next run", async () => {

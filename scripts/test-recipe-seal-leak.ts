@@ -119,17 +119,27 @@ const ATTACKS = [
     ["citations[].locator", (p) => ({ ...GOOD_DRAFT, citations: [{ id: "c1", text: "q2", sourceId: "q2", locator: p }] })],
     ["domain.legalQuestions", (p) => ({ ...GOOD_DRAFT, domain: { units: ["ea"], legalQuestions: [p] } })],
     ["meta", (p) => ({ ...GOOD_DRAFT, meta: { note: p, generatedAt: "2026-10-21T00:00:00Z" } })],
+    // Keys are strings too. Values-only collection let {"<prompt>": 1} through.
+    ["object key", (p) => ({ ...GOOD_DRAFT, meta: { [p]: "x", generatedAt: "2026-10-21T00:00:00Z" } })],
   ];
   let leakedResponses = 0;
   let leakedLogs = 0;
   const fieldsExercised = new Set<string>();
+  const rawOutputs = new Set<string>();
   for (const [i, attack] of ATTACKS.entries()) {
     const [where, plant] = PLANT[i % PLANT.length];
     fieldsExercised.add(where);
     // The model answers the specific attack and echoes the prompt into `where`.
+    // The stub must actually answer the attack, otherwise all 25 iterations are
+    // byte-identical and the loop proves one case 25 times (the previous version's
+    // defect: 25 attacks -> 5 distinct outputs).
     const attacked = async (prompt: string) => {
       assert.ok(prompt.length > 0, "model called with an empty prompt");
-      return j(plant(renderPrompt(SEMANTIC, {})));
+      // One sentence of prose, not the whole prompt: a full echo is withheld
+      // outright (C91), which would prove nothing about in-place scrubbing.
+      const out = j(plant(`${attack} :: ${SEMANTIC.boundary}`));
+      rawOutputs.add(out);
+      return out;
     };
     const { result, lines } = await run(attacked, { inputs: { attack, quotes: ["a", "b"] } });
     const responseText = j(result);
@@ -142,6 +152,7 @@ const ATTACKS = [
   assert.equal(leakedResponses, 0, "responses leaked semantic shingles");
   assert.equal(leakedLogs, 0, "logs leaked semantic shingles");
   assert.equal(fieldsExercised.size, PLANT.length, "not every response field was exercised");
+  assert.equal(rawOutputs.size, ATTACKS.length, `attacks produced ${rawOutputs.size} distinct model outputs, not ${ATTACKS.length}`);
   console.log(`  ok  ${ATTACKS.length} extraction attempts across ${fieldsExercised.size} response fields: 0 response leaks, 0 log leaks`);
   checks++;
 

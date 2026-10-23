@@ -57,30 +57,151 @@ export interface RecipeManifest {
 }
 
 /**
- * The only keys a manifest may carry. Without this, `verifyBundle` would happily
- * sign and serve a hand-built manifest containing prose under any invented key
- * (`guidance`, `checklist`, `firstQuestion` …). An independent review proved the
- * DB constraint alone was a naming ban and therefore bypassable.
+ * Structural manifest schema. An allow-list of *keys* was not enough: a review
+ * showed `capability` could be an array or a string of prose, `pricing` could be
+ * prose, and `capability.inputs[].description` could carry anything, all of which
+ * verified "successfully". Types and unknown keys are validated at every level.
  */
-export const MANIFEST_KEYS = [
-  "protocol", "id", "version", "created_at", "author", "capability", "checks",
-  "semantic", "dek_wrapped", "evals", "pricing", "chain", "signature",
-] as const;
-export const CAPABILITY_KEYS = ["inputs", "outputs", "tools", "forbidden_tools", "boundary_summary"] as const;
+type Spec =
+  | { t: "string" } | { t: "int" } | { t: "boolean" }
+  | { t: "nullable-string" } | { t: "nullable-int" }
+  | { t: "string[]" } | { t: "string-map" } | { t: "int-map" }
+  | { t: "object"; keys: Record<string, Spec>; optional?: string[] }
+  | { t: "array"; of: Spec };
 
-/** Returns the offending keys, or an empty array when the manifest is in shape. */
-export function manifestShapeErrors(manifest: unknown): string[] {
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return ["not_an_object"];
-  const m = manifest as Record<string, unknown>;
-  const extra = Object.keys(m).filter((k) => !(MANIFEST_KEYS as readonly string[]).includes(k));
-  const errors: string[] = extra.map((k) => `unexpected_key:${k}`);
-  const cap = m.capability;
-  if (cap && typeof cap === "object" && !Array.isArray(cap)) {
-    for (const k of Object.keys(cap as Record<string, unknown>)) {
-      if (!(CAPABILITY_KEYS as readonly string[]).includes(k)) errors.push(`unexpected_capability_key:${k}`);
+const MANIFEST_SPEC: Spec = {
+  t: "object",
+  optional: ["signature"],
+  keys: {
+    protocol: { t: "string" }, id: { t: "string" }, version: { t: "string" },
+    created_at: { t: "string" },
+    author: { t: "object", keys: {
+      id: { t: "string" }, name: { t: "string" }, key_id: { t: "string" }, public_key: { t: "string" } } },
+    capability: { t: "object", keys: {
+      inputs: { t: "array", of: { t: "object", keys: {
+        name: { t: "string" }, type: { t: "string" }, required: { t: "boolean" } } } },
+      outputs: { t: "string[]" },
+      tools: { t: "string[]" },
+      forbidden_tools: { t: "string[]" },
+      boundary_summary: { t: "string" } } },
+    checks: { t: "object", keys: {
+      module: { t: "string" }, sha256: { t: "string" }, rules: { t: "int" },
+      codes: { t: "string-map" }, engine: { t: "string" } } },
+    semantic: { t: "object", keys: {
+      blob: { t: "string" }, sha256: { t: "string" }, alg: { t: "string" },
+      nonce: { t: "string" }, aad: { t: "string" } } },
+    dek_wrapped: { t: "string" },
+    evals: { t: "object", keys: {
+      corpus_sha256: { t: "nullable-string" }, cases: { t: "int" },
+      pass_rate_bp: { t: "nullable-int" } } },
+    pricing: { t: "object", keys: {
+      unit: { t: "string" }, amount_cents: { t: "int" },
+      quota_default: { t: "nullable-int" }, split_bp: { t: "int-map" } } },
+    chain: { t: "object", keys: {
+      hash_algo: { t: "string" }, commitment: { t: "nullable-string" } } },
+    signature: { t: "string" },
+  },
+};
+
+/** Top-level manifest keys, derived from the spec (the DB constraint mirrors it). */
+export const MANIFEST_KEYS = Object.keys((MANIFEST_SPEC as { keys: Record<string, Spec> }).keys);
+
+function plainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function checkSpec(value: unknown, spec: Spec, path: string, errors: string[]): void {
+  const bad = (why: string) => { errors.push(`${path || "<root>"}:${why}`); };
+  switch (spec.t) {
+    case "string": if (typeof value !== "string") bad("not_a_string"); return;
+    case "int": if (!Number.isSafeInteger(value)) bad("not_an_integer"); return;
+    case "boolean": if (typeof value !== "boolean") bad("not_a_boolean"); return;
+    case "nullable-string":
+      if (value !== null && typeof value !== "string") bad("not_a_string_or_null"); return;
+    case "nullable-int":
+      if (value !== null && !Number.isSafeInteger(value)) bad("not_an_integer_or_null"); return;
+    case "string[]":
+      if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) bad("not_a_string_array");
+      return;
+    case "string-map":
+      if (!plainObject(value) || Object.values(value).some((v) => typeof v !== "string")) bad("not_a_string_map");
+      return;
+    case "int-map":
+      if (!plainObject(value) || Object.values(value).some((v) => !Number.isSafeInteger(v))) bad("not_an_int_map");
+      return;
+    case "array":
+      if (!Array.isArray(value)) { bad("not_an_array"); return; }
+      value.forEach((v, i) => checkSpec(v, spec.of, `${path}[${i}]`, errors));
+      return;
+    case "object": {
+      if (!plainObject(value)) { bad("not_an_object"); return; }
+      const allowed = new Set(Object.keys(spec.keys));
+      const optional = new Set(spec.optional ?? []);
+      for (const k of Object.keys(value)) {
+        if (!allowed.has(k)) errors.push(`${path ? `${path}.` : ""}${k}:unexpected_key`);
+      }
+      for (const [k, sub] of Object.entries(spec.keys)) {
+        if (!(k in value)) {
+          if (!optional.has(k)) errors.push(`${path ? `${path}.` : ""}${k}:missing`);
+          continue;
+        }
+        checkSpec(value[k], sub, path ? `${path}.${k}` : k, errors);
+      }
+      return;
     }
   }
+}
+
+/** Returns the offending paths, or an empty array when the manifest is in shape. */
+export function manifestShapeErrors(manifest: unknown): string[] {
+  const errors: string[] = [];
+  checkSpec(manifest, MANIFEST_SPEC, "", errors);
   return errors;
+}
+
+/**
+ * The seal path must not carry the prose it is sealing. Fixtures were shipping
+ * `capability.boundary_summary = recipe.boundary`, so the *public* manifest
+ * published the boundary verbatim — the exact thing the product promises not to
+ * reveal. Any 5-token run shared with the semantic half is refused at seal time.
+ */
+const SEAL_LEAK_N = 5;
+const SEAL_LEAK_SKIP = /^(checks\.codes\.|author\.|id$|version$|created_at$)/;
+
+function tokens(s: string): string[] {
+  return s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
+  const semanticStrings: string[] = [];
+  const collect = (v: unknown): void => {
+    if (typeof v === "string") { semanticStrings.push(v); return; }
+    if (Array.isArray(v)) { v.forEach(collect); return; }
+    if (plainObject(v)) { for (const val of Object.values(v)) collect(val); }
+  };
+  collect(semantic);
+  const guarded = new Set<string>();
+  for (const str of semanticStrings) {
+    const t = tokens(str);
+    for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) guarded.add(t.slice(i, i + SEAL_LEAK_N).join(" "));
+  }
+  if (guarded.size === 0) return [];
+
+  const hits: string[] = [];
+  const walk = (value: unknown, path: string): void => {
+    if (typeof value === "string") {
+      if (SEAL_LEAK_SKIP.test(path)) return;
+      const t = tokens(value);
+      for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) {
+        if (guarded.has(t.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); return; }
+      }
+      return;
+    }
+    if (Array.isArray(value)) { value.forEach((v, i) => walk(v, `${path}[${i}]`)); return; }
+    if (plainObject(value)) { for (const [k, v] of Object.entries(value)) walk(v, path ? `${path}.${k}` : k); }
+  };
+  walk(manifest, "");
+  return hits;
 }
 
 export const BUNDLE_REASONS = [
@@ -219,6 +340,12 @@ export function sealBundle(input: SealInput): { bytes: Uint8Array; manifest: Rec
   manifest.semantic.nonce = Buffer.from(nonce).toString("base64");
   manifest.dek_wrapped = Buffer.from(aeadSeal(input.kek, dekNonce, dek, AAD_DEK)).toString("base64");
 
+  // Refuse to seal a manifest that carries the prose it is supposed to seal.
+  const leaked = semanticLeakInManifest(manifest, input.semantic);
+  if (leaked.length > 0) {
+    throw new Error(`SEMANTIC_IN_MANIFEST: ${leaked.join(",")} — the public manifest would reveal the sealed text`);
+  }
+
   const digest = digestOf(manifest);
   manifest.signature = sign(null, Buffer.from(digest, "hex"), input.author.privateKey).toString("base64");
 
@@ -241,51 +368,59 @@ export interface VerifyResult {
 }
 
 export function verifyBundle(bytes: Uint8Array): VerifyResult {
-  let entries: Map<string, Uint8Array>;
   try {
-    entries = readZip(bytes);
+    let entries: Map<string, Uint8Array>;
+    try {
+      entries = readZip(bytes);
+    } catch (err) {
+      return { ok: false, reason: "NOT_ZIP", detail: String(err instanceof Error ? err.message : err) };
+    }
+    const manifestRaw = entries.get("manifest.json");
+    const semantic = entries.get("semantic.enc");
+    const checks = entries.get("checks.wasm");
+    if (!manifestRaw || !semantic) return { ok: false, reason: "MISSING_ENTRY" };
+    if (!checks || checks.length === 0) return { ok: false, reason: "NO_CHECKS" };
+
+    let manifest: RecipeManifest;
+    try {
+      manifest = JSON.parse(new TextDecoder().decode(manifestRaw)) as RecipeManifest;
+    } catch {
+      return { ok: false, reason: "MANIFEST_SCHEMA" };
+    }
+    if (manifest.protocol !== PROTOCOL) return { ok: false, reason: "UNSUPPORTED_PROTOCOL" };
+    if (!manifest.signature) return { ok: false, reason: "MANIFEST_SCHEMA", detail: "missing signature" };
+    // Structural allow-list: a self-signed manifest is only trustworthy if it is
+    // also in shape, otherwise "verified" just means "self-consistent" and a
+    // publisher could smuggle prose in under an invented key.
+    const shapeErrors = manifestShapeErrors(manifest);
+    if (shapeErrors.length > 0) {
+      return { ok: false, reason: "MANIFEST_SCHEMA", detail: shapeErrors.join(",") };
+    }
+
+    const digest = digestOf(manifest);
+    const publicKey = createPublicKey({
+      key: Buffer.from(manifest.author.public_key, "base64"),
+      format: "der",
+      type: "spki",
+    });
+    const sigOk = verify(null, Buffer.from(digest, "hex"), publicKey,
+      Buffer.from(manifest.signature, "base64"));
+    if (!sigOk) return { ok: false, reason: "BAD_SIGNATURE", manifest, digest };
+
+    if (sha256Hex(checks) !== manifest.checks.sha256) {
+      return { ok: false, reason: "HASH_MISMATCH_CHECKS", manifest, digest };
+    }
+    if (sha256Hex(semantic) !== manifest.semantic.sha256) {
+      return { ok: false, reason: "HASH_MISMATCH_SEMANTIC", manifest, digest };
+    }
+    return { ok: true, manifest, digest };
   } catch (err) {
-    return { ok: false, reason: "NOT_ZIP", detail: String(err instanceof Error ? err.message : err) };
+    // Never throw at a caller that is verifying untrusted bytes: a manifest
+    // missing author.public_key used to raise ERR_INVALID_ARG_TYPE out of
+    // verifyBundle and BRI the request to a 500.
+    return { ok: false, reason: "MANIFEST_SCHEMA",
+      detail: err instanceof Error ? err.message : String(err) };
   }
-  const manifestRaw = entries.get("manifest.json");
-  const semantic = entries.get("semantic.enc");
-  const checks = entries.get("checks.wasm");
-  if (!manifestRaw || !semantic) return { ok: false, reason: "MISSING_ENTRY" };
-  if (!checks || checks.length === 0) return { ok: false, reason: "NO_CHECKS" };
-
-  let manifest: RecipeManifest;
-  try {
-    manifest = JSON.parse(new TextDecoder().decode(manifestRaw)) as RecipeManifest;
-  } catch {
-    return { ok: false, reason: "MANIFEST_SCHEMA" };
-  }
-  if (manifest.protocol !== PROTOCOL) return { ok: false, reason: "UNSUPPORTED_PROTOCOL" };
-  if (!manifest.signature) return { ok: false, reason: "MANIFEST_SCHEMA", detail: "missing signature" };
-  // Structural allow-list: a self-signed manifest is only trustworthy if it is
-  // also in shape, otherwise "verified" just means "self-consistent" and a
-  // publisher could smuggle prose in under an invented key.
-  const shapeErrors = manifestShapeErrors(manifest);
-  if (shapeErrors.length > 0) {
-    return { ok: false, reason: "MANIFEST_SCHEMA", detail: shapeErrors.join(",") };
-  }
-
-  const digest = digestOf(manifest);
-  const publicKey = createPublicKey({
-    key: Buffer.from(manifest.author.public_key, "base64"),
-    format: "der",
-    type: "spki",
-  });
-  const sigOk = verify(null, Buffer.from(digest, "hex"), publicKey,
-    Buffer.from(manifest.signature, "base64"));
-  if (!sigOk) return { ok: false, reason: "BAD_SIGNATURE", manifest, digest };
-
-  if (sha256Hex(checks) !== manifest.checks.sha256) {
-    return { ok: false, reason: "HASH_MISMATCH_CHECKS", manifest, digest };
-  }
-  if (sha256Hex(semantic) !== manifest.semantic.sha256) {
-    return { ok: false, reason: "HASH_MISMATCH_SEMANTIC", manifest, digest };
-  }
-  return { ok: true, manifest, digest };
 }
 
 export function partsOf(bytes: Uint8Array): BundleParts | null {

@@ -36,6 +36,10 @@ async function getDeps(): Promise<RouteDeps> {
         storage: new FsStorage(process.env.RECIPE_SEAL_STORAGE_DIR ?? ".data/recipe-seal"),
         // Absent KEK is a valid state: verify works, run answers 503.
         kek: kekFromEnv(),
+        // Local-open mode is opt-in for these routes. humanAuthRequired() returns
+        // false whenever BETTER_AUTH_URL is unset, so relying on it alone would
+        // hand publish/licence to anyone if that var ever went missing.
+        allowOpen: process.env.RECIPE_SEAL_ALLOW_OPEN === "1",
         // Inject the execution lane. Without this the paid `run` path answers 503
         // in production no matter what, so licensing and metering would only ever
         // be exercised by the test suite. Absent a configured chat lane the model

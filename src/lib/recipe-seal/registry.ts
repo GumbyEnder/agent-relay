@@ -259,6 +259,25 @@ export interface RecordRunInput {
   ms?: number;
 }
 
+/**
+ * Look up a completed run by idempotency key *before* reserving quota or calling
+ * the model. Detecting the duplicate only at INSERT meant a replay still ran
+ * inference at platform cost and then had its unit refunded — a free compute loop
+ * for anyone holding a token (an independent review measured modelCalls rising
+ * with every replay).
+ */
+export async function findRunByKey(
+  q: QueryFn,
+  licenseId: string,
+  idemKey: string,
+): Promise<{ id: string; verdict: unknown } | null> {
+  const rows = await q<{ id: string; verdict: unknown }>(
+    `SELECT id, verdict FROM ar_recipe_run WHERE license_id = $1 AND idem_key = $2 LIMIT 1`,
+    [licenseId, idemKey],
+  );
+  return rows[0] ?? null;
+}
+
 export async function recordRun(q: QueryFn, input: RecordRunInput): Promise<{ id: string; deduped: boolean }> {
   const id = newId("run");
   try {

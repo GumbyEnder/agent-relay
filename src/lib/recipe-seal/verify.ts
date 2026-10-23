@@ -81,22 +81,26 @@ export class RateLimiter {
     private readonly maxKeys = 10_000,
   ) {}
 
+  /** Drop only *expired* buckets. Never evict a live counter — that hands the
+   *  caller a reset, which is exactly what a limiter must not do. Capacity
+   *  pressure is handled by the shared overflow bucket in `take`. */
   private evict(t: number): void {
-    if (this.buckets.size < this.maxKeys) return;
     for (const [k, b] of this.buckets) {
       if (b.resetAt <= t) this.buckets.delete(k);
-    }
-    for (const [k] of this.buckets) {
-      if (this.buckets.size < this.maxKeys) break;
-      this.buckets.delete(k);
     }
   }
 
   /** Returns {allowed, remaining, retryAfterMs}. */
   take(key: string): { allowed: boolean; remaining: number; retryAfterMs: number } {
     const t = this.now();
+    // At capacity, sweep expired buckets. If still full, route NEW keys into one
+    // shared overflow bucket instead of evicting a live counter — eviction reset
+    // live limits, so a caller could clear its own 429 by minting fresh keys.
+    if (!this.buckets.has(key) && this.buckets.size >= this.maxKeys) {
+      this.evict(t);
+      if (this.buckets.size >= this.maxKeys) key = "__overflow__";
+    }
     const b = this.buckets.get(key);
-    if (!b) this.evict(t);
     if (!b || b.resetAt <= t) {
       this.buckets.set(key, { count: 1, resetAt: t + this.windowMs });
       return { allowed: true, remaining: this.limit - 1, retryAfterMs: 0 };

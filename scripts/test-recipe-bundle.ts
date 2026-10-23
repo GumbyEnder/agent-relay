@@ -36,10 +36,12 @@ const KEK = new Uint8Array(32).fill(7);
 
 const capability: Capability = {
   inputs: [{ name: "quotes", type: "file[]", required: true }],
-  outputs: recipe.outputContract,
+  // Machine-readable descriptor only — never the prose itself (the seal path
+  // refuses a manifest that reproduces the semantic half).
+  outputs: ["comparison-table", "recommendation"],
   tools: recipe.tools,
   forbidden_tools: ["send", "email", "submit", "publish", "pay", "sign"],
-  boundary_summary: recipe.boundary,
+  boundary_summary: "read-only; nothing is sent",
 };
 
 const SEMANTIC = {
@@ -249,5 +251,61 @@ ok("a correctly SIGNED manifest with an invented key is rejected as MANIFEST_SCH
   assert.equal(verdict.reason, "MANIFEST_SCHEMA");
   assert.equal(String(verdict.detail).includes("guidance"), true);
 });
+
+// ── seal gate: the manifest must not carry the prose it seals ────────────────
+ok("seal refuses a manifest that reproduces the sealed boundary", () => {
+  let threw = "";
+  try {
+    sealBundle(input({ capability: { ...capability, boundary_summary: recipe.boundary } }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("SEMANTIC_IN_MANIFEST"), true, `seal accepted prose in the manifest: ${threw}`);
+});
+
+ok("seal refuses capability.outputs copied from the output contract", () => {
+  let threw = "";
+  try {
+    sealBundle(input({ capability: { ...capability, outputs: recipe.outputContract } }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("SEMANTIC_IN_MANIFEST"), true, `seal accepted prose outputs: ${threw}`);
+});
+
+// ── verifyBundle must REJECT malformed manifests, never throw ────────────────
+function reSign(mutate: (m: Record<string, unknown>) => void): Uint8Array {
+  const author = generateAuthorKey();
+  const sealed = sealBundle(input({ author: { id: "acct_author", name: "Author",
+    keyId: author.keyId, privateKey: author.privateKey } }));
+  const m = JSON.parse(JSON.stringify(sealed.manifest)) as Record<string, unknown>;
+  mutate(m);
+  delete m.signature;
+  const digest = sha256Hex(canonicalise(m));
+  m.signature = sign(null, Buffer.from(digest, "hex"), author.privateKey).toString("base64");
+  const entries = readZip(sealed.bytes);
+  return makeZip([
+    { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(m)) },
+    { name: "semantic.enc", data: entries.get("semantic.enc")! },
+    { name: "checks.wasm", data: entries.get("checks.wasm")! },
+  ]);
+}
+
+const malformed: Array<[string, (m: Record<string, unknown>) => void]> = [
+  ["capability as an array of prose", (m) => { m.capability = ["never invents a price"]; }],
+  ["capability as a string", (m) => { m.capability = "never invents a price or a term"; }],
+  ["pricing as prose", (m) => { m.pricing = "free for everyone, no limits"; }],
+  ["capability.inputs[].description", (m) => {
+    (m.capability as { inputs: unknown[] }).inputs = [{ name: "quotes", type: "file[]", required: true, description: "ask which quotes" }];
+  }],
+  ["author.public_key missing", (m) => { delete (m.author as Record<string, unknown>).public_key; }],
+  ["checks.codes as an array", (m) => { (m.checks as Record<string, unknown>).codes = ["C01"]; }],
+  ["extra nested key in pricing", (m) => { (m.pricing as Record<string, unknown>).note = "ask which quotes"; }],
+];
+for (const [label, mutate] of malformed) {
+  ok(`verifyBundle rejects ${label} as MANIFEST_SCHEMA (no throw)`, () => {
+    let result;
+    try { result = verifyBundle(reSign(mutate)); }
+    catch (err) { throw new Error(`verifyBundle THREW on ${label}: ${err instanceof Error ? err.message : err}`); }
+    assert.equal(result.ok, false, `${label} verified`);
+    assert.equal(result.reason, "MANIFEST_SCHEMA", `${label} -> ${result.reason}`);
+  });
+}
 
 console.log(`\nStep 2: ${checks} checks passed\n`);

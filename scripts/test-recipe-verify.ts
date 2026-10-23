@@ -4,10 +4,11 @@
  *
  * Run: npx tsx scripts/test-recipe-verify.ts
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { rulesFor } from "../src/lib/recipe-checks";
-import { PIPELINE_CODES, runSealedRecipe } from "../src/lib/recipe-seal/pipeline";
+import { PIPELINE_CODES, filterLeak, runSealedRecipe } from "../src/lib/recipe-seal/pipeline";
 import { createSafeLogger, memorySink } from "../src/lib/recipe-seal/safe-log";
 import { LIMITS, RateLimiter, bucketMs, verifyBatch, verifyDraft } from "../src/lib/recipe-seal/verify";
 import { compileRecipeChecks } from "../src/lib/recipe-checks";
@@ -77,32 +78,49 @@ const BAD = {
     assert.equal(bucketMs(50), ">=50");
   });
 
-  await ok("NO-PLAINTEXT: nothing in verify's module graph reads the environment", () => {
-    // Deleting RECIPE_SEAL_KEK from process.env proves nothing about a pure
-    // function — an independent review called the old assertion hollow. The real
-    // property is structural: no file reachable from verify.ts reads process.env
-    // at all, so KEK state cannot influence the free tier.
-    const seen = new Set<string>();
-    const walk = (rel: string): void => {
-      if (seen.has(rel)) return;
-      seen.add(rel);
-      const src = readFileSync(join(process.cwd(), rel), "utf8");
-      assert.equal(src.includes("process.env"), false, `${rel} reads process.env`);
-      for (const m of src.matchAll(/from\s+"(\.\.?\/[^"]+)"/g)) {
-        const base = normalize(join(dirname(rel), m[1]));
-        const cand = [`${base}.ts`, join(base, "index.ts")].find((p) => existsSync(join(process.cwd(), p)));
-        if (cand) walk(cand);
-      }
-    };
-    walk("src/lib/recipe-seal/verify.ts");
-    assert.ok(seen.size >= 2, `expected to walk verify.ts's imports, saw ${[...seen].join(",")}`);
+  await ok("LEAK: prose shorter than the shingle width is still caught", () => {
+    // 8-token windows never matched a 5-word phrase, so short boundary text passed
+    // through untouched. Detection runs at 4 tokens as well.
+    const semantic = { discovery: ["d"], boundary: "Never invents a price or a term.", checklist: {}, outputContract: [] } as never;
+    for (const short of ["never invents a price", "invents a price or a term"]) {
+      const r = filterLeak(short, semantic);
+      assert.equal(r.matched > 0, true, `short prose escaped detection: ${short}`);
+      assert.equal(r.text.includes(short), false, `short prose survived: ${r.text}`);
+    }
   });
 
-  await ok("NO-PLAINTEXT: verify.ts does not reference the bundle opener at all", () => {
-    const src = readFileSync(join(process.cwd(), "src/lib/recipe-seal/verify.ts"), "utf8");
-    for (const forbidden of ["openSemantic", "dek_wrapped", "process.env.RECIPE_SEAL_KEK", 'from "./bundle"']) {
-      assert.equal(src.includes(forbidden), false, `verify.ts references ${forbidden}`);
-    }
+  await ok("LEAK: legitimate text beside one boundary sentence is not wiped", () => {
+    // The old rule withheld the whole string once 15% of it overlapped, which
+    // erased a perfectly good 40-token body that happened to cite the boundary.
+    const semantic = { discovery: ["d"], boundary: "Never invents a price or a term.", checklist: {}, outputContract: [] } as never;
+    const body = "Supplier B is cheaper per unit at 12.40 versus 13.10, delivery is four days sooner, " +
+      "and the warranty is twelve months. Never invents a price or a term. Recommendation: choose B.";
+    const r = filterLeak(body, semantic);
+    assert.equal(r.rejected, false, "the entire field was withheld for one sentence");
+    assert.equal(r.text.includes("Supplier B is cheaper per unit"), true, "legitimate text was destroyed");
+    assert.equal(r.text.includes("Never invents a price"), false, "the boundary sentence survived");
+  });
+
+  await ok("LIMITER: a full bucket map never hands a caller a reset", () => {
+    const limiter = new RateLimiter(2, 60_000, () => 0, 2);
+    assert.equal(limiter.take("a").allowed, true);
+    assert.equal(limiter.take("a").allowed, true);
+    assert.equal(limiter.take("a").allowed, false, "a was not limited");
+    limiter.take("b"); limiter.take("c"); limiter.take("d"); limiter.take("e");
+    assert.equal(limiter.take("a").allowed, false, "eviction reset a live counter");
+  });
+
+  await ok("NO-PLAINTEXT: verify runs with a runtime trap on every KEK-ish env read", () => {
+    // A source grep is a lint (it misses process["env"], follows only known
+    // specifiers, and false-positives on comments). scripts/purity-check.ts
+    // installs a Proxy on process.env *before* importing the verify modules, so
+    // any reachable read of RECIPE_SEAL_KEK throws at runtime.
+    const out = execFileSync("npx", ["tsx", "scripts/purity-check.ts"], {
+      cwd: process.cwd(), encoding: "utf8", timeout: 120_000,
+    });
+    const parsed = JSON.parse(out.trim().split("\n").pop() as string) as { ok: boolean; envReads: number };
+    assert.equal(parsed.envReads, 0, "the verify tier read a KEK-ish environment variable");
+    assert.equal(parsed.ok, true);
   });
 
   await ok("PARITY: verify codes equal the codes produced inside the run path", async () => {

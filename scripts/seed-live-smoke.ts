@@ -43,7 +43,7 @@ const q: QueryFn = async (text, params) => (await pool.query(text, params as unk
     capability: {
       inputs: [{ name: "quotes", type: "file[]", required: true }],
       outputs: recipe.outputContract, tools: recipe.tools,
-      forbidden_tools: ["send", "email"], boundary_summary: recipe.boundary,
+      forbidden_tools: ["send", "email"], boundary_summary: "read-only analysis; nothing is sent",
     },
     author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
     kek: new Uint8Array(32).fill(7),
