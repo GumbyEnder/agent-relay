@@ -138,151 +138,126 @@
     }
 
     /* ── Chat layout ──────────────────────────────────────
-       The session brief lives in a persistent rail on the right. Collapsed it
-       is a 64px spine, so the conversation gets the width; expanded it is a
-       full panel. Present in BOTH Chat and Work mode — it is the session's
-       brief, not a chat-only sidebar. */
+       One centered column. The brief is an inline strip above the
+       transcript, never a side column — it must not take width from the
+       conversation. Landing order: composer first, recent work under it. */
     .chat-layout {
       display: grid;
-      grid-template-columns: minmax(0, 820px) 64px;
-      gap: 1.25rem;
-      align-items: start;
+      grid-template-columns: minmax(0, 880px);
       justify-content: center;
-      max-width: 1180px;
+      max-width: 920px;
       margin: 0 auto;
     }
-    .chat-layout.brief-open {
-      grid-template-columns: minmax(0, 820px) 340px;
-    }
-    /* Editing a brief item needs room to write — widen the rail while an
-       editor is open, and put it back on save/cancel. */
-    .chat-layout.brief-editing {
-      grid-template-columns: minmax(0, 700px) 440px;
-    }
 
-    /* ── Brief rail ─────────────────────────────────────── */
-    .brief-rail {
-      position: sticky;
-      top: 1rem;
-      align-self: start;
-      min-width: 0;
+    /* Composer: the top-of-page presence on the landing screen. */
+    .composer-card {
+      border: 1px solid #2A2A2A;
+      border-radius: 12px;
+      background: var(--bz-panel);
+      padding: 0.75rem 0.85rem 0.7rem;
+      order: 1;
     }
-    .rail-toggle {
+    .composer-card:focus-within { border-color: #3A3A3A; }
+    .composer-card .mode-tabs { margin: 0 0 0.55rem; }
+    .composer-card .chat-input-row {
+      border-top: none;
+      margin-top: 0;
+      padding-top: 0;
+      align-items: flex-end;
+    }
+    .composer-card #chatInput {
+      background: transparent;
+      border: none;
+      padding: 0.35rem 0.15rem;
+      font-size: 0.98rem;
+      resize: vertical;
+      min-height: 3.1rem;
+    }
+    .composer-card #chatInput:focus { outline: none; box-shadow: none; }
+    .composer-card .paper-attach { margin-top: 0.45rem; }
+    .chat-main.is-conversation .composer-card { order: 6; }
+
+    /* Inline brief: one line, expands in place. */
+    .brief-bar {
+      order: 2;
+      border: 1px solid #262626;
+      border-radius: 8px;
+      background: #101010;
+      margin: 0.7rem 0 0.6rem;
+    }
+    .brief-bar-btn {
       display: flex;
-      flex-direction: column;
       align-items: center;
       gap: 0.55rem;
       width: 100%;
-      padding: 0.7rem 0.3rem;
-      background: var(--bz-panel);
-      border: 1px solid #2A2A2A;
-      border-radius: 999px;
-      color: #9A9A9A;
+      background: none;
+      border: none;
+      color: #C8C8C8;
       font: inherit;
-      font-size: 0.75rem;
+      font-size: 0.8rem;
+      padding: 0.5rem 0.7rem;
       cursor: pointer;
+      text-align: left;
       min-height: 0;
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
-    .rail-toggle:hover { border-color: var(--bz-yellow); color: var(--bz-yellow); }
-    .rail-chevron { font-size: 0.95rem; line-height: 1; }
-    .rail-label {
-      writing-mode: vertical-rl;
-      transform: rotate(180deg);
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
+    .brief-bar-btn:hover { color: var(--bz-yellow); }
+    .bb-label {
       font-size: 0.68rem;
-      font-weight: 600;
-    }
-    .rail-count {
-      font-size: 0.66rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 700;
       color: var(--bz-yellow);
-      font-variant-numeric: tabular-nums;
-      letter-spacing: 0.02em;
     }
-    .rail-dots { display: flex; flex-direction: column; gap: 4px; margin-bottom: 2px; }
-    .rail-dots span {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      border: 1px solid #3A3A3A;
-      background: transparent;
+    .bb-count { font-size: 0.72rem; color: #A8A8A8; font-variant-numeric: tabular-nums; }
+    .bb-dots { display: flex; gap: 4px; }
+    .bb-dots span {
+      width: 7px; height: 7px; border-radius: 50%;
+      border: 1px solid #3A3A3A; background: transparent;
     }
-    .rail-dots span.filled { background: var(--bz-yellow); border-color: var(--bz-yellow); }
-    .rail-dots span.skipped { background: #555; border-color: #555; }
-    .rail-dots span.pulse { animation: railPulse 0.6s ease-out; }
-    @keyframes railPulse {
+    .bb-dots span.filled { background: var(--bz-yellow); border-color: var(--bz-yellow); }
+    .bb-dots span.skipped { background: #555; border-color: #555; }
+    .bb-dots span.pulse { animation: bbPulse 0.6s ease-out; }
+    @keyframes bbPulse {
       0% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.55); }
       100% { box-shadow: 0 0 0 7px rgba(255, 193, 7, 0); }
     }
-    .brief-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.5rem;
-    }
-    .rail-close {
-      background: none;
-      border: none;
-      color: #8A8A8A;
-      font-size: 1.1rem;
-      line-height: 1;
-      cursor: pointer;
-      padding: 0.25rem 0.45rem;
-      min-height: 0;
+    .bb-preview {
+      flex: 1;
       min-width: 0;
+      color: #8F8F8F;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .rail-close:hover { color: var(--bz-yellow); }
-    /* The panel only exists while the rail is open. */
-    .brief-rail .slot-checklist { display: none; position: static; }
-    .chat-layout.brief-open .brief-rail .slot-checklist,
-    .chat-layout.brief-editing .brief-rail .slot-checklist { display: block; }
-    .chat-layout.brief-open .rail-toggle,
-    .chat-layout.brief-editing .rail-toggle { display: none; }
-    .rail-scrim { display: none; }
+    .bb-chev { color: #777; font-size: 0.7rem; }
+    .brief-bar.open .bb-chev { transform: rotate(180deg); }
+    .brief-body { display: block; border-top: 1px solid #242424; padding: 0.7rem; }
+    .brief-body .slot-checklist { border: none; background: none; padding: 0; }
+
+    .chat-messages { order: 3; }
+    #paperPanel, #paperDrop { order: 4; }
+    #draftBanner { order: 5; }
+    #chatError { order: 7; }
+    .chat-main > p.muted:last-of-type { order: 9; }
 
     @media (max-width: 900px) {
-      .chat-layout,
-      .chat-layout.brief-open,
-      .chat-layout.brief-editing { grid-template-columns: 1fr; }
-      /* Mobile: the rail is a fixed pill in the corner; opening it slides the
-         panel over the conversation with a scrim to dismiss. */
-      .brief-rail {
-        position: fixed;
-        top: 76px;
-        right: 10px;
-        width: auto;
-        z-index: 61;
+      .chat-layout { grid-template-columns: 1fr; }
+      .composer-card { border-radius: 10px; }
+    }
+    /* Mobile: the composer is the point of the page — strip the chrome that
+       pushes it down the screen. */
+    @media (max-width: 640px) {
+      .chat-mascot { display: none; }
+      .chat-header-row { padding: 0 0 0.25rem; min-height: 0; }
+      /* The 48px touch minimum was inflating a one-word utility row. */
+      .chat-header-row .secondary {
+        min-height: 30px;
+        padding: 0.15rem 0.6rem;
+        font-size: 0.75rem;
       }
-      .rail-toggle {
-        flex-direction: row;
-        gap: 0.4rem;
-        width: auto;
-        padding: 0.42rem 0.7rem;
-        border-radius: 999px;
-        background: var(--bz-panel);
-      }
-      .rail-label { writing-mode: horizontal-tb; transform: none; }
-      .rail-dots { flex-direction: row; margin-bottom: 0; }
-      .chat-layout.brief-open .brief-rail,
-      .chat-layout.brief-editing .brief-rail { top: 0; right: 0; }
-      .chat-layout.brief-open .brief-rail .slot-checklist,
-      .chat-layout.brief-editing .brief-rail .slot-checklist {
-        width: min(84vw, 360px);
-        max-height: 100vh;
-        overflow-y: auto;
-        border-radius: 0;
-        padding: 1rem;
-        box-shadow: -24px 0 48px rgba(0, 0, 0, 0.55);
-      }
-      .rail-scrim {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.55);
-        z-index: 60;
-      }
-      .rail-scrim.show { display: block; }
+      .chat-main > #chatCompany:empty { display: none; }
+      .composer-card { padding: 0.6rem 0.7rem 0.55rem; }
+      .composer-card #chatInput { font-size: 16px; }
     }
     header > .header-inner,
     .header-inner {
@@ -749,42 +724,70 @@
 
     .hidden { display: none; }
 
-    .recent-work { padding: 0.25rem 0; max-width: 42rem; }
-    .recent-work .rw-head { margin: 0 0 0.15rem; font-size: 1.1rem; }
-    .recent-work .rw-lead { margin: 0 0 0.7rem; }
+    /* Recent work: a compact list under the composer, search in the header. */
+    .recent-work { padding: 0.25rem 0 0; }
+    .rw-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin: 0.1rem 0 0.55rem;
+    }
+    .recent-work .rw-head {
+      margin: 0;
+      font-size: 0.7rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #8A8A8A;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .recent-work .rw-lead { margin: 0 0 0.6rem; font-size: 0.82rem; }
     .rw-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.7rem; }
     .rw-ex {
       background: transparent; border: 1px solid #2A2A2A; color: #C9CDD2;
-      border-radius: 999px; padding: 0.25rem 0.7rem; font-size: 0.82rem; cursor: pointer;
+      border-radius: 999px; padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer;
+      min-height: 0;
     }
     .rw-ex:hover { border-color: #FFC107; color: #FFC107; }
     .rw-item {
       display: block; width: 100%; text-align: left; font: inherit;
-      background: #0A0A0A; border: 1px solid #2A2A2A; border-radius: 8px;
-      padding: 0.65rem 0.85rem; margin: 0 0 0.5rem; cursor: pointer;
+      background: transparent; border: 1px solid #222; border-radius: 7px;
+      padding: 0.5rem 0.7rem; margin: 0 0 0.35rem; cursor: pointer;
       position: relative;
+      transition: border-color 0.12s, background 0.12s;
     }
-    .rw-item:hover { border-color: #FFC107; }
-    .rw-item .rw-title { display: block; color: #fff; font-weight: 700; font-size: 0.95rem; padding-right: 2.2rem; }
+    .rw-item:hover { border-color: #3A3A3A; background: #121212; }
+    .rw-item .rw-title {
+      display: block; color: #EDEDED; font-weight: 600; font-size: 0.88rem;
+      padding-right: 2.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .rw-tools {
-      position: absolute; top: 0.5rem; right: 0.6rem; display: inline-flex; gap: 0.3rem;
+      position: absolute; top: 0.35rem; right: 0.45rem; display: inline-flex; gap: 0.25rem;
+      opacity: 0; transition: opacity 0.12s;
     }
+    .rw-item:hover .rw-tools, .rw-item:focus-within .rw-tools { opacity: 1; }
     .rw-rename, .rw-delete {
       background: transparent; border: 1px solid #2A2A2A; color: #888;
-      border-radius: 5px; padding: 0.05rem 0.45rem; font-size: 0.8rem; cursor: pointer; line-height: 1.4;
+      border-radius: 5px; padding: 0 0.4rem; font-size: 0.75rem; cursor: pointer; line-height: 1.5;
+      min-height: 0; min-width: 0;
     }
     .rw-rename:hover { color: #FFC107; border-color: #FFC107; }
     .rw-delete:hover { color: #ff6b6b; border-color: #ff6b6b; }
-    .rw-item .rw-sub { display: block; color: #9a9a9a; font-size: 0.8rem; margin-top: 0.15rem; }
-    .rw-item.needs-input { border-color: #5a4a1a; border-left: 3px solid #FFC107; }
-    .rw-item.needs-input .rw-title { color: #FFC107; }
-    .rw-search { margin: 0 0 0.9rem; }
-    .rw-search input {
-      width: 100%; box-sizing: border-box; padding: 0.6rem 0.85rem;
-      border: 1px solid #2A2A2A; border-radius: 8px; background: #0A0A0A;
-      color: #fff; font: inherit; font-size: 0.9rem;
+    .rw-item .rw-sub {
+      display: block; color: #858585; font-size: 0.75rem; margin-top: 0.1rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1.5rem;
     }
-    .rw-search input::placeholder { color: #777; }
+    .rw-item.needs-input { border-left: 3px solid #FFC107; }
+    .rw-item.needs-input .rw-title { color: #FFC107; }
+    .rw-head-row .rw-search { margin: 0; flex: 0 1 290px; }
+    .rw-search { margin: 0 0 0.7rem; }
+    .rw-search input {
+      width: 100%; font: inherit; font-size: 0.8rem; color: #E8E8E8;
+      background: #0F0F0F; border: 1px solid #2A2A2A; border-radius: 999px;
+      padding: 0.4rem 0.8rem;
+    }
+    .rw-search input::placeholder { color: #6F6F6F; }
     .rw-search input:focus { outline: none; border-color: #FFC107; }
     .rw-group {
       margin: 0.9rem 0 0.4rem; font-size: 0.72rem; letter-spacing: 0.09em;
@@ -1241,17 +1244,16 @@
             <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
             <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
           </div>
-          <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-            <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-            <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
-            <span class="mode-hint" id="modeHint">Talk it through — I'll ask if it turns into a project.</span>
-          </div>
-          <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.55rem;font-size:0.92rem"></p>
-          <div class="chat-messages" id="chatMessages"></div>
-          <div class="chat-input-row">
-            <textarea id="chatInput" rows="2" placeholder="Describe the job…" aria-label="Describe the job for BeeZilla" disabled></textarea>
-            <button id="chatSend" disabled>Send</button>
-          </div>
+          <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
+          <div class="composer-card" id="composerCard">
+            <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+              <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+              <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+            </div>
+            <div class="chat-input-row">
+              <textarea id="chatInput" rows="2" placeholder="What do you need done?" aria-label="Describe the job for BeeZilla" disabled></textarea>
+              <button id="chatSend" disabled>Send</button>
+            </div>
 
           <!-- Work mode: the harness makes you say what the task actually is,
                before it will send a single turn or build a draft. -->
@@ -1310,8 +1312,28 @@
             <p class="muted" id="wdNote" role="status" style="margin:0.6rem 0 0"></p>
           </form>
           <div class="paper-attach">
-            <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
+              <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
+            </div>
           </div>
+
+          <!-- The brief is one line above the conversation, expandable in place.
+               No side column: it costs no width and never competes with the chat. -->
+          <div class="brief-bar hidden" id="briefBar">
+            <button type="button" class="brief-bar-btn" id="briefBarToggle" aria-expanded="false" aria-controls="briefPanel">
+              <span class="bb-label">Brief</span>
+              <span class="bb-count" id="railCount">0/4</span>
+              <span class="bb-dots" id="railDots" aria-hidden="true"></span>
+              <span class="bb-preview" id="bbPreview">Nothing captured yet</span>
+              <span class="bb-chev" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="slot-checklist brief-body hidden" id="briefPanel" role="region" aria-label="Brief">
+              <p id="briefCompany" class="brief-company"></p>
+              <div id="slotItems"></div>
+              <div id="paperBrief" class="paper-brief hidden"></div>
+            </div>
+          </div>
+
+          <div class="chat-messages" id="chatMessages"></div>
           <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
           <div id="paperDrop" class="paper-drop hidden">
             <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
@@ -1352,27 +1374,6 @@
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
         </div>
-        <!-- Session brief: always present off to the side, in Chat and Work
-             mode alike. Collapsed to a 64px spine by default so the
-             conversation keeps the width; expands on demand. -->
-        <aside class="brief-rail" id="briefRail" aria-label="Session brief">
-          <button type="button" class="rail-toggle" id="railToggle" aria-expanded="false" aria-controls="briefPanel" title="Show the session brief">
-            <span class="rail-chevron" aria-hidden="true">&#8249;</span>
-            <span class="rail-label">Brief</span>
-            <span class="rail-count" id="railCount">0/4</span>
-            <span class="rail-dots" id="railDots" aria-hidden="true"></span>
-          </button>
-          <div class="slot-checklist" id="briefPanel" role="region" aria-label="Brief">
-            <div class="brief-head">
-              <h3>Brief</h3>
-              <button type="button" class="rail-close" id="railClose" aria-label="Hide the brief">&#215;</button>
-            </div>
-            <p id="briefCompany" class="brief-company"></p>
-            <div id="slotItems"></div>
-            <div id="paperBrief" class="paper-brief hidden"></div>
-          </div>
-        </aside>
-        <div class="rail-scrim" id="railScrim"></div>
       </div>
     </div>
 
@@ -2246,6 +2247,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         container.appendChild(offer);
       }
       container.scrollTop = container.scrollHeight;
+      if (typeof updateChrome === "function") updateChrome();
     }
 
     function activeCompanyId() {
@@ -2547,7 +2549,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
       });
       renderMoneyCheck();
-      renderRailStatus();
+      renderBriefStatus();
       // If the re-render removed the open editor, collapse the wide column.
       if (!container.querySelector(".slot-edit-input")) setBriefEditWidth(false);
     }
@@ -2606,9 +2608,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function setBriefEditWidth(on) {
-      var layout = document.querySelector(".chat-layout");
-      if (layout) layout.classList.toggle("brief-editing", !!on);
-      // An editor cannot live in a shut rail.
+      // An editor cannot live inside a collapsed strip.
       if (on) setBrief(true);
     }
 
@@ -3194,6 +3194,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
+      updateChrome();
 
       setPhase(chatState.jobContext ? "Chat — " + chatState.jobContext.title : "Talk to BeeZilla");
     }
@@ -3249,29 +3250,37 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       renderSlotChecklist();
     }
 
-    // The brief rail is always mounted; this only opens or closes it.
-    // State is the user's choice (persisted), never a side effect of mode or
-    // of whether a conversation exists.
+    // The brief is one inline strip above the transcript. Open/closed is a
+    // per-visit courtesy, not a persisted layout choice.
     function setBrief(open) {
-      var layout = document.querySelector(".chat-layout");
-      if (!layout) return;
+      var bar = document.getElementById("briefBar");
+      var body = document.getElementById("briefPanel");
       var isOpen = !!open;
-      layout.classList.toggle("brief-open", isOpen);
-      var btn = document.getElementById("railToggle");
-      if (btn) btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
-      var scrim = document.getElementById("railScrim");
-      if (scrim) scrim.classList.toggle("show", isOpen);
-      try { localStorage.setItem("bz_brief_open", isOpen ? "1" : "0"); } catch (_) {}
-      if (!isOpen) setBriefEditWidth(false);
+      if (bar) bar.classList.toggle("open", isOpen);
+      if (body) body.classList.toggle("hidden", !isOpen);
+      var toggle = document.getElementById("briefBarToggle");
+      if (toggle) toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
     }
 
     function briefOpen() {
-      var layout = document.querySelector(".chat-layout");
-      return !!(layout && (layout.classList.contains("brief-open") || layout.classList.contains("brief-editing")));
+      var bar = document.getElementById("briefBar");
+      return !!(bar && bar.classList.contains("open"));
     }
 
-    // Rail status: n/4 captured + one dot per statement.
-    function renderRailStatus() {
+    // Landing vs conversation: the composer is the top-of-page element until a
+    // conversation exists, then it drops to the bottom like any chat.
+    function updateChrome() {
+      var main = document.getElementById("chatMain") || document.querySelector(".chat-main");
+      var inConversation = !!(chatState.messages.length || chatState.sessionId || chatState.jobId);
+      if (main) main.classList.toggle("is-conversation", inConversation);
+      var bar = document.getElementById("briefBar");
+      if (bar) bar.classList.toggle("hidden", !inConversation);
+      if (!inConversation) setBrief(false);
+      renderBriefStatus();
+    }
+
+    // Strip status: n/4 captured, one dot per statement, one-line preview.
+    function renderBriefStatus() {
       var ids = Object.keys(SLOT_LABELS);
       var count = document.getElementById("railCount");
       var dots = document.getElementById("railDots");
@@ -3300,6 +3309,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
         chatState._railFilled = prev;
       }
+      var preview = document.getElementById("bbPreview");
+      if (preview) {
+        var first = ids.map(function (id) { return chatState.slots[id]; })
+          .filter(function (v) { return v && v !== "skipped"; })[0];
+        preview.textContent = first
+          ? first
+          : (filled ? "Captured" : "Nothing captured yet");
+      }
     }
 
     function setBackVisible(show) {
@@ -3316,6 +3333,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.paper = null;
       resetDraftGate();
       try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      updateChrome();
       showRecentWork();
     }
 
@@ -3333,6 +3351,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       resetDraftGate();
       setChatMascot("17-attentive");
       renderChatMessages();
+      updateChrome();
       renderSlotChecklist();
       document.getElementById("chatInput").focus();
     }
@@ -3427,15 +3446,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function renderWorkSearch(q) {
       var container = document.getElementById("chatMessages");
       container.innerHTML = '<div class="recent-work">' +
+        '<div class="rw-head-row">' +
+        '<h3 class="rw-head">Search</h3>' +
         workSearchBoxHtml() +
+        '</div>' +
         '<p class="muted rw-lead" id="rwSearchStatus">Searching…</p>' +
         '<div id="rwSearchResults"></div>' +
-        '<div class="rw-actions"><button type="button" class="primary rw-new">New chat</button></div>' +
         '</div>';
       bindWorkSearchBox(container);
       var input = container.querySelector("#rwSearch");
       if (input) { input.focus(); }
-      container.querySelector(".rw-new").addEventListener("click", newChatNow);
       fetch("/api/buzzy/search?q=" + encodeURIComponent(q), { credentials: "same-origin" })
         .then(function (r) {
           if (r.status === 401) { window.location.href = "/buzzy/landing"; return null; }
@@ -3548,8 +3568,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") +
               (revised ? " · revised" : "") +
               (decided ? " · " + decided + " detail" + (decided === 1 ? "" : "s") : "") +
-              (j.template ? " · " + j.template : "") +
-              (j.updatedAt ? " · updated " + timeAgo(j.updatedAt) : ""),
+              (j.updatedAt ? " · " + timeAgo(j.updatedAt) : ""),
           });
         });
         // Drafts awaiting the owner's approval float to the top.
@@ -3557,14 +3576,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var shown = rwShowAll ? items : items.slice(0, 8);
         var RW_EXAMPLES = ["Write a welcome email for new customers", "Draft a polite payment reminder", "Turn my services into a price list"];
         var html = '<div class="recent-work">' +
-          workSearchBoxHtml() +
+          '<div class="rw-head-row">' +
           '<h3 class="rw-head">Recent work</h3>' +
-          '<p class="muted rw-lead">Pick up where you left off, or start something new.</p>' +
-          '<div class="rw-examples">' +
-          RW_EXAMPLES.map(function (ex) { return '<button type="button" class="rw-ex" data-ex="' + esc(ex) + '">' + esc(ex) + "</button>"; }).join("") +
+          workSearchBoxHtml() +
           '</div>';
         if (!shown.length) {
-          html += '<p class="muted">No work yet. Start by describing a job.</p>';
+          html += '<p class="muted rw-lead">Nothing yet. Start above, or try one of these:</p>' +
+            '<div class="rw-examples">' +
+            RW_EXAMPLES.map(function (ex) { return '<button type="button" class="rw-ex" data-ex="' + esc(ex) + '">' + esc(ex) + "</button>"; }).join("") +
+            '</div>';
         } else {
           shown.forEach(function (it, idx) {
             html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0" title="' + esc(it.tooltip || it.title) + '">' +
@@ -3574,15 +3594,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               '</div>';
           });
         }
-        html += '<div class="rw-actions">' +
-          '<button type="button" class="primary rw-new">New chat</button>' +
-          (items.length > 8
-            ? (rwShowAll
-                ? '<button type="button" class="secondary rw-all">Show less</button>'
-                : '<button type="button" class="secondary rw-all">Show all work (' + items.length + ')</button>')
-            : '') +
-          '</div>' +
-          '</div>';
+        if (items.length > 8) {
+          html += '<div class="rw-actions">' +
+            (rwShowAll
+              ? '<button type="button" class="secondary rw-all">Show less</button>'
+              : '<button type="button" class="secondary rw-all">Show all work (' + items.length + ')</button>') +
+            '</div>';
+        }
+        html += '</div>';
         container.innerHTML = html;
         container.querySelectorAll(".rw-item").forEach(function (el) {
           el.addEventListener("click", function () {
@@ -3616,7 +3635,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             deleteJob(it, function () { showRecentWork(); });
           });
         });
-        container.querySelector(".rw-new").addEventListener("click", newChatNow);
+        var newBtn = container.querySelector(".rw-new");
+        if (newBtn) newBtn.addEventListener("click", newChatNow);
         var allBtn = container.querySelector(".rw-all");
         if (allBtn) allBtn.addEventListener("click", function () { rwShowAll = !rwShowAll; showRecentWork(); });
         container.querySelectorAll(".rw-ex").forEach(function (el) {
@@ -3869,27 +3889,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         el.addEventListener("input", renderWorkProgress);
         el.addEventListener("change", renderWorkProgress);
       });
-      // ── Session brief rail ─────────────────────────────────────
-      // Always mounted; open/closed is the user's remembered choice.
-      var railToggle = document.getElementById("railToggle");
-      if (railToggle) {
-        railToggle.addEventListener("click", function () { setBrief(!briefOpen()); });
+      // ── Inline brief strip ─────────────────────────────────────
+      var barToggle = document.getElementById("briefBarToggle");
+      if (barToggle) {
+        barToggle.addEventListener("click", function () { setBrief(!briefOpen()); });
       }
-      var closeRail = function () {
-        if (document.querySelector(".slot-edit-input")) cancelSlotEdit();
-        setBrief(false);
-      };
-      var railClose = document.getElementById("railClose");
-      if (railClose) railClose.addEventListener("click", closeRail);
-      var scrim = document.getElementById("railScrim");
-      if (scrim) scrim.addEventListener("click", closeRail);
       document.addEventListener("keydown", function (e) {
         if (e.key === "Escape" && briefOpen() && !document.querySelector(".slot-edit-input")) setBrief(false);
       });
-      var savedOpen = null;
-      try { savedOpen = localStorage.getItem("bz_brief_open"); } catch (_) {}
-      setBrief(savedOpen === "1");
-      renderRailStatus();
+      setBrief(false);
+      updateChrome();
 
       renderWorkProgress();
       // Deep link: /buzzy/talk?mode=work starts in the definition panel.
@@ -4174,8 +4183,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var briefCo = document.getElementById("briefCompany");
       var line = document.getElementById("chatCompany");
       var name = co && co.name ? co.name : "";
-      if (nameEl) nameEl.textContent = name || "No company yet";
+      if (nameEl) nameEl.textContent = name || "";
       if (kicker) kicker.textContent = name ? "Working for" : "";
+      // Without a company the tab bar already says "No company yet" — don't
+      // say it twice. Hide the whole name block and leave the mascot.
+      var head = nameEl ? nameEl.closest(".chat-company-head") : null;
+      if (head) head.classList.toggle("hidden", !name);
       if (briefCo) briefCo.textContent = name ? "For " + name : "";
       if (line) line.textContent = co && co.oneLiner ? co.oneLiner : "";
       var id = co ? co.id : null;
