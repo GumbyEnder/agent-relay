@@ -152,7 +152,9 @@ export interface CompiledChecks {
   wasm: Uint8Array;
   /** Public code -> one-line description. Never contains a predicate. */
   codes: Record<string, string>;
-  manifest: { sha256: string; rules: number; codes: string[]; engine: string };
+  /** `codes` is the public code -> description map: it ships in the manifest so a
+   *  consumer can explain a verdict without the rule predicates. */
+  manifest: { sha256: string; rules: number; codes: Record<string, string>; engine: string };
 }
 
 export class BudgetExceededError extends Error {

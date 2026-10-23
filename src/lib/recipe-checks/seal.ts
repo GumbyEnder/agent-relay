@@ -133,7 +133,9 @@ export function compile(rules: Rule[], opts: { salt?: Uint8Array } = {}): Compil
     manifest: {
       sha256: createHash("sha256").update(wasm).digest("hex"),
       rules: rules.length,
-      codes: Object.keys(codes).sort(),
+      // The MAP, not the key list: the verify tier explains a fired code from the
+      // manifest alone. An array here silently produced empty descriptions.
+      codes,
       engine: ENGINE,
     },
   };

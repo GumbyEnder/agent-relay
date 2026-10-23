@@ -127,6 +127,9 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal(r.status, 200);
     assert.equal((r.body as { ok: boolean }).ok, false);
     assert.ok((r.body as { codes: string[] }).codes.includes("C01"));
+    // The response must explain the code it reported.
+    const desc = (r.body as { descriptions: Record<string, string> }).descriptions;
+    assert.equal(typeof desc.C01, "string", "fired code returned without a description");
   });
 
   await ok("verify rejects a missing draft with 400", async () => {
@@ -243,8 +246,8 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
   });
 
   await ok("no prompt text anywhere in the run ledger", async () => {
-    const rows = await q<{ verdict: unknown; inputs_hash: string }>(
-      `SELECT verdict, inputs_hash FROM ar_recipe_run`);
+    const rows = (await q(`SELECT verdict, inputs_hash FROM ar_recipe_run`)) as
+      { verdict: unknown; inputs_hash: string }[];
     const text = j(rows);
     for (const phrase of recipe.discovery) {
       assert.equal(text.includes(phrase.slice(0, 24)), false, "ledger leaked prose");

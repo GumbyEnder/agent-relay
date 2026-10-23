@@ -54,6 +54,16 @@ const BAD = {
     assert.ok(typeof r.descriptions.C01 === "string");
   });
 
+  await ok("regression: descriptions resolve from the SEALED manifest codes map", () => {
+    // The bug this guards: compile() once emitted codes as a string[] so the
+    // manifest could not explain a fired code, and every response carried {}.
+    const fromManifest = compiled.manifest.codes;
+    assert.equal(typeof (fromManifest as Record<string, string>).C01, "string",
+      "manifest.checks.codes is not a code->description map");
+    const r = verifyDraft({ checksWasm: compiled.wasm, draft: BAD, descriptions: fromManifest });
+    assert.equal(typeof r.descriptions.C01, "string", "C01 fired but was not described");
+  });
+
   await ok("only fired codes are described (no rule inventory in the response)", () => {
     const r = verifyDraft({ checksWasm: compiled.wasm, draft: GOOD, descriptions: DESCRIPTIONS });
     assert.equal(Object.keys(r.descriptions).length, 0);
