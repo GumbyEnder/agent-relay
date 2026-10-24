@@ -296,6 +296,33 @@ ok("seal refuses a boundary hidden in checks.codes", () => {
   assert.equal(threw.includes("checks.codes.C99"), true, `the gate did not name the field: ${threw}`);
 });
 
+ok("seal refuses the boundary split into reordered 3-token chunks", () => {
+  // The concatenation pass joins fields in walk order, so permuting short chunks
+  // beat it: 15 tokens in 3-token chunks, reordered, contains no 4-gram match but
+  // reassembles the sentence. The vocabulary pass is order-independent.
+  const chunks = ["never invents a", "price or a", "term no supplier", "is contacted and", "nothing is ordered"];
+  const shuffled = [chunks[2], chunks[0], chunks[4], chunks[1], chunks[3]];
+  let threw = "";
+  try { sealBundle(input({ capability: { ...capability, forbidden_tools: shuffled } })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `permuted chunks sealed: ${threw}`);
+  assert.equal(threw.includes("<vocabulary>"), true, `the vocabulary pass did not fire: ${threw}`);
+});
+
+ok("seal refuses a split_bp that over-allocates", () => {
+  let threw = "";
+  try { sealBundle(input({ pricing: { split_bp: { author: 10000, platform: 10000 } } })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("pricing.split_bp:over_allocated"), true, `over-allocation sealed: ${threw}`);
+});
+
+ok("seal refuses a rules count below the number of codes it ships", () => {
+  let threw = "";
+  try { sealBundle(input({ checks: { ...compiled.manifest, rules: 1 } })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("checks.rules:below_code_count"), true, `rules below codes sealed: ${threw}`);
+});
+
 const valueCases: Array<[string, (cap: Record<string, unknown>) => Record<string, unknown>, string]> = [
   ["negative price", () => ({ ...capability }), "pricing.amount_cents:range"],
 ];

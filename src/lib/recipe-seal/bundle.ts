@@ -175,6 +175,18 @@ function tokens(s: string): string[] {
   return s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 
+const STOPWORDS = new Set([
+  "the", "and", "or", "a", "an", "is", "are", "to", "of", "in", "for", "with", "no", "not",
+  "that", "it", "you", "your", "be", "by", "as", "at", "on", "from", "this", "these", "those",
+  "if", "then", "than", "but", "so", "we", "they", "he", "she", "i", "my", "its", "into",
+  "does", "did", "do", "has", "have", "was", "were", "will", "would", "can", "could", "should",
+]);
+
+/** Distinct words that carry meaning, for order-independent comparison. */
+function contentTokens(text: string): string[] {
+  return tokens(text).filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+}
+
 function ngrams(text: string, n: number): Set<string> {
   const t = tokens(text);
   const out = new Set<string>();
@@ -218,6 +230,19 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
       if (guarded.has(t.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); break; }
     }
   }
+  // Order-independent containment: the secret may be split into short chunks and
+  // reordered so no 4-gram survives anywhere. Chunking and permutation preserve
+  // the *bag of content words*, so compare that too.
+  const manifestBag = new Set<string>();
+  for (const [, v] of strings) for (const t of tokens(v)) manifestBag.add(t);
+
+  for (const semanticString of semanticStrings) {
+    const content = [...new Set(contentTokens(semanticString))];
+    if (content.length < 5) continue;                 // too short to judge
+    const present = content.filter((t) => manifestBag.has(t)).length;
+    if (present / content.length >= 0.7) { hits.push("<vocabulary>"); break; }
+  }
+
   // Cross-field: the secret may be split so no single string contains the run.
   const blob = strings.map(([, v]) => v).join(" ");
   const bt = tokens(blob);
@@ -249,9 +274,13 @@ export function manifestValueErrors(m: unknown): string[] {
       errors.push("pricing.quota_default:range");
     }
     if (pricing.split_bp) {
+      let total = 0;
       for (const [k, v] of Object.entries(pricing.split_bp)) {
         if (!Number.isSafeInteger(v) || v < 0 || v > 10_000) errors.push(`pricing.split_bp.${k}:range`);
+        else total += v;
       }
+      // Over-allocating made splitCost pay a negative platform share.
+      if (total > 10_000) errors.push("pricing.split_bp:over_allocated");
     }
   }
   const codes = man.checks?.codes;
@@ -261,7 +290,10 @@ export function manifestValueErrors(m: unknown): string[] {
       if (!nonEmpty(v)) errors.push(`checks.codes.${k}:empty`);
     }
   }
-  if (man.checks && (!Number.isSafeInteger(man.checks.rules) || man.checks.rules < 0)) errors.push("checks.rules:range");
+  if (man.checks) {
+    if (!Number.isSafeInteger(man.checks.rules) || man.checks.rules < 1) errors.push("checks.rules:range");
+    else if (codes && man.checks.rules < Object.keys(codes).length) errors.push("checks.rules:below_code_count");
+  }
   return errors;
 }
 

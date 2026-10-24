@@ -141,6 +141,31 @@ export function compile(rules: Rule[], opts: { salt?: Uint8Array } = {}): Compil
   };
 }
 
+/**
+ * Prove every rule can actually evaluate before the module is published.
+ *
+ * `new RegExp` happens at evaluation, not load, so a rule with an invalid pattern
+ * loads happily and throws the first time a draft reaches it — which surfaced as a
+ * 500 on verify, an uncaught throw in batch, and a burned quota unit on run.
+ * Compiling every pattern here turns that into a publish-time rejection.
+ */
+export function validateRules(rules: Rule[]): void {
+  const walk = (expr: unknown): void => {
+    if (!expr || typeof expr !== "object") return;
+    const e = expr as Record<string, unknown>;
+    if (e.op === "matches") {
+      // throws on a malformed pattern
+      new RegExp(String(e.pattern), typeof e.flags === "string" ? e.flags : "");
+    }
+    for (const key of ["args", "arg", "expr"]) {
+      const v = e[key];
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") walk(v);
+    }
+  };
+  for (const rule of rules) walk(rule.expr);
+}
+
 export function loadRules(wasm: Uint8Array): Rule[] {
   const payload = readWasm(wasm);
   const salt = payload.slice(0, 8);

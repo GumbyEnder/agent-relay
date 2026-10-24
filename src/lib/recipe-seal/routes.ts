@@ -13,6 +13,7 @@
  *   POST license, publish     operator/session (checked by the adapter)
  */
 import { verifyBundle, partsOf, openSemantic, inspectBundle, manifestPublishErrors, sha256Hex, type RecipeManifest } from "./bundle";
+import { validateRules } from "../recipe-checks/seal";
 import {
   authenticate, getBundle, getUsage, issueLicense, listBundles, publishBundle, recordRun,
   findRunByKey, releaseRun, reserveRun, splitCost, type LicenseRow, type QueryFn,
@@ -162,14 +163,27 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     // A bundle whose checks module does not load would 500 the free tier and burn
     // a paid unit per attempt, so it is rejected at the door.
     try {
-      loadRules(bundleParts.checksWasm);
+      // A module can load and still throw when evaluated (an invalid regex inside a
+      // rule). Compiling every pattern here rejects it at the door instead of 500ing
+      // verify, throwing in batch and burning a unit on run.
+      validateRules(loadRules(bundleParts.checksWasm));
     } catch {
-      return err(422, "invalid_checks", "checks.wasm does not load as a sealed rule program");
+      return err(422, "invalid_checks", "checks.wasm does not evaluate as a sealed rule program");
     }
 
-    await storage.put(bundleKey(verified.digest!), bytes);
-    await storage.put(semanticKey(verified.digest!), bundleParts.semanticEnc);
-    await storage.put(checksKey(verified.digest!), bundleParts.checksWasm);
+    try {
+      await storage.put(bundleKey(verified.digest!), bytes);
+      await storage.put(semanticKey(verified.digest!), bundleParts.semanticEnc);
+      await storage.put(checksKey(verified.digest!), bundleParts.checksWasm);
+    } catch (cause) {
+      // Same digest but different bytes means the content-addressed store found a
+      // collision. That is an integrity signal, not a server fault to 500 on.
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      if (msg.includes("collision")) {
+        return err(409, "bundle_collision", "a different bundle already occupies this hash");
+      }
+      return err(503, "storage_unavailable", "the bundle could not be stored");
+    }
     let row;
     try {
       row = await publishBundle(q, {
@@ -254,8 +268,11 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     // limiter, a caller whose single-verify budget is exhausted could send
     // 50 drafts per call, forever. Counted per DRAFT, not per call.
     const batchLimiter = req.token ? deps.tokenLimiter! : deps.anonymousLimiter!;
+    // Identical key derivation to single verify, or the two routes have independent
+    // budgets and the batch becomes a way around an exhausted per-caller limit.
+    const batchKey = req.token ? `tok:${sha256Hex(req.token)}` : `ip:${req.callerKey ?? "unknown"}`;
     for (let i = 0; i < drafts.length; i++) {
-      const gate = batchLimiter.take(req.token ? `token:${req.token}` : (req.callerKey ?? "unknown"));
+      const gate = batchLimiter.take(batchKey);
       if (!gate.allowed) {
         return { status: 429, body: { ok: false, error: "rate limited", code: "rate_limited" },
           headers: { "Retry-After": String(Math.ceil(gate.retryAfterMs / 1000)) } };
@@ -274,10 +291,17 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     const partsBundle = await loadBundleParts(storage, hash);
     if (!partsBundle) return err(404, "unknown_bundle", "no such bundle");
     const manifest = partsBundle.manifest;
-    const results = verifyBatch(drafts.map((draft) => ({
-      checksWasm: partsBundle.checksWasm, draft, descriptions: manifest.checks.codes,
-    })));
-    return { status: results.status, body: { ok: results.ok, results: results.results, error: results.error } };
+    let batchResults: ReturnType<typeof verifyBatch>;
+    try {
+      batchResults = verifyBatch(drafts.map((draft) => ({
+        checksWasm: partsBundle.checksWasm, draft, descriptions: manifest.checks.codes,
+      })));
+    } catch {
+      // The same evaluator failure single verify answers 422 for. Without this the
+      // batch route surfaced an uncaught SyntaxError as a 500.
+      return err(422, "invalid_checks", "the checks module does not evaluate");
+    }
+    return { status: batchResults.status, body: { ok: batchResults.ok, results: batchResults.results, error: batchResults.error } };
   }
 
   // ── token-scoped routes ────────────────────────────────────────────────────
@@ -324,15 +348,23 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       return err(502, "checks_unavailable", "the checks module does not load");
     }
     const log = createSafeLogger(deps.logSink!, { level: "info", now: deps.now });
-    const result = await runSealedRecipe({
-      semantic: opened.semantic as SemanticHalf,
-      inputs: (body.inputs ?? {}) as Record<string, unknown>,
-      rules,
-      model: deps.model,
-      log,
-      recipeHash: auth.bundleHash,
-      licenseId: auth.license.id,
-    });
+    let result;
+    try {
+      result = await runSealedRecipe({
+        semantic: opened.semantic as SemanticHalf,
+        inputs: (body.inputs ?? {}) as Record<string, unknown>,
+        rules,
+        model: deps.model,
+        log,
+        recipeHash: auth.bundleHash,
+        licenseId: auth.license.id,
+      });
+    } catch {
+      // The evaluator or the model threw after the unit was reserved. Release it:
+      // a charge with no ledger row is the worst of both worlds.
+      await releaseRun(q, auth.license.id);
+      return err(502, "run_failed", "the recipe could not be evaluated");
+    }
 
     let run;
     try {
@@ -395,6 +427,9 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     if (!Number.isSafeInteger(priceCents) || priceCents < 0) return err(400, "invalid_price", "priceCents must be a non-negative integer");
     if (priceCents !== recipePrice) {
       return err(409, "price_mismatch", `this recipe is licensed at ${recipePrice} cents per run`);
+    }
+    if (body.scopes !== undefined && !Array.isArray(body.scopes)) {
+      return err(400, "invalid_scope", "scopes must be an array");
     }
     const scopeList = Array.isArray(body.scopes)
       ? (body.scopes.filter((x) => typeof x === "string") as string[])

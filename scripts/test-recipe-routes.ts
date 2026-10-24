@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { Pool } from "pg";
 import { RECIPES } from "../src/lib/buzzy/recipes";
 import { compileRecipeChecks } from "../src/lib/recipe-checks";
+import { compile } from "../src/lib/recipe-checks/seal";
+import { defineRule, matches } from "../src/lib/recipe-checks/author";
 import { generateAuthorKey, sealBundle, sha256Hex } from "../src/lib/recipe-seal/bundle";
 import { canonicalise } from "../src/lib/recipe-seal/jcs";
 import { makeZip, readZip } from "../src/lib/recipe-seal/zip";
@@ -135,6 +137,39 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const hashOfForged = (await import("../src/lib/recipe-seal/bundle")).verifyBundle(forged.bytes).digest!;
     const served = await routeRecipes({ method: "GET", path: `/api/recipes/${hashOfForged}/manifest` }, deps);
     assert.equal(served.status, 404, "the refused manifest is being served anyway");
+  });
+
+  await ok("publish refuses the boundary split into reordered 3-token chunks", async () => {
+    const chunks = ["never invents a", "price or a", "term no supplier", "is contacted and", "nothing is ordered"];
+    const forged = forge((m) => {
+      (m.capability as Record<string, unknown>).forbidden_tools = [chunks[2], chunks[0], chunks[4], chunks[1], chunks[3]];
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(forged.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 422, `permuted chunks published: ${r.status} ${j(r.body)}`);
+  });
+
+  await ok("a checks module that LOADS but throws when evaluated is refused at publish", async () => {
+    // new RegExp() happens at evaluation, not load, so an invalid pattern sailed
+    // through publish: verify then 500'd, batch threw uncaught, and run burned a
+    // unit with no ledger row.
+    const badRules = [defineRule({ id: "bad", code: "C99", severity: "error",
+      description: "invalid pattern", expr: matches("sections[0].body", "(") })];
+    const compiledBad = compile(badRules, { salt: new Uint8Array(8) });
+    const throwing = sealBundle({
+      recipeId: "throwing-checks", version: "1.0.0",
+      semantic: { discovery: ["d"], boundary: "b" },
+      checksWasm: compiledBad.wasm, checks: compiledBad.manifest,
+      capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "read-only" },
+      author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
+      kek: KEK, createdAt: "2026-10-23T00:00:00.000Z",
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(throwing.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 422, `throwing checks module published: ${r.status} ${j(r.body)}`);
+    assert.equal((r.body as { code: string }).code, "invalid_checks");
   });
 
   await ok("a bundle whose checks module does not load is refused at publish", async () => {
@@ -474,6 +509,52 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify/batch`,
       body: { drafts }, callerKey: "1.2.3.4" }, tight);
     assert.equal(r.status, 429, `batch bypassed the limiter: ${r.status}`);
+  });
+
+  await ok("a content-addressed collision is a 409, not a 500", async () => {
+    const colliding = {
+      get: async () => null,
+      put: async () => { throw new Error("content-addressed key collision: bundles/x.srb"); },
+      has: async () => false,
+    } as unknown as typeof storage;
+    const cDeps = createRouteDeps({
+      q, storage: colliding, kek: KEK, model: async () => j(GOOD),
+      anonymousLimiter: new RateLimiter(60, 60_000, () => 0),
+      tokenLimiter: new RateLimiter(600, 60_000, () => 0), logSink: memorySink(),
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(sealed.bytes).toString("base64") } }, cDeps);
+    assert.equal(r.status, 409, `collision -> ${r.status} ${j(r.body)}`);
+    assert.equal((r.body as { code: string }).code, "bundle_collision");
+  });
+
+  await ok("single verify and batch share one budget", async () => {
+    // Different key namespaces made the batch an unlimited second door.
+    const shared = createRouteDeps({
+      q, storage, kek: KEK, model: async () => j(GOOD),
+      anonymousLimiter: new RateLimiter(5, 60_000, () => 0),
+      tokenLimiter: new RateLimiter(5, 60_000, () => 0), logSink: memorySink(),
+    });
+    const draft = { sections: [{ id: "s", title: "t", body: "b" }] };
+    for (let i = 0; i < 5; i++) {
+      const okr = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify`,
+        body: { draft }, callerKey: "9.9.9.9" }, shared);
+      assert.equal(okr.status, 200, `single ${i} -> ${okr.status}`);
+    }
+    const exhausted = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify`,
+      body: { draft }, callerKey: "9.9.9.9" }, shared);
+    assert.equal(exhausted.status, 429, "single verify was not limited");
+    const batch = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify/batch`,
+      body: { drafts: [draft] }, callerKey: "9.9.9.9" }, shared);
+    assert.equal(batch.status, 429, "batch used a separate budget from single verify");
+  });
+
+  await ok("scopes must be an array, not a string", async () => {
+    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { licenseeId: "x", scopes: "run" } }, deps);
+    assert.equal(r.status, 400, `scopes string granted ${r.status}`);
   });
 
   await ok("an unknown licensee kind is a 400, not a 500", async () => {
