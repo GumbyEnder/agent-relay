@@ -67,3 +67,45 @@ export function normalizeToolResult(text: string, maxChars = 6000): string {
     text.slice(-tail)
   );
 }
+
+
+/** Rough context window for a model id/label. Env override: BZ_CONTEXT_TOKENS. */
+const WINDOW_HINTS: Array<[RegExp, number]> = [
+  [/gemini/i, 1000000],
+  [/kimi|moonshot/i, 256000],
+  [/claude|anthropic/i, 200000],
+  [/glm/i, 128000],
+  [/deepseek/i, 128000],
+  [/qwen/i, 131072],
+  [/gpt|openai|solar|mercury/i, 128000],
+];
+
+export function contextWindowFor(model: string | null | undefined): number {
+  const override = Number(process.env.BZ_CONTEXT_TOKENS || 0);
+  if (Number.isFinite(override) && override > 0) return override;
+  const m = String(model ?? "");
+  for (const [re, n] of WINDOW_HINTS) if (re.test(m)) return n;
+  return 128000;
+}
+
+/** Fraction of the window where we start compacting, and where we warn. */
+export const CONTEXT_COMPACT_AT = 0.55;
+export const CONTEXT_WARN_AT = 0.75;
+
+export interface ContextState {
+  used: number;
+  limit: number;
+  pct: number;
+  compacted: boolean;
+  dropped: number;
+}
+
+export function contextState(
+  usedTokens: number,
+  limit: number,
+  compacted = false,
+  dropped = 0,
+): ContextState {
+  const pct = limit > 0 ? Math.min(100, Math.round((usedTokens / limit) * 100)) : 0;
+  return { used: Math.round(usedTokens), limit, pct, compacted, dropped };
+}

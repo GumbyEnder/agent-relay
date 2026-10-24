@@ -34,6 +34,7 @@ import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
+import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
@@ -272,6 +273,41 @@ export default defineEventHandler(async (event) => {
   if (method === "GET" && path === "/api/buzzy/models") {
     const models = getModels().map((m) => ({ label: m.label, key: m.label }));
     return { models };
+  }
+
+  // ── GET /api/buzzy/context — how full is the window right now ──────
+  // Cheap estimate from the stored turns + a fixed prompt/tool allowance.
+  // The authoritative number comes back on every chat turn (response.context).
+  if (method === "GET" && path === "/api/buzzy/context") {
+    const qs = fullPath.includes("?") ? fullPath.slice(fullPath.indexOf("?") + 1) : "";
+    const params = new URLSearchParams(qs);
+    const sessionId = params.get("sessionId");
+    const jobId = params.get("jobId");
+    const modelParam = params.get("model");
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    let rows: Array<{ content: string }> = [];
+    try {
+      rows = sessionId
+        ? await sql`SELECT content FROM buzzy_chat_messages
+            WHERE user_id = ${user.id} AND session_id = ${sessionId}
+            ORDER BY created_at DESC LIMIT 60` as Array<{ content: string }>
+        : jobId
+          ? await sql`SELECT content FROM buzzy_chat_messages
+              WHERE user_id = ${user.id} AND job_id = ${jobId}
+              ORDER BY created_at DESC LIMIT 60` as Array<{ content: string }>
+          : [];
+    } catch { rows = []; }
+    const label = modelParam || getModels()[0]?.label || "";
+    const modelId = getModels().find((m) => m.label === label)?.model || label;
+    const limit = contextWindowFor(modelId);
+    const chars = rows.reduce((acc, r) => acc + String(r.content || "").length, 0);
+    const used = Math.ceil(chars / 4) + 1500 + 2200; // turns + tool schemas + persona
+    return { ok: true, model: label, messages: rows.length, context: contextState(used, limit) };
   }
 
   // ── GET /api/buzzy/transcript — restore chat on reload (dogfood 10007) ──

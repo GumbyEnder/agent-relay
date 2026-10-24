@@ -1068,6 +1068,39 @@
 .bz-approve-bar { position: sticky; bottom: 0; background: var(--bz-panel, #141414); padding: 10px; display: flex; gap: 8px; }
 .bz-approve-bar button { flex: 1; min-height: 52px; }
 
+/* ── Context meter ─────────────────────────────────────────────── */
+.ctx-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.45rem 0 0;
+}
+.ctx-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: #232323;
+  overflow: hidden;
+}
+.ctx-bar > span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: #5A5A5A;
+  border-radius: 999px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.ctx-text {
+  font-size: 0.7rem;
+  color: #7A7A7A;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-meter.warn .ctx-bar > span { background: var(--bz-yellow); }
+.ctx-meter.warn .ctx-text { color: var(--bz-yellow); }
+.ctx-meter.hot .ctx-bar > span { background: var(--bz-status-red, #C45B5B); }
+.ctx-meter.hot .ctx-text { color: var(--bz-status-red, #C45B5B); }
+
 /* ── Voice: optional spoken replies + talk/listen/respond ─────── */
 .voice-toggle {
   display: inline-flex;
@@ -1207,6 +1240,7 @@
             <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read replies aloud">
               <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Voice</span>
             </button>
+            <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New session</button>
             <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
@@ -1221,6 +1255,10 @@
               <button id="chatSend" disabled>Send</button>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
+            <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
+              <div class="ctx-bar"><span id="ctxFill"></span></div>
+              <span id="ctxText" class="ctx-text">Context 0%</span>
+            </div>
 
           <div class="paper-attach">
               <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
@@ -2085,7 +2123,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function renderChatMessages() {
       const container = document.getElementById("chatMessages");
-      const html = chatState.messages.map((m) => {
+      // Newest first, but each exchange still reads question-then-answer:
+      // [u2, a2, u1, a1]. Your words and the reply stay at the top; older
+      // turns and the work history drop below. No scroll games.
+      const ordered = (function oldestToNewestPairs(msgs) {
+        var out = [];
+        for (var i = msgs.length - 1; i >= 0; i--) out.push(msgs[i]);
+        for (var j = 0; j < out.length - 1; j++) {
+          if (out[j].role === "assistant" && out[j + 1].role === "user") {
+            var t = out[j]; out[j] = out[j + 1]; out[j + 1] = t;
+            j++;
+          }
+        }
+        return out;
+      })(chatState.messages);
+      const html = ordered.map((m) => {
         const cls = m.role === "user" ? "bubble me" : "bubble";
         const escaped = String(m.content).replace(/</g, "&lt;").replace(/\n/g, "<br>");
         return '<div class="' + cls + '">' + escaped + "</div>";
@@ -2158,9 +2210,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         row.appendChild(no);
         offer.appendChild(txt);
         offer.appendChild(row);
-        container.appendChild(offer);
+        // Newest-first transcript: the offer belongs with the latest turn.
+        container.insertBefore(offer, container.firstChild);
       }
-      container.scrollTop = container.scrollHeight;
+      container.scrollTop = 0;
       if (typeof updateChrome === "function") updateChrome();
     }
 
@@ -2719,6 +2772,53 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       paintVoice();
     }
 
+    // ── Context meter ────────────────────────────────────────────────
+    function fmtTokens(n) {
+      n = Number(n) || 0;
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+      if (n >= 1000) return Math.round(n / 1000) + "k";
+      return String(n);
+    }
+
+    function paintContext(ctx) {
+      if (!ctx) return;
+      var meter = document.getElementById("ctxMeter");
+      var fill = document.getElementById("ctxFill");
+      var text = document.getElementById("ctxText");
+      if (!meter || !fill || !text) return;
+      var pct = Math.max(0, Math.min(100, Number(ctx.pct) || 0));
+      meter.classList.remove("hidden");
+      fill.style.width = pct + "%";
+      meter.classList.toggle("warn", pct >= 75 && pct < 90);
+      meter.classList.toggle("hot", pct >= 90);
+      var line = "Context " + pct + "% · " + fmtTokens(ctx.used) + " / " + fmtTokens(ctx.limit);
+      if (ctx.compacted) {
+        line += " · earlier turns compressed" + (ctx.dropped ? " (" + ctx.dropped + ")" : "");
+      }
+      text.textContent = line;
+    }
+
+    function loadContext() {
+      // Works with no session too — the window size is knowable before the
+      // first turn, and the meter should not appear out of nowhere later.
+      var q = chatState.sessionId ? "?sessionId=" + encodeURIComponent(chatState.sessionId) : "?";
+      if (selectedModel()) q += (q === "?" ? "" : "&") + "model=" + encodeURIComponent(selectedModel());
+      fetch("/api/buzzy/context" + q,
+            { credentials: "same-origin", signal: AbortSignal.timeout(8000) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && d.ok && d.context) paintContext(d.context); })
+        .catch(function () {});
+    }
+
+    function resetContextMeter() {
+      var meter = document.getElementById("ctxMeter");
+      var fill = document.getElementById("ctxFill");
+      var text = document.getElementById("ctxText");
+      if (fill) fill.style.width = "0%";
+      if (text) text.textContent = "Context 0%";
+      if (meter) { meter.classList.remove("warn", "hot"); }
+    }
+
     // Called after a turn lands. Drafts are read only as a short heads-up.
     function maybeSpeak(data) {
       if (!data || !data.ok) return;
@@ -3161,6 +3261,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
       updateChrome();
+      loadContext();
 
       setPhase(chatState.jobContext ? "Chat — " + chatState.jobContext.title : "Talk to BeeZilla");
     }
@@ -3310,6 +3411,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function newChatNow() {
+      resetContextMeter();
       chatState.sessionId = null;
       chatState.jobId = null;
       chatState.jobContext = null;
@@ -3739,6 +3841,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             Object.assign(chatState.slots, data.slots);
             renderSlotChecklist();
           }
+          paintContext(data.context);
           document.getElementById("chatError").textContent = data.error || "Something went wrong.";
           document.getElementById("chatError").classList.remove("hidden");
           chatState.messages.push({
@@ -3786,6 +3889,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         renderChatMessages();
         renderSlotChecklist();
+        // The turn's own numbers are authoritative — don't re-fetch over them.
+        paintContext(data.context);
         maybeSpeak(data);
 
       } catch (err) {
@@ -3860,6 +3965,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setBrief(false);
       updateChrome();
       initVoice();
+
+      var nsBtn = document.getElementById("newSessionBtn");
+      if (nsBtn) nsBtn.addEventListener("click", function () {
+        newChatNow();
+        var inp = document.getElementById("chatInput");
+        if (inp && !inp.disabled) inp.focus();
+      });
 
       // Deep link: /buzzy/talk?mode=work opens the chat already in work mode.
       var m = new URLSearchParams(window.location.search).get("mode");

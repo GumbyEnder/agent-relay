@@ -41,7 +41,7 @@ import {
   SEARCH_KNOWLEDGE_TOOL,
 } from "./info";
 import { calculate, CALCULATE_TOOL } from "./calc";
-import { compactHistory, normalizeToolResult, estimateTokens } from "./context";
+import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -223,6 +223,8 @@ export interface ChatResponse {
   estimate?: { estimateLow: number; estimateHigh: number; civilian: string; free: boolean };
   /** BZ-F011: suggestion only — never an auto-switch. */
   expertSuggestion?: { id: string; name: string; reason: string };
+  /** How full the model's context is for this turn. */
+  context?: ContextState;
   error?: string;
   code?: string;
 }
@@ -281,18 +283,22 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ? await sql`
         SELECT role, content FROM buzzy_chat_messages
         WHERE user_id = ${userId} AND session_id = ${sessionId}
-        ORDER BY created_at DESC LIMIT 10
+        ORDER BY created_at DESC LIMIT 40
       `
     : await sql`
         SELECT role, content FROM buzzy_chat_messages
         WHERE user_id = ${userId} AND job_id IS NOT DISTINCT FROM ${jobId}
-        ORDER BY created_at DESC LIMIT 10
+        ORDER BY created_at DESC LIMIT 40
       `;
 
   // Reverse to chronological order, then compact to the context budget
   // (Phase 4: explicit about what was dropped — the marker states it).
   const rawHistory = rows.reverse() as Array<{ role: string; content: string }>;
-  const { messages: history, compacted, droppedCount } = compactHistory(rawHistory, 12000, 6);
+  // Budget a slice of the model's real window, so compaction happens well
+  // before the request would fail — not at an arbitrary 12k.
+  const ctxLimit = contextWindowFor(resolvedModel || model);
+  const historyBudget = Math.max(8000, Math.floor(ctxLimit * CONTEXT_COMPACT_AT));
+  const { messages: history, compacted, droppedCount } = compactHistory(rawHistory, historyBudget, 6);
 
   // ── Session resume recap (mobile/async: the conversation follows the owner)
   let resumeRecap = "";
@@ -427,6 +433,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     { role: "user", content: message },
   ];
 
+  // ── Context accounting ─────────────────────────────────────────────
+  // Measured on exactly what we send: persona + history + this message, plus
+  // a fixed allowance for the tool schemas and protocol overhead.
+  const TOOL_OVERHEAD_TOKENS = 1500;
+  const usedTokens =
+    estimateTokens([
+      { role: "system", content: systemPrompt },
+      ...history,
+      { role: "user", content: message },
+    ]) + TOOL_OVERHEAD_TOKENS;
+  const ctx: ContextState = contextState(usedTokens, ctxLimit, compacted, droppedCount);
+
   // ── Call LLM ───────────────────────────────────────────────────────
   // Phase 1 (plan doc 23): when the draft gate is satisfied, the model gets
   // the render_document tool and may run a bounded loop (max 3 iterations).
@@ -527,6 +545,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       reply: "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
       error: err instanceof Error ? err.message : "LLM request failed",
       code: "llm_error",
+      context: ctx,
       slots: Object.keys(newlyExtracted).length ? newlyExtracted : undefined,
     };
   }
@@ -634,6 +653,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const response: ChatResponse = {
     ok: true,
     reply: cleanReply,
+    context: ctx,
   };
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
   // draft — before the owner approves work, never after.
