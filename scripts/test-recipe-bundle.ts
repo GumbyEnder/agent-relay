@@ -13,6 +13,7 @@ import {
 } from "../src/lib/recipe-seal/bundle";
 import { readZip, makeZip } from "../src/lib/recipe-seal/zip";
 import { canonicalise } from "../src/lib/recipe-seal/jcs";
+import { compile, loadRules } from "../src/lib/recipe-checks/seal";
 
 const j = (v: unknown) => JSON.stringify(v);
 const assert = {
@@ -321,6 +322,48 @@ ok("seal refuses a rules count below the number of codes it ships", () => {
   try { sealBundle(input({ checks: { ...compiled.manifest, rules: 1 } })); }
   catch (err) { threw = String(err instanceof Error ? err.message : err); }
   assert.equal(threw.includes("checks.rules:below_code_count"), true, `rules below codes sealed: ${threw}`);
+});
+
+// ── round-6: malformed expressions and short/array boundaries ────────────────
+ok("a compiled program with a malformed expression is refused at load", () => {
+  // `{op:"and", args:"not-an-array"}` parses as JSON, loads, then throws on
+  // `.every` at evaluation — which used to publish 201 and burn model spend.
+  let threw = "";
+  try {
+    const bad = [{ id: "bad", code: "C99", severity: "block", description: "d",
+      expr: { op: "and", args: "not-an-array" } }] as never;
+    const badCompiled = compile(bad, { salt: new Uint8Array(8) });
+    loadRules(badCompiled.wasm);
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.length > 0, true, "a malformed expression loaded without error");
+  assert.equal(/args|expression/i.test(threw), true, `unhelpful error: ${threw}`);
+});
+
+ok("seal refuses a SHORT boundary split into 2-token chunks", () => {
+  // 4 content tokens: below the 5-token threshold that used to skip the
+  // vocabulary pass, and split so no 4-gram survives.
+  const chunks = ["price term", "never invents"];
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { discovery: ["d"], boundary: "never invents price term" } as never,
+      capability: { ...capability, forbidden_tools: chunks },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `short boundary split sealed: ${threw}`);
+});
+
+ok("seal refuses a boundary supplied as an array of single words", () => {
+  // An array of one-word strings produced no n-grams at all, emptying the guard
+  // set and letting the whole boundary publish.
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { discovery: ["d"], boundary: ["never", "invents", "price", "term"] } as never,
+      capability: { ...capability, boundary_summary: "never invents", forbidden_tools: ["price term"] },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `array boundary sealed: ${threw}`);
 });
 
 const valueCases: Array<[string, (cap: Record<string, unknown>) => Record<string, unknown>, string]> = [

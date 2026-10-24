@@ -208,42 +208,53 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
     if (plainObject(v)) { for (const val of Object.values(v)) collect(val); }
   };
   collect(semantic);
-  const guarded = new Set<string>();
-  for (const str of semanticStrings) for (const g of ngrams(str, SEAL_LEAK_N)) guarded.add(g);
-  if (guarded.size === 0) return [];
+  if (semanticStrings.length === 0) return [];
+
+  // Join before n-gramming. An array of single words yields no n-grams per string,
+  // which previously emptied the guard set and let the whole boundary seal and
+  // publish (found by an independent review).
+  const semanticText = semanticStrings.join(" ");
+  const guarded = ngrams(semanticText, SEAL_LEAK_N);
 
   const hits: string[] = [];
   const strings: Array<[string, string]> = [];
   const walk = (value: unknown, path: string): void => {
-    if (typeof value === "string") {
-      strings.push([path, value]);
-      return;
-    }
+    if (typeof value === "string") { strings.push([path, value]); return; }
     if (Array.isArray(value)) { value.forEach((v, i) => walk(v, `${path}[${i}]`)); return; }
     if (plainObject(value)) { for (const [k, v] of Object.entries(value)) walk(v, path ? `${path}.${k}` : k); }
   };
   walk(manifest, "");
 
+  // 1. Exact n-gram run, per field (so the report names the field).
   for (const [path, value] of strings) {
     const t = tokens(value);
     for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) {
       if (guarded.has(t.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); break; }
     }
   }
-  // Order-independent containment: the secret may be split into short chunks and
-  // reordered so no 4-gram survives anywhere. Chunking and permutation preserve
-  // the *bag of content words*, so compare that too.
+
+  // 2. Order-independent containment: chunking and permutation preserve the bag of
+  // content words even when no adjacent run survives.
   const manifestBag = new Set<string>();
   for (const [, v] of strings) for (const t of tokens(v)) manifestBag.add(t);
 
-  for (const semanticString of semanticStrings) {
-    const content = [...new Set(contentTokens(semanticString))];
-    if (content.length < 5) continue;                 // too short to judge
+  const covers = (text: string): boolean => {
+    const content = [...new Set(contentTokens(text))];
+    if (content.length === 0) return false;
+    // A short boundary has too few words to hide behind a ratio: require all of
+    // them. Longer prose uses the 70% threshold.
+    const threshold = content.length >= 5 ? 0.7 : 1;
     const present = content.filter((t) => manifestBag.has(t)).length;
-    if (present / content.length >= 0.7) { hits.push("<vocabulary>"); break; }
-  }
+    return present / content.length >= threshold;
+  };
 
-  // Cross-field: the secret may be split so no single string contains the run.
+  for (const str of semanticStrings) {
+    if (contentTokens(str).length < 3) continue;   // single words are judged joined
+    if (covers(str)) { hits.push("<vocabulary>"); break; }
+  }
+  if (!hits.includes("<vocabulary>") && covers(semanticText)) hits.push("<vocabulary>");
+
+  // 3. Cross-field: a run split so no single field contains it.
   const blob = strings.map(([, v]) => v).join(" ");
   const bt = tokens(blob);
   for (let i = 0; i + SEAL_LEAK_N <= bt.length; i++) {

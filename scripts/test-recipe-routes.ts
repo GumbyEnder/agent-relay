@@ -139,6 +139,19 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal(served.status, 404, "the refused manifest is being served anyway");
   });
 
+  await ok("publish refuses the boundary split into permuted 2-token chunks", async () => {
+    // Cut into 2-word chunks and reversed, no 4-gram survives anywhere; only the
+    // order-independent vocabulary rule catches it. Independent review.
+    const words = String(recipe.boundary).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const pairs: string[] = [];
+    for (let i = 0; i + 2 <= words.length; i += 2) pairs.push(words.slice(i, i + 2).join(" "));
+    const forged = forge((m) => { (m.capability as Record<string, unknown>).forbidden_tools = pairs.slice().reverse(); });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(forged.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 422, `permuted 2-token chunks published: ${r.status} ${j(r.body)}`);
+  });
+
   await ok("publish refuses the boundary split into reordered 3-token chunks", async () => {
     const chunks = ["never invents a", "price or a", "term no supplier", "is contacted and", "nothing is ordered"];
     const forged = forge((m) => {

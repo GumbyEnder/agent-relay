@@ -142,28 +142,125 @@ export function compile(rules: Rule[], opts: { salt?: Uint8Array } = {}): Compil
 }
 
 /**
- * Prove every rule can actually evaluate before the module is published.
+ * Structural validation of a sealed rule program.
  *
- * `new RegExp` happens at evaluation, not load, so a rule with an invalid pattern
- * loads happily and throws the first time a draft reaches it — which surfaced as a
- * 500 on verify, an uncaught throw in batch, and a burned quota unit on run.
- * Compiling every pattern here turns that into a publish-time rejection.
+ * A compiled module can `load` and still throw the first time it evaluates: a
+ * malformed expression shape (`{op:"and", args:"x"}`) passes JSON parsing and
+ * then dies on `.every`. Earlier versions only regex-compiled `matches`, so such
+ * a module published 201, 500'd verify, and — worse — let `run` call the model
+ * before throwing, giving a licensee unlimited inference at platform cost.
+ *
+ * Every opcode is checked for its required fields and field types, recursively,
+ * with a depth cap. An expression the VM would not understand is refused here.
  */
+const SIMPLE_OPS = new Set(["truthy", "falsy", "empty", "nonempty", "canonicalUnit", "integer"]);
+const NUM_CMP_OPS = new Set(["lt", "lte", "gt", "gte"]);
+const EQ_OPS = new Set(["eq", "neq"]);
+const STRING_OPS = new Set(["starts", "ends", "has"]);
+const PATH_PAIR_OPS = new Set(["ltePath", "eqPath"]);
+const COLLECTION_OPS = new Set(["allOf", "anyOf", "noneOf"]);
+const MAX_DEPTH = 64;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function requireString(e: Record<string, unknown>, key: string, path: string): string {
+  const v = e[key];
+  if (typeof v !== "string" || v.length === 0) throw new Error(`${path}: '${key}' must be a non-empty string`);
+  return v;
+}
+
+function requireArray(e: Record<string, unknown>, key: string, path: string): unknown[] {
+  const v = e[key];
+  if (!Array.isArray(v) || v.length === 0) throw new Error(`${path}: '${key}' must be a non-empty array`);
+  return v;
+}
+
+function assertExpr(expr: unknown, path: string, depth = 0): void {
+  if (depth > MAX_DEPTH) throw new Error(`${path}: expression nesting exceeds ${MAX_DEPTH}`);
+  if (!isPlainObject(expr)) throw new Error(`${path}: expression must be an object`);
+  const e = expr;
+  const op = e.op;
+  if (typeof op !== "string") throw new Error(`${path}: missing 'op'`);
+
+  if (op === "and" || op === "or") {
+    for (const [i, child] of requireArray(e, "args", path).entries()) assertExpr(child, `${path}.args[${i}]`, depth + 1);
+    return;
+  }
+  if (op === "not") {
+    if (!("arg" in e)) throw new Error(`${path}: 'arg' is required for not`);
+    assertExpr(e.arg, `${path}.arg`, depth + 1);
+    return;
+  }
+  if (EQ_OPS.has(op)) {
+    requireString(e, "path", path);
+    if (!("value" in e) || (typeof e.value === "object" && e.value !== null)) {
+      throw new Error(`${path}: 'value' must be a scalar literal`);
+    }
+    return;
+  }
+  if (NUM_CMP_OPS.has(op)) {
+    requireString(e, "path", path);
+    if (typeof e.value !== "number" || !Number.isFinite(e.value)) throw new Error(`${path}: 'value' must be a finite number`);
+    return;
+  }
+  if (op === "in") {
+    requireString(e, "path", path);
+    for (const [i, v] of requireArray(e, "values", path).entries()) {
+      if (typeof v === "object" && v !== null) throw new Error(`${path}.values[${i}]: must be a scalar literal`);
+    }
+    return;
+  }
+  if (STRING_OPS.has(op)) {
+    requireString(e, "path", path);
+    requireString(e, "value", path);
+    return;
+  }
+  if (SIMPLE_OPS.has(op) || op === "matches") {
+    requireString(e, "path", path);
+    if (op === "matches") {
+      const pattern = requireString(e, "pattern", path);
+      const flags = e.flags === undefined ? "" : String(e.flags);
+      if (pattern.length > 500) throw new Error(`${path}: pattern longer than 500 characters`);
+      new RegExp(pattern, flags.replace(/[^i]/g, ""));  // throws on a malformed pattern
+    }
+    return;
+  }
+  if (PATH_PAIR_OPS.has(op)) {
+    requireString(e, "a", path);
+    requireString(e, "b", path);
+    return;
+  }
+  if (COLLECTION_OPS.has(op) || op === "countGte") {
+    requireString(e, "path", path);
+    if (op === "countGte" && (typeof e.n !== "number" || !Number.isInteger(e.n) || e.n < 0)) {
+      throw new Error(`${path}: 'n' must be a non-negative integer`);
+    }
+    if (op !== "countGte") {
+      if (!("check" in e)) throw new Error(`${path}: 'check' is required for ${op}`);
+      assertExpr(e.check, `${path}.check`, depth + 1);
+    }
+    if (e.where !== undefined) assertExpr(e.where, `${path}.where`, depth + 1);
+    return;
+  }
+  throw new Error(`${path}: unknown op '${op}'`);
+}
+
+/** Validate an entire rule set: ids, codes, severities and every expression. */
 export function validateRules(rules: Rule[]): void {
-  const walk = (expr: unknown): void => {
-    if (!expr || typeof expr !== "object") return;
-    const e = expr as Record<string, unknown>;
-    if (e.op === "matches") {
-      // throws on a malformed pattern
-      new RegExp(String(e.pattern), typeof e.flags === "string" ? e.flags : "");
-    }
-    for (const key of ["args", "arg", "expr"]) {
-      const v = e[key];
-      if (Array.isArray(v)) v.forEach(walk);
-      else if (v && typeof v === "object") walk(v);
-    }
-  };
-  for (const rule of rules) walk(rule.expr);
+  if (!Array.isArray(rules) || rules.length === 0) throw new Error("rule program is empty");
+  const codes = new Set<string>();
+  for (const [i, rule] of rules.entries()) {
+    const at = `rules[${i}]`;
+    if (!rule || typeof rule !== "object") throw new Error(`${at}: not an object`);
+    if (typeof rule.id !== "string" || rule.id.length === 0) throw new Error(`${at}: missing id`);
+    if (typeof rule.code !== "string" || rule.code.length === 0) throw new Error(`${at}: missing code`);
+    if (codes.has(rule.code)) throw new Error(`${at}: duplicate code '${rule.code}'`);
+    codes.add(rule.code);
+    if (!["block", "warn"].includes(String(rule.severity))) throw new Error(`${at}: bad severity`);
+    assertExpr(rule.expr, `${at}.expr`);
+  }
 }
 
 export function loadRules(wasm: Uint8Array): Rule[] {
@@ -175,7 +272,7 @@ export function loadRules(wasm: Uint8Array): Rule[] {
   if (program.v !== 1 || program.engine !== ENGINE) {
     throw new Error(`unsupported rule program: v${program.v} ${program.engine}`);
   }
-  return program.rules.map((r) =>
+  const rules = program.rules.map((r) =>
     defineRule({
       id: r.id,
       code: r.code,
@@ -184,6 +281,10 @@ export function loadRules(wasm: Uint8Array): Rule[] {
       expr: r.expr,
     }),
   );
+  // Validate here, not only at publish: the run path calls the model before it
+  // evaluates, so an unvalidated program would spend inference and then throw.
+  validateRules(rules);
+  return rules;
 }
 
 /** Convenience: codes map from a compiled artifact (public, safe to ship). */

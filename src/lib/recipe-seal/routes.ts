@@ -279,10 +279,14 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       }
     }
     if (deps.anonymousLimiter) {
-      const draftsSeen = deps.anonymousLimiter.noteDraftHash(req.callerKey ?? "unknown");
-      if (draftsSeen === LIMITS.probingDraftsPerHour || draftsSeen === LIMITS.probingDraftsPerHour * 2) {
+      // Per DRAFT, not per request. Counting once per batch under-reported a
+      // 50-draft prober by 50x and let it stay under the alert threshold.
+      const caller = req.callerKey ?? "unknown";
+      let draftsSeen = 0;
+      for (let i = 0; i < drafts.length; i++) draftsSeen = deps.anonymousLimiter.noteDraftHash(caller);
+      if (draftsSeen >= LIMITS.probingDraftsPerHour && draftsSeen < LIMITS.probingDraftsPerHour + drafts.length) {
         deps.logSink?.write(JSON.stringify({ level: "warn", event: "draft_probing",
-          drafts: draftsSeen, recipeHash: hash, caller: req.callerKey ?? "unknown", route: "batch" }));
+          drafts: draftsSeen, recipeHash: hash, caller, route: "batch" }));
       }
     }
     const batchBundle = await getBundle(q, hash);
@@ -360,9 +364,24 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
         licenseId: auth.license.id,
       });
     } catch {
-      // The evaluator or the model threw after the unit was reserved. Release it:
-      // a charge with no ledger row is the worst of both worlds.
-      await releaseRun(q, auth.license.id);
+      // The pipeline threw after the unit was reserved. Releasing the unit while
+      // the model has already been called gives a licensee unlimited free
+      // inference (found by an independent review). Charge the attempt and write
+      // the ledger row instead, so the spend is metered and visible; release only
+      // if the row cannot be written.
+      try {
+        await recordRun(q, {
+          licenseId: auth.license.id, bundleHash: auth.bundleHash,
+          idemKey: typeof body.idempotencyKey === "string" ? body.idempotencyKey : null,
+          inputsHash: sha256Hex(JSON.stringify(body.inputs ?? {})),
+          outputHash: null,
+          verdict: { ok: false, codes: ["C93"], warnings: ["run_threw"] },
+          costCents: Number((bundleRow.manifest as RecipeManifest | null)?.pricing?.amount_cents ?? 0),
+          tokensIn: undefined, tokensOut: undefined, lane: "api", ms: undefined,
+        });
+      } catch {
+        await releaseRun(q, auth.license.id);
+      }
       return err(502, "run_failed", "the recipe could not be evaluated");
     }
 
