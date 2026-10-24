@@ -112,7 +112,9 @@ function evalExpr(expr: Expr, ctx: unknown, fuel: Fuel): boolean {
       // Author-supplied patterns are capped; only the `i` flag is honoured so a
       // sealed program can never smuggle stateful (g/y) behaviour in.
       if (expr.pattern.length > 500) return false;
-      const flags = (expr.flags ?? "").replace(/[^i]/g, "");
+      // String() so a malformed flag cannot throw here; the author validator
+      // refuses non-strings at load, this is the runtime backstop.
+      const flags = String(expr.flags ?? "").replace(/[^i]/g, "");
       return new RegExp(expr.pattern, flags).test(v);
     }
     case "canonicalUnit": {

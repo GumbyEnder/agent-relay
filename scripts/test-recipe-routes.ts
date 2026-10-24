@@ -167,7 +167,7 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     // new RegExp() happens at evaluation, not load, so an invalid pattern sailed
     // through publish: verify then 500'd, batch threw uncaught, and run burned a
     // unit with no ledger row.
-    const badRules = [defineRule({ id: "bad", code: "C99", severity: "error",
+    const badRules = [defineRule({ id: "bad", code: "C99", severity: "block",
       description: "invalid pattern", expr: matches("sections[0].body", "(") })];
     const compiledBad = compile(badRules, { salt: new Uint8Array(8) });
     const throwing = sealBundle({

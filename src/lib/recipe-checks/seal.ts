@@ -221,7 +221,12 @@ function assertExpr(expr: unknown, path: string, depth = 0): void {
     requireString(e, "path", path);
     if (op === "matches") {
       const pattern = requireString(e, "pattern", path);
-      const flags = e.flags === undefined ? "" : String(e.flags);
+      // Must be a string: the VM calls .replace on it, so a numeric flag compiled
+      // fine here and threw at evaluation (found by an independent review).
+      if (e.flags !== undefined && typeof e.flags !== "string") {
+        throw new Error(`${path}: 'flags' must be a string`);
+      }
+      const flags = e.flags === undefined ? "" : e.flags;
       if (pattern.length > 500) throw new Error(`${path}: pattern longer than 500 characters`);
       new RegExp(pattern, flags.replace(/[^i]/g, ""));  // throws on a malformed pattern
     }

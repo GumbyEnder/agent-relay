@@ -366,6 +366,49 @@ ok("seal refuses a boundary supplied as an array of single words", () => {
   assert.equal(threw.includes("leaks_sealed_text"), true, `array boundary sealed: ${threw}`);
 });
 
+// ── round-7: keys are strings too, and flags is a string ─────────────────────
+ok("seal refuses the boundary hidden in a checks.codes KEY", () => {
+  // Values-only walking let the boundary ride in as a map key and be served by
+  // GET /manifest. Independent review.
+  let threw = "";
+  try {
+    sealBundle(input({ checks: { ...compiled.manifest, codes: { [recipe.boundary]: "x" } } }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `key-borne boundary sealed: ${threw}`);
+  assert.equal(threw.includes("<key>"), true, `the gate did not name a key path: ${threw}`);
+});
+
+ok("seal refuses the boundary hidden in a pricing.split_bp KEY", () => {
+  let threw = "";
+  try {
+    sealBundle(input({ pricing: { split_bp: { [recipe.boundary]: 7000 } } }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `split_bp key sealed: ${threw}`);
+});
+
+ok("a boundary of short words is still caught when reordered", () => {
+  // "no vat due now" has no 4+ character content tokens; the ratio test had
+  // nothing to measure, so only the short-token fallback catches it.
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { discovery: ["d"], boundary: "no vat due now" } as never,
+      capability: { ...capability, forbidden_tools: ["due now", "no vat"] },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `short-token boundary sealed: ${threw}`);
+});
+
+ok("a rule with non-string matches flags is refused at load", () => {
+  let threw = "";
+  try {
+    const bad = [{ id: "bad-flags", code: "C98", severity: "block", description: "d",
+      expr: { op: "matches", path: "sections[0].body", pattern: "x", flags: 5 } }] as never;
+    loadRules(compile(bad, { salt: new Uint8Array(8) }).wasm);
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(/flags/i.test(threw), true, `non-string flags not refused: ${threw}`);
+});
+
 const valueCases: Array<[string, (cap: Record<string, unknown>) => Record<string, unknown>, string]> = [
   ["negative price", () => ({ ...capability }), "pricing.amount_cents:range"],
 ];

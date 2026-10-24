@@ -221,7 +221,16 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   const walk = (value: unknown, path: string): void => {
     if (typeof value === "string") { strings.push([path, value]); return; }
     if (Array.isArray(value)) { value.forEach((v, i) => walk(v, `${path}[${i}]`)); return; }
-    if (plainObject(value)) { for (const [k, v] of Object.entries(value)) walk(v, path ? `${path}.${k}` : k); }
+    if (plainObject(value)) {
+      for (const [k, v] of Object.entries(value)) {
+        const child = path ? `${path}.${k}` : k;
+        // Object KEYS are attacker-chosen in checks.codes and pricing.split_bp.
+        // A values-only walk let the boundary ride in as a key and be served by
+        // GET /manifest (found by an independent review).
+        strings.push([`${child}<key>`, k]);
+        walk(v, child);
+      }
+    }
   };
   walk(manifest, "");
 
@@ -239,7 +248,13 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   for (const [, v] of strings) for (const t of tokens(v)) manifestBag.add(t);
 
   const covers = (text: string): boolean => {
-    const content = [...new Set(contentTokens(text))];
+    let content = [...new Set(contentTokens(text))];
+    if (content.length < 3) {
+      // A boundary made of short words ("no vat due now") has no 4+ char content
+      // tokens, so the ratio test had nothing to measure. Fall back to any
+      // non-stopword token of two or more characters.
+      content = [...new Set(tokens(text).filter((t) => t.length >= 2 && !STOPWORDS.has(t)))];
+    }
     if (content.length === 0) return false;
     // A short boundary has too few words to hide behind a ratio: require all of
     // them. Longer prose uses the 70% threshold.
