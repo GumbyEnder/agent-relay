@@ -12,7 +12,7 @@
  *   GET  usage                capability token, scope `usage`
  *   POST license, publish     operator/session (checked by the adapter)
  */
-import { verifyBundle, partsOf, openSemantic, inspectBundle, sha256Hex, type RecipeManifest } from "./bundle";
+import { verifyBundle, partsOf, openSemantic, inspectBundle, manifestPublishErrors, sha256Hex, type RecipeManifest } from "./bundle";
 import {
   authenticate, getBundle, getUsage, issueLicense, listBundles, publishBundle, recordRun,
   findRunByKey, releaseRun, reserveRun, splitCost, type LicenseRow, type QueryFn,
@@ -140,6 +140,33 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     }
     const manifest = verified.manifest;
     const bundleParts = partsOf(bytes)!;
+
+    // Producer gate #2 — the one that actually holds. verifyBundle only proves a
+    // bundle is internally consistent; a *hand-signed* manifest that sealBundle
+    // refuses (prose copied into capability, codes or a split across fields) would
+    // otherwise publish and be served verbatim. Publish decrypts the semantic half
+    // it is about to store and refuses a manifest that reproduces it.
+    if (!deps.kek) {
+      return err(503, "publish_unavailable", "publishing requires the seal key (RECIPE_SEAL_KEK)");
+    }
+    const openedForPublish = openSemantic(bundleParts, deps.kek);
+    if (!openedForPublish.ok) {
+      return err(422, "sealed_unreadable", "the sealed semantic half cannot be opened with this key");
+    }
+    const publishErrors = manifestPublishErrors(manifest, openedForPublish.semantic);
+    if (publishErrors.length > 0) {
+      return err(422, "invalid_manifest",
+        `refusing to publish: ${publishErrors.slice(0, 6).join("; ")}` +
+        (publishErrors.length > 6 ? ` (+${publishErrors.length - 6} more)` : ""));
+    }
+    // A bundle whose checks module does not load would 500 the free tier and burn
+    // a paid unit per attempt, so it is rejected at the door.
+    try {
+      loadRules(bundleParts.checksWasm);
+    } catch {
+      return err(422, "invalid_checks", "checks.wasm does not load as a sealed rule program");
+    }
+
     await storage.put(bundleKey(verified.digest!), bytes);
     await storage.put(semanticKey(verified.digest!), bundleParts.semanticEnc);
     await storage.put(checksKey(verified.digest!), bundleParts.checksWasm);
@@ -223,6 +250,24 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     // contract for the same input.
     const badDraft = drafts.findIndex((d) => !d || typeof d !== "object" || Array.isArray(d));
     if (badDraft >= 0) return err(400, "invalid_body", `drafts[${badDraft}] is not an object`);
+    // The batch route is a sibling door to the same oracle: without the same
+    // limiter, a caller whose single-verify budget is exhausted could send
+    // 50 drafts per call, forever. Counted per DRAFT, not per call.
+    const batchLimiter = req.token ? deps.tokenLimiter! : deps.anonymousLimiter!;
+    for (let i = 0; i < drafts.length; i++) {
+      const gate = batchLimiter.take(req.token ? `token:${req.token}` : (req.callerKey ?? "unknown"));
+      if (!gate.allowed) {
+        return { status: 429, body: { ok: false, error: "rate limited", code: "rate_limited" },
+          headers: { "Retry-After": String(Math.ceil(gate.retryAfterMs / 1000)) } };
+      }
+    }
+    if (deps.anonymousLimiter) {
+      const draftsSeen = deps.anonymousLimiter.noteDraftHash(req.callerKey ?? "unknown");
+      if (draftsSeen === LIMITS.probingDraftsPerHour || draftsSeen === LIMITS.probingDraftsPerHour * 2) {
+        deps.logSink?.write(JSON.stringify({ level: "warn", event: "draft_probing",
+          drafts: draftsSeen, recipeHash: hash, caller: req.callerKey ?? "unknown", route: "batch" }));
+      }
+    }
     const batchBundle = await getBundle(q, hash);
     if (!batchBundle) return err(404, "unknown_bundle", "no such bundle");
     if (batchBundle.status === "revoked") return err(410, "bundle_revoked", "this recipe has been withdrawn");
@@ -271,7 +316,13 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       return err(500, "semantic_unavailable", "recipe could not be opened");
     }
 
-    const rules = loadRules(partsBundle.checksWasm);
+    let rules;
+    try {
+      rules = loadRules(partsBundle.checksWasm);
+    } catch {
+      await releaseRun(q, auth.license.id);   // no inference happened, no charge
+      return err(502, "checks_unavailable", "the checks module does not load");
+    }
     const log = createSafeLogger(deps.logSink!, { level: "info", now: deps.now });
     const result = await runSealedRecipe({
       semantic: opened.semantic as SemanticHalf,
@@ -323,6 +374,10 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     const licenseeId = typeof body.licenseeId === "string" ? body.licenseeId : null;
     if (!licenseeId) return err(400, "invalid_body", "licenseeId is required");
     if (bundleRow.status === "revoked") return err(409, "bundle_revoked", "this recipe has been withdrawn");
+    const licenseeKind = (body.licenseeKind as string | undefined) ?? "account";
+    if (!["account", "agent", "org"].includes(licenseeKind)) {
+      return err(400, "invalid_licensee_kind", "licenseeKind must be account, agent or org");
+    }
 
     // Validate operator input before it reaches SQL: quota=1.5, quota=1e20,
     // scopes=["root"] and expiresAt="garbage" all used to end as a 500, and an
@@ -355,7 +410,7 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     try {
       issued = await issueLicense(q, {
         bundleHash: hash,
-        licenseeKind: (body.licenseeKind as "account" | "agent" | "org") ?? "account",
+        licenseeKind: licenseeKind as "account" | "agent" | "org",
         licenseeId,
         quota,
         scopes: scopeList as ("run" | "verify" | "usage")[],
@@ -380,9 +435,15 @@ function verifyResponse(checksWasm: Uint8Array, manifest: RecipeManifest, draft:
   if (!draft || typeof draft !== "object") {
     return err(400, "invalid_body", "draft is required");
   }
-  const result: VerifyResult = verifyDraft({
-    checksWasm, draft, descriptions: manifest.checks.codes, engine: manifest.checks.engine,
-  });
+  let result: VerifyResult;
+  try {
+    result = verifyDraft({
+      checksWasm, draft, descriptions: manifest.checks.codes, engine: manifest.checks.engine,
+    });
+  } catch {
+    // A bundle whose checks module will not load must not 500 the free tier.
+    return err(422, "invalid_checks", "the checks module does not load");
+  }
   return { status: 200, body: {
     ok: result.ok, codes: result.codes, warnings: result.warnings,
     descriptions: result.descriptions, engine: result.engine, ms_bucket: result.ms_bucket,

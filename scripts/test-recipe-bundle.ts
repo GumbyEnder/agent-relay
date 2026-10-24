@@ -258,7 +258,7 @@ ok("seal refuses a manifest that reproduces the sealed boundary", () => {
   try {
     sealBundle(input({ capability: { ...capability, boundary_summary: recipe.boundary } }));
   } catch (err) { threw = String(err instanceof Error ? err.message : err); }
-  assert.equal(threw.includes("SEMANTIC_IN_MANIFEST"), true, `seal accepted prose in the manifest: ${threw}`);
+  assert.equal(threw.includes("leaks_sealed_text"), true, `seal accepted prose in the manifest: ${threw}`);
 });
 
 ok("seal refuses capability.outputs copied from the output contract", () => {
@@ -266,7 +266,56 @@ ok("seal refuses capability.outputs copied from the output contract", () => {
   try {
     sealBundle(input({ capability: { ...capability, outputs: recipe.outputContract } }));
   } catch (err) { threw = String(err instanceof Error ? err.message : err); }
-  assert.equal(threw.includes("SEMANTIC_IN_MANIFEST"), true, `seal accepted prose outputs: ${threw}`);
+  assert.equal(threw.includes("leaks_sealed_text"), true, `seal accepted prose outputs: ${threw}`);
+});
+
+// ── the gate covers every field, every width, and split secrets ──────────────
+const gateCases: Array<[string, (cap: Record<string, unknown>) => Record<string, unknown>]> = [
+  ["4-token summary", () => ({ ...capability, boundary_summary: "Never invents a price." })],
+  ["secret split across two fields", () => ({ ...capability,
+    boundary_summary: "Never invents a price", forbidden_tools: ["or a term. No supplier is contacted"] })],
+];
+for (const [label, build] of gateCases) {
+  ok(`seal refuses the sealed boundary as ${label}`, () => {
+    let threw = "";
+    try { sealBundle(input({ capability: build(capability) as never })); }
+    catch (err) { threw = String(err instanceof Error ? err.message : err); }
+    assert.equal(threw.includes("leaks_sealed_text"), true, `seal accepted ${label}: ${threw}`);
+  });
+}
+
+ok("seal refuses a boundary hidden in checks.codes", () => {
+  // checks.codes used to be excluded from the gate, so a rule description could
+  // carry the boundary and be served in the public manifest.
+  let threw = "";
+  try {
+    sealBundle(input({ checks: { ...compiled.manifest,
+      codes: { ...compiled.manifest.codes, C99: recipe.boundary } } }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `seal accepted codes prose: ${threw}`);
+  assert.equal(threw.includes("checks.codes.C99"), true, `the gate did not name the field: ${threw}`);
+});
+
+const valueCases: Array<[string, (cap: Record<string, unknown>) => Record<string, unknown>, string]> = [
+  ["negative price", () => ({ ...capability }), "pricing.amount_cents:range"],
+];
+for (const [label, , expected] of valueCases) {
+  ok(`seal refuses ${label}`, () => {
+    let threw = "";
+    try {
+      sealBundle(input({ pricing: { amount_cents: -1 } }));
+    } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+    assert.equal(threw.includes(expected), true, `seal accepted ${label}: ${threw}`);
+  });
+}
+
+ok("seal refuses an empty code description and an empty id", () => {
+  let threw = "";
+  try {
+    sealBundle(input({ recipeId: "", checks: { ...compiled.manifest, codes: { C01: "" } } }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("id:empty"), true, `empty id accepted: ${threw}`);
+  assert.equal(threw.includes("checks.codes.C01:empty"), true, `empty description accepted: ${threw}`);
 });
 
 // ── verifyBundle must REJECT malformed manifests, never throw ────────────────

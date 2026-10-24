@@ -5,12 +5,15 @@
  * Run: DATABASE_URL_TEST=postgres://postgres:test@127.0.0.1:55432/recipes \
  *        npx tsx scripts/test-recipe-routes.ts
  */
+import { sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { RECIPES } from "../src/lib/buzzy/recipes";
 import { compileRecipeChecks } from "../src/lib/recipe-checks";
 import { generateAuthorKey, sealBundle, sha256Hex } from "../src/lib/recipe-seal/bundle";
+import { canonicalise } from "../src/lib/recipe-seal/jcs";
+import { makeZip, readZip } from "../src/lib/recipe-seal/zip";
 import { MemoryStorage } from "../src/lib/recipe-seal/storage";
 import { createRouteDeps, routeRecipes, type RouteDeps } from "../src/lib/recipe-seal/routes";
 import { RateLimiter } from "../src/lib/recipe-seal/verify";
@@ -95,6 +98,64 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     // No session at all is 401 (signed_out); a session without `manage_keys` is 403.
     assert.equal(r.status, 401);
     assert.equal((r.body as { code: string }).code, "signed_out");
+  });
+
+  // ── the publish boundary is the gate that actually holds ───────────────────
+  /** Take the genuine sealed bundle, mutate+re-sign its manifest, rebuild the zip. */
+  function forge(mutate: (m: Record<string, unknown>) => void, checksOverride?: Uint8Array) {
+    const m = JSON.parse(JSON.stringify(sealed.manifest)) as Record<string, unknown>;
+    mutate(m);
+    delete m.signature;
+    const digest = sha256Hex(canonicalise(m));
+    m.signature = sign(null, Buffer.from(digest, "hex"), key.privateKey).toString("base64");
+    const entries = readZip(sealed.bytes);
+    const checks = checksOverride ?? entries.get("checks.wasm")!;
+    const bytes = makeZip([
+      { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(m)) },
+      { name: "semantic.enc", data: entries.get("semantic.enc")! },
+      { name: "checks.wasm", data: checks },
+    ]);
+    return { bytes, hash: sha256Hex(canonicalise({ ...m })) };
+  }
+
+  await ok("a hand-signed manifest that sealBundle refuses cannot be published", async () => {
+    // sealBundle is a library function; publish is the door that serves the
+    // manifest. A forged bundle used to verify (self-consistent signature), publish
+    // 201, and serve the sealed boundary verbatim from GET /manifest.
+    const forged = forge((m) => {
+      (m.checks as Record<string, unknown>).codes = {
+        ...((m.checks as { codes: Record<string, string> }).codes),
+        C99: recipe.boundary,
+      };
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(forged.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 422, `forged manifest published: ${r.status} ${j(r.body)}`);
+    const hashOfForged = (await import("../src/lib/recipe-seal/bundle")).verifyBundle(forged.bytes).digest!;
+    const served = await routeRecipes({ method: "GET", path: `/api/recipes/${hashOfForged}/manifest` }, deps);
+    assert.equal(served.status, 404, "the refused manifest is being served anyway");
+  });
+
+  await ok("a bundle whose checks module does not load is refused at publish", async () => {
+    // Swapping the module after sealing is caught earlier (the AAD binds
+    // semantic.enc to checks.sha256), so this seals junk properly: a producer can
+    // seal any non-empty bytes, and that bundle used to 500 the free tier and burn
+    // a paid unit per attempt.
+    const junk = new Uint8Array(64).fill(0x41);
+    const junkBundle = sealBundle({
+      recipeId: "junk-checks", version: "1.0.0",
+      semantic: { discovery: ["d"], boundary: "b" },
+      checksWasm: junk, checks: { ...compiled.manifest, sha256: sha256Hex(junk) },
+      capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "read-only" },
+      author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
+      kek: KEK, createdAt: "2026-10-23T00:00:00.000Z",
+    });
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(junkBundle.bytes).toString("base64") } }, deps);
+    assert.equal(r.status, 422, `unloadable checks module published: ${r.status} ${j(r.body)}`);
+    assert.equal((r.body as { code: string }).code, "invalid_checks");
   });
 
   await ok("publish accepts a verified bundle and stores it content-addressed", async () => {
@@ -401,6 +462,27 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
   });
 
   // ── withdrawal must stop serving, not just hide the catalogue row ──────────
+  await ok("batch verify is rate limited per draft, like single verify", async () => {
+    // The batch route was a second door to the same oracle: a caller whose
+    // single-verify budget was exhausted could send 50 drafts per call forever.
+    const tight = createRouteDeps({
+      q, storage, kek: KEK, model: async () => j(GOOD),
+      anonymousLimiter: new RateLimiter(10, 60_000, () => 0),
+      tokenLimiter: new RateLimiter(10, 60_000, () => 0), logSink: memorySink(),
+    });
+    const drafts = Array.from({ length: 20 }, () => ({ sections: [{ id: "s", title: "t", body: "b" }] }));
+    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/verify/batch`,
+      body: { drafts }, callerKey: "1.2.3.4" }, tight);
+    assert.equal(r.status, 429, `batch bypassed the limiter: ${r.status}`);
+  });
+
+  await ok("an unknown licensee kind is a 400, not a 500", async () => {
+    const r = await routeRecipes({ method: "POST", path: `/api/recipes/${hash}/license`,
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { licenseeId: "x", licenseeKind: "root" } }, deps);
+    assert.equal(r.status, 400, `licenseeKind root -> ${r.status} ${j(r.body)}`);
+  });
+
   await ok("a revoked bundle stops serving verify, batch and manifest", async () => {
     await q(`UPDATE ar_recipe_bundle SET status = 'revoked' WHERE hash = $1`, [hash]);
     const draft = { sections: [{ id: "s1", title: "T", body: "B" }] };

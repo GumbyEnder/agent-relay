@@ -160,18 +160,34 @@ export function manifestShapeErrors(manifest: unknown): string[] {
 }
 
 /**
- * The seal path must not carry the prose it is sealing. Fixtures were shipping
- * `capability.boundary_summary = recipe.boundary`, so the *public* manifest
- * published the boundary verbatim — the exact thing the product promises not to
- * reveal. Any 5-token run shared with the semantic half is refused at seal time.
+ * The producer-side leak gate.
+ *
+ * A manifest is *published* — served to anyone who asks. If any of its strings
+ * reproduces the sealed prose, the product's central promise is broken, so this
+ * runs at seal time AND again at publish time (the two places a manifest is
+ * produced). Field exclusions are deliberately absent: a review showed a manifest
+ * could hide the boundary inside `checks.codes.C99`, or split it across two
+ * fields, and still be served verbatim.
  */
-const SEAL_LEAK_N = 5;
-const SEAL_LEAK_SKIP = /^(checks\.codes\.|author\.|id$|version$|created_at$)/;
+const SEAL_LEAK_N = 4;
 
 function tokens(s: string): string[] {
   return s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 
+function ngrams(text: string, n: number): Set<string> {
+  const t = tokens(text);
+  const out = new Set<string>();
+  for (let i = 0; i + n <= t.length; i++) out.add(t.slice(i, i + n).join(" "));
+  return out;
+}
+
+/**
+ * Returns the manifest paths that reproduce the sealed text.
+ *
+ * Two passes: per-string (so the report names the field) and a concatenated blob
+ * (so a secret split across two fields is still caught).
+ */
 export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
   const semanticStrings: string[] = [];
   const collect = (v: unknown): void => {
@@ -181,27 +197,81 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   };
   collect(semantic);
   const guarded = new Set<string>();
-  for (const str of semanticStrings) {
-    const t = tokens(str);
-    for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) guarded.add(t.slice(i, i + SEAL_LEAK_N).join(" "));
-  }
+  for (const str of semanticStrings) for (const g of ngrams(str, SEAL_LEAK_N)) guarded.add(g);
   if (guarded.size === 0) return [];
 
   const hits: string[] = [];
+  const strings: Array<[string, string]> = [];
   const walk = (value: unknown, path: string): void => {
     if (typeof value === "string") {
-      if (SEAL_LEAK_SKIP.test(path)) return;
-      const t = tokens(value);
-      for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) {
-        if (guarded.has(t.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); return; }
-      }
+      strings.push([path, value]);
       return;
     }
     if (Array.isArray(value)) { value.forEach((v, i) => walk(v, `${path}[${i}]`)); return; }
     if (plainObject(value)) { for (const [k, v] of Object.entries(value)) walk(v, path ? `${path}.${k}` : k); }
   };
   walk(manifest, "");
+
+  for (const [path, value] of strings) {
+    const t = tokens(value);
+    for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) {
+      if (guarded.has(t.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); break; }
+    }
+  }
+  // Cross-field: the secret may be split so no single string contains the run.
+  const blob = strings.map(([, v]) => v).join(" ");
+  const bt = tokens(blob);
+  for (let i = 0; i + SEAL_LEAK_N <= bt.length; i++) {
+    if (guarded.has(bt.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push("<concatenated>"); break; }
+  }
   return hits;
+}
+
+/**
+ * Value/shape rules the structural spec cannot express: an empty id, a negative
+ * price or a code with no description makes a manifest publishable but unusable.
+ */
+export function manifestValueErrors(m: unknown): string[] {
+  const errors: string[] = [];
+  if (!plainObject(m)) return errors;
+  const man = m as Partial<RecipeManifest>;
+  const nonEmpty = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+  if (!nonEmpty(man.id)) errors.push("id:empty");
+  if (!nonEmpty(man.version)) errors.push("version:empty");
+  if (typeof man.id === "string" && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(man.id)) errors.push("id:charset");
+  if (typeof man.version === "string" && !/^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?$/.test(man.version)) errors.push("version:charset");
+  const pricing = man.pricing;
+  if (pricing) {
+    if (!Number.isSafeInteger(pricing.amount_cents) || pricing.amount_cents < 0 || pricing.amount_cents > 100_000_000) {
+      errors.push("pricing.amount_cents:range");
+    }
+    if (pricing.quota_default !== null && (!Number.isSafeInteger(pricing.quota_default) || pricing.quota_default < 0)) {
+      errors.push("pricing.quota_default:range");
+    }
+    if (pricing.split_bp) {
+      for (const [k, v] of Object.entries(pricing.split_bp)) {
+        if (!Number.isSafeInteger(v) || v < 0 || v > 10_000) errors.push(`pricing.split_bp.${k}:range`);
+      }
+    }
+  }
+  const codes = man.checks?.codes;
+  if (codes) {
+    for (const [k, v] of Object.entries(codes)) {
+      if (!k.trim()) errors.push("checks.codes:empty_key");
+      if (!nonEmpty(v)) errors.push(`checks.codes.${k}:empty`);
+    }
+  }
+  if (man.checks && (!Number.isSafeInteger(man.checks.rules) || man.checks.rules < 0)) errors.push("checks.rules:range");
+  return errors;
+}
+
+/**
+ * Everything publish must check about a manifest before it is served. One call so
+ * no caller can pick a subset.
+ */
+export function manifestPublishErrors(manifest: unknown, semantic: unknown): string[] {
+  return [...manifestShapeErrors(manifest), ...manifestValueErrors(manifest),
+    ...semanticLeakInManifest(manifest, semantic).map((p) => `leaks_sealed_text:${p}`)];
 }
 
 export const BUNDLE_REASONS = [
@@ -340,10 +410,11 @@ export function sealBundle(input: SealInput): { bytes: Uint8Array; manifest: Rec
   manifest.semantic.nonce = Buffer.from(nonce).toString("base64");
   manifest.dek_wrapped = Buffer.from(aeadSeal(input.kek, dekNonce, dek, AAD_DEK)).toString("base64");
 
-  // Refuse to seal a manifest that carries the prose it is supposed to seal.
-  const leaked = semanticLeakInManifest(manifest, input.semantic);
-  if (leaked.length > 0) {
-    throw new Error(`SEMANTIC_IN_MANIFEST: ${leaked.join(",")} — the public manifest would reveal the sealed text`);
+  // Producer gate #1: refuse to seal a manifest that carries the prose it seals,
+  // or that is structurally unusable (negative price, empty id, empty code).
+  const sealErrors = manifestPublishErrors(manifest, input.semantic);
+  if (sealErrors.length > 0) {
+    throw new Error(`INVALID_MANIFEST: ${sealErrors.join(",")} — this manifest cannot be published`);
   }
 
   const digest = digestOf(manifest);
