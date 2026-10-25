@@ -2,7 +2,10 @@
  * Buzzy LLM harness — lightweight OpenAI-compatible chat completions.
  *
  * Reads BZ_CHAT_BASE_URL / BZ_CHAT_KEY / BZ_CHAT_MODEL from env.
- * Defaults to Nous Inference API (cloud-only — no local models).
+ * Defaults to the Nous Inference API. Whether that is "cloud" or "local" is a
+ * deployment fact, not an assumption: `local` and `provider` are derived from
+ * BZ_CHAT_BASE_URL (see CATALOG_IS_LOCAL), so pointing it at localhost makes the
+ * catalog genuinely local instead of merely claiming to be.
  *
  * BZ_CHAT_MODELS is a JSON array of { label, model } objects.
  * If unset, defaults to a single "Marvin" entry.

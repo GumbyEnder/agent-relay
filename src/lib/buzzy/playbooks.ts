@@ -79,6 +79,34 @@ function payRangeCheck(draft: string, ownerText: string): { verdict: "verified" 
   };
 }
 
+/**
+ * Every step must have a name against it.
+ *
+ * The team-handover starter promises this check ("Every step has an owner"), and
+ * for a while the playbook ran no checks at all — so the promise was prose only.
+ * Deliberately conservative: only checklist-shaped lines are examined, and the
+ * result is a warning the owner can act on, never a block.
+ */
+function ownerAssignedCheck(draft: string): { verdict: "verified" | "stated" | "warning"; detail: string } {
+  const stepLines = draft
+    .split(/\n/)
+    .filter((l) => /^\s*(?:[-*•]|\d+[.)])\s+\S/.test(l) && l.trim().length > 8);
+  if (stepLines.length === 0) {
+    return { verdict: "stated", detail: "No step list to check for owners." };
+  }
+  // An owner is a named party attached to the step: "— Dana", "Owner: Dana",
+  // "@dana", or a bolded name at the start of the item.
+  const ownerAttached = /(?:—|–|\s-\s)\s*[A-Z][a-zA-Z]+|owner\s*:|@[A-Za-z0-9_.-]+/i;
+  const missing = stepLines.filter((l) => !ownerAttached.test(l));
+  return {
+    verdict: missing.length === 0 ? "verified" : "warning",
+    detail:
+      missing.length === 0
+        ? `All ${stepLines.length} steps name an owner.`
+        : `${missing.length} of ${stepLines.length} steps have no owner against them — someone has to be accountable for each.`,
+  };
+}
+
 function lengthCheck(maxWords: number) {
   return (draft: string): { verdict: "verified" | "stated" | "warning"; detail: string } => {
     const words = draft.split(/\s+/).filter(Boolean).length;
@@ -122,7 +150,14 @@ export const TYPE_PLAYBOOKS: Record<string, Playbook> = {
       { id: "alternatives", prompt: "What else are they considering, if you know?" },
     ],
     artifactHint: "Multi-section .docx; offer a .pptx summary when the audience will present it.",
-    checks: [],
+    // Two starters map to this playbook — customer proposal (#200) and team
+    // handover (#201) — and both promise checks that used to be prose only.
+    // Price math covers the proposal's line items; owner coverage covers the
+    // handover's "every step has an owner". Both are warnings, never blocks.
+    checks: [
+      { id: "price_math", label: "Price math", run: moneyMathCheck },
+      { id: "owners_assigned", label: "Owners", run: ownerAssignedCheck },
+    ],
   },
   invoice: {
     name: "an invoice",
