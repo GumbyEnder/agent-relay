@@ -17,22 +17,63 @@ const BASE_URL = env("BZ_CHAT_BASE_URL") || "https://inference-api.nousresearch.
 const API_KEY = env("BZ_CHAT_KEY");
 const DEFAULT_MODEL = env("BZ_CHAT_MODEL") || "z-ai/glm-5.3-flash";
 
-/** Parsed model catalog from BZ_CHAT_MODELS. */
-let _models: Array<{ label: string; model: string }> | null = null;
+/**
+ * A catalog entry. Only `label` and `model` are required; the rest are optional
+ * because they are curation metadata the deployment may or may not supply:
+ *
+ *  - `provider` — who serves the model. Absent means "not declared", NOT "any".
+ *    An entry with no provider cannot satisfy a provider preference; the policy
+ *    refuses rather than assuming.
+ *  - `local` — true only when the model runs on infrastructure the operator
+ *    controls. Derived from BASE_URL when not declared, so pointing
+ *    BZ_CHAT_BASE_URL at localhost makes the catalog genuinely local.
+ *  - `priceInPerMTok` / `priceOutPerMTok` — USD per million tokens. Absent means
+ *    "no price map", and the `cheapest` control refuses rather than guessing.
+ */
+export interface CatalogModel {
+  label: string;
+  model: string;
+  provider?: string;
+  local?: boolean;
+  priceInPerMTok?: number;
+  priceOutPerMTok?: number;
+}
 
-function getModels(): Array<{ label: string; model: string }> {
+const LOCAL_BASE = /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|host\.docker\.internal)\b/i;
+
+/** True when BASE_URL points at operator-controlled infrastructure. */
+export const CATALOG_IS_LOCAL = LOCAL_BASE.test(BASE_URL);
+
+/** Provider inferred from BASE_URL when an entry does not declare one. */
+export const CATALOG_DEFAULT_PROVIDER = CATALOG_IS_LOCAL
+  ? "local"
+  : /nousresearch/i.test(BASE_URL)
+    ? "nous"
+    : "custom";
+
+/** Parsed model catalog from BZ_CHAT_MODELS. */
+let _models: CatalogModel[] | null = null;
+
+function getModels(): CatalogModel[] {
   if (_models !== null) return _models;
   const raw = env("BZ_CHAT_MODELS");
   if (!raw) {
     _models = [{ label: "Marvin", model: DEFAULT_MODEL }];
-    return _models!;
+  } else {
+    try {
+      _models = JSON.parse(raw);
+    } catch {
+      console.warn("[buzzy/llm] BZ_CHAT_MODELS is not valid JSON — using default");
+      _models = [{ label: "Marvin", model: DEFAULT_MODEL }];
+    }
   }
-  try {
-    _models = JSON.parse(raw);
-  } catch {
-    console.warn("[buzzy/llm] BZ_CHAT_MODELS is not valid JSON — using default");
-    _models = [{ label: "Marvin", model: DEFAULT_MODEL }];
-  }
+  // Normalise: fill provider/local from the deployment's own base URL so a
+  // preference can be satisfied without every entry restating the obvious.
+  _models = _models!.map((e) => ({
+    ...e,
+    provider: e.provider ?? CATALOG_DEFAULT_PROVIDER,
+    local: e.local ?? CATALOG_IS_LOCAL,
+  }));
   return _models!;
 }
 
@@ -226,6 +267,15 @@ export async function chatCompletion(
 }
 
 export { getModels };
+
+/**
+ * Test seam: install a synthetic catalog (or clear the memoised one) so the
+ * policy can be exercised against catalogs the deployment does not have — no
+ * local models, no price map, several providers. Never called from runtime code.
+ */
+export function __resetModelCatalogForTests(next?: CatalogModel[]): void {
+  _models = next ?? null;
+}
 
 /**
  * Resolve a client-supplied model reference to a real catalog model id.

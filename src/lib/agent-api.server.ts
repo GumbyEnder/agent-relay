@@ -48,6 +48,7 @@ import { canAccessBoardByOwner } from "./board-tenancy";
 import { summarizeTickets } from "./ticket-summary";
 import { renderDocsHtmlPage, wantsHtmlDocs } from "./docs-html";
 import { DEFAULT_PROJECT_ID } from "./seed";
+import { validateModelPrefsPatch } from "./buzzy/modelPrefs";
 
 const KNOWN_COLUMNS = new Set<string>(COLUMNS.map((c) => c.id));
 
@@ -2498,6 +2499,19 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         body.prefs && typeof body.prefs === "object" && !Array.isArray(body.prefs)
           ? (body.prefs as Record<string, unknown>)
           : undefined;
+      // Model controls are contract-checked at write time: storing a value the
+      // policy cannot honour would leave the owner believing a constraint is in
+      // force when the next turn silently ignores it.
+      if (prefsPatch) {
+        const modelKeys = ["modelPreference", "provider", "localOnly", "budgetCapCents"];
+        const modelPatch = Object.fromEntries(
+          Object.entries(prefsPatch).filter(([k]) => modelKeys.includes(k)),
+        );
+        const valid = validateModelPrefsPatch(modelPatch);
+        if (!valid.ok) {
+          return err(400, valid.error, "invalid_preference");
+        }
+      }
       const saved = await boardOps.setOperatorPrefs(ctx.user.id, {
         theme: theme === null || theme === "" ? null : theme,
         prefs: prefsPatch,

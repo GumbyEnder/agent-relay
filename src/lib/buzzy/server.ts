@@ -18,6 +18,7 @@
 
 import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
 import { selectModel } from "./modelPolicy";
+import { readModelPrefs } from "./modelPrefs";
 import {
   renderDocument,
   renderPresentation,
@@ -469,21 +470,52 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
   try {
-    // BZ-F012: versioned, reasoned model-selection policy. The decision
-    // (policy version + phase + reason) is persisted internally per turn.
+    // BZ-F012 / BZ-F041 / BZ-F043: versioned, reasoned model-selection policy.
+    // The operator's saved controls are read here (ownership-scoped to this
+    // turn's userId) and validated before use — a stale or hand-edited pref
+    // must not change routing silently, so the fallback is recorded.
+    const savedPrefs = await readModelPrefs(sql, userId);
     const decision = selectModel({
       jobType,
       phase: draftGateOpen ? "deliverable" : "discovery",
       overrideModel: resolvedModel,
+      preference: savedPrefs.preference,
+      provider: savedPrefs.provider,
+      localOnly: savedPrefs.localOnly,
+      budgetCapCents: savedPrefs.budgetCapCents,
+      spentCents: savedPrefs.spentCents,
     });
     if (jobId) {
       try {
         await sql`
           INSERT INTO buzzy_job_events (job_id, user_id, actor, action, detail)
           VALUES (${jobId}, ${userId}, ${userId}, 'model_decision',
-                  ${JSON.stringify({ policyVersion: decision.policyVersion, phase: decision.phase, label: decision.label, reason: decision.reason })})
+                  ${JSON.stringify({
+                    policyVersion: decision.policyVersion,
+                    phase: decision.phase,
+                    label: decision.label,
+                    provider: decision.provider ?? null,
+                    reason: decision.reason,
+                    refused: decision.refused ?? false,
+                    refusedReason: decision.refusedReason ?? null,
+                    preference: savedPrefs.preference,
+                    preferenceSource: savedPrefs.preferenceSource,
+                    degradation: savedPrefs.degradation,
+                    budget: decision.budget
+                      ? { verdict: decision.budget.verdict, spentCents: decision.budget.spentCents, capCents: decision.budget.capCents }
+                      : null,
+                  })})
         `;
       } catch { /* decision logging never blocks the turn */ }
+    }
+    // A refusal routes nowhere: say why instead of quietly using the default.
+    if (decision.refused) {
+      return {
+        ok: false,
+        reply: "",
+        error: decision.reason,
+        code: decision.refusedReason ?? "model_refused",
+      };
     }
     const routedModel = decision.model || undefined;
     reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });

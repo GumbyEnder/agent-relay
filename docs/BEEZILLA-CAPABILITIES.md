@@ -52,7 +52,7 @@ State and behavior that exists regardless of any LLM call. 46 exact-path route h
 | Search | Cross-company: jobs, sessions, documents (title + current-version content) |
 | Telemetry | Event whitelist, content-shaped props stripped at write time; success = accepted **and** re-retrieved outputs |
 | Scheduled jobs | Cadence-based runs behind a runner secret; every run produces a draft that waits for review |
-| Model policy | `mp-1.0.0` — catalog-only eligibility, phase/task routing, no silent escalation, decision recorded per turn |
+| Model policy | `mp-1.1.0` — catalog-only eligibility, phase/task routing, no silent escalation, decision recorded per turn. Seven controls: `value`, `faster`, `thorough`, `cheapest`, `provider`, `localOnly`, `budgetCapCents`. A control that cannot be satisfied is **refused by name** (`no_price_map`, `unknown_provider`, `no_local_models`, `budget_refused`) and routes nowhere — it never degrades silently to the default. Controls are read per turn from the operator's saved prefs and validated; an unrecognised stored value falls back to `value` with the fallback recorded |
 
 Migrations 0028–0038 carry this: documents, provenance, contacts, share links, decisions,
 connection scope, outbound actions, telemetry, team, delegations.
@@ -195,9 +195,19 @@ at least one deterministic test — no exceptions.
 
 ### 5. Cost and budget controls surfaced to the owner
 
-Per-job and per-space spend ceilings with visible remaining budget, and a hard stop that
-pauses rather than silently continuing. We record model decisions (`mp-1.0.0`) but do not yet
-expose a budget the owner can set.
+**Partly delivered in `mp-1.1.0`.** The policy now enforces a spend ceiling: `budgetVerdict()`
+compares recorded spend against the owner's cap and returns `allow` / `ask` / `refuse`
+(`spent === cap` refuses — the owner said stop *at* the cap). The verdict blocks the turn with
+`budget_refused` before any model is chosen.
+
+Still absent, and correctly reported as absent:
+- **A UI to set the cap.** It is written through the existing `POST /api/agent/me/prefs`
+  (`prefs.budgetCapCents`) and read per turn; nothing renders a control for it yet.
+- **Per-job and per-space ceilings.** Only one account-level cap exists.
+- **A real price map.** `cost_usd` stays nullable, so an unpriced deployment sums spend to 0
+  and the ceiling has nothing to count. `cheapest` and `budgetCapCents` are therefore
+  *structural* today: they work the moment prices exist, and they refuse rather than guess
+  until then.
 
 ### 6. Deeper delegation
 
