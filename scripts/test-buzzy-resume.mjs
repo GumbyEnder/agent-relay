@@ -911,7 +911,9 @@ r = await api(cookieA, "GET", `/api/buzzy/jobs/${docJob}/events`);
 const decisionEvent = (r.json?.events ?? []).find((e) => e.action === "model_decision");
 check(
   "BZ-F012 each turn records a versioned, reasoned model decision internally",
-  Boolean(decisionEvent) && /mp-1\.0\.0/.test(decisionEvent.detail) && /reason|default Value|catalog/i.test(decisionEvent.detail),
+  // Pin the SHAPE (a versioned decision carrying a reason), not one frozen
+  // version string — bumping the policy version is not a product regression.
+  Boolean(decisionEvent) && /"policyVersion":"mp-\d+\.\d+\.\d+"/.test(decisionEvent.detail) && /"reason":"[^"]+"/.test(decisionEvent.detail),
   JSON.stringify(r.json?.events).slice(0, 300),
 );
 
