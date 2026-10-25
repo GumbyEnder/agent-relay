@@ -29,6 +29,7 @@
 
 import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
+import type { VoiceHandlers } from "./voice";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
@@ -55,6 +56,51 @@ import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemet
 import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
 import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
+
+/**
+ * One latency sample. Two sources: `server` (our own stage timings) and
+ * `client` (what the owner actually experienced — mic stop → first sound →
+ * turn end). Kept apart on purpose: a slow model and a slow client are
+ * different bugs. Identity and timings only, never text or audio.
+ */
+async function recordVoiceMetrics(
+  sql: Sql,
+  row: {
+    userId: string;
+    jobId?: string | null;
+    sessionId?: string | null;
+    source: "client" | "server";
+    mode?: string | null;
+    model?: string | null;
+    asrMs?: number | null;
+    ttftMs?: number | null;
+    ttfaMs?: number | null;
+    turnMs?: number | null;
+    extractMs?: number | null;
+    llmMs?: number | null;
+    honchoMs?: number | null;
+    replyChars?: number | null;
+    audioBytes?: number | null;
+    spoken?: boolean;
+  },
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO buzzy_voice_metrics
+        (user_id, job_id, session_id, source, mode, model, asr_ms, ttft_ms, ttfa_ms,
+         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken)
+      VALUES
+        (${row.userId}, ${row.jobId ?? null}, ${row.sessionId ?? null}, ${row.source},
+         ${row.mode ?? null}, ${row.model ?? null}, ${row.asrMs ?? null}, ${row.ttftMs ?? null},
+         ${row.ttfaMs ?? null}, ${row.turnMs ?? null}, ${row.extractMs ?? null},
+         ${row.llmMs ?? null}, ${row.honchoMs ?? null}, ${row.replyChars ?? null},
+         ${row.audioBytes ?? null}, ${row.spoken ?? false})
+    `;
+  } catch (err) {
+    // A lost metric must never break a turn.
+    console.warn("[buzzy/voice-metrics] insert failed:", err instanceof Error ? err.message : err);
+  }
+}
 
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
@@ -405,6 +451,11 @@ export default defineEventHandler(async (event) => {
     // UI mode: "work" steers toward a work effort, "chat" is ordinary
     // conversation. Unknown values fall back to chat inside chatLoop.
     const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
+    // Voice lane: stream text + audio back over SSE so speech starts on the
+    // first audio chunk instead of after the whole buffered reply.
+    const voice = body.voice === true;
+    const voiceName = typeof body.voiceName === "string" ? body.voiceName.trim().slice(0, 24) : undefined;
+    const surface: "text" | "voice" = voice ? "voice" : "text";
 
     const sql = await getSql();
 
@@ -492,26 +543,185 @@ export default defineEventHandler(async (event) => {
     }
 
     const turnStarted = Date.now();
-    await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface: "chat" } });
-    const result = await chatLoop({
-      userId,
-      jobId,
-      sessionId,
-      message,
-      model,
-      attemptId,
-      jobContext,
-      mode,
-      companyName: company?.name ?? null,
-      companyFacts: company?.facts ?? [],
-      customerMemoryBlock,
-    });
+    await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface } });
+
+    const runTurn = (speech?: VoiceHandlers) =>
+      chatLoop({
+        userId,
+        jobId,
+        sessionId,
+        message,
+        model,
+        attemptId,
+        jobContext,
+        mode,
+        companyName: company?.name ?? null,
+        companyFacts: company?.facts ?? [],
+        customerMemoryBlock,
+        surface,
+        speech,
+        voiceName,
+      });
+
+    // ── Voice lane: text + audio streamed as Server-Sent Events ────────
+    // Events: text {t} · audio {b64,format} · done {ChatResponse} · error {error}
+    // The final `done` payload is the SAME ChatResponse the text lane returns,
+    // so the client runs one post-processing path for both.
+    if (voice) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          let closed = false;
+          const send = (event: string, data: unknown) => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            } catch {
+              closed = true;
+            }
+          };
+          try {
+            const result = await runTurn({
+              onText: (t) => send("text", { t }),
+              onAudio: (b64, format) => send("audio", { b64, format }),
+            });
+            send("done", result);
+            if (result.timings) {
+              await recordVoiceMetrics(sql, {
+                userId,
+                jobId,
+                sessionId,
+                source: "server",
+                mode,
+                model: result.timings.model,
+                ttftMs: result.timings.ttftMs,
+                ttfaMs: result.timings.ttfaMs,
+                turnMs: result.timings.totalMs,
+                extractMs: result.timings.extractMs,
+                llmMs: result.timings.llmMs,
+                honchoMs: result.timings.honchoMs,
+                replyChars: result.reply?.length ?? 0,
+                spoken: true,
+              });
+            }
+          } catch (err) {
+            console.error("[buzzy/voice] turn failed:", err instanceof Error ? err.message : err);
+            send("error", { error: "The voice turn failed. Try again — the text chat still works." });
+          } finally {
+            closed = true;
+            try {
+              controller.close();
+            } catch {
+              /* already closed by the client */
+            }
+          }
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    const result = await runTurn();
     // BZ-F039: a draft was shown to the human (no content recorded — ids and
     // timing only). Check verdicts travel as their own events.
     const replyText = typeof (result as { reply?: unknown }).reply === "string" ? String((result as { reply: string }).reply) : "";
     await recordTelemetry(sql, { userId, jobId, event: "draft_shown",
       props: { surface: "chat", ms: Date.now() - turnStarted, count: replyText.length > 0 ? 1 : 0 } });
     return result;
+  }
+
+  // ── Voice + turn latency metrics ───────────────────────────────────
+  // POST: client beacon (what the owner experienced). GET: the readout —
+  // p50/p95 time-to-talk and turn time, per day, for the signed-in account.
+  if (method === "POST" && path === "/api/buzzy/voice-metrics") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch {
+      /* empty body — record what we have */
+    }
+    const num = (key: string): number | null => {
+      const v = body[key];
+      if (typeof v !== "number" || !Number.isFinite(v)) return null;
+      return Math.max(0, Math.min(600000, Math.round(v)));
+    };
+    const sql = await getSql();
+    await recordVoiceMetrics(sql, {
+      userId: user.id,
+      jobId: typeof body.jobId === "string" ? body.jobId : null,
+      sessionId: typeof body.sessionId === "string" ? body.sessionId : null,
+      source: "client",
+      mode: typeof body.mode === "string" ? body.mode.slice(0, 16) : null,
+      model: typeof body.model === "string" ? body.model.slice(0, 64) : null,
+      asrMs: num("asrMs"),
+      ttftMs: num("ttftMs"),
+      ttfaMs: num("ttfaMs"),
+      turnMs: num("turnMs"),
+      replyChars: num("replyChars"),
+      audioBytes: num("audioBytes"),
+      spoken: body.spoken === true,
+    });
+    return { ok: true };
+  }
+  if (method === "GET" && path === "/api/buzzy/voice-metrics") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const daysRaw = Number(queryValue(fullPath, "days"));
+    const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 7;
+    const summary = (await sql`
+      SELECT
+        count(*)::int                                              AS turns,
+        count(*) FILTER (WHERE spoken)::int                        AS spoken_turns,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY ttfa_ms)       AS ttfa_p50,
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY ttfa_ms)      AS ttfa_p95,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)       AS ttft_p50,
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)      AS ttft_p95,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY turn_ms)       AS turn_p50,
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY turn_ms)      AS turn_p95,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY llm_ms)        AS llm_p50,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY extract_ms)    AS extract_p50,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY asr_ms)        AS asr_p50
+      FROM buzzy_voice_metrics
+      WHERE user_id = ${user.id}
+        AND created_at > now() - (${days} || ' days')::interval
+    `) as Array<Record<string, number | null>>;
+    const byDay = (await sql`
+      SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+             count(*)::int                                        AS turns,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY ttfa_ms) AS ttfa_p50,
+             percentile_cont(0.95) WITHIN GROUP (ORDER BY ttfa_ms) AS ttfa_p95,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY turn_ms) AS turn_p50,
+             percentile_cont(0.95) WITHIN GROUP (ORDER BY turn_ms) AS turn_p95
+      FROM buzzy_voice_metrics
+      WHERE user_id = ${user.id}
+        AND created_at > now() - (${days} || ' days')::interval
+      GROUP BY 1 ORDER BY 1 DESC
+    `) as Array<Record<string, unknown>>;
+    const recent = (await sql`
+      SELECT created_at, source, mode, model, asr_ms, ttft_ms, ttfa_ms, turn_ms,
+             extract_ms, llm_ms, reply_chars, spoken
+      FROM buzzy_voice_metrics
+      WHERE user_id = ${user.id}
+      ORDER BY created_at DESC LIMIT 25
+    `) as Array<Record<string, unknown>>;
+    return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
   }
 
   // ── GET /api/buzzy/jobs/:id/document — approval-gated artifact download ─

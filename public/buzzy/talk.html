@@ -316,12 +316,49 @@
     /* FIX #4: mascot bigger and better aligned */
     .chat-mascot {
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
-    .chat-mascot img {
+    .chat-mascot canvas {
       width: 64px;
       height: auto;
       display: block;
+      filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.12));
     }
+
+    /* ── Voice stage ───────────────────────────────────────────────── */
+    .voice-stage {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      margin: 0 0 0.65rem;
+      padding: 0.7rem 0.9rem;
+      border: 1px solid #2b2b2b;
+      border-radius: 14px;
+      background: radial-gradient(120% 160% at 20% 0%, #1a1a1a 0%, #121212 60%, #0d0d0d 100%);
+    }
+    .voice-stage.hidden { display: none; }
+    .voice-stage canvas {
+      width: 96px;
+      height: auto;
+      flex-shrink: 0;
+    }
+    .vs-body { flex: 1; min-width: 0; }
+    .vs-state {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--bz-yellow);
+      letter-spacing: 0.01em;
+    }
+    .vs-lat {
+      margin: 0.15rem 0 0;
+      font-size: 0.74rem;
+      color: #8a8a8a;
+      font-variant-numeric: tabular-nums;
+    }
+    .vs-lat strong { color: #c9c9c9; font-weight: 600; }
+    .voice-stage .secondary { min-height: 30px; padding: 0.15rem 0.6rem; font-size: 0.75rem; }
 
     .agent-select {
       font: inherit;
@@ -1229,7 +1266,7 @@
           <div class="chat-header-row">
             <div class="chat-header-left">
               <div class="chat-mascot">
-                <img id="chatMascot" src="brand/revision6_expressions_17-attentive.png" alt="BeeZilla" />
+                <canvas id="chatMascot" width="64" height="63" aria-label="BeeZilla"></canvas>
               </div>
               <div class="chat-company-head">
                 <p class="chat-company-kicker" id="chatCompanyKicker">Working for</p>
@@ -1244,6 +1281,17 @@
             <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
+
+          <!-- Voice stage: a real face while you talk. It only appears when
+               the mic is on, so typed chat stays as clean as it was. -->
+          <div id="voiceStage" class="voice-stage hidden">
+            <canvas id="voiceAvatar" aria-hidden="true"></canvas>
+            <div class="vs-body">
+              <p class="vs-state" id="voiceStageState">Listening</p>
+              <p class="vs-lat" id="voiceStageLat"></p>
+            </div>
+            <button id="voiceStageEnd" class="secondary" type="button">End voice</button>
+          </div>
           <div class="composer-card" id="composerCard">
             <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
               <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
@@ -1347,6 +1395,7 @@
   <script src="/buzzy/companies.js"></script>
   <script src="/buzzy/money-check.js"></script>
   <script src="/buzzy/promise-check.js"></script>
+  <script src="/buzzy/avatar.js"></script>
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -2526,8 +2575,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function setChatMascot(expr) {
-      document.getElementById("chatMascot").src =
-        "brand/revision6_expressions_" + expr + ".png";
+      // The mascot is a canvas now — map the brand expression names onto the
+      // avatar's animation states instead of swapping a PNG.
+      setAvatarState(AVATAR_STATES[expr] || "idle");
     }
 
     // ── Inline slot editing ─────────────────────────────────────
@@ -2641,7 +2691,117 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // The flag up top controls whether replies are read aloud. The mic turns
     // the page into a hands-free loop: listen, send, speak, listen again.
     var VOICE_KEY = "bz_voice_replies";
-    var voice = { replies: false, mic: false, rec: null, speaking: false, sending: false };
+    var voice = {
+      replies: false, mic: false, rec: null, speaking: false, sending: false,
+      // Playback + lip-sync
+      ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
+      // Timings
+      lastSpeechEnd: 0, metrics: [],
+    };
+    // The avatar is drawn, not swapped: eyes + mouth are painted over the
+    // display face and driven by the real audio level.
+    var avatars = [];
+    var AVATAR_STATES = {
+      "08-thinking": "thinking", "11-loading": "thinking",
+      "12-content": "draft", "16-smiling": "draft", "02-joy": "draft", "13-idea": "draft",
+      "17-attentive": "idle", "15-neutral": "idle", "18-unimpressed": "idle",
+      "19-angry": "idle", "20-skeptical": "idle", "04-surprised": "idle",
+    };
+
+    function mountAvatars() {
+      if (!window.BeeZillaAvatar) return;
+      var head = document.getElementById("chatMascot");
+      var stage = document.getElementById("voiceAvatar");
+      if (head && !head.__bzAvatar) avatars.push(window.BeeZillaAvatar.mount(head, { size: 64 }));
+      if (stage && !stage.__bzAvatar) avatars.push(window.BeeZillaAvatar.mount(stage, { size: 96 }));
+    }
+
+    function setAvatarState(state) {
+      for (var i = 0; i < avatars.length; i++) avatars[i].setState(state);
+    }
+
+    // ── Audio: PCM16 @24kHz from the voice lane, straight into Web Audio ──
+    function ensureAudio() {
+      if (voice.ctx) return voice.ctx;
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try {
+        voice.ctx = new AC({ sampleRate: 24000 });
+        voice.gain = voice.ctx.createGain();
+        voice.analyser = voice.ctx.createAnalyser();
+        voice.analyser.fftSize = 1024;
+        voice.analyser.smoothingTimeConstant = 0.5;
+        voice.gain.connect(voice.analyser);
+        voice.analyser.connect(voice.ctx.destination);
+      } catch (_) {
+        voice.ctx = null;
+      }
+      return voice.ctx;
+    }
+
+    function b64ToBytes(b64) {
+      var bin = atob(b64);
+      var out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    function startLevelLoop() {
+      if (voice.raf || !voice.analyser) return;
+      var data = new Uint8Array(voice.analyser.frequencyBinCount);
+      function frame() {
+        voice.raf = 0;
+        if (!voice.analyser) return;
+        voice.analyser.getByteTimeDomainData(data);
+        var sum = 0;
+        for (var i = 0; i < data.length; i++) {
+          var v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        var level = Math.min(1, Math.sqrt(sum / data.length) * 3.4);
+        for (var a = 0; a < avatars.length; a++) avatars[a].setLevel(level);
+        if (voice.speaking || voice.active) voice.raf = requestAnimationFrame(frame);
+      }
+      voice.raf = requestAnimationFrame(frame);
+    }
+
+    function playPcm(b64) {
+      var ctx = ensureAudio();
+      if (!ctx) return;
+      if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+      var bytes = b64ToBytes(b64);
+      var samples = Math.floor(bytes.length / 2);
+      if (!samples) return;
+      var view = new DataView(bytes.buffer);
+      var buf = ctx.createBuffer(1, samples, 24000);
+      var ch = buf.getChannelData(0);
+      for (var i = 0; i < samples; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
+      var src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(voice.gain);
+      var startAt = Math.max(ctx.currentTime + 0.05, voice.nextTime);
+      src.start(startAt);
+      voice.nextTime = startAt + buf.duration;
+      voice.active++;
+      if (!voice.speaking) {
+        voice.speaking = true;
+        setAvatarState("speaking");
+        paintVoice();
+      }
+      startLevelLoop();
+      src.onended = function () {
+        voice.active = Math.max(0, voice.active - 1);
+        if (!voice.active && !voice.sending) finishSpeaking();
+      };
+    }
+
+    function finishSpeaking() {
+      voice.speaking = false;
+      voice.nextTime = 0;
+      for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
+      paintVoice();
+      if (voice.mic) startListening();
+    }
 
     function voicePref() {
       try { return localStorage.getItem(VOICE_KEY) === "1"; } catch (_) { return false; }
@@ -2672,14 +2832,42 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         s.textContent = msg;
         s.classList.toggle("hidden", !msg);
       }
+      // The stage is the face of the conversation: only while it is live.
+      var stage = document.getElementById("voiceStage");
+      var live = voice.mic || voice.speaking || voice.sending;
+      if (stage) stage.classList.toggle("hidden", !live);
+      var st = document.getElementById("voiceStageState");
+      if (st) {
+        st.textContent = voice.speaking ? "Speaking" : voice.sending ? "Thinking" : voice.mic ? "Listening" : "Voice";
+      }
+      if (!voice.speaking) {
+        setAvatarState(voice.mic ? (voice.sending ? "thinking" : "listening") : "idle");
+      }
     }
 
     function stopSpeaking() {
-      try { window.speechSynthesis.cancel(); } catch (_) {}
+      // Cut real audio (not just the browser's speech queue).
+      voice.active = 0;
+      voice.nextTime = 0;
       voice.speaking = false;
+      try {
+        if (voice.gain && voice.ctx) {
+          // Rebuild the chain so already-scheduled buffers stop immediately.
+          voice.gain.disconnect();
+          voice.gain = voice.ctx.createGain();
+          voice.gain.connect(voice.analyser);
+        }
+      } catch (_) {}
+      try { window.speechSynthesis.cancel(); } catch (_) {}
+      for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
       paintVoice();
     }
 
+    /**
+     * Fallback speech for browsers/paths without the audio lane (typed turns
+     * with the Voice pill on, or an audio failure). Keeps the product usable
+     * but is clearly the lesser voice — the audio lane is the real one.
+     */
     function speakReply(text) {
       if (!text || !("speechSynthesis" in window)) {
         if (voice.mic) startListening();
@@ -2691,8 +2879,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         u.lang = "en-US";
         u.rate = 1.02;
         voice.speaking = true;
+        setAvatarState("speaking");
         paintVoice();
+        // No audio stream from SpeechSynthesis — approximate the mouth with
+        // word boundaries so the face still moves while it talks.
+        var pulse = null;
+        u.onboundary = function () {
+          if (!avatars.length) return;
+          var lvl = 0.35 + Math.random() * 0.5;
+          for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(lvl);
+          clearTimeout(pulse);
+          pulse = setTimeout(function () {
+            for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
+          }, 120);
+        };
         var done = function () {
+          clearTimeout(pulse);
+          for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
           voice.speaking = false;
           paintVoice();
           if (voice.mic) startListening();
@@ -2722,9 +2925,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
         if (finalText.trim()) {
           stopListening();
+          // Timestamp the moment the owner stopped talking: time-to-talk is
+          // measured from here, not from when we happened to send.
+          voice.lastSpeechEnd = performance.now();
           var input = document.getElementById("chatInput");
           if (input) input.value = finalText.trim();
           voice.sending = true;
+          setAvatarState("thinking");
           paintVoice();
           sendChatMessage();
         }
@@ -2831,11 +3038,149 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function initVoice() {
       voice.replies = voicePref();
+      mountAvatars();
       var t = document.getElementById("voiceToggle");
       if (t) t.addEventListener("click", toggleVoiceReplies);
       var m = document.getElementById("micBtn");
       if (m) m.addEventListener("click", toggleMic);
+      var end = document.getElementById("voiceStageEnd");
+      if (end) end.addEventListener("click", function () {
+        voice.mic = false;
+        stopListening();
+        stopSpeaking();
+        paintVoice();
+      });
       paintVoice();
+    }
+
+    // ── Voice latency tracking ───────────────────────────────────────
+    // Every turn logs: mic stop → request sent (asr), sent → first text,
+    // sent → first sound (ttfa = time to talk), sent → turn done. Samples go
+    // to the server for per-user tracking and stay in the console for a
+    // quick read. No text, no audio — timings only.
+    function logVoiceMetrics(m) {
+      voice.metrics.push(m);
+      if (voice.metrics.length > 200) voice.metrics.shift();
+      if (window.console && console.table) {
+        try {
+          console.table(voice.metrics.slice(-8).map(function (x) {
+            return {
+              at: x.at, mode: x.mode, surface: x.surface,
+              "asr ms": x.asrMs, "ttft ms": x.ttftMs, "to talk ms": x.ttfaMs, "turn ms": x.turnMs,
+            };
+          }));
+        } catch (_) {}
+      }
+      paintLatency(m);
+      var body = {
+        jobId: chatState.jobId || null,
+        sessionId: chatState.sessionId || null,
+        mode: chatState.mode || "chat",
+        model: m.model || null,
+        asrMs: m.asrMs, ttftMs: m.ttftMs, ttfaMs: m.ttfaMs, turnMs: m.turnMs,
+        replyChars: m.replyChars, spoken: !!m.spoken,
+      };
+      try {
+        fetch("/api/buzzy/voice-metrics", {
+          method: "POST",
+          credentials: "same-origin",
+          keepalive: true,
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify(body),
+        }).catch(function () {});
+      } catch (_) {}
+    }
+
+    function paintLatency(m) {
+      var el = document.getElementById("voiceStageLat");
+      if (!el) return;
+      if (!m) { el.textContent = ""; return; }
+      var parts = [];
+      if (m.ttfaMs != null) parts.push("<strong>" + (m.ttfaMs / 1000).toFixed(2) + "s</strong> to talk");
+      if (m.turnMs != null) parts.push((m.turnMs / 1000).toFixed(2) + "s turn");
+      if (m.asrMs != null && m.asrMs > 60) parts.push((m.asrMs / 1000).toFixed(2) + "s to send");
+      el.innerHTML = parts.join(" · ");
+    }
+
+    /**
+     * One spoken turn. Same body as the text lane plus voice:true, consumed as
+     * Server-Sent Events:
+     *   text  → live transcript bubble (the answer appears as it is spoken)
+     *   audio → PCM played the moment it arrives (this is the time-to-talk path)
+     *   done  → the same ChatResponse the text lane returns
+     *   error → surfaces the failure instead of hanging on a dead stream
+     */
+    function streamVoiceTurn(sendBody, metrics, sendStarted) {
+      var liveBubble = null;
+      var liveText = "";
+      return fetch(CHAT_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(120000),
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(Object.assign({}, sendBody, { voice: true })),
+      }).then(function (res) {
+        if (!res.ok || !res.body) {
+          return res.json().catch(function () { return { error: "Voice turn failed." }; })
+            .then(function (j) { throw new Error((j && j.error) || "Voice turn failed."); });
+        }
+        var reader = res.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "";
+        var finalData = null;
+
+        function handleFrame(frame) {
+          var ev = "message";
+          var dataLines = [];
+          frame.split("\n").forEach(function (line) {
+            if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
+            else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
+          });
+          if (!dataLines.length) return;
+          var payload;
+          try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
+          if (ev === "text") {
+            if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
+            liveText += payload.t || "";
+            if (!liveBubble) {
+              liveBubble = document.createElement("div");
+              liveBubble.className = "bubble streaming";
+              var c = document.getElementById("chatMessages");
+              if (c) c.insertBefore(liveBubble, c.firstChild);
+            }
+            liveBubble.textContent = liveText;
+          } else if (ev === "audio") {
+            if (metrics.ttfaMs == null) {
+              metrics.ttfaMs = Math.round(performance.now() - sendStarted);
+              metrics.spoken = true;
+            }
+            playPcm(payload.b64);
+          } else if (ev === "done") {
+            finalData = payload;
+          } else if (ev === "error") {
+            throw new Error(payload.error || "Voice turn failed.");
+          }
+        }
+
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) {
+              if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
+              if (!finalData) throw new Error("The voice turn ended without a reply.");
+              return finalData;
+            }
+            buf += dec.decode(r.value, { stream: true });
+            var idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              var frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              handleFrame(frame);
+            }
+            return pump();
+          });
+        }
+        return pump();
+      });
     }
 
     // Both modes are the same free-form chat box. The mode changes the
@@ -3821,14 +4166,39 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             body: JSON.stringify(sendBody),
           });
         };
-        let resp;
-        try {
-          resp = await postOnce();
-        } catch (firstErr) {
-          resp = await postOnce(); // bounded: exactly one retry, same attemptId
-        }
 
-        const data = await resp.json();
+        // Voice turns take the streaming lane: text + audio arrive together,
+        // so the avatar starts talking on the first audio chunk instead of
+        // after the whole reply is buffered.
+        const useVoiceLane = (voice.mic || voice.replies) && typeof ReadableStream !== "undefined";
+        const sendStarted = performance.now();
+        const metrics = {
+          at: new Date().toLocaleTimeString(),
+          mode: chatState.mode || "chat",
+          surface: useVoiceLane ? "voice" : "text",
+          asrMs: voice.lastSpeechEnd ? Math.round(sendStarted - voice.lastSpeechEnd) : null,
+          ttftMs: null,
+          ttfaMs: null,
+          turnMs: null,
+          replyChars: null,
+          spoken: false,
+          model: null,
+        };
+        voice.lastSpeechEnd = 0;
+
+        let data;
+        if (useVoiceLane) {
+          data = await streamVoiceTurn(sendBody, metrics, sendStarted);
+        } else {
+          let resp;
+          try {
+            resp = await postOnce();
+          } catch (firstErr) {
+            resp = await postOnce(); // bounded: exactly one retry, same attemptId
+          }
+          data = await resp.json();
+          metrics.turnMs = Math.round(performance.now() - sendStarted);
+        }
 
         if (!data.ok) {
           setChatMascot("18-unimpressed");
@@ -3891,7 +4261,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         renderSlotChecklist();
         // The turn's own numbers are authoritative — don't re-fetch over them.
         paintContext(data.context);
-        maybeSpeak(data);
+        // One latency sample per turn: what the owner actually experienced.
+        metrics.turnMs = metrics.turnMs || Math.round(performance.now() - sendStarted);
+        metrics.replyChars = (data.reply || "").length;
+        metrics.model = data.timings && data.timings.model ? data.timings.model : null;
+        if (metrics.ttfaMs == null && data.timings && data.timings.ttfaMs != null) {
+          metrics.ttfaMs = data.timings.ttfaMs;
+        }
+        logVoiceMetrics(metrics);
+        // The audio lane already spoke the answer; only the text lane needs the
+        // fallback speaker, and only if no audio came back at all.
+        if (!useVoiceLane) maybeSpeak(data);
+        else if (!metrics.spoken && (voice.mic || voice.replies)) speakReply(data.reply || "");
 
       } catch (err) {
         setChatMascot("18-unimpressed");

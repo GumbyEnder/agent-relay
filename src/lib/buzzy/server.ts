@@ -49,6 +49,7 @@ import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { materializeDraft } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
+import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -153,19 +154,40 @@ function extractSystemPrompt(existing?: Record<string, string>): string {
   );
 }
 
+/**
+ * Slot extraction is a bounded JSON task — it does not need the owner's
+ * (possibly reasoning) reply model. Running it on a fast catalog entry cut
+ * ~3-5s off every turn; the reply model is the fallback if the fast id is
+ * unavailable on this provider.
+ */
+const EXTRACT_MODEL = process.env.BZ_EXTRACT_MODEL?.trim() || "google/gemini-3.1-flash-lite";
+
 async function extractDecisions(
   userMessage: string,
   model?: string,
   existing?: Record<string, string>,
 ): Promise<Record<string, string>> {
+  const messages = [
+    { role: "system", content: extractSystemPrompt(existing) },
+    { role: "user", content: userMessage.slice(0, 3000) },
+  ];
+  const candidates = [EXTRACT_MODEL, model].filter(
+    (m, i, all): m is string => typeof m === "string" && m.length > 0 && all.indexOf(m) === i,
+  );
+  for (const candidate of candidates) {
+    try {
+      const raw = await chatCompletion(messages, { model: candidate, temperature: 0.2, maxTokens: 200 });
+      return parseExtracted(raw, userMessage);
+    } catch {
+      // Try the next candidate; a failed extraction degrades to nothing rather
+      // than blocking or inventing facts.
+    }
+  }
+  return {};
+}
+
+function parseExtracted(raw: string, userMessage: string): Record<string, string> {
   try {
-    const raw = await chatCompletion(
-      [
-        { role: "system", content: extractSystemPrompt(existing) },
-        { role: "user", content: userMessage.slice(0, 3000) },
-      ],
-      { model, temperature: 0.2, maxTokens: 300 },
-    );
     const cleaned = raw.replace(/```json|```/g, "").trim();
     const obj = JSON.parse(cleaned) as Record<string, unknown>;
     const out: Record<string, string> = {};
@@ -209,6 +231,25 @@ export interface ChatRequest {
   /** UI mode. "work" steers the conversation toward a work effort (scope
    *  interview + decisions). "chat" (default) is ordinary conversation. */
   mode?: "chat" | "work";
+  /** "voice" turns stream text + audio so speech starts on the first chunk. */
+  surface?: "text" | "voice";
+  /** Streaming sinks. Present only on the voice lane. */
+  speech?: VoiceHandlers;
+  /** Preferred audio voice for the voice lane. */
+  voiceName?: string;
+}
+
+/** Per-turn latency breakdown. Product metric — surfaced to the client and
+ *  written to buzzy_voice_metrics so "it feels slow" becomes a number. */
+export interface TurnTimings {
+  extractMs: number;
+  llmMs: number;
+  honchoMs: number;
+  totalMs: number;
+  ttftMs: number | null;
+  ttfaMs: number | null;
+  model: string;
+  surface: "text" | "voice";
 }
 
 export interface ChatResponse {
@@ -226,6 +267,8 @@ export interface ChatResponse {
   expertSuggestion?: { id: string; name: string; reason: string };
   /** How full the model's context is for this turn. */
   context?: ContextState;
+  /** Per-turn latency breakdown (ms). */
+  timings?: TurnTimings;
   error?: string;
   code?: string;
 }
@@ -250,6 +293,15 @@ function confirmedCompanySection(
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const { userId, jobId, sessionId, message, model, jobContext, companyName, companyFacts } = req;
   const mode: "chat" | "work" = req.mode === "work" ? "work" : "chat";
+  const surface: "text" | "voice" = req.surface === "voice" ? "voice" : "text";
+  // Turn clock: every stage below is timed so a slow turn names its own cause.
+  const turnStart = Date.now();
+  let extractMs = 0;
+  let llmMs = 0;
+  let honchoMs = 0;
+  let ttftMs: number | null = null;
+  let ttfaMs: number | null = null;
+  let turnModel = "";
 
   if (!message?.trim()) {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
@@ -275,7 +327,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const memory = new DbMemory(sql, userId, jobId || sessionId);
 
   // ── Ensure Honcho peer ──────────────────────────────────────────────
-  await ensurePeer(userId);
+  // Memory registration is bookkeeping, not part of the answer: a Honcho
+  // round trip on the critical path was adding ~0.3-1.5s to every turn for
+  // data the reply does not read. Fire it and keep going.
+  void ensurePeer(userId).catch(() => {});
 
   // ── Load recent chat history ───────────────────────────────────────
   // Session-scoped when this chat has one. A null job_id is shared by every
@@ -357,12 +412,26 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Structural, separate from the reply turn: a dedicated JSON extraction
   // populates the Decisions Made box whether or not the reply model emits
   // markers. New extracts are persisted so later turns see them as answered.
-  const newlyExtracted = await extractDecisions(message, resolvedModel, slotValues);
-  for (const [slotId, val] of Object.entries(newlyExtracted)) {
-    if (!slotValues[slotId]) {
-      slotValues[slotId] = val;
-      await memory.remember(slotId, val);
+  //
+  // VOICE turns start it and do NOT wait: the owner is listening, so the
+  // reply model runs first and the extract is merged once the audio is out.
+  // TEXT turns await it (the brief must be right in the same render), but on
+  // a fast model rather than the reply model.
+  const extractStarted = Date.now();
+  const extractPromise = extractDecisions(message, resolvedModel, slotValues);
+  let newlyExtracted: Record<string, string> = {};
+  const mergeExtracted = async (found: Record<string, string>) => {
+    for (const [slotId, val] of Object.entries(found)) {
+      if (!slotValues[slotId]) {
+        slotValues[slotId] = val;
+        await memory.remember(slotId, val);
+      }
     }
+  };
+  if (surface !== "voice") {
+    newlyExtracted = await extractPromise;
+    extractMs = Date.now() - extractStarted;
+    await mergeExtracted(newlyExtracted);
   }
 
   // ── Build system prompt ────────────────────────────────────────────
@@ -446,6 +515,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ]) + TOOL_OVERHEAD_TOKENS;
   const ctx: ContextState = contextState(usedTokens, ctxLimit, compacted, droppedCount);
 
+  // ── Persist user message ───────────────────────────────────────────
+  // Written BEFORE the model call: a turn that times out or dies mid-stream
+  // must still leave the owner's words on the record (and in the transcript).
+  await sql`
+    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
+    VALUES (${userId}, ${jobId}, ${sessionId}, 'user', ${message})
+  `;
+
   // ── Call LLM ───────────────────────────────────────────────────────
   // Phase 1 (plan doc 23): when the draft gate is satisfied, the model gets
   // the render_document tool and may run a bounded loop (max 3 iterations).
@@ -518,7 +595,36 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       };
     }
     const routedModel = decision.model || undefined;
-    reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
+    turnModel = routedModel || "";
+    // The voice lane speaks: text AND audio stream from one call, so the
+    // avatar talks on the first audio chunk instead of after the whole reply.
+    // Deliverable turns stay on the text lane — a draft is announced, not
+    // read aloud, and only the text lane can carry the render tools.
+    const useVoiceLane =
+      surface === "voice" && !!req.speech && voiceAvailable() && !draftGateOpen && !explicitDocumentRequest;
+    const llmStarted = Date.now();
+    if (useVoiceLane) {
+      const spoken = await voiceCompletion(
+        messages,
+        { model: VOICE_MODEL, voice: req.voiceName, maxTokens: 400 },
+        req.speech,
+      );
+      llmMs = Date.now() - llmStarted;
+      ttftMs = spoken.ttftMs;
+      ttfaMs = spoken.ttfaMs;
+      turnModel = spoken.model;
+      reply = {
+        content: spoken.text,
+        toolCalls: [],
+        usage: null,
+        latencyMs: spoken.totalMs,
+        model: spoken.model,
+        finishReason: spoken.finishReason,
+      };
+    } else {
+      reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
+      llmMs = Date.now() - llmStarted;
+    }
 
     // Bounded model-paced loop: execute render_document calls and feed the
     // result back until the model returns a final answer or we hit the cap.
@@ -582,6 +688,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     };
   }
 
+  // VOICE lane: the owner already heard the answer — merge the deferred slot
+  // extraction now (it ran alongside the reply, not before it).
+  if (surface === "voice") {
+    newlyExtracted = await extractPromise;
+    extractMs = Date.now() - extractStarted;
+    await mergeExtracted(newlyExtracted);
+  }
+
   // ── Sanitize reply ─────────────────────────────────────────────────
   const sanitizedReply = sanitizeMemoryText(reply.content);
   // User-visible reply has decision markers removed; slots parse the raw
@@ -625,14 +739,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     void fixed;
   }
 
-  // ── Persist user message ───────────────────────────────────────────
-  const msgId = jobId || `buzzy_${userId.slice(0, 8)}`;
-  await sql`
-    INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
-    VALUES (${userId}, ${jobId}, ${sessionId}, 'user', ${message})
-  `;
-
-  // ── Persist assistant reply (with per-turn usage — Phase 0 accounting) ─
+  // ── Persist assistant reply (with per-turn usage — Phase 0 accounting) ──
   await sql`
     INSERT INTO buzzy_chat_messages
       (user_id, job_id, session_id, role, content,
@@ -657,13 +764,25 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   }
 
-  // ── Sync to Honcho ─────────────────────────────────────────────────
+  // ── Sync to Honcho (off the critical path) ─────────────────────────
+  // Long-term memory is written AFTER the owner already has the answer. It
+  // used to be awaited before the response, so every turn paid two Honcho
+  // round trips for data only future turns read.
   if (honchoAvailable()) {
-    const sid = await ensureSession(msgId, userId);
-    await syncMessages(sid, userId, [
-      { content: message.slice(0, 4000), peer_id: userId },
-      { content: cleanReply.slice(0, 4000), peer_id: "beezilla" },
-    ]);
+    const msgId = jobId || `buzzy_${userId.slice(0, 8)}`;
+    const honchoStarted = Date.now();
+    void (async () => {
+      try {
+        const sid = await ensureSession(msgId, userId);
+        await syncMessages(sid, userId, [
+          { content: message.slice(0, 4000), peer_id: userId },
+          { content: cleanReply.slice(0, 4000), peer_id: "beezilla" },
+        ]);
+      } catch (err) {
+        console.warn("[buzzy/honcho] background sync failed:", err instanceof Error ? err.message : err);
+      }
+    })();
+    honchoMs = Date.now() - honchoStarted; // dispatch only — the work is async
   }
 
   // ── Build response ─────────────────────────────────────────────────
@@ -686,6 +805,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ok: true,
     reply: cleanReply,
     context: ctx,
+    timings: {
+      extractMs,
+      llmMs,
+      honchoMs,
+      totalMs: Date.now() - turnStart,
+      ttftMs,
+      ttfaMs,
+      model: turnModel || reply.model,
+      surface,
+    },
   };
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
   // draft — before the owner approves work, never after.
