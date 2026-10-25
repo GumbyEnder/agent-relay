@@ -2726,7 +2726,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
       try {
+        // 24k matches the wire format exactly; if the browser refuses the hint
+        // we still play — createBuffer resamples into the context's own rate.
         voice.ctx = new AC({ sampleRate: 24000 });
+      } catch (_) {
+        try { voice.ctx = new AC(); } catch (_) { voice.ctx = null; }
+      }
+      if (!voice.ctx) return null;
+      try {
         voice.gain = voice.ctx.createGain();
         voice.analyser = voice.ctx.createAnalyser();
         voice.analyser.fftSize = 1024;
@@ -2767,7 +2774,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function playPcm(b64) {
       var ctx = ensureAudio();
-      if (!ctx) return;
+      if (!ctx) {
+        // Never fail silently: the owner must know why nothing was heard.
+        var st = document.getElementById("voiceStageState");
+        if (st) st.textContent = "Audio blocked by the browser — tap the mic again";
+        return;
+      }
       if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
       var bytes = b64ToBytes(b64);
       var samples = Math.floor(bytes.length / 2);
@@ -2834,7 +2846,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
       // The stage is the face of the conversation: only while it is live.
       var stage = document.getElementById("voiceStage");
-      var live = voice.mic || voice.speaking || voice.sending;
+      var live = voice.mic || voice.speaking || voice.sending || voice.replies;
       if (stage) stage.classList.toggle("hidden", !live);
       var st = document.getElementById("voiceStageState");
       if (st) {
@@ -3099,6 +3111,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (m.ttfaMs != null) parts.push("<strong>" + (m.ttfaMs / 1000).toFixed(2) + "s</strong> to talk");
       if (m.turnMs != null) parts.push((m.turnMs / 1000).toFixed(2) + "s turn");
       if (m.asrMs != null && m.asrMs > 60) parts.push((m.asrMs / 1000).toFixed(2) + "s to send");
+      // Name the lane on screen: "voice" means the audio model answered,
+      // "text" means it fell back — that difference is the whole diagnosis.
+      parts.push(m.surface === "voice" ? "voice lane" : "text lane");
       el.innerHTML = parts.join(" · ");
     }
 
