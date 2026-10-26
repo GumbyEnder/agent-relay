@@ -525,6 +525,33 @@ ok("a single long sealed token is comparable and caught when copied", () => {
   assert.equal(threw.includes("leaks_sealed_text"), true, `single token copied and sealed: ${threw}`);
 });
 
+ok("seal refuses prose atomised one word per field", () => {
+  // Round-12 hole: judging field by field meant a payload storing the boundary one
+  // word per field produced no window and no 4-gram, and published verbatim.
+  const phrase = recipe.boundary as string;
+  const words = phrase.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const atomised: Record<string, string> = { note: "assess supplier quotes and lead times" };
+  words.forEach((w, i) => { atomised[`w${i}`] = w; });
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: atomised as never,
+      capability: { ...capability, boundary_summary: phrase },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `atomised prose sealed: ${threw}`);
+});
+
+ok("seal refuses a sealed value that is a fragment of a vocabulary word", () => {
+  // A sealed "recommendat" against outputs ["recommendation"] used to publish: the
+  // excusal matched a fragment of the public identifier. The exemption now requires
+  // the sealed half to contain the WHOLE term.
+  let threw = "";
+  try { sealBundle(input({ semantic: { boundary: "recommendat" } as never })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `fragment excused: ${threw}`);
+});
+
 ok("a metadata-only payload is refused as unsearchable, not as a leak", () => {
   // Collecting semantic keys made a one-word guard look like 100% coverage, so
   // {"version": 3} was reported as leaks_sealed_text:<vocabulary> — a wrong

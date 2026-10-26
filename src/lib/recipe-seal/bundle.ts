@@ -314,51 +314,60 @@ function ngrams(text: string, n: number): Set<string> {
  * independent review (round 8) — keys were fixed on the MANIFEST side in round 7
  * and missed on the SEMANTIC side.
  */
-export function collectGuardStrings(semantic: unknown): string[] {
-  return guardMaterial(semantic).strings;
-}
-
 /**
- * The guard set, and whether it can actually be compared against anything.
+ * Split the sealed half into VALUES and KEYS.
  *
- * "Searchable" is the predicate the fail-closed rule needs: text that produces no
- * 4-gram and is shorter than one character window cannot be proven absent from a
- * manifest, so publishing it would be an unproven claim. A payload with no text at
- * all is a different case — there is nothing to leak.
+ * They are kept apart on purpose. Round 12 showed that interleaving keys into the
+ * value text both inflated the guard (a short value plus its field name looked
+ * searchable when neither part could match) and — worse — made the comparison run
+ * per field, so prose stored ONE WORD PER FIELD produced no window and no 4-gram
+ * and published verbatim. Values are therefore concatenated into one text and
+ * judged as a document; keys are judged individually.
  */
-export function guardMaterial(semantic: unknown): { strings: string[]; text: string; searchable: boolean } {
-  const strings = collectGuardStringsRaw(semantic);
-  const text = strings.join(" ");
-  // Searchable means at least ONE sealed string is long enough to yield a
-  // comparable window. Measuring the joined text was wrong: a short value plus a
-  // field name ("boundary" + "VAT") reached the threshold while neither part could
-  // ever match, so the gate declared "searchable" and compared nothing.
-  const searchable = strings.some((s) => normalizeForCompare(s).length >= windowFor(s));
-  return { strings, text, searchable };
-}
-
-function collectGuardStringsRaw(semantic: unknown): string[] {
-  const out: string[] = [];
+function collectParts(semantic: unknown): { values: string[]; keys: string[] } {
+  const values: string[] = [];
+  const keys: string[] = [];
   const collect = (v: unknown): void => {
-    if (typeof v === "string") { if (v.trim()) out.push(v); return; }
+    if (typeof v === "string" || v instanceof String) {
+      const str = String(v);
+      if (str.trim()) values.push(str);
+      return;
+    }
     if (Array.isArray(v)) {
-      // A boundary stored as a word array is one phrase, not four short values:
-      // join it as well as recursing, or each element falls under the window floor
-      // and the whole payload reads as unsearchable.
-      const joined = v.filter((x) => typeof x === "string").join(" ");
-      if (joined.trim()) out.push(joined);
+      // A boundary stored as a word array is one phrase, not four short values.
+      const joined = v.map((x) => String(x)).join(" ");
+      if (joined.trim()) values.push(joined);
       v.forEach(collect);
       return;
     }
     if (plainObject(v)) {
       for (const [k, val] of Object.entries(v)) {
-        if (k.trim()) out.push(k);
+        if (k.trim()) keys.push(k);
         collect(val);
       }
     }
   };
   collect(semantic);
-  return out;
+  return { values, keys };
+}
+
+export function guardMaterial(semantic: unknown): {
+  strings: string[];
+  text: string;
+  values: string[];
+  keys: string[];
+  searchable: boolean;
+} {
+  const { values, keys } = collectParts(semantic);
+  // The sealed half as ONE document. Word-per-field storage becomes a sentence
+  // again the moment the values are joined, which is the whole point.
+  const text = values.join(" ");
+  const atomised = values.length >= 4 && values.filter((v) => tokens(v).length <= 3).length >= values.length - 1;
+  const searchable =
+    values.some((v) => normalizeForCompare(v).length >= windowFor(v)) ||
+    keys.some((k) => normalizeForCompare(k).length >= windowFor(k)) ||
+    (atomised && normalizeForCompare(text).length >= windowFor(text));
+  return { strings: [...values, ...keys], text, values, keys, searchable };
 }
 
 export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
@@ -375,8 +384,9 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   // Join before n-gramming. An array of single words yields no n-grams per string,
   // which previously emptied the guard set and let the whole boundary seal and
   // publish (found by an independent review).
-  const semanticText = semanticStrings.join(" ");
+  const semanticText = material.text;
   const guarded = ngrams(semanticText, SEAL_LEAK_N);
+  for (const k of material.keys) for (const g of ngrams(k, SEAL_LEAK_N)) guarded.add(g);
 
   const hits: string[] = [];
   const strings: Array<[string, string]> = [];
@@ -466,15 +476,40 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
     // Exemption comes ONLY from vocabulary fixed in this file. Reading it from the
     // manifest certified itself: 32 characters of sealed prose parked in
     // capability.outputs excused every window inside them, and the prose was served.
+    // Excused only when the SEALED half itself contains the whole vocabulary term.
+    // Excusing by "window is a fragment of a vocab word" let a sealed value of
+    // "recommendat" publish against outputs:["recommendation"] — the manifest
+    // declared a public identifier, the sealed half contained a truncation of it,
+    // and 11 characters of sealed text were served. Requiring the full term in
+    // both places means the shared text is the public identifier, not a slice of
+    // it.
+    const guardNormAll = normalizeForCompare(semanticText);
     const excused = (w: string): boolean =>
-      SCHEMA_KEY_NAMES.has(w) || VOCAB_WINDOWS.some((a) => a.includes(w));
-    for (const s of semanticStrings) {
-      const g = normalizeForCompare(s);
-      const width = windowFor(s);
+      SCHEMA_KEY_NAMES.has(w) ||
+      VOCAB_WINDOWS.some((v) => v.includes(w) && guardNormAll.includes(v));
+    // Per field, plus each key. Concatenating every value would catch the
+    // word-per-field attack but also manufactures windows that straddle a field
+    // boundary ("…recommendation" + "tools…" yields "mendationt") and collide with
+    // ordinary vocabulary — it refused the honest fixture. So the join is applied
+    // only to the shape that attack actually takes: many short values, i.e. prose
+    // atomised across fields. A payload of real prose fields is compared per field.
+    const atomised =
+      material.values.length >= 4 &&
+      material.values.filter((v) => tokens(v).length <= 3).length >= material.values.length - 1;
+    const corpora: string[] = [
+      ...material.values,
+      ...(atomised ? [material.text] : []),
+      ...material.keys,
+    ];
+    for (const doc of corpora) {
+      const g = normalizeForCompare(doc);
+      const width = windowFor(doc);
       if (g.length < width) continue;
       for (let i = 0; i + width <= g.length; i++) {
         const w = g.slice(i, i + width);
-        if (manNorm.includes(w) && !excused(w)) { hits.push("<normalized>"); break; }
+        if (manNorm.includes(w) && !excused(w)) {
+          hits.push("<normalized>"); break;
+        }
       }
       if (hits.includes("<normalized>")) break;
     }
