@@ -171,8 +171,29 @@ export function manifestShapeErrors(manifest: unknown): string[] {
  */
 const SEAL_LEAK_N = 4;
 
+/**
+ * Script-agnostic word tokens.
+ *
+ * This used to be `split(/[^a-z0-9]+/)`, which silently dropped every non-ASCII
+ * letter: a sealed half written in Cyrillic, Greek or Arabic tokenised to `[]`,
+ * so the guard set was empty and the prose published and served verbatim. The
+ * guard must tokenise whatever text exists, not only English.
+ */
 function tokens(s: string): string[] {
-  return s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return s.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+/**
+ * Character window for the script-agnostic pass. Chinese/Japanese text has no
+ * word boundaries, so a "word" is the whole sentence and no 4-gram survives.
+ * Comparing normalised character windows catches exact reproduction in any
+ * script without depending on a tokenizer agreeing about what a word is.
+ */
+const SEAL_LEAK_CHARS = 10;
+
+/** NFKC, lowercase, letters and digits only — spaces and punctuation removed. */
+function normalizeForCompare(s: string): string {
+  return s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 const STOPWORDS = new Set([
@@ -206,6 +227,27 @@ function ngrams(text: string, n: number): Set<string> {
  * and missed on the SEMANTIC side.
  */
 export function collectGuardStrings(semantic: unknown): string[] {
+  return guardMaterial(semantic).strings;
+}
+
+/**
+ * The guard set, and whether it can actually be compared against anything.
+ *
+ * "Searchable" is the predicate the fail-closed rule needs: text that produces no
+ * 4-gram and is shorter than one character window cannot be proven absent from a
+ * manifest, so publishing it would be an unproven claim. A payload with no text at
+ * all is a different case — there is nothing to leak.
+ */
+export function guardMaterial(semantic: unknown): { strings: string[]; text: string; searchable: boolean } {
+  const strings = collectGuardStringsRaw(semantic);
+  const text = strings.join(" ");
+  const searchable =
+    ngrams(text, SEAL_LEAK_N).size > 0 ||
+    normalizeForCompare(text).length >= SEAL_LEAK_CHARS;
+  return { strings, text, searchable };
+}
+
+function collectGuardStringsRaw(semantic: unknown): string[] {
   const out: string[] = [];
   const collect = (v: unknown): void => {
     if (typeof v === "string") { if (v.trim()) out.push(v); return; }
@@ -222,12 +264,15 @@ export function collectGuardStrings(semantic: unknown): string[] {
 }
 
 export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
-  const semanticStrings = collectGuardStrings(semantic);
-  // Fail CLOSED. An empty guard set means the no-plaintext promise cannot be
-  // evaluated at all, so it must not read as "clean". The producer gate reports
-  // this as semantic_payload:empty; this return value is the backstop for any
+  const material = guardMaterial(semantic);
+  const semanticStrings = material.strings;
+  // Fail CLOSED. Nothing to compare means the no-plaintext promise cannot be
+  // evaluated, so it must not read as "clean". Empty text is reported as
+  // semantic_payload:empty, text too short to compare as
+  // semantic_payload:unsearchable; this return value is the backstop for any
   // caller that reaches the leak test directly.
   if (semanticStrings.length === 0) return ["<no_sealed_text>"];
+  if (!material.searchable) return ["<unsearchable_sealed_text>"];
 
   // Join before n-gramming. An array of single words yields no n-grams per string,
   // which previously emptied the guard set and let the whole boundary seal and
@@ -271,8 +316,13 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
     if (content.length < 3) {
       // A boundary made of short words ("no vat due now") has no 4+ char content
       // tokens, so the ratio test had nothing to measure. Fall back to any
-      // non-stopword token of two or more characters.
-      content = [...new Set(tokens(text).filter((t) => t.length >= 2 && !STOPWORDS.has(t)))];
+      // non-stopword token of two or more characters — but never to a SINGLE
+      // token: with a one-word guard the threshold drops to 1.0, so any manifest
+      // that merely shares that word reads as 100% coverage. That produced false
+      // positives on metadata-only payloads ({"version": 3} and friends).
+      const fallback = [...new Set(tokens(text).filter((t) => t.length >= 2 && !STOPWORDS.has(t)))];
+      if (fallback.length < 2) return false;
+      content = fallback;
     }
     if (content.length === 0) return false;
     // A short boundary has too few words to hide behind a ratio: require all of
@@ -293,6 +343,32 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   const bt = tokens(blob);
   for (let i = 0; i + SEAL_LEAK_N <= bt.length; i++) {
     if (guarded.has(bt.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push("<concatenated>"); break; }
+  }
+
+  // 4. Script-agnostic fallback, applied ONLY to text that yields no word n-grams.
+  // Chinese/Japanese has no spaces, so a whole sentence is one token and no 4-gram
+  // exists; that is the text this pass is for. Running it over ordinary prose
+  // compares 10-character windows of text the manifest is ALLOWED to share
+  // (a semantic half legitimately names the outputs), which produced a false
+  // positive on the honest fixture. Scoping it to low-token strings keeps the
+  // coverage without the collateral.
+  if (!hits.includes("<normalized>")) {
+    // Non-ASCII only. An ordinary Latin word of ten characters ("capability",
+    // "comparisont…") matches the manifest's own structural vocabulary and is not
+    // a leak; the pass exists for scripts the word tokenizer cannot segment.
+    const lowToken = semanticStrings
+      .filter((s) => /[^\x00-\x7F]/.test(s) && tokens(s).length < SEAL_LEAK_N)
+      .map(normalizeForCompare)
+      .filter((s) => s.length >= SEAL_LEAK_CHARS);
+    if (lowToken.length > 0) {
+      const manNorm = normalizeForCompare(blob);
+      for (const g of lowToken) {
+        for (let i = 0; i + SEAL_LEAK_CHARS <= g.length; i++) {
+          if (manNorm.includes(g.slice(i, i + SEAL_LEAK_CHARS))) { hits.push("<normalized>"); break; }
+        }
+        if (hits.includes("<normalized>")) break;
+      }
+    }
   }
   return hits;
 }
@@ -348,11 +424,15 @@ export function manifestValueErrors(m: unknown): string[] {
  */
 export function manifestPublishErrors(manifest: unknown, semantic: unknown): string[] {
   const errs = [...manifestShapeErrors(manifest), ...manifestValueErrors(manifest)];
-  // Fail closed: a sealed half with no text at all leaves nothing to compare, so
-  // the no-plaintext promise is unproven. Refusing here is the honest answer;
-  // returning "clean" would be a claim the gate cannot support.
-  if (collectGuardStrings(semantic).length === 0) {
+  // Fail closed on the guard's OWN input, not on string presence. A payload with
+  // no text has nothing to leak; a payload whose text cannot produce a single
+  // 4-gram or character window cannot be proven absent, and that is a refusal.
+  const material = guardMaterial(semantic);
+  if (material.strings.length === 0) {
     return [...errs, "semantic_payload:empty"];
+  }
+  if (!material.searchable) {
+    return [...errs, "semantic_payload:unsearchable"];
   }
   return [...errs, ...semanticLeakInManifest(manifest, semantic).map((p) => `leaks_sealed_text:${p}`)];
 }

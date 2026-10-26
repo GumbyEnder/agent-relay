@@ -178,6 +178,46 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal(served.status, 404, "the refused semantic-key manifest is being served anyway");
   });
 
+  await ok("publish refuses prose in a non-Latin script", async () => {
+    // Round 9: tokens() was split(/[^a-z0-9]+/), so Cyrillic/CJK/any non-ASCII
+    // prose tokenised to [] and the guard was empty — publish 201, GET /manifest
+    // 200, prose served verbatim. The tokenizer is now script-agnostic.
+    const cyr = "Резерв не меняет цену никогда и ничего не заказывает";
+    const lexical = sealBundle({
+      recipeId: recipe.id,
+      version: "1.0.2",
+      semantic: { boundary: cyr, discovery: ["котировки поставщиков"] },
+      checksWasm: compiled.wasm,
+      checks: compiled.manifest,
+      capability: {
+        inputs: [{ name: "quotes", type: "file[]", required: true }],
+        outputs: ["comparison-table"], tools: recipe.tools,
+        forbidden_tools: ["send"], boundary_summary: "read-only; nothing is sent",
+      },
+      author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
+      kek: KEK,
+      pricing: { amount_cents: 4 },
+      createdAt: "2026-10-20T12:00:00.000Z",
+    });
+    const m = JSON.parse(JSON.stringify(lexical.manifest)) as Record<string, unknown>;
+    (m.checks as Record<string, unknown>).codes = { [cyr]: "C97" };
+    delete m.signature;
+    m.signature = sign(null, Buffer.from(sha256Hex(canonicalise(m)), "hex"), key.privateKey).toString("base64");
+    const entries = readZip(lexical.bytes);
+    const forged = makeZip([
+      { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(m)) },
+      { name: "semantic.enc", data: entries.get("semantic.enc")! },
+      { name: "checks.wasm", data: entries.get("checks.wasm")! },
+    ]);
+    const r = await routeRecipes({ method: "POST", path: "/api/recipes",
+      operatorId: "op_1", operatorRole: "admin", authRequired: true,
+      body: { bundle: Buffer.from(forged).toString("base64") } }, deps);
+    assert.equal(r.status, 422, `Cyrillic prose published: ${r.status} ${j(r.body)}`);
+    const hashOfForged = (await import("../src/lib/recipe-seal/bundle")).verifyBundle(forged).digest!;
+    const served = await routeRecipes({ method: "GET", path: `/api/recipes/${hashOfForged}/manifest` }, deps);
+    assert.equal(served.status, 404, "Cyrillic prose is being served anyway");
+  });
+
   await ok("publish refuses the boundary split into permuted 2-token chunks", async () => {
     // Cut into 2-word chunks and reversed, no 4-gram survives anywhere; only the
     // order-independent vocabulary rule catches it. Independent review.

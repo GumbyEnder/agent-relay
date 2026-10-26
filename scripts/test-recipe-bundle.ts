@@ -226,7 +226,9 @@ ok("a correctly SIGNED manifest with an invented key is rejected as MANIFEST_SCH
   const author = generateAuthorKey();
   const sealed = sealBundle({
     recipeId: "r-shape", version: "1.0.0",
-    semantic: { discovery: ["d"], boundary: "b" },
+    // Real prose, not a stub: a sealed half too short to guard is refused
+    // outright (semantic_payload:unsearchable), so fixtures must be realistic.
+    semantic: { discovery: ["which quotes are in play"], boundary: "never invent a price or a payment term" },
     checksWasm: compiled.wasm, checks: compiled.manifest,
     capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "b" },
     author: { id: "acct_author", name: "Author", keyId: author.keyId, privateKey: author.privateKey },
@@ -437,6 +439,69 @@ ok("an array-only semantic payload is guarded by its elements, not refused", () 
   // theatre; the gate must still run and come back clean.
   const sealed = sealBundle(input({ semantic: { discovery: ["ok"], boundary: "read only" } as never }));
   assert.equal(sealed.bytes.length > 0, true, "a legitimate sealed half failed to seal");
+});
+
+// ── round-9: the guard must tokenise whatever text exists ────────────────────
+ok("seal refuses a boundary written in Cyrillic", () => {
+  // tokens() was split(/[^a-z0-9]+/), so non-ASCII letters tokenised to [] and the
+  // guard set was empty: the prose published and served verbatim.
+  const cyr = "Резерв не меняет цену никогда и ничего не заказывает";
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: cyr } as never,
+      checks: { ...compiled.manifest, codes: { [cyr]: "C97" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `Cyrillic boundary sealed: ${threw}`);
+});
+
+ok("seal refuses a boundary written in Chinese", () => {
+  // No word boundaries at all: the whole sentence is one token, so no 4-gram
+  // exists. Only the normalised character-window pass catches this.
+  const cjk = "从不发明价格或付款条件";
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: cjk } as never,
+      checks: { ...compiled.manifest, codes: { [cjk]: "C98" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `CJK boundary sealed: ${threw}`);
+});
+
+ok("seal refuses CJK prose carried in a semantic KEY", () => {
+  const cjk = "从不发明价格或付款条件";
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { [cjk]: "placeholder" } as never,
+      checks: { ...compiled.manifest, codes: { [cjk]: "C99" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `CJK key boundary sealed: ${threw}`);
+});
+
+ok("a metadata-only payload is refused as unsearchable, not as a leak", () => {
+  // Collecting semantic keys made a one-word guard look like 100% coverage, so
+  // {"version": 3} was reported as leaks_sealed_text:<vocabulary> — a wrong
+  // diagnosis. The honest answer is that the sealed half is too short to guard.
+  let threw = "";
+  try { sealBundle(input({ semantic: { version: 3 } as never })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("semantic_payload:unsearchable"), true, `metadata payload: ${threw}`);
+  assert.equal(threw.includes("leaks_sealed_text"), false, `misdiagnosed as a leak: ${threw}`);
+});
+
+ok("a short Latin boundary is still searchable and still caught", () => {
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { discovery: ["d"], boundary: "no vat due now" } as never,
+      capability: { ...capability, forbidden_tools: ["due now", "no vat"] },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `short boundary lost: ${threw}`);
 });
 
 ok("a rule with non-string matches flags is refused at load", () => {
