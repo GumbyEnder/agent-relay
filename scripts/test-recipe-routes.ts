@@ -219,22 +219,48 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
   });
 
   await ok("publish refuses the boundary split into permuted 2-token chunks", async () => {
-    // Cut into 2-word chunks and reversed, no 4-gram survives anywhere; only the
-    // order-independent vocabulary rule catches it. Independent review.
+    // Order-independent: cut into 2-word chunks and reverse them, so no 4-gram
+    // survives anywhere. Only the vocabulary rule catches it. Self-contained
+    // bundle — reusing the shared fixture let a later mutation contaminate it.
     const words = String(recipe.boundary).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
     const pairs: string[] = [];
     for (let i = 0; i + 2 <= words.length; i += 2) pairs.push(words.slice(i, i + 2).join(" "));
-    const forged = forge((m) => { (m.capability as Record<string, unknown>).forbidden_tools = pairs.slice().reverse(); });
+    const lexical = sealBundle({
+      recipeId: recipe.id, version: "1.0.3",
+      semantic: { boundary: recipe.boundary, discovery: recipe.discovery, outputContract: recipe.outputContract },
+      checksWasm: compiled.wasm,
+      checks: compiled.manifest,
+      capability: {
+        inputs: [{ name: "quotes", type: "file[]", required: true }],
+        outputs: ["comparison-table"], tools: ["calculator"], forbidden_tools: ["send"],
+        boundary_summary: "read-only; nothing is sent",
+      },
+      author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
+      kek: KEK, pricing: { amount_cents: 4 }, createdAt: "2026-10-20T12:00:00.000Z",
+    });
+    const m = JSON.parse(JSON.stringify(lexical.manifest)) as Record<string, unknown>;
+    (m.capability as Record<string, unknown>).boundary_summary = pairs.slice().reverse().join("; ");
+    delete m.signature;
+    m.signature = sign(null, Buffer.from(sha256Hex(canonicalise(m)), "hex"), key.privateKey).toString("base64");
+    const entries = readZip(lexical.bytes);
+    const forged = makeZip([
+      { name: "manifest.json", data: new TextEncoder().encode(JSON.stringify(m)) },
+      { name: "semantic.enc", data: entries.get("semantic.enc")! },
+      { name: "checks.wasm", data: entries.get("checks.wasm")! },
+    ]);
     const r = await routeRecipes({ method: "POST", path: "/api/recipes",
       operatorId: "op_1", operatorRole: "admin", authRequired: true,
-      body: { bundle: Buffer.from(forged.bytes).toString("base64") } }, deps);
+      body: { bundle: Buffer.from(forged).toString("base64") } }, deps);
     assert.equal(r.status, 422, `permuted 2-token chunks published: ${r.status} ${j(r.body)}`);
   });
 
   await ok("publish refuses the boundary split into reordered 3-token chunks", async () => {
     const chunks = ["never invents a", "price or a", "term no supplier", "is contacted and", "nothing is ordered"];
     const forged = forge((m) => {
-      (m.capability as Record<string, unknown>).forbidden_tools = [chunks[2], chunks[0], chunks[4], chunks[1], chunks[3]];
+      // capability descriptors are a closed vocabulary now, so the chunks ride in
+      // boundary_summary, which is free text.
+      (m.capability as Record<string, unknown>).boundary_summary =
+        [chunks[2], chunks[0], chunks[4], chunks[1], chunks[3]].join("; ");
     });
     const r = await routeRecipes({ method: "POST", path: "/api/recipes",
       operatorId: "op_1", operatorRole: "admin", authRequired: true,

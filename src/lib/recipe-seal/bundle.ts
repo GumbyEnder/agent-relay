@@ -153,9 +153,61 @@ function checkSpec(value: unknown, spec: Spec, path: string, errors: string[]): 
 }
 
 /** Returns the offending paths, or an empty array when the manifest is in shape. */
+/**
+ * The closed vocabulary for the manifest's descriptor fields.
+ *
+ * These are the ONLY values a manifest may declare as an output or a tool.
+ *
+ * Why closed: the leak gate has to allow a manifest to share words with the sealed
+ * prose, because a recipe describes what it produces and the manifest declares the
+ * same thing. The first attempt allowed any string the manifest carried — and that
+ * certified itself: a publisher could copy 32 characters of sealed prose into
+ * `capability.outputs` and the gate would excuse every window inside it, publish
+ * 201 and serve the prose. An exemption may only ever come from vocabulary fixed
+ * in code, never from the document under judgement.
+ *
+ * Consequence, stated plainly: adding a new output kind or tool is a code change.
+ * That is a deliberate cost, paid so the no-plaintext claim can be made at all.
+ */
+export const OUTPUT_VOCAB: readonly string[] = [
+  "comparison-table", "recommendation", "missing-terms-section",
+  "document", "spreadsheet", "presentation", "summary", "checklist", "letter",
+];
+
+export const TOOL_VOCAB: readonly string[] = [
+  "calculate", "calculator", "search_knowledge", "lookup_market_rate", "fetch_website",
+  "render_document", "render_presentation", "render_sheet",
+  "send", "email", "submit", "file", "publish", "pay", "sign", "wire", "transfer",
+];
+
+const DESCRIPTOR_VOCAB: ReadonlySet<string> = new Set(
+  [...OUTPUT_VOCAB, ...TOOL_VOCAB].map((v) => v.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")),
+);
+
+/** A short window of the fixed vocabulary — the only text a manifest may share. */
+const VOCAB_WINDOWS: readonly string[] = [...DESCRIPTOR_VOCAB].filter(Boolean);
+
+function capabilityVocabErrors(m: unknown): string[] {
+  const errors: string[] = [];
+  if (!plainObject(m)) return errors;
+  const cap = (m as Record<string, unknown>).capability;
+  if (!plainObject(cap)) return errors;
+  const allowed = new Set([...OUTPUT_VOCAB, ...TOOL_VOCAB]);
+  for (const field of ["outputs", "tools", "forbidden_tools"]) {
+    const v = cap[field];
+    if (!Array.isArray(v)) continue;
+    for (const e of v) {
+      if (typeof e !== "string") continue;
+      if (!allowed.has(e)) errors.push(`capability.${field}:not_in_vocabulary`);
+    }
+  }
+  return errors;
+}
+
 export function manifestShapeErrors(manifest: unknown): string[] {
   const errors: string[] = [];
   checkSpec(manifest, MANIFEST_SPEC, "", errors);
+  errors.push(...capabilityVocabErrors(manifest));
   return errors;
 }
 
@@ -231,28 +283,6 @@ const SCHEMA_KEY_NAMES: ReadonlySet<string> = (() => {
   walk(MANIFEST_SPEC);
   return out;
 })();
-
-/**
- * Declared descriptors the manifest is allowed to carry alongside sealed prose
- * (outputs, tools, forbidden tools). Deliberately narrow: short identifiers only,
- * never a sentence, so this cannot be used as a laundering channel for prose.
- */
-function allowEntries(manifest: unknown): string[] {
-  const out: string[] = [];
-  if (!plainObject(manifest)) return out;
-  const cap = (manifest as Record<string, unknown>).capability;
-  if (!plainObject(cap)) return out;
-  for (const field of ["outputs", "tools", "forbidden_tools"]) {
-    const v = cap[field];
-    if (!Array.isArray(v)) continue;
-    for (const e of v) {
-      if (typeof e !== "string") continue;
-      const n = normalizeForCompare(e);
-      if (n.length > 0 && n.length <= 32) out.push(n);
-    }
-  }
-  return out;
-}
 
 const STOPWORDS = new Set([
   "the", "and", "or", "a", "an", "is", "are", "to", "of", "in", "for", "with", "no", "not",
@@ -433,9 +463,11 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   // published manifest, in any script.
   if (!hits.includes("<normalized>")) {
     const manNorm = normalizeForCompare(blob);
-    const allow = allowEntries(manifest);
+    // Exemption comes ONLY from vocabulary fixed in this file. Reading it from the
+    // manifest certified itself: 32 characters of sealed prose parked in
+    // capability.outputs excused every window inside them, and the prose was served.
     const excused = (w: string): boolean =>
-      SCHEMA_KEY_NAMES.has(w) || allow.some((a) => a.includes(w));
+      SCHEMA_KEY_NAMES.has(w) || VOCAB_WINDOWS.some((a) => a.includes(w));
     for (const s of semanticStrings) {
       const g = normalizeForCompare(s);
       const width = windowFor(s);
