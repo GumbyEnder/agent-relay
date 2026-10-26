@@ -35,7 +35,8 @@ before adding anything new.
 |---|---|---|
 | **D1** | `toolRegistry.ts` becomes the single source of truth: name, JSON schema, gate class, side-effect class, time budget, byte cap, telemetry key, docs blurb. The loop derives `offeredTools(ctx)` from it. | Schemas in 5 files is how a tool silently stops matching its declaration |
 | **D2** | Every tool has a **gate function** returning `{allowed, reason}`, not an inline boolean. A refusal reaches the model as `tool_refused: {tool, reason}` and the reply explains it in plain language. | "not available" produces the invented-limitation failure we already fixed once |
-| **D3** | **Browser is a separate internal service** (`beezilla-browser`), token-gated, render-only in B1. Not Chromium inside the app image. | Crash/memory isolation; a 600MB browser must not sit in the request path; one clean seam for B3/B4 |
+| **D3** | **Browser runs on Hyperbrowser** (managed, job-based), not Chromium inside the app image. All guards are enforced in the tool wrapper, not trusted to the provider. | No 600MB browser in the request path, no image change, and the provider's job model gives us a cheap seam for B3/B4 |
+| **D8** | **One `read_web_page` tool, routing HTTP-first with a browser fallback** — not two tools the model must choose between. Plain GET first; if the extracted text is thin, re-render through the browser and say which path ran. | Measured: raw HTTP 1.6s vs browser 6.1s on the same page. A model choosing wrong costs 4.5s per turn for nothing |
 | **D4** | **Off-account side effects are never raw tool calls.** `browse_act` emits an action *preview* that must clear the existing outbound approval. No send tool until a real delivery channel exists. | Keeps "approve before work leaves the account" true as the surface grows |
 | **D5** | External payloads (pages, search results, documents) are **DATA, never instructions**. One normalizer wraps and strips imperative content; no tool call may originate from page text alone. | Prompt injection is the #1 risk the moment we render arbitrary pages |
 | **D6** | Budgets: per-tool wall clock, response byte cap, per-turn tool budget. Exceeding is a **named failure**, never a hang. | Today one slow tool eats the whole turn |
@@ -93,45 +94,67 @@ diffed in CI so docs cannot drift.
 
 ## 4. Workstream B — real browser
 
-### B1 — Render a JS page (the value)
-New service `beezilla-browser` (Railway, own image with Chromium, no public domain):
+### B1 — Read a real page (the value)
+
+Transport: **Hyperbrowser** (managed). Verified 2026-10-25:
 
 ```
-POST /render  {url, waitUntil?, timeoutMs?}
-  → {finalUrl, title, text, links[], tables[], screenshotB64, timings}
+POST https://api.hyperbrowser.ai/api/scrape  {"url": …}   → {"jobId": …}
+GET  https://api.hyperbrowser.ai/api/scrape/<jobId>        → {"status":"completed","data":{markdown, metadata}}
 ```
 
-Guards, all enforced in the service, not the caller:
-- SSRF check on the URL **and re-checked on `finalUrl` after redirects** (reuse `website.ts` logic).
-- No cookies carried in, no localStorage, fresh context per call, hard close.
-- 1 concurrent context per instance; queue depth 4; 20s wall clock; 2MB text cap; 1 page per call.
-- `robots.txt` fetched and reported in the result (`robots: allow|disallow|unknown`) so the product
-  can say what it did rather than imply permission.
-- Screenshot retained with the tool result for audit (B1 acceptance).
+Measured: `example.com` completed in ~2s; `stripe.com/pricing` returned **36KB of clean markdown
+from 985KB of raw HTML in 6.1s** (raw HTTP fetch of the same page: 1.6s, but unusable markup).
+That gap is exactly why D8 exists: HTTP first, browser only when the page needs JS.
 
-Tool: `browse_page(url)` — side-effect class `read-only`, gate `always`, cost `free`, 25s budget.
-Fallback: if the service is down or slow, the turn degrades to `fetch_website` and the reply says
-which path ran (never silently pretend).
+Tool surface — **one** tool, not two:
 
-*Accept:* a real SPA (e.g. a grant portal) returns usable text where `fetch_website` returns a
-shell; a private address is refused after redirect; a slow page fails by name inside budget.
+```
+read_web_page(url, want?)  → {finalUrl, title, text, links[], tables[], path:"http"|"browser",
+                              renderedAt, robots, timings}
+```
+
+Routing rule (deterministic, not model-chosen):
+1. Plain GET via the existing `fetchWebsitePage` (SSRF guard, 8s).
+2. If visible text < 1,200 chars, or prose/text ratio looks like a shell, or the owner's intent
+   names a portal/app → re-render through Hyperbrowser.
+3. Return `path` so the reply can say "I had to render this page" and the telemetry records it.
+
+Guards, enforced in our wrapper:
+- SSRF check on the URL **and on `finalUrl` after redirects** (reuse `website.ts` `isPrivateIp`).
+- No cookies or credentials sent to the provider; one URL per call; 25s wall clock; 2MB text cap.
+- `robots.txt` fetched separately and reported (`allow|disallow|unknown`) so the product states
+  what it did rather than implying permission.
+- Page content passes through the D5 normalizer before the model ever sees it.
+- Provider failure degrades to the HTTP path and says so — never silently pretends.
+
+*Accept:* a JS-rendered page returns usable text where `fetch_website` returns a shell; the same
+static page takes the HTTP path (no browser spend); a private address is refused after redirect;
+a slow page fails by name inside budget; telemetry shows `path` per call.
 
 ### B2 — Structured extraction
 `browse_extract(url, want: "tables"|"prices"|"links"|"fees")` → typed rows.
 Deterministic parser first (table/heading heuristics); the model may label fields but **never
 supplies a number**. Same rule as `lookup_market_rate`: unreadable → "could not confirm".
 
-### B3 — Bounded interaction (no credentials)
+### B3 — Bounded interaction, **forms allowed** (owner decision 2026-10-25)
 `browse_act(url, steps[])` with a closed verb set: `click`, `scroll`, `expand`, `paginate`,
-`wait_for`. Max 8 steps, every step logged, **no typing into inputs, no submit**. Produces an
-action log + final page. Anything that would submit becomes a D4 approval preview instead.
-Design review before code.
+`wait_for`, **`fill`** (type into a named field). Max 12 steps, every step logged, field values
+must trace to the brief (never invented). **Submission is not a step**: reaching a submit control
+ends the run with `awaiting_approval` and a filled-form preview, which must clear the existing
+outbound gate (D4) before a single submit call is made.
 
-### B4 — Authenticated sessions (later, needs review)
-Owner's own portal session: per-account isolated context, explicit per-session consent, revocable,
-full audit, no credential storage by us. This is the phase that makes BeeZilla feel like an
-assistant for real office work — and the phase most capable of doing damage. No code before the
-consent + audit model is signed off.
+Rationale: filling a form is reversible and useful; submitting is not. The owner said forms may be
+filled — that is honoured here without handing the model an irreversible button.
+
+### B4 — Authenticated sessions — **all accounts** (owner decision 2026-10-25)
+Every account may connect a portal session, consumer or business. Non-negotiables before code:
+per-account isolated browser context, explicit per-session consent naming the site, revocable from
+the account page, full action log (URL, verb, field names — never field values beyond a redacted
+preview), no credential storage by us, and a hard rate limit per account. Consumer accounts get the
+same audit trail as business spaces; the difference is only who pays.
+This is the phase with the most damage potential — the consent + audit model ships *with* it, not
+after it.
 
 ---
 
@@ -141,10 +164,10 @@ Ranked by value ÷ risk. All follow D7.
 
 | # | Tool | Gate | Why now |
 |---|---|---|---|
-| C1 | `web_search(query, recency?)` | always, free-ish | Browsing without search is guessing. Sourced results (URL + quote) feed the draft with citations |
+| C1 | `web_search(query, recency?)` — **Brave Search API** (`BZ_BRAVE_KEY`) | always, free-ish | Browsing without search is guessing. Verified: 200 in ~1.0s. Return URL + title + snippet + age; the draft cites them. `read_web_page` then opens the one that matters |
 | C2 | `read_document(docId, question?)` | always, account-scoped | Papers are already imported (`buzzy_papers`) but unreadable — follow-ups force a re-upload today |
 | C3 | `parse_spreadsheet(fileId)` | always, account-scoped | We render .xlsx out and cannot read one in; accounting jobs need rows as data |
-| C4 | `ocr_page(fileId)` | always, account-scoped | Scanned invoices/quotes are the most common civilian document |
+| C4 | `ocr_page(fileId)` — cloud OCR service on Railway | always, account-scoped | Scanned invoices/quotes are the most common civilian document; owner chose cloud over the local rig |
 | C5 | `read_email_thread` / `draft_email` | read always; draft = draft gate | The inbox is where office work starts. **No send tool** until a delivery channel exists |
 | C6 | `fill_template(clientTemplateId, values)` | draft gate | Wire the dead schema; repeat clients work in their own branded format |
 | C7 | `lookup_public_record(kind, query)` | always | Company registry / licence / permit lookups — source-dependent, phase last |
@@ -158,7 +181,7 @@ approval surface with its own liability, and none is blocking a real job today.
 
 | Wave | Contents | Rationale |
 |---|---|---|
-| **1** | A1–A5, C1 (`web_search`), B1 (`browse_page` + service) | Makes the harness trustworthy and closes the two biggest capability holes |
+| **1** | A1–A5, C1 (`web_search` → Brave), B1 (`read_web_page`, HTTP-first with Hyperbrowser fallback) | Makes the harness trustworthy and closes the two biggest capability holes. No new infrastructure: both providers are managed |
 | **2** | A6–A8, C2, C3, B2 | Injection defense + documents as data + structured page extraction |
 | **3** | B3, C4, C5 (read/draft), C6 | Interaction, OCR, inbox, client formats |
 | **4** | B4, outbound email send, C7 | Needs consent/audit design + a real delivery channel |
@@ -178,16 +201,18 @@ Each wave is independently shippable and independently revertable (`BZ_BROWSER_*
 
 ---
 
-## 8. Open questions for the owner
+## 8. Decisions — resolved 2026-10-25 (owner)
 
-1. **Browser hosting** — self-hosted service (data stays ours, we carry the ops) vs a managed
-   browser API (faster to ship, third party sees client pages). Recommendation: self-hosted.
-2. **Search provider** — Brave / Exa / Tavily, and which key we fund. Recommendation: Exa for
-   research quality, Brave if price dominates.
-3. **B4 authenticated browsing** — allowed for consumer accounts at all, or business spaces only?
-4. **OCR** — local (DellT2 / Orin) vs cloud vendor. Local keeps documents home; cloud is faster.
-5. **`browse_act` stopping rule** — may it ever submit a form, or does it always stop at
-   "filled, waiting for you"? Recommendation: stop at filled for v1.
+| Question | Decision |
+|---|---|
+| Browser hosting | **Hyperbrowser** (managed). Key set as `BZ_HYPERBROWSER_KEY` on `agent-relay` + `beezilla`; verified end-to-end |
+| Search provider | **Brave** (`BZ_BRAVE_KEY`), verified 200 in ~1.0s |
+| B4 authenticated browsing | **All accounts** — consumer and business, same audit trail |
+| OCR | **Cloud, on Railway** — a service in the same project, not a local rig |
+| Forms | **May fill** named fields; **submission stays behind the outbound approval** (see B3) |
+
+Consequence to accept: Hyperbrowser means client page URLs leave our infrastructure. Recorded
+here deliberately; the no-credentials rule is what keeps that acceptable.
 
 ---
 
