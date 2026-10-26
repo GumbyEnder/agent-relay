@@ -122,23 +122,8 @@ export async function extractTemplateStructure(docxBytes: Uint8Array): Promise<T
   return { headings: headings.slice(0, 40), blanks, wordCount };
 }
 
-/** JSON schema for the fill_template tool — drafts render in THEIR format. */
-export const FILL_TEMPLATE_TOOL = {
-  type: "function",
-  function: {
-    name: "fill_template",
-    description:
-      "Render the deliverable into the owner's own uploaded template. You provide the " +
-      "title and the full body text; the harness maps it onto the template's headings and " +
-      "blanks. Use ONLY when the owner has a template on file and the deliverable matches it.",
-    parameters: {
-      type: "object",
-      properties: {
-        templateId: { type: "string", description: "The template id from the owner's library." },
-        title: { type: "string" },
-        body: { type: "string", description: "The complete deliverable text, in order." },
-      },
-      required: ["templateId", "title", "body"],
-    },
-  },
-};
+// NOTE (2026-10-25): the `fill_template` declaration lived here and was never
+// wired into the chat loop — a dead schema that read as a shipped capability.
+// It was removed under `docs/TOOL-AND-BROWSER-PLAN.md` (A3): a tool declaration
+// is a promise, and an unreachable promise is worse than none. Re-adding it
+// means a real template store, a registry entry, a gate, and a test (wave 3).

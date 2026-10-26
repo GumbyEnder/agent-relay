@@ -128,7 +128,7 @@ request resolves to that account *through an active membership* — nobody share
 
 | Absent | Why |
 |---|---|
-| **Headless browser** | `fetch_website` is a plain HTTP GET — no JavaScript execution. JS-rendered SPAs return a near-empty shell. Playwright exists in the repo but only `scripts/browser-smoke.mjs` and `scripts/preview-thumbnail.mjs` use it; the runtime does not |
+| ~~**Headless browser**~~ | **Shipped in wave 1 (2026-10-25).** `read_web_page` fetches over HTTP first and escalates to a managed render (Hyperbrowser) when the page comes back thin, reporting which path ran. Interaction, structure extraction and authenticated sessions are still absent (B2-B4) |
 | **Email delivery** | No outbound mail channel is wired. Approvals record `not_sent` honestly rather than pretending |
 | **OAuth token exchange** | Email/calendar/drive connection *scope, consent and revoke* are implemented and stored; the token exchange is not |
 | **Outbound HTTP writes** | `fetch_website` is GET-only. No POST, no uploads, no arbitrary third-party writes |
@@ -172,6 +172,10 @@ Proposed phasing — each phase shippable on its own:
 | B4 | **Authenticated sessions** — owner's own portal session | Explicit per-session consent, isolated browser context per account, no credential storage by us, revocable, full action log |
 
 B1 is where the value is. B3 and B4 need dedicated design review before any code.
+
+**Status 2026-10-25:** B1 shipped as `read_web_page` (HTTP-first, managed render
+fallback, `path` reported per call). Registry/gates/budgets/tool telemetry shipped alongside it
+(`docs/TOOL-AND-BROWSER-PLAN.md`).
 
 ### 2. Delivery channel
 

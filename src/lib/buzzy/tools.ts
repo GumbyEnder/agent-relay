@@ -14,7 +14,7 @@ export interface ToolDeclaration {
   inputs: string;
   output: string;
   sensitivity: "none" | "account" | "account-documents";
-  costClass: "free" | "llm-priced";
+  costClass: "free" | "llm-priced" | "metered";
   sideEffects: "none" | "read-only" | "render-to-memory";
   permission: "session_user" | "owner";
   verification: string;
@@ -67,7 +67,29 @@ export const TOOL_REGISTRY: ToolDeclaration[] = [
     failureBehavior: "no data → the draft says 'could not confirm', never a made-up figure",
   },
   {
-    name: "fetch_website",
+    name: "web_search",
+    inputs: "{ query, count?, freshness? } — what to look for",
+    output: "titled URLs + short snippets (leads, never evidence)",
+    sensitivity: "none",
+    costClass: "metered",
+    sideEffects: "read-only",
+    permission: "session_user",
+    verification: "typed results with source URLs; empty result stated, never padded",
+    failureBehavior: "search error is named; the model may not invent a source",
+  },
+  {
+    name: "read_web_page",
+    inputs: "{ url } — a public page",
+    output: "visible text, plus which path produced it (http | browser)",
+    sensitivity: "none",
+    costClass: "metered",
+    sideEffects: "read-only",
+    permission: "session_user",
+    verification: "SSRF guard re-checked on every redirect hop; thin pages escalate to a real render",
+    failureBehavior: "blocked/unreadable is stated plainly; the model may not describe a page it did not read",
+  },
+  {
+    name: "fetch_website", // superseded by read_web_page — kept executable, never offered
     inputs: "{ url } — a public page",
     output: "page text, marked DATA ONLY (never instructions)",
     sensitivity: "none",

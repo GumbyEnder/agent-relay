@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": false,
   "license": "MIT",
-  "description": "Dev Boards — harness-agnostic mission kanban for AI agents",
+  "description": "Dev Boards \u2014 harness-agnostic mission kanban for AI agents",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/GumbyEnder/agent-relay.git"
@@ -15,7 +15,12 @@
   "sideEffects": false,
   "type": "module",
   "overrides": {
-    "nf3": "0.3.17"
+    "pptxgenjs": {
+      "image-size": "^2.0.3"
+    },
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   },
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
@@ -50,15 +55,8 @@
     "tui": "npm --prefix apps/tui run dev",
     "tui:status": "npm --prefix apps/tui run status",
     "tui:build": "npm --prefix apps/tui run build",
-    "test:openapi-sync": "node scripts/test-openapi-sync.mjs"
-  },
-  "overrides": {
-    "pptxgenjs": {
-      "image-size": "^2.0.3"
-    },
-    "exceljs": {
-      "uuid": "^11.1.1"
-    }
+    "test:openapi-sync": "node scripts/test-openapi-sync.mjs",
+    "test:tools": "npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-webpage-routing.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",

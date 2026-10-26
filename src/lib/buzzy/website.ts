@@ -86,7 +86,12 @@ function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-async function hostBlocked(host: string): Promise<"blocked" | "missing" | "ok"> {
+/**
+ * Private-address guard. Exported so every reader (webpage.ts, and anything
+ * that follows redirects later) uses the SAME rule — a second copy is how an
+ * SSRF check silently diverges.
+ */
+export async function hostBlocked(host: string): Promise<"blocked" | "missing" | "ok"> {
   if (isIP(host) && isPrivateIp(host)) return "blocked";
   try {
     const found = await lookup(host, { all: true, verbatim: true });

@@ -724,6 +724,40 @@ export default defineEventHandler(async (event) => {
     return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
   }
 
+  // ── GET /api/buzzy/tool-calls — what the harness actually ran ───────
+  // Read-back for the tool telemetry. Identity + timing only; no arguments or
+  // result text, so this is safe to expose to the signed-in owner.
+  if (method === "GET" && path === "/api/buzzy/tool-calls") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const daysRaw = Number(queryValue(fullPath, "days"));
+    const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 1;
+    const calls = (await sql`
+      SELECT created_at, tool, gate, ms, ok, error_code, result_bytes, path, job_id
+      FROM buzzy_tool_calls
+      WHERE user_id = ${user.id}
+        AND created_at > now() - (${days} || ' days')::interval
+      ORDER BY created_at DESC
+      LIMIT 50
+    `) as Array<Record<string, unknown>>;
+    const summary = (await sql`
+      SELECT tool,
+             count(*)::int                                        AS calls,
+             count(*) FILTER (WHERE ok)::int                      AS ok_calls,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY ms)      AS ms_p50,
+             percentile_cont(0.95) WITHIN GROUP (ORDER BY ms)     AS ms_p95
+      FROM buzzy_tool_calls
+      WHERE user_id = ${user.id}
+        AND created_at > now() - (${days} || ' days')::interval
+      GROUP BY tool ORDER BY calls DESC
+    `) as Array<Record<string, unknown>>;
+    return { ok: true, days, summary, calls };
+  }
+
   // ── GET /api/buzzy/jobs/:id/document — approval-gated artifact download ─
   // The .docx produced by render_document is downloadable ONLY after the
   // owner has approved the job (plan doc 23 Phase 1 acceptance).
