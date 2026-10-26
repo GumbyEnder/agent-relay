@@ -49,6 +49,7 @@ import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext } from "./voiceTools";
+import { touchSession, maybeSummarizeSession } from "./sessions";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -886,6 +887,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       slotValues[slotId] = val;
       await memory.remember(slotId, val);
     }
+  }
+
+  // ── Recency + summary (list labels, off the critical path) ──────────
+  // updated_at is what "most recent conversation" means; it was only written on
+  // rename, so a busy chat could sort below a stale one. The summary keeps the
+  // list readable — refreshed every few messages, never blocking this turn.
+  if (sessionId) {
+    await touchSession(sql, sessionId, userId);
+    void maybeSummarizeSession(sql, sessionId, userId);
   }
 
   // ── Sync to Honcho (off the critical path) ─────────────────────────

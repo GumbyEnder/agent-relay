@@ -30,6 +30,7 @@
 import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import type { VoiceHandlers } from "./voice";
+import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
@@ -3458,7 +3459,10 @@ export default defineEventHandler(async (event) => {
     const rows = companyFilter
       ? await sql`
           SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.created_at, s.updated_at,
-            (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count
+            (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count,
+            (SELECT left(m.content, 220) FROM buzzy_chat_messages m
+              WHERE m.session_id = s.id AND m.role = 'user'
+              ORDER BY m.created_at ASC LIMIT 1) AS preview
           FROM buzzy_sessions s
           WHERE s.user_id = ${user.id} AND s.company_id = ${companyFilter}
           ORDER BY s.updated_at DESC
@@ -3466,7 +3470,10 @@ export default defineEventHandler(async (event) => {
         `
       : await sql`
           SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.created_at, s.updated_at,
-            (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count
+            (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count,
+            (SELECT left(m.content, 220) FROM buzzy_chat_messages m
+              WHERE m.session_id = s.id AND m.role = 'user'
+              ORDER BY m.created_at ASC LIMIT 1) AS preview
           FROM buzzy_sessions s
           WHERE s.user_id = ${user.id}
           ORDER BY s.updated_at DESC
@@ -3482,6 +3489,9 @@ export default defineEventHandler(async (event) => {
         createdAt: r.created_at,
         updatedAt: r.updated_at,
         messageCount: Number(r.message_count),
+        // First thing the owner said — the row always carries text even before
+        // the summariser has run.
+        preview: typeof r.preview === "string" ? r.preview : null,
       })),
     };
   }
@@ -3579,7 +3589,9 @@ export default defineEventHandler(async (event) => {
     };
   }
 
-  // ── POST /api/buzzy/sessions/:id/summary — AI summary (<=200 words) ──
+  // ── POST /api/buzzy/sessions/:id/summary — one-line conversation label ──
+  // Same summariser the Recent work list uses, so the row text and the stored
+  // summary can never disagree. Used to backfill older conversations.
   const summaryMatch = path.match(/^\/api\/buzzy\/sessions\/([A-Za-z0-9_-]+)\/summary$/);
   if (method === "POST" && summaryMatch) {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
@@ -3595,37 +3607,8 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 404);
       return { error: "session not found", code: "not_found" };
     }
-    const msgs = await sql`
-      SELECT role, content FROM buzzy_chat_messages
-      WHERE session_id = ${summaryMatch[1]}
-      ORDER BY created_at ASC LIMIT 50
-    `;
-    if (!msgs.length) {
-      return { summary: null, note: "No messages to summarize yet." };
-    }
-    const transcript = msgs
-      .map((m) => `${m.role === "user" ? "Client" : "BeeZilla"}: ${m.content}`)
-      .join("\n")
-      .slice(0, 12000);
-    const raw = await chatCompletion(
-      [
-        {
-          role: "system",
-          content:
-            "Summarize this conversation in 200 words or less, plain language, for the person who had it. What was discussed and what was decided. No jargon.",
-        },
-        { role: "user", content: transcript },
-      ],
-      { temperature: 0.3, maxTokens: 400 },
-    );
-    // Hard cap at 200 words regardless of LLM output.
-    const words = raw.trim().split(/\s+/).slice(0, 200).join(" ");
-    const updated = await sql`
-      UPDATE buzzy_sessions SET summary = ${words}, updated_at = now()
-      WHERE id = ${summaryMatch[1]} AND user_id = ${user.id}
-      RETURNING summary
-    `;
-    return { summary: updated[0]?.summary ?? words };
+    const summary = await summarizeSessionNow(sql, summaryMatch[1], user.id);
+    return { summary, note: summary ? undefined : "No messages to summarize yet." };
   }
 
   // ── GET /api/buzzy/papers — latest paper on this company, not another ──

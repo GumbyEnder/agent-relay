@@ -3845,6 +3845,32 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return d.toLocaleDateString();
     }
 
+    /** Start date for a conversation row: "Oct 26", with the year when it differs. */
+    function startedLabel(iso) {
+      if (!iso) return "";
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return "";
+      var opts = { month: "short", day: "numeric" };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+      return d.toLocaleDateString(undefined, opts);
+    }
+
+    /**
+     * One row's second line: what the conversation is about, when it started,
+     * and when it last moved. A row is never blank — before the summariser has
+     * run, the owner's own opening words stand in.
+     */
+    function rowSub(summaryLine, startedAt, at) {
+      var parts = [];
+      var line = String(summaryLine || "").trim();
+      if (line.length > 180) line = line.slice(0, 177).trim() + "…";
+      parts.push(line || "Pick up this conversation");
+      var started = startedLabel(startedAt);
+      if (started) parts.push("Started " + started);
+      if (at) parts.push("Active " + timeAgo(new Date(at).toISOString()));
+      return parts.join(" · ");
+    }
+
     // ── Work search across all of the user's companies ─────────────────
     var rwSearchQuery = "";
 
@@ -3971,11 +3997,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var key = s.jobId || ("s:" + s.id);
           if (seen[key]) return;
           seen[key] = true;
+          var sessAt = Date.parse(s.updatedAt || s.createdAt || "") || 0;
+          var sessLine = (s.summary || s.preview || "").trim();
           items.push({
-            kind: "session", session: s, title: s.title || "Untitled chat",
-            sub: (s.summary || "Pick up this conversation") +
-              (s.messageCount != null ? " · " + s.messageCount + " message" + (s.messageCount === 1 ? "" : "s") : "") +
-              (s.updatedAt ? " · updated " + timeAgo(s.updatedAt) : ""),
+            kind: "session", session: s, at: sessAt, startedAt: s.createdAt,
+            title: s.title || "Untitled chat",
+            sub: rowSub(sessLine, s.createdAt, sessAt),
           });
         });
         jobs.forEach(function (j) {
@@ -3992,18 +4019,27 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             d.challenge || (d.slots && d.slots.challenge),
             d.end_goal || (d.slots && d.slots.end_goal),
           ].filter(Boolean).join(" → ").trim();
+          var jobAt = Date.parse(j.updatedAt || j.createdAt || "") || 0;
+          var jobLine = tooltip || [j.status || "Discovering",
+            revised ? "revised" : "",
+            decided ? decided + " detail" + (decided === 1 ? "" : "s") : ""]
+            .filter(Boolean).join(" · ");
           items.push({
             kind: "job", job: j, needsInput: needsInput,
+            at: jobAt, startedAt: j.createdAt,
             title: j.title || "Untitled job",
             tooltip: tooltip,
-            sub: (needsInput ? "Needs your input · " : "") + (j.status || "Discovering") +
-              (revised ? " · revised" : "") +
-              (decided ? " · " + decided + " detail" + (decided === 1 ? "" : "s") : "") +
-              (j.updatedAt ? " · " + timeAgo(j.updatedAt) : ""),
+            sub: (needsInput ? "Needs your input · " : "") + rowSub(jobLine, j.createdAt, jobAt),
           });
         });
-        // Drafts awaiting the owner's approval float to the top.
-        items.sort(function (a, b) { return (b.needsInput ? 1 : 0) - (a.needsInput ? 1 : 0); });
+        // Most recent first. Drafts awaiting approval still float to the top —
+        // that pin is a product rule, but inside each group the order is by when
+        // the conversation last moved, not by the order the two APIs returned.
+        items.sort(function (a, b) {
+          var pin = (b.needsInput ? 1 : 0) - (a.needsInput ? 1 : 0);
+          if (pin !== 0) return pin;
+          return (b.at || 0) - (a.at || 0);
+        });
         var shown = rwShowAll ? items : items.slice(0, 8);
         var RW_EXAMPLES = ["Write a welcome email for new customers", "Draft a polite payment reminder", "Turn my services into a price list"];
         var html = '<div class="recent-work">' +
