@@ -251,7 +251,7 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const compiledBad = compile(badRules, { salt: new Uint8Array(8) });
     const throwing = sealBundle({
       recipeId: "throwing-checks", version: "1.0.0",
-      semantic: { discovery: ["d"], boundary: "b" },
+      semantic: { discovery: ["assess the quotes"], boundary: "the assistant never guesses a number" },
       checksWasm: compiledBad.wasm, checks: compiledBad.manifest,
       capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "read-only" },
       author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
@@ -272,7 +272,7 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const junk = new Uint8Array(64).fill(0x41);
     const junkBundle = sealBundle({
       recipeId: "junk-checks", version: "1.0.0",
-      semantic: { discovery: ["d"], boundary: "b" },
+      semantic: { discovery: ["assess the quotes"], boundary: "nothing leaves the account without approval" },
       checksWasm: junk, checks: { ...compiled.manifest, sha256: sha256Hex(junk) },
       capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "read-only" },
       author: { id: "acct_author", name: "Author", keyId: key.keyId, privateKey: key.privateKey },
@@ -301,7 +301,7 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const k2 = genKey();
     const other = reseal({
       recipeId: recipe.id, version: "1.0.0",   // same recipe + version ...
-      semantic: { discovery: ["different content"], boundary: "b" },
+      semantic: { discovery: ["different content entirely"], boundary: "a distinct sealed half for the duplicate test" },
       checksWasm: compiled.wasm, checks: compiled.manifest,
       capability: { inputs: [], outputs: [], tools: [], forbidden_tools: [], boundary_summary: "b" },
       author: { id: "acct_author", name: "Author", keyId: k2.keyId, privateKey: k2.privateKey },

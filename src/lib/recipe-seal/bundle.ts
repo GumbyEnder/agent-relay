@@ -191,9 +191,67 @@ function tokens(s: string): string[] {
  */
 const SEAL_LEAK_CHARS = 10;
 
+/**
+ * Logographic scripts carry far more information per character: six Chinese
+ * characters are roughly a clause, while ten Latin characters are barely a word
+ * and a half. Using one floor for both either under-protects CJK (an eight
+ * character clause slipped through a ten character window) or floods Latin
+ * manifests with false positives (an eight character floor refused the honest
+ * fixture). The floor varies by script; the SCOPE does not — every string is
+ * compared, whatever the script.
+ */
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
+
+function windowFor(s: string): number {
+  return CJK.test(s) ? 6 : SEAL_LEAK_CHARS;
+}
+
 /** NFKC, lowercase, letters and digits only — spaces and punctuation removed. */
 function normalizeForCompare(s: string): string {
   return s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/**
+ * Every key name in the manifest schema. This is the structural vocabulary the
+ * manifest is REQUIRED to contain ("capability", "boundary_summary", "split_bp"),
+ * so a sealed half sharing one of these words is not a leak. Derived from the
+ * spec rather than from the manifest, because checks.codes keys are author-chosen
+ * and must never be welcomed in.
+ */
+const SCHEMA_KEY_NAMES: ReadonlySet<string> = (() => {
+  const out = new Set<string>();
+  const walk = (spec: Spec | undefined): void => {
+    if (!spec || spec.t !== "object") return;
+    for (const [k, v] of Object.entries(spec.keys)) {
+      out.add(normalizeForCompare(k));
+      walk(v as Spec);
+      if ((v as { t?: string }).t === "array") walk((v as { of: Spec }).of);
+    }
+  };
+  walk(MANIFEST_SPEC);
+  return out;
+})();
+
+/**
+ * Declared descriptors the manifest is allowed to carry alongside sealed prose
+ * (outputs, tools, forbidden tools). Deliberately narrow: short identifiers only,
+ * never a sentence, so this cannot be used as a laundering channel for prose.
+ */
+function allowEntries(manifest: unknown): string[] {
+  const out: string[] = [];
+  if (!plainObject(manifest)) return out;
+  const cap = (manifest as Record<string, unknown>).capability;
+  if (!plainObject(cap)) return out;
+  for (const field of ["outputs", "tools", "forbidden_tools"]) {
+    const v = cap[field];
+    if (!Array.isArray(v)) continue;
+    for (const e of v) {
+      if (typeof e !== "string") continue;
+      const n = normalizeForCompare(e);
+      if (n.length > 0 && n.length <= 32) out.push(n);
+    }
+  }
+  return out;
 }
 
 const STOPWORDS = new Set([
@@ -241,9 +299,11 @@ export function collectGuardStrings(semantic: unknown): string[] {
 export function guardMaterial(semantic: unknown): { strings: string[]; text: string; searchable: boolean } {
   const strings = collectGuardStringsRaw(semantic);
   const text = strings.join(" ");
-  const searchable =
-    ngrams(text, SEAL_LEAK_N).size > 0 ||
-    normalizeForCompare(text).length >= SEAL_LEAK_CHARS;
+  // Searchable means at least ONE sealed string is long enough to yield a
+  // comparable window. Measuring the joined text was wrong: a short value plus a
+  // field name ("boundary" + "VAT") reached the threshold while neither part could
+  // ever match, so the gate declared "searchable" and compared nothing.
+  const searchable = strings.some((s) => normalizeForCompare(s).length >= windowFor(s));
   return { strings, text, searchable };
 }
 
@@ -251,7 +311,15 @@ function collectGuardStringsRaw(semantic: unknown): string[] {
   const out: string[] = [];
   const collect = (v: unknown): void => {
     if (typeof v === "string") { if (v.trim()) out.push(v); return; }
-    if (Array.isArray(v)) { v.forEach(collect); return; }
+    if (Array.isArray(v)) {
+      // A boundary stored as a word array is one phrase, not four short values:
+      // join it as well as recursing, or each element falls under the window floor
+      // and the whole payload reads as unsearchable.
+      const joined = v.filter((x) => typeof x === "string").join(" ");
+      if (joined.trim()) out.push(joined);
+      v.forEach(collect);
+      return;
+    }
     if (plainObject(v)) {
       for (const [k, val] of Object.entries(v)) {
         if (k.trim()) out.push(k);
@@ -309,7 +377,14 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   // 2. Order-independent containment: chunking and permutation preserve the bag of
   // content words even when no adjacent run survives.
   const manifestBag = new Set<string>();
-  for (const [, v] of strings) for (const t of tokens(v)) manifestBag.add(t);
+  for (const [, v] of strings) {
+    for (const t of tokens(v)) {
+      // Schema words are structural: the manifest must say "boundary_summary" and
+      // "capability". Counting them as coverage made a one-word sealed value look
+      // like a leak against any honest manifest.
+      if (!SCHEMA_KEY_NAMES.has(t)) manifestBag.add(t);
+    }
+  }
 
   const covers = (text: string): boolean => {
     let content = [...new Set(contentTokens(text))];
@@ -345,29 +420,31 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
     if (guarded.has(bt.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push("<concatenated>"); break; }
   }
 
-  // 4. Script-agnostic fallback, applied ONLY to text that yields no word n-grams.
-  // Chinese/Japanese has no spaces, so a whole sentence is one token and no 4-gram
-  // exists; that is the text this pass is for. Running it over ordinary prose
-  // compares 10-character windows of text the manifest is ALLOWED to share
-  // (a semantic half legitimately names the outputs), which produced a false
-  // positive on the honest fixture. Scoping it to low-token strings keeps the
-  // coverage without the collateral.
+  // 4. The total pass: normalised character windows, EVERY string, EVERY script.
+  //
+  // Every previous version of this pass was scoped — to values, then to keys, then
+  // to non-ASCII, then to strings yielding fewer than four tokens — and every scope
+  // was a hole: a CJK sentence ending in 。 split into four tokens and skipped the
+  // pass entirely while producing no 4-gram either, so it published and served
+  // verbatim. There is no scope here. A window that matches is a leak unless the
+  // manifest is REQUIRED to contain that text (schema vocabulary) or it is a
+  // declared short descriptor. That is the whole rule, and it is the one a customer
+  // can be told: no ten normalised characters of the sealed half appear in a
+  // published manifest, in any script.
   if (!hits.includes("<normalized>")) {
-    // Non-ASCII only. An ordinary Latin word of ten characters ("capability",
-    // "comparisont…") matches the manifest's own structural vocabulary and is not
-    // a leak; the pass exists for scripts the word tokenizer cannot segment.
-    const lowToken = semanticStrings
-      .filter((s) => /[^\x00-\x7F]/.test(s) && tokens(s).length < SEAL_LEAK_N)
-      .map(normalizeForCompare)
-      .filter((s) => s.length >= SEAL_LEAK_CHARS);
-    if (lowToken.length > 0) {
-      const manNorm = normalizeForCompare(blob);
-      for (const g of lowToken) {
-        for (let i = 0; i + SEAL_LEAK_CHARS <= g.length; i++) {
-          if (manNorm.includes(g.slice(i, i + SEAL_LEAK_CHARS))) { hits.push("<normalized>"); break; }
-        }
-        if (hits.includes("<normalized>")) break;
+    const manNorm = normalizeForCompare(blob);
+    const allow = allowEntries(manifest);
+    const excused = (w: string): boolean =>
+      SCHEMA_KEY_NAMES.has(w) || allow.some((a) => a.includes(w));
+    for (const s of semanticStrings) {
+      const g = normalizeForCompare(s);
+      const width = windowFor(s);
+      if (g.length < width) continue;
+      for (let i = 0; i + width <= g.length; i++) {
+        const w = g.slice(i, i + width);
+        if (manNorm.includes(w) && !excused(w)) { hits.push("<normalized>"); break; }
       }
+      if (hits.includes("<normalized>")) break;
     }
   }
   return hits;

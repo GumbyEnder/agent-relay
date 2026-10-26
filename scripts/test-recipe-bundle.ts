@@ -437,7 +437,9 @@ ok("an array-only semantic payload is guarded by its elements, not refused", () 
   // A payload with no prose still has keys/elements acting as guard strings, so
   // there is nothing to protect and nothing to leak. Refusing here would be
   // theatre; the gate must still run and come back clean.
-  const sealed = sealBundle(input({ semantic: { discovery: ["ok"], boundary: "read only" } as never }));
+  const sealed = sealBundle(input({
+    semantic: { discovery: ["ok"], boundary: "pricing stays exactly as the owner wrote it" } as never,
+  }));
   assert.equal(sealed.bytes.length > 0, true, "a legitimate sealed half failed to seal");
 });
 
@@ -480,6 +482,47 @@ ok("seal refuses CJK prose carried in a semantic KEY", () => {
     }));
   } catch (err) { threw = String(err instanceof Error ? err.message : err); }
   assert.equal(threw.includes("leaks_sealed_text"), true, `CJK key boundary sealed: ${threw}`);
+});
+
+ok("seal refuses a punctuated Chinese sentence", () => {
+  // Round-10 hole: 。 is a non-letter, so a real CJK paragraph split into four
+  // tokens, failed the old `< 4 tokens` scoping, and produced no 4-gram either —
+  // so it published and served a whole clause verbatim.
+  const clause = "金鑰輪換。簽章驗證。版本鎖定。授權檢查。";
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: clause } as never,
+      capability: { ...capability, boundary_summary: "金鑰輪換。簽章驗證。" },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `punctuated CJK sealed: ${threw}`);
+});
+
+ok("seal refuses a short Chinese clause (six-character window)", () => {
+  const short = "金鑰輪換簽章版";
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: short } as never,
+      checks: { ...compiled.manifest, codes: { [short]: "C96" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `short CJK sealed: ${threw}`);
+});
+
+ok("a single long sealed token is comparable and caught when copied", () => {
+  // The two-token rule left one-word values permanently uncomparable. A single
+  // word longer than the window is compared like any other string.
+  const word = "Vertraulichkeit";
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: word } as never,
+      checks: { ...compiled.manifest, codes: { [word]: "C95" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `single token copied and sealed: ${threw}`);
 });
 
 ok("a metadata-only payload is refused as unsearchable, not as a leak", () => {
