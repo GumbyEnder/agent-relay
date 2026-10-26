@@ -4041,7 +4041,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (pin !== 0) return pin;
           return (b.at || 0) - (a.at || 0);
         });
-        var shown = rwShowAll ? items : items.slice(0, 8);
+        var shown = rwShowAll ? items : items.slice(0, 12);
         var RW_EXAMPLES = ["Write a welcome email for new customers", "Draft a polite payment reminder", "Turn my services into a price list"];
         var html = '<div class="recent-work">' +
           '<div class="rw-head-row">' +
@@ -4062,7 +4062,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               '</div>';
           });
         }
-        if (items.length > 8) {
+        if (items.length > 12) {
           html += '<div class="rw-actions">' +
             (rwShowAll
               ? '<button type="button" class="secondary rw-all">Show less</button>'
