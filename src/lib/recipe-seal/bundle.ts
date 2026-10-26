@@ -195,20 +195,39 @@ function ngrams(text: string, n: number): Set<string> {
 }
 
 /**
- * Returns the manifest paths that reproduce the sealed text.
+ * Every string in the sealed half that must never appear in a served manifest.
  *
- * Two passes: per-string (so the report names the field) and a concatenated blob
- * (so a secret split across two fields is still caught).
+ * Object KEYS are included. The sealed payload is attacker/author-shaped JSON, and
+ * a boundary can live in a key exactly as easily as in a value:
+ * `{"Never invents a price or a payment term": "placeholder"}` walks to a
+ * values-only collector as ["placeholder"], so the boundary never entered the
+ * guard set and a manifest reproducing it published cleanly. Found by an
+ * independent review (round 8) — keys were fixed on the MANIFEST side in round 7
+ * and missed on the SEMANTIC side.
  */
-export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
-  const semanticStrings: string[] = [];
+export function collectGuardStrings(semantic: unknown): string[] {
+  const out: string[] = [];
   const collect = (v: unknown): void => {
-    if (typeof v === "string") { semanticStrings.push(v); return; }
+    if (typeof v === "string") { if (v.trim()) out.push(v); return; }
     if (Array.isArray(v)) { v.forEach(collect); return; }
-    if (plainObject(v)) { for (const val of Object.values(v)) collect(val); }
+    if (plainObject(v)) {
+      for (const [k, val] of Object.entries(v)) {
+        if (k.trim()) out.push(k);
+        collect(val);
+      }
+    }
   };
   collect(semantic);
-  if (semanticStrings.length === 0) return [];
+  return out;
+}
+
+export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
+  const semanticStrings = collectGuardStrings(semantic);
+  // Fail CLOSED. An empty guard set means the no-plaintext promise cannot be
+  // evaluated at all, so it must not read as "clean". The producer gate reports
+  // this as semantic_payload:empty; this return value is the backstop for any
+  // caller that reaches the leak test directly.
+  if (semanticStrings.length === 0) return ["<no_sealed_text>"];
 
   // Join before n-gramming. An array of single words yields no n-grams per string,
   // which previously emptied the guard set and let the whole boundary seal and
@@ -328,8 +347,14 @@ export function manifestValueErrors(m: unknown): string[] {
  * no caller can pick a subset.
  */
 export function manifestPublishErrors(manifest: unknown, semantic: unknown): string[] {
-  return [...manifestShapeErrors(manifest), ...manifestValueErrors(manifest),
-    ...semanticLeakInManifest(manifest, semantic).map((p) => `leaks_sealed_text:${p}`)];
+  const errs = [...manifestShapeErrors(manifest), ...manifestValueErrors(manifest)];
+  // Fail closed: a sealed half with no text at all leaves nothing to compare, so
+  // the no-plaintext promise is unproven. Refusing here is the honest answer;
+  // returning "clean" would be a claim the gate cannot support.
+  if (collectGuardStrings(semantic).length === 0) {
+    return [...errs, "semantic_payload:empty"];
+  }
+  return [...errs, ...semanticLeakInManifest(manifest, semantic).map((p) => `leaks_sealed_text:${p}`)];
 }
 
 export const BUNDLE_REASONS = [

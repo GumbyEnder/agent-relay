@@ -399,6 +399,46 @@ ok("a boundary of short words is still caught when reordered", () => {
   assert.equal(threw.includes("leaks_sealed_text"), true, `short-token boundary sealed: ${threw}`);
 });
 
+// ── round-8: the SEALED half's keys are strings too ──────────────────────────
+ok("seal refuses the boundary hidden in a SEMANTIC object KEY", () => {
+  // collect() walked Object.values only. Prose living in a semantic KEY never
+  // entered the guard set, so a manifest reproducing that prose published clean
+  // and was served by GET /manifest. Round-7 fixed keys on the manifest side and
+  // missed them on the semantic side.
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { [recipe.boundary]: "placeholder" } as never,
+      checks: { ...compiled.manifest, codes: { [recipe.boundary]: "x" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `semantic-key boundary sealed: ${threw}`);
+});
+
+ok("a semantic payload with no readable text refuses to publish (fails closed)", () => {
+  // An empty guard set means the no-plaintext promise cannot be evaluated. It must
+  // not read as "clean".
+  let threw = "";
+  try { sealBundle(input({ semantic: {} as never })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("semantic_payload:empty"), true, `empty sealed half sealed cleanly: ${threw}`);
+});
+
+ok("a null semantic payload refuses to publish", () => {
+  let threw = "";
+  try { sealBundle(input({ semantic: null as never })); }
+  catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("semantic_payload:empty"), true, `null sealed half sealed cleanly: ${threw}`);
+});
+
+ok("an array-only semantic payload is guarded by its elements, not refused", () => {
+  // A payload with no prose still has keys/elements acting as guard strings, so
+  // there is nothing to protect and nothing to leak. Refusing here would be
+  // theatre; the gate must still run and come back clean.
+  const sealed = sealBundle(input({ semantic: { discovery: ["ok"], boundary: "read only" } as never }));
+  assert.equal(sealed.bytes.length > 0, true, "a legitimate sealed half failed to seal");
+});
+
 ok("a rule with non-string matches flags is refused at load", () => {
   let threw = "";
   try {
