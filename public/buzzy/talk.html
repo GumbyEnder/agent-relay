@@ -4015,10 +4015,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var v = d.slots[k];
             return v && v !== "skipped";
           }).length : 0;
-          var tooltip = [
+          var tooltipParts = [
             d.challenge || (d.slots && d.slots.challenge),
             d.end_goal || (d.slots && d.slots.end_goal),
-          ].filter(Boolean).join(" → ").trim();
+          ].map(function (v) { return String(v || "").trim(); }).filter(function (v) { return v.length > 0; });
+          var tooltip = tooltipParts.join(" → ");
           var jobAt = Date.parse(j.updatedAt || j.createdAt || "") || 0;
           var jobLine = tooltip || [j.status || "Discovering",
             revised ? "revised" : "",

@@ -91,16 +91,36 @@ export async function summarizeSessionNow(
   const value = summary || fallback;
   if (!value) return null;
 
+  // Give an unnamed conversation a real name. A row called "New session" is
+  // unreadable in a list; the owner's opening words are the honest label.
+  // Never overwrites a rename (only the literal default is replaced).
+  const derivedTitle = (() => {
+    const firstClause = String(firstUser || "")
+      .split(/[.?!\n]/)[0]
+      .replace(/\s+/g, " ")
+      .trim();
+    return firstClause.split(" ").slice(0, 9).join(" ").replace(/[,;:]$/, "").slice(0, 70);
+  })();
+
   try {
     const count = (await sql`
       SELECT count(*)::int AS n FROM buzzy_chat_messages
       WHERE session_id = ${sessionId} AND user_id = ${userId}
     `) as Array<{ n: number }>;
+    // NOTE: writing a summary is NOT activity — updated_at is deliberately left
+    // alone here so "Active 2h ago" keeps meaning "the owner last spoke".
     await sql`
       UPDATE buzzy_sessions
-      SET summary = ${value}, summary_at = now(), summary_messages = ${Number(count[0]?.n ?? 0)}, updated_at = now()
+      SET summary = ${value}, summary_at = now(), summary_messages = ${Number(count[0]?.n ?? 0)}
       WHERE id = ${sessionId} AND user_id = ${userId}
     `;
+    if (derivedTitle.length > 2) {
+      await sql`
+        UPDATE buzzy_sessions SET title = ${derivedTitle}
+        WHERE id = ${sessionId} AND user_id = ${userId}
+          AND (title IS NULL OR btrim(title) = '' OR title = 'New session')
+      `;
+    }
   } catch (err) {
     console.warn("[buzzy/sessions] summary write failed:", err instanceof Error ? err.message : err);
   }
