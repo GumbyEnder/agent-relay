@@ -1,6 +1,6 @@
 # BeeZilla — Tool harness hardening + browser capability
 
-**Status:** proposed plan (not started)
+**Status:** wave 1 SHIPPED 2026-10-25 (`686ca69`, live on app.devboards.ai) — A1-A5, C1, B1
 **Owner:** Frodo (PM/integration); implementation via coder-b70 → Aragorn fallback
 **Date:** 2026-10-25
 **Extends:** `docs/BEEZILLA-CAPABILITIES.md` (layers + "where we want to go"), `docs/tool-reliability.md`
@@ -181,12 +181,22 @@ approval surface with its own liability, and none is blocking a real job today.
 
 | Wave | Contents | Rationale |
 |---|---|---|
-| **1** | A1–A5, C1 (`web_search` → Brave), B1 (`read_web_page`, HTTP-first with Hyperbrowser fallback) | Makes the harness trustworthy and closes the two biggest capability holes. No new infrastructure: both providers are managed |
+| **1** ✅ | A1–A5, C1 (`web_search` → Brave), B1 (`read_web_page`, HTTP-first with Hyperbrowser fallback) | Makes the harness trustworthy and closes the two biggest capability holes. No new infrastructure: both providers are managed |
 | **2** | A6–A8, C2, C3, B2 | Injection defense + documents as data + structured page extraction |
 | **3** | B3, C4, C5 (read/draft), C6 | Interaction, OCR, inbox, client formats |
 | **4** | B4, outbound email send, C7 | Needs consent/audit design + a real delivery channel |
 
 Each wave is independently shippable and independently revertable (`BZ_BROWSER_*` / per-tool flags).
+
+### Wave 1 — verified live
+
+| Check | Result |
+|---|---|
+| `web_search` on a real turn | 1 call, 538ms, ok, 1.9KB of leads |
+| `read_web_page` on a real turn | 1 call, 253ms, `path=http`, 8.2KB (usps.com is server-rendered, so no browser spend) |
+| registry/gate/budget tests | `npm run test:tools` green |
+| telemetry read-back | `GET /api/buzzy/tool-calls?days=1` returns per-tool p50/p95 |
+| provider render leg | proven directly (job → completed, markdown), and unit-tested; no live turn has needed the browser yet |
 
 ---
 
