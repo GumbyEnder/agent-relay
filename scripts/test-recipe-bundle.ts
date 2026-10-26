@@ -542,6 +542,34 @@ ok("seal refuses prose atomised one word per field", () => {
   assert.equal(threw.includes("leaks_sealed_text"), true, `atomised prose sealed: ${threw}`);
 });
 
+ok("seal refuses a boundary split across two fields with a key between them", () => {
+  // Round 13: with keys interleaved into the manifest text, "no vat due" and
+  // "now on friday" in two code values looked non-contiguous. Values only.
+  const gap = { a: "no vat due", b: "now on", c: "friday",
+    d: "the quarterly filing schedule", e: "reviewed by the finance team" };
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: gap as never,
+      checks: { ...compiled.manifest, rules: 9, codes: { K1: "no vat due", K2: "now on friday" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `split boundary sealed: ${threw}`);
+});
+
+ok("seal refuses a vocabulary word embedded in longer sealed text", () => {
+  // Excusal required the term to be a token-aligned run in the sealed half; plain
+  // containment let "xxrecommendationxx" excuse the whole public word.
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: "xxrecommendationxx" } as never,
+      checks: { ...compiled.manifest, codes: { C99: "recommendation" } },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `embedded term excused: ${threw}`);
+});
+
 ok("seal refuses a sealed value that is a fragment of a vocabulary word", () => {
   // A sealed "recommendat" against outputs ["recommendation"] used to publish: the
   // excusal matched a fragment of the public identifier. The exemption now requires

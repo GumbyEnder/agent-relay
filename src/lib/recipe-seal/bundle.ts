@@ -362,158 +362,155 @@ export function guardMaterial(semantic: unknown): {
   // The sealed half as ONE document. Word-per-field storage becomes a sentence
   // again the moment the values are joined, which is the whole point.
   const text = values.join(" ");
-  const atomised = values.length >= 4 && values.filter((v) => tokens(v).length <= 3).length >= values.length - 1;
+  // Searchable = the comparison can actually see something: a 4-word run in the
+  // joined values, or one value/key long enough to window.
   const searchable =
+    tokens(text).length >= SEAL_LEAK_N ||
     values.some((v) => normalizeForCompare(v).length >= windowFor(v)) ||
-    keys.some((k) => normalizeForCompare(k).length >= windowFor(k)) ||
-    (atomised && normalizeForCompare(text).length >= windowFor(text));
+    keys.some((k) => normalizeForCompare(k).length >= windowFor(k));
   return { strings: [...values, ...keys], text, values, keys, searchable };
 }
 
 export function semanticLeakInManifest(manifest: unknown, semantic: unknown): string[] {
   const material = guardMaterial(semantic);
-  const semanticStrings = material.strings;
   // Fail CLOSED. Nothing to compare means the no-plaintext promise cannot be
-  // evaluated, so it must not read as "clean". Empty text is reported as
-  // semantic_payload:empty, text too short to compare as
-  // semantic_payload:unsearchable; this return value is the backstop for any
-  // caller that reaches the leak test directly.
-  if (semanticStrings.length === 0) return ["<no_sealed_text>"];
+  // evaluated, so it must not read as "clean".
+  if (material.strings.length === 0) return ["<no_sealed_text>"];
   if (!material.searchable) return ["<unsearchable_sealed_text>"];
 
-  // Join before n-gramming. An array of single words yields no n-grams per string,
-  // which previously emptied the guard set and let the whole boundary seal and
-  // publish (found by an independent review).
-  const semanticText = material.text;
-  const guarded = ngrams(semanticText, SEAL_LEAK_N);
-  for (const k of material.keys) for (const g of ngrams(k, SEAL_LEAK_N)) guarded.add(g);
-
   const hits: string[] = [];
-  const strings: Array<[string, string]> = [];
+
+  // ── The manifest, as (path, text) pairs plus its whole de-spaced text ───────
+  const entries: Array<[string, string]> = [];
   const walk = (value: unknown, path: string): void => {
-    if (typeof value === "string") { strings.push([path, value]); return; }
+    if (typeof value === "string") { entries.push([path || "<root>", value]); return; }
     if (Array.isArray(value)) { value.forEach((v, i) => walk(v, `${path}[${i}]`)); return; }
     if (plainObject(value)) {
       for (const [k, v] of Object.entries(value)) {
         const child = path ? `${path}.${k}` : k;
         // Object KEYS are attacker-chosen in checks.codes and pricing.split_bp.
-        // A values-only walk let the boundary ride in as a key and be served by
-        // GET /manifest (found by an independent review).
-        strings.push([`${child}<key>`, k]);
+        entries.push([`${child}<key>`, k]);
         walk(v, child);
       }
     }
   };
   walk(manifest, "");
 
-  // 1. Exact n-gram run, per field (so the report names the field).
-  for (const [path, value] of strings) {
-    const t = tokens(value);
-    for (let i = 0; i + SEAL_LEAK_N <= t.length; i++) {
-      if (guarded.has(t.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); break; }
+  // The whole manifest as one text. Comparing a sealed window against this is
+  // correct: the manifest IS one document, so a run crossing two of its own
+  // fields is still contiguous text a reader sees. (The mistake in earlier rounds
+  // was splicing the SEALED fields together, which is what collided with ordinary
+  // vocabulary and refused the honest fixture.)
+  const manifestText = entries.map(([, v]) => v).join(" ");
+  const manifestNorm = normalizeForCompare(manifestText);
+  const manifestTokens = tokens(manifestText);
+  // Values only, for the cross-field word run: a key sitting between two values
+  // ("K1 no vat due K2 now on friday") breaks contiguity that a reader of the
+  // served JSON still experiences as one sentence.
+  const manifestValueTokens = tokens(
+    entries.filter(([path]) => !path.endsWith("<key>")).map(([, v]) => v).join(" "),
+  );
+
+  // ── Sealed side ────────────────────────────────────────────────────────────
+  // Values are joined into one document UNCONDITIONALLY. No predicate decides
+  // whether the sealed half counts as "a document": rounds 12 and 13 each found
+  // that such a switch was itself the hole (one word per field; then two
+  // multi-token values). Token-aligned matching makes the join safe.
+  const sealedTokens = tokens(material.text);
+  const sealedGrams = new Set<string>();
+  for (let i = 0; i + SEAL_LEAK_N <= sealedTokens.length; i++) {
+    sealedGrams.add(sealedTokens.slice(i, i + SEAL_LEAK_N).join(" "));
+  }
+  for (const key of material.keys) {
+    const kt = tokens(key);
+    for (let i = 0; i + SEAL_LEAK_N <= kt.length; i++) sealedGrams.add(kt.slice(i, i + SEAL_LEAK_N).join(" "));
+  }
+
+  // 1. Word-run inside one manifest field — names the field.
+  if (sealedGrams.size > 0) {
+    for (const [path, text] of entries) {
+      const mt = tokens(text);
+      for (let i = 0; i + SEAL_LEAK_N <= mt.length; i++) {
+        if (sealedGrams.has(mt.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push(path); break; }
+      }
+      if (hits.length > 0) break;
     }
   }
 
-  // 2. Order-independent containment: chunking and permutation preserve the bag of
-  // content words even when no adjacent run survives.
-  const manifestBag = new Set<string>();
-  for (const [, v] of strings) {
-    for (const t of tokens(v)) {
-      // Schema words are structural: the manifest must say "boundary_summary" and
-      // "capability". Counting them as coverage made a one-word sealed value look
-      // like a leak against any honest manifest.
-      if (!SCHEMA_KEY_NAMES.has(t)) manifestBag.add(t);
+  // 2. Word-run across manifest fields — a clause split over two of them.
+  if (!hits.includes("<concatenated>") && sealedGrams.size > 0) {
+    for (let i = 0; i + SEAL_LEAK_N <= manifestValueTokens.length; i++) {
+      if (sealedGrams.has(manifestValueTokens.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push("<concatenated>"); break; }
     }
   }
+
+  // 3. Order-independent: a bag of content words survives chunking and reversal.
+  const manifestBag = new Set<string>();
+  for (const t of manifestTokens) if (!SCHEMA_KEY_NAMES.has(t)) manifestBag.add(t);
 
   const covers = (text: string): boolean => {
     let content = [...new Set(contentTokens(text))];
     if (content.length < 3) {
-      // A boundary made of short words ("no vat due now") has no 4+ char content
-      // tokens, so the ratio test had nothing to measure. Fall back to any
-      // non-stopword token of two or more characters — but never to a SINGLE
-      // token: with a one-word guard the threshold drops to 1.0, so any manifest
-      // that merely shares that word reads as 100% coverage. That produced false
-      // positives on metadata-only payloads ({"version": 3} and friends).
       const fallback = [...new Set(tokens(text).filter((t) => t.length >= 2 && !STOPWORDS.has(t)))];
       if (fallback.length < 2) return false;
       content = fallback;
     }
     if (content.length === 0) return false;
-    // A short boundary has too few words to hide behind a ratio: require all of
-    // them. Longer prose uses the 70% threshold.
     const threshold = content.length >= 5 ? 0.7 : 1;
     const present = content.filter((t) => manifestBag.has(t)).length;
     return present / content.length >= threshold;
   };
 
-  for (const str of semanticStrings) {
-    if (contentTokens(str).length < 3) continue;   // single words are judged joined
-    if (covers(str)) { hits.push("<vocabulary>"); break; }
-  }
-  if (!hits.includes("<vocabulary>") && covers(semanticText)) hits.push("<vocabulary>");
-
-  // 3. Cross-field: a run split so no single field contains it.
-  const blob = strings.map(([, v]) => v).join(" ");
-  const bt = tokens(blob);
-  for (let i = 0; i + SEAL_LEAK_N <= bt.length; i++) {
-    if (guarded.has(bt.slice(i, i + SEAL_LEAK_N).join(" "))) { hits.push("<concatenated>"); break; }
-  }
-
-  // 4. The total pass: normalised character windows, EVERY string, EVERY script.
-  //
-  // Every previous version of this pass was scoped — to values, then to keys, then
-  // to non-ASCII, then to strings yielding fewer than four tokens — and every scope
-  // was a hole: a CJK sentence ending in 。 split into four tokens and skipped the
-  // pass entirely while producing no 4-gram either, so it published and served
-  // verbatim. There is no scope here. A window that matches is a leak unless the
-  // manifest is REQUIRED to contain that text (schema vocabulary) or it is a
-  // declared short descriptor. That is the whole rule, and it is the one a customer
-  // can be told: no ten normalised characters of the sealed half appear in a
-  // published manifest, in any script.
-  if (!hits.includes("<normalized>")) {
-    const manNorm = normalizeForCompare(blob);
-    // Exemption comes ONLY from vocabulary fixed in this file. Reading it from the
-    // manifest certified itself: 32 characters of sealed prose parked in
-    // capability.outputs excused every window inside them, and the prose was served.
-    // Excused only when the SEALED half itself contains the whole vocabulary term.
-    // Excusing by "window is a fragment of a vocab word" let a sealed value of
-    // "recommendat" publish against outputs:["recommendation"] — the manifest
-    // declared a public identifier, the sealed half contained a truncation of it,
-    // and 11 characters of sealed text were served. Requiring the full term in
-    // both places means the shared text is the public identifier, not a slice of
-    // it.
-    const guardNormAll = normalizeForCompare(semanticText);
-    const excused = (w: string): boolean =>
-      SCHEMA_KEY_NAMES.has(w) ||
-      VOCAB_WINDOWS.some((v) => v.includes(w) && guardNormAll.includes(v));
-    // Per field, plus each key. Concatenating every value would catch the
-    // word-per-field attack but also manufactures windows that straddle a field
-    // boundary ("…recommendation" + "tools…" yields "mendationt") and collide with
-    // ordinary vocabulary — it refused the honest fixture. So the join is applied
-    // only to the shape that attack actually takes: many short values, i.e. prose
-    // atomised across fields. A payload of real prose fields is compared per field.
-    const atomised =
-      material.values.length >= 4 &&
-      material.values.filter((v) => tokens(v).length <= 3).length >= material.values.length - 1;
-    const corpora: string[] = [
-      ...material.values,
-      ...(atomised ? [material.text] : []),
-      ...material.keys,
-    ];
-    for (const doc of corpora) {
-      const g = normalizeForCompare(doc);
-      const width = windowFor(doc);
-      if (g.length < width) continue;
-      for (let i = 0; i + width <= g.length; i++) {
-        const w = g.slice(i, i + width);
-        if (manNorm.includes(w) && !excused(w)) {
-          hits.push("<normalized>"); break;
-        }
-      }
-      if (hits.includes("<normalized>")) break;
+  if (!hits.includes("<vocabulary>")) {
+    for (const s of material.values) {
+      if (contentTokens(s).length < 3) continue;
+      if (covers(s)) { hits.push("<vocabulary>"); break; }
     }
   }
+  if (!hits.includes("<vocabulary>") && covers(material.text)) hits.push("<vocabulary>");
+
+  // 4. Inside a single word, per sealed field. Catches scripts with no word
+  // boundaries (a CJK sentence is one token, so passes 1-3 see nothing).
+  // A vocabulary term is excused only when the sealed half carries it as a
+  // token-aligned run. Plain containment let a sealed "xxrecommendationxx" excuse
+  // the full public word and publish 14 characters of sealed text; requiring the
+  // term to appear as its own run ("comparison table" counts, "xx…xx" does not)
+  // keeps the honest fixture working without that hole.
+  const sealedRunNorms = new Set<string>();
+  for (let i = 0; i < sealedTokens.length; i++) {
+    let acc = "";
+    for (let j = i; j < sealedTokens.length && j < i + 4; j++) {
+      acc += sealedTokens[j];
+      sealedRunNorms.add(acc);
+    }
+  }
+  for (const key of material.keys) {
+    const kt = tokens(key);
+    if (kt.length) sealedRunNorms.add(kt.join(""));
+  }
+  const excused = (w: string): boolean =>
+    SCHEMA_KEY_NAMES.has(w) ||
+    VOCAB_WINDOWS.some((v) => v.includes(w) && sealedRunNorms.has(v));
+
+  const windowScan = (doc: string, label: string): boolean => {
+    const g = normalizeForCompare(doc);
+    const width = windowFor(doc);
+    if (g.length < width) return false;
+    for (let i = 0; i + width <= g.length; i++) {
+      const w = g.slice(i, i + width);
+      if (excused(w)) continue;
+      if (manifestNorm.includes(w)) { hits.push(label); return true; }
+    }
+    return false;
+  };
+
+  if (!hits.includes("<normalized>")) {
+    for (const v of material.values) if (windowScan(v, "<normalized>")) break;
+  }
+  if (!hits.includes("<key>")) {
+    for (const k of material.keys) if (windowScan(k, "<key>")) break;
+  }
+
   return hits;
 }
 
