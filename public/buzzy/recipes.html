@@ -24,177 +24,73 @@
       line-height: 1.55;
       -webkit-font-smoothing: antialiased;
     }
-    main {
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 2rem 1.25rem 4rem;
-    }
-    .page-head { margin-bottom: 1.75rem; }
-    h1 {
-      font-size: 1.9rem;
-      margin: 0 0 0.5rem;
-      color: #fff;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-    }
-    .lede {
-      margin: 0;
-      max-width: 720px;
-      color: #B8B8B8;
-      font-size: 0.95rem;
-    }
+    main { max-width: 1120px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    .page-head { margin-bottom: 1.5rem; }
+    h1 { font-size: 1.9rem; margin: 0 0 0.5rem; color: #fff; font-weight: 700; letter-spacing: -0.01em; }
+    .lede { color: #B8B8B8; max-width: 720px; margin: 0 0 0.75rem; font-size: 0.95rem; }
     .lede strong { color: var(--bz-yellow); font-weight: 600; }
 
-    /* How a recipe gets written */
-    .how {
-      border: 1px solid #2A2A2A;
-      border-left: 3px solid var(--bz-yellow);
-      background: var(--bz-panel);
-      border-radius: 6px;
-      padding: 1.25rem 1.35rem;
-      margin: 0 0 2rem;
+    .legend {
+      display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: center;
+      border-top: 1px solid #222; border-bottom: 1px solid #222;
+      padding: 0.7rem 0; margin: 1.25rem 0 1.75rem;
+      font-size: 0.8rem; color: #8A8A8A;
     }
-    .how h2 {
-      margin: 0 0 0.35rem;
-      font-size: 1rem;
-      color: var(--bz-yellow);
-      letter-spacing: .02em;
-    }
-    .how p.hint { margin: 0 0 0.9rem; color: #9A9A9A; font-size: 0.85rem; }
-    .how ol {
-      margin: 0 0 0.9rem;
-      padding-left: 1.15rem;
-      columns: 2;
-      column-gap: 2rem;
-      font-size: 0.87rem;
-      color: #D0D0D0;
-    }
-    .how ol li { margin: 0 0 0.45rem; break-inside: avoid; }
-    .asks {
-      border-top: 1px solid #262626;
-      padding-top: 0.8rem;
-      font-size: 0.83rem;
-      color: #9A9A9A;
-      margin: 0;
-    }
-    .asks strong { color: #D8D8D8; font-weight: 600; }
+    .legend b { color: #D8D8D8; font-weight: 600; }
+    .legend .hint { margin-left: auto; color: #6F6F6F; }
 
-    /* Category strip */
-    .cats {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      margin: 0 0 1.75rem;
-    }
-    .cats a {
-      font-size: 0.78rem;
-      color: #B0B0B0;
-      text-decoration: none;
-      border: 1px solid #2E2E2E;
-      border-radius: 999px;
-      padding: 0.3rem 0.75rem;
-      transition: border-color .15s, color .15s;
-    }
-    .cats a:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; }
 
-    section.cat { margin-bottom: 2.25rem; scroll-margin-top: 1rem; }
-    section.cat > h2 {
-      font-size: 0.78rem;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-      color: #8A8A8A;
-      font-weight: 700;
-      margin: 0 0 0.9rem;
-      padding-bottom: 0.5rem;
-      border-bottom: 1px solid #222;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-      gap: 1rem;
-      align-items: start;
-    }
-    .recipe-card {
+    .card {
       background: var(--bz-panel);
       border: 1px solid #2A2A2A;
       border-top: 3px solid var(--bz-yellow);
       border-radius: 6px;
       padding: 1.1rem 1.15rem 1rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.55rem;
+      display: flex; flex-direction: column; gap: 0.6rem;
+      transition: border-color .15s, transform .15s;
     }
-    .recipe-card .top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 0.5rem;
+    .card:hover { border-color: #3A3A3A; transform: translateY(-1px); }
+    .card .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+    .card h3 { margin: 0; font-size: 1rem; color: #fff; font-weight: 650; line-height: 1.35; }
+    .card .desc { margin: 0; color: #A8A8A8; font-size: 0.86rem; }
+
+    .price {
+      flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; letter-spacing: .02em;
+      border-radius: 999px; padding: 0.22rem 0.6rem; white-space: nowrap;
+      border: 1px solid var(--bz-yellow-dim); color: var(--bz-yellow);
+      background: rgba(255,193,7,0.07);
     }
-    .recipe-card .num {
-      font-size: 0.7rem;
-      color: #6F6F6F;
-      font-variant-numeric: tabular-nums;
-      letter-spacing: .06em;
+    .price.free { border-color: #2F6F4F; color: #67D99B; background: rgba(103,217,155,0.07); }
+
+    .meta { display: flex; flex-wrap: wrap; gap: 0.3rem 0.85rem; font-size: 0.73rem; color: #7A7A7A; }
+    .meta b { color: #A8A8A8; font-weight: 600; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .chip {
+      font-size: 0.68rem; color: #8A8A8A; border: 1px solid #2A2A2A;
+      background: #101010; border-radius: 5px; padding: 0.12rem 0.4rem;
     }
-    .recipe-card .badge {
-      font-size: 0.63rem;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-      color: #8A8A8A;
-      border: 1px solid #333;
-      border-radius: 999px;
-      padding: 0.12rem 0.5rem;
+    .chip.record { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #6F6F6F; }
+
+    .lock {
+      margin-top: auto; padding-top: 0.7rem; border-top: 1px solid #222;
+      display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+      font-size: 0.76rem; color: #7A7A7A;
     }
-    .recipe-card h3 {
-      font-size: 1rem;
-      margin: 0;
-      color: #fff;
-      font-weight: 650;
-      line-height: 1.35;
-    }
-    .recipe-card .what {
-      margin: 0;
-      color: #A8A8A8;
-      font-size: 0.83rem;
-    }
-    .recipe-card ol.steps {
-      margin: 0.1rem 0 0;
-      padding-left: 1.1rem;
-      color: #D2D2D2;
-      font-size: 0.86rem;
-      line-height: 1.6;
-    }
-    .recipe-card ol.steps li { margin-bottom: 0.28rem; }
-    .recipe-card .check {
-      margin: 0.15rem 0 0;
-      font-size: 0.79rem;
-      color: #9C9C9C;
-      border-top: 1px dashed #2C2C2C;
-      padding-top: 0.55rem;
-    }
-    .recipe-card .check strong { color: var(--bz-yellow); font-weight: 600; }
-    .recipe-card .use {
-      margin-top: auto;
-      padding-top: 0.4rem;
-      font-size: 0.78rem;
-      color: #8A8A8A;
-      text-decoration: none;
-    }
-    .recipe-card .use:hover { color: var(--bz-yellow); }
+    .lock .sealed { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .lock .sealed::before { content: "🔒"; font-size: 0.72rem; }
+    .lock a { color: var(--bz-yellow); text-decoration: none; font-weight: 600; }
+    .lock a:hover { text-decoration: underline; }
+
+    .state { padding: 2rem 0; color: #7A7A7A; font-size: 0.88rem; }
+    .state.error { color: #FF8A80; }
 
     footer.notes {
-      border-top: 1px solid #222;
-      margin-top: 1rem;
-      padding-top: 1.1rem;
-      color: #7A7A7A;
-      font-size: 0.8rem;
-      max-width: 820px;
+      border-top: 1px solid #222; margin-top: 2rem; padding-top: 1.1rem;
+      color: #7A7A7A; font-size: 0.8rem; max-width: 820px;
     }
-    @media (max-width: 700px) {
-      .how ol { columns: 1; }
-      .grid { grid-template-columns: 1fr; }
-    }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
   </style>
   <link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
@@ -217,410 +113,110 @@
       </nav>
     </div>
   </header>
+
   <main>
     <div class="page-head">
       <h1>Recipes</h1>
       <p class="lede">
-        A recipe is <strong>your</strong> way of doing something, written down well enough that BeeZilla can
-        do it your way next time. Below are twenty examples of the kind of recipe you can build here —
-        each one is a real, ordinary job people already do by hand. The steps shown are the basic shape,
-        not the finished thing. Yours gets sharper every time you correct it.
+        A recipe is a way of doing a job that someone has already worked out, tested and sealed.
+        You can see what it does, who made it, when it last changed and what it costs — <strong>the
+        method stays sealed</strong> until you buy it.
       </p>
     </div>
 
-    <div class="how">
-      <h2>How a recipe gets written here</h2>
-      <p class="hint">You don't sit down to author a recipe. You do the job, and your corrections become the recipe.</p>
-      <ol>
-        <li>Start a job and describe the goal in your own words.</li>
-        <li>BeeZilla interviews you — the problem, who it's for, what's in the way, what done looks like.</li>
-        <li>It shows you a <em>full draft</em>, not a plan. You change what's wrong.</li>
-        <li>Every change is a rule: what it should have known, what it should never do.</li>
-        <li>When the result is right, BeeZilla offers to save it as a recipe — with its checks.</li>
-        <li>Next time, it shows the checks first: "14 of 14 keywords covered," "line items total $1,284 — reconciles."</li>
-        <li>After a few clean runs, the recipe can work on its own up to its boundary — never past it.</li>
-      </ol>
-      <p class="asks">
-        <strong>The five questions a recipe answers:</strong> When should this be used? · What must I
-        always get from you? · What do you check that a beginner wouldn't? · What must never appear in
-        the result? · What should BeeZilla refuse to do without you?
-      </p>
+    <div class="legend">
+      <span><b>Price</b> in Honey Drops, or free</span>
+      <span><b>Sealed</b> — the steps are never published</span>
+      <span><b>Checked</b> — every recipe ships with its rules</span>
+      <span class="hint" id="count"></span>
     </div>
 
-    <div class="cats">
-      <a href="#career">Career &amp; earning</a>
-      <a href="#money">Money &amp; admin</a>
-      <a href="#marketing">Marketing &amp; sales</a>
-      <a href="#home">Home, health &amp; family</a>
-      <a href="#life">Craft &amp; life events</a>
-    </div>
-
-    <!-- ============ CAREER ============ -->
-    <section class="cat" id="career">
-      <h2>Career &amp; earning</h2>
-      <div class="grid">
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">01</span><span class="badge">Example</span></div>
-          <h3>A résumé aimed at one posting</h3>
-          <p class="what">One page tuned to a single job ad, plus a short cover note and a list of what you changed.</p>
-          <ol class="steps">
-            <li>Paste the posting and your current résumé.</li>
-            <li>Pull out its must-have keywords and the seniority it implies.</li>
-            <li>Map each must-have to something you actually did; drop what doesn't map.</li>
-            <li>Rewrite the top third so the match is obvious in seven seconds.</li>
-            <li>Put a number in every bullet you can — people, money, time, volume.</li>
-            <li>Cut the material that belongs to a different job.</li>
-            <li>Write three sentences naming the role and your closest match.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every must-have appears in context, no claim lacks your number, and it's still one page.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">02</span><span class="badge">Example</span></div>
-          <h3>An interview pack from the job description</h3>
-          <p class="what">The questions this employer will actually ask, and one true story behind each answer.</p>
-          <ol class="steps">
-            <li>Paste the posting and the résumé you sent them.</li>
-            <li>List the eight questions this role invites.</li>
-            <li>Attach one real story to each: situation, what you did, what changed.</li>
-            <li>Write the honest answer to the gap they'll spot.</li>
-            <li>Prepare three questions that show you understand their problem.</li>
-            <li>Rehearse once out loud; trim anything past ninety seconds.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every question traces to the posting, every answer uses a story you actually lived, and nothing is invented.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">03</span><span class="badge">Example</span></div>
-          <h3>A raise or rate conversation</h3>
-          <p class="what">The number, the case for it, and what to say when the answer isn't yes.</p>
-          <ol class="steps">
-            <li>State your role, location, current pay, and what you're asking for.</li>
-            <li>Collect two independent ranges for that role and market.</li>
-            <li>Write one line on what you delivered and what it changed.</li>
-            <li>Decide your walk-away number and one non-salary ask.</li>
-            <li>Script the opening ask, then the silence after it.</li>
-            <li>Prepare three branches: yes, not now, no — one follow-up line each.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> two sourced numbers (or an honest "couldn't confirm"), all three branches written, and no threats anywhere in it.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">04</span><span class="badge">Example</span></div>
-          <h3>A career pivot, in plain language</h3>
-          <p class="what">Your experience translated into the language of the field you're moving into.</p>
-          <ol class="steps">
-            <li>List your roles and what each one actually built.</li>
-            <li>Name the target role and its top five requirements.</li>
-            <li>Build a translation table: old title language → new field language.</li>
-            <li>Pick three proof stories that survive the translation.</li>
-            <li>Write the sixty-second answer to "why this move?"</li>
-            <li>Retire the jargon only your old industry understands.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every claim traces to a real role and the table covers all five requirements.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- ============ MONEY ============ -->
-    <section class="cat" id="money">
-      <h2>Money &amp; admin</h2>
-      <div class="grid">
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">05</span><span class="badge">Example</span></div>
-          <h3>A subscription and bill audit</h3>
-          <p class="what">Every recurring charge, sorted into cancel, downgrade, renegotiate, keep.</p>
-          <ol class="steps">
-            <li>Paste the last two statements, or list the charges.</li>
-            <li>Flag anything duplicated, raised, or unrecognized.</li>
-            <li>Sort each line: cancel, downgrade, renegotiate, keep.</li>
-            <li>Write the cancellation or renewal line for each one.</li>
-            <li>Do the cheapest wins first.</li>
-            <li>Log what you saved and the date it lands.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> the line items add up to the total you claim, and no saving appears without a source line.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">06</span><span class="badge">Example</span></div>
-          <h3>A dispute, in the right order</h3>
-          <p class="what">The letters to send, in sequence, with the deadline on each one.</p>
-          <ol class="steps">
-            <li>Describe what went wrong, with dates and amounts.</li>
-            <li>Attach what you have: bill, contract, receipt, photo.</li>
-            <li>Set the ladder: the company, then the regulator, then the card issuer.</li>
-            <li>Write letter one — facts, what you want, by when.</li>
-            <li>Draft each follow-up with its own date.</li>
-            <li>Stop and refer to a professional if it turns into a legal claim.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> the dates are consistent, the amounts match the evidence, and no rule or statute number was made up.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">07</span><span class="badge">Example</span></div>
-          <h3>An insurance claim packet</h3>
-          <p class="what">A chronology, a photo set, and the policy language that matches the loss.</p>
-          <ol class="steps">
-            <li>Give the policy number, the date, and what happened.</li>
-            <li>Write the chronology one event per line, in order.</li>
-            <li>Match each damaged or lost item to a policy section.</li>
-            <li>List the photos an adjuster will ask for, then take them.</li>
-            <li>Ask the one coverage question you need answered.</li>
-            <li>Hand coverage disputes to a professional.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every line cites a policy section or a photo, and no value was invented.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">08</span><span class="badge">Example</span></div>
-          <h3>A monthly close for a small business</h3>
-          <p class="what">The month's books, categorized the same way every time, with the questions you ask the owner.</p>
-          <ol class="steps">
-            <li>Export the month's transactions.</li>
-            <li>Write a rule for every merchant you've seen before.</li>
-            <li>Apply the rules, then look at what's left over.</li>
-            <li>Ask about the leftovers only — five questions, maximum.</li>
-            <li>Reconcile the bank balance.</li>
-            <li>Save a one-page summary: income, spend, the three things that moved.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> nothing is uncategorized, the account reconciles, and every flagged item has a named question.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- ============ MARKETING ============ -->
-    <section class="cat" id="marketing">
-      <h2>Marketing &amp; sales</h2>
-      <div class="grid">
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">09</span><span class="badge">Example</span></div>
-          <h3>A local search pass</h3>
-          <p class="what">The business profile fixes, photos, and weekly habit that make a service business findable nearby.</p>
-          <ol class="steps">
-            <li>Name the service, the city, and the three things you want to be found for.</li>
-            <li>Check the category, hours, service area, and phone number.</li>
-            <li>Rewrite the description: what you do, for whom, where.</li>
-            <li>Add ten real photos — storefront, work in progress, finished, the team.</li>
-            <li>Set up the review ask and reply to every review.</li>
-            <li>Post one update a week, about work you actually did.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every recommendation maps to a field that exists, and nothing promises a ranking.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">10</span><span class="badge">Example</span></div>
-          <h3>An offer, positioned for one niche</h3>
-          <p class="what">Who it's for, what it replaces, what it costs, and who it isn't for.</p>
-          <ol class="steps">
-            <li>Pick one audience and the problem they'd pay to end.</li>
-            <li>Name what they use now and why it fails them.</li>
-            <li>Write the one-line offer: outcome, for whom, how fast.</li>
-            <li>Anchor the price against two real comparisons.</li>
-            <li>List the three proof points you can actually show.</li>
-            <li>Write the "we're not for you" line.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> there's exactly one audience, every proof point is sourced, and no claim is unfalsifiable.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">11</span><span class="badge">Example</span></div>
-          <h3>An outreach sequence you'd answer</h3>
-          <p class="what">Three touches, four objections answered, and a break-up line. Drafted, never sent for you.</p>
-          <ol class="steps">
-            <li>Define the exact recipient and the trigger you're responding to.</li>
-            <li>Write a first line that is specific and true — not a compliment.</li>
-            <li>Write three touches: value, proof, break-up; four to five days apart.</li>
-            <li>Answer the four objections you actually hear.</li>
-            <li>Add the one-line opt-out.</li>
-            <li>Draft only. You press send.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every claim is verifiable, no scraped personal detail appears, and the send boundary held.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">12</span><span class="badge">Example</span></div>
-          <h3>A product listing that gets found</h3>
-          <p class="what">Title, bullets, images, and backend terms rebuilt for one marketplace category.</p>
-          <ol class="steps">
-            <li>Paste the current listing and the three listings above you.</li>
-            <li>Find the terms your category actually searches with.</li>
-            <li>Write the title in the category's formula: brand, product, key attribute, size.</li>
-            <li>Rewrite bullets: benefit first, specification second.</li>
-            <li>Reorder images: hero, in use, scale, detail, comparison.</li>
-            <li>Fill the backend fields with the terms that didn't fit.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> every field is inside its limit, no prohibited claim appears, and every term came from real search data.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- ============ HOME ============ -->
-    <section class="cat" id="home">
-      <h2>Home, health &amp; family</h2>
-      <div class="grid">
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">13</span><span class="badge">Example</span></div>
-          <h3>Contractor scope and bid comparison</h3>
-          <p class="what">A scope so complete that the bids actually compare, and the questions that expose a bad one.</p>
-          <ol class="steps">
-            <li>Describe the job and what "done" means to you.</li>
-            <li>Write the scope lines that prevent change orders: materials, disposal, permits, cleanup.</li>
-            <li>Get at least two written bids against the same scope.</li>
-            <li>Normalize them line by line.</li>
-            <li>Ask: who pulls the permit, what's excluded, what changes the price.</li>
-            <li>Choose on the total, not the headline.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> two sourced bids (or an honest "couldn't confirm"), the comparison adds up, and exclusions are listed.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">14</span><span class="badge">Example</span></div>
-          <h3>A care coordination packet</h3>
-          <p class="what">One page a new doctor can read in a minute, plus the questions for each appointment.</p>
-          <ol class="steps">
-            <li>Collect conditions, medications, and allergies exactly as written.</li>
-            <li>Build the one-page history in the order a clinician reads it.</li>
-            <li>Write the question for each upcoming appointment.</li>
-            <li>Record what changed after each visit.</li>
-            <li>Keep one folder and one naming convention.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> no dosage or diagnosis was invented, every medication has a source, and the professional-referral line is intact.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">15</span><span class="badge">Example</span></div>
-          <h3>A week of meals from constraints</h3>
-          <p class="what">Five dinners that share ingredients, fit the budget and the clock, and survive the allergies.</p>
-          <ol class="steps">
-            <li>Set the constraints: people, budget, time ceiling, allergies.</li>
-            <li>Pick five dinners that share ingredients.</li>
-            <li>Build one shopping list from those five.</li>
-            <li>Note the prep you can do once, on Sunday.</li>
-            <li>Plan the leftovers onto a specific night.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> the list adds up, every ingredient is used or deliberately parked, and allergens were checked on every line.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">16</span><span class="badge">Example</span></div>
-          <h3>A move, six weeks out</h3>
-          <p class="what">The dates that matter, the order they matter in, and what it will cost.</p>
-          <ol class="steps">
-            <li>List the fixed dates: lease, movers, utilities, mail.</li>
-            <li>Work back six weeks, one task per week.</li>
-            <li>Separate "before the truck" from "after the truck".</li>
-            <li>Price it in lines: movers, supplies, deposits, travel.</li>
-            <li>Write the first-night box list.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> no task depends on a later date, the cost lines total, and every deposit has a refund condition.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- ============ LIFE ============ -->
-    <section class="cat" id="life">
-      <h2>Craft &amp; life events</h2>
-      <div class="grid">
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">17</span><span class="badge">Example</span></div>
-          <h3>The family recipe, made repeatable</h3>
-          <p class="what">The dish you cook by feel, written so someone else gets the same result.</p>
-          <ol class="steps">
-            <li>Write it as you actually make it, vague cues included.</li>
-            <li>Turn each cue into something testable: temperature, time, colour, sound.</li>
-            <li>Write the ratios so it scales up and down.</li>
-            <li>Add the substitution table.</li>
-            <li>Name the three ways it goes wrong and how to spot each.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> the ratios scale, the steps are in order, and no instruction says "until it looks right."</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">18</span><span class="badge">Example</span></div>
-          <h3>An event on a hard budget</h3>
-          <p class="what">Headcount, cap, and the three things people will actually remember.</p>
-          <ol class="steps">
-            <li>Set the date, the headcount, and the cap you won't cross.</li>
-            <li>List what guests remember: the food, the room, one moment.</li>
-            <li>Split every line: vendor, or do it yourself.</li>
-            <li>Get quotes for the vendor lines.</li>
-            <li>Write the rain plan and the run sheet with times.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> the budget sums to the cap, every vendor is quoted or flagged, and the run sheet has clock times.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">19</span><span class="badge">Example</span></div>
-          <h3>The "if something happens" folder</h3>
-          <p class="what">What your family would need to find, in what order — and where it lives, never the passwords.</p>
-          <ol class="steps">
-            <li>List the accounts, policies, and documents someone would need.</li>
-            <li>Write where each one lives — not the password, the location.</li>
-            <li>Add the people to call, in order.</li>
-            <li>Record the decisions already made.</li>
-            <li>Set one review date a year.</li>
-            <li>Send wills and estates to an attorney.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> no secret is stored in it, the coverage list is complete, and the referral line survived your edits.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-        <article class="recipe-card">
-          <div class="top"><span class="num">20</span><span class="badge">Example</span></div>
-          <h3>The job only you know how to do</h3>
-          <p class="what">The task you've never written down, turned into steps someone else can finish.</p>
-          <ol class="steps">
-            <li>Pick the task you're the only one who can do.</li>
-            <li>Film yourself doing it once, start to finish.</li>
-            <li>Break it into steps, each with a "done" you can see.</li>
-            <li>Add the quality bar: what good looks like at each step.</li>
-            <li>Add the three mistakes to prevent.</li>
-            <li>Have someone else run it and mark where they got stuck.</li>
-          </ol>
-          <p class="check"><strong>You'd know it worked if:</strong> someone else completes it unaided, every step has a visible done-state, and the stuck points are fixed.</p>
-          <a class="use" href="/buzzy/talk">Start a job like this →</a>
-        </article>
-
-      </div>
-    </section>
+    <div id="shelf" class="grid"></div>
+    <div id="state" class="state">Loading the shelf…</div>
 
     <footer class="notes">
-      These are examples, not templates you're meant to follow. Two people doing the same job will write
-      different recipes, and the difference is the whole point — it's your judgment that gets saved, not ours.
-      Recipes that touch legal, medical, tax, or insurance decisions always carry a "stop and see a
+      What you always get in public is what a recipe refuses to do. The method — the part someone
+      worked out and paid for with their own mistakes — is only ever opened by the person who owns it.
+      Recipes that touch legal, medical, tax or insurance decisions carry a "stop and see a
       professional" line, and that line can't be edited out.
     </footer>
   </main>
+
   <script>
     (function () {
-      // Session-aware header: name + gate to the branded landing when signed out.
+      var shelf = document.getElementById("shelf");
+      var state = document.getElementById("state");
+      var count = document.getElementById("count");
+
+      function fmtDate(iso) {
+        if (!iso) return "—";
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return "—";
+        return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+      }
+
+      function el(tag, cls, text) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text != null) n.textContent = text;
+        return n;
+      }
+
+      function card(r) {
+        var c = el("article", "card");
+        var row = el("div", "row");
+        row.appendChild(el("h3", null, r.title || r.id));
+        row.appendChild(el("span", "price" + (r.is_free ? " free" : ""),
+          r.is_free ? "Free" : (r.price_honey_drops + " Honey Drops")));
+        c.appendChild(row);
+
+        if (r.description) c.appendChild(el("p", "desc", r.description));
+
+        var meta = el("div", "meta");
+        function m(label, value) {
+          var s = el("span");
+          s.appendChild(el("b", null, label + ":"));
+          s.appendChild(document.createTextNode(" " + value));
+          meta.appendChild(s);
+        }
+        m("By", (r.author && (r.author.name || r.author.id)) || "unknown");
+        m("Made", fmtDate(r.created_at));
+        m("Updated", fmtDate(r.updated_at));
+        c.appendChild(meta);
+
+        var chips = el("div", "chips");
+        var cap = r.capability || {};
+        (cap.outputs || []).forEach(function (o) { chips.appendChild(el("span", "chip", String(o))); });
+        if (r.hash) chips.appendChild(el("span", "chip record", r.hash.slice(0, 10)));
+        if (r.version) chips.appendChild(el("span", "chip", "v" + r.version));
+        c.appendChild(chips);
+
+        var lock = el("div", "lock");
+        lock.appendChild(el("span", "sealed", "Method sealed"));
+        var a = el("a", null, r.is_free ? "Open it →" : "Buy →");
+        a.href = "/buzzy/talk?recipe=" + encodeURIComponent(r.hash || r.id);
+        lock.appendChild(a);
+        c.appendChild(lock);
+        return c;
+      }
+
+      fetch("/api/recipes", { credentials: "same-origin" })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          var rows = (data && data.recipes) || [];
+          if (!rows.length) { state.textContent = "No recipes on the shelf yet."; return; }
+          state.remove();
+          rows.forEach(function (r) { shelf.appendChild(card(r)); });
+          count.textContent = rows.length + (rows.length === 1 ? " recipe" : " recipes");
+        })
+        .catch(function (err) {
+          state.className = "state error";
+          state.textContent = "The shelf could not be loaded (" + err.message + "). Try again shortly.";
+        });
+
       var link = document.querySelector(".account-link");
       if (link) {
         fetch("/api/auth/get-session", { credentials: "same-origin" })
@@ -632,10 +228,9 @@
             link.href = "/buzzy/profile";
             link.style.cursor = "pointer";
           })
-          .catch(function () { /* keep the Sign in link */ });
+          .catch(function () { });
       }
     })();
   </script>
-
 </body>
 </html>
