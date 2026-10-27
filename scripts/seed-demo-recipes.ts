@@ -47,7 +47,8 @@ const SHELF: Array<{ id: string; title: string; description: string; price: numb
 ];
 
 const author = generateAuthorKey();
-const authorName = "Shane Barron";
+const authorName = process.env.SEAL_SEED_AUTHOR_NAME ?? "Shane Barron";
+const authorId = process.env.SEAL_SEED_AUTHOR_ID ?? "acct_shane";
 
 function b64(u: Uint8Array): string {
   return Buffer.from(u).toString("base64");
@@ -83,7 +84,7 @@ function b64(u: Uint8Array): string {
           forbidden_tools: ["send", "submit"],
           boundary_summary: "read-only; nothing is sent",
         },
-        author: { id: "acct_shane", name: authorName, keyId: author.keyId, privateKey: author.privateKey },
+        author: { id: authorId, name: authorName, keyId: author.keyId, privateKey: author.privateKey },
         kek: KEK,
         listing: {
           title: item.title,
