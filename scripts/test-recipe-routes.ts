@@ -359,6 +359,11 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     assert.equal(row.is_free, true);
     const author = row.author as { id?: string; name?: string };
     assert.ok(author?.id, "no author id");
+    // The shelf must not become a paperwork dump: no key material, no splits, no
+    // internal hashes. A shopper gets capability, not the manifest.
+    assert.ok(!("manifest" in row), "the catalogue is shipping the full manifest");
+    const cap = row.capability as { outputs?: unknown; boundary_summary?: unknown };
+    assert.ok(cap && Array.isArray(cap.outputs), "no capability on the shelf");
   });
 
   await ok("manifest is public and carries no prose", async () => {

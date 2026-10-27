@@ -131,6 +131,7 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
       const m = r.manifest as Record<string, unknown> | null;
       const l = (m?.listing ?? {}) as Record<string, unknown>;
       const author = (m?.author ?? {}) as Record<string, unknown>;
+      const cap = (m?.capability ?? {}) as Record<string, unknown>;
       return {
         hash: r.hash,
         id: r.recipe_id,
@@ -144,9 +145,18 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
         // 0 is free. The client renders "Free" and never shows a price of zero.
         price_honey_drops: typeof l.price_honey_drops === "number" ? l.price_honey_drops : 0,
         is_free: (l.price_honey_drops ?? 0) === 0,
-        // Kept so a client can show capability without a second request, and so the
-        // existing tests that read it keep working.
-        manifest: r.manifest,
+        // What it accepts and what it will not do — the two things a shopper needs
+        // beyond the price. Deliberately NOT the manifest: key material, pricing
+        // splits, checks codes and internal hashes are not a shelf's business, and
+        // returning 1.5 KB of them per row makes the catalogue the most expensive
+        // page on the site.
+        capability: {
+          inputs: (cap.inputs ?? []) as unknown,
+          outputs: (cap.outputs ?? []) as unknown,
+          tools: (cap.tools ?? []) as unknown,
+          forbidden_tools: (cap.forbidden_tools ?? []) as unknown,
+          boundary_summary: (cap.boundary_summary ?? "") as unknown,
+        },
       };
     }) } };
   }
