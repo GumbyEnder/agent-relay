@@ -4317,6 +4317,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         metrics.turnMs = metrics.turnMs || Math.round(performance.now() - sendStarted);
         metrics.replyChars = (data.reply || "").length;
         metrics.model = data.timings && data.timings.model ? data.timings.model : null;
+        // Trust the server about which lane answered: a tool/draft turn runs on
+        // the text lane even though the request asked for voice.
+        if (data.timings && data.timings.surface) metrics.surface = data.timings.surface;
         if (metrics.ttfaMs == null && data.timings && data.timings.ttfaMs != null) {
           metrics.ttfaMs = data.timings.ttfaMs;
         }

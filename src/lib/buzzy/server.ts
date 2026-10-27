@@ -583,6 +583,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const toolMax = 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
+  // True when this turn's reply was spoken by the audio model. False on a
+  // tool/draft turn, which is why the owner used to hear the browser's robot
+  // voice instead of BeeZilla's.
+  let spokeThisTurn = false;
   // The words the renderer was given. Persisting these (not the chat reply) is what
   // makes the Library, export and share surfaces show the document the owner asked
   // for; the reply is a confirmation, not a deliverable.
@@ -644,6 +648,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // read aloud, and only the text lane can carry the render tools.
     const useVoiceLane =
       surface === "voice" && !!req.speech && voiceAvailable() && !draftGateOpen && !explicitDocumentRequest;
+    if (useVoiceLane) spokeThisTurn = true;
     const llmStarted = Date.now();
     if (useVoiceLane) {
       const spoken = await voiceCompletion(
@@ -913,6 +918,36 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     console.warn("[buzzy] stripped false file-storage refusal from reply");
   }
   const cleanReply = guardedReply;
+
+  // ── Same voice, always ──────────────────────────────────────────────
+  // Turns that need tools or produce a deliverable run on the text lane, which
+  // has no audio. The client used to fall back to the browser's speech engine,
+  // so the owner heard a different (robotic) voice mid-conversation. Read the
+  // settled reply through the audio model instead, so the voice never changes.
+  if (surface === "voice" && !spokeThisTurn && req.speech && voiceAvailable() && cleanReply.trim()) {
+    try {
+      const spokenText = draftGateOpen
+        ? `Saved it — the document is ready for your approval. ${cleanReply}`.slice(0, 700)
+        : cleanReply.slice(0, 900);
+      await voiceCompletion(
+        [
+          {
+            role: "system",
+            content:
+              "Read the following aloud exactly as written, in your normal speaking voice. " +
+              "Do not add, remove, summarise, or answer it — just say it.",
+          },
+          { role: "user", content: spokenText },
+        ],
+        { maxTokens: 320 },
+        req.speech,
+      );
+      spokeThisTurn = true;
+    } catch (err) {
+      // The client still has its own fallback; never fail the turn over audio.
+      console.warn("[buzzy/voice] readout failed:", err instanceof Error ? err.message : err);
+    }
+  }
 
   if (leaksJargon(sanitizedReply)) {
     // Simple jargon replacement as a fallback
