@@ -221,6 +221,8 @@ export function manifestShapeErrors(manifest: unknown): string[] {
  * could hide the boundary inside `checks.codes.C99`, or split it across two
  * fields, and still be served verbatim.
  */
+import { foldConfusables } from "./confusables";
+
 const SEAL_LEAK_N = 4;
 
 /**
@@ -232,7 +234,9 @@ const SEAL_LEAK_N = 4;
  * guard must tokenise whatever text exists, not only English.
  */
 function tokens(s: string): string[] {
-  return s.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  // Confusables fold first: homoglyph substitution is an identity trick, and every
+  // pass downstream should see the character the reader sees.
+  return foldConfusables(s.normalize("NFKC").toLowerCase()).match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 /**
@@ -260,7 +264,7 @@ function windowFor(s: string): number {
 
 /** NFKC, lowercase, letters and digits only — spaces and punctuation removed. */
 function normalizeForCompare(s: string): string {
-  return s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return foldConfusables(s.normalize("NFKC").toLowerCase()).replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 /**

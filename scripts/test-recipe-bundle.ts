@@ -570,6 +570,20 @@ ok("seal refuses a whole sealed field with its spacing removed", () => {
   assert.equal(threw.includes("leaks_sealed_text"), true, `de-spaced field sealed: ${threw}`);
 });
 
+ok("seal refuses a boundary written with homoglyphs", () => {
+  // Round 13: sealed "n\u0435v\u0435r quot\u0435s" (Cyrillic e) published against a Latin
+  // manifest with the gate clean. Identity of characters is a different question
+  // from boundaries of comparison; confusables are folded before any pass runs.
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: "n\u0435v\u0435r quot\u0435s a pric\u0435 b\u0435for\u0435 signing" } as never,
+      capability: { ...capability, boundary_summary: "never quotes a price before signing" },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `homoglyph boundary sealed: ${threw}`);
+});
+
 ok("a sealed half that merely names a declared output still seals", () => {
   // The excusal must hold in the vocabulary pass too, or every recipe whose
   // outputContract names its own output would be refused.
