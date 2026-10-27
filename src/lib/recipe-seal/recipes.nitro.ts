@@ -11,8 +11,25 @@ import { resolveOperatorContext } from "@/lib/auth/verify.server";
 import { chatCompletion } from "@/lib/buzzy/llm";
 import { createRouteDeps, routeRecipes, type RouteDeps } from "./routes";
 import { FsStorage } from "./storage";
+import { generateAuthorKey, partsOf, sealBundle, verifyBundle } from "./bundle";
+import { publishBundle } from "./registry";
+import { bundleKey, checksKey, semanticKey } from "./storage";
+import { compileRecipeChecks } from "@/lib/recipe-checks";
+import { RECIPES } from "@/lib/buzzy/recipes";
 
 let depsPromise: Promise<RouteDeps> | null = null;
+let authorKeyCache: ReturnType<typeof generateAuthorKey> | null = null;
+
+/**
+ * The key hosted uploads are signed with. One per process: a user's recipes are
+ * attributable by `author.id`, and the signature attests the platform sealed them.
+ * A per-user key would have to be stored, and storing customers' signing keys is a
+ * liability we are not taking on to make an upload form work.
+ */
+function platformAuthorKey() {
+  authorKeyCache ??= generateAuthorKey();
+  return authorKeyCache;
+}
 
 function kekFromEnv(): Uint8Array | null {
   const raw = process.env.RECIPE_SEAL_KEK;
@@ -106,6 +123,106 @@ export default defineEventHandler(async (event) => {
   let body: unknown = undefined;
   if (method === "POST" || method === "PUT" || method === "PATCH") {
     body = await readBody(event).catch(() => ({}));
+  }
+
+  // ── POST /api/recipes/upload — a person publishes their own recipe ─────────
+  //
+  // Everything else on this route is operator-only because it enrols a *bundle
+  // someone else signed*. This is the one path a normal account may take: they
+  // describe the recipe, the server seals it, and they are recorded as the author
+  // and therefore the seller.
+  //
+  // The signing key is the platform's, not theirs. That is a real, stated trade:
+  // hosted uploads are custodially signed, ownership is by author id, and the
+  // recipe stays encrypted under the server KEK. A bring-your-own-key upload would
+  // keep even us out — that is a separate feature, not a checkbox here.
+  if (path === "/api/recipes/upload" && method === "POST") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+
+    const deps = await getDeps();
+    if (!deps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Publishing is not configured", code: "publish_unavailable" }; }
+
+    const b = (body ?? {}) as Record<string, unknown>;
+    const basis = typeof b.basis === "string" ? b.basis : "";
+    const template = RECIPES.find((r) => r.id === basis);
+    if (!template) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Pick which kind of recipe this is", code: "unknown_basis" };
+    }
+    const title = typeof b.title === "string" ? b.title.trim() : "";
+    const description = typeof b.description === "string" ? b.description.trim() : "";
+    const price = Number(b.priceHoneyDrops ?? 0);
+    if (title.length < 3) { setResponseStatus(event, 400); return { ok: false, error: "Give it a title", code: "title_required" }; }
+    if (!Number.isSafeInteger(price) || price < 0 || price > 100000) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Price must be a whole number of Honey Drops", code: "invalid_price" };
+    }
+
+    const semantic = {
+      discovery: template.discovery,
+      boundary: template.boundary,
+      checklist: template.checklist,
+      outputContract: template.outputContract,
+    };
+    const compiled = compileRecipeChecks(template.id, { salt: new Uint8Array(8) });
+    const authorKey = platformAuthorKey();
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "recipe";
+    const recipeId = `user.${user.id.slice(0, 8)}.${slug}`;
+
+    let sealed;
+    try {
+      sealed = sealBundle({
+        recipeId,
+        version: "1.0.0",
+        semantic,
+        checksWasm: compiled.wasm,
+        checks: compiled.manifest,
+        capability: {
+          inputs: [{ name: "sources", type: "file[]", required: true }],
+          outputs: ["document"],
+          tools: ["render_document"],
+          forbidden_tools: ["send", "submit"],
+          boundary_summary: "read-only; nothing is sent",
+        },
+        author: { id: user.id, name: user.email || "BeeZilla user", keyId: authorKey.keyId, privateKey: authorKey.privateKey },
+        kek: deps.kek,
+        listing: { title, description, priceHoneyDrops: price },
+        pricing: { amount_cents: 0 },
+      });
+    } catch (e) {
+      // The leak gate lives here too: an upload whose copy reproduces its own
+      // sealed half is refused before it can be stored or served.
+      setResponseStatus(event, 422);
+      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "refused" };
+    }
+
+    const verified = verifyBundle(sealed.bytes);
+    if (!verified.ok || !verified.manifest) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The sealed bundle did not verify", code: "bad_bundle" };
+    }
+    const parts = partsOf(sealed.bytes)!;
+    try {
+      await deps.storage.put(bundleKey(verified.digest!), sealed.bytes);
+      await deps.storage.put(semanticKey(verified.digest!), parts.semanticEnc);
+      await deps.storage.put(checksKey(verified.digest!), parts.checksWasm);
+      const row = await publishBundle(
+        <T = Record<string, unknown>>(text: string, params?: unknown[]) => deps.q<T>(text, params ?? []),
+        {
+          hash: verified.digest!, recipeId, version: verified.manifest.version,
+          authorId: user.id, manifest: verified.manifest,
+          bundleRef: bundleKey(verified.digest!), semanticRef: semanticKey(verified.digest!),
+          checksRef: checksKey(verified.digest!),
+        },
+      );
+      setResponseStatus(event, 201);
+      return { ok: true, hash: row.hash, id: recipeId, version: row.version, title, price_honey_drops: price };
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      setResponseStatus(event, code === "23505" ? 409 : 500);
+      return { ok: false, error: code === "23505" ? "You already published this title" : "Could not publish", code: code === "23505" ? "duplicate" : "publish_failed" };
+    }
   }
 
   const deps = await getDeps();
