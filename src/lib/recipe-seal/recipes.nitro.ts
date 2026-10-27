@@ -74,7 +74,23 @@ export default defineEventHandler(async (event) => {
   const rawHeaders = (event.node?.req?.headers ?? {}) as Record<string, string | string[] | undefined>;
   const headers = toHeaders(rawHeaders);
   // Role, not mere presence: publish and licence issue gate on `manage_keys`.
-  const opCtx = await resolveOperatorContext(headers).catch(() => null);
+  // Roles are durable rows (`ar_operator_roles`), not env flags. Without this the
+  // context resolves to role:null for every signed-in human, so publish and licence
+  // answered 403 for everyone including an admin — the routes were reachable but
+  // nobody could ever enrol a recipe.
+  const opCtx = await resolveOperatorContext(headers, {
+    lookupDbRole: async (userId, email) => {
+      const sql = await getSql();
+      const rows = await sql.query<{ role: string }>(
+        `select role from ar_operator_roles
+          where user_id = $1 or (lower(email) = lower($2) and $2 is not null)
+          limit 1`,
+        [userId, email ?? null],
+      );
+      const role = rows[0]?.role;
+      return role === "viewer" || role === "operator" || role === "admin" ? role : null;
+    },
+  }).catch(() => null);
 
   const authorization = headers.get("authorization") ?? "";
   const token = authorization.toLowerCase().startsWith("bearer ")
