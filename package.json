@@ -56,7 +56,7 @@
     "tui:status": "npm --prefix apps/tui run status",
     "tui:build": "npm --prefix apps/tui run build",
     "test:openapi-sync": "node scripts/test-openapi-sync.mjs",
-    "test:tools": "npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-webpage-routing.ts && npx tsx scripts/test-voice-tools.ts"
+    "test:tools": "npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-webpage-routing.ts && npx tsx scripts/test-voice-tools.ts && npx tsx scripts/test-file-intent.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",

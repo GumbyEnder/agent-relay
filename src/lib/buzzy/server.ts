@@ -51,6 +51,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -402,14 +403,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // BZ-F042: asking for the artifact as a saved file IS a draft request. Without
   // this the gate stays shut, no render tool is offered, and the model improvises
   // a "I can't save files" refusal that the product can actually fulfil.
-  const wantsLibraryFile =
-    /\b(save|store|put|add)\b[^.\n]{0,40}\b(library|my files?|documents?)\b/i.test(message) ||
-    /\b(as|in)\s+(an?\s+)?(md|markdown|pdf|docx?|word)\b/i.test(message) ||
-    /\bsave (a )?copy\b/i.test(message) ||
-    /\b(download|export) (it|this|that)\b/i.test(message);
-  const requestedDraft =
-    wantsLibraryFile ||
-    /\b(write it up|just write|go ahead|draft it|that'?s enough|finalize|whenever you'?re ready)\b/i.test(message);
+  // "Save it in the file" / "put this in a doc" / "save a copy" all mean ONE
+  // thing to a person: make me a file I can keep. The old pattern only matched
+  // the word "library" or an explicit format, so the single most common request
+  // ("research X and save it in the file") fell through the gate and the product
+  // answered without producing anything.
+  const wantsLibraryFile = isFileRequest(message);
+  const requestedDraft = isDraftRequest(message);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -556,7 +556,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // glm-class models treat an optional tool as optional and answer in prose.
   // When the owner EXPLICITLY asks for the file, force the tool call (plan doc
   // 23, open decision #3: native tool_calls with a fallback path).
-  const explicitDocumentRequest = /\b(word document|\.docx|actual document|make the (file|document)|produce the (file|document)|as a (file|document|word)|download(able)? (file|document))\b/i.test(message);
+  const explicitDocumentRequest = isExplicitDocumentRequest(message);
   const toolChoice = draftGateOpen && explicitDocumentRequest
     ? { type: "function", function: { name: "render_document" } }
     : undefined;
@@ -809,6 +809,40 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       }
       reply = await chatCompletionFull(followUpMessages, { model: routedModel, maxTokens: loopTools ? 4096 : undefined });
     }
+    // ── Guard: a tool name is not an answer ────────────────────────────
+    // Observed live: after a search the model returned
+    // "read_web_page: https://…" as its whole reply. That is a tool artifact,
+    // not an answer, and it would have been saved as the deliverable. Ask once
+    // for the prose; if it still comes back as an echo, fail the turn honestly
+    // rather than storing junk in the owner's Library.
+    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|calculate|render_document|render_sheet|render_presentation)\s*[:(]/i;
+    const URL_ONLY = /^\s*https?:\/\/\S+\s*$/i;
+    if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
+      console.warn("[buzzy/chat] tool echo in reply — asking for prose once");
+      reply = await chatCompletionFull(
+        [
+          ...messages,
+          { role: "assistant", content: reply.content },
+          {
+            role: "user",
+            content:
+              "That was a tool artifact, not an answer. Reply to the person now, in your own words, " +
+              "using what the tools returned. No tool names, no bare URLs, no JSON.",
+          },
+        ],
+        { model: routedModel, maxTokens: 1200 },
+      );
+      if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
+        console.error("[buzzy/chat] reply stayed a tool echo after retry");
+        return {
+          ok: false,
+          reply: "",
+          error: "I gathered the sources but couldn't put the answer together. Try again — nothing was saved.",
+          code: "empty_reply",
+          context: ctx,
+        };
+      }
+    }
     // Limit-trip rule: if we exited on iterations with tool calls still pending,
     // reply.content holds the model's last text — surface it as-is below. Never silent.
   } catch (err) {
@@ -1030,6 +1064,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
     `;
+    // Link the conversation to the work it produced. Without this, a file made
+    // from a plain conversation was reachable from the Library but the chat had
+    // no pointer back to its own work item.
+    if (sessionId && !jobId) {
+      try {
+        await sql`
+          UPDATE buzzy_sessions SET job_id = ${recordId}
+          WHERE id = ${sessionId} AND user_id = ${userId}
+            AND (job_id IS NULL OR job_id IS DISTINCT FROM ${recordId})
+        `;
+      } catch (err) {
+        console.warn("[buzzy/jobs] session link failed:", err instanceof Error ? err.message : err);
+      }
+    }
     // BZ-F015: materialize the actual produced text as a durable document
     // with immutable versions — never reconstruct it later from the brief.
     try {
