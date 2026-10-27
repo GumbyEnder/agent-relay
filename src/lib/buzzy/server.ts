@@ -493,8 +493,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       : "";
 
   const persona = personaForMode(mode) + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
+  // Freshness: without a date the model cannot tell a superseded price from the
+  // current one. It answered "78 cents" the day USPS's own page said 82.
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const freshnessBlock =
+    `\n\nTODAY IS ${todayISO}. When the request says current, now, today, latest or how much, ` +
+    "prefer the most recent source you read and state the date it was published. " +
+    "If a page shows an old price or an old deadline, look for a newer official page before stating it — " +
+    "a superseded figure is worse than 'I could not confirm'.";
+  // Research that ends in a file must carry its receipts.
+  const wantsSources = wantsLibraryFile || /\b(research|look ?up|find out|sources?|cite|verify|current|latest)\b/i.test(message);
+  const sourcesBlock = wantsSources
+    ? "\n\nSOURCES: if you read any web page this turn, the deliverable MUST end with a 'Sources' section listing " +
+      "the URLs you actually opened, one per line, and your reply must name the source you relied on. Never cite a page " +
+      "you did not open, and never present a search snippet as confirmation."
+    : "";
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance;
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   const messages: Array<{ role: string; content: string }> = [
