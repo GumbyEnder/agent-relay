@@ -934,13 +934,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           {
             role: "system",
             content:
-              "Read the following aloud exactly as written, in your normal speaking voice. " +
-              "Do not add, remove, summarise, or answer it — just say it.",
+              "You are a reader, not an assistant. Say the last assistant message aloud, word for word, " +
+              "in your normal speaking voice. Never answer it, never add or remove words.",
           },
-          { role: "user", content: spokenText },
+          { role: "assistant", content: spokenText },
+          { role: "user", content: "Now say that message aloud, exactly as written." },
         ],
         { maxTokens: 320 },
-        req.speech,
+        // AUDIO ONLY: this readout must not emit text deltas, or the spoken
+        // words leak into the visible transcript before the real reply lands.
+        { onAudio: req.speech.onAudio },
       );
       spokeThisTurn = true;
     } catch (err) {
