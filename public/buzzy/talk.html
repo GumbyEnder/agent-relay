@@ -2870,55 +2870,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           voice.gain.connect(voice.analyser);
         }
       } catch (_) {}
-      try { window.speechSynthesis.cancel(); } catch (_) {}
       for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
       paintVoice();
     }
 
     /**
-     * Fallback speech for browsers/paths without the audio lane (typed turns
-     * with the Voice pill on, or an audio failure). Keeps the product usable
-     * but is clearly the lesser voice — the audio lane is the real one.
+     * There is exactly ONE voice in this product: the audio model. The browser
+     * speech engine is deliberately not used — hearing a different, robotic
+     * voice mid-conversation is worse than hearing nothing. If a turn produces
+     * no audio, say so on screen and keep the loop going.
      */
-    function speakReply(text) {
-      if (!text || !("speechSynthesis" in window)) {
-        if (voice.mic) startListening();
-        return;
-      }
-      try {
-        window.speechSynthesis.cancel();
-        var u = new SpeechSynthesisUtterance(String(text).slice(0, 1800));
-        u.lang = "en-US";
-        u.rate = 1.02;
-        voice.speaking = true;
-        setAvatarState("speaking");
-        paintVoice();
-        // No audio stream from SpeechSynthesis — approximate the mouth with
-        // word boundaries so the face still moves while it talks.
-        var pulse = null;
-        u.onboundary = function () {
-          if (!avatars.length) return;
-          var lvl = 0.35 + Math.random() * 0.5;
-          for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(lvl);
-          clearTimeout(pulse);
-          pulse = setTimeout(function () {
-            for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
-          }, 120);
-        };
-        var done = function () {
-          clearTimeout(pulse);
-          for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
-          voice.speaking = false;
-          paintVoice();
-          if (voice.mic) startListening();
-        };
-        u.onend = done;
-        u.onerror = done;
-        window.speechSynthesis.speak(u);
-      } catch (_) {
-        voice.speaking = false;
-        paintVoice();
-      }
+    function voiceUnavailable() {
+      var st = document.getElementById("voiceStageState");
+      if (st) st.textContent = "Voice unavailable for this turn — the answer is on screen";
+      var lat = document.getElementById("voiceStageLat");
+      if (lat && !lat.textContent) lat.textContent = "no audio returned";
+      voice.speaking = false;
+      for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
+      paintVoice();
+      // Keep a hands-free conversation hands-free: listen again shortly.
+      if (voice.mic) setTimeout(function () { if (voice.mic && !voice.speaking && !voice.rec) startListening(); }, 1200);
     }
 
     // One spoken turn: returns the final transcript, or "" if nothing heard.
@@ -3038,14 +3009,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (meter) { meter.classList.remove("warn", "hot"); }
     }
 
-    // Called after a turn lands. Drafts are read only as a short heads-up.
+    // A turn that produced no audio. Never substitutes the browser's voice.
     function maybeSpeak(data) {
       if (!data || !data.ok) return;
       if (!voice.mic && !voice.replies) return;
-      var text = data.draft
-        ? "I've put a draft together. It's on screen for you to review."
-        : data.reply;
-      speakReply(text);
+      voiceUnavailable();
     }
 
     function initVoice() {
@@ -4326,8 +4294,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         logVoiceMetrics(metrics);
         // The audio lane already spoke the answer; only the text lane needs the
         // fallback speaker, and only if no audio came back at all.
-        if (!useVoiceLane) maybeSpeak(data);
-        else if (!metrics.spoken && (voice.mic || voice.replies)) speakReply(data.reply || "");
+        // One voice only. Audio played -> done. No audio -> say so, never swap
+        // the browser's speech engine in mid-conversation.
+        if (!metrics.spoken && (voice.mic || voice.replies)) maybeSpeak(data);
 
       } catch (err) {
         setChatMascot("18-unimpressed");
