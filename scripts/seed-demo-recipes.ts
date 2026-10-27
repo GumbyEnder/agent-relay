@@ -15,6 +15,7 @@ import { generateAuthorKey, sealBundle } from "../src/lib/recipe-seal/bundle";
 
 const BASE = process.env.SEAL_SEED_BASE ?? "http://127.0.0.1:4189";
 const TOKEN = process.env.SEAL_SEED_TOKEN ?? "";
+const COOKIE = process.env.SEAL_SEED_COOKIE ?? "";
 const KEK = new Uint8Array(32).fill(9);
 
 /** What we put on the shelf. Price 0 is free; the client renders "Free". */
@@ -105,6 +106,7 @@ function b64(u: Uint8Array): string {
         "content-type": "application/json",
         origin: BASE,
         ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
+        ...(COOKIE ? { cookie: COOKIE } : {}),
       },
       body: JSON.stringify({ bundle: b64(sealed.bytes) }),
     });
