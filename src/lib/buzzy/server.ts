@@ -254,6 +254,8 @@ export interface TurnTimings {
   ttfaMs: number | null;
   model: string;
   surface: "text" | "voice";
+  /** Which lane actually produced the reply: "audio" streams speech, "text" does not. */
+  lane: "audio" | "text";
 }
 
 export interface ChatResponse {
@@ -587,6 +589,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // tool/draft turn, which is why the owner used to hear the browser's robot
   // voice instead of BeeZilla's.
   let spokeThisTurn = false;
+  let lane: "audio" | "text" = "text";
   // The words the renderer was given. Persisting these (not the chat reply) is what
   // makes the Library, export and share surfaces show the document the owner asked
   // for; the reply is a confirmation, not a deliverable.
@@ -648,7 +651,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // read aloud, and only the text lane can carry the render tools.
     const useVoiceLane =
       surface === "voice" && !!req.speech && voiceAvailable() && !draftGateOpen && !explicitDocumentRequest;
-    if (useVoiceLane) spokeThisTurn = true;
+    if (useVoiceLane) { spokeThisTurn = true; lane = "audio"; }
+    if (surface === "voice" && !useVoiceLane) {
+      // Say WHY the audio lane was skipped — otherwise a slow text turn looks
+      // like a slow voice model.
+      console.log(
+        `[buzzy/voice] audio lane skipped: gate=${draftGateOpen} docRequest=${explicitDocumentRequest} ` +
+          `speechSink=${!!req.speech} available=${voiceAvailable()}`,
+      );
+    }
     const llmStarted = Date.now();
     if (useVoiceLane) {
       const spoken = await voiceCompletion(
@@ -1050,6 +1061,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ttfaMs,
       model: turnModel || reply.model,
       surface,
+      lane,
     },
   };
   // Pricing surface (stack item 12): the per-job estimate disclosed with the

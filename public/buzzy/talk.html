@@ -3081,7 +3081,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (m.asrMs != null && m.asrMs > 60) parts.push((m.asrMs / 1000).toFixed(2) + "s to send");
       // Name the lane on screen: "voice" means the audio model answered,
       // "text" means it fell back — that difference is the whole diagnosis.
-      parts.push(m.surface === "voice" ? "voice lane" : "text lane");
+      // Report the lane that actually answered, not the one requested.
+      var laneName = m.lane || (m.surface === "voice" ? "audio" : "text");
+      parts.push(laneName === "audio" ? "voice lane" : "text lane (read back)");
       el.innerHTML = parts.join(" · ");
     }
 
@@ -4288,6 +4290,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Trust the server about which lane answered: a tool/draft turn runs on
         // the text lane even though the request asked for voice.
         if (data.timings && data.timings.surface) metrics.surface = data.timings.surface;
+        if (data.timings && data.timings.lane) metrics.lane = data.timings.lane;
         if (metrics.ttfaMs == null && data.timings && data.timings.ttfaMs != null) {
           metrics.ttfaMs = data.timings.ttfaMs;
         }
