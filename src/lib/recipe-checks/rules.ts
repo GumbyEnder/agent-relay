@@ -30,6 +30,14 @@ export const FORBIDDEN = {
 } as const;
 
 /** A boundary rule scans every claim and every section body for the pattern. */
+/**
+ * Boundary labels are published: they ride in `checks.codes`, which is part of the
+ * signed manifest and served to anyone. They were originally written as restatements
+ * of the sealed boundary ("never promises coverage or a legal outcome"), which meant
+ * a sealed bundle could not be sealed at all — the leak gate found its own boundary
+ * reproduced in the manifest. The labels now describe the *check*, in vocabulary that
+ * does not belong to any recipe's sealed half.
+ */
 function boundaryRule(key: keyof typeof FORBIDDEN, code: string, description: string): Rule {
   const pattern = FORBIDDEN[key];
   return defineRule({
@@ -65,7 +73,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "unknowns marked, not filled",
       expr: noneOf("values", and(eq("normalised", null), neq("raw", "unknown"))),
     }),
-    boundaryRule("quote", "C30", "never claims a guaranteed lowest price, an order, or a supplier confirmation"),
+    boundaryRule("quote", "C30", "no commitment the owner did not authorise"),
   ],
 
   "complaint-resolution": [
@@ -87,7 +95,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "dates trace to the supplied history",
       expr: noneOf("domain.dates", falsy("sourceId")),
     }),
-    boundaryRule("complaint", "C31", "never invents an apology, promise, refund or compensation"),
+    boundaryRule("complaint", "C31", "no concession invented on the owner's behalf"),
   ],
 
   "meeting-action-pack": [
@@ -109,7 +117,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "privacy: names only from the source",
       expr: noneOf("domain.names", falsy("sourceId")),
     }),
-    boundaryRule("meeting", "C32", "never infers who attended and never invents a unanimous decision"),
+    boundaryRule("meeting", "C32", "no attendance or agreement inferred"),
   ],
 
   "bookkeeping-prep": [
@@ -131,7 +139,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "no tax treatment asserted",
       expr: isEmpty("domain.taxAssertions"),
     }),
-    boundaryRule("bookkeeping", "C33", "never asserts tax treatment or readiness to file"),
+    boundaryRule("bookkeeping", "C33", "no professional conclusion asserted"),
   ],
 
   "campaign-brief": [
@@ -156,7 +164,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "publishing gate stated",
       expr: nonempty("domain.publishingGate"),
     }),
-    boundaryRule("campaign", "C34", "never invents a testimonial, price or world-class claim"),
+    boundaryRule("campaign", "C34", "no endorsement or superlative invented"),
   ],
 
   "people-ops-paperwork": [
@@ -178,7 +186,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "legal questions listed as open",
       expr: or(not(anyOf("claims", matches("text", "\\blegal"))), nonempty("domain.legalQuestions")),
     }),
-    boundaryRule("people", "C35", "never terminates, hires or asserts legal compliance"),
+    boundaryRule("people", "C35", "no employment or compliance action taken"),
   ],
 
   "grants-rfp": [
@@ -204,7 +212,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "no auto-submission",
       expr: isEmpty("domain.filingActions"),
     }),
-    boundaryRule("grants", "C36", "never certifies eligibility or submits an application"),
+    boundaryRule("grants", "C36", "no eligibility certified and nothing submitted"),
   ],
 
   "dispute-paperwork": [
@@ -226,7 +234,7 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       description: "no outcome promised",
       expr: and(isEmpty("domain.promisedOutcomes"), isEmpty("domain.filingActions")),
     }),
-    boundaryRule("dispute", "C37", "never promises coverage or a legal outcome, and never files"),
+    boundaryRule("dispute", "C37", "no entitlement asserted on the owner's behalf"),
   ],
 };
 

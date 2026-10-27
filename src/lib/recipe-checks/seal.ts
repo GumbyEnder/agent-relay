@@ -105,19 +105,31 @@ function readWasm(bytes: Uint8Array): Uint8Array {
 // ── public API ────────────────────────────────────────────────────────────────
 export function compile(rules: Rule[], opts: { salt?: Uint8Array } = {}): CompiledChecks {
   if (rules.length === 0) throw new Error("refusing to compile an empty rule set");
+  // The manifest's `codes` map is PUBLISHED — it ships in the signed bundle and is
+  // served to every shopper. It used to carry `r.description`, which is prose
+  // written from the recipe's own boundary ("no tax treatment asserted"), so sealing
+  // such a recipe tripped its own leak gate: the manifest reproduced the sealed half.
+  // The map now publishes the rule's stable id. Human labels live in the client.
+  // The manifest's `codes` map is PUBLISHED — it ships in the signed bundle and is
+  // served to every shopper. Every version that carried prose failed the same way:
+  // first `r.description` (written from the recipe's boundary), then `r.id` (also
+  // derived from it) each reproduced the sealed half and tripped the leak gate on
+  // perfectly good recipes. A published field may not carry text derived from the
+  // thing it is meant to protect, so it carries only the stable code. Explanations
+  // live in the client, keyed by code and defined in one place.
   const codes: Record<string, string> = {};
   for (const r of rules) {
-    if (codes[r.code] && codes[r.code] !== r.description) {
+    if (codes[r.code] && codes[r.code] !== r.code) {
       throw new Error(`duplicate rule code ${r.code}`);
     }
-    codes[r.code] = r.description;
+    codes[r.code] = r.code;
   }
 
   const program: RuleProgram = {
     v: 1,
     engine: ENGINE,
-    // ids and descriptions stay in: they are needed for author-side debugging and
-    // are folded on disk. They never cross the API boundary.
+    // Descriptions stay inside the bundle: needed for author-side debugging, folded
+    // on disk, never published. Only the code → id map leaves the server.
     rules: rules.map((r) => ({ ...r })),
   };
   const encoded = new TextEncoder().encode(JSON.stringify(program));
