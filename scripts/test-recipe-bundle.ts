@@ -557,6 +557,29 @@ ok("seal refuses a boundary split across two fields with a key between them", ()
   assert.equal(threw.includes("leaks_sealed_text"), true, `split boundary sealed: ${threw}`);
 });
 
+ok("seal refuses a whole sealed field with its spacing removed", () => {
+  // Round 13: "never invents a price" vs a manifest carrying
+  // "neverinventsaprice" — word-boundary alignment dissolves when spaces go.
+  let threw = "";
+  try {
+    sealBundle(input({
+      semantic: { boundary: "never invents a price" } as never,
+      capability: { ...capability, boundary_summary: "neverinventsaprice" },
+    }));
+  } catch (err) { threw = String(err instanceof Error ? err.message : err); }
+  assert.equal(threw.includes("leaks_sealed_text"), true, `de-spaced field sealed: ${threw}`);
+});
+
+ok("a sealed half that merely names a declared output still seals", () => {
+  // The excusal must hold in the vocabulary pass too, or every recipe whose
+  // outputContract names its own output would be refused.
+  const sealed = sealBundle(input({
+    semantic: { outputContract: ["comparison table"] } as never,
+    capability: { ...capability, outputs: ["comparison-table"], boundary_summary: "read-only; nothing is sent" },
+  }));
+  assert.equal(sealed.bytes.length > 0, true, "descriptor-named output refused");
+});
+
 ok("seal refuses a vocabulary word embedded in longer sealed text", () => {
   // Excusal required the term to be a token-aligned run in the sealed half; plain
   // containment let "xxrecommendationxx" excuse the whole public word.
