@@ -436,6 +436,14 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/recipe-seal/recipes.nitro.ts",
               },
               {
+                route: "/api/wallet",
+                handler: "./src/lib/wallet/wallet.nitro.ts",
+              },
+              {
+                route: "/api/wallet/**",
+                handler: "./src/lib/wallet/wallet.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/chat",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },

@@ -80,3 +80,21 @@ header nav .account-link {
   padding: 0.25rem 0.6rem;
   border-radius: 6px;
 }
+/* Honey Drops chip — the wallet lives in the header on every shelf page. */
+.hd-chip {
+  order: -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #FFC107;
+  border: 1px solid #B8860B;
+  background: rgba(255, 193, 7, 0.08);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.hd-chip:hover { background: rgba(255, 193, 7, 0.16); }
