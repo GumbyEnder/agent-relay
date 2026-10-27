@@ -39,7 +39,7 @@ const q: QueryFn = async (text, params) => (await pool.query(text, params as unk
 async function migrate() {
   for (const f of ["0039_recipe_seal_bundles.sql", "0040_recipe_seal_licenses.sql",
                    "0041_recipe_seal_tokens.sql", "0042_recipe_seal_metering.sql",
-                   "0043_recipe_seal_structural_guards.sql"]) {
+                   "0043_recipe_seal_structural_guards.sql", "0044_recipe_listing.sql"]) {
     const sql = readFileSync(join(process.cwd(), "migrations", f), "utf8");
     await pool.query(sql);
   }
@@ -54,6 +54,11 @@ async function reset() {
 // protocol's allow-list (0043 rejects anything else, including the old fixture's
 // top-level `codes`).
 const MANIFEST = { protocol: "recipe-seal/1", id: "quote-comparison", version: "1.0.0",
+  created_at: "2026-10-27T12:00:00.000Z",
+  // A published row must be shelf-ready: 0044 makes the listing structural, so a
+  // manifest without one cannot reach the table at all.
+  listing: { title: "Quote Comparison", description: "Compare contractor bids.", 
+             updated_at: "2026-10-27T12:00:00.000Z", price_honey_drops: 0 },
   checks: { module: "checks.wasm", sha256: "0".repeat(64), rules: 24, codes: { C01: "x" }, engine: "srb-vm/1" } };
 
 (async () => {
