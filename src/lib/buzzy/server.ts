@@ -25,6 +25,7 @@ import {
   renderSheet,
   parseToolArguments,
   reviewDraft,
+  documentToMarkdown,
 } from "./artifact";
 import { playbookGuidance, playbookChecks } from "./playbooks";
 import { buildJobEstimate } from "./digest";
@@ -562,6 +563,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const toolMax = 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
+  // The words the renderer was given. Persisting these (not the chat reply) is what
+  // makes the Library, export and share surfaces show the document the owner asked
+  // for; the reply is a confirmation, not a deliverable.
+  let renderedDocText: string | null = null;
+  let renderedDocTitle: string | null = null;
   try {
     // BZ-F012 / BZ-F041 / BZ-F043: versioned, reasoned model-selection policy.
     // The operator's saved controls are read here (ownership-scoped to this
@@ -757,6 +763,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 : tc.name === "render_presentation" ? await renderPresentation(content)
                 : await renderSheet(content);
               if (result.ok && result.bytes && result.filename) {
+                if (tc.name === "render_document") {
+                  const asText = documentToMarkdown(content);
+                  if (asText.ok) { renderedDocText = asText.markdown; renderedDocTitle = asText.title; }
+                }
                 renderedDocument = {
                   filename: result.filename,
                   bytesB64: Buffer.from(result.bytes).toString("base64"),
@@ -999,12 +1009,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const recordId = jobId || sessionId || `job_${Date.now()}`;
     response.jobId = recordId;
     if (previousDraft) response.previousDraft = previousDraft;
+    // Title source order matters. The renderer derives its title from THIS
+    // conversation; a slot may have been contaminated by an older job (the gate
+    // found a fence SOW titled "Quote request letter to landlord for a new AC
+    // unit" because the extraction pulled another job's facts into this one).
     const baseTitle =
-      slotValues.end_goal && slotValues.end_goal !== "skipped"
-        ? slotValues.end_goal
-        : slotValues.challenge && slotValues.challenge !== "skipped"
-          ? slotValues.challenge
-          : message;
+      renderedDocTitle && renderedDocTitle.trim()
+        ? renderedDocTitle
+        : slotValues.end_goal && slotValues.end_goal !== "skipped"
+          ? slotValues.end_goal
+          : slotValues.challenge && slotValues.challenge !== "skipped"
+            ? slotValues.challenge
+            : message;
     await sql`
       INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
       VALUES (
@@ -1017,7 +1033,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // BZ-F015: materialize the actual produced text as a durable document
     // with immutable versions — never reconstruct it later from the brief.
     try {
-      await materializeDraft(sql, userId, recordId, baseTitle, cleanReply, {
+      // The rendered document when there is one; the reply only when the turn
+      // produced no artifact at all.
+      await materializeDraft(sql, userId, recordId, baseTitle, renderedDocText ?? cleanReply, {
         slots: slotValues,
         review: response.review,
         creator: userId,
