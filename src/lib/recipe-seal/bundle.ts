@@ -411,6 +411,23 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
     entries.filter(([path]) => !path.endsWith("<key>")).map(([, v]) => v).join(" "),
   );
 
+  // Vocabulary terms the SEALED half carries as token-aligned runs may appear in
+  // the manifest: that text is a public identifier, not prose.
+  const sealedRunNormsForVocab = new Set<string>();
+  {
+    const st = tokens(material.text);
+    for (let i = 0; i < st.length; i++) {
+      let acc = "";
+      for (let j = i; j < st.length && j < i + 4; j++) { acc += st[j]; sealedRunNormsForVocab.add(acc); }
+    }
+    for (const k of material.keys) {
+      const kt = tokens(k);
+      if (kt.length) sealedRunNormsForVocab.add(kt.join(""));
+    }
+  }
+  const excusedForVocab = (normValue: string): boolean =>
+    VOCAB_WINDOWS.some((v) => sealedRunNormsForVocab.has(v) && (normValue === v || normValue.startsWith(v) || normValue.endsWith(v)));
+
   // ── Sealed side ────────────────────────────────────────────────────────────
   // Values are joined into one document UNCONDITIONALLY. No predicate decides
   // whether the sealed half counts as "a document": rounds 12 and 13 each found
@@ -464,10 +481,16 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   if (!hits.includes("<vocabulary>")) {
     for (const s of material.values) {
       if (contentTokens(s).length < 3) continue;
+      // A value that IS a declared output/tool descriptor shares words with the
+      // manifest by design. Without this, sealing outputContract ["comparison
+      // table"] against outputs ["comparison-table"] was refused.
+      if (excusedForVocab(normalizeForCompare(s))) continue;
       if (covers(s)) { hits.push("<vocabulary>"); break; }
     }
   }
-  if (!hits.includes("<vocabulary>") && covers(material.text)) hits.push("<vocabulary>");
+  if (!hits.includes("<vocabulary>") &&
+      !excusedForVocab(normalizeForCompare(material.text)) &&
+      covers(material.text)) hits.push("<vocabulary>");
 
   // 4. Inside a single word, per sealed field. Catches scripts with no word
   // boundaries (a CJK sentence is one token, so passes 1-3 see nothing).
@@ -509,6 +532,22 @@ export function semanticLeakInManifest(manifest: unknown, semantic: unknown): st
   }
   if (!hits.includes("<key>")) {
     for (const k of material.keys) if (windowScan(k, "<key>")) break;
+  }
+
+  // 5. A whole sealed field with its spacing removed. Round 13's reviewer showed
+  // that "no vat due" and a manifest carrying "novatdueno" sailed through: the
+  // comparison aligns on word boundaries, and removing the spaces dissolves them.
+  // Only WHOLE fields are tested here, never windows — comparing de-spaced
+  // fragments is what spliced one sealed field onto the next and refused the
+  // honest fixture. A whole field is a unit the author actually wrote.
+  if (hits.length === 0) {
+    for (const v of material.values) {
+      if (tokens(v).length < 2) continue;
+      const g = normalizeForCompare(v);
+      if (g.length < windowFor(v)) continue;
+      if (excused(g)) continue;
+      if (manifestNorm.includes(g)) { hits.push("<despaced>"); break; }
+    }
   }
 
   return hits;
