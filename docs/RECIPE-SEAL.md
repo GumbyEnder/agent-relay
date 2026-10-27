@@ -55,12 +55,18 @@ be its own piece of work.
 
 | Not covered | Why it is outside |
 |---|---|
-| **De-spaced obfuscation** — sealed `"no vat due"`, manifest `"novatdueno"` | word boundaries are what the comparison aligns on; removing them dissolves the unit |
-| **Homoglyph substitution** — Cyrillic `е` for Latin `e` | matching is exact on NFKC-normalised text, not confusable-aware; that needs a confusables table |
+| **De-spaced fragments** — fewer characters than one field | a whole sealed field with spacing removed is refused (`<despaced>`); fragments and runs spanning two fields are not |
+| ~~Homoglyph substitution~~ | **now covered** — Unicode confusables (UTS #39) are folded before any pass runs |
 | **Sub-window fragments** — fewer characters than one window | below the floor there is not enough signal to distinguish a leak from ordinary vocabulary |
 | **Paraphrase, translation, transliteration** | a copy detector cannot see meaning |
 | **What the model emits at run time** | the gate compares manifest against semantic; the execution path is a separate surface |
 | **Producer-side sharding across bundles** | each bundle is judged on its own manifest |
+
+**Sub-window fragments — decision recorded.** A sealed fragment shorter than one window (10
+latin / 6 CJK normalised characters) is outside the guarantee. The floor is kept rather than
+raising it: below it there is not enough signal to tell a leak from ordinary vocabulary, and
+refusing every short recipe would reject legitimate work to buy a promise we cannot keep.
+Short sealed fields are the author's risk, and the floor is stated here rather than hidden.
 
 **The honest summary:** this is a copy detector with a stated floor, not a proof that the prose
 is secret. It raises the cost of accidental leakage substantially. It does not bound a
