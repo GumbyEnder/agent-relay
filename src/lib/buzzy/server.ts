@@ -649,14 +649,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // avatar talks on the first audio chunk instead of after the whole reply.
     // Deliverable turns stay on the text lane — a draft is announced, not
     // read aloud, and only the text lane can carry the render tools.
+    // When does a spoken turn actually NEED the tool-bearing text lane? Only
+    // when it must produce a file, or when a Work-mode brief is driving the
+    // turn. A stale brief in a chat-mode conversation must not push every reply
+    // onto the slow lane — that is what made a two-second answer take 21 seconds.
+    const toolTurnNeeded = explicitDocumentRequest || (mode === "work" && draftGateOpen);
     const useVoiceLane =
-      surface === "voice" && !!req.speech && voiceAvailable() && !draftGateOpen && !explicitDocumentRequest;
+      surface === "voice" && !!req.speech && voiceAvailable() && !toolTurnNeeded;
     if (useVoiceLane) { spokeThisTurn = true; lane = "audio"; }
     if (surface === "voice" && !useVoiceLane) {
       // Say WHY the audio lane was skipped — otherwise a slow text turn looks
       // like a slow voice model.
       console.log(
-        `[buzzy/voice] audio lane skipped: gate=${draftGateOpen} docRequest=${explicitDocumentRequest} ` +
+        `[buzzy/voice] audio lane skipped: mode=${mode} gate=${draftGateOpen} requestedDraft=${requestedDraft} ` +
+          `allFilled=${wereAllFilled} existing=${hasExistingDraft} docRequest=${explicitDocumentRequest} ` +
           `speechSink=${!!req.speech} available=${voiceAvailable()}`,
       );
     }
