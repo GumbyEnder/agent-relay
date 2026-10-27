@@ -81,6 +81,11 @@ const sealed = sealBundle({
   },
   author: { id: "acct_probe", name: "Probe", keyId: key.keyId, privateKey: key.privateKey },
   kek: KEK,
+  listing: {
+    title: "Bid Sorter — probe",
+    description: "Sorts contractor quotes by price and completeness.",
+    priceHoneyDrops: 25,
+  },
   pricing: { amount_cents: 4 },
   createdAt: new Date().toISOString(),
 });
@@ -166,6 +171,21 @@ function forge(mutate: (m: Record<string, unknown>) => void) {
 
   const ver = await req("POST", `/api/recipes/${hash}/verify`, { input: { quotes: [] } });
   check("verify answers and does not echo sealed prose", [200, 422, 400].includes(ver.status) && leaks(ver.text, sealedProse).length === 0, `status ${ver.status}`);
+
+  // ── the shopfront, as a shopper receives it ───────────────────────────────
+  const cat = await req("GET", "/api/recipes");
+  const row = (cat.json?.recipes ?? []).find((x: any) => x.hash === hash);
+  check("the catalogue lists the published recipe", !!row);
+  if (row) {
+    check("the shelf shows a title", row.title === "Bid Sorter — probe", String(row.title));
+    check("the shelf shows a description", typeof row.description === "string" && row.description.length > 0);
+    check("the shelf shows the price in Honey Drops", row.price_honey_drops === 25, String(row.price_honey_drops));
+    check("a priced recipe is not marked free", row.is_free === false);
+    check("the shelf shows the author", !!row.author?.id);
+    check("the shelf shows when it last changed", typeof row.updated_at === "string");
+    check("the shelf does not leak sealed prose", leaks(JSON.stringify(row), sealedProse).length === 0,
+      leaks(JSON.stringify(row), sealedProse).join(", "));
+  }
 
   // ── the door must refuse a leak, or "no leak" only means "nothing checked" ──
   const attacks: Array<[string, (m: Record<string, unknown>) => void]> = [

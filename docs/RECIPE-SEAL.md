@@ -75,6 +75,45 @@ because the publisher holds the plaintext.
 
 ---
 
+## What a shopper sees
+
+A recipe is bought, not inspected. Everything below is published in clear; the sealed half never is.
+
+| Field | Notes |
+|---|---|
+| `listing.title` | the shelf label, 1–120 characters |
+| `listing.description` | what it does for you, ≤600 characters — **not how it does it** |
+| `author.name` | carried in the manifest and signed with it |
+| `created_at` | when the recipe was made |
+| `listing.updated_at` | when it last changed |
+| `listing.price_honey_drops` | integer; **0 means free** — there is no half-free |
+| `hash`, `id`, `version` | the record; `hash` is content-addressed, `id`+`version` is the shelf address |
+
+`GET /api/recipes` returns that projection per row, not the full manifest — the manifest is
+1.5 KB of key material and internals per recipe, and a shelf does not need it.
+
+### The description is the most dangerous field in the protocol
+
+It is free text that ships in clear to every shopper, written by the author, sitting next to the
+text that must stay sealed. It is the obvious place to paste the recipe.
+
+The leak gate makes **no exception** for it. The gate compares the whole manifest — values and
+keys, in any script, after confusable folding — against the sealed half, so `listing.title` and
+`listing.description` are covered by construction rather than by a special case. That was tested
+directly: a description paraphrasing the sealed discovery was refused at seal time with
+`leaks_sealed_text`.
+
+The consequence is deliberate and worth knowing before it surprises an author: **a description
+that echoes the sealed text is refused, even when the echo is innocent.** Write what the buyer
+gets, not what the recipe says.
+
+### Shape limits, enforced twice
+
+`app`: `manifestShapeErrors`; `db`: constraints in `0044_recipe_listing.sql`. Both refuse an empty
+title, a title over 120, a description over 600, a negative or fractional price, and a listing
+that is missing entirely. A published row is shelf-ready by definition — a manifest with no
+listing cannot reach the table.
+
 ## How to test the claim
 
 Four rungs. Each one can pass while the one above it is broken, so the order matters.

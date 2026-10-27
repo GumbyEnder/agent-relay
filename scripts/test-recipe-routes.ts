@@ -79,7 +79,7 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     DROP TABLE IF EXISTS ar_recipe_run, ar_recipe_token, ar_recipe_license, ar_recipe_bundle CASCADE;`);
   for (const f of ["0039_recipe_seal_bundles.sql", "0040_recipe_seal_licenses.sql",
                    "0041_recipe_seal_tokens.sql", "0042_recipe_seal_metering.sql",
-                   "0043_recipe_seal_structural_guards.sql"]) {
+                   "0043_recipe_seal_structural_guards.sql", "0044_recipe_listing.sql"]) {
     await pool.query(readFileSync(join(process.cwd(), "migrations", f), "utf8"));
   }
 
@@ -344,6 +344,21 @@ const BAD = { ...GOOD, values: [{ id: "total-1", kind: "money", raw: "1240.00", 
     const r = await routeRecipes({ method: "GET", path: "/api/recipes" }, deps);
     assert.equal(r.status, 200);
     assert.equal((r.body as { recipes: unknown[] }).recipes.length, 1);
+  });
+
+  await ok("the catalogue carries a shopfront, not the paperwork", async () => {
+    const r = await routeRecipes({ method: "GET", path: "/api/recipes" }, deps);
+    const row = (r.body as { recipes: Array<Record<string, unknown>> }).recipes[0];
+    // A shopper decides from these alone: what it is, who made it, when it
+    // changed, and what it costs. None of it is the recipe.
+    assert.ok(typeof row.title === "string" && (row.title as string).length > 0, "no title");
+    assert.ok(typeof row.description === "string", "no description field");
+    assert.ok(typeof row.updated_at === "string", "no updated_at");
+    assert.ok(row.created_at, "no created_at");
+    assert.equal(row.price_honey_drops, 0);
+    assert.equal(row.is_free, true);
+    const author = row.author as { id?: string; name?: string };
+    assert.ok(author?.id, "no author id");
   });
 
   await ok("manifest is public and carries no prose", async () => {

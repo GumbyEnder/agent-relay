@@ -124,10 +124,31 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
   // ── GET /api/recipes ───────────────────────────────────────────────────────
   if (rest.length === 0 && method === "GET") {
     const rows = await listBundles(q);
-    return { status: 200, body: { ok: true, recipes: rows.map((r) => ({
-      hash: r.hash, id: r.recipe_id, version: r.version, author: r.author_id,
-      manifest: r.manifest,
-    }) ) } };
+    // The shelf, not the paperwork. A shopper needs to decide whether to buy, and
+    // the full manifest is 1.5 KB of key material, hashes and pricing internals per
+    // row. Everything here is published by definition; nothing here is the recipe.
+    return { status: 200, body: { ok: true, recipes: rows.map((r) => {
+      const m = r.manifest as Record<string, unknown> | null;
+      const l = (m?.listing ?? {}) as Record<string, unknown>;
+      const author = (m?.author ?? {}) as Record<string, unknown>;
+      return {
+        hash: r.hash,
+        id: r.recipe_id,
+        version: r.version,
+        title: l.title ?? r.recipe_id,
+        description: l.description ?? "",
+        author: { id: author.id ?? r.author_id, name: author.name ?? null },
+        created_at: m?.created_at ?? null,
+        updated_at: l.updated_at ?? m?.created_at ?? null,
+        published_at: (r as { created_at?: string }).created_at ?? null,
+        // 0 is free. The client renders "Free" and never shows a price of zero.
+        price_honey_drops: typeof l.price_honey_drops === "number" ? l.price_honey_drops : 0,
+        is_free: (l.price_honey_drops ?? 0) === 0,
+        // Kept so a client can show capability without a second request, and so the
+        // existing tests that read it keep working.
+        manifest: r.manifest,
+      };
+    }) } };
   }
 
   // ── POST /api/recipes (collection) — publish a sealed bundle ───────────────

@@ -37,6 +37,19 @@ export interface RecipeManifest {
   id: string;
   version: string;
   created_at: string;
+  /**
+   * What a shopper sees. Everything here is published in clear, so it is the one
+   * part of the manifest an author writes *about* the recipe rather than *of* it.
+   * The leak gate makes no exception for it: prose copied from the sealed half is
+   * refused here exactly as it is anywhere else.
+   */
+  listing: {
+    title: string;
+    description: string;
+    updated_at: string;
+    /** The shelf price. 0 means free; there is no half-free. */
+    price_honey_drops: number;
+  };
   author: { id: string; name: string; key_id: string; public_key: string };
   capability: Capability;
   checks: {
@@ -75,6 +88,9 @@ const MANIFEST_SPEC: Spec = {
   keys: {
     protocol: { t: "string" }, id: { t: "string" }, version: { t: "string" },
     created_at: { t: "string" },
+    listing: { t: "object", keys: {
+      title: { t: "string" }, description: { t: "string" },
+      updated_at: { t: "string" }, price_honey_drops: { t: "int" } } },
     author: { t: "object", keys: {
       id: { t: "string" }, name: { t: "string" }, key_id: { t: "string" }, public_key: { t: "string" } } },
     capability: { t: "object", keys: {
@@ -208,7 +224,35 @@ export function manifestShapeErrors(manifest: unknown): string[] {
   const errors: string[] = [];
   checkSpec(manifest, MANIFEST_SPEC, "", errors);
   errors.push(...capabilityVocabErrors(manifest));
+  errors.push(...listingShapeErrors(manifest));
   return errors;
+}
+
+/**
+ * The shopfront. These are limits, not opinions: a title that never ends is a
+ * denial-of-service on every list view, and a negative price is a transfer of
+ * Honey Drops *to* the buyer. The description is capped because it is free text
+ * that ships in clear to every shopper, and an unbounded field in a published
+ * document is a place to hide a recipe one paragraph at a time.
+ */
+const LISTING_TITLE_MAX = 120;
+const LISTING_DESCRIPTION_MAX = 600;
+
+function listingShapeErrors(manifest: unknown): string[] {
+  const out: string[] = [];
+  if (!plainObject(manifest)) return out;
+  const l = manifest.listing;
+  if (!plainObject(l)) { out.push("listing:missing"); return out; }
+  const title = l.title, desc = l.description, price = l.price_honey_drops, upd = l.updated_at;
+  if (typeof title !== "string" || title.trim().length === 0) out.push("listing.title:empty");
+  else if (title.length > LISTING_TITLE_MAX) out.push("listing.title:too_long");
+  if (typeof desc !== "string") out.push("listing.description:not_a_string");
+  else if (desc.length > LISTING_DESCRIPTION_MAX) out.push("listing.description:too_long");
+  if (typeof price !== "number" || !Number.isSafeInteger(price) || price < 0) {
+    out.push("listing.price_honey_drops:invalid");
+  }
+  if (typeof upd !== "string" || Number.isNaN(Date.parse(upd))) out.push("listing.updated_at:not_a_date");
+  return out;
 }
 
 /**
@@ -646,6 +690,9 @@ export interface SealInput {
   evals?: { corpus_sha256?: string | null; cases?: number; pass_rate_bp?: number | null };
   pricing?: { amount_cents?: number; quota_default?: number | null; split_bp?: Record<string, number> };
   createdAt?: string;
+  /** Shopfront metadata. Optional so existing callers keep working; a recipe with
+   *  no listing is simply not shelf-ready, which `manifestShapeErrors` says plainly. */
+  listing?: { title: string; description?: string; updatedAt?: string; priceHoneyDrops?: number };
   /** test-only determinism hooks */
   dek?: Uint8Array;
   nonce?: Uint8Array;
@@ -717,6 +764,12 @@ export function sealBundle(input: SealInput): { bytes: Uint8Array; manifest: Rec
     id: input.recipeId,
     version: input.version,
     created_at: input.createdAt ?? new Date().toISOString(),
+    listing: {
+      title: (input.listing?.title ?? input.recipeId).trim(),
+      description: (input.listing?.description ?? "").trim(),
+      updated_at: input.listing?.updatedAt ?? input.createdAt ?? new Date().toISOString(),
+      price_honey_drops: input.listing?.priceHoneyDrops ?? 0,
+    },
     author: {
       id: input.author.id,
       name: input.author.name,
