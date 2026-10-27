@@ -86,6 +86,33 @@ function safeFilename(title: string): string {
  * Deterministic: same input, same bytes. Throws nothing — returns ok:false
  * with a reason the loop can surface in plain language.
  */
+/**
+ * The plain-text form of a document tool call.
+ *
+ * The renderer turns `render_document` arguments into a .docx, but the Library,
+ * export and share surfaces need the same words as text. Persisting the chat
+ * reply instead (the old behaviour) meant a user downloaded a one-sentence PDF
+ * about an unrelated job while the real scope of work sat unread in
+ * `data.artifact` — a gate failure, not a cosmetic bug.
+ *
+ * Returns the title as well, because the renderer's title is derived from the
+ * conversation and is a better job title than a slot that may have been
+ * contaminated by another job.
+ */
+export function documentToMarkdown(
+  raw: unknown,
+): { ok: true; title: string; markdown: string } | { ok: false; error: string } {
+  const v = validateDocumentContent(raw);
+  if (!v.ok) return { ok: false, error: v.error };
+  const { title, sections } = v.content;
+  const parts: string[] = [`# ${title}`];
+  for (const s of sections) {
+    parts.push("", `## ${s.heading}`, "");
+    for (const p of s.paragraphs) parts.push(p, "");
+  }
+  return { ok: true, title, markdown: parts.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n" };
+}
+
 export async function renderDocument(raw: unknown): Promise<RenderResult> {
   const v = validateDocumentContent(raw);
   if (!v.ok) return { ok: false, error: v.error };
