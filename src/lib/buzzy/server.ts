@@ -49,7 +49,7 @@ import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
-import { buildVoiceWebContext } from "./voiceTools";
+import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest } from "./intent";
 
@@ -521,11 +521,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     { role: "user", content: message },
   ];
 
-  // The spoken lane runs an audio model with NO tools. Without this pre-pass it
-  // had nothing to call and told the owner it "can't browse the web" — a wiring
-  // lie. When the utterance wants something from the live web, the harness does
-  // the lookup itself and hands the model the results as DATA to speak from.
-  if (surface === "voice") {
+  // Research pre-pass. Two reasons, one mechanism:
+  //   * the spoken lane runs an audio model with NO tools, so a spoken lookup
+  //     had nothing to call and the avatar claimed it couldn't browse;
+  //   * the text lane HAS tools but will answer from memory when it can — it
+  //     wrote "78 cents" into a saved document the day USPS's page said 82.
+  // So when the request is a lookup, the harness does it and hands the model
+  // what it read, with the URLs. The model cannot skip the research.
+  const researchIntent = /\b(research|look ?up|find out|check|verify|current|latest|today|right now|how much|price|cost|deadline|hours)\b/i.test(message);
+  const runWebPrepass = surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent)));
+  if (runWebPrepass) {
     const webCtx = await buildVoiceWebContext(message);
     for (const call of webCtx.calls) {
       await recordToolCall(sql, {
