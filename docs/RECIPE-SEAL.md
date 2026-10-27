@@ -75,6 +75,55 @@ because the publisher holds the plaintext.
 
 ---
 
+## How to test the claim
+
+Four rungs. Each one can pass while the one above it is broken, so the order matters.
+
+**1 — the library (64 checks plus the rest of the suite)**
+
+```
+npx tsx scripts/test-recipe-checks.ts     # rule DSL
+npx tsx scripts/test-recipe-bundle.ts     # seal/verify, leak gate, confusables
+npx tsx scripts/test-recipe-seal-leak.ts  # redaction
+```
+
+**2 — the route layer as a function, against real Postgres** (`test-recipe-routes.ts`,
+`test-recipe-registry.ts`). These prove the handlers' logic including every refusal path.
+
+**3 — the door, over HTTP, against a running server** (`scripts/seal-http-probe.ts`). This is
+the rung the unit suites cannot climb: the h3 handler, the operator check, storage, the KEK and
+the database, exercised the way a caller would.
+
+```
+npm run build
+export DATABASE_URL=<postgres> RECIPE_SEAL_ALLOW_OPEN=1 \
+       RECIPE_SEAL_KEK=$(python3 -c 'import base64;print(base64.b64encode(bytes([9]*32)).decode())') \
+       RECIPE_SEAL_STORAGE_DIR=/tmp/seal-probe-store PORT=4187
+node .output/server/index.mjs &
+SEAL_PROBE_BASE=http://127.0.0.1:4187 npx tsx scripts/seal-http-probe.ts
+```
+
+13 checks: an honest bundle publishes; the served manifest reproduces no window of the sealed
+half; the sealed bundle is not downloadable; a tampered bundle is refused; and five forged but
+validly-signed manifests — prose in a check code, in the boundary summary, **split across two
+fields**, hidden **in an object key**, and **homoglyph-substituted** — are each refused at the
+door. The last five are the point: without them, "no leak" only proves nothing was checked.
+
+Note on the probe fixture: it uses distinctive marker prose, not the shared recipe fixtures.
+Those fixtures contain vocabulary the manifest is *allowed* to use (`comparison-table`), and a
+naive probe reports the documented exemption as a leak.
+
+**4 — a reviewer who did not write it.** Not a script. Thirteen rounds of adversarial review
+found thirteen real holes; every one was in the class "a scope we thought was safe". That work
+does not replace an outside reader, and nothing in rungs 1–3 substitutes for one.
+
+### Where this cannot run today
+
+`POST /api/recipes` needs `RECIPE_SEAL_KEK` on the server and an operator with `manage_keys`.
+The deployed services have neither, so publish answers 401 and the seal is **read-only in
+production**: manifests verify, nothing new can be enrolled. Enrolling a recipe is a deliberate
+act — set the KEK, grant the operator — not something that happens by accident.
+
 ## Why the gate looks the way it does
 
 Thirteen adversarial review rounds shaped it. Every defect was the same family: **a boundary of
