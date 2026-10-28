@@ -62,7 +62,7 @@ if (!existsSync(ASAR)) {
     const archive = readFileSync(ASAR, "latin1");
     check("the connect flow also asks for a search token", archive.includes("api/search-token"));
     // s9g: without a baked default the Connect item is dead on every real install.
-    check("the app knows the BeeZilla address without env", archive.includes("https://app.beezilla.ai"));
+    check("the app knows the BeeZilla address without env", /https:\/\/beezilla[a-z0-9.-]*\.(railway\.app|beezilla\.ai)/.test(archive));
     // These two live OUTSIDE app.asar (scripts/ and .output/ are staged as real files
     // in resources/app), so searching the archive finds nothing and lies about a good
     // build — the same mistake as the earlier PGLite check.

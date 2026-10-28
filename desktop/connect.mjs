@@ -58,8 +58,13 @@ export const SEARCH_MINT_SCRIPT = `(async () => {
  * Without a baked default the Connect menu item is disabled on every real install and
  * "our inference" can only be reached by a user who exports an env var — which is not
  * a product. Env override still wins for testing and staging.
+ *
+ * This points at the deployment that exists and answers today (verified: the mint
+ * returns 401 without a session, search 503 without a key). beezilla.ai has no NS
+ * record, so a branded host is a later one-line change — a default that does not
+ * resolve would make Connect dead on arrival, which is the bug this replaced.
  */
-export const DEFAULT_CLOUD_URL = "https://app.beezilla.ai";
+export const DEFAULT_CLOUD_URL = "https://beezilla-demo-production-c069.up.railway.app";
 
 /**
  * Network failures read very differently from credential failures, and the user-facing
