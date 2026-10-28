@@ -31,6 +31,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "verify": "npm run typecheck && npm run build && npm run test:ci",
+    "test:ci": "npm run test:engine && npm run test:openapi-sync && npm run test:bz-f001-profile && npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-voice-tools.ts && npx tsx scripts/test-file-intent.ts",
     "test:engine": "npx tsx scripts/test-board-engine.ts && npm run test:history && npm run test:build-order && npm run test:refresh-scope && npm run test:p0p2 && npm run test:prod && npm run test:auth-email && npm run test:tenancy && npm run test:tenancy-endpoints && npm run test:skill-routing && npm run test:project-ref && npm run test:docs-html && npm run test:github-ingest",
     "test:tenancy": "npx tsx scripts/test-board-tenancy.ts",
     "test:skill-routing": "npx tsx scripts/test-skill-routing.ts",

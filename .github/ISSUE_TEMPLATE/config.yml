@@ -2,4 +2,10 @@ blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
     url: https://github.com/GumbyEnder/agent-relay/security/advisories/new
-    about: Report security issues privately (see SECURITY.md)
+    about: Report security issues privately (see SECURITY.md) — never in a public issue
+  - name: Question or idea
+    url: https://github.com/GumbyEnder/agent-relay/discussions
+    about: Ask in Discussions instead of opening an issue
+  - name: Self-host & getting started
+    url: https://github.com/GumbyEnder/agent-relay/blob/main/docs/SELF_HOST.md
+    about: Run it locally before filing a setup issue

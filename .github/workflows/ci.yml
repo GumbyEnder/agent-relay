@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to the same branch cancels the previous run — contributor PRs
+# often arrive as a burst of fixup commits.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Never "production": npm skips devDependencies, which the test scripts need.
+      NODE_ENV: development
+      # Tests must not inherit a real mail provider or chat key from anywhere.
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Lint debt is tracked as its own issue (see docs/MAINTAINING.md). Until it is
+      # burned down, lint reports here but does not block contributor PRs.
+      - name: Lint (advisory — reports, does not block)
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Tests (hermetic subset)
+        run: npm run test:ci
+
+      - name: Upload build output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: .output/server/index.mjs
+          if-no-files-found: ignore
+          retention-days: 3

@@ -134,7 +134,8 @@ Builds run under **Railpack** (`npm install && npm run build`, start `npm run st
 | [docs/TOPOLOGY.md](docs/TOPOLOGY.md) | How the services fit together |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | OSS vs hosted; what may break on 0.x |
 | [CHANGELOG.md](CHANGELOG.md) | Releases |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | PRs, branch policy |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | PRs, branch policy, review process |
+| [docs/MAINTAINING.md](docs/MAINTAINING.md) | Triage, review and merge playbook |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 
 Full index: [docs/README.md](docs/README.md).
@@ -143,9 +144,20 @@ Full index: [docs/README.md](docs/README.md).
 
 [MIT](LICENSE)
 
-## CI
+## Contributing
 
-Run adapter unit tests (no live network): `NODE_ENV=development npm test`
+External contributions are wanted. Fork or branch from `main`, open a PR — no invitation needed.
+
+```bash
+npm run verify     # typecheck + build + the hermetic test suite CI gates on
+```
+
+- CI runs `verify` on every PR: typecheck, build, and the hermetic suite (`npm run test:ci`). Lint runs advisory while existing debt is burned down.
+- Every PR gets a human response within **5 working days**, including a "no".
+- `good first issue` items name the file, the expected outcome, and the command that proves it works.
+- Questions and ideas → [Discussions](https://github.com/GumbyEnder/agent-relay/discussions). Security → private advisory per [SECURITY.md](SECURITY.md).
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before your first PR; [docs/MAINTAINING.md](docs/MAINTAINING.md) if you are reviewing or merging.
 
 ## Status
 
