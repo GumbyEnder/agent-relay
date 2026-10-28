@@ -17,6 +17,7 @@ import { bundleKey, checksKey, semanticKey } from "./storage";
 import { compileRecipeChecks } from "@/lib/recipe-checks";
 import { RECIPES } from "@/lib/buzzy/recipes";
 import { isLocalRuntime, localDataDir } from "@/lib/runtime";
+import { catalogBaseUrl, fetchCatalog, installRecipe } from "@/lib/recipe-seal/catalog";
 import { resolveLocalRequester } from "@/lib/local-owner";
 import { defaultAnchors, verifyTrustedBundle } from "./trust";
 import { listRecipes, putRecipe } from "./cache";
@@ -138,6 +139,63 @@ export default defineEventHandler(async (event) => {
         anchor: result.verdict.anchor,
         cached: result.cached
           ? { id: result.cached.id, version: result.cached.version, title: result.cached.title, sha256: result.cached.sha256 }
+          : undefined,
+      };
+    }
+
+    // The catalog is the only cloud call a local install makes. Listing is
+    // read-only; fetching installs ONLY after the bundle verifies against a pinned
+    // publisher, so a compromised catalog cannot install code.
+    if (path === "/api/recipes/local/catalog" && method === "GET") {
+      let base = "";
+      try {
+        base = catalogBaseUrl();
+      } catch (err) {
+        setResponseStatus(event, 200);
+        return { ok: false, configured: false, entries: [], error: err instanceof Error ? err.message : String(err) };
+      }
+      if (!base) {
+        setResponseStatus(event, 200);
+        return { ok: false, configured: false, entries: [], error: "no catalog configured (set BZ_CATALOG_URL)" };
+      }
+      const result = await fetchCatalog(base);
+      setResponseStatus(event, 200);
+      return { ok: result.ok, configured: true, catalog: base, entries: result.entries, error: result.error };
+    }
+
+    if (path === "/api/recipes/local/fetch" && method === "POST") {
+      const id = typeof (body as { id?: unknown })?.id === "string" ? (body as { id: string }).id.trim() : "";
+      if (!id) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "body.id is required", code: "bad_request" };
+      }
+      let base = "";
+      try {
+        base = catalogBaseUrl();
+      } catch (err) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: err instanceof Error ? err.message : String(err), code: "bad_catalog" };
+      }
+      const listing = await fetchCatalog(base);
+      if (!listing.ok) {
+        setResponseStatus(event, 502);
+        return { ok: false, error: listing.error, code: "catalog_unreachable" };
+      }
+      const entry = listing.entries.find((e) => e.id === id);
+      if (!entry) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: `no recipe '${id}' in the catalog`, code: "not_found" };
+      }
+      const installed = await installRecipe(dataDir, entry, { anchors, base });
+      setResponseStatus(event, installed.ok ? 201 : 422);
+      return {
+        ok: installed.ok,
+        reason: installed.verdict?.reason,
+        detail: installed.verdict?.detail,
+        error: installed.error,
+        entry: { id: entry.id, version: entry.version, title: entry.title },
+        cached: installed.cached
+          ? { id: installed.cached.id, version: installed.cached.version, title: installed.cached.title, sha256: installed.cached.sha256 }
           : undefined,
       };
     }
