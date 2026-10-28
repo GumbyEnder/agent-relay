@@ -644,6 +644,30 @@ export default defineEventHandler(async (event) => {
     }
 
     const result = await runTurn();
+    // Typed turns belong in the same log. Until now only the voice lane wrote a
+    // server sample, so a slow typed turn left no trace at all — which is
+    // exactly the turn the owner asked to have reviewed.
+    if (result.timings) {
+      try {
+        await recordVoiceMetrics(sql, {
+          userId,
+          jobId,
+          sessionId,
+          source: "server",
+          mode,
+          lane: "text",
+          model: result.timings.model,
+          ttftMs: result.timings.ttftMs,
+          ttfaMs: result.timings.ttfaMs,
+          turnMs: result.timings.totalMs,
+          extractMs: result.timings.extractMs,
+          llmMs: result.timings.llmMs,
+          honchoMs: result.timings.honchoMs,
+          replyChars: result.reply?.length ?? 0,
+          spoken: false,
+        });
+      } catch { /* metrics never break a turn */ }
+    }
     // BZ-F039: a draft was shown to the human (no content recorded — ids and
     // timing only). Check verdicts travel as their own events.
     const replyText = typeof (result as { reply?: unknown }).reply === "string" ? String((result as { reply: string }).reply) : "";
