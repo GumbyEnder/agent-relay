@@ -167,8 +167,11 @@ export default defineEventHandler(async (event) => {
     };
     const compiled = compileRecipeChecks(template.id, { salt: new Uint8Array(8) });
     const authorKey = platformAuthorKey();
+    // The manifest id charset is [a-z0-9._-]; auth user ids are mixed-case base58,
+    // so an id built straight from one fails `id:charset` at seal time.
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "recipe";
-    const recipeId = `user.${user.id.slice(0, 8)}.${slug}`;
+    const owner = user.id.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
+    const recipeId = `user.${owner}.${slug}`.slice(0, 64);
 
     let sealed;
     try {
