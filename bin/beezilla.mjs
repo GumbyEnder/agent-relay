@@ -206,8 +206,10 @@ async function cmdDoctor() {
 
   // A build with no pinned publisher cannot trust a single fetched recipe, so
   // say it at install time rather than at the first import.
+  // Search is optional: an install with no key still chats, it just cannot cite.
+  // A soft check keeps `doctor` honest without failing a healthy install.
   const search = resolveSearch(DATA);
-  ok(
+  soft(
     "web search",
     Boolean(search),
     search
