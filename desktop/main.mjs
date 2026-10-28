@@ -14,7 +14,7 @@ import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RuntimeSupervisor, defaultDataDir } from "./supervisor.mjs";
-import { loadInference } from "../scripts/lib/inference.mjs";
+import { isExpired, loadInference } from "../scripts/lib/inference.mjs";
 import { createSettingsHandlers } from "./settings.mjs";
 
 const ROOT = app.isPackaged
@@ -58,6 +58,17 @@ function applyStoredInferenceToEnv() {
     const inf = loadInference(supervisor.dataDir, {
       decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
     });
+    if (inf && inf.provider === "beezilla" && isExpired(inf)) {
+      // Expiry is a session problem: refuse by name instead of spending a request
+      // that comes back 401 and reads as "your key is wrong".
+      delete process.env.BZ_CHAT_KEY;
+      delete process.env.BZ_CHAT_BASE_URL;
+      delete process.env.BZ_CHAT_MODEL;
+      process.env.BZ_MANAGED_EXPIRED = "1";
+      console.warn("[desktop] BeeZilla token expired — Settings will ask you to reconnect");
+      return;
+    }
+    delete process.env.BZ_MANAGED_EXPIRED;
     if (inf?.key) {
       process.env.BZ_CHAT_KEY = inf.key;
       if (inf.baseUrl) process.env.BZ_CHAT_BASE_URL = inf.baseUrl;
