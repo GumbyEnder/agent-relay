@@ -143,6 +143,10 @@ Full index: [docs/README.md](docs/README.md).
 
 [MIT](LICENSE)
 
+## CI
+
+Run adapter unit tests (no live network): `NODE_ENV=development npm test`
+
 ## Status
 
 **v0.x** — running in production for both products, but protocol and storage may still change before 1.0. Pin a git tag for deployments.

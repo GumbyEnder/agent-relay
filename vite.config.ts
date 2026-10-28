@@ -428,6 +428,24 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/auth-api.nitro.ts",
               },
               {
+                // Our inference: the signed-in owner mints a short-lived token
+                // (no shared provider key ever reaches the desktop app).
+                route: "/api/inference-token",
+                handler: "./src/lib/inference-token.nitro.ts",
+              },
+              {
+                // Our search quota: a short-lived, search-scoped token pointed at our
+                // gateway, so the Brave key never reaches a client.
+                route: "/api/search-token",
+                handler: "./src/lib/search-token.nitro.ts",
+              },
+              {
+                // The gateway itself: holds the Brave key, spends our quota on a
+                // token's behalf, passes the provider payload through unchanged.
+                route: "/api/search",
+                handler: "./src/lib/search-gateway.nitro.ts",
+              },
+              {
                 route: "/api/recipes",
                 handler: "./src/lib/recipe-seal/recipes.nitro.ts",
               },
