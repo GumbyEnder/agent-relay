@@ -83,19 +83,20 @@ async function recordVoiceMetrics(
     replyChars?: number | null;
     audioBytes?: number | null;
     spoken?: boolean;
+    lane?: string | null;
   },
 ): Promise<void> {
   try {
     await sql`
       INSERT INTO buzzy_voice_metrics
         (user_id, job_id, session_id, source, mode, model, asr_ms, ttft_ms, ttfa_ms,
-         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken)
+         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane)
       VALUES
         (${row.userId}, ${row.jobId ?? null}, ${row.sessionId ?? null}, ${row.source},
          ${row.mode ?? null}, ${row.model ?? null}, ${row.asrMs ?? null}, ${row.ttftMs ?? null},
          ${row.ttfaMs ?? null}, ${row.turnMs ?? null}, ${row.extractMs ?? null},
          ${row.llmMs ?? null}, ${row.honchoMs ?? null}, ${row.replyChars ?? null},
-         ${row.audioBytes ?? null}, ${row.spoken ?? false})
+         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null})
     `;
   } catch (err) {
     // A lost metric must never break a turn.
@@ -264,6 +265,18 @@ function headersFromEvent(event: any): Headers {
     (rawHeaders ?? {}) as Record<string, string | string[] | undefined>,
   ).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")]);
   return new Headers(init);
+}
+
+/**
+ * Operator read-back. The owner asking "review my last turn" cannot be answered
+ * from a signed-in endpoint, and timing rows carry no message text — so a
+ * timing-only read is allowed with the ops key. Never widen this to content.
+ */
+function opsAuthorized(event: any): boolean {
+  const want = (process.env.BZ_OPS_KEY || "").trim();
+  if (!want) return false;
+  const got = (headersFromEvent(event).get("x-bz-ops-key") || "").trim();
+  return got.length > 0 && got === want;
 }
 
 export default defineEventHandler(async (event) => {
@@ -674,16 +687,21 @@ export default defineEventHandler(async (event) => {
       replyChars: num("replyChars"),
       audioBytes: num("audioBytes"),
       spoken: body.spoken === true,
+      lane: typeof body.lane === "string" ? body.lane.slice(0, 8) : null,
     });
     return { ok: true };
   }
   if (method === "GET" && path === "/api/buzzy/voice-metrics") {
-    const user = await getSessionUserFromHeaders(headersFromEvent(event));
-    if (!user) {
+    const ops = opsAuthorized(event);
+    const user = ops ? null : await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!ops && !user) {
       setResponseStatus(event, 401);
       return { error: "Sign in required", code: "signed_out" };
     }
+    const opsUser = ops ? queryValue(fullPath, "user") : null;
     const sql = await getSql();
+    // A fragment, so the ops path can read across owners without string surgery.
+    const scope = ops && !opsUser ? sql`TRUE` : sql`user_id = ${opsUser ?? user!.id}`;
     const daysRaw = Number(queryValue(fullPath, "days"));
     const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 7;
     const summary = (await sql`
@@ -700,7 +718,7 @@ export default defineEventHandler(async (event) => {
         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract_ms)    AS extract_p50,
         percentile_cont(0.5) WITHIN GROUP (ORDER BY asr_ms)        AS asr_p50
       FROM buzzy_voice_metrics
-      WHERE user_id = ${user.id}
+      WHERE ${scope}
         AND created_at > now() - (${days} || ' days')::interval
     `) as Array<Record<string, number | null>>;
     const byDay = (await sql`
@@ -711,15 +729,15 @@ export default defineEventHandler(async (event) => {
              percentile_cont(0.5) WITHIN GROUP (ORDER BY turn_ms) AS turn_p50,
              percentile_cont(0.95) WITHIN GROUP (ORDER BY turn_ms) AS turn_p95
       FROM buzzy_voice_metrics
-      WHERE user_id = ${user.id}
+      WHERE ${scope}
         AND created_at > now() - (${days} || ' days')::interval
       GROUP BY 1 ORDER BY 1 DESC
     `) as Array<Record<string, unknown>>;
     const recent = (await sql`
-      SELECT created_at, source, mode, model, asr_ms, ttft_ms, ttfa_ms, turn_ms,
-             extract_ms, llm_ms, reply_chars, spoken
+      SELECT created_at, source, mode, model, lane, asr_ms, ttft_ms, ttfa_ms, turn_ms,
+             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id
       FROM buzzy_voice_metrics
-      WHERE user_id = ${user.id}
+      WHERE ${scope}
       ORDER BY created_at DESC LIMIT 25
     `) as Array<Record<string, unknown>>;
     return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
