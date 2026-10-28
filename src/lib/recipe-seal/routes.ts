@@ -123,7 +123,13 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
 
   // ── GET /api/recipes ───────────────────────────────────────────────────────
   if (rest.length === 0 && method === "GET") {
-    const rows = await listBundles(q);
+    // A recipe is a shelf item, not a version log. Republishing a newer version used
+    // to append another card, so the catalogue showed the same recipe twice with
+    // different prices. Keep the newest published version per recipe id.
+    const all = await listBundles(q);
+    const newest = new Map<string, (typeof all)[number]>();
+    for (const r of all) if (!newest.has(r.recipe_id)) newest.set(r.recipe_id, r);
+    const rows = [...newest.values()];
     // The shelf, not the paperwork. A shopper needs to decide whether to buy, and
     // the full manifest is 1.5 KB of key material, hashes and pricing internals per
     // row. Everything here is published by definition; nothing here is the recipe.
