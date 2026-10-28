@@ -1,24 +1,19 @@
 version: 2
 
-# Dependency PRs are only safe because CI exists. They land as normal PRs and
-# are squash-merged like any other contribution.
+# Routine dependency churn arrives as ONE grouped PR per directory per month.
+# Security updates ignore the limits entirely, so a real CVE still lands
+# immediately — that is the balance we want on a repo that ships to production.
 updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: America/New_York
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 1
     versioning-strategy: increase
     groups:
-      dev-dependencies:
-        dependency-type: development
+      minor-and-patch:
+        applies-to: version-updates
         update-types: ["minor", "patch"]
-      production-patch:
-        dependency-type: production
-        update-types: ["patch"]
     ignore:
       # Major bumps of the build/runtime spine are deliberate work, not a bot PR.
       - dependency-name: "vite"
@@ -28,20 +23,30 @@ updates:
       - dependency-name: "nitropack"
         update-types: ["version-update:semver-major"]
 
-  # Dependabot auto-detected this nested manifest; make it explicit and grouped so
+  # Dependabot also scans this nested manifest — keep it explicit and grouped so
   # the adapter cannot open its own pile of PRs on top of the root queue.
   - package-ecosystem: npm
     directory: "/packages/beezilla-adapter"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: monthly
+    open-pull-requests-limit: 1
     versioning-strategy: increase
     groups:
-      adapter-minor-patch:
+      minor-and-patch:
+        applies-to: version-updates
         update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]
