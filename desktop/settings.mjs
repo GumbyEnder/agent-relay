@@ -24,6 +24,7 @@ import {
   saveSearchKey,
   clearSearchKey,
   saveManagedSearch as saveManagedSearchStore,
+  loadManagedSearch,
 } from "../scripts/lib/search-keys.mjs";
 
 /**
@@ -48,8 +49,17 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
           }
         : null,
       search: search
-        ? { provider: search.provider, source: search.source, key: redactKey(search.key) }
+        ? {
+            provider: search.provider,
+            source: search.source,
+            // A managed credential has no user-visible key to redact.
+            key: search.provider === "beezilla" ? null : redactKey(search.key),
+            expiresAt: search.expiresAt ?? null,
+          }
         : null,
+      // Present only when we HAVE a BeeZilla search credential and it lapsed: the
+      // difference between "off" and "reconnect", which the UI must not blur.
+      searchNeedsReconnect: !search && Boolean(loadManagedSearch(dir, cipher)),
     };
   };
 
