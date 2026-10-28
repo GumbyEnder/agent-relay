@@ -10,11 +10,12 @@
  * so patching `window.fetch` there does not touch the page's fetch — a trap that
  * produces a window where every API call 401s while the preload "looks right".
  */
-import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage } from "electron";
+import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RuntimeSupervisor, defaultDataDir } from "./supervisor.mjs";
 import { loadInference } from "../scripts/lib/inference.mjs";
+import { createSettingsHandlers } from "./settings.mjs";
 
 const ROOT = app.isPackaged
   ? join(process.resourcesPath, "app")
@@ -26,6 +27,66 @@ const supervisor = new RuntimeSupervisor({
 });
 
 let mainWindow = null;
+
+/**
+ * Decrypt the stored inference key into the environment the runtime inherits.
+ * safeStorage only works after `app.whenReady()`, so this cannot run at module
+ * load — and it must run again after the user saves a key, before the restart.
+ */
+function applyStoredInferenceToEnv() {
+  try {
+    const inf = loadInference(supervisor.dataDir, {
+      decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
+    });
+    if (inf?.key) {
+      process.env.BZ_CHAT_KEY = inf.key;
+      if (inf.baseUrl) process.env.BZ_CHAT_BASE_URL = inf.baseUrl;
+      if (inf.model) process.env.BZ_CHAT_MODEL = inf.model;
+      console.log(`[desktop] inference: ${inf.provider} (stored${inf.encrypted ? ", encrypted" : ""})`);
+      return;
+    }
+  } catch (err) {
+    // A store we cannot decrypt must not take the app down — chat refuses by name.
+    console.warn("[desktop] could not read the stored inference key:", err instanceof Error ? err.message : err);
+  }
+  delete process.env.BZ_CHAT_KEY;
+  delete process.env.BZ_CHAT_BASE_URL;
+  delete process.env.BZ_CHAT_MODEL;
+}
+
+/**
+ * Settings IPC. `safeStorage` is only usable after `app.whenReady()`, so the
+ * handlers are built there — but they are plain functions, so the contract can be
+ * tested without a display (see scripts/test-desktop-settings.mjs).
+ */
+function registerSettingsIpc() {
+  const handlers = createSettingsHandlers({
+    dataDir: () => supervisor.dataDir,
+    supervisor,
+    cipher: {
+      encrypt: (s) => safeStorage.encryptString(s),
+      decrypt: (b) => safeStorage.decryptString(Buffer.from(b)),
+    },
+    beforeRestart: applyStoredInferenceToEnv,
+  });
+
+  const wrap = (fn) => async (_event, payload) => {
+    try {
+      return { ok: true, data: await fn(payload) };
+    } catch (err) {
+      // The page shows this text, so it must be a sentence a user can act on.
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  ipcMain.handle("beezilla:settings:get", wrap(() => handlers.status()));
+  ipcMain.handle("beezilla:settings:saveInference", wrap((cfg) => handlers.saveInference(cfg)));
+  ipcMain.handle("beezilla:settings:saveSearch", wrap((cfg) => handlers.saveSearch(cfg)));
+  ipcMain.handle("beezilla:settings:clear", wrap((kind) => handlers.clear(kind)));
+  ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion() })));
+
+  return handlers;
+}
 
 // One install, one runtime: a second launch must focus the existing window, not
 // open a second server against the same PGLite data directory.
@@ -85,6 +146,9 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: true,
+      // .cjs: a sandboxed renderer cannot load an ESM preload, and it fails
+      // silently — window.beezilla just does not exist.
+      preload: join(dirname(fileURLToPath(import.meta.url)), "preload.cjs"),
     },
   });
 
@@ -103,20 +167,37 @@ async function createWindow() {
   mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) =>
     console.log(`[desktop] load failed ${code} ${desc} ${url}`),
   );
-  mainWindow.webContents.on("console-message", (_e, _level, message) =>
-    console.log(`[renderer] ${message}`),
-  );
+  mainWindow.webContents.on("console-message", (_e, _level, message) => {
+    console.log(`[renderer] ${message}`);
+    // Probe mode ends the moment the renderer reports — no fixed timeout to wait out.
+    if (process.env.BZ_SETTINGS_TEST && message.startsWith("SETTINGS_RESULT:")) {
+      setTimeout(() => app.quit(), 250);
+    }
+  });
 
+  // Test hook: load a probe page instead of the product UI, so the privileged
+// bridge can be exercised in a real sandboxed renderer.
+  const probe = process.env.BZ_SETTINGS_TEST;
+  const target = probe ? `file://${join(dirname(fileURLToPath(import.meta.url)), "test-settings.html")}` : `${base}/buzzy/talk`;
   const loaded = await Promise.race([
-    mainWindow.loadURL(`${base}/buzzy/talk`).then(() => true),
+    mainWindow.loadURL(target).then(() => true),
     new Promise((r) => setTimeout(() => r(false), 30_000)),
   ]);
-  console.log(`[desktop] loadURL ${loaded ? "resolved" : "TIMED OUT"} ${base}/buzzy/talk`);
+  console.log(`[desktop] loadURL ${loaded ? "resolved" : "TIMED OUT"} ${target}`);
 
   // Headless smoke hook: render, capture what the user would see, exit. Lets CI
   // prove the window actually paints instead of only proving the process boots.
   // Capture AFTER loadURL resolves — registering a `did-finish-load` listener
   // here would never fire, because the event has already been emitted by then.
+  if (probe) {
+    // Safety net only: the renderer normally quits the app as soon as it reports.
+    setTimeout(() => {
+      console.log("[desktop] probe timed out — no SETTINGS_RESULT");
+      app.quit();
+    }, 40_000);
+    return;
+  }
+
   if (process.env.BZ_SMOKE) {
     await new Promise((r) => setTimeout(r, Number(process.env.BZ_SMOKE_DELAY_MS ?? 2500)));
     // A capture that never resolves would hang CI forever; race it.
@@ -138,23 +219,8 @@ async function createWindow() {
 app.whenReady().then(async () => {
   installMenu();
 
-  // Decrypt the stored inference key into the environment the runtime inherits.
-  // safeStorage (DPAPI on Windows / Keychain on macOS) only works once the app is
-  // ready, which is why this cannot happen at module load.
-  try {
-    const inf = loadInference(supervisor.dataDir, {
-      decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
-    });
-    if (inf?.key) {
-      process.env.BZ_CHAT_KEY = inf.key;
-      if (inf.baseUrl) process.env.BZ_CHAT_BASE_URL = inf.baseUrl;
-      if (inf.model) process.env.BZ_CHAT_MODEL = inf.model;
-      console.log(`[desktop] inference: ${inf.provider} (stored${inf.encrypted ? ", encrypted" : ""})`);
-    }
-  } catch (err) {
-    // A store we cannot decrypt must not take the app down — chat refuses by name.
-    console.warn("[desktop] could not read the stored inference key:", err instanceof Error ? err.message : err);
-  }
+  applyStoredInferenceToEnv();
+  registerSettingsIpc();
 
   try {
     await createWindow();
