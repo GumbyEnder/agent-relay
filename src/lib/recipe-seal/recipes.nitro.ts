@@ -91,7 +91,7 @@ function toHeaders(raw: Record<string, string | string[] | undefined>): Headers 
  * change. This finds the actual colliding runs so the message can name them.
  */
 function collidingPhrases(shelfCopy: string, method: unknown): string[] {
-  const norm = (v: string) => v.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "");
+  const norm = (v: string) => v.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]+/g, "");
   const sealed = norm(JSON.stringify(method));
   const copy = norm(shelfCopy);
   const hits = new Set<string>();
@@ -228,7 +228,7 @@ export default defineEventHandler(async (event) => {
   //
   // Only an owner may rate: a score from someone who never ran it is a review of the
   // description. The rater id is stored to stop double-voting and is never returned.
-  const rateMatch = path.match(/^\/api\/recipes\/([a-f0-9]{64})\/rate$/);
+  const rateMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/rate$"));
   if (rateMatch && method === "POST") {
     const user = opCtx?.user ?? null;
     if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
@@ -257,7 +257,7 @@ export default defineEventHandler(async (event) => {
   // paid already has a session, and inventing a secret to hand back to the same
   // browser adds a leak surface for nothing. The sealed method is opened here and
   // never leaves the server — the caller gets the document and the verdict.
-  const useMatch = path.match(/^\/api\/recipes\/([a-f0-9]{64})\/use$/);
+  const useMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/use$"));
   if (useMatch && method === "POST") {
     const user = opCtx?.user ?? null;
     if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
