@@ -227,9 +227,10 @@
        TALK. Active state is computed here from the path, not hard-coded per page. */
     (function () {
       var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
-      // Default is Library: "/buzzy/" IS the jobs/library page (index.html).
+      // index.html serves ONLY /buzzy/library; every other /buzzy route
+      // redirects to the chat, so bare /buzzy counts as Talk here.
       var section = "library";
-      if (/^\/buzzy\/talk$/.test(path)) section = "talk";
+      if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
       else if (/^\/buzzy\/library$/.test(path)) section = "library";
       else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
       else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
