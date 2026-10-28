@@ -249,7 +249,29 @@ async function connectManagedAccount() {
   console.log(
     `[desktop] connect: BeeZilla inference connected (expires ${outcome.expiresAt ?? "unknown"}), runtime ${saved.started ? "started" : "restarted"}`,
   );
-  return { ...outcome, token: undefined, savedTo: saved.saved?.key };
+
+  // Search is a second capability and is allowed to be missing. Saying so once, at
+  // connect time, is better than a user discovering it later in a chat turn.
+  let searchSaved = null;
+  if (outcome.search?.ok) {
+    try {
+      const res = await settingsHandlers.saveManagedSearch({
+        token: outcome.search.token,
+        gateway: outcome.search.endpoint,
+        expiresAt: outcome.search.expiresAt,
+      });
+      searchSaved = res.saved;
+      console.log(`[desktop] connect: BeeZilla search connected (expires ${outcome.search.expiresAt ?? "unknown"})`);
+    } catch (err) {
+      console.warn(`[desktop] connect: search token not stored — ${err instanceof Error ? err.message : err}`);
+    }
+  } else if (outcome.search?.notDeployed) {
+    console.log("[desktop] connect: BeeZilla search is not enabled on this deployment — BYOK search only");
+  } else if (outcome.search?.error) {
+    console.warn(`[desktop] connect: search token unavailable — ${outcome.search.error}`);
+  }
+
+  return { ...outcome, token: undefined, search: { ...outcome.search, token: undefined, saved: searchSaved }, savedTo: saved.saved?.key };
 }
 
 async function openSettings() {
@@ -358,7 +380,18 @@ async function createWindow() {
     // Drive the real flow (window -> mint inside the page -> credential store) and
     // report it in one parseable line for scripts/test-desktop-connect.mjs.
     const outcome = await connectManagedAccount();
-    console.log(`CONNECT_RESULT:${JSON.stringify({ ok: outcome.ok, error: outcome.error ?? null, needsSignIn: outcome.needsSignIn ?? false })}`);
+    console.log(
+      `CONNECT_RESULT:${JSON.stringify({
+        ok: outcome.ok,
+        error: outcome.error ?? null,
+        needsSignIn: outcome.needsSignIn ?? false,
+        // The search half is reported too: a connect that silently drops it looks
+        // identical to one that never asked.
+        search: outcome.search
+          ? { ok: outcome.search.ok === true, notDeployed: outcome.search.notDeployed === true, error: outcome.search.error ?? null }
+          : null,
+      })}`,
+    );
     setTimeout(() => app.quit(), 500);
     return;
   }

@@ -33,6 +33,25 @@ export const MINT_SCRIPT = `(async () => {
   }
 })()`;
 
+/**
+ * The search half. Separate call because our search quota is a different capability
+ * and the deployment may not have it yet — a 503 here must not fail the sign-in.
+ */
+export const SEARCH_MINT_SCRIPT = `(async () => {
+  try {
+    const res = await fetch("/api/search-token", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = await res.json().catch(() => ({}));
+    return JSON.stringify({ status: res.status, body });
+  } catch (err) {
+    return JSON.stringify({ status: 0, body: { ok: false, error: String(err && err.message || err) } });
+  }
+})()`;
+
 export function cloudBaseUrl(raw = process.env.BZ_CLOUD_URL) {
   const value = (raw ?? "").trim().replace(/\/+$/, "");
   if (!value) return "";
@@ -45,6 +64,29 @@ export function cloudBaseUrl(raw = process.env.BZ_CLOUD_URL) {
  * @param {unknown} raw
  * @returns {{ok: boolean, token?: string, expiresAt?: string, baseUrl?: string, model?: string, error?: string, needsSignIn?: boolean}}
  */
+/**
+ * Search is optional: whatever goes wrong here, inference already works.
+ * @param {unknown} raw
+ * @returns {{ok: boolean, token?: string, expiresAt?: string, endpoint?: string, notDeployed?: boolean, error?: string}}
+ */
+export function interpretSearchMintResult(raw) {
+  let parsed = null;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return { ok: false, error: "the BeeZilla window returned something unreadable" };
+  }
+  const status = Number(parsed?.status ?? 0);
+  const body = parsed?.body ?? {};
+  if (status === 503 || body.code === "not_configured") {
+    return { ok: false, notDeployed: true, error: "BeeZilla search is not enabled on this deployment yet" };
+  }
+  if (status >= 200 && status < 300 && body.ok !== false && body.token) {
+    return { ok: true, token: body.token, expiresAt: body.expiresAt, endpoint: body.endpoint };
+  }
+  return { ok: false, error: body.error || `the BeeZilla window answered ${status || "nothing"}` };
+}
+
 export function interpretMintResult(raw) {
   let parsed = null;
   try {
@@ -101,6 +143,7 @@ export async function connectAccount(deps) {
   }
 
   let outcome;
+  let search = null;
   try {
     outcome = interpretMintResult(await deps.evaluate(MINT_SCRIPT));
 
@@ -119,6 +162,16 @@ export async function connectAccount(deps) {
         break; // the window went away mid-poll
       }
     }
+
+    // Inference is in hand; now the search half. It runs while the window is still
+    // open (the session lives there), and its problems never undo the sign-in.
+    if (outcome?.ok) {
+      try {
+        search = interpretSearchMintResult(await deps.evaluate(SEARCH_MINT_SCRIPT));
+      } catch (err) {
+        search = { ok: false, error: `search token: ${err instanceof Error ? err.message : err}` };
+      }
+    }
   } catch (err) {
     outcome = { ok: false, error: `could not reach BeeZilla: ${err instanceof Error ? err.message : err}` };
   } finally {
@@ -128,5 +181,5 @@ export async function connectAccount(deps) {
       /* window cleanup is best-effort */
     }
   }
-  return outcome;
+  return { ...outcome, search };
 }

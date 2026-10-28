@@ -54,9 +54,19 @@ if (!hasXvfb) {
   check("garbage is refused, not crashed", interpretMintResult("not json").ok === false);
 }
 
+// ── the search half of the answer (pure) ───────────────────────────────────
+{
+  const { interpretSearchMintResult } = await import("../desktop/connect.mjs");
+  check("a search token is accepted", interpretSearchMintResult({ status: 200, body: { ok: true, token: "bz1.s.p", endpoint: "https://search.beezilla.ai" } }).ok === true);
+  check("a 503 for search means 'not deployed', not 'failed'", interpretSearchMintResult({ status: 503, body: { code: "not_configured" } }).notDeployed === true);
+  check("a search token without an endpoint is not stored", interpretSearchMintResult({ status: 200, body: { ok: true, token: "bz1.s.p" } }).ok === true);
+}
+
 // ── a fake BeeZilla cloud ───────────────────────────────────────────────────
 let mintCalls = 0;
+let searchCalls = 0;
 let mode = "signin"; // "signin" = 401 then 200 | "notconfigured" = 503
+let searchMode = "ok"; // "ok" | "notconfigured"
 const cloud = createServer((req, res) => {
   const url = req.url ?? "/";
   if (url === "/connect") {
@@ -93,6 +103,25 @@ const cloud = createServer((req, res) => {
     );
     return;
   }
+  if (url === "/api/search-token" && req.method === "POST") {
+    searchCalls++;
+    if (searchMode === "notconfigured") {
+      res.writeHead(503, { "content-type": "application/json" }).end(
+        JSON.stringify({ ok: false, code: "not_configured", error: "BeeZilla search is not deployed yet (BZ_SEARCH_GATEWAY_URL)" }),
+      );
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" }).end(
+      JSON.stringify({
+        ok: true,
+        token: "bz1.search.payload",
+        expiresAt: new Date(Date.now() + 900_000).toISOString(),
+        expiresInSeconds: 900,
+        endpoint: "https://search.beezilla.ai/v1/search",
+      }),
+    );
+    return;
+  }
   res.writeHead(404).end("not found");
 });
 await new Promise((r) => cloud.listen(0, "127.0.0.1", r));
@@ -121,6 +150,17 @@ const runConnect = (dataDir, testMode) =>
     );
     void child;
   });
+
+const readSearchStore = (dataDir) => {
+  const file = join(dataDir, "search.json");
+  if (!existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    return parsed?.managedTokenCipher ? parsed : null;
+  } catch {
+    return null;
+  }
+};
 
 const readStore = (dataDir) => {
   const file = join(dataDir, "inference.json");
@@ -151,6 +191,13 @@ let dataDir = mkdtempSync(join(tmpdir(), "bz-connect-"));
   check("the store keeps the cloud's expiry", Boolean(store?.expiresAt), store?.expiresAt);
   check("the store records our endpoint", String(store?.baseUrl ?? "").includes("inference-api"), store?.baseUrl);
   check("the token is never written in the clear", !JSON.stringify(store ?? {}).includes("bz1.fake.payload"), "encrypted at rest");
+
+  // the search half travels with the same sign-in
+  const searchStore = readSearchStore(dataDir);
+  check("a search token is minted in the same sign-in", result?.search?.ok === true, result?.search?.error ?? "ok");
+  check("the search token is stored for later turns", Boolean(searchStore?.managedTokenCipher), searchStore ? "stored" : "missing");
+  check("the search gateway is recorded", String(searchStore?.gateway ?? "").includes("beezilla.ai"), searchStore?.gateway);
+  check("the search token is never written in the clear", !JSON.stringify(searchStore ?? {}).includes("bz1.search.payload"), "encrypted at rest");
 }
 
 // ── 2. a deployment with no signing secret ──────────────────────────────────
@@ -168,6 +215,28 @@ let dataDir = mkdtempSync(join(tmpdir(), "bz-connect-"));
   check("the 503 message names the deployment, not the user", /not configured|not available/i.test(String(result?.error ?? "")), String(result?.error ?? "").slice(0, 80));
   check("nothing is saved when minting fails", readStore(dataDir) === null, readStore(dataDir) ? "store written" : "no store");
 }
+
+// ── 3. inference works, search is not deployed ─────────────────────────────
+{
+  mintCalls = 0;
+  searchCalls = 0;
+  mode = "signin";
+  searchMode = "notconfigured";
+  dataDir = mkdtempSync(join(tmpdir(), "bz-connect-nosearch-"));
+  const { out } = await runConnect(dataDir, "signin");
+  const line = out.split("\n").find((l) => l.includes("CONNECT_RESULT:")) ?? "";
+  let result = null;
+  try {
+    result = JSON.parse(line.slice(line.indexOf("CONNECT_RESULT:") + "CONNECT_RESULT:".length));
+  } catch {}
+
+  check("sign-in still succeeds when search is missing", result?.ok === true, result?.error ?? line.slice(0, 60));
+  check("the search failure is reported as 'not deployed'", result?.search?.notDeployed === true, JSON.stringify(result?.search ?? {}).slice(0, 80));
+  check("inference is still stored", readStore(dataDir)?.provider === "beezilla", readStore(dataDir)?.provider ?? "none");
+  check("no search credential is invented", readSearchStore(dataDir) === null, readSearchStore(dataDir) ? "store written" : "no search store");
+  check("the app says so in its log", /search is not enabled/.test(out), "logged");
+}
+searchMode = "ok";
 
 cloud.close();
 rmSync(dataDir, { recursive: true, force: true });
