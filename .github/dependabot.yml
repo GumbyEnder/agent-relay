@@ -1,0 +1,35 @@
+version: 2
+
+# Dependency PRs are only safe because CI exists. They land as normal PRs and
+# are squash-merged like any other contribution.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 3
+    versioning-strategy: increase
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+      production-patch:
+        dependency-type: production
+        update-types: ["patch"]
+    ignore:
+      # Major bumps of the build/runtime spine are deliberate work, not a bot PR.
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nitropack"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2

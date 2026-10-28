@@ -24,7 +24,7 @@
 | [ADMIN_HOST.md](./ADMIN_HOST.md) | Optional split admin host |
 | [TEAM_TENANCY_SKETCH.md](./TEAM_TENANCY_SKETCH.md) | Early tenancy notes |
 | [GROK_BUILD_PROMPT.md](./GROK_BUILD_PROMPT.md) | Historical build handoff |
+| [TUI_DESIGN.md](./TUI_DESIGN.md) | Terminal UI design spec (v0) — Ink/TS MVP |
+| [MAINTAINING.md](./MAINTAINING.md) | Maintainer process — triage, review, merge, release |
 
 Repo root also has [CHANGELOG.md](../CHANGELOG.md), [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md).
-
-| [TUI_DESIGN.md](TUI_DESIGN.md) | Terminal UI design spec (v0) — Ink/TS MVP |
