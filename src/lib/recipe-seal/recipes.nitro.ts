@@ -271,13 +271,27 @@ if (useMatch && method === "POST") {
   if (!input) { setResponseStatus(event, 400); return { ok: false, error: "Tell it what you need", code: "input_required" }; }
 
   try {
-    const result = await useRecipe({
+    // Providers occasionally answer with reasoning and no content. A buyer who paid
+    // Drops for this deserves a second attempt before they get an error back.
+    const attempt = () => useRecipe({
       storage: rDeps.storage,
-      kek: rDeps.kek,
+      kek: rDeps.kek as Uint8Array,
       hash,
       input,
-      model: (prompt: string) => chatCompletion([{ role: "user", content: prompt }], { temperature: 0.2 }),
+      model: (prompt: string) => chatCompletion(
+        [
+          { role: "system", content: "Reply with the JSON object only. No commentary, no reasoning." },
+          { role: "user", content: prompt },
+        ],
+        { temperature: 0.2 },
+      ),
     });
+    let result;
+    try { result = await attempt(); }
+    catch (first) {
+      if (!/reasoning only/i.test(String((first as Error).message))) throw first;
+      result = await attempt();
+    }
     if (!result.artifact) { setResponseStatus(event, 502); return result; }
     return { hash, ...result };
   } catch (e) {
