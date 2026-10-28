@@ -703,7 +703,8 @@ export default defineEventHandler(async (event) => {
     // Never a nested query fragment (postgres.js would execute it). Two plain
     // parameters instead: "everything" for the operator, "one owner" otherwise.
     const scopeAll = ops && !opsUser;
-    const scopeUid = opsUser ?? user!.id;
+    // `user` is null on the ops path, so it must be optional here.
+    const scopeUid = opsUser ?? user?.id ?? "";
     const daysRaw = Number(queryValue(fullPath, "days"));
     const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 7;
     try {
