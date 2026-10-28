@@ -42,7 +42,7 @@ import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
-import { materializeDraft } from "./documents";
+import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
@@ -277,6 +277,8 @@ export interface ChatResponse {
   context?: ContextState;
   /** Per-turn latency breakdown (ms). */
   timings?: TurnTimings;
+  /** The file this turn produced, with links the chat can show inline. */
+  document?: { filename: string; contentType: string; bytes: number | null; documentId?: string; downloadUrl: string; libraryUrl: string };
   error?: string;
   code?: string;
 }
@@ -1201,16 +1203,44 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
     // BZ-F015: materialize the actual produced text as a durable document
     // with immutable versions — never reconstruct it later from the brief.
+    let materializedId: string | null = null;
     try {
       // The rendered document when there is one; the reply only when the turn
       // produced no artifact at all.
-      await materializeDraft(sql, userId, recordId, baseTitle, renderedDocText ?? cleanReply, {
+      const mat = await materializeDraft(sql, userId, recordId, baseTitle, renderedDocText ?? cleanReply, {
         slots: slotValues,
         review: response.review,
         creator: userId,
       });
+      materializedId = mat && mat.id ? String(mat.id) : null;
     } catch (derr) {
       console.error("[buzzy/documents] materialize failed:", derr instanceof Error ? derr.message : derr);
+    }
+    // The chat must hand over the file it just made. A banner at the top of the
+    // page is not "delivered": the link belongs in the reply that announced it.
+    // TS narrows the outer variable to null here (it is assigned inside the
+    // tool loop), so take it through an explicitly typed local.
+    const renderedDoc = renderedDocument as { filename: string; bytesB64: string; contentType: string } | null;
+    if (renderedDoc || materializedId) {
+      // The chat delivers the file. Two links, both real:
+      //   downloadUrl — /api/buzzy/documents/:id?format=… renders the exact
+      //     version on demand and is NOT approval-gated (the owner's own file,
+      //     made in this conversation).
+      //   libraryUrl  — the Library row for the work item this chat produced.
+      const docId = materializedId ?? documentIdForJob(recordId);
+      const fmt = /pdf/i.test(renderedDoc?.contentType ?? "")
+        ? "pdf"
+        : /word|officedocument/i.test(renderedDoc?.contentType ?? "")
+          ? "docx"
+          : "md";
+      response.document = {
+        filename: renderedDoc?.filename ?? `${baseTitle.slice(0, 60)}.${fmt}`,
+        contentType: renderedDoc?.contentType ?? "text/markdown",
+        bytes: renderedDoc?.bytesB64 ? Math.round((renderedDoc.bytesB64.length * 3) / 4) : null,
+        documentId: docId,
+        downloadUrl: `/api/buzzy/documents/${encodeURIComponent(docId)}?format=${fmt}`,
+        libraryUrl: `/buzzy/library?job=${encodeURIComponent(recordId)}`,
+      };
     }
   }
 

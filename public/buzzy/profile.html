@@ -96,21 +96,58 @@
 <body>
   <header>
     <div class="header-inner">
-      <a href="/buzzy/" class="brand-link">
+      <a href="/buzzy/talk" class="brand-link">
         <div class="brand">
           <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
           <strong>BeeZilla</strong>
         </div>
       </a>
-      <nav>
-        <a href="/buzzy/" id="jobsLink">Talk</a>
-        <a href="/buzzy/remember.html" id="memLink">What BeeZilla remembers</a>
-        <a href="/buzzy/profile.html" id="profLink" class="active">About your business</a>
-        <a href="/buzzy/recipes">Recipes</a>
-        <a href="/buzzy/library" id="libLink">Library</a>
-        <a href="/buzzy/landing" class="account-link">Sign in</a>
-        <span class="phase" id="phaseLabel">About your business</span>
-      </nav>
+      <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+    </nav>
+    <script>
+    /* ONE navigation, defined once. Every page used to hand-write its own nav
+       and they drifted: "Talk" pointed at /buzzy/ (the Jobs/Library page), so the
+       chat was unreachable from the nav — that is why you could not get back to
+       TALK. Active state is computed here from the path, not hard-coded per page. */
+    (function () {
+      var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+      // Default is Library: "/buzzy/" IS the jobs/library page (index.html).
+      var section = "library";
+      if (/^\/buzzy\/talk$/.test(path)) section = "talk";
+      else if (/^\/buzzy\/library$/.test(path)) section = "library";
+      else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
+      else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
+      else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
+      else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
+      else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "library";
+      var links = document.querySelectorAll("#bzNav a[data-nav]");
+      for (var i = 0; i < links.length; i++) {
+        var on = links[i].getAttribute("data-nav") === section;
+        links[i].classList.toggle("active", on);
+        if (on) links[i].setAttribute("aria-current", "page");
+        else links[i].removeAttribute("aria-current");
+      }
+      // "Sign in" is a lie once you are signed in. Ask the API and relabel.
+      var acct = document.getElementById("accountLink");
+      if (acct) {
+        fetch("/api/buzzy/documents?limit=1", { credentials: "same-origin" })
+          .then(function (r) {
+            if (r.ok) { acct.textContent = "Account"; acct.href = "/buzzy/profile"; }
+            else { acct.textContent = "Sign in"; acct.href = "/buzzy/landing"; }
+          })
+          .catch(function () {});
+      }
+    })();
+    </script>
     </div>
   </header>
   <main id="app"></main>
