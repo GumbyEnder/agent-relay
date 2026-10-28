@@ -24,11 +24,14 @@ export const TOKEN_PREFIX = "bz1";
 export const DEFAULT_TTL_SECONDS = 900; // 15 minutes
 export const MAX_TTL_SECONDS = 3600;
 
+/** What a token is allowed to be used for. Nothing else is mintable. */
+export type TokenScope = "inference" | "search";
+
 export interface InferenceClaims {
   /** the account the token was minted for */
   sub: string;
-  /** always "inference" — a token for anything else is refused */
-  scope: "inference";
+  /** the one capability this token carries */
+  scope: TokenScope;
   /** issued at, epoch seconds */
   iat: number;
   /** expires at, epoch seconds */
@@ -38,6 +41,8 @@ export interface InferenceClaims {
 }
 
 export type VerifyFailure = "malformed" | "bad_signature" | "expired" | "scope" | "no_secret";
+
+const SCOPES: readonly TokenScope[] = ["inference", "search"];
 
 export interface VerifyResult {
   ok: boolean;
@@ -63,6 +68,8 @@ const sign = (secret: string, payload: string): string =>
 
 export interface MintOptions {
   userId: string;
+  /** defaults to "inference" so existing callers keep their meaning */
+  scope?: TokenScope;
   ttlSeconds?: number;
   secret?: string;
   now?: number;
@@ -91,9 +98,12 @@ export function mintInferenceToken(opts: MintOptions): MintedToken {
   const requested = Number.isFinite(opts.ttlSeconds) ? Math.floor(opts.ttlSeconds!) : DEFAULT_TTL_SECONDS;
   const ttl = Math.min(Math.max(requested, 60), MAX_TTL_SECONDS);
 
+  const scope = opts.scope ?? "inference";
+  if (!SCOPES.includes(scope)) return { ok: false, error: `unknown token scope: ${String(scope)}` };
+
   const claims: InferenceClaims = {
     sub: userId,
-    scope: "inference",
+    scope,
     iat: now,
     exp: now + ttl,
     jti: randomBytes(12).toString("hex"),
@@ -105,7 +115,7 @@ export function mintInferenceToken(opts: MintOptions): MintedToken {
 /** Verify a token exactly as a gateway would. */
 export function verifyInferenceToken(
   token: string,
-  opts: { secret?: string; now?: number } = {},
+  opts: { secret?: string; now?: number; scope?: TokenScope } = {},
 ): VerifyResult {
   const secret = opts.secret ?? signingSecret();
   if (!secret) return { ok: false, reason: "no_secret" };
@@ -128,8 +138,11 @@ export function verifyInferenceToken(
   } catch {
     return { ok: false, reason: "malformed" };
   }
-  if (!claims?.sub || claims.scope !== "inference" || !Number.isFinite(claims.exp)) {
-    return { ok: false, reason: "malformed" };
+  // A token is only good for the capability it was minted for: an inference token
+  // must never unlock search quota, and vice versa.
+  const required = opts.scope ?? "inference";
+  if (!claims?.sub || !SCOPES.includes(claims.scope) || claims.scope !== required || !Number.isFinite(claims.exp)) {
+    return { ok: false, reason: "scope" };
   }
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   if (claims.exp <= now) return { ok: false, reason: "expired", claims };

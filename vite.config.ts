@@ -434,6 +434,12 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/inference-token.nitro.ts",
               },
               {
+                // Our search quota: a short-lived, search-scoped token pointed at our
+                // gateway, so the Brave key never reaches a client.
+                route: "/api/search-token",
+                handler: "./src/lib/search-token.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/chat",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },

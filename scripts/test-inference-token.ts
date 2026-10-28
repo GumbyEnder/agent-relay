@@ -71,7 +71,7 @@ const minted = mintInferenceToken({ userId: "user_42", secret: SECRET, now: NOW 
   const forged = verifyInferenceToken(`bz1.${forgedPayload}.${forgedSig}`, { secret: SECRET, now: NOW });
   check(
     "a correctly-signed token claiming another scope is refused on the claim",
-    !forged.ok && forged.reason === "malformed",
+    !forged.ok && forged.reason === "scope",
     forged.reason,
   );
 
@@ -105,6 +105,33 @@ const minted = mintInferenceToken({ userId: "user_42", secret: SECRET, now: NOW 
   const trimmed = inferenceEndpoint();
   check("a configured endpoint is normalised", trimmed.baseUrl === "https://proxy.internal/v1", trimmed.baseUrl);
   delete process.env.BZ_INFERENCE_BASE_URL;
+}
+
+// ── scopes: one token, one capability ───────────────────────────────────────
+{
+  const inference = mintInferenceToken({ userId: "user_42", secret: SECRET, now: NOW, scope: "inference" });
+  const search = mintInferenceToken({ userId: "user_42", secret: SECRET, now: NOW, scope: "search" });
+
+  check("a search-scoped token can be minted", search.ok && search.claims?.scope === "search", search.error);
+  check(
+    "an inference token verifies for inference",
+    verifyInferenceToken(inference.token!, { secret: SECRET, now: NOW, scope: "inference" }).ok === true,
+  );
+  check(
+    "an inference token is REFUSED for search (no quota crossover)",
+    verifyInferenceToken(inference.token!, { secret: SECRET, now: NOW, scope: "search" }).reason === "scope",
+  );
+  check(
+    "a search token is REFUSED for inference",
+    verifyInferenceToken(search.token!, { secret: SECRET, now: NOW, scope: "inference" }).reason === "scope",
+  );
+  check(
+    "a search token verifies for search",
+    verifyInferenceToken(search.token!, { secret: SECRET, now: NOW, scope: "search" }).ok === true,
+  );
+
+  const bogus = mintInferenceToken({ userId: "user_42", secret: SECRET, scope: "admin" as never });
+  check("an unknown scope cannot be minted", !bogus.ok, bogus.error);
 }
 
 console.log(`\ninference token E2E: ${failures === 0 ? "passed" : `${failures} failed`}`);
