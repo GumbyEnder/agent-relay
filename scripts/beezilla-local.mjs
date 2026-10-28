@@ -131,7 +131,11 @@ const child = spawn(process.execPath, [entry], {
     BZ_RUNTIME: "local",
     BZ_DATA_DIR: dir,
     BZ_LOCAL_TOKEN: localToken,
-    ...(search ? { BZ_BRAVE_KEY: search.key } : {}),
+    ...(search && search.provider === "beezilla"
+      ? { BZ_SEARCH_TOKEN: search.token, BZ_SEARCH_GATEWAY_URL: search.gateway }
+      : search
+        ? { BZ_BRAVE_KEY: search.key }
+        : {}),
     ...(managedExpired ? { BZ_MANAGED_EXPIRED: "1" } : {}),
     ...(inference && !managedExpired
       ? {

@@ -73,6 +73,63 @@ export function clearSearchKey(dataDir) {
   rmSync(searchStorePath(dataDir), { force: true });
 }
 
+/**
+ * BeeZilla search: a short-lived, search-scoped token pointed at OUR gateway.
+ * Stored beside the BYOK key (never instead of it — BYOK wins at resolve time) so a
+ * user who later adds their own Brave key is not fighting a hidden credential.
+ */
+export function saveManagedSearch(dataDir, { token, gateway, expiresAt }, cipher = {}) {
+  const value = (token ?? "").trim();
+  if (!value) throw new Error("a search token is required");
+  const encrypted = Boolean(cipher.encrypt);
+  const payload = {
+    managedTokenCipher: encrypted ? Buffer.from(cipher.encrypt(value)).toString("base64") : value,
+    managedEncrypted: encrypted,
+    gateway: (gateway ?? "").trim().replace(/\/+$/, ""),
+    expiresAt: expiresAt ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+  const file = searchStorePath(dataDir);
+  // Merge rather than overwrite: a BYOK key already in the file must survive.
+  let existing = {};
+  try {
+    existing = JSON.parse(readFileSync(file, "utf8")) ?? {};
+  } catch {}
+  writeFileSync(file, JSON.stringify({ ...existing, ...payload }, null, 2) + "\n", { mode: 0o600 });
+  try {
+    chmodSync(file, 0o600);
+  } catch {
+    /* Windows ignores POSIX modes; Electron encryption is the real control there */
+  }
+  return payload;
+}
+
+export function loadManagedSearch(dataDir, cipher = {}) {
+  const file = searchStorePath(dataDir);
+  if (!existsSync(file)) return null;
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!raw?.managedTokenCipher || !raw?.gateway) return null;
+  let token;
+  try {
+    token = raw.managedEncrypted
+      ? cipher.decrypt
+        ? cipher.decrypt(Buffer.from(raw.managedTokenCipher, "base64"))
+        : null
+      : raw.managedTokenCipher;
+  } catch {
+    return null;
+  }
+  if (!token) return null;
+  const expiresAt = raw.expiresAt ?? null;
+  const expired = expiresAt ? Date.parse(expiresAt) <= Date.now() : false;
+  return { token, gateway: raw.gateway, expiresAt, expired, updatedAt: raw.updatedAt ?? null };
+}
+
 export function resolveSearch(dataDir, cipher = {}) {
   const envKey = (process.env.BZ_BRAVE_KEY ?? "").trim();
   if (envKey) {
@@ -81,6 +138,20 @@ export function resolveSearch(dataDir, cipher = {}) {
   const stored = loadSearchKey(dataDir, cipher);
   if (stored) {
     return { source: "store", provider: stored.provider, key: stored.key, encrypted: stored.encrypted };
+  }
+  // Nothing of the user's own: fall back to OUR gateway with a scoped token, which
+  // is how search works out of the box. An expired managed token is simply not
+  // offered — search degrades to "unavailable" rather than failing a chat turn.
+  const managed = loadManagedSearch(dataDir, cipher);
+  if (managed && !managed.expired) {
+    return {
+      source: "managed",
+      provider: "beezilla",
+      token: managed.token,
+      gateway: managed.gateway,
+      expiresAt: managed.expiresAt,
+      encrypted: true,
+    };
   }
   return null;
 }

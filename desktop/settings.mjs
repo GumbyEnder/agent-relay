@@ -19,7 +19,12 @@ import {
   isExpired,
   redactKey,
 } from "../scripts/lib/inference.mjs";
-import { resolveSearch, saveSearchKey, clearSearchKey } from "../scripts/lib/search-keys.mjs";
+import {
+  resolveSearch,
+  saveSearchKey,
+  clearSearchKey,
+  saveManagedSearch as saveManagedSearchStore,
+} from "../scripts/lib/search-keys.mjs";
 
 /**
  * @param {{ dataDir: () => string, supervisor?: any, cipher?: {encrypt?:Function, decrypt?:Function} }} deps
@@ -91,6 +96,16 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
       const saved = saveSearchKey(dataDir(), { key }, cipher);
       const restartInfo = await restart();
       return { saved: { provider: saved.provider, encrypted: saved.encrypted }, ...restartInfo, status: describe() };
+    },
+
+    /**
+     * Store the search-scoped token minted by our cloud. Kept separate from
+     * saveSearch (a BYOK key) because they can coexist and BYOK wins.
+     */
+    async saveManagedSearch(cfg) {
+      const saved = saveManagedSearchStore(dataDir(), cfg, cipher);
+      const restarted = await restart();
+      return { saved: { gateway: saved.gateway, expiresAt: saved.expiresAt }, ...restarted };
     },
 
     async clear(kind) {
