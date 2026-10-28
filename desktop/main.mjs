@@ -27,6 +27,8 @@ const supervisor = new RuntimeSupervisor({
 });
 
 let mainWindow = null;
+let settingsWindow = null;
+let runtimeBase = null;
 
 /**
  * Decrypt the stored inference key into the environment the runtime inherits.
@@ -107,6 +109,12 @@ function installMenu() {
       {
         label: "BeeZilla",
         submenu: [
+          {
+            label: "Settings…",
+            accelerator: "CmdOrCtrl+,",
+            click: () => void openSettings(),
+          },
+          { type: "separator" },
           { role: "reload" },
           { role: "toggleDevTools" },
           { type: "separator" },
@@ -118,11 +126,65 @@ function installMenu() {
   );
 }
 
+/**
+ * Settings window — a second window over the SAME runtime, not a second server.
+ * It shares the default session, so the auth header injected for `base` already
+ * applies and the page can reach the preload bridge.
+ */
+function settingsWindowFor(url) {
+  settingsWindow = new BrowserWindow({
+    width: 760,
+    height: 820,
+    minWidth: 560,
+    title: "BeeZilla — Settings",
+    parent: mainWindow ?? undefined,
+    modal: false,
+    show: true,
+    backgroundColor: "#f7f8fa",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: join(dirname(fileURLToPath(import.meta.url)), "preload.cjs"),
+    },
+  });
+  settingsWindow.on("closed", () => {
+    settingsWindow = null;
+  });
+  settingsWindow.webContents.on("console-message", (_e, _l, message) =>
+    console.log(`[settings] ${message}`),
+  );
+  void settingsWindow.loadURL(url);
+  return settingsWindow;
+}
+
+async function openSettings() {
+  if (settingsWindow) {
+    settingsWindow.focus();
+    return;
+  }
+  // If the runtime is not up yet (first launch), bring it up rather than showing
+  // an error page: the user asked to configure the thing that starts it.
+  if (!runtimeBase) {
+    const rt = await supervisor.start();
+    const base = `http://${rt.host}:${rt.port}`;
+    runtimeBase = base;
+    session.defaultSession.webRequest.onBeforeSendHeaders({ urls: [`${base}/*`] }, (details, callback) => {
+      details.requestHeaders["Authorization"] = `Bearer ${supervisor.token}`;
+      callback({ requestHeaders: details.requestHeaders });
+    });
+  }
+  // .html explicitly: Nitro answers /buzzy/talk without the extension (that path
+  // is registered) but a plain static page needs its filename.
+  settingsWindowFor(`${runtimeBase}/buzzy/settings.html`);
+}
+
 async function createWindow() {
   console.log("[desktop] createWindow: starting runtime");
   const rt = await supervisor.start();
   console.log(`[desktop] runtime ready on ${rt.host}:${rt.port}`);
   const base = `http://${rt.host}:${rt.port}`;
+  runtimeBase = base;
 
   // Every request to the local runtime carries the per-launch token. Loopback
   // alone is not auth (any local process can reach the port), so without this
@@ -178,7 +240,13 @@ async function createWindow() {
   // Test hook: load a probe page instead of the product UI, so the privileged
 // bridge can be exercised in a real sandboxed renderer.
   const probe = process.env.BZ_SETTINGS_TEST;
-  const target = probe ? `file://${join(dirname(fileURLToPath(import.meta.url)), "test-settings.html")}` : `${base}/buzzy/talk`;
+  // BZ_PROBE_URL lets a test load a real product page (e.g. the settings screen)
+  // and drive it, instead of a synthetic probe document.
+  const probePath = process.env.BZ_PROBE_PATH;
+  const target =
+    process.env.BZ_PROBE_URL ||
+    (probePath ? `${base}${probePath}` : null) ||
+    (probe ? `file://${join(dirname(fileURLToPath(import.meta.url)), "test-settings.html")}` : `${base}/buzzy/talk`);
   const loaded = await Promise.race([
     mainWindow.loadURL(target).then(() => true),
     new Promise((r) => setTimeout(() => r(false), 30_000)),
@@ -189,6 +257,36 @@ async function createWindow() {
   // prove the window actually paints instead of only proving the process boots.
   // Capture AFTER loadURL resolves — registering a `did-finish-load` listener
   // here would never fire, because the event has already been emitted by then.
+  if (probe && process.env.BZ_SETTINGS_DRIVE) {
+    // Drive the real settings form: pick "my own key", paste, save, read the
+    // result out of the DOM. A UI that renders but cannot save is not a feature.
+    const driver = `(async () => {
+      const out = {};
+      out.hasBridge = Boolean(window.beezilla && window.beezilla.settings);
+      out.formPresent = Boolean(document.getElementById("save-inference") && document.getElementById("provider-byok"));
+      out.buttonsEnabled = !document.getElementById("save-inference").disabled;
+      const radio = document.getElementById("provider-byok");
+      if (radio) { radio.checked = true; radio.dispatchEvent(new Event("change", { bubbles: true })); }
+      out.byokFieldsShown = !document.getElementById("byok-fields").hidden;
+      document.getElementById("key").value = "sk-drive-probe-1234567890";
+      document.getElementById("save-inference").click();
+      await new Promise((resolve) => {
+        const started = Date.now();
+        const tick = setInterval(() => {
+          const text = document.getElementById("inference-status").textContent || "";
+          if (/Saved|Could not|required|error/i.test(text) || Date.now() - started > 40000) { clearInterval(tick); resolve(); }
+        }, 250);
+      });
+      out.statusText = document.getElementById("inference-status").textContent;
+      out.currentText = document.getElementById("inference-current").textContent.trim();
+      return JSON.stringify(out);
+    })()`;
+    const result = await mainWindow.webContents.executeJavaScript(driver).catch((err) => JSON.stringify({ ok: false, error: String(err) }));
+    console.log(`SETTINGS_DRIVE_RESULT:${result}`);
+    app.quit();
+    return;
+  }
+
   if (probe) {
     // Safety net only: the renderer normally quits the app as soon as it reports.
     setTimeout(() => {
