@@ -69,6 +69,30 @@ if (!hasXvfb) {
   else process.env.BZ_CLOUD_URL = saved;
 }
 
+// ── an unreachable BeeZilla must fail fast, in words a user can act on ─────
+{
+  const { connectAccount, isUnreachable } = await import("../desktop/connect.mjs");
+  const started = Date.now();
+  const result = await connectAccount({
+    baseUrl: "https://app.beezilla.ai",
+    open: async (url) => {
+      // Exactly what Electron throws when the host does not resolve.
+      throw new Error(`ERR_NAME_NOT_RESOLVED (-105) loading '${url}'`);
+    },
+    evaluate: async () => null,
+    isOpen: () => true,
+    close: () => {},
+    signInDeadlineMs: 180_000,
+    pollMs: 2_000,
+  });
+  const elapsed = Date.now() - started;
+  check("an unreachable host is recognised", isUnreachable(new Error("ERR_NAME_NOT_RESOLVED (-105)")), "classified");
+  check("an unreachable host fails immediately", elapsed < 2000, `${elapsed}ms (not the 180s sign-in wait)`);
+  check("it is reported as unreachable", result.unreachable === true, JSON.stringify(result));
+  check("the message names BeeZilla, not an Electron code", /could not reach BeeZilla at app\.beezilla\.ai/.test(result.error) && !/ERR_/.test(result.error), result.error);
+  check("the message offers BYOK as the way forward", /your own API key/i.test(result.error), "byok offered");
+}
+
 // ── the search half of the answer (pure) ───────────────────────────────────
 {
   const { interpretSearchMintResult } = await import("../desktop/connect.mjs");
