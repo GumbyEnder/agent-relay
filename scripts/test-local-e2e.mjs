@@ -14,6 +14,7 @@
  * Run: node scripts/test-local-e2e.mjs
  */
 import { spawn, execFileSync } from "node:child_process";
+import http from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, readdirSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -111,6 +112,36 @@ check(
 const landing = await fetch(`${base}/buzzy/landing`, { redirect: "manual" }).then((r) => r.status).catch(() => 0);
 check("branded landing serves", landing === 200, `status ${landing}`);
 
+// ── local auth: loopback alone is NOT authentication ─────────────────────────
+const token = runtime.token;
+check("runtime.json carries a per-launch token", typeof token === "string" && token.length >= 32);
+
+const unauth = await fetch(`${base}/api/buzzy/jobs`).then((r) => r.status).catch(() => 0);
+check("API refuses without the token", unauth === 401, `status ${unauth}`);
+
+const authorized = await fetch(`${base}/api/buzzy/jobs`, {
+  headers: { authorization: `Bearer ${token}` },
+}).then((r) => r.status).catch(() => 0);
+check("API accepts with the token", authorized === 200, `status ${authorized}`);
+
+const badHost = await new Promise((done) => {
+  const req = http.request(
+    {
+      host: "127.0.0.1",
+      port: runtime.port,
+      path: "/api/buzzy/jobs",
+      headers: { Host: "evil.example", authorization: `Bearer ${token}` },
+    },
+    (res) => {
+      res.resume();
+      done(res.statusCode ?? 0);
+    },
+  );
+  req.on("error", () => done(0));
+  req.end();
+});
+check("DNS-rebinding Host header rejected", badHost !== 200, `status ${badHost}`);
+
 await stop(child, runtimeFile);
 
 // ── boot 2 against the same store ─────────────────────────────────────────────
@@ -144,6 +175,34 @@ try {
   check("existing store opens with migrations intact", /"n":\s*[1-9]/.test(migRows), migRows);
 } catch (err) {
   check("existing store opens with migrations intact", false, String(err).slice(0, 160));
+}
+
+// exactly ONE owner, provisioned idempotently across both boots
+try {
+  const out = execFileSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "-e",
+      `import('./src/lib/db.ts').then(async (m) => { const sql = await m.getSql(); const r = await sql\`select count(*)::int as n, min(email) as email from "user"\`; console.log(JSON.stringify(r)); const pg = await m.getPglite(); await pg.close(); })`,
+    ],
+    {
+      cwd: ROOT,
+      env: { ...process.env, BZ_RUNTIME: "local", BZ_DATA_DIR: dataDir },
+      encoding: "utf8",
+      timeout: 120_000,
+    },
+  );
+  const line = out.trim().split("\n").pop();
+  const parsed = JSON.parse(line);
+  check(
+    "single owner provisioned, idempotent across restarts",
+    parsed[0]?.n === 1 && parsed[0]?.email === "owner@beezilla.local",
+    line,
+  );
+} catch (err) {
+  check("single owner provisioned, idempotent across restarts", false, String(err).slice(0, 160));
 }
 
 await stop(child, runtimeFile);
