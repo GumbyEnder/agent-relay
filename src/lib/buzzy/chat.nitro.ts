@@ -749,38 +749,47 @@ export default defineEventHandler(async (event) => {
     // One row per TURN, not per sample: the server row and the client row are
     // written ~1ms apart for the same turn, and only together do they answer
     // "how long did the owner talk, and how long did we take to answer".
-    const seen = new Set<string>();
-    const turns: Array<Record<string, unknown>> = [];
-    for (const row of recent as Array<Record<string, any>>) {
-      const key = `${row.session_id ?? "-"}:${Math.floor(new Date(row.created_at).getTime() / 3000)}`;
-      const existing = turns.find((t) => t.key === key);
-      const isClient = row.source === "client";
-      if (existing) {
-        // The client row wins for experienced timings; keep server-only fields.
-        if (isClient) Object.assign(existing, { client: row });
-        else Object.assign(existing, { server: row });
-        continue;
+    // One entry per TURN. The server row and the client row for the same turn
+    // are written ~1ms apart, so pair by session id and proximity — bucketing by
+    // clock time splits them at bucket edges.
+    const rowsSorted = (recent as Array<Record<string, any>>)
+      .slice()
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const used = new Set<number>();
+    const shaped: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < rowsSorted.length; i++) {
+      if (used.has(i)) continue;
+      const r = rowsSorted[i];
+      used.add(i);
+      let partner: Record<string, any> | null = null;
+      for (let j = i + 1; j < rowsSorted.length; j++) {
+        if (used.has(j)) continue;
+        const q = rowsSorted[j];
+        if (q.session_id !== r.session_id || q.source === r.source) continue;
+        if (Math.abs(new Date(r.created_at).getTime() - new Date(q.created_at).getTime()) > 3000) break;
+        partner = q;
+        used.add(j);
+        break;
       }
-      seen.add(key);
-      turns.push({ key, at: row.created_at, session_id: row.session_id, user_id: row.user_id,
-        [isClient ? "client" : "server"]: row });
-    }
-    const shaped = turns.map((t) => {
-      const c = (t.client ?? {}) as Record<string, any>;
-      const v = (t.server ?? {}) as Record<string, any>;
-      return {
-        at: t.at, session_id: t.session_id, user_id: t.user_id,
+      const c = (r.source === "client" ? r : partner) ?? {};
+      const v = (r.source === "server" ? r : partner) ?? {};
+      shaped.push({
+        at: r.created_at,
+        session_id: r.session_id,
+        user_id: r.user_id,
         model: c.model ?? v.model ?? null,
         lane: c.lane ?? v.lane ?? null,
         speech_ms: c.speech_ms ?? v.speech_ms ?? null,
         asr_ms: c.asr_ms ?? null,
+        ttft_ms: c.ttft_ms ?? v.ttft_ms ?? null,
         ttfa_ms: c.ttfa_ms ?? v.ttfa_ms ?? null,
         turn_ms: c.turn_ms ?? v.turn_ms ?? null,
         reply_chars: c.reply_chars ?? v.reply_chars ?? null,
         spoken: c.spoken ?? v.spoken ?? null,
-        client_ms: c.turn_ms != null && v.turn_ms != null ? c.turn_ms - v.turn_ms : null,
-      };
-    });
+        overhead_ms:
+          c.turn_ms != null && v.turn_ms != null ? Math.round(c.turn_ms - v.turn_ms) : null,
+      });
+    }
     return { ok: true, days, summary: summary[0] ?? null, byDay, turns: shaped, recent };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
