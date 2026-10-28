@@ -114,7 +114,7 @@ export function verifyTrustedBundle(
       ok: false,
       trusted: false,
       reason: "UNPINNED_PUBLISHER",
-      detail: `signed by ${author.keyId ?? "an unknown key"}, which is not pinned in this build`,
+      detail: `signed by ${author.key_id ?? "an unknown key"}, which is not pinned in this build`,
       manifest: base.manifest,
     };
   }
