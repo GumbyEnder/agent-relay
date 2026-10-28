@@ -54,6 +54,21 @@ if (!hasXvfb) {
   check("garbage is refused, not crashed", interpretMintResult("not json").ok === false);
 }
 
+// ── the cloud address a shipped app uses (pure) ────────────────────────────
+{
+  const { cloudBaseUrl, DEFAULT_CLOUD_URL } = await import("../desktop/connect.mjs");
+  const saved = process.env.BZ_CLOUD_URL;
+  delete process.env.BZ_CLOUD_URL;
+  check("a normal install has a default BeeZilla address", cloudBaseUrl() === DEFAULT_CLOUD_URL, cloudBaseUrl());
+  check("the default is a secure, named host", /^https:\/\/app\.beezilla\.ai$/.test(DEFAULT_CLOUD_URL), DEFAULT_CLOUD_URL);
+  process.env.BZ_CLOUD_URL = "https://staging.beezilla.ai/";
+  check("an env override still wins, trailing slash trimmed", cloudBaseUrl() === "https://staging.beezilla.ai", cloudBaseUrl());
+  delete process.env.BZ_CLOUD_URL;
+  check("a non-http address is refused", (() => { try { cloudBaseUrl("ftp://nope"); return false; } catch { return true; } })());
+  if (saved === undefined) delete process.env.BZ_CLOUD_URL;
+  else process.env.BZ_CLOUD_URL = saved;
+}
+
 // ── the search half of the answer (pure) ───────────────────────────────────
 {
   const { interpretSearchMintResult } = await import("../desktop/connect.mjs");
