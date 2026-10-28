@@ -936,9 +936,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Deferred merge: the owner already heard (or read) the answer — fold in the
   // slot extraction that ran alongside it instead of gating the turn on it.
   if (surface === "voice" || !Object.keys(newlyExtracted).length) {
-    newlyExtracted = await extractPromise;
+    // Never hold the response for this. The words are already on screen / in the
+    // owner's ears; waiting here only delays the `done` event (measured: a 2.3s
+    // streamed turn reported 9.2s because extraction was still awaited).
+    const late = await Promise.race([
+      extractPromise.catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 400)),
+    ]);
+    if (late) {
+      newlyExtracted = late;
+      await mergeExtracted(late);
+    } else {
+      void extractPromise.then(mergeExtracted).catch(() => {});
+    }
     extractMs = Date.now() - extractStarted;
-    await mergeExtracted(newlyExtracted);
   }
 
   // ── Sanitize reply ─────────────────────────────────────────────────
