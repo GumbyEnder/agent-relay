@@ -428,6 +428,12 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/auth-api.nitro.ts",
               },
               {
+                // Our inference: the signed-in owner mints a short-lived token
+                // (no shared provider key ever reaches the desktop app).
+                route: "/api/inference-token",
+                handler: "./src/lib/inference-token.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/chat",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
