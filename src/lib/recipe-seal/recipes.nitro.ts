@@ -16,6 +16,7 @@ import { publishBundle } from "./registry";
 import { bundleKey, checksKey, semanticKey } from "./storage";
 import { compileRecipeChecks } from "@/lib/recipe-checks";
 import { RECIPES } from "@/lib/buzzy/recipes";
+import { deriveRecipe, gatherEvidence } from "@/lib/buzzy/deriveRecipe";
 
 let depsPromise: Promise<RouteDeps> | null = null;
 let authorKeyCache: ReturnType<typeof generateAuthorKey> | null = null;
@@ -125,6 +126,66 @@ export default defineEventHandler(async (event) => {
     body = await readBody(event).catch(() => ({}));
   }
 
+  // ── GET /api/recipes/derive — jobs that could become a recipe ─────────────
+  if (path === "/api/recipes/derive" && method === "GET") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+    const sql = await getSql();
+    const rows = await sql.query<{ id: string; title: string | null; template: string | null; updated_at: string; doc_title: string | null; versions: string }>(
+      `SELECT j.id, j.title, j.template, j.updated_at::text AS updated_at,
+              d.title AS doc_title,
+              (SELECT count(*)::text FROM buzzy_document_versions v WHERE v.doc_id = d.id) AS versions
+         FROM buzzy_jobs j
+         LEFT JOIN LATERAL (
+           SELECT id, title FROM buzzy_documents
+            WHERE job_id = j.id AND user_id = j.user_id
+            ORDER BY updated_at DESC LIMIT 1
+         ) d ON true
+        WHERE j.user_id = $1
+        ORDER BY j.updated_at DESC
+        LIMIT 25`,
+      [user.id],
+    );
+    return {
+      ok: true,
+      jobs: rows.map((r) => ({
+        id: r.id,
+        title: r.title ?? r.doc_title ?? "Untitled job",
+        basis: r.template,
+        versions: Number(r.versions ?? 0),
+        updated_at: r.updated_at,
+        canDerive: Number(r.versions ?? 0) > 0,
+      })),
+    };
+  }
+
+  // ── POST /api/recipes/derive — read a recipe out of a finished job ─────────
+  //
+  // Nothing is published here. The output is a draft for the owner to read and
+  // correct, because a method derived from one job is a claim about the next one.
+  if (path === "/api/recipes/derive" && method === "POST") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const jobId = typeof b.jobId === "string" ? b.jobId.trim() : "";
+    if (!jobId) { setResponseStatus(event, 400); return { ok: false, error: "jobId is required", code: "invalid_body" }; }
+
+    const sql = await getSql();
+    const evidence = await gatherEvidence(sql, user.id, jobId);
+    if (!evidence) { setResponseStatus(event, 404); return { ok: false, error: "No such job", code: "unknown_job" }; }
+    if (!evidence.finalDraft) {
+      setResponseStatus(event, 409);
+      return { ok: false, error: "Finish the job first — there is no accepted document to learn from", code: "no_document" };
+    }
+    try {
+      const draft = await deriveRecipe(evidence);
+      return { ok: true, draft, evidence: { job: evidence.title, corrections: evidence.corrections.length } };
+    } catch (e) {
+      setResponseStatus(event, 502);
+      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "derive_failed" };
+    }
+  }
+
   // ── POST /api/recipes/upload — a person publishes their own recipe ─────────
   //
   // Everything else on this route is operator-only because it enrols a *bundle
@@ -159,12 +220,29 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "Price must be a whole number of Honey Drops", code: "invalid_price" };
     }
 
-    const semantic = {
-      discovery: template.discovery,
-      boundary: template.boundary,
-      checklist: template.checklist,
-      outputContract: template.outputContract,
-    };
+    // A recipe's METHOD comes from the job it was learned from. The template only
+    // decides which checks are applied — the house rules — never what the method
+    // says. Falling back to the template's own text is the demo path, and is the
+    // reason every seeded recipe of a kind shared one method.
+    const m = (b.method ?? null) as Record<string, unknown> | null;
+    const methodOk =
+      m && typeof m.boundary === "string" && m.boundary.trim().length > 0 &&
+      Array.isArray(m.discovery) && m.discovery.length >= 2;
+    const semantic = methodOk
+      ? {
+          discovery: (m!.discovery as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 10),
+          boundary: String(m!.boundary).slice(0, 400),
+          checklist: (m!.checklist ?? {}) as Record<string, string>,
+          outputContract: Array.isArray(m!.outputContract)
+            ? (m!.outputContract as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 10)
+            : [],
+        }
+      : {
+          discovery: template.discovery,
+          boundary: template.boundary,
+          checklist: template.checklist,
+          outputContract: template.outputContract,
+        };
     const compiled = compileRecipeChecks(template.id, { salt: new Uint8Array(8) });
     const authorKey = platformAuthorKey();
     // The manifest id charset is [a-z0-9._-]; auth user ids are mixed-case base58,
