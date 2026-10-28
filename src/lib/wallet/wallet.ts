@@ -254,10 +254,23 @@ export async function ownedHashes(q: Q, userId: string): Promise<string[]> {
  * Seller-facing sales figures. Deliberately aggregated: a seller learns how many
  * copies sold and what they earned, never who bought them.
  */
+export interface SaleRow {
+  /** When it sold. Not who bought it — that never leaves the server. */
+  sold_at: string;
+  recipeId: string;
+  hash: string;
+  paid: number;
+  credit: number;
+}
+
 export interface SalesSummary {
   sales: number;
   earned: number;
-  byRecipe: Array<{ hash: string; recipeId: string; sales: number; earned: number }>;
+  /** Distinct buyers as a number. A count is a business fact; a list is a customer list. */
+  distinctBuyers: number;
+  byRecipe: Array<{ hash: string; recipeId: string; sales: number; earned: number; avgRating: number | null; ratingCount: number }>;
+  /** Newest first, capped: a ledger, not an export. */
+  recent: SaleRow[];
 }
 
 export async function salesSummary(q: Q, sellerId: string): Promise<SalesSummary> {
@@ -266,20 +279,75 @@ export async function salesSummary(q: Q, sellerId: string): Promise<SalesSummary
        FROM ar_recipe_purchase WHERE seller_id = $1`,
     [sellerId],
   );
-  const per = await q<{ hash: string; recipe_id: string; sales: string; earned: string }>(
-    `SELECT hash, recipe_id, COUNT(*)::text AS sales, COALESCE(SUM(seller_credit), 0)::text AS earned
+  const per = await q<{ hash: string; recipe_id: string; sales: string; earned: string; avg: string | null; ratings: string }>(
+    `SELECT p.hash, p.recipe_id, COUNT(*)::text AS sales,
+            COALESCE(SUM(p.seller_credit), 0)::text AS earned,
+            (SELECT ROUND(AVG(r.stars)::numeric, 2)::text FROM ar_recipe_rating r WHERE r.hash = p.hash) AS avg,
+            (SELECT COUNT(*)::text FROM ar_recipe_rating r WHERE r.hash = p.hash) AS ratings
+       FROM ar_recipe_purchase p WHERE p.seller_id = $1
+      GROUP BY p.hash, p.recipe_id ORDER BY COUNT(*) DESC`,
+    [sellerId],
+  );
+  const distinct = await q<{ n: string }>(
+    `SELECT COUNT(DISTINCT buyer_id)::text AS n FROM ar_recipe_purchase WHERE seller_id = $1`,
+    [sellerId],
+  );
+  const recent = await q<{ sold_at: string; recipe_id: string; hash: string; paid: number; credit: number }>(
+    `SELECT created_at::text AS sold_at, recipe_id, hash, price_honey_drops AS paid, seller_credit AS credit
        FROM ar_recipe_purchase WHERE seller_id = $1
-      GROUP BY hash, recipe_id ORDER BY COUNT(*) DESC`,
+      ORDER BY created_at DESC LIMIT 100`,
     [sellerId],
   );
   return {
     sales: Number(totals[0]?.sales ?? 0),
     earned: Number(totals[0]?.earned ?? 0),
+    distinctBuyers: Number(distinct[0]?.n ?? 0),
     byRecipe: per.map((r) => ({
       hash: r.hash,
       recipeId: r.recipe_id,
       sales: Number(r.sales),
       earned: Number(r.earned),
+      avgRating: r.avg === null ? null : Number(r.avg),
+      ratingCount: Number(r.ratings ?? 0),
+    })),
+    recent: recent.map((r) => ({
+      sold_at: r.sold_at,
+      recipeId: r.recipe_id,
+      hash: r.hash,
+      paid: Number(r.paid),
+      credit: Number(r.credit),
     })),
   };
+}
+
+export interface RatingSummary {
+  average: number | null;
+  count: number;
+}
+
+export async function ratingsFor(q: Q, hashes: string[]): Promise<Record<string, RatingSummary>> {
+  if (!hashes.length) return {};
+  const rows = await q<{ hash: string; avg: string | null; n: string }>(
+    `SELECT hash, ROUND(AVG(stars)::numeric, 2)::text AS avg, COUNT(*)::text AS n
+       FROM ar_recipe_rating WHERE hash = ANY($1::text[]) GROUP BY hash`,
+    [hashes],
+  );
+  const out: Record<string, RatingSummary> = {};
+  for (const r of rows) out[r.hash] = { average: r.avg === null ? null : Number(r.avg), count: Number(r.n) };
+  return out;
+}
+
+/** Upsert one rating from someone who owns the recipe. Returns their stars. */
+export async function rateRecipe(q: Q, hash: string, raterId: string, stars: number): Promise<{ stars: number }> {
+  const n = Math.trunc(stars);
+  if (!Number.isSafeInteger(n) || n < 1 || n > 5) throw new Error("stars must be 1..5");
+  const rows = await q<{ stars: number }>(
+    `INSERT INTO ar_recipe_rating (hash, rater_id, stars)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (hash, rater_id)
+     DO UPDATE SET stars = EXCLUDED.stars, updated_at = now()
+     RETURNING stars`,
+    [hash, raterId, n],
+  );
+  return { stars: Number(rows[0].stars) };
 }
