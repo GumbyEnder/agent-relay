@@ -1,0 +1,280 @@
+#!/usr/bin/env node
+/**
+ * beezilla — the local runtime's command line.
+ *
+ * This is NOT a second implementation. The CLI supervises and talks to the same
+ * local server the desktop window uses; `scripts/beezilla-local.mjs` owns the
+ * process, this file owns the verbs. Anything the CLI can do, the window can do
+ * and vice versa, because both go through one runtime and one auth token.
+ *
+ *   beezilla serve [--port N]   start the runtime in the foreground
+ *   beezilla status             is it running, where, since when
+ *   beezilla stop               graceful shutdown (PGLite flushes)
+ *   beezilla doctor             diagnose install: build, assets, data dir, keys
+ *   beezilla run "<message>"    one chat turn, printed to stdout
+ *   beezilla export [file]      full local data as JSON (never trapped)
+ *
+ * Autostart: every command that needs a server starts one if none is running,
+ * so a fresh install works from the first command with no ceremony.
+ */
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { homedir, platform } from "node:os";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const LAUNCHER = join(ROOT, "scripts", "beezilla-local.mjs");
+
+function dataDir() {
+  const override = (process.env.BZ_DATA_DIR ?? "").trim();
+  if (override) return override;
+  if (platform() === "win32") {
+    return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "BeeZilla", "data");
+  }
+  if (platform() === "darwin") {
+    return join(homedir(), "Library", "Application Support", "BeeZilla", "data");
+  }
+  return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "beezilla", "data");
+}
+
+const DATA = dataDir();
+const RUNTIME_FILE = join(DATA, "runtime.json");
+
+function readRuntime() {
+  try {
+    return JSON.parse(readFileSync(RUNTIME_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function healthy(rt) {
+  if (!rt?.port) return false;
+  try {
+    const res = await fetch(`http://${rt.host}:${rt.port}/api/agent/health`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function api(rt, path, init = {}) {
+  const res = await fetch(`http://${rt.host}:${rt.port}${path}`, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${rt.token}`,
+      ...(init.headers ?? {}),
+    },
+    signal: AbortSignal.timeout(120_000),
+  });
+  const text = await res.text();
+  let body = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    /* plain text is fine */
+  }
+  return { status: res.status, body };
+}
+
+/** Start the runtime detached and wait for runtime.json. */
+async function ensureServer() {
+  const existing = readRuntime();
+  if (existing && (await healthy(existing))) return existing;
+
+  mkdirSync(DATA, { recursive: true });
+  const child = spawn(process.execPath, [LAUNCHER], {
+    cwd: ROOT,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, BZ_DATA_DIR: DATA },
+  });
+  child.unref();
+
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const rt = readRuntime();
+    if (rt && (await healthy(rt))) return rt;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error("local runtime did not start within 120s (run `beezilla doctor`)");
+}
+
+// ── verbs ────────────────────────────────────────────────────────────────────
+
+async function cmdServe(argv) {
+  const child = spawn(process.execPath, [LAUNCHER, ...argv], {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: { ...process.env, BZ_DATA_DIR: DATA },
+  });
+  await new Promise((r) => child.on("exit", r));
+}
+
+async function cmdStatus() {
+  const rt = readRuntime();
+  if (!rt) {
+    console.log("not running");
+    return 0;
+  }
+  const up = await healthy(rt);
+  if (!up) {
+    console.log(`not answering  http://${rt.host}:${rt.port}`);
+    console.log(`pid ${rt.pid}  started ${rt.startedAt}  (stale handshake — shutting down, or crashed)`);
+    console.log(`data ${rt.dataDir}`);
+    return 1;
+  }
+  console.log(`running  http://${rt.host}:${rt.port}`);
+  console.log(`pid ${rt.pid}  since ${rt.startedAt}`);
+  console.log(`data ${rt.dataDir}`);
+  return 0;
+}
+
+async function cmdStop() {
+  const rt = readRuntime();
+  if (!rt) {
+    console.log("not running");
+    return 0;
+  }
+  try {
+    process.kill(rt.pid, "SIGTERM");
+  } catch {
+    /* already gone */
+  }
+  // The server shuts down gracefully (PGLite must flush its WAL), and the
+  // launcher removes the handshake file when the child exits. Wait for BOTH:
+  // reporting "stopped" while runtime.json still names a live pid is how a CLI
+  // starts telling the truth about a process that is still shutting down.
+  const deadline = Date.now() + 25_000;
+  let downAt = 0;
+  while (Date.now() < deadline) {
+    const alive = await healthy(rt);
+    if (!alive && !downAt) downAt = Date.now();
+    if (!alive && !existsSync(RUNTIME_FILE)) {
+      console.log("stopped");
+      return 0;
+    }
+    if (downAt && Date.now() - downAt > 10_000) break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  if (!(await healthy(rt))) {
+    console.log("server stopped, but runtime.json was left behind — remove it or start again");
+    return 0;
+  }
+  console.log("still running after 25s — check the process manually");
+  return 1;
+}
+
+async function cmdDoctor() {
+  const checks = [];
+  const ok = (name, pass, detail = "") => checks.push({ name, pass, detail });
+
+  ok("build present", existsSync(join(ROOT, ".output", "server", "index.mjs")), ".output/server/index.mjs");
+  const libs = join(ROOT, ".output", "server", "_libs");
+  ok(
+    "pglite assets",
+    ["pglite.data", "pglite.wasm", "initdb.wasm"].every((f) => existsSync(join(libs, f))),
+    "the launcher restores these on start",
+  );
+
+  let writable = false;
+  try {
+    mkdirSync(DATA, { recursive: true });
+    writeFileSync(join(DATA, ".doctor"), "ok");
+    writable = statSync(join(DATA, ".doctor")).size > 0;
+  } catch {
+    writable = false;
+  }
+  ok("data dir writable", writable, DATA);
+
+  ok(
+    "inference configured",
+    Boolean((process.env.BZ_CHAT_KEY ?? "").trim()),
+    (process.env.BZ_CHAT_KEY ?? "").trim()
+      ? "provider key present (ours or BYOK)"
+      : "no key — chat will refuse by name; the rest works offline",
+  );
+
+  const rt = readRuntime();
+  ok("runtime", Boolean(rt && (await healthy(rt))), rt ? `http://${rt.host}:${rt.port}` : "not started");
+
+  for (const c of checks) {
+    console.log(`${c.pass ? "PASS" : "warn"}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}`);
+  }
+  const blocking = checks.filter((c) => !c.pass && c.name !== "inference configured" && c.name !== "runtime");
+  return blocking.length ? 1 : 0;
+}
+
+async function cmdRun(argv) {
+  const message = argv.filter((a) => !a.startsWith("--")).join(" ").trim();
+  if (!message) {
+    console.error('usage: beezilla run "<what you want>" [--job <id>] [--work]');
+    return 2;
+  }
+  const jobIdx = argv.indexOf("--job");
+  const jobId = jobIdx !== -1 ? argv[jobIdx + 1] : undefined;
+  const mode = argv.includes("--work") ? "work" : "chat";
+
+  const rt = await ensureServer();
+  const { status, body } = await api(rt, "/api/buzzy/chat", {
+    method: "POST",
+    body: JSON.stringify({ message, jobId, mode }),
+  });
+
+  if (status !== 200) {
+    console.error(body?.error ?? `request failed (${status})`);
+    return 1;
+  }
+  if (typeof body?.reply === "string" && body.reply.trim()) {
+    console.log(body.reply);
+  } else {
+    console.log(JSON.stringify(body, null, 2));
+  }
+  if (body?.jobId) console.error(`\n[job ${body.jobId}]`);
+  return 0;
+}
+
+async function cmdExport(argv) {
+  const target =
+    argv[0] || join(process.cwd(), `beezilla-export-${new Date().toISOString().slice(0, 10)}.zip`);
+  const rt = await ensureServer();
+  // The export endpoint returns a ZIP of the owner's whole workspace, not JSON.
+  // Read it as bytes — treating it as text produces a file that opens as mojibake.
+  const res = await fetch(`http://${rt.host}:${rt.port}/api/buzzy/export`, {
+    headers: { authorization: `Bearer ${rt.token}` },
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    console.error(`export failed (${res.status})`);
+    return 1;
+  }
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (bytes.subarray(0, 2).toString("latin1") !== "PK") {
+    console.error("export did not return a ZIP archive");
+    return 1;
+  }
+  writeFileSync(target, bytes);
+  console.log(`wrote ${target} (${bytes.length} bytes)`);
+  return 0;
+}
+
+const [, , verb, ...rest] = process.argv;
+const verbs = {
+  serve: cmdServe,
+  status: cmdStatus,
+  stop: cmdStop,
+  doctor: cmdDoctor,
+  run: cmdRun,
+  export: cmdExport,
+};
+
+const fn = verbs[verb];
+if (!fn) {
+  console.log(`beezilla <command>\n\n  serve [--port N]   start the runtime\n  status             is it running\n  stop               graceful shutdown\n  doctor             diagnose this install\n  run "<message>"    one chat turn [--job id] [--work]\n  export [file]      full local data as JSON`);
+  process.exit(verb ? 2 : 0);
+}
+process.exit(await fn(rest));
