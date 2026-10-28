@@ -435,11 +435,51 @@
 
         var chips = el("div", "chips");
         if (OWNED.has(r.hash)) chips.appendChild(el("span", "chip owned", r.author && r.author.id === ME ? "Yours" : "Owned"));
+        var rt = r.rating || { average: null, count: 0 };
+        if (rt.count > 0) {
+          chips.appendChild(el("span", "chip rating", "★ " + rt.average.toFixed(1) + " (" + rt.count + ")"));
+        } else {
+          chips.appendChild(el("span", "chip rating dim", "★ no ratings yet"));
+        }
         var cap = r.capability || {};
         (cap.outputs || []).forEach(function (o) { chips.appendChild(el("span", "chip", String(o))); });
         if (r.hash) chips.appendChild(el("span", "chip record", r.hash.slice(0, 10)));
         if (r.version) chips.appendChild(el("span", "chip", "v" + r.version));
         c.appendChild(chips);
+
+        if (r.author && r.author.id !== ME && OWNED.has(r.hash)) {
+          var stars = el("div", "stars");
+          stars.style.cssText = "display:flex;gap:0.2rem;align-items:center;font-size:0.8rem;color:#7A7A7A;";
+          stars.appendChild(el("span", null, "Rate it:"));
+          for (var si = 1; si <= 5; si++) {
+            (function (n) {
+              var b = el("button", "star", "★");
+              b.style.cssText = "background:none;border:0;color:#4A4A4A;font-size:0.95rem;cursor:pointer;padding:0 0.1rem;line-height:1;";
+              b.setAttribute("aria-label", n + " star" + (n === 1 ? "" : "s"));
+              b.addEventListener("click", function () {
+                fetch("/api/recipes/" + encodeURIComponent(r.hash) + "/rate", {
+                  method: "POST", credentials: "same-origin",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ stars: n })
+                })
+                  .then(function (res) { return res.json(); })
+                  .then(function (j) {
+                    if (!j.ok) { stars.appendChild(el("span", null, " " + (j.error || "could not save"))); return; }
+                    [].forEach.call(stars.querySelectorAll(".star"), function (el2, idx) {
+                      el2.style.color = idx < n ? "#FFC107" : "#4A4A4A";
+                    });
+                    var note = stars.querySelector(".thanks") || el("span", "thanks", "");
+                    note.style.cssText = "margin-left:0.5rem;font-size:0.74rem;color:#67D99B;";
+                    note.textContent = j.count > 1 ? "saved · ★ " + j.average.toFixed(1) + " from " + j.count : "saved";
+                    stars.appendChild(note);
+                  })
+                  .catch(function () {});
+              });
+              stars.appendChild(b);
+            })(si);
+          }
+          c.appendChild(stars);
+        }
 
         var lock = el("div", "lock");
         lock.appendChild(el("span", "sealed", "Method sealed"));

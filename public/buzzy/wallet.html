@@ -96,10 +96,17 @@
       <div class="stat"><div class="label">Owned</div><div class="value" id="owned">—</div><div class="note">recipes you can open</div></div>
     </div>
 
-    <h2>Your sales</h2>
+    <h2>Your recipes, and how they are doing</h2>
     <div id="sales" class="empty">Loading…</div>
 
-    <h2>Ledger</h2>
+    <h2>Sales ledger</h2>
+    <p class="hint" style="margin:-0.4rem 0 0.6rem;font-size:0.78rem;color:#7A7A7A;">
+      Every sale of your recipes: when, which recipe, what they paid, what you earned.
+      Buyers are never identified.
+    </p>
+    <div id="salesledger" class="empty">Loading…</div>
+
+    <h2>Your balance movements</h2>
     <div id="ledger" class="empty">Loading…</div>
 
     <div class="privacy">
@@ -137,22 +144,46 @@
 
       function renderSales(s) {
         var box = document.getElementById("sales");
-        box.className = "";
-        if (!s || !s.sales) { box.className = "empty"; box.textContent = "Nothing sold yet. Publish a recipe and it appears here."; return; }
+        var led = document.getElementById("salesledger");
+        box.className = ""; led.className = "";
+        if (!s || !s.sales) {
+          box.className = "empty"; box.textContent = "Nothing sold yet. Publish a recipe and it appears here.";
+          led.className = "empty"; led.textContent = "No transactions yet.";
+          return;
+        }
+        // Popularity: per recipe, how many times it sold and how it was rated.
         var table = el("table");
         var head = el("tr");
-        ["Recipe", "Opened", "You earned"].forEach(function (h) { head.appendChild(el("th", null, h)); });
+        ["Recipe", "Sold", "Rating", "You earned"].forEach(function (h) { head.appendChild(el("th", null, h)); });
         table.appendChild(head);
         s.byRecipe.forEach(function (r) {
           var tr = el("tr");
           tr.appendChild(el("td", null, r.recipeId));
           tr.appendChild(el("td", "num", money(r.sales)));
+          tr.appendChild(el("td", "num", r.ratingCount ? ("★ " + r.avgRating.toFixed(1) + " (" + r.ratingCount + ")") : "—"));
           tr.appendChild(el("td", "num pos", "+" + money(r.earned)));
           table.appendChild(tr);
         });
         box.appendChild(table);
-        var total = el("p", "empty", "Total: " + money(s.sales) + " opened, " + money(s.earned) + " Drops earned. Buyers are never identified.");
-        box.appendChild(total);
+        box.appendChild(el("p", "empty",
+          "Total: " + money(s.sales) + " sold to " + money(s.distinctBuyers) +
+          " buyer" + (s.distinctBuyers === 1 ? "" : "s") + ", " + money(s.earned) +
+          " Drops earned. Buyers are never identified."));
+
+        // Transactions: when, what, paid, earned — no names anywhere.
+        var lt = el("table");
+        var lh = el("tr");
+        ["When", "Recipe", "They paid", "You earned"].forEach(function (h) { lh.appendChild(el("th", null, h)); });
+        lt.appendChild(lh);
+        (s.recent || []).forEach(function (r) {
+          var tr = el("tr");
+          tr.appendChild(el("td", null, new Date(r.sold_at).toLocaleString()));
+          tr.appendChild(el("td", null, r.recipeId));
+          tr.appendChild(el("td", "num", money(r.paid)));
+          tr.appendChild(el("td", "num pos", "+" + money(r.credit)));
+          lt.appendChild(tr);
+        });
+        led.appendChild(lt);
       }
 
       fetch("/api/wallet", { credentials: "same-origin" })

@@ -18,7 +18,7 @@ import { compileRecipeChecks } from "@/lib/recipe-checks";
 import { RECIPES } from "@/lib/buzzy/recipes";
 import { deriveRecipe, gatherEvidence } from "@/lib/buzzy/deriveRecipe";
 import { useRecipe } from "./useRecipe";
-import { ownsRecipe } from "@/lib/wallet/wallet";
+import { ownsRecipe, rateRecipe, ratingsFor } from "@/lib/wallet/wallet";
 
 let depsPromise: Promise<RouteDeps> | null = null;
 let authorKeyCache: ReturnType<typeof generateAuthorKey> | null = null;
@@ -224,7 +224,34 @@ export default defineEventHandler(async (event) => {
     const user = opCtx?.user ?? null;
     if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
 
-    // ── POST /api/recipes/:hash/use — run a recipe this account owns ──────────
+    // ── POST /api/recipes/:hash/rate — score a recipe you own ─────────────────
+  //
+  // Only an owner may rate: a score from someone who never ran it is a review of the
+  // description. The rater id is stored to stop double-voting and is never returned.
+  const rateMatch = path.match(/^\/api\/recipes\/([a-f0-9]{64})\/rate$/);
+  if (rateMatch && method === "POST") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+    const deps = await getDeps();
+    const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => deps.q<T>(text, params ?? []);
+    const hash = rateMatch[1];
+    if (!(await ownsRecipe(q, user.id, hash))) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "You can rate a recipe once you own it", code: "not_owned" };
+    }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const stars = Number(b.stars);
+    try {
+      await rateRecipe(q, hash, user.id, stars);
+    } catch (e) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: String((e as Error).message), code: "invalid_stars" };
+    }
+    const summary = (await ratingsFor(q, [hash]))[hash] ?? { average: null, count: 0 };
+    return { ok: true, your_stars: Math.trunc(stars), ...summary };
+  }
+
+  // ── POST /api/recipes/:hash/use — run a recipe this account owns ──────────
   //
   // The door is the session plus the entitlement, not a bearer token: a person who
   // paid already has a session, and inventing a secret to hand back to the same

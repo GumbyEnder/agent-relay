@@ -130,6 +130,15 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
     const newest = new Map<string, (typeof all)[number]>();
     for (const r of all) if (!newest.has(r.recipe_id)) newest.set(r.recipe_id, r);
     const rows = [...newest.values()];
+    // Ratings are public and aggregated; the people who left them are not.
+    const ratingRows = rows.length
+      ? await q<{ hash: string; avg: string | null; n: string }>(
+          `SELECT hash, ROUND(AVG(stars)::numeric, 2)::text AS avg, COUNT(*)::text AS n
+             FROM ar_recipe_rating WHERE hash = ANY($1::text[]) GROUP BY hash`,
+          [rows.map((r) => r.hash)],
+        )
+      : [];
+    const ratings = new Map(ratingRows.map((r) => [r.hash, { average: r.avg === null ? null : Number(r.avg), count: Number(r.n) }]));
     // The shelf, not the paperwork. A shopper needs to decide whether to buy, and
     // the full manifest is 1.5 KB of key material, hashes and pricing internals per
     // row. Everything here is published by definition; nothing here is the recipe.
@@ -151,6 +160,7 @@ export async function routeRecipes(req: RouteRequest, deps: RouteDeps): Promise<
         // 0 is free. The client renders "Free" and never shows a price of zero.
         price_honey_drops: typeof l.price_honey_drops === "number" ? l.price_honey_drops : 0,
         is_free: (l.price_honey_drops ?? 0) === 0,
+        rating: ratings.get(r.hash) ?? { average: null, count: 0 },
         // What it accepts and what it will not do — the two things a shopper needs
         // beyond the price. Deliberately NOT the manifest: key material, pricing
         // splits, checks codes and internal hashes are not a shelf's business, and
