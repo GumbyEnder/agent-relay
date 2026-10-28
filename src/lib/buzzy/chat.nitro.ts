@@ -722,7 +722,7 @@ export default defineEventHandler(async (event) => {
         percentile_cont(0.5) WITHIN GROUP (ORDER BY asr_ms)        AS asr_p50
       FROM buzzy_voice_metrics
       WHERE (${scopeAll} OR user_id = ${scopeUid})
-        AND created_at > now() - (${days} || ' days')::interval
+        AND created_at > now() - (${days} * interval '1 day')
     `) as Array<Record<string, number | null>>;
     const byDay = (await sql`
       SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
@@ -733,7 +733,7 @@ export default defineEventHandler(async (event) => {
              percentile_cont(0.95) WITHIN GROUP (ORDER BY turn_ms) AS turn_p95
       FROM buzzy_voice_metrics
       WHERE (${scopeAll} OR user_id = ${scopeUid})
-        AND created_at > now() - (${days} || ' days')::interval
+        AND created_at > now() - (${days} * interval '1 day')
       GROUP BY 1 ORDER BY 1 DESC
     `) as Array<Record<string, unknown>>;
     const recent = (await sql`
@@ -768,7 +768,7 @@ export default defineEventHandler(async (event) => {
       SELECT created_at, tool, gate, ms, ok, error_code, result_bytes, path, job_id
       FROM buzzy_tool_calls
       WHERE user_id = ${user.id}
-        AND created_at > now() - (${days} || ' days')::interval
+        AND created_at > now() - (${days} * interval '1 day')
       ORDER BY created_at DESC
       LIMIT 50
     `) as Array<Record<string, unknown>>;
@@ -780,7 +780,7 @@ export default defineEventHandler(async (event) => {
              percentile_cont(0.95) WITHIN GROUP (ORDER BY ms)     AS ms_p95
       FROM buzzy_tool_calls
       WHERE user_id = ${user.id}
-        AND created_at > now() - (${days} || ' days')::interval
+        AND created_at > now() - (${days} * interval '1 day')
       GROUP BY tool ORDER BY calls DESC
     `) as Array<Record<string, unknown>>;
     return { ok: true, days, summary, calls };
