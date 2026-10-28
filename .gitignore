@@ -16,3 +16,7 @@ dist/
 playwright-report/
 test-results/
 brand-assets/
+
+# desktop release staging (generated; see desktop/dist.mjs)
+desktop/stage/
+dist-desktop/

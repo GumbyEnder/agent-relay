@@ -61,11 +61,13 @@ export class RuntimeSupervisor {
       cwd: this.root,
       env: {
         ...process.env,
-        // Electron main is NOT a normal Node process: clear the inspector/env
-        // that would make the child inherit a debugger port.
+        // Electron's binary IS process.execPath inside the app, so the child must
+        // be told to behave as plain Node. Set explicitly: leaving it undefined
+        // happens to work (Electron sees the string "undefined" and treats it as
+        // set) but that is an accident, not a contract.
+        ELECTRON_RUN_AS_NODE: "1",
         BZ_DATA_DIR: this.dataDir,
         BZ_RUNTIME: "local",
-        ELECTRON_RUN_AS_NODE: undefined,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
