@@ -278,8 +278,8 @@ async function loadBoard(sql: Sql, projectId?: string | null): Promise<BoardData
       ? sql`select * from ar_missions where project_id = ${projectId} order by updated_at desc`
       : sql`select * from ar_missions order by updated_at desc`,
     projectId
-      ? sql`select * from ar_events where project_id = ${projectId} or project_id is null order by at desc limit 200`
-      : sql`select * from ar_events order by at desc limit 200`,
+      ? sql`select * from ar_events where project_id = ${projectId} or project_id is null order by at desc limit 2000`
+      : sql`select * from ar_events order by at desc limit 2000`,
     projectId
       ? sql`select * from ar_calls where project_id = ${projectId} or project_id is null order by created_at desc`
       : sql`select * from ar_calls order by created_at desc`,
@@ -555,6 +555,9 @@ export async function ensureBoardReady(): Promise<void> {
         await new Promise((r) => setTimeout(r, 200));
         await sql`select 1 from ar_missions limit 1`;
       }
+      // Events retention (REVIEW-F9): cold table must exist before journal
+      // reads union it. IF NOT EXISTS keeps this idempotent with 0023.
+      await sql`create table if not exists ar_events_cold (like ar_events including all)`;
       await seedIfEmpty(sql);
     })().catch((err) => {
       globalRef.__arBoardReady__ = undefined;
@@ -987,8 +990,12 @@ export const durableBoard = {
       const sql = await getSql();
       await ensureProjects(sql);
       const owner = opts?.ownerUserId?.trim() || null;
-      const includeShared = opts?.includeShared !== false;
       const admin = opts?.admin === true;
+      // Shared (owner-less) boards: admins always; non-admin operators only when
+      // SHARED_BOARDS=1 (demo mode). Keeps QA debris out of every signup's rail.
+      const includeShared =
+        (opts?.includeShared !== false) &&
+        (admin || process.env.SHARED_BOARDS === "1");
       const includeArchived = opts?.includeArchived === true;
       let rows: Record<string, unknown>[];
       if (admin || !owner) {
@@ -1764,6 +1771,20 @@ export const durableBoard = {
         }
         projectId = resolved;
       }
+      // Lazy sweep: auto-release claims with no heartbeat for >6h on running
+      // missions (configurable via STALE_CLAIM_RELEASE_HOURS; 0 disables).
+      // Prevents the dead-key dead-end that stranded missions for 14 months.
+      const staleHours = Number(process.env.STALE_CLAIM_RELEASE_HOURS ?? "6");
+      if (staleHours > 0) {
+        const cutoff = new Date(Date.now() - staleHours * 3600_000);
+        await sql`
+          update ar_missions
+          set claimed_by = null, claimed_at = null, updated_at = ${ts(Date.now())}
+          where column_id = 'running'
+            and claimed_by is not null
+            and (last_heartbeat is null or last_heartbeat < ${cutoff})
+        `;
+      }
       const board = await loadBoard(sql, projectId ?? null);
       return engine.pollMissions(board, { ...opts, projectId });
     }),
@@ -1787,6 +1808,21 @@ export const durableBoard = {
       }
       return result;
     }),
+
+  unclaim: (
+    missionId: string,
+    agent: string,
+    opts?: { force?: boolean; note?: string },
+  ) =>
+    applyEngine(
+      (b) => engine.unclaimMission(b, missionId, agent, opts),
+      agent,
+      "agent",
+      opts?.note,
+    ),
+
+  comment: (missionId: string, agent: string, note: string) =>
+    applyEngine((b) => engine.commentMission(b, missionId, agent, note), agent, "agent", note),
 
   heartbeat: (missionId: string, agent: string, note?: string) =>
     applyEngine((b) => engine.heartbeatMission(b, missionId, agent, note), agent, "agent", note),
@@ -2320,7 +2356,25 @@ export const durableBoard = {
         order by at asc
       `;
       const history = histRows.map((r) => rowHistory(r as Record<string, unknown>));
-      return renderMissionJournalMarkdown(mission, history);
+      const commentRows = await sql`
+        select e.at, e.message, a.name as agent_name
+        from (
+          select * from ar_events where mission_id = ${missionId} and kind = 'comment'
+          union all
+          select * from ar_events_cold where mission_id = ${missionId} and kind = 'comment'
+        ) e
+        left join ar_agents a on a.id = e.agent_id
+        order by e.at asc
+      `;
+      const comments = commentRows.map((r) => {
+        const x = r as Record<string, unknown>;
+        return {
+          at: Number(x.at),
+          author: String(x.agent_name ?? "system"),
+          text: String(x.message ?? "").replace(/^[^·]*·\s*/, ""),
+        };
+      });
+      return renderMissionJournalMarkdown(mission, history, comments);
     }),
 
   listApiKeys: (projectId: string) =>

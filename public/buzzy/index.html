@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BeeZilla — Your jobs</title>
+  <title>🐴 BeeZilla — Jobs</title>
   <style>
     :root {
       --bz-black: #0A0A0A;
@@ -38,6 +38,18 @@
       flex-wrap: wrap;
       gap: 0.5rem;
     }
+    header > .header-inner,
+    .header-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
     header .brand {
       display: flex;
       align-items: center;
@@ -235,6 +247,114 @@
       transition: background 0.15s;
     }
     .jobrow:hover { background: rgba(255,193,7,0.06); }
+    /* Card format for the jobs list (desktop-friendly, self-contained) */
+    .job-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 0.9rem;
+    }
+    .jobcard {
+      border: 1px solid #2A2A2A;
+      background: var(--bz-panel);
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .jobcard:hover {
+      border-color: var(--bz-yellow-dim, #6a5a10);
+      background: rgba(255,193,7,0.04);
+    }
+    .jobcard-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .jobcard-title {
+      font-weight: 600;
+      color: #fff;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .jobcard-dates {
+      font-size: 0.72rem;
+      color: #777;
+      display: flex;
+      gap: 0.9rem;
+      flex-wrap: wrap;
+    }
+    .jobcard-dates b { color: #999; font-weight: 500; }
+    /* ── Documents: mini-vault (folder per job, .md docs) ── */
+    .docs-section { margin-top: 2rem; }
+    .docs-section h2 { font-size: 1.2rem; color: #fff; margin: 0 0 0.3rem; }
+    .docs-folders {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 0.9rem;
+      margin-top: 1rem;
+    }
+    .docfolder {
+      border: 1px solid #2A2A2A;
+      background: var(--bz-panel);
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .docfolder:hover { border-color: var(--bz-yellow-dim, #6a5a10); background: rgba(255,193,7,0.04); }
+    .docfolder .df-name { font-weight: 600; color: #fff; font-size: 0.92rem; }
+    .docfolder .df-meta { font-size: 0.72rem; color: #777; margin-top: 0.3rem; }
+    .doclist { margin-top: 1rem; }
+    .docitem {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.7rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      background: var(--bz-panel);
+      padding: 0.6rem 0.9rem;
+      margin-bottom: 0.5rem;
+    }
+    .docitem .di-name { color: #fff; font-size: 0.88rem; cursor: pointer; }
+    .docitem .di-name:hover { text-decoration: underline; }
+    .docitem .di-meta { font-size: 0.7rem; color: #777; }
+    .docitem .di-actions { display: flex; gap: 0.4rem; }
+    .docitem .di-actions button { font-size: 0.72rem; padding: 0.3rem 0.65rem; }
+    .docviewer {
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      background: #101010;
+      padding: 1rem 1.2rem;
+      margin-top: 0.8rem;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem;
+      color: #D8D8D8;
+      max-height: 480px;
+      overflow: auto;
+    }
+    .docviewer h1, .docviewer h2 { font-family: inherit; }
+    .docs-back { margin-bottom: 0.8rem; }
+    .jobcard-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+    }
+    .jobcard .chatbtn {
+      font-size: 0.78rem;
+      padding: 0.35rem 0.7rem;
+    }
     .tag {
       font-size: 0.7rem;
       text-transform: uppercase;
@@ -245,6 +365,9 @@
       border-radius: 3px;
       font-weight: 600;
     }
+    .tag-done { color: var(--bz-status-green); background: rgba(91,175,107,0.12); }
+    .tag-approved { color: var(--bz-status-blue); background: rgba(91,141,184,0.12); }
+    .tag-draft { color: var(--bz-status-lavender); background: rgba(155,142,196,0.12); }
     .templates {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -410,27 +533,55 @@
       margin: 0.5rem 0;
     }
     .result-cost strong { color: var(--bz-yellow); }
-  </style>
+  
+    .account-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 0.4rem;
+      background: var(--bz-panel, #141414);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.7rem 0.9rem;
+      min-width: 200px;
+      z-index: 50;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    .account-menu .am-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+    .account-menu .am-email { font-size: 0.75rem; color: #888; margin: 0.15rem 0 0.6rem; word-break: break-all; }
+    .account-menu .am-signout {
+      width: 100%;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+    .header-inner, header { position: relative; }
+</style>
+<link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
 <body>
   <header>
-    <a href="/buzzy/" class="brand-link">
-      <div class="brand">
-        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-        <strong>BeeZilla</strong>
-      </div>
-    </a>
-    <nav>
-      <a href="/buzzy/" id="jobsLink" class="active">Your jobs</a>
-      <a href="/buzzy/talk" id="talkLink">Discuss</a>
-      <a href="/buzzy/memory" id="memLink">Memory</a>
-      <a href="/buzzy/experts">Experts</a>
-      <a href="/login" class="account-link">Sign in</a>
-      <span class="phase" id="phaseLabel">Your jobs</span>
-    </nav>
+      <div class="header-inner">
+  <a href="/buzzy/" class="brand-link">
+        <div class="brand">
+          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <strong>BeeZilla</strong>
+        </div>
+      </a>
+      <nav>
+        <a href="/buzzy/" id="jobsLink">Talk</a>
+        <a href="/buzzy/memory" id="memLink">Memory</a>
+        <a href="/buzzy/experts">Experts</a>
+        <a href="/buzzy/recipes">Recipes</a>
+        <a href="/buzzy/library" id="libLink" class="active">Library</a>
+        <a href="/buzzy/landing" class="account-link">Sign in</a>
+        <span class="phase" id="phaseLabel">Work</span>
+      </nav>
+  </div>
   </header>
+  <div id="companyTabs"></div>
   <main id="app"></main>
 
+  <script src="/buzzy/companies.js"></script>
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -462,8 +613,9 @@
 
     function emptyJob(id) {
       return {
-        id: id || ("job_" + Date.now()),
+        id: id || ("job_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)),
         createdAt: Date.now(),
+        updatedAt: Date.now(),
         template: null,
         problem: "",
         messages: [],
@@ -480,10 +632,24 @@
     }
 
     function jobComplete(j) {
-      return !!(j && j.screen === "result");
+      // screen is unreliable — leaving the result view overwrites it with
+      // "jobs". The durable completion signal is the board: all 4 steps in Done
+      // (dogfood 10015 root cause). A stored status of Done (server column or
+      // job JSON) counts too, so completed jobs reloaded from the account
+      // still land in the Library.
+      if (!j) return false;
+      if (j.status === "Done") return true;
+      if (j.screen === "result") return true;
+      if (j.board && Array.isArray(j.board.Done) && j.board.Done.length >= 4) return true;
+      return false;
     }
 
     function jobTitle(j) {
+      // Prefer a stored title (server jobs). Otherwise auto-title from the
+      // first user message (dogfood 10013); fall back to template, then "New job".
+      if (j && j.title && String(j.title).trim()) return String(j.title).trim();
+      const first = (j.messages || []).find((m) => m.who === "me" && m.text);
+      if (first) return first.text.slice(0, 72);
       if (j.problem) return j.problem.slice(0, 72);
       if (j.template) return j.template + " job";
       const happened = (j.answers && j.answers.what_happened) || "";
@@ -493,20 +659,22 @@
 
     function jobStatus(j) {
       if (jobComplete(j)) return "Done";
-      if (j.screen === "board") return "Working";
-      if (j.approved) return "Working";
-      if (j.screen === "draft") return "Needs you";
-      if (j.problem) return "In progress";
-      if (j.template) return "In progress";
-      if (j.q > 0) return "In progress";
-      return "Not started";
+      if (j.approved || j.screen === "board") return "Approved";
+      if (j.screen === "draft") return "Draft ready";
+      if (j.draft || j.draftText) return "Draft ready";
+      return "Discovering";
     }
 
     const catalog = { currentId: null, hideCompleted: true, jobs: [], userId: null };
     let state = emptyJob();
+    // The first paint reads localStorage. Don't POST that copy until the
+    // account's server list has been merged, or a deleted demo job gets
+    // written back as the current job.
+    let serverMerged = false;
 
     function snapshotCurrent() {
       if (!state.id) return;
+      state.updatedAt = Date.now();
       const copy = JSON.parse(JSON.stringify(state));
       const i = catalog.jobs.findIndex((j) => j.id === copy.id);
       if (i >= 0) catalog.jobs[i] = copy;
@@ -518,6 +686,162 @@
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog));
       } catch (_) { /* quota, private mode */ }
+      syncServerJob();
+    }
+
+    // Durable server persistence (dogfood B2) — jobs no longer live only in
+    // localStorage. Throttled so rapid saves coalesce into one POST.
+    var _syncTimer = null;
+    function syncServerJob() {
+      if (!serverMerged) return;
+      if (_syncTimer) return;
+      _syncTimer = setTimeout(function () {
+        _syncTimer = null;
+        try { pushJob(state); } catch (_) { /* offline/private mode */ }
+      }, 400);
+    }
+
+    // Persist one job, including which company it belongs to. Null companyId
+    // means the owner has not filed it yet.
+    function pushJob(j) {
+      if (!serverMerged || !j || !j.id) return;
+      fetch("/api/buzzy/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          id: j.id,
+          template: j.template || null,
+          title: jobTitle(j),
+          status: jobStatus(j),
+          companyId: j.companyId || null,
+          data: j
+        })
+      }).catch(function () { /* offline or signed out */ });
+    }
+
+    function jobCompanyId(j) {
+      return j && j.companyId ? j.companyId : null;
+    }
+
+    // undefined = companies still loading (don't hide anything yet).
+    // null = this account has no companies, so the workspace is unscoped.
+    function workspaceCompanyId() {
+      if (!window.BZCompanies || !BZCompanies.ready()) return undefined;
+      if (!BZCompanies.list().length) return null;
+      return BZCompanies.activeId();
+    }
+
+    function inWorkspace(j) {
+      var cid = workspaceCompanyId();
+      if (cid === undefined || cid === null) return true;
+      return jobCompanyId(j) === cid;
+    }
+
+    // Unassigned jobs (no company yet) belong to the first company, so they
+    // surface under it instead of floating in a "not in a company" limbo.
+    function firstCompanyId() {
+      if (!window.BZCompanies || !BZCompanies.ready()) return null;
+      var list = BZCompanies.list();
+      return list.length ? list[0].id : null;
+    }
+
+    function assignUnassignedToFirstCompany() {
+      var first = firstCompanyId();
+      if (!first) return;
+      var changed = [];
+      catalog.jobs.forEach(function (j) {
+        if (j && j.id && !j.companyId) { j.companyId = first; changed.push(j); }
+      });
+      if (!changed.length) return;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
+      changed.forEach(function (j) { pushJob(j); });
+    }
+
+    // A blank job started before the tabs loaded belongs to the active company.
+    function applyActiveCompanyToFreshJob() {
+      var co = workspaceCompanyId();
+      if (!co || !state || state.companyId) return false;
+      if (state.problem || (state.messages && state.messages.length) || state.template || state.draft || state.draftText) return false;
+      state.companyId = co;
+      return true;
+    }
+
+    function assignJobToActive(id) {
+      var j = catalog.jobs.find(function (x) { return x.id === id; });
+      var co = window.BZCompanies && BZCompanies.activeId && BZCompanies.activeId();
+      if (!j || !co || j.companyId === co) return;
+      j.companyId = co;
+      j.updatedAt = Date.now();
+      if (state && state.id === j.id) state.companyId = co;
+      pushJob(j);
+      if (state.screen === "jobs") goJobs();
+      else if (state.screen === "docs") goDocs();
+    }
+
+    // Row from GET /api/buzzy/jobs → the client job object the rest of the
+    // page already understands. `data` is the full job; title/status live on
+    // the row when an older seed forgot to copy them inside.
+    function normalizeServerJob(s) {
+      if (!s || typeof s !== "object") return null;
+      var data = s.data && typeof s.data === "object" ? s.data : {};
+      var job;
+      try { job = JSON.parse(JSON.stringify(data)); } catch (_) { job = {}; }
+      if (!job.id && s.id) job.id = s.id;
+      if (!job.id) return null;
+      if (s.title && !job.title) job.title = s.title;
+      if (s.template && !job.template) job.template = s.template;
+      if (s.status && !job.status) job.status = s.status;
+      if (Object.prototype.hasOwnProperty.call(s, "companyId")) job.companyId = s.companyId || null;
+      if (!job.updatedAt && s.updatedAt) {
+        var u = Date.parse(s.updatedAt);
+        if (!isNaN(u)) job.updatedAt = u;
+      }
+      if (!job.createdAt && s.createdAt) {
+        var c = Date.parse(s.createdAt);
+        if (!isNaN(c)) job.createdAt = c;
+      }
+      return job;
+    }
+
+    // Signed-in catalog follows the account. Recent local-only jobs (typed
+    // in the last 10 minutes and not on the server yet) stay. Everything
+    // else the server no longer has is dropped, so a re-seed actually
+    // replaces the old readable-slug demo jobs.
+    function mergeServerJobs() {
+      var prevScreen = state.screen;
+      var prevId = state.id;
+      fetch("/api/buzzy/jobs", { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          serverMerged = true;
+          if (!d || !Array.isArray(d.jobs)) return;
+          var serverJobs = [];
+          d.jobs.forEach(function (s) {
+            var job = normalizeServerJob(s);
+            if (job) serverJobs.push(job);
+          });
+          if (!serverJobs.length) return;
+          var serverIds = {};
+          serverJobs.forEach(function (j) { serverIds[j.id] = true; });
+          var cutoff = Date.now() - 10 * 60 * 1000;
+          var pending = catalog.jobs.filter(function (j) {
+            return j && j.id && !serverIds[j.id] && (j.updatedAt || 0) >= cutoff &&
+              (j.problem || (j.messages && j.messages.length));
+          });
+          catalog.jobs = serverJobs.concat(pending);
+          catalog.jobs.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+          var cur = catalog.jobs.find(function (j) { return j.id === prevId; });
+          if (cur) state = cur;
+          else if (catalog.jobs[0]) { state = catalog.jobs[0]; catalog.currentId = state.id; }
+          state.screen = prevScreen || state.screen || "jobs";
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(catalog)); } catch (_) {}
+          if (applyActiveCompanyToFreshJob()) pushJob(state);
+          assignUnassignedToFirstCompany();
+          if (state.screen === "docs") goDocs();
+          else if (state.screen === "jobs") goJobs();
+        })
+        .catch(function () { serverMerged = true; });
     }
 
     function loadState() {
@@ -534,7 +858,9 @@
             if (cur) state = cur;
             else if (catalog.jobs[0]) { state = catalog.jobs[0]; catalog.currentId = state.id; }
             else { state = emptyJob(); catalog.jobs = [state]; catalog.currentId = state.id; }
-            if (!state.screen || state.screen === "intro") state.screen = "jobs";
+            // Landing URL is the jobs hub — always open there, never resume
+            // mid-flow from a previous visit (dogfood 10017).
+            if (!state.screen || state.screen === "intro" || state.screen === "result") state.screen = "jobs";
             return true;
           }
         }
@@ -566,6 +892,7 @@
       catalog.currentId = id;
       if (state.screen === "jobs" || state.screen === "intro") {
         if (jobComplete(state)) state.screen = "result";
+        else if (state.approved) state.screen = "board"; // approved but not finished — show the board, not the chat (dogfood 10012)
         else if (state.problem) state.screen = "chat";
         else if (state.template) state.screen = "problem";
         else if (state.answers && state.answers.what_happened) state.screen = state.version ? "draft" : "ask";
@@ -577,6 +904,8 @@
     function newJob() {
       snapshotCurrent();
       state = emptyJob();
+      var co = window.BZCompanies && BZCompanies.activeId && BZCompanies.activeId();
+      if (co) state.companyId = co;
       catalog.jobs.unshift(state);
       catalog.currentId = state.id;
       state.screen = "pick";
@@ -584,7 +913,17 @@
       render();
     }
 
+    // index.html now serves ONLY the Library (documents). Any other /buzzy/
+    // route is the consolidated Work interface, so leave for it immediately.
+    if (window.location.pathname.replace(/\/+$/, "") !== "/buzzy/library") {
+      window.location.replace("/buzzy/talk");
+    }
+
     loadState();
+    // /buzzy/library lands directly on the Library (documents) screen.
+    if (window.location.pathname.replace(/\/+$/, "") === "/buzzy/library") {
+      state.screen = "docs";
+    }
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
@@ -601,6 +940,8 @@
     }
 
     function draftDoc() {
+      if (state.draftText) return state.draftText;
+      if (state.draft) return state.draft;
       if (state.problem) {
         return templateName() + " draft\nStatus: " + (state.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + state.version + "\n\nWhat you asked for:\n" + state.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";
       }
@@ -633,34 +974,340 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return notes;
     }
 
+    function jobCardHtml(j, moveLabel) {
+      const status = jobStatus(j);
+      const statusClass = status === "Done" ? " tag-done" : status === "Approved" ? " tag-approved" : status === "Draft ready" ? " tag-draft" : "";
+      const hasChat = !!(j.problem || (j.messages && j.messages.length) || j.template);
+      const esc = (s) => String(s).replace(/</g, "&lt;");
+      const fmt = (ts) => new Date(ts || Date.now()).toLocaleDateString();
+      return "<div class='jobcard' data-id='" + j.id + "'>" +
+        "<div class='jobcard-top'>" +
+          "<div class='jobcard-title'>" + jobTitle(j).replace(/</g, "&lt;") + "</div>" +
+          "<span class='tag" + statusClass + "'>" + status + "</span>" +
+        "</div>" +
+        "<div class='jobcard-dates'>" +
+          "<span><b>Started</b> " + fmt(j.createdAt) + "</span>" +
+          "<span><b>Updated</b> " + fmt(j.updatedAt || j.createdAt) + "</span>" +
+        "</div>" +
+        "<div class='jobcard-bottom'>" +
+          "<span class='muted' style='font-size:0.75rem'>" + esc(j.template || "General") + "</span>" +
+          (moveLabel ? "<button class='secondary movebtn' data-move='" + j.id + "'>Move to " + esc(moveLabel) + "</button>" : "") +
+        "</div>" +
+      "</div>";
+    }
+
     function goJobs() {
-      setPhase("Your jobs");
+      setPhase("Work");
       snapshotCurrent();
-      const list = catalog.jobs.filter((j) => !(catalog.hideCompleted && jobComplete(j)));
-      const rows = list.length
-        ? list.map((j) => {
-            const when = new Date(j.createdAt || Date.now()).toLocaleDateString();
-            const statusClass = jobStatus(j) === "Done" ? " tag-done" : jobStatus(j) === "Working" ? " tag-working" : "";
-            return "<div class='jobrow' data-id='" + j.id + "'><div><strong>" + jobTitle(j).replace(/</g,"&lt;") + "</strong><p class='muted'>" + when + "</p></div><span class='tag'>" + jobStatus(j) + "</span></div>";
-          }).join("")
-        : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
+      const co = window.BZCompanies && BZCompanies.ready() ? BZCompanies.active() : null;
+      const list = catalog.jobs.filter((j) => inWorkspace(j) && !(catalog.hideCompleted && jobComplete(j)));
+      const loose = co
+        ? catalog.jobs.filter((j) => !jobCompanyId(j) && !(catalog.hideCompleted && jobComplete(j)))
+        : [];
+      const esc = (s) => String(s).replace(/</g, "&lt;");
+      const cards = list.length
+        ? "<div class='job-cards'>" + list.map((j) => jobCardHtml(j)).join("") + "</div>"
+        : (co
+          ? "<p class='muted'>No jobs for " + esc(co.name) + " yet. Start one, and it stays with this company.</p>"
+          : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>");
+      const looseHtml = loose.length && co
+        ? "<h2 style='font-size:1rem;margin-top:1.5rem'>Not in a company yet</h2>" +
+          "<p class='muted'>These aren't part of " + esc(co.name) + ". Move one here only if it belongs to this company.</p>" +
+          "<div class='job-cards'>" + loose.map((j) => jobCardHtml(j, co.name)).join("") + "</div>"
+        : "";
       document.getElementById("app").innerHTML =
         "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
-        "<h1>Your jobs</h1>" +
-        "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
+        "<h1>" + (co ? "Work for " + esc(co.name) : "Work") + "</h1>" +
+        "<p>" + (co
+          ? "Only " + esc(co.name) + " is on this desk. Another company's jobs stay on their own tab."
+          : "Current and past work. Completed jobs stay here unless you hide them.") + "</p>" +
         "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
-        rows +
-        "<div class='row'><button id='newjob'>New job</button></div>" +
-        "<p class='muted'>Talk to BeeZilla with your history needs an account and Honcho. This page is the job list only.</p>";
+        cards +
+        looseHtml +
+        "<div class='row'><button id='newjob'>New job</button><button id='opendocs' class='secondary'>Library</button></div>" +
+        (catalog.userId
+          ? ""
+          : "<p class='muted'>Sign in and BeeZilla will keep your history across jobs.</p>");
       document.getElementById("hideDone").onchange = () => {
         catalog.hideCompleted = document.getElementById("hideDone").checked;
         saveState();
         goJobs();
       };
-      document.getElementById("newjob").onclick = newJob;
-      document.querySelectorAll(".jobrow").forEach((el) => {
-        el.onclick = () => openJob(el.getAttribute("data-id"));
+      document.getElementById("newjob").onclick = () => { window.location.href = "/buzzy/talk.html"; };
+      document.getElementById("opendocs").onclick = () => { snapshotCurrent(); state.screen = "docs"; render(); };
+      document.querySelectorAll(".jobcard").forEach((el) => {
+        el.onclick = () => {
+          openJobChat(el.getAttribute("data-id"));
+        };
       });
+      document.querySelectorAll(".movebtn").forEach((el) => {
+        el.onclick = (e) => {
+          e.stopPropagation();
+          assignJobToActive(el.getAttribute("data-move"));
+        };
+      });
+    }
+
+    // Launch agent chat with this job's context (dogfood UX: Chat on every card)
+    function openJobChat(id) {
+      snapshotCurrent();
+      const j = catalog.jobs.find((x) => x.id === id);
+      if (!j) return;
+      state = j;
+      catalog.currentId = id;
+      saveState();
+      const payload = {
+        jobId: j.id,
+        title: jobTitle(j),
+        template: j.template,
+        problem: j.problem || "",
+        messages: (j.messages || []).map((m) => ({ who: m.who, text: m.text })),
+        answers: j.answers || {},
+        approved: !!j.approved,
+        status: jobStatus(j),
+        companyId: j.companyId || null,
+      };
+      try {
+        sessionStorage.setItem("bz_open_job", JSON.stringify(payload));
+      } catch (_) { /* storage full/blocked — chat still opens, just without context */ }
+      window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(j.id);
+    }
+
+    /* ── Documents: mini-vault ──────────────────────────────────────
+     * One folder per job. Each folder holds .md documents generated by the
+     * job (SOW draft, PDF companion note, etc.). Docs are stored per job in
+     * localStorage (DOCS_KEY) as { [jobId]: [{name, md, createdAt, updatedAt}] }.
+     * The current draft is always materialized into the job's folder, so a
+     * finished job's documents are openable and downloadable from the hub. */
+
+    const DOCS_KEY = "bz_docs_v1";
+    let docsOpenFolder = null; // jobId currently browsed, null = folder grid
+    let docsOpenDoc = null;    // doc name currently viewed, null = file list
+
+    function loadDocs() {
+      try { return JSON.parse(localStorage.getItem(DOCS_KEY)) || {}; }
+      catch (_) { return {}; }
+    }
+    function saveDocs(all) {
+      try { localStorage.setItem(DOCS_KEY, JSON.stringify(all)); } catch (_) {}
+    }
+    function slugify(s) {
+      return String(s || "job").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "job";
+    }
+
+    // Materialize a real draft into the job's folder. Completed jobs with
+    // only a problem still get the structured fallback. Open jobs with no
+    // draft are left alone — a problem echo is not a Library document.
+    // A stored real draft replaces the file; a fallback never overwrites one.
+    function syncJobDocs(j) {
+      const real = String(j.draftText || j.draft || "").trim();
+      const complete = jobComplete(j);
+      if (!real && !complete) return;
+      const hasDoc = real || j.problem || (j.answers && Object.keys(j.answers || {}).length);
+      if (!hasDoc) return;
+      const all = loadDocs();
+      const folder = all[j.id] || (all[j.id] = []);
+      const md = draftDocFor(j);
+      const name = slugify(jobTitle(j)) + "-v" + (j.version || 0) + ".md";
+      const existing = folder.find((d) => d.name === name);
+      if (existing) {
+        if (real && existing.md !== md) { existing.md = md; existing.updatedAt = Date.now(); }
+      } else {
+        folder.push({ name: name, md: md, createdAt: Date.now(), updatedAt: Date.now() });
+      }
+      // keep newest first
+      folder.sort((a, b) => b.updatedAt - a.updatedAt);
+      saveDocs(all);
+    }
+
+    // Same content as draftDoc() but for any job (not just `state`).
+    function draftDocFor(j) {
+      if (j.draftText) return j.draftText;
+      if (j.draft) return j.draft; // the real LLM-generated draft (durable)
+      if (j.problem) {
+        const t = TEMPLATES.find((x) => x.id === j.template);
+        return ((t && t.name) || "Job") + " draft\nStatus: " + (j.approved ? "Approved" : "Draft — not started") + "\nVersion: v" + (j.version || 0) + "\n\nWhat you asked for:\n" + j.problem + "\n\nBeeZilla is not a lawyer, accountant, or publisher. This is a draft for you to review. Nothing is sent until you send it.";
+      }
+      const a = j.answers || {};
+      return `Scope of Work — Fence repair
+Prepared for: you (homeowner)
+Status: ${j.approved ? "Approved — for quotes" : "Draft — not started"}
+Version: v${j.version || 0}
+
+What happened: ${a.what_happened}
+Size: ${a.rough_size}
+Materials: ${a.material_supplier}
+Budget: ${a.budget_range}
+Timing: ${a.timing}
+Done right means: ${a.done_right_check}
+Quotes: ${a.quote_count}
+Please don't: ${a.exclusions}
+
+This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or sending this out.`;
+    }
+
+    function downloadText(name, text, type) {
+      const blob = new Blob([text], { type: type || "text/markdown" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    // Word (.doc) export without a dependency: Word opens HTML saved with an
+    // msword MIME. Markdown maps to a minimal heading/list/paragraph body.
+    function mdToWordHtml(md) {
+      var lines = String(md || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split(/\n+/);
+      var out = "";
+      var inList = false;
+      lines.forEach(function (line) {
+        var t = line.trim();
+        var h = t.match(/^(#{1,6})\s/);
+        if (h) {
+          if (inList) { out += "</ul>"; inList = false; }
+          var lvl = Math.min(h[1].length, 3);
+          out += "<h" + (lvl + 1) + ">" + t.replace(/^#+\s*/, "") + "</h" + (lvl + 1) + ">";
+        } else if (/^[-*]\s/.test(t)) {
+          if (!inList) { out += "<ul>"; inList = true; }
+          out += "<li>" + t.replace(/^[-*]\s*/, "") + "</li>";
+        } else if (t) {
+          if (inList) { out += "</ul>"; inList = false; }
+          out += "<p>" + t + "</p>";
+        }
+      });
+      if (inList) out += "</ul>";
+      return out;
+    }
+
+    function downloadWord(name, md) {
+      var full = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body>' + mdToWordHtml(md) + "</body></html>";
+      var blob = new Blob(["\ufeff", full], { type: "application/msword" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name.replace(/\.md$/, "") + ".doc";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+    function goDocs() {
+      setPhase("Library");
+      // Sync every job that has content so folders never look stale.
+      catalog.jobs.forEach(syncJobDocs);
+      const all = loadDocs();
+      const app = document.getElementById("app");
+      const co = window.BZCompanies && BZCompanies.ready() ? BZCompanies.active() : null;
+      if (docsOpenFolder) {
+        const openJob = catalog.jobs.find((x) => x.id === docsOpenFolder);
+        if (openJob && !inWorkspace(openJob)) { docsOpenFolder = null; docsOpenDoc = null; }
+        else if (!openJob && co) { docsOpenFolder = null; docsOpenDoc = null; }
+      }
+
+      if (docsOpenFolder && docsOpenDoc) {
+        // ── Viewer ──
+        const docs = all[docsOpenFolder] || [];
+        const doc = docs.find((d) => d.name === docsOpenDoc);
+        const job = catalog.jobs.find((x) => x.id === docsOpenFolder);
+        if (!doc) { docsOpenDoc = null; return goDocs(); }
+        app.innerHTML =
+          "<div class='docs-back'><button id='docsBackList' class='secondary'>← " + escHtml(job ? jobTitle(job) : docsOpenFolder) + "</button></div>" +
+          "<h1>" + escHtml(doc.name) + "</h1>" +
+          "<p class='muted'>Updated " + new Date(doc.updatedAt || doc.createdAt).toLocaleString() + "</p>" +
+          "<div class='row'><button id='docDl'>Download .md</button><button id='docDlWord' class='secondary'>Download Word</button><button id='docDlPdf' class='secondary'>Download PDF</button><button id='docCopy' class='secondary'>Copy text</button></div>" +
+          "<div class='docviewer'>" + escHtml(doc.md) + "</div>";
+        document.getElementById("docsBackList").onclick = () => { docsOpenDoc = null; goDocs(); };
+        document.getElementById("docDl").onclick = () => downloadText(doc.name, doc.md, "text/markdown");
+        document.getElementById("docDlPdf").onclick = () => {
+          if (window.beezillaSowPdf) {
+            const bytes = window.beezillaSowPdf(doc.md);
+            const blob = new Blob([bytes], { type: "application/pdf" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = doc.name.replace(/\.md$/, "") + ".pdf";
+            a.click();
+          } else {
+            downloadText(doc.name, doc.md, "text/markdown");
+          }
+        };
+        document.getElementById("docDlWord").onclick = () => downloadWord(doc.name, doc.md);
+        document.getElementById("docCopy").onclick = (e) => {
+          navigator.clipboard && navigator.clipboard.writeText(doc.md);
+          e.target.textContent = "Copied";
+          setTimeout(() => { e.target.textContent = "Copy text"; }, 1200);
+        };
+        return;
+      }
+
+      if (docsOpenFolder) {
+        // ── File list for one folder ──
+        const docs = all[docsOpenFolder] || [];
+        const job = catalog.jobs.find((x) => x.id === docsOpenFolder);
+        app.innerHTML =
+          "<div class='docs-back'><button id='docsBackFolders' class='secondary'>← All folders</button></div>" +
+          "<h1>" + escHtml(job ? jobTitle(job) : "Folder") + "</h1>" +
+          "<p class='muted'>Markdown documents for this job. Open, download, or print to PDF.</p>" +
+          "<div class='doclist'>" +
+          (docs.length
+            ? docs.map((d) =>
+                "<div class='docitem'>" +
+                  "<span class='di-name' data-doc='" + escHtml(d.name) + "'>" + escHtml(d.name) + "</span>" +
+                  "<span class='di-meta'>updated " + new Date(d.updatedAt || d.createdAt).toLocaleDateString() + " · " + Math.max(1, Math.round(d.md.length / 100) / 10) + " KB</span>" +
+                  "<span class='di-actions'><button class='secondary' data-open='" + escHtml(d.name) + "'>Open</button><button class='secondary' data-dl='" + escHtml(d.name) + "'>Download</button></span>" +
+                "</div>").join("")
+            : "<p class='muted'>No documents in this folder yet.</p>") +
+          "</div>";
+        document.getElementById("docsBackFolders").onclick = () => { docsOpenFolder = null; goDocs(); };
+        app.querySelectorAll("[data-open]").forEach((el) => { el.onclick = () => { docsOpenDoc = el.getAttribute("data-open"); goDocs(); }; });
+        app.querySelectorAll(".di-name").forEach((el) => { el.onclick = () => { docsOpenDoc = el.getAttribute("data-doc"); goDocs(); }; });
+        app.querySelectorAll("[data-dl]").forEach((el) => {
+          el.onclick = () => {
+            const doc = (all[docsOpenFolder] || []).find((d) => d.name === el.getAttribute("data-dl"));
+            if (doc) downloadText(doc.name, doc.md, "text/markdown");
+          };
+        });
+        return;
+      }
+
+      // ── Folder grid — this company's library only ──
+      const folders = Object.keys(all)
+        .map((id) => ({ id: id, docs: all[id], job: catalog.jobs.find((x) => x.id === id) }))
+        .filter((f) => {
+          if (!f.docs || !f.docs.length) return false;
+          if (!f.job) return !co;
+          return inWorkspace(f.job);
+        });
+      const parked = co
+        ? Object.keys(all).filter((id) => {
+            const job = catalog.jobs.find((x) => x.id === id);
+            return job && !jobCompanyId(job) && (all[id] || []).length;
+          }).length
+        : 0;
+      app.innerHTML =
+        "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
+        "<h1>" + (co ? "Library · " + escHtml(co.name) : "Library") + "</h1>" +
+        "<p class='muted'>" + (co
+          ? "Documents for " + escHtml(co.name) + " only. Another company's files stay on their tab."
+          : "Every job keeps its own folder. Documents are markdown — open them here, download, or print to PDF.") + "</p>" +
+        (parked ? "<p class='muted'>" + parked + (parked === 1 ? " folder isn't" : " folders aren't") + " in a company, so " + (parked === 1 ? "it isn't" : "they aren't") + " in this library.</p>" : "") +
+        "<div class='docs-back'><button id='docsBackJobs' class='secondary'>← Back to Jobs</button></div>" +
+        "<div class='docs-folders'>" +
+        (folders.length
+          ? folders.map((f) =>
+              "<div class='docfolder' data-folder='" + f.id + "'>" +
+                "<div class='df-name'>📁 " + escHtml(f.job ? jobTitle(f.job) : f.id) + "</div>" +
+                "<div class='df-meta'>" + f.docs.length + " document" + (f.docs.length === 1 ? "" : "s") +
+                  (f.job && jobComplete(f.job) ? " · approved draft" : "") +
+                  " · latest " + new Date(f.docs[0].updatedAt || f.docs[0].createdAt).toLocaleDateString() + "</div>" +
+              "</div>").join("")
+          : "<p class='muted'>No documents yet. Documents appear here as your jobs produce drafts and deliverables.</p>") +
+        "</div>";
+      app.querySelectorAll(".docfolder").forEach((el) => {
+        el.onclick = () => { docsOpenFolder = el.getAttribute("data-folder"); goDocs(); };
+      });
+      const bj = document.getElementById("docsBackJobs");
+      if (bj) bj.onclick = () => { docsOpenFolder = null; docsOpenDoc = null; state.screen = "jobs"; render(); };
     }
 
     function goPick() {
@@ -729,6 +1376,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         syncHonchoChat();
         state.screen = "draft";
         render();
+        generateDraft();
       };
       document.getElementById("send").onclick = () => {
         const v = document.getElementById("more").value.trim();
@@ -814,6 +1462,30 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       state.events.push({ type: "draft_version", version: "v" + state.version, at: Date.now() });
     }
 
+    // Generate a real draft document via the chat endpoint (dogfood B11).
+    // The stub draftDoc() is only a fallback until the LLM returns.
+    function generateDraft() {
+      if (state.draftText || !state.problem) return;
+      const msg = "Write the full draft document for this job now, in plain language, ready to review. Job type: " +
+        (templateName() || "General") + ". Problem: " + state.problem;
+      fetch("/api/buzzy/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ message: msg })
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.ok && d.reply) {
+            const clean = String(d.reply).trim();
+            if (clean) {
+              state.draftText = clean;
+              // Re-render the draft screen with the real content in place.
+              if (state.screen === "draft") render();
+            }
+          }
+        }).catch(function () { /* signed out — keep the structured stub */ });
+    }
+
     function goDraft() {
       setPhase("Check this before anything starts");
       const notes = fairnessNotes().map((n) => "<li>" + n + "</li>").join("");
@@ -877,6 +1549,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         } else {
           move("Working", "Done", STEPS[3].title);
           state.screen = "result";
+          saveState(); // persist DONE state immediately (dogfood 10015)
         }
         i += 1;
         render();
@@ -970,6 +1643,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       else if (state.screen === "board") goBoard();
       else if (state.screen === "result") goResult();
       else if (state.screen === "remember") goRemember();
+      else if (state.screen === "docs") goDocs();
       saveState();
     }
     const HONCHO_BASE = "https://honcho-api-production-5869.up.railway.app";
@@ -1005,9 +1679,83 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }).catch(function () {});
     }
 
+    // ── Account: session-aware Sign in / user name + Log out ──────────
+    (function account() {
+      var link = document.querySelector(".account-link");
+      if (!link) return;
+      fetch("/api/auth/get-session", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (session) {
+          var user = session && session.user;
+          if (!user) { window.location.replace("/buzzy/landing"); return; }
+          var bzDisplayName = user.name || user.email || "Account";
+          link.textContent = bzDisplayName;
+          link.href = "#";
+          link.style.cursor = "pointer";
+          // Profile menu: clicking the name opens a small account panel
+          var menu = document.createElement("div");
+          menu.className = "account-menu";
+          menu.style.display = "none";
+          menu.innerHTML =
+            '<div class="am-name">' + bzDisplayName + "</div>" +
+            '<div class="am-email">' + (user.email || "") + "</div>" +
+            '<button type="button" class="am-signout">Log out</button>';
+          var out = menu.querySelector(".am-signout");
+          out.addEventListener("click", function (e) {
+            e.preventDefault();
+            fetch("/api/auth/sign-out", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }).then(function () { window.location.href = "/buzzy/"; });
+          });
+          link.parentNode.insertBefore(menu, link.nextSibling);
+          link.addEventListener("click", function (e) {
+            e.preventDefault();
+            menu.style.display = menu.style.display === "none" ? "block" : "none";
+          });
+          document.addEventListener("click", function (e) {
+            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
+          });
+        })
+        .catch(function () {});
+    })();
+
+    // Navigation — same-URL nav clicks must reset the SPA view (the browser
+    // won't reload /buzzy/ → /buzzy/, leaving the user stuck mid-flow).
+    document.querySelectorAll('a[href="/buzzy/"]').forEach((a) => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        state.screen = "jobs";
+        render();
+        window.scrollTo(0, 0);
+      });
+    });
+    document.querySelectorAll('a[href="/buzzy/talk"], a[href="/buzzy/talk.html"]').forEach((a) => {
+      a.addEventListener("click", () => {
+        snapshotCurrent();
+        saveState();
+      });
+    });
+
     render();
+    mergeServerJobs();
+    if (window.BZCompanies) {
+      BZCompanies.onChange(function () {
+        assignUnassignedToFirstCompany();
+        if (applyActiveCompanyToFreshJob()) pushJob(state);
+        if (state.screen === "docs") { goDocs(); return; }
+        if (state.screen === "jobs") { goJobs(); return; }
+        var co = BZCompanies.activeId && BZCompanies.activeId();
+        if (co && state.companyId && state.companyId !== co) {
+          docsOpenFolder = null;
+          docsOpenDoc = null;
+          state.screen = "jobs";
+          goJobs();
+        }
+      });
+    }
   </script>
-<script src="common.js"></script>
-<script>(function(){document.addEventListener("DOMContentLoaded",function(){if(window.__bzHeader)window.__bzHeader("jobs")})})();</script>
 </body>
 </html>

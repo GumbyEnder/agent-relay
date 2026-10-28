@@ -44,6 +44,56 @@ Full mission record.
 
 Agent may be **name** or **id**.
 
+### `POST /missions/:id/unclaim`
+
+```json
+{ "agent": "forge" }
+// or take over a stale claim:
+{ "agent": "frodo", "force": true, "note": "claimant key retired" }
+```
+
+- **200** — claim released (mission keeps its column; `mission_unclaimed` event)
+- **409** `not_claimer` — claimed by another agent and `force` not set
+- Force-release requires a **review-skill** ark key or an operator session
+
+### `POST /missions/:id/comment`
+
+```json
+{ "agent": "forge", "note": "found the root cause, patching" }
+```
+
+Dedicated comment/progress thread — does **not** touch `lastHeartbeat`, so stale-detection stays meaningful. Any agent with read access may comment. Events use kind `comment`. Alias: `comment` field accepted in place of `note`.
+
+### Mission state machine
+
+Every mission payload carries `allowedMoves` — the verbs legal from its current column:
+
+| From | Verb | To | Who |
+|------|------|----|-----|
+| inbox / ready | `claim` | running | any agent |
+| inbox / ready | `move` | running | operator |
+| running | `heartbeat` | — | claimant |
+| running | `deliver` | review | claimant |
+| running | `escalate` | needs_human | claimant |
+| running | `unclaim` | — (stays running) | claimant; `force` by reviewer/operator |
+| running | `move` | ready, done | operator |
+| review | `move` | done, ready | reviewer-skill key or operator |
+| needs_human | `deliver` | review | claimant |
+| needs_human | `move` | any | operator |
+| done / blocked | — | terminal | — |
+
+Note: `POST /move` from **inbox→ready** is NOT a reviewer move — hand cards to workers by claiming them, or move inbox→running as operator.
+
+### Cursor pagination (`GET /missions`)
+
+Responses carry `truncated` and `nextCursor` (opaque base64 keyset over the sort tuple; `null` when exhausted). Page through ALL matching missions:
+
+```bash
+curl -s 'localhost:8080/api/agent/missions?column=inbox&limit=50&cursor=<nextCursor>'
+```
+
+Malformed cursors → **400** `bad_cursor`.
+
 ### `POST /missions/:id/heartbeat`
 
 ```json
@@ -102,3 +152,7 @@ curl -s -X POST localhost:8080/api/agent/missions/msn_agent_protocol_doc/claim \
   -H 'content-type: application/json' \
   -d '{"agent":"lens"}' | jq
 ```
+
+### `GET /openapi.json`
+
+Machine-readable OpenAPI 3.1 contract (schemas for Mission/Error, all paths, auth schemes). Typed clients and tool discovery read this; this file stays the narrative layer.

@@ -12,7 +12,7 @@ import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-const PAGES = new Set(["index", "talk", "memory", "remember", "form", "experts"]);
+const PAGES = new Set(["index", "talk", "memory", "remember", "form", "experts", "library", "profile", "landing", "recipes", "wallet", "upload"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {
@@ -26,7 +26,9 @@ export default defineEventHandler(async (event) => {
     return { error: "method not allowed" };
   }
 
-  const path = (event.path ?? "").replace(/\/+$/, "") || "/buzzy";
+  // event.path includes the query string in this runtime. Strip it before
+  // matching or /buzzy/talk?job=… is not a known page.
+  const path = (event.path ?? "").split("?")[0].replace(/\/+$/, "") || "/buzzy";
   const segments = path.split("/").filter(Boolean); // ["buzzy", maybe "talk"]
 
   let name: string;
@@ -95,13 +97,19 @@ export default defineEventHandler(async (event) => {
     return html("<h1>Not found</h1>", 404);
   }
 
+  // /buzzy/library is the Library (documents vault) view of the app shell —
+  // same index.html, which opens the docs screen when the URL ends in /library.
+  // The root /buzzy/* is the consolidated Work interface: index.html itself
+  // redirects non-library routes to talk.html.
+  const fileName = name === "library" ? "index" : name;
+
   // Dev: repo root/public/buzzy. Prod: cwd is the repo root too (startCommand
   // runs `node .output/server/index.mjs` from the project root).
-  const file = resolve(process.cwd(), "public", "buzzy", `${name}.html`);
-  let body = await readBuzzyFile(`${name}.html`);
+  const file = resolve(process.cwd(), "public", "buzzy", `${fileName}.html`);
+  let body = await readBuzzyFile(`${fileName}.html`);
   if (!body) {
     // Production fallback: Nitro copies public/ into .output/public.
-    body = await readBuzzyFile(join(".output", "public", "buzzy", `${name}.html`));
+    body = await readBuzzyFile(join(".output", "public", "buzzy", `${fileName}.html`));
   }
   if (!body) {
     setResponseStatus(event, 404);

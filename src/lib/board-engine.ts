@@ -79,7 +79,43 @@ export function missionSummary(m: Mission) {
     source: m.source ?? null,
     usage: m.usage ?? null,
     updatedAt: m.updatedAt,
+    // Machine-readable state machine: which verbs are legal from the current
+    // column, so clients don't learn the rules by hitting 409s.
+    allowedMoves: allowedTransitions(m),
   };
+}
+
+/**
+ * Allowed transitions from the mission's current column, as a compact
+ * {verb, to?, who} list. Mirrors the rules the API actually enforces:
+ * - claim: ready/inbox (any agent), running (current claimant only)
+ * - deliver: running (claimant), needs_human (claimant resolves)
+ * - heartbeat/escalate: running or needs_human (claimant)
+ * - move: review→done|ready (reviewer-skill key or operator); operator can
+ *   move most columns; done is terminal
+ */
+function allowedTransitions(m: Mission) {
+  const claimed = Boolean(m.claimedBy);
+  const isDone = m.column === "done";
+  const isBlocked = m.column === "blocked";
+  if (isDone || isBlocked) return [];
+  const moves: Array<{ verb: string; to?: string; who: string }> = [];
+  if (m.column === "ready" || m.column === "inbox") {
+    if (!claimed) moves.push({ verb: "claim", to: "running", who: "any_agent" });
+    moves.push({ verb: "move", to: "running", who: "operator" });
+  } else if (m.column === "running") {
+    moves.push({ verb: "heartbeat", who: "claimant" });
+    moves.push({ verb: "deliver", to: "review", who: "claimant" });
+    moves.push({ verb: "escalate", to: "needs_human", who: "claimant" });
+    moves.push({ verb: "unclaim", who: "claimant" });
+    moves.push({ verb: "move", to: "ready|done", who: "operator" });
+  } else if (m.column === "review") {
+    moves.push({ verb: "move", to: "done|ready", who: "reviewer_or_operator" });
+  } else if (m.column === "needs_human") {
+    moves.push({ verb: "deliver", to: "review", who: "claimant" });
+    moves.push({ verb: "move", who: "operator" });
+  }
+  return moves;
 }
 
 export function pollMissions(
@@ -99,6 +135,12 @@ export function pollMissions(
     projectId?: string;
     /** When set, restrict poll to these boards (agent-key scope). Empty = no boards. */
     allowedProjectIds?: string[] | null;
+    /**
+     * Opaque cursor from a previous page's `nextCursor`. Keyset over the sort
+     * tuple so clients can page through ALL matching missions (the ~500 slice
+     * cap previously truncated large columns silently).
+     */
+    cursor?: string;
   } = {},
 ): EngineResult<{
   missions: ReturnType<typeof missionSummary>[];
@@ -107,6 +149,7 @@ export function pollMissions(
   total: number;
   limit: number;
   truncated: boolean;
+  nextCursor?: string | null;
 }> {
   const column = opts.column ?? "ready";
   const limit = Math.min(Math.max(opts.limit ?? 5, 1), 500);
@@ -162,7 +205,46 @@ export function pollMissions(
     return rank[a.priority] - rank[b.priority] || a.createdAt - b.createdAt;
   });
 
+  // Cursor: opaque keyset over the sort tuple (skillHit, rank, createdAt, id).
+  // Format: b64("<skillHit>:<rank>:<createdAt>:<id>"). Applied after the sort so
+  // paging is stable across requests.
+  let cursorSk: number | null = null;
+  let cursorRank: number | null = null;
+  let cursorCreatedAt: number | null = null;
+  let cursorId: string | null = null;
+  if (opts.cursor) {
+    try {
+      const decoded = Buffer.from(opts.cursor, "base64").toString("utf8");
+      const [sk, rk, ca, cid] = decoded.split(":");
+      cursorSk = Number(sk);
+      cursorRank = Number(rk);
+      cursorCreatedAt = Number(ca);
+      cursorId = cid ?? null;
+      if (![Number.isFinite(cursorSk), Number.isFinite(cursorRank), Number.isFinite(cursorCreatedAt)].every(Boolean) || !cursorId) {
+        return { ok: false, status: 400, error: "Invalid cursor", code: "bad_cursor" };
+      }
+    } catch {
+      return { ok: false, status: 400, error: "Invalid cursor", code: "bad_cursor" };
+    }
+  }
+  if (cursorId != null) {
+    list = list.filter((m) => {
+      const sk = skillHit(m);
+      if (sk !== cursorSk) return sk > cursorSk!;
+      if (m.priority !== undefined && rank[m.priority] !== cursorRank) return rank[m.priority] > cursorRank!;
+      if (m.createdAt !== cursorCreatedAt) return m.createdAt > cursorCreatedAt!;
+      return m.id > cursorId!;
+    });
+  }
+
   const total = list.length;
+  const page = list.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor = total > limit && last
+    ? Buffer.from(
+        `${skillHit(last)}:${rank[last.priority]}:${last.createdAt}:${last.id}`,
+      ).toString("base64")
+    : null;
   return {
     ok: true,
     board,
@@ -178,7 +260,8 @@ export function pollMissions(
       total,
       limit,
       truncated: total > limit,
-      missions: list.slice(0, limit).map(missionSummary),
+      ...(nextCursor ? { nextCursor } : { nextCursor: null }),
+      missions: page.map(missionSummary),
     },
   };
 }
@@ -263,6 +346,66 @@ export function claimMission(
   };
 }
 
+/**
+ * Release a claim. The claimant can always release their own. `force: true`
+ * allows another actor (reviewer-skill key / operator, gated at the API layer)
+ * to take over a stale claim — e.g. missions held by retired agent keys.
+ * The mission keeps its column; only the claim is cleared (running stays
+ * running so no work is silently re-queued).
+ */
+export function unclaimMission(
+  board: BoardData,
+  missionId: string,
+  agentRef: string,
+  opts?: { force?: boolean; note?: string },
+): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
+  const mission = board.missions.find((m) => m.id === missionId);
+  if (!mission) {
+    return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
+  }
+  if (mission.claimedBy && mission.claimedBy !== agent.id && !opts?.force) {
+    const holder = board.agents.find((a) => a.id === mission.claimedBy);
+    return {
+      ok: false,
+      status: 409,
+      error: `Mission is claimed by ${holder?.name ?? mission.claimedBy} — pass force to take over (reviewer/operator gate applies)`,
+      code: "not_claimer",
+    };
+  }
+  const now = Date.now();
+  const missions = board.missions.map((m) =>
+    m.id === missionId
+      ? touchMission(m, {
+          claimedBy: null,
+          claimedAt: null,
+          lastHeartbeat: now,
+        })
+      : m,
+  );
+  const agents = board.agents.map((a) => {
+    if (a.currentMissionId === missionId) {
+      return { ...a, currentMissionId: null, status: a.status === "busy" ? ("idle" as const) : a.status };
+    }
+    return a;
+  });
+  const next: BoardData = {
+    ...board,
+    missions,
+    agents,
+    events: pushEvent(board.events, {
+      missionId,
+      agentId: agent.id,
+      kind: "mission_unclaimed",
+      message: `${agent.name} released claim${opts?.force ? " (force)" : ""} · ${mission.title}${opts?.note ? ` — ${opts.note}` : ""}`,
+    }),
+  };
+  const updated = next.missions.find((m) => m.id === missionId)!;
+  return { ok: true, board: next, data: { mission: missionSummary(updated) } };
+}
+
 export function heartbeatMission(
   board: BoardData,
   missionId: string,
@@ -311,6 +454,47 @@ export function heartbeatMission(
       agentId: agent.id,
       kind: "heartbeat",
       message: note?.trim() ? `Heartbeat · ${note.trim()}` : `Heartbeat · ${mission.title}`,
+    }),
+  };
+  return {
+    ok: true,
+    board: next,
+    data: { mission: missionSummary(next.missions.find((m) => m.id === missionId)!) },
+  };
+}
+
+/**
+ * Dedicated comment/progress thread. Unlike heartbeat, a comment does NOT touch
+ * lastHeartbeat — stale-detection can distinguish "alive" from "talkative".
+ * The claimant or any agent with read access may comment; own event kind
+ * ("comment") keeps the board journal readable.
+ */
+export function commentMission(
+  board: BoardData,
+  missionId: string,
+  agentRef: string,
+  note: string,
+): EngineResult<{ mission: ReturnType<typeof missionSummary> }> {
+  const ensured = ensureAgent(board, agentRef, { harness: "custom", role: "client" });
+  board = ensured.board;
+  const agent = ensured.agent;
+  const mission = board.missions.find((m) => m.id === missionId);
+  if (!mission) {
+    return { ok: false, status: 404, error: `Unknown mission: ${missionId}`, code: "mission_not_found" };
+  }
+  const text = note.trim();
+  if (!text) {
+    return { ok: false, status: 400, error: "note is required", code: "bad_request" };
+  }
+  const missions = board.missions.map((m) => (m.id === missionId ? touchMission(m, {}) : m));
+  const next: BoardData = {
+    ...board,
+    missions,
+    events: pushEvent(board.events, {
+      missionId,
+      agentId: agent.id,
+      kind: "comment",
+      message: `${agent.name} · ${text}`,
     }),
   };
   return {

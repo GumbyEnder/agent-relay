@@ -1,0 +1,100 @@
+/* BeeZilla shared header/nav — single source of truth across every /buzzy/ page.
+   Linked after each page's inline <style> so it wins ties and the nav never
+   drifts in sizing between pages. Uses --bz-* vars with fallbacks so it works
+   even where a page still defines the older --yellow/--muted/--panel2 set. */
+header {
+  padding: 0.85rem 1.5rem;
+  border-bottom: 1px solid #222;
+  background: var(--bz-panel, #0A0A0A);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  position: relative;
+}
+header > .header-inner,
+.header-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+header .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+header .brand strong {
+  letter-spacing: 0.06em;
+  font-size: 1.15rem;
+  color: var(--bz-yellow, #ffc107);
+  text-transform: uppercase;
+  font-weight: 800;
+}
+header .brand .mascot-mark,
+header .brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+}
+header .brand-link {
+  text-decoration: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+header nav {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+  line-height: 1.55;
+}
+header nav a {
+  color: #999;
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: color 0.15s;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  border: none;
+}
+header nav a:hover { color: var(--bz-yellow, #ffc107); }
+header nav a.active { color: var(--bz-yellow, #ffc107); font-weight: 600; background: none; border-radius: 0; }
+header nav .phase {
+  color: var(--bz-yellow, #ffc107);
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+}
+header nav .account-link {
+  color: var(--bz-yellow, #ffc107);
+  border: 1px solid #3a3a3a;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+}
+/* Honey Drops chip — the wallet lives in the header on every shelf page. */
+.hd-chip {
+  order: -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #FFC107;
+  border: 1px solid #B8860B;
+  background: rgba(255, 193, 7, 0.08);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.hd-chip:hover { background: rgba(255, 193, 7, 0.16); }

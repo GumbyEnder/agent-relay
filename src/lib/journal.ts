@@ -15,6 +15,7 @@ function escCell(s: string): string {
 export function renderMissionJournalMarkdown(
   mission: Mission,
   history: MissionHistoryEntry[],
+  comments?: Array<{ at: number; author: string; text: string }>,
 ): string {
   const sorted = [...history].sort((a, b) => a.at - b.at);
   const lines: string[] = [
@@ -71,6 +72,14 @@ export function renderMissionJournalMarkdown(
 
   if (sorted.length === 0) {
     lines.push("| — | — | — | — | — | No history yet |");
+  }
+
+  if (comments?.length) {
+    lines.push("", "## Comments", "");
+    for (const c of comments) {
+      lines.push(`- **${iso(c.at)} · ${c.author}:** ${c.text.replace(/\n/g, " ")}`);
+    }
+    lines.push("");
   }
 
   lines.push("");

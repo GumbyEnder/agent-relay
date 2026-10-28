@@ -288,6 +288,56 @@ export function AppShell({
   const byColumn = (col: MissionColumn) =>
     missions.filter((m) => m.column === col);
 
+  // KANBAN-A1: Ready is a triage flag, not a lifecycle stage — render ready
+  // missions inside the Inbox lane as badged cards. The API columns are
+  // unchanged (inbox/ready still exist); this is presentation only.
+  const VISUAL_COLUMNS = useMemo(
+    () => COLUMNS.filter((c) => c.id !== "ready"),
+    [],
+  );
+  const laneMissions = (id: MissionColumn) =>
+    id === "inbox"
+      ? [
+          ...missions.filter((m) => m.column === "ready"),
+          ...missions.filter((m) => m.column === "inbox"),
+        ]
+      : byColumn(id);
+
+  // KANBAN-A2: empty lanes collapse to a rail. State persists per board.
+  const collapseKey = `ar.collapse.${selectedProjectId ?? "all"}`;
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(collapseKey);
+      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(collapseKey);
+      setCollapsed(raw ? (JSON.parse(raw) as Record<string, boolean>) : {});
+    } catch {
+      setCollapsed({});
+    }
+  }, [collapseKey]);
+  const toggleCollapse = (id: MissionColumn) =>
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !(prev[id] ?? laneMissions(id).length === 0) };
+      try {
+        localStorage.setItem(collapseKey, JSON.stringify(next));
+      } catch {
+        /* ignore quota */
+      }
+      return next;
+    });
+  const isCollapsed = (id: MissionColumn) => {
+    const explicit = collapsed[id];
+    if (explicit !== undefined) return explicit;
+    // Auto-collapse empty lanes by default
+    return laneMissions(id).length === 0;
+  };
+
   const selectView = (v: MainView) => {
     setMainView(v);
     void navigate({
@@ -830,11 +880,13 @@ export function AppShell({
             <div className="flex min-h-0 flex-1">
               <main className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-thin">
                 <div className="flex h-full gap-2 p-3 sm:gap-3 sm:p-4">
-                  {COLUMNS.map((col) => (
+                  {VISUAL_COLUMNS.map((col) => (
                     <BoardColumn
                       key={col.id}
                       columnId={col.id}
-                      missions={byColumn(col.id)}
+                      missions={laneMissions(col.id)}
+                      collapsed={isCollapsed(col.id)}
+                      onToggleCollapse={() => toggleCollapse(col.id)}
                       agents={agents}
                       selectedId={selectedMissionId}
                       showBoardName={isAllBoardsScope(selectedProjectId)}

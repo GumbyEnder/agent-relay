@@ -28,6 +28,7 @@ import { COLUMNS, HARNESS_IDS } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
 import type { EngineResult } from "./board-engine";
 import { verifyGitHubSignature } from "./github-webhook";
+import { openApiSpec } from "./openapi";
 import {
   extractArtifactFromGitHubPayload,
   githubExternalId,
@@ -47,6 +48,7 @@ import { canAccessBoardByOwner } from "./board-tenancy";
 import { summarizeTickets } from "./ticket-summary";
 import { renderDocsHtmlPage, wantsHtmlDocs } from "./docs-html";
 import { DEFAULT_PROJECT_ID } from "./seed";
+import { validateModelPrefsPatch } from "./buzzy/modelPrefs";
 
 const KNOWN_COLUMNS = new Set<string>(COLUMNS.map((c) => c.id));
 
@@ -63,15 +65,36 @@ function parseColumnParam(raw: string | undefined, fallback: MissionColumn): Mis
 }
 
 const HARNESSES = new Set<HarnessKind>(HARNESS_IDS);
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data, null, 2), {
+// Pretty-print JSON in dev only — in prod, indentation on deeply-nested payloads
+// (mission usage.raw chains) inflated the board snapshot to 204 MB and broke
+// every browser consumer. Compact JSON in production.
+const PRETTY_JSON = process.env.NODE_ENV !== "production";
+// CORS: wildcard default; set ALLOWED_ORIGINS="https://a.com,https://b.com" to
+// tighten. Non-matching origins get no access-control-allow-origin header (the
+// browser blocks the read). Token-authed only — session cookies are never
+// honored cross-origin regardless of this list.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+function corsOrigin(requestOrigin: string | null): string {
+  if (!ALLOWED_ORIGINS.length || !requestOrigin) return "*";
+  return ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : "null";
+}
+function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    "access-control-allow-origin": corsOrigin(origin),
+    "access-control-allow-headers": "content-type, authorization, x-agent-key",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  };
+}
+function json(data: unknown, status = 200, origin: string | null = null): Response {
+  return new Response(PRETTY_JSON ? JSON.stringify(data, null, 2) : JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-      "access-control-allow-headers": "content-type, authorization, x-agent-key",
-      "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+      ...corsHeaders(origin),
     },
   });
 }
@@ -490,7 +513,7 @@ async function assertAgentReviewMove(
   machineAuth: MachineAuth,
   missionId: string,
   column: import("./types").MissionColumn | undefined,
-): Promise<Response | undefined> {
+): Promise<Response | "agent_move" | undefined> {
   if (machineAuth.type !== "ark" || !machineAuth.agentId) return undefined;
   const agentOrErr = await resolveVerbAgent({}, machineAuth);
   if (agentOrErr instanceof Response) return agentOrErr;
@@ -521,7 +544,21 @@ async function assertAgentReviewMove(
       "move_from_restricted",
     );
   }
-  return undefined;
+  // Valid ark reviewer move: authorized by skill + column restriction alone.
+  // Return the sentinel so the caller performs the agent move WITHOUT falling
+  // through to operator gating (an ark key has no operator session role).
+  return "agent_move";
+}
+
+/**
+ * Perform the reviewer move on behalf of an ark agent key.
+ */
+async function agentReviewMove(
+  missionId: string,
+  column: import("./types").MissionColumn,
+  agentName: string,
+): Promise<Response> {
+  return fromEngine(await boardOps.moveMission(missionId, column, `agent:${agentName}`));
 }
 
 /**
@@ -607,6 +644,21 @@ function parseUsage(raw: unknown): import("./types").MissionUsage | null {
         .filter((x): x is [string, number] => x[1] !== undefined),
     );
   }
+  // Depth-cap the raw blob: self-nesting raw.raw.raw chains (440 levels in a
+  // legacy backfill) × pretty-printed JSON produced a 204 MB board snapshot and
+  // broke every browser consumer. Collapse single-key 'raw' wrappers and hard-cap
+  // the serialized size.
+  let rawOut = u as Record<string, unknown>;
+  const isSingleRawWrapper = (o: Record<string, unknown>) =>
+    Object.keys(o).length === 1 && "raw" in o && o.raw != null && typeof o.raw === "object" && !Array.isArray(o.raw);
+  let guard = 0;
+  while (isSingleRawWrapper(rawOut) && guard++ < 20) {
+    rawOut = rawOut.raw as Record<string, unknown>;
+  }
+  const RAW_MAX_BYTES = 64 * 1024;
+  if (JSON.stringify(rawOut).length > RAW_MAX_BYTES) {
+    rawOut = { truncated: true, note: "raw payload exceeded 64KB — dropped by ingest depth/size cap" };
+  }
   return {
     tokensIn: num(u.tokensIn ?? u.tokens_in),
     tokensOut: num(u.tokensOut ?? u.tokens_out),
@@ -619,7 +671,7 @@ function parseUsage(raw: unknown): import("./types").MissionUsage | null {
         : u.pricing_source != null
           ? String(u.pricing_source)
           : undefined,
-    raw: u as Record<string, unknown>,
+    raw: rawOut,
   };
 }
 
@@ -636,11 +688,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "access-control-allow-origin": "*",
-        "access-control-allow-headers": "content-type, authorization, x-agent-key",
-        "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
-      },
+      headers: corsHeaders(req.headers.get("origin")),
     });
   }
 
@@ -682,6 +730,11 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       }
     } catch {
       return err(400, "Invalid JSON body", "invalid_json");
+    }
+
+    // GET /openapi.json — machine-readable contract (API-6)
+    if (parts.length === 1 && parts[0] === "openapi.json" && req.method === "GET") {
+      return json(openApiSpec(url.origin));
     }
 
     // GET /health
@@ -903,6 +956,7 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         matchAgentSkills,
         projectId: requestedProject,
         allowedProjectIds: allowedOrErr,
+        cursor: url.searchParams.get("cursor") ?? undefined,
       });
       return fromEngine(result);
     }
@@ -945,6 +999,12 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       if (verb === "move") {
         const column = str(body.column) as import("./types").MissionColumn | undefined;
         const agentGate = await assertAgentReviewMove(req, machineAuth, id, column);
+        if (agentGate === "agent_move") {
+          const agent = await resolveVerbAgent({}, machineAuth);
+          if (agent instanceof Response) return agent;
+          if (!column) return err(400, "column is required", "bad_request");
+          return agentReviewMove(id, column, agent);
+        }
         if (agentGate) return agentGate;
         const gate = await requireOperatorCap(req, "write_board");
         if (gate) return gate;
@@ -966,6 +1026,47 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
 
       if (verb === "claim") {
         return fromEngine(await boardOps.claim(id, agent));
+      }
+      if (verb === "unclaim") {
+        // Claimant releases their own. Force (take over another's claim) requires
+        // a review-skill ark key or operator write_board — missions held by dead
+        // agent keys would otherwise be stuck forever (409 not_claimer dead-end).
+        const force = body.force === true;
+        if (force) {
+          if (machineAuth.type === "ark") {
+            const agentGate = await assertAgentReviewMove(req, machineAuth, id, "done");
+            // reuse the review-skill check: agentGate === undefined means the key
+            // holds a review-skill agent and read access. Column checks don't
+            // apply here (we're only releasing a claim), so ignore 403s about
+            // move targets — but a Response for skill/404 must pass through.
+            if (agentGate instanceof Response && agentGate.status === 403 && String((agentGate as unknown as { _body?: string })._body ?? "").includes("review_skill_required")) {
+              return agentGate;
+            }
+            if (agentGate instanceof Response && agentGate.status === 404) return agentGate;
+          } else if (machineAuth.type === "browser" || machineAuth.type === "open") {
+            const gate = await requireOperatorCap(req, "write_board");
+            if (gate) return gate;
+          } else {
+            return err(403, "force unclaim requires a review-skill agent key or operator session", "force_unclaim_forbidden");
+          }
+        }
+        const existing = await boardOps.getMission(id);
+        if (!existing) return err(404, `Unknown mission: ${id}`, "mission_not_found");
+        const denied = await assertCanReadMission(req, machineAuth, existing);
+        if (denied) return denied;
+        return fromEngine(
+          await boardOps.unclaim(id, agent, { force, note: str(body.note) }),
+        );
+      }
+      if (verb === "comment") {
+        // Any agent with read access may comment; does not touch lastHeartbeat.
+        const note = str(body.note) ?? str(body.comment);
+        if (!note?.trim()) return err(400, "note is required", "bad_request");
+        const existing = await boardOps.getMission(id);
+        if (!existing) return err(404, `Unknown mission: ${id}`, "mission_not_found");
+        const denied = await assertCanReadMission(req, machineAuth, existing);
+        if (denied) return denied;
+        return fromEngine(await boardOps.comment(id, agent, note));
       }
       if (verb === "heartbeat") {
         return fromEngine(await boardOps.heartbeat(id, agent, str(body.note)));
@@ -1050,6 +1151,26 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
             issueKeyRaw === 1 ||
             issueKeyRaw === "1" ||
             issueKeyRaw === "true";
+
+      // Re-register guard (F6): registerAgent upserts by name and REPLACES the
+      // skill list wholesale. Re-registering an existing name without authority
+      // lets anyone strip e.g. the `review` skill that gates force-release.
+      // New names stay open (self-serve onboarding). Existing names require a
+      // bound ark key (that agent) or an operator session.
+      const existingProfile = await boardOps.getAgentProfile(name);
+      const existingAgent = existingProfile ? { agent: existingProfile.agent } : null;
+      const ownsAgent =
+        machineAuth.type === "ark" &&
+        (machineAuth.agentId === existingProfile?.agent.id ||
+          machineAuth.agentId === name);
+      const isOperator = machineAuth.type === "browser" || machineAuth.type === "open";
+      if (existingAgent && !ownsAgent && !isOperator) {
+        return err(
+          403,
+          `Agent "${name}" already exists — re-registration requires the agent's own key or an operator session`,
+          "re_register_forbidden",
+        );
+      }
 
       const result = await boardOps.registerAgent({
         name,
@@ -1813,6 +1934,12 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "missions" && parts[2] === "move" && req.method === "POST") {
       const column = str(body.column) as import("./types").MissionColumn | undefined;
       const agentGate = await assertAgentReviewMove(req, machineAuth, parts[1]!, column);
+      if (agentGate === "agent_move") {
+        const agent = await resolveVerbAgent({}, machineAuth);
+        if (agent instanceof Response) return agent;
+        if (!column) return err(400, "column is required", "bad_request");
+        return agentReviewMove(parts[1]!, column, agent);
+      }
       if (agentGate) return agentGate;
       const gate = await requireOperatorCap(req, "write_board");
       if (gate) return gate;
@@ -2372,6 +2499,19 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         body.prefs && typeof body.prefs === "object" && !Array.isArray(body.prefs)
           ? (body.prefs as Record<string, unknown>)
           : undefined;
+      // Model controls are contract-checked at write time: storing a value the
+      // policy cannot honour would leave the owner believing a constraint is in
+      // force when the next turn silently ignores it.
+      if (prefsPatch) {
+        const modelKeys = ["modelPreference", "provider", "localOnly", "budgetCapCents"];
+        const modelPatch = Object.fromEntries(
+          Object.entries(prefsPatch).filter(([k]) => modelKeys.includes(k)),
+        );
+        const valid = validateModelPrefsPatch(modelPatch);
+        if (!valid.ok) {
+          return err(400, valid.error, "invalid_preference");
+        }
+      }
       const saved = await boardOps.setOperatorPrefs(ctx.user.id, {
         theme: theme === null || theme === "" ? null : theme,
         prefs: prefsPatch,

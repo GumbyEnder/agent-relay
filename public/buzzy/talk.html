@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BeeZilla — Talk</title>
+  <title>🐴 BeeZilla — Chat</title>
   <style>
     /* ── BeeZilla Design Tokens ─────────────────────────── */
     :root {
@@ -137,18 +137,140 @@
       color: #555;
     }
 
-    /* ── Chat layout ────────────────────────────────────── */
-    /* FIX #1: wider chat column, narrower decisions panel */
+    /* ── Chat layout ──────────────────────────────────────
+       One centered column. The brief is an inline strip above the
+       transcript, never a side column — it must not take width from the
+       conversation. Landing order: composer first, recent work under it. */
     .chat-layout {
       display: grid;
-      grid-template-columns: 1fr 260px;
-      gap: 1rem;
-      align-items: start;
+      grid-template-columns: minmax(0, 880px);
+      justify-content: center;
+      max-width: 920px;
+      margin: 0 auto;
     }
+
+    /* Composer: the top-of-page presence on the landing screen. */
+    .composer-card {
+      border: 1px solid #2A2A2A;
+      border-radius: 12px;
+      background: var(--bz-panel);
+      padding: 0.75rem 0.85rem 0.7rem;
+      order: 1;
+    }
+    .composer-card:focus-within { border-color: #3A3A3A; }
+    .composer-card .mode-tabs { margin: 0 0 0.55rem; }
+    .composer-card .chat-input-row {
+      border-top: none;
+      margin-top: 0;
+      padding-top: 0;
+      align-items: flex-end;
+    }
+    .composer-card #chatInput {
+      background: transparent;
+      border: none;
+      padding: 0.35rem 0.15rem;
+      font-size: 0.98rem;
+      resize: vertical;
+      min-height: 3.1rem;
+    }
+    .composer-card #chatInput:focus { outline: none; box-shadow: none; }
+    .composer-card .paper-attach { margin-top: 0.45rem; }
+    /* The composer never moves. A conversation adds a transcript below it. */
+.chat-messages:empty { flex: 0 0 auto; max-height: none; padding: 0; }
+.recent-below { order: 6; margin-top: 1.1rem; }
+
+    /* Inline brief: one line, expands in place. */
+    .brief-bar {
+      order: 2;
+      border: 1px solid #262626;
+      border-radius: 8px;
+      background: #101010;
+      margin: 0.7rem 0 0.6rem;
+    }
+    .brief-bar-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      width: 100%;
+      background: none;
+      border: none;
+      color: #C8C8C8;
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 0.5rem 0.7rem;
+      cursor: pointer;
+      text-align: left;
+      min-height: 0;
+    }
+    .brief-bar-btn:hover { color: var(--bz-yellow); }
+    .bb-label {
+      font-size: 0.68rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--bz-yellow);
+    }
+    .bb-count { font-size: 0.72rem; color: #A8A8A8; font-variant-numeric: tabular-nums; }
+    .bb-dots { display: flex; gap: 4px; }
+    .bb-dots span {
+      width: 7px; height: 7px; border-radius: 50%;
+      border: 1px solid #3A3A3A; background: transparent;
+    }
+    .bb-dots span.filled { background: var(--bz-yellow); border-color: var(--bz-yellow); }
+    .bb-dots span.skipped { background: #555; border-color: #555; }
+    .bb-dots span.pulse { animation: bbPulse 0.6s ease-out; }
+    @keyframes bbPulse {
+      0% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.55); }
+      100% { box-shadow: 0 0 0 7px rgba(255, 193, 7, 0); }
+    }
+    .bb-preview {
+      flex: 1;
+      min-width: 0;
+      color: #8F8F8F;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bb-chev { color: #777; font-size: 0.7rem; }
+    .brief-bar.open .bb-chev { transform: rotate(180deg); }
+    .brief-body { display: block; border-top: 1px solid #242424; padding: 0.7rem; }
+    .brief-body .slot-checklist { border: none; background: none; padding: 0; }
+
+    .chat-messages { order: 3; }
+    #paperPanel, #paperDrop { order: 4; }
+    #draftBanner { order: 5; }
+    #chatError { order: 7; }
+    .chat-main > p.muted:last-of-type { order: 9; }
+
     @media (max-width: 900px) {
-      .chat-layout {
-        grid-template-columns: 1fr;
+      .chat-layout { grid-template-columns: 1fr; }
+      .composer-card { border-radius: 10px; }
+    }
+    /* Mobile: the composer is the point of the page — strip the chrome that
+       pushes it down the screen. */
+    @media (max-width: 640px) {
+      .chat-mascot { display: none; }
+      .chat-header-row { padding: 0 0 0.25rem; min-height: 0; }
+      /* The 48px touch minimum was inflating a one-word utility row. */
+      .chat-header-row .secondary {
+        min-height: 30px;
+        padding: 0.15rem 0.6rem;
+        font-size: 0.75rem;
       }
+      .chat-main > #chatCompany:empty { display: none; }
+      .composer-card { padding: 0.6rem 0.7rem 0.55rem; }
+      .composer-card #chatInput { font-size: 16px; }
+    }
+    header > .header-inner,
+    .header-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
     }
     .chat-main {
       display: flex;
@@ -167,17 +289,76 @@
       display: flex;
       align-items: center;
       gap: 0.75rem;
+      min-width: 0;
     }
+    .chat-company-kicker {
+      margin: 0;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #888;
+      font-weight: 700;
+    }
+    .chat-company-name {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.2;
+    }
+    .brief-company {
+      margin: 0 0 0.55rem;
+      color: #aaa;
+      font-size: 0.8rem;
+    }
+    .slot-copy { min-width: 0; flex: 1; }
 
     /* FIX #4: mascot bigger and better aligned */
     .chat-mascot {
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
-    .chat-mascot img {
+    .chat-mascot canvas {
       width: 64px;
       height: auto;
       display: block;
+      filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.12));
     }
+
+    /* ── Voice stage ───────────────────────────────────────────────── */
+    .voice-stage {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      margin: 0 0 0.65rem;
+      padding: 0.7rem 0.9rem;
+      border: 1px solid #2b2b2b;
+      border-radius: 14px;
+      background: radial-gradient(120% 160% at 20% 0%, #1a1a1a 0%, #121212 60%, #0d0d0d 100%);
+    }
+    .voice-stage.hidden { display: none; }
+    .voice-stage canvas {
+      width: 96px;
+      height: auto;
+      flex-shrink: 0;
+    }
+    .vs-body { flex: 1; min-width: 0; }
+    .vs-state {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--bz-yellow);
+      letter-spacing: 0.01em;
+    }
+    .vs-lat {
+      margin: 0.15rem 0 0;
+      font-size: 0.74rem;
+      color: #8a8a8a;
+      font-variant-numeric: tabular-nums;
+    }
+    .vs-lat strong { color: #c9c9c9; font-weight: 600; }
+    .voice-stage .secondary { min-height: 30px; padding: 0.15rem 0.6rem; font-size: 0.75rem; }
 
     .agent-select {
       font: inherit;
@@ -300,26 +481,6 @@
     }
     /* ── Tabs ───────────────────────────────────────────── */
     /* FIX #6: larger tabs */
-    .bz-tabs {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 0.9rem;
-    }
-    .bz-tab {
-      padding: 0.6rem 1.25rem;
-      border: 1px solid #2A2A2A;
-      border-radius: 6px;
-      background: var(--bz-panel);
-      color: var(--bz-silver);
-      cursor: pointer;
-      font-size: 0.92rem;
-      font-weight: 600;
-    }
-    .bz-tab.active {
-      background: var(--bz-yellow);
-      border-color: var(--bz-yellow);
-      color: #111;
-    }
 
     /* ── Draft banner ───────────────────────────────────── */
     .draft-ready-banner {
@@ -337,7 +498,111 @@
     }
     .draft-ready-banner .muted {
       color: #888;
+      font-weight: 400;
     }
+    .draft-ready-banner textarea {
+      text-align: left;
+      margin-top: 0.7rem;
+      min-height: 8.5rem;
+    }
+    .draft-ready-banner .row { justify-content: center; }
+    /* The confirm stays on the page so it is a different control from Send.
+       It is not display:flex — a later flex rule would beat .hidden. */
+    .outward-confirm {
+      margin-top: 0.9rem;
+      padding: 0.85rem 0.9rem;
+      border: 1px solid var(--bz-yellow);
+      border-radius: 6px;
+      text-align: left;
+      background: rgba(255,193,7,0.06);
+    }
+    .outward-confirm p {
+      color: #E8E8E8;
+      font-weight: 600;
+    }
+    .draft-ready-banner.hidden { display: none; }
+    .draft-warning { color: #f0c36a; font-size: 0.85rem; font-weight: 600; background: rgba(240,195,106,0.08); border: 1px solid #B8860B; border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.35rem 0; }
+    .draft-warning.hidden { display: none; }
+    .row-tools { margin-top: 0.45rem; }
+    .row-tools button { font-size: 0.85rem; }
+    /* The money list is not display:flex. A later flex rule would beat .hidden. */
+    .draft-ready-banner .money-check {
+      text-align: left;
+      margin: 0.75rem 0 0.35rem;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #101010;
+    }
+    .draft-ready-banner .money-check p {
+      color: #E8E8E8;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+    .draft-ready-banner .money-check ul { margin: 0; padding-left: 1.1rem; }
+    .draft-ready-banner .money-check li {
+      margin: 0.28rem 0;
+      color: #D8D8D8;
+      font-weight: 400;
+    }
+    .draft-ready-banner .money-check li.wrong { color: #f0c36a; }
+    #moneyCheck.hidden { display: none; }
+    /* Paper read: not display:flex, so .hidden cannot lose to a later flex rule. */
+    .paper-attach { margin-top: 0.8rem; }
+    .paper-toggle {
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.34rem 0.7rem;
+      border-radius: 6px;
+      border: 1px dashed #3a3a3a;
+      background: transparent;
+      color: #9a9a9a;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .paper-toggle:hover { color: #FFC107; border-color: #B8860B; }
+    .paper-toggle[aria-expanded="true"] { color: #FFC107; border-color: #FFC107; }
+    .paper-drop.hidden { display: none; }
+    .paper-drop {
+      margin-top: 0.8rem;
+      border: 1px dashed #3a3a3a;
+      border-radius: 6px;
+      padding: 0.7rem 0.8rem;
+      background: #101010;
+      text-align: left;
+    }
+    .paper-drop.over { border-color: var(--bz-yellow); }
+    .paper-drop p { margin: 0 0 0.35rem; }
+    .paper-drop textarea { width: 100%; min-height: 2.6rem; margin-top: 0.35rem; }
+    .paper-drop input[type="file"] { max-width: 100%; font-size: 0.82rem; color: #C9CDD2; }
+    #paperPanel {
+      margin-top: 0.8rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.8rem 0.9rem;
+      background: var(--bz-panel);
+      text-align: left;
+    }
+    #paperPanel.hidden { display: none; }
+    #paperBrief { margin-top: 0.8rem; }
+    #paperBrief.hidden { display: none; }
+    .paper-doc {
+      white-space: pre-wrap;
+      max-height: 9rem;
+      overflow: auto;
+      background: #0A0A0A;
+      border-radius: 4px;
+      padding: 0.6rem;
+      font-size: 0.82rem;
+      color: #D8D8D8;
+      margin: 0.4rem 0 0.6rem;
+    }
+    .paper-fact {
+      padding: 0.45rem 0;
+      border-bottom: 1px solid #1A1A1A;
+    }
+    .paper-fact button { margin: 0.3rem 0.35rem 0 0; }
+    .paper-fact input { width: 100%; margin-top: 0.3rem; }
     .row {
       display: flex;
       gap: 0.6rem;
@@ -422,6 +687,9 @@
       flex-direction: column;
       gap: 0.35rem;
       padding: 0.3rem 0;
+      flex: 1 1 100%;
+      width: 100%;
+      min-width: 0;
     }
     .slot-edit-row input {
       width: 100%;
@@ -436,6 +704,34 @@
     .slot-edit-row .edit-actions {
       display: flex;
       gap: 0.4rem;
+    }
+    .slot-edit-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #9a9a9a;
+    }
+    /* Room to actually write: the brief editor is a multi-line box, not a
+       one-line field, and it grows with the text. */
+    .slot-edit-row textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 8rem;
+      font: inherit;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid var(--bz-yellow);
+      background: var(--bz-charcoal);
+      color: #E8E8E8;
+      border-radius: 4px;
+      resize: vertical;
+    }
+    .slot-edit-row textarea:focus { outline: none; box-shadow: 0 0 0 2px rgba(255,193,7,0.25); }
+    .slot-edit-hint { color: #777; font-size: 0.7rem; align-self: center; }
+    .slot-edit-row .edit-actions {
+      flex-wrap: wrap;
+      align-items: center;
     }
     .slot-edit-row .edit-actions button {
       padding: 0.25rem 0.6rem;
@@ -466,6 +762,232 @@
     }
 
     .hidden { display: none; }
+
+    /* Recent work: a compact list under the composer, search in the header. */
+    .recent-work { padding: 0.25rem 0 0; }
+    .rw-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin: 0.1rem 0 0.55rem;
+    }
+    .recent-work .rw-head {
+      margin: 0;
+      font-size: 0.7rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #8A8A8A;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .recent-work .rw-lead { margin: 0 0 0.6rem; font-size: 0.82rem; }
+    .rw-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.7rem; }
+    .rw-ex {
+      background: transparent; border: 1px solid #2A2A2A; color: #C9CDD2;
+      border-radius: 999px; padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer;
+      min-height: 0;
+    }
+    .rw-ex:hover { border-color: #FFC107; color: #FFC107; }
+    .rw-item {
+      display: block; width: 100%; text-align: left; font: inherit;
+      background: transparent; border: 1px solid #222; border-radius: 7px;
+      padding: 0.5rem 0.7rem; margin: 0 0 0.35rem; cursor: pointer;
+      position: relative;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .rw-item:hover { border-color: #3A3A3A; background: #121212; }
+    .rw-item .rw-title {
+      display: block; color: #EDEDED; font-weight: 600; font-size: 0.88rem;
+      padding-right: 2.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .rw-tools {
+      position: absolute; top: 0.35rem; right: 0.45rem; display: inline-flex; gap: 0.25rem;
+      opacity: 0; transition: opacity 0.12s;
+    }
+    .rw-item:hover .rw-tools, .rw-item:focus-within .rw-tools { opacity: 1; }
+    .rw-rename, .rw-delete {
+      background: transparent; border: 1px solid #2A2A2A; color: #888;
+      border-radius: 5px; padding: 0 0.4rem; font-size: 0.75rem; cursor: pointer; line-height: 1.5;
+      min-height: 0; min-width: 0;
+    }
+    .rw-rename:hover { color: #FFC107; border-color: #FFC107; }
+    .rw-delete:hover { color: #ff6b6b; border-color: #ff6b6b; }
+    .rw-item .rw-sub {
+      display: block; color: #858585; font-size: 0.75rem; margin-top: 0.1rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1.5rem;
+    }
+    .rw-item.needs-input { border-left: 3px solid #FFC107; }
+    .rw-item.needs-input .rw-title { color: #FFC107; }
+    .rw-head-row .rw-search { margin: 0; flex: 0 1 290px; }
+    .rw-search { margin: 0 0 0.7rem; }
+    .rw-search input {
+      width: 100%; font: inherit; font-size: 0.8rem; color: #E8E8E8;
+      background: #0F0F0F; border: 1px solid #2A2A2A; border-radius: 999px;
+      padding: 0.4rem 0.8rem;
+    }
+    .rw-search input::placeholder { color: #6F6F6F; }
+    .rw-search input:focus { outline: none; border-color: #FFC107; }
+    .rw-group {
+      margin: 0.9rem 0 0.4rem; font-size: 0.72rem; letter-spacing: 0.09em;
+      text-transform: uppercase; color: #9a9a9a;
+    }
+    .rw-item.rw-session { border-left: 3px solid #444; }
+    .rw-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; align-items: center; }
+    .rw-all { color: #C9CDD2; font-size: 0.9rem; }
+    .back-recent { flex-shrink: 0; }
+
+    /* ── Sessions drawer ──────────────────────────────────── */
+    .sessions-toggle {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+    }
+    .sessions-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 60;
+      display: flex;
+      justify-content: flex-end;
+    }
+    /* `.sessions-overlay` sets display:flex, which (same specificity, later in
+       file) would override `.hidden{display:none}` and paint the dark backdrop
+       on load, blocking the page. Explicitly win the hidden state here. */
+    .sessions-overlay.hidden { display: none; }
+    #sessionsDrawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 380px;
+      max-width: 92vw;
+      background: var(--bz-panel);
+      border-left: 1px solid #2A2A2A;
+      z-index: 61;
+      box-shadow: -6px 0 24px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.18s ease;
+    }
+    #sessionsDrawer.open { transform: translateX(0); }
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid #222;
+    }
+    .drawer-header h3 {
+      margin: 0;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--bz-yellow);
+      font-weight: 700;
+    }
+    .drawer-close {
+      background: transparent;
+      border: 1px solid #444;
+      color: #999;
+      padding: 0.25rem 0.6rem;
+      font-size: 0.8rem;
+    }
+    .drawer-close:hover { border-color: var(--bz-yellow); background: rgba(255,193,7,0.08); }
+    .drawer-actions { padding: 0.8rem 1rem; border-bottom: 1px solid #222; }
+    .drawer-actions button { width: 100%; }
+    .drawer-note {
+      padding: 0.5rem 1rem 0;
+      font-size: 0.82rem;
+      color: #888;
+    }
+    #sessionsList {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.6rem 1rem;
+    }
+    .session-card {
+      border: 1px solid #2A2A2A;
+      background: var(--bz-col);
+      border-radius: 6px;
+      padding: 0.7rem 0.8rem;
+      margin-bottom: 0.6rem;
+    }
+    .session-card .sc-title {
+      font-weight: 600;
+      color: #E8E8E8;
+      font-size: 0.9rem;
+      margin: 0 0 0.2rem;
+      word-break: break-word;
+    }
+    .session-card .sc-summary {
+      color: #888;
+      font-size: 0.8rem;
+      margin: 0 0 0.3rem;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .session-card .sc-meta {
+      color: #555;
+      font-size: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .session-card .sc-actions {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .session-card .sc-actions button {
+      padding: 0.22rem 0.55rem;
+      font-size: 0.75rem;
+    }
+    .session-card.active {
+      border-color: var(--bz-yellow-dim);
+    }
+    .sessions-empty {
+      color: #777;
+      font-size: 0.85rem;
+      text-align: center;
+      padding: 1.5rem 0;
+    }
+    .sessions-error {
+      color: var(--bz-status-red);
+      font-size: 0.85rem;
+      padding: 0.75rem 0.25rem;
+      margin-top: 0.5rem;
+    }
+
+    /* ── Explicit skip on decisions ────────────────────────── */
+    .slot-skip {
+      cursor: pointer;
+      color: #777;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      border: 1px solid #444;
+      border-radius: 3px;
+      margin-left: auto;
+      flex-shrink: 0;
+      align-self: center;
+      background: transparent;
+    }
+    .slot-skip:hover {
+      color: var(--bz-yellow);
+      border-color: var(--bz-yellow);
+      background: rgba(255,193,7,0.08);
+    }
+    .slot-item.skipped .slot-value-headline {
+      color: #999;
+      font-style: italic;
+    }
+    .slot-item.skipped .slot-check {
+      background: #555;
+      border-color: #555;
+      color: #E8E8E8;
+    }
 
     /* ── Form tab styles ──────────────────────────────────── */
     .form-group {
@@ -502,10 +1024,223 @@
     .form-group textarea::placeholder {
       color: #555;
     }
-  </style>
+  
+    .account-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 0.4rem;
+      background: var(--bz-panel, #141414);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.7rem 0.9rem;
+      min-width: 200px;
+      z-index: 50;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    .account-menu .am-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+    .account-menu .am-email { font-size: 0.75rem; color: #888; margin: 0.15rem 0 0.6rem; word-break: break-all; }
+    .account-menu .am-signout {
+      width: 100%;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+    .header-inner, header { position: relative; }
+    /* Promise marks are not display:flex. A later flex rule would beat .hidden. */
+    .draft-ready-banner .promise-check {
+      text-align: left;
+      margin: 0.75rem 0 0.35rem;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #f0c36a;
+      border-radius: 6px;
+      background: #101010;
+    }
+    .draft-ready-banner .promise-check p {
+      color: #E8E8E8;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+    .draft-ready-banner .promise-check .promise-words {
+      background: rgba(240, 195, 106, 0.22);
+      border-left: 3px solid #f0c36a;
+      padding: 0.45rem 0.65rem;
+      margin: 0.45rem 0 0.2rem;
+      color: #fff8e8;
+      font-weight: 600;
+    }
+    .draft-ready-banner .promise-check .promise-reason {
+      color: #f0c36a;
+      font-weight: 400;
+      margin: 0.15rem 0 0.25rem;
+    }
+    .draft-ready-banner .promise-check label {
+      display: block;
+      color: #D8D8D8;
+      font-weight: 400;
+      margin: 0 0 0.55rem;
+    }
+    #promiseCheck.hidden { display: none; }
+
+    /* ── Activity digest — centered on the chat column, never full-bleed left ──
+       #digestCard is a direct child of <main>, so it must carry its own
+       max-width + auto margins or its text pins to the viewport edge. */
+    .bz-digest {
+      max-width: 760px;
+      margin: 0 auto 0.9rem;
+      padding: 10px 14px;
+      background: var(--bz-panel);
+      border: 1px solid var(--bz-col);
+      border-left: 3px solid var(--bz-yellow);
+      border-radius: 6px;
+      color: var(--bz-silver);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+/* ── Mobile/async pass (plan doc 23): one-thumb approval + legibility ── */
+@media (max-width: 640px) {
+  button, [role="button"] { min-height: 48px; min-width: 48px; font-size: 16px; }
+  .bz-digest { font-size: 15px; padding: 10px 12px; }
+}
+.bz-approve-bar { position: sticky; bottom: 0; background: var(--bz-panel, #141414); padding: 10px; display: flex; gap: 8px; }
+.bz-approve-bar button { flex: 1; min-height: 52px; }
+
+/* ── Context meter ─────────────────────────────────────────────── */
+.ctx-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.45rem 0 0;
+}
+.ctx-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: #232323;
+  overflow: hidden;
+}
+.ctx-bar > span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: #5A5A5A;
+  border-radius: 999px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.ctx-text {
+  font-size: 0.7rem;
+  color: #7A7A7A;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-meter.warn .ctx-bar > span { background: var(--bz-yellow); }
+.ctx-meter.warn .ctx-text { color: var(--bz-yellow); }
+.ctx-meter.hot .ctx-bar > span { background: var(--bz-status-red, #C45B5B); }
+.ctx-meter.hot .ctx-text { color: var(--bz-status-red, #C45B5B); }
+
+/* ── Voice: optional spoken replies + talk/listen/respond ─────── */
+.voice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px solid #2E2E2E;
+  color: #9A9A9A;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-height: 0;
+  min-width: 0;
+}
+.voice-toggle:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
+.voice-toggle.on {
+  color: var(--bz-black);
+  background: var(--bz-yellow);
+  border-color: var(--bz-yellow);
+  font-weight: 600;
+}
+.vt-icon { font-size: 0.85rem; }
+.mic-btn {
+  background: transparent;
+  border: 1px solid #2E2E2E;
+  color: #9A9A9A;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  align-self: stretch;
+  min-height: 0;
+  min-width: 0;
+}
+.mic-btn:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
+.mic-btn.on {
+  color: var(--bz-black);
+  background: var(--bz-yellow);
+  border-color: var(--bz-yellow);
+  animation: micPulse 1.6s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 193, 7, 0); }
+}
+.voice-status {
+  margin: 0.4rem 0 0;
+  font-size: 0.76rem;
+  color: var(--bz-yellow);
+}
+
+/* ── Chat / Work modes ─────────────────────────────────────────────── */
+.mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0.85rem;
+  flex-wrap: wrap;
+}
+.mode-tab {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.36rem 1rem;
+  border-radius: 999px;
+  border: 1px solid #2E2E2E;
+  background: transparent;
+  color: #9A9A9A;
+  cursor: pointer;
+  min-height: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.mode-tab:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
+.mode-tab.active {
+  background: var(--bz-yellow);
+  border-color: var(--bz-yellow);
+  color: var(--bz-black);
+}
+
+/* Work definition panel — replaces the composer in work mode */
+.work-offer {
+  border: 1px solid var(--bz-yellow);
+  border-radius: 8px;
+  background: #171717;
+  padding: 0.75rem 0.9rem;
+  margin: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-width: 640px;
+}
+.work-offer p { margin: 0; font-size: 0.86rem; color: #DADADA; }
+.work-offer .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.work-offer button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.85rem; }
+</style>
+<link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
 <body>
   <header>
+    <div class="header-inner">
     <a href="/buzzy/" class="brand-link">
       <div class="brand">
         <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
@@ -513,63 +1248,154 @@
       </div>
     </a>
     <nav>
-      <a href="/buzzy/" id="jobsLink">Your jobs</a>
-      <a href="/buzzy/talk" id="talkLink" class="active">Discuss</a>
+      <a href="/buzzy/" id="jobsLink" class="active">Talk</a>
       <a href="/buzzy/memory" id="memLink">Memory</a>
       <a href="/buzzy/experts">Experts</a>
-      <a href="/login" class="account-link">Sign in</a>
+        <a href="/buzzy/recipes">Recipes</a>
+        <a href="/buzzy/library" id="libLink">Library</a>
+      <a href="/buzzy/landing" class="account-link">Sign in</a>
     </nav>
+    </div>
   </header>
+  <div id="companyTabs"></div>
   <main>
+    <div id="digestCard" class="bz-digest hidden" style="display:none"></div>
     <div id="chatScreen">
-      <div class="bz-tabs" role="tablist">
-        <button type="button" class="bz-tab active" id="tabChat" data-tab="chat">Chat</button>
-        <button type="button" class="bz-tab" id="tabForm" data-tab="form">Form</button>
-      </div>
       <div class="chat-layout">
         <div class="chat-main">
           <div class="chat-header-row">
             <div class="chat-header-left">
               <div class="chat-mascot">
-                <img id="chatMascot" src="brand/revision6_expressions_17-attentive.png" alt="BeeZilla" />
+                <canvas id="chatMascot" width="64" height="63" aria-label="BeeZilla"></canvas>
+              </div>
+              <div class="chat-company-head">
+                <p class="chat-company-kicker" id="chatCompanyKicker">Working for</p>
+                <h1 class="chat-company-name" id="chatCompanyName">No company yet</h1>
               </div>
             </div>
-            <select id="agentSelect" class="agent-select" title="Choose an agent model">
-              <option value="">Loading agents…</option>
-            </select>
+            <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
+            <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read replies aloud">
+              <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Voice</span>
+            </button>
+            <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New session</button>
+            <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
           </div>
+          <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
+
+          <!-- Voice stage: a real face while you talk. It only appears when
+               the mic is on, so typed chat stays as clean as it was. -->
+          <div id="voiceStage" class="voice-stage hidden">
+            <canvas id="voiceAvatar" aria-hidden="true"></canvas>
+            <div class="vs-body">
+              <p class="vs-state" id="voiceStageState">Listening</p>
+              <p class="vs-lat" id="voiceStageLat"></p>
+            </div>
+            <button id="voiceStageEnd" class="secondary" type="button">End voice</button>
+          </div>
+          <div class="composer-card" id="composerCard">
+            <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+              <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+              <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+            </div>
+            <div class="chat-input-row">
+              <textarea id="chatInput" rows="2" placeholder="What do you want to talk about" aria-label="Describe the job for BeeZilla" disabled></textarea>
+              <button id="micBtn" class="mic-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">&#127908;</button>
+              <button id="chatSend" disabled>Send</button>
+            </div>
+            <p id="voiceStatus" class="voice-status hidden" role="status"></p>
+            <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
+              <div class="ctx-bar"><span id="ctxFill"></span></div>
+              <span id="ctxText" class="ctx-text">Context 0%</span>
+            </div>
+
+          <div class="paper-attach">
+              <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
+            </div>
+          </div>
+
+          <!-- The brief is one line above the conversation, expandable in place.
+               No side column: it costs no width and never competes with the chat. -->
+          <div class="brief-bar hidden" id="briefBar">
+            <button type="button" class="brief-bar-btn" id="briefBarToggle" aria-expanded="false" aria-controls="briefPanel">
+              <span class="bb-label">Brief</span>
+              <span class="bb-count" id="railCount">0/4</span>
+              <span class="bb-dots" id="railDots" aria-hidden="true"></span>
+              <span class="bb-preview" id="bbPreview">Nothing captured yet</span>
+              <span class="bb-chev" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="slot-checklist brief-body hidden" id="briefPanel" role="region" aria-label="Brief">
+              <p id="briefCompany" class="brief-company"></p>
+              <div id="slotItems"></div>
+              <div id="paperBrief" class="paper-brief hidden"></div>
+            </div>
+          </div>
+
           <div class="chat-messages" id="chatMessages"></div>
-          <div class="chat-input-row">
-            <textarea id="chatInput" rows="2" placeholder="Describe the job…" disabled></textarea>
-            <button id="chatSend" disabled>Send</button>
+          <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
+          <div id="paperDrop" class="paper-drop hidden">
+            <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
+            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,application/pdf,text/plain" />
+            <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
+            <div class="row">
+              <button type="button" id="paperRead">Read it</button>
+            </div>
+            <p id="paperNote" class="muted" role="status"></p>
           </div>
           <div id="draftBanner" class="draft-ready-banner hidden">
-            <p>Everything BeeZilla needs has been gathered!</p>
-            <p class="muted">A draft is ready for you to review.</p>
-            <div class="row" style="justify-content:center;margin-top:0.8rem">
-              <button id="viewDraft" class="secondary">View draft</button>
-              <button id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+            <p>A draft is ready for you to review.</p>
+            <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
+            <p id="draftWarning" class="draft-warning hidden" role="alert"></p>
+            <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
+            <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
+            <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
+            <p class="muted" id="draftMeta">Version 1 · not approved</p>
+            <div class="row">
+              <button type="button" id="approveDraft">Approve this version</button>
+              <button type="button" id="draftSend">Send</button>
+            </div>
+            <div class="row row-tools">
+              <button type="button" id="downloadDraft" class="secondary">Download .md</button>
+              <button type="button" id="downloadWord" class="secondary">Word</button>
+              <button type="button" id="downloadPdf" class="secondary">PDF</button>
+              <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
+              <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
+              <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+            </div>
+            <p id="draftSendNote" class="muted" role="status"></p>
+            <div id="outwardConfirm" class="outward-confirm">
+              <p>Sending, filing, paying, or publishing is a separate step.</p>
+              <button type="button" id="confirmOutward" disabled>Confirm send</button>
+              <p id="outwardNote" class="muted"></p>
             </div>
           </div>
+          <!-- History of work sits below the chat, in every state, so the
+               page never reflows when a conversation starts. -->
+          <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
-          <div id="formScreen" class="hidden" style="max-width:600px;">
-            <h2 style="margin:0 0 0.5rem;color:var(--bz-yellow);font-size:1.05rem;">Structured job request</h2>
-            <p class="muted">Fill in the fields — BeeZilla will turn it into a conversation and lock in the decisions.</p>
-            <div id="formBody"></div>
-            <div class="row" style="margin-top:1rem;">
-              <button id="formSubmit">Submit to BeeZilla</button>
-            </div>
-          </div>
-        </div>
-        <div class="slot-checklist" id="slotChecklist">
-          <h3>Decisions made</h3>
-          <div id="slotItems"></div>
         </div>
       </div>
     </div>
+
+    <!-- Sessions drawer -->
+    <div id="sessionsOverlay" class="sessions-overlay hidden" aria-hidden="true"></div>
+    <aside id="sessionsDrawer" aria-label="History" aria-hidden="true">
+      <div class="drawer-header">
+        <h3>History</h3>
+        <button id="sessionsClose" class="drawer-close" type="button">Close</button>
+      </div>
+      <div class="drawer-actions">
+        <button id="drawerNewChat" class="secondary" type="button">Start a new chat</button>
+      </div>
+      <p class="drawer-note">Pick a past chat to reopen it, rename it, or get a quick summary.</p>
+      <div id="sessionsList"></div>
+    </aside>
   </main>
 
+  <script src="/buzzy/companies.js"></script>
+  <script src="/buzzy/money-check.js"></script>
+  <script src="/buzzy/promise-check.js"></script>
+  <script src="/buzzy/avatar.js"></script>
   <script src="sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
@@ -1144,40 +1970,46 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     // ── Intake mode tabs: chat (default) / form ────────────────────────
-    document.querySelectorAll(".bz-tab").forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        document.querySelectorAll(".bz-tab").forEach(function (t) { t.classList.remove("active"); });
-        tab.classList.add("active");
-        document.body.dataset.intake = tab.dataset.tab;
-        // Show/hide panels
-        var chatPanel = document.getElementById("chatScreen");
-        var formPanel = document.getElementById("formScreen");
-        var chatCol = chatPanel.querySelector(".chat-main > .chat-messages, .chat-main .chat-messages");
-        var chatInputRow = chatPanel.querySelector(".chat-input-row");
-        var chatErr = document.getElementById("chatError");
-        var chatFooter = chatPanel.querySelector(".chat-main > p.muted");
-        if (tab.dataset.tab === "form") {
-          chatPanel.classList.remove("hidden");
-          [chatCol, chatInputRow, chatErr, chatFooter].forEach(function (el) {
-            if (el) el.classList.add("hidden");
-          });
-          formPanel.classList.remove("hidden");
-          renderForm();
-        } else {
-          [chatCol, chatInputRow, chatFooter].forEach(function (el) {
-            if (el) el.classList.remove("hidden");
-          });
-          formPanel.classList.add("hidden");
-          showChatScreen();
-        }
-      });
-    });
+    let chatState = {
+      jobId: null,
+      sessionId: null,
+      slots: {},
+      messages: [],
+      draftReady: false,
+      draftText: "",
+      draftVersion: 1,
+      approvedText: null,
+      outwardConfirmed: false,
+      moneyBlocks: false,
+      promiseBlocks: false,
+      acceptedPromises: {},
+      paper: null,
+      userId: null,
+      model: null,
+      boundCompanyId: null,
+      mode: "chat",
+      workOfferDismissed: false,
+    };
 
     // ── Expert query param ─────────────────────────────────────────────
     var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
     if (expertFromUrl) {
       chatState.expert = expertFromUrl;
-      // Clear the query param from the URL
+      window.history.replaceState({}, "", "/buzzy/talk");
+    }
+
+    // ── Job context from the Jobs card "Chat" button ───────────────────
+    // sessionStorage payload (set by openJobChat) gives the agent the project
+    // context; the ?job= param identifies the job for transcript restore.
+    var jobFromUrl = new URLSearchParams(window.location.search).get("job");
+    if (jobFromUrl) {
+      chatState.jobId = jobFromUrl;
+      try {
+        var jobCtx = JSON.parse(sessionStorage.getItem("bz_open_job") || "null");
+        if (jobCtx && jobCtx.jobId === jobFromUrl) {
+          chatState.jobContext = jobCtx;
+        }
+      } catch (_) {}
       window.history.replaceState({}, "", "/buzzy/talk");
     }
 
@@ -1191,20 +2023,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       { id: "exclusions", label: "Exclusions", type: "textarea", placeholder: "Anything you definitely don't want done?" },
     ];
 
-    function renderForm() {
-      var container = document.getElementById("formBody");
-      var html = "";
-      FORM_FIELDS.forEach(function (f) {
-        if (f.type === "textarea") {
-          html += '<div class="form-group"><label for="form_' + f.id + '">' + f.label + '</label><textarea id="form_' + f.id + '" rows="3" placeholder="' + f.placeholder + '"></textarea></div>';
-        } else {
-          html += '<div class="form-group"><label for="form_' + f.id + '">' + f.label + '</label><input id="form_' + f.id + '" type="' + f.type + '" placeholder="' + f.placeholder + '" /></div>';
-        }
-      });
-      container.innerHTML = html;
-    }
 
-    document.getElementById("formSubmit").addEventListener("click", function () {
+    const formSubmitEl = document.getElementById("formSubmit");
+    if (formSubmitEl) formSubmitEl.addEventListener("click", function () {
       var values = {};
       FORM_FIELDS.forEach(function (f) {
         var el = document.getElementById("form_" + f.id);
@@ -1229,27 +2050,61 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("chatSend").click();
     });
 
+    // ── Account: session-aware Sign in / user name + Log out ──────────
+    (function account() {
+      var link = document.querySelector(".account-link");
+      if (!link) return;
+      fetch("/api/auth/get-session", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (session) {
+          var user = session && session.user;
+          if (!user) { window.location.replace("/buzzy/landing"); return; }
+          var bzDisplayName = user.name || user.email || "Account";
+          link.textContent = bzDisplayName;
+          link.href = "#";
+          link.style.cursor = "pointer";
+          // Profile menu: clicking the name opens a small account panel
+          var menu = document.createElement("div");
+          menu.className = "account-menu";
+          menu.style.display = "none";
+          menu.innerHTML =
+            '<div class="am-name">' + bzDisplayName + "</div>" +
+            '<div class="am-email">' + (user.email || "") + "</div>" +
+            '<button type="button" class="am-signout">Log out</button>';
+          var out = menu.querySelector(".am-signout");
+          out.addEventListener("click", function (e) {
+            e.preventDefault();
+            fetch("/api/auth/sign-out", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }).then(function () { window.location.href = "/buzzy/"; });
+          });
+          link.parentNode.insertBefore(menu, link.nextSibling);
+          link.addEventListener("click", function (e) {
+            e.preventDefault();
+            menu.style.display = menu.style.display === "none" ? "block" : "none";
+          });
+          document.addEventListener("click", function (e) {
+            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
+          });
+        })
+        .catch(function () {});
+    })();
+
 
     // ── Chat-first screen (P1) ────────────────────────────────────
     const SLOT_LABELS = {
-      what_happened: "What happened",
-      rough_size: "Rough size",
-      material_supplier: "Material supplier",
-      budget_range: "Budget range",
-      timing: "Timing",
-      done_right_check: "Done right means",
-      quote_count: "Quote count",
-      exclusions: "Exclusions",
+      challenge: "The Challenge",
+      difficulties: "Difficulties",
+      who_involved: "Who is involved",
+      end_goal: "What is the end goal",
     };
 
-    let chatState = {
-      jobId: null,
-      slots: {},
-      messages: [],
-      draftReady: false,
-      userId: null,
-      model: null,
-    };
+    // The four Decisions Made statements the owner may explicitly skip.
+    const SKIPPABLE_SLOTS = ["challenge", "difficulties", "who_involved", "end_goal"];
+    const SESSIONS_BASE = "/api/buzzy/sessions";
 
     let modelCatalog = [];
 
@@ -1260,28 +2115,55 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     // ── Load model catalog and populate selector ────────────────────
+    let _modelsStarted = false;
+    function fallbackAgents(sel) {
+      sel.innerHTML = "";
+      ["Marvin", "Kimi", "Qwen Thinking"].forEach(function (label) {
+        var opt = document.createElement("option");
+        opt.value = label;
+        opt.textContent = label;
+        sel.appendChild(opt);
+      });
+      if (sel.options.length) sel.selectedIndex = 0;
+    }
     function loadModels() {
-      fetch("/api/buzzy/models")
+      // Single flight — never two overlapping fetches on the same selector.
+      if (_modelsStarted) return;
+      _modelsStarted = true;
+      const sel = document.getElementById("agentSelect");
+      // Timeout + fallback list so the selector never sticks at "Loading agents…"
+      fetch("/api/buzzy/models", { signal: AbortSignal.timeout(8000) })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
-          if (!data || !data.models || !data.models.length) return;
-          modelCatalog = data.models;
-          const sel = document.getElementById("agentSelect");
-          if (!sel) return;
-          sel.innerHTML = "";
-          var defaultOpt = document.createElement("option");
-          defaultOpt.value = "";
-          defaultOpt.textContent = "Default agent";
-          sel.appendChild(defaultOpt);
-          modelCatalog.forEach(function (m) {
-            var opt = document.createElement("option");
-            opt.value = m.model;
-            opt.textContent = m.label;
-            sel.appendChild(opt);
-          });
+          // Empty/invalid body counts as failure: populate the fallback so the
+          // dropdown can NEVER stay at "Loading agents…" (dogfood: seen live).
+          if (data && Array.isArray(data.models) && data.models.length) {
+            modelCatalog = data.models;
+            if (!sel) return;
+            sel.innerHTML = "";
+            modelCatalog.forEach(function (m) {
+              var opt = document.createElement("option");
+              opt.value = m.label;
+              opt.textContent = m.label;
+              sel.appendChild(opt);
+            });
+            // Default-select the first agent — no unmapped "Default agent" label.
+            if (sel.options.length) sel.selectedIndex = 0;
+          } else if (sel && sel.options.length <= 1) {
+            fallbackAgents(sel);
+          }
         })
-        .catch(function () {});
+        .catch(function () {
+          // Models unreachable — populate the fallback list so the dropdown
+          // never sticks at "Loading agents…" (seen live).
+          const sel2 = document.getElementById("agentSelect");
+          if (!sel2 || sel2.options.length > 1) return;
+          fallbackAgents(sel2);
+        });
     }
+    // Populate the selector at script start, not only when the chat screen
+    // mounts — a slow/failed screen change must never leave "Loading agents…".
+    loadModels();
 
     function selectedModel() {
       var sel = document.getElementById("agentSelect");
@@ -1290,33 +2172,383 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function renderChatMessages() {
       const container = document.getElementById("chatMessages");
-      const html = chatState.messages.map((m) => {
+      // Newest first, but each exchange still reads question-then-answer:
+      // [u2, a2, u1, a1]. Your words and the reply stay at the top; older
+      // turns and the work history drop below. No scroll games.
+      const ordered = (function oldestToNewestPairs(msgs) {
+        var out = [];
+        for (var i = msgs.length - 1; i >= 0; i--) out.push(msgs[i]);
+        for (var j = 0; j < out.length - 1; j++) {
+          if (out[j].role === "assistant" && out[j + 1].role === "user") {
+            var t = out[j]; out[j] = out[j + 1]; out[j + 1] = t;
+            j++;
+          }
+        }
+        return out;
+      })(chatState.messages);
+      const html = ordered.map((m) => {
         const cls = m.role === "user" ? "bubble me" : "bubble";
         const escaped = String(m.content).replace(/</g, "&lt;").replace(/\n/g, "<br>");
         return '<div class="' + cls + '">' + escaped + "</div>";
       }).join("");
       container.innerHTML = html;
-      container.scrollTop = container.scrollHeight;
+      // BZ-F011: expert handoff suggestion (never an auto-switch). Re-appended
+      // after every render because this container is rebuilt from state.
+      if (chatState.expertSuggestion && !chatState.expert) {
+        const s = chatState.expertSuggestion;
+        const card = document.createElement("div");
+        card.className = "bubble expert-suggestion";
+        card.style.border = "1px solid var(--yellow, #f5c518)";
+        const txt = document.createElement("div");
+        txt.textContent = s.reason;
+        card.appendChild(txt);
+        const switchBtn = document.createElement("button");
+        switchBtn.type = "button";
+        switchBtn.textContent = "Switch to the " + s.name + " expert";
+        switchBtn.style.marginRight = "8px";
+        switchBtn.addEventListener("click", function () {
+          // Handoff: the confirmed brief (slots) and history stay exactly as
+          // they are — only the expert context changes.
+          chatState.expert = s.id;
+          chatState.expertSuggestion = null;
+          chatState.messages.push({ role: "assistant", content: "Switched to the " + s.name + " expert. Everything we captured carries over." });
+          renderChatMessages();
+        });
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.textContent = "Not now";
+        dismiss.addEventListener("click", function () {
+          chatState.expertSuggestion = null;
+          renderChatMessages();
+        });
+        card.appendChild(switchBtn);
+        card.appendChild(dismiss);
+        container.appendChild(card);
+      }
+      // Is this a project? Once two decisions are on the table, offer the
+      // structured path instead of letting the chat drift. The agent also
+      // asks in its own words; this is the actionable button for that ask.
+      if (shouldOfferWork() && container.querySelectorAll(".work-offer").length === 0) {
+        var offer = document.createElement("div");
+        offer.className = "work-offer";
+        var txt = document.createElement("p");
+        txt.textContent = "This is shaping up like a project. Want to define the work so it gets done the same way every time?";
+        var row = document.createElement("div");
+        row.className = "row";
+        var yes = document.createElement("button");
+        yes.type = "button";
+        yes.textContent = "Define the work";
+        yes.addEventListener("click", function () {
+          chatState.workOfferDismissed = true;
+          setMode("work");
+          chatState.messages.push({
+            role: "assistant",
+            content: "Work it is. What are we going to accomplish together?",
+          });
+          renderChatMessages();
+        });
+        var no = document.createElement("button");
+        no.type = "button";
+        no.className = "secondary";
+        no.textContent = "Just chatting";
+        no.addEventListener("click", function () {
+          chatState.workOfferDismissed = true;
+          renderChatMessages();
+        });
+        row.appendChild(yes);
+        row.appendChild(no);
+        offer.appendChild(txt);
+        offer.appendChild(row);
+        // Newest-first transcript: the offer belongs with the latest turn.
+        container.insertBefore(offer, container.firstChild);
+      }
+      container.scrollTop = 0;
+      if (typeof updateChrome === "function") updateChrome();
+    }
+
+    function activeCompanyId() {
+      if (window.BZCompanies && typeof BZCompanies.activeId === "function" && BZCompanies.activeId()) {
+        return BZCompanies.activeId();
+      }
+      return chatState.boundCompanyId || undefined;
+    }
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    var paperLoad = 0;
+    var paperBusy = false;
+
+    function renderPaper(paper) {
+      chatState.paper = paper || null;
+      var panel = document.getElementById("paperPanel");
+      var brief = document.getElementById("paperBrief");
+      if (!paper) {
+        if (panel) { panel.classList.add("hidden"); panel.innerHTML = ""; }
+        if (brief) { brief.classList.add("hidden"); brief.innerHTML = ""; }
+        return;
+      }
+      var facts = paper.facts || [];
+      var factHtml = facts.map(function (f) {
+        var shown = f.value ? esc(f.value) : "Not on the page";
+        var later = f.source === "You corrected this" || f.source === "You added this" || f.source === "You confirmed this"
+          ? " Later notes use this line."
+          : "";
+        var buttons = "";
+        if (f.status !== "confirmed") {
+          if (f.value) buttons += '<button type="button" data-act="confirm" data-line="' + esc(f.id) + '">That\'s right</button>';
+          buttons += '<button type="button" data-act="edit" data-line="' + esc(f.id) + '">' + (f.value ? "Change" : "Add it") + "</button>";
+        } else {
+          buttons += '<button type="button" data-act="edit" data-line="' + esc(f.id) + '">Change</button>';
+        }
+        return '<div class="paper-fact" data-line="' + esc(f.id) + '">' +
+          "<strong>" + esc(f.label) + "</strong>" +
+          "<div>" + shown + "</div>" +
+          '<p class="muted">' + esc(f.source) + " · from " + esc(f.place || "the paper") + later + "</p>" +
+          buttons +
+          "</div>";
+      }).join("");
+      var gaps = (paper.gaps || []).map(function (g) {
+        return '<p class="muted">' + esc(g) + "</p>";
+      }).join("");
+      var doc = paper.text
+        ? '<div class="paper-doc">' + esc(paper.text) + "</div>"
+        : '<p class="muted">No words could be read on this.</p>';
+      if (panel) {
+        panel.classList.remove("hidden");
+        panel.innerHTML =
+          "<h3>The paper</h3>" +
+          "<p>" + esc(paper.filename || "Pasted letter") + "</p>" +
+          doc +
+          '<p class="muted">Nothing is sent, filed, or paid from this.</p>' +
+          '<div class="row"><button type="button" id="paperDownload">Download the paper</button></div>';
+        var dl = document.getElementById("paperDownload");
+        if (dl) dl.addEventListener("click", downloadPaper);
+      }
+      if (brief) {
+        brief.classList.remove("hidden");
+        brief.innerHTML =
+          "<h3>From the paper</h3>" +
+          (paper.question ? "<p>" + esc(paper.question) + "</p>" : "") +
+          gaps +
+          factHtml;
+        brief.querySelectorAll("button[data-act]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var act = btn.getAttribute("data-act");
+            var line = btn.getAttribute("data-line");
+            if (act === "confirm") postPaperLine(line, "confirm", null);
+            else startPaperEdit(line);
+          });
+        });
+      }
+      renderMoneyCheck();
+    }
+
+    function downloadPaper() {
+      var paper = chatState.paper;
+      if (!paper) return;
+      var blob = new Blob([paper.text || ""], { type: "text/plain" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = paper.filename || "paper.txt";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function startPaperEdit(lineId) {
+      var brief = document.getElementById("paperBrief");
+      if (!brief || !chatState.paper) return;
+      var fact = (chatState.paper.facts || []).filter(function (f) { return f.id === lineId; })[0];
+      if (!fact) return;
+      var row = brief.querySelector('.paper-fact[data-line="' + lineId + '"]');
+      if (!row) return;
+      row.innerHTML =
+        "<strong>" + esc(fact.label) + "</strong>" +
+        '<input class="paper-edit" value="' + esc(fact.value || "") + '" />' +
+        '<div><button type="button" class="paper-save">Save</button> <button type="button" class="paper-cancel">Cancel</button></div>';
+      var input = row.querySelector(".paper-edit");
+      input.focus();
+      row.querySelector(".paper-save").addEventListener("click", function () {
+        postPaperLine(lineId, "edit", input.value);
+      });
+      row.querySelector(".paper-cancel").addEventListener("click", function () {
+        renderPaper(chatState.paper);
+      });
+    }
+
+    function postPaperLine(lineId, action, value) {
+      var paper = chatState.paper;
+      var note = document.getElementById("paperNote");
+      if (!paper || paperBusy) return;
+      paperBusy = true;
+      if (note) note.textContent = "";
+      fetch("/api/buzzy/papers/" + encodeURIComponent(paper.id) + "/lines", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineId: lineId, action: action, value: value || undefined }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+      }).then(function (res) {
+        if (!res.ok || !res.d.paper) {
+          if (note) note.textContent = (res.d && res.d.error) || "Couldn't update that line.";
+          return;
+        }
+        paperLoad++;
+        renderPaper(res.d.paper);
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        if (note) note.textContent = "Couldn't update that line.";
+      }).finally(function () { paperBusy = false; });
+    }
+
+    function loadCompanyPaper(companyId) {
+      var token = ++paperLoad;
+      if (!companyId) { renderPaper(null); return; }
+      var q = "/api/buzzy/papers?companyId=" + encodeURIComponent(companyId);
+      if (chatState.jobId) q += "&jobId=" + encodeURIComponent(chatState.jobId);
+      fetch(q, { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (token !== paperLoad) return;
+          if (!d || !d.paper) { renderPaper(null); return; }
+          if (d.paper.companyId && d.paper.companyId !== companyId) { renderPaper(null); return; }
+          if (d.paper.jobId && !chatState.jobId) chatState.jobId = d.paper.jobId;
+          renderPaper(d.paper);
+        })
+        .catch(function () { if (token === paperLoad) renderPaper(null); });
+    }
+
+    function bytesToBase64(bytes) {
+      var chunk = 0x8000;
+      var bin = "";
+      for (var i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(bin);
+    }
+
+    function readDroppedFile(file) {
+      return new Promise(function (resolve, reject) {
+        if (!file) { reject(new Error("Drop a file or paste the letter first.")); return; }
+        if (file.size > 1500000) { reject(new Error("That file is too large. Paste the letter instead.")); return; }
+        var isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+        var isText = /^text\//.test(file.type || "") || /\.(txt|md|csv)$/i.test(file.name || "");
+        var reader = new FileReader();
+        reader.onerror = function () { reject(new Error("Couldn't read that file.")); };
+        reader.onload = function () {
+          if (isPdf) {
+            var bytes = new Uint8Array(reader.result);
+            resolve({ filename: file.name || "paper.pdf", fileKind: "pdf", dataBase64: bytesToBase64(bytes), text: "" });
+            return;
+          }
+          if (isText) {
+            resolve({ filename: file.name || "paper.txt", fileKind: "text", text: String(reader.result || "") });
+            return;
+          }
+          resolve({ filename: file.name || "photo", fileKind: "photo", text: "" });
+        };
+        if (isText) reader.readAsText(file);
+        else reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function submitPaper(payload) {
+      var note = document.getElementById("paperNote");
+      var co = activeCompanyId();
+      if (!co) {
+        if (note) note.textContent = "Pick the company this paper belongs to first. A dropped file stays on that company.";
+        return Promise.resolve();
+      }
+      if (paperBusy) return Promise.resolve();
+      paperBusy = true;
+      if (note) note.textContent = "Reading…";
+      var userLine = payload.filename ? "Read this — " + payload.filename : "Read this.";
+      chatState.messages.push({ role: "user", content: userLine });
+      renderChatMessages();
+      return ensureChatSession().then(function () {
+        return fetch("/api/buzzy/papers", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId: co,
+            jobId: chatState.jobId || undefined,
+            sessionId: chatState.sessionId || undefined,
+            filename: payload.filename || "",
+            text: payload.text || "",
+            fileKind: payload.fileKind || "paste",
+            dataBase64: payload.dataBase64 || undefined,
+          }),
+        });
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+      }).then(function (res) {
+        if (!res.ok || !res.d.paper) {
+          if (note) note.textContent = (res.d && res.d.error) || "Couldn't read that.";
+          return;
+        }
+        if (res.d.paper.jobId) chatState.jobId = res.d.paper.jobId;
+        chatState.boundCompanyId = co;
+        paperLoad++;
+        renderPaper(res.d.paper);
+        chatState.messages.push({ role: "assistant", content: res.d.reply || res.d.paper.reply || "" });
+        renderChatMessages();
+        var paste = document.getElementById("paperPaste");
+        if (paste) paste.value = "";
+        var file = document.getElementById("paperFile");
+        if (file) file.value = "";
+        if (note) note.textContent = "These lines are proposed. Nothing is confirmed until you accept one.";
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        if (note) note.textContent = (e && e.message) || "Couldn't read that.";
+      }).finally(function () { paperBusy = false; });
+    }
+
+    function readThisBody(text) {
+      var m = String(text || "").match(/^\s*read this\b[:\s\-]*([\s\S]*)$/i);
+      if (!m) return null;
+      return (m[1] || "").trim();
     }
 
     function renderSlotChecklist() {
       const container = document.getElementById("slotItems");
       const ids = Object.keys(SLOT_LABELS);
       const html = ids.map((id) => {
-        const filled = !!chatState.slots[id];
-        const escapedValue = (chatState.slots[id] || "").replace(/</g, "&lt;");
+        const value = chatState.slots[id];
+        const skipped = value === "skipped";
         const escapedLabel = SLOT_LABELS[id].replace(/</g, "&lt;");
-        if (filled) {
-          return '<div class="slot-item filled" data-slot="' + id + '">' +
-            '<span class="slot-check">✓</span>' +
-            '<span class="slot-value-headline">' + escapedValue + '</span>' +
+        if (!value) {
+          return '<div class="slot-item open" data-brief="' + id + '" data-slot="' + id + '">' +
+            '<span class="slot-check"></span>' +
+            '<span class="slot-copy">' +
             '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
-            '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
-            '</div>';
+            '<span class="slot-value-headline slot-still-open">Still open</span>' +
+            '</span></div>';
         }
-        return '<div class="slot-item">' +
-          '<span class="slot-check"></span>' +
-          '<span class="slot-still-open">still open</span>' +
+        if (skipped) {
+          return '<div class="slot-item filled skipped" data-brief="' + id + '" data-slot="' + id + '">' +
+            '<span class="slot-check">–</span>' +
+            '<span class="slot-copy">' +
+            '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
+            '<span class="slot-value-headline">Skipped</span>' +
+            '</span></div>';
+        }
+        const escapedValue = String(value).replace(/</g, "&lt;");
+        return '<div class="slot-item filled" data-brief="' + id + '" data-slot="' + id + '">' +
+          '<span class="slot-check">✓</span>' +
+          '<span class="slot-copy">' +
+          '<span class="slot-label-secondary">' + escapedLabel + '</span>' +
+          '<span class="slot-value-headline">' + escapedValue + '</span>' +
+          '</span>' +
+          '<span class="slot-edit-icon" data-slot="' + id + '" title="Edit">&#9998;</span>' +
           '</div>';
       }).join("");
       container.innerHTML = html;
@@ -1326,11 +2558,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           startEditSlot(icon.getAttribute("data-slot"));
         });
       });
+      // Wire up skip affordances
+      container.querySelectorAll(".slot-skip").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          skipSlot(btn.getAttribute("data-slot"));
+        });
+      });
+      renderMoneyCheck();
+      renderBriefStatus();
+      // If the re-render removed the open editor, collapse the wide column.
+      if (!container.querySelector(".slot-edit-input")) setBriefEditWidth(false);
+    }
+
+    function skipSlot(slotId) {
+      saveSlotEdit(slotId, "skipped");
     }
 
     function setChatMascot(expr) {
-      document.getElementById("chatMascot").src =
-        "brand/revision6_expressions_" + expr + ".png";
+      // The mascot is a canvas now — map the brand expression names onto the
+      // avatar's animation states instead of swapping a PNG.
+      setAvatarState(AVATAR_STATES[expr] || "idle");
     }
 
     // ── Inline slot editing ─────────────────────────────────────
@@ -1338,36 +2585,57 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const container = document.getElementById("slotItems");
       const item = container.querySelector('[data-slot="' + slotId + '"]');
       if (!item) return;
+      setBriefEditWidth(true);
       const currentValue = chatState.slots[slotId] || "";
       const label = SLOT_LABELS[slotId];
       const escapedLabel = label.replace(/</g, "&lt;");
       item.classList.remove("filled");
       item.innerHTML =
         '<div class="slot-edit-row">' +
-        '<input type="text" class="slot-edit-input" value="' + currentValue.replace(/"/g, '&quot;') + '" data-slot="' + slotId + '" />' +
+        '<label class="slot-edit-label">' + escapedLabel + '</label>' +
+        '<textarea class="slot-edit-input" rows="6" data-slot="' + slotId + '" ' +
+        'aria-label="Edit ' + escapedLabel + '">' + esc(currentValue) + '</textarea>' +
         '<div class="edit-actions">' +
         '<button class="slot-edit-save" data-slot="' + slotId + '">Save</button>' +
         '<button class="slot-edit-cancel" data-slot="' + slotId + '">Cancel</button>' +
+        '<span class="slot-edit-hint">Enter saves · Shift+Enter adds a line</span>' +
         '</div></div>';
       const input = item.querySelector(".slot-edit-input");
       input.focus();
       input.select();
+      input.addEventListener("input", function () {
+        // Grow with the content instead of trapping long text behind a scrollbar.
+        input.style.height = "auto";
+        input.style.height = Math.max(128, input.scrollHeight) + "px";
+      });
       item.querySelector(".slot-edit-save").addEventListener("click", function () {
         saveSlotEdit(slotId, input.value.trim());
       });
       item.querySelector(".slot-edit-cancel").addEventListener("click", function () {
-        renderSlotChecklist();
+        cancelSlotEdit();
       });
       input.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
           saveSlotEdit(slotId, input.value.trim());
         } else if (e.key === "Escape") {
-          renderSlotChecklist();
+          cancelSlotEdit();
         }
       });
     }
 
+    function setBriefEditWidth(on) {
+      // An editor cannot live inside a collapsed strip.
+      if (on) setBrief(true);
+    }
+
+    function cancelSlotEdit() {
+      setBriefEditWidth(false);
+      renderSlotChecklist();
+    }
+
     function saveSlotEdit(slotId, newValue) {
+      setBriefEditWidth(false);
       if (!newValue) {
         renderSlotChecklist();
         return;
@@ -1377,7 +2645,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       renderSlotChecklist();
       // Post through existing chat endpoint so model knows
       const label = SLOT_LABELS[slotId];
-      const editMsg = "Update: " + label + " is now \"" + newValue + "\".";
+      const editMsg = newValue === "skipped"
+        ? "Update: " + label + " was skipped."
+        : "Update: " + label + " is now \"" + newValue + "\".";
       chatState.messages.push({ role: "user", content: editMsg });
       renderChatMessages();
       // Disable input briefly while posting
@@ -1389,6 +2659,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId: chatState.jobId,
+          sessionId: chatState.sessionId || undefined,
+          companyId: activeCompanyId(),
           message: editMsg,
           model: selectedModel(),
         }),
@@ -1403,43 +2675,1480 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
+    // ── Chat / Work mode ────────────────────────────────────────────
+    // Chat is the default. Work mode makes the harness delineate the task
+    // before a single turn is sent: required fields, one composed message,
+    // then the normal draft-then-approve path. Nothing here bypasses the
+    // server's slot extraction or the draft gate.
+    function filledDecisions() {
+      return Object.keys(SLOT_LABELS).filter(function (id) {
+        var v = chatState.slots[id];
+        return v && v !== "skipped";
+      });
+    }
+
+    // ── Voice: optional spoken replies + talk → listen → respond ────
+    // The flag up top controls whether replies are read aloud. The mic turns
+    // the page into a hands-free loop: listen, send, speak, listen again.
+    var VOICE_KEY = "bz_voice_replies";
+    var voice = {
+      replies: false, mic: false, rec: null, speaking: false, sending: false,
+      // Playback + lip-sync
+      ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
+      // Timings
+      lastSpeechEnd: 0, metrics: [],
+    };
+    // The avatar is drawn, not swapped: eyes + mouth are painted over the
+    // display face and driven by the real audio level.
+    var avatars = [];
+    var AVATAR_STATES = {
+      "08-thinking": "thinking", "11-loading": "thinking",
+      "12-content": "draft", "16-smiling": "draft", "02-joy": "draft", "13-idea": "draft",
+      "17-attentive": "idle", "15-neutral": "idle", "18-unimpressed": "idle",
+      "19-angry": "idle", "20-skeptical": "idle", "04-surprised": "idle",
+    };
+
+    function mountAvatars() {
+      if (!window.BeeZillaAvatar) return;
+      var head = document.getElementById("chatMascot");
+      var stage = document.getElementById("voiceAvatar");
+      if (head && !head.__bzAvatar) avatars.push(window.BeeZillaAvatar.mount(head, { size: 64 }));
+      if (stage && !stage.__bzAvatar) avatars.push(window.BeeZillaAvatar.mount(stage, { size: 96 }));
+    }
+
+    function setAvatarState(state) {
+      for (var i = 0; i < avatars.length; i++) avatars[i].setState(state);
+    }
+
+    // ── Audio: PCM16 @24kHz from the voice lane, straight into Web Audio ──
+    function ensureAudio() {
+      if (voice.ctx) return voice.ctx;
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try {
+        // 24k matches the wire format exactly; if the browser refuses the hint
+        // we still play — createBuffer resamples into the context's own rate.
+        voice.ctx = new AC({ sampleRate: 24000 });
+      } catch (_) {
+        try { voice.ctx = new AC(); } catch (_) { voice.ctx = null; }
+      }
+      if (!voice.ctx) return null;
+      try {
+        voice.gain = voice.ctx.createGain();
+        voice.analyser = voice.ctx.createAnalyser();
+        voice.analyser.fftSize = 1024;
+        voice.analyser.smoothingTimeConstant = 0.5;
+        voice.gain.connect(voice.analyser);
+        voice.analyser.connect(voice.ctx.destination);
+      } catch (_) {
+        voice.ctx = null;
+      }
+      return voice.ctx;
+    }
+
+    function b64ToBytes(b64) {
+      var bin = atob(b64);
+      var out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    function startLevelLoop() {
+      if (voice.raf || !voice.analyser) return;
+      var data = new Uint8Array(voice.analyser.frequencyBinCount);
+      function frame() {
+        voice.raf = 0;
+        if (!voice.analyser) return;
+        voice.analyser.getByteTimeDomainData(data);
+        var sum = 0;
+        for (var i = 0; i < data.length; i++) {
+          var v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        var level = Math.min(1, Math.sqrt(sum / data.length) * 3.4);
+        for (var a = 0; a < avatars.length; a++) avatars[a].setLevel(level);
+        if (voice.speaking || voice.active) voice.raf = requestAnimationFrame(frame);
+      }
+      voice.raf = requestAnimationFrame(frame);
+    }
+
+    function playPcm(b64) {
+      var ctx = ensureAudio();
+      if (!ctx) {
+        // Never fail silently: the owner must know why nothing was heard.
+        var st = document.getElementById("voiceStageState");
+        if (st) st.textContent = "Audio blocked by the browser — tap the mic again";
+        return;
+      }
+      if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+      var bytes = b64ToBytes(b64);
+      var samples = Math.floor(bytes.length / 2);
+      if (!samples) return;
+      var view = new DataView(bytes.buffer);
+      var buf = ctx.createBuffer(1, samples, 24000);
+      var ch = buf.getChannelData(0);
+      for (var i = 0; i < samples; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
+      var src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(voice.gain);
+      var startAt = Math.max(ctx.currentTime + 0.05, voice.nextTime);
+      src.start(startAt);
+      voice.nextTime = startAt + buf.duration;
+      voice.active++;
+      if (!voice.speaking) {
+        voice.speaking = true;
+        setAvatarState("speaking");
+        paintVoice();
+      }
+      startLevelLoop();
+      src.onended = function () {
+        voice.active = Math.max(0, voice.active - 1);
+        if (!voice.active && !voice.sending) finishSpeaking();
+      };
+    }
+
+    function finishSpeaking() {
+      voice.speaking = false;
+      voice.nextTime = 0;
+      for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
+      paintVoice();
+      if (voice.mic) startListening();
+    }
+
+    function voicePref() {
+      try { return localStorage.getItem(VOICE_KEY) === "1"; } catch (_) { return false; }
+    }
+    function saveVoicePref(on) {
+      try { localStorage.setItem(VOICE_KEY, on ? "1" : "0"); } catch (_) {}
+    }
+
+    function paintVoice() {
+      var t = document.getElementById("voiceToggle");
+      if (t) {
+        t.classList.toggle("on", voice.replies);
+        t.setAttribute("aria-pressed", voice.replies ? "true" : "false");
+      }
+      var m = document.getElementById("micBtn");
+      if (m) {
+        m.classList.toggle("on", voice.mic);
+        m.setAttribute("aria-pressed", voice.mic ? "true" : "false");
+        m.textContent = voice.mic ? (voice.speaking ? "\uD83D\uDD0A" : "\uD83C\uDF99") : "\uD83C\uDFA4";
+      }
+      var s = document.getElementById("voiceStatus");
+      if (s) {
+        var msg = voice.speaking
+          ? "Speaking — I'll listen again when I'm done."
+          : voice.mic
+            ? "Listening — speak, then pause."
+            : "";
+        s.textContent = msg;
+        s.classList.toggle("hidden", !msg);
+      }
+      // The stage is the face of the conversation: only while it is live.
+      var stage = document.getElementById("voiceStage");
+      var live = voice.mic || voice.speaking || voice.sending || voice.replies;
+      if (stage) stage.classList.toggle("hidden", !live);
+      var st = document.getElementById("voiceStageState");
+      if (st) {
+        st.textContent = voice.speaking ? "Speaking" : voice.sending ? "Thinking" : voice.mic ? "Listening" : "Voice";
+      }
+      if (!voice.speaking) {
+        setAvatarState(voice.mic ? (voice.sending ? "thinking" : "listening") : "idle");
+      }
+    }
+
+    function stopSpeaking() {
+      // Cut real audio (not just the browser's speech queue).
+      voice.active = 0;
+      voice.nextTime = 0;
+      voice.speaking = false;
+      try {
+        if (voice.gain && voice.ctx) {
+          // Rebuild the chain so already-scheduled buffers stop immediately.
+          voice.gain.disconnect();
+          voice.gain = voice.ctx.createGain();
+          voice.gain.connect(voice.analyser);
+        }
+      } catch (_) {}
+      for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
+      paintVoice();
+    }
+
+    /**
+     * There is exactly ONE voice in this product: the audio model. The browser
+     * speech engine is deliberately not used — hearing a different, robotic
+     * voice mid-conversation is worse than hearing nothing. If a turn produces
+     * no audio, say so on screen and keep the loop going.
+     */
+    function voiceUnavailable() {
+      var st = document.getElementById("voiceStageState");
+      if (st) st.textContent = "Voice unavailable for this turn — the answer is on screen";
+      var lat = document.getElementById("voiceStageLat");
+      if (lat && !lat.textContent) lat.textContent = "no audio returned";
+      voice.speaking = false;
+      for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
+      paintVoice();
+      // Keep a hands-free conversation hands-free: listen again shortly.
+      if (voice.mic) setTimeout(function () { if (voice.mic && !voice.speaking && !voice.rec) startListening(); }, 1200);
+    }
+
+    // One spoken turn: returns the final transcript, or "" if nothing heard.
+    function startListening() {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR || voice.rec) return;
+      var rec = new SR();
+      rec.lang = "en-US";
+      rec.continuous = false;
+      rec.interimResults = true;
+      voice.rec = rec;
+      voice.firstInterimAt = 0;
+      rec.onresult = function (e) {
+        // Speaking window: first recognised sound → final transcript. This is
+        // the owner's own talk time, separate from our processing time.
+        if (!voice.firstInterimAt && e.results && e.results.length) {
+          var heard = e.results[e.resultIndex || 0];
+          if (heard && heard[0] && String(heard[0].transcript || "").trim()) {
+            voice.firstInterimAt = performance.now();
+          }
+        }
+        var finalText = "";
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+        }
+        if (finalText.trim()) {
+          voice.userSpeechMs = voice.firstInterimAt
+            ? Math.round(performance.now() - voice.firstInterimAt)
+            : null;
+          stopListening();
+          // Timestamp the moment the owner stopped talking: time-to-talk is
+          // measured from here, not from when we happened to send.
+          voice.lastSpeechEnd = performance.now();
+          var input = document.getElementById("chatInput");
+          if (input) input.value = finalText.trim();
+          voice.sending = true;
+          setAvatarState("thinking");
+          paintVoice();
+          sendChatMessage();
+        }
+      };
+      rec.onerror = function (e) {
+        if (e && e.error === "not-allowed") {
+          voice.mic = false;
+          paintVoice();
+        }
+      };
+      rec.onend = function () {
+        voice.rec = null;
+        if (voice.mic && !voice.speaking && !voice.sending) {
+          setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
+        }
+      };
+      try { rec.start(); } catch (_) { voice.rec = null; }
+      paintVoice();
+    }
+
+    function stopListening() {
+      if (!voice.rec) return;
+      try { voice.rec.stop(); } catch (_) {}
+      voice.rec = null;
+      paintVoice();
+    }
+
+    function toggleMic() {
+      voice.mic = !voice.mic;
+      if (voice.mic) {
+        // A spoken conversation needs spoken answers.
+        if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
+        startListening();
+      } else {
+        stopListening();
+        stopSpeaking();
+      }
+      paintVoice();
+    }
+
+    function toggleVoiceReplies() {
+      voice.replies = !voice.replies;
+      saveVoicePref(voice.replies);
+      if (!voice.replies) stopSpeaking();
+      paintVoice();
+    }
+
+    // ── Context meter ────────────────────────────────────────────────
+    function fmtTokens(n) {
+      n = Number(n) || 0;
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+      if (n >= 1000) return Math.round(n / 1000) + "k";
+      return String(n);
+    }
+
+    function paintContext(ctx) {
+      if (!ctx) return;
+      var meter = document.getElementById("ctxMeter");
+      var fill = document.getElementById("ctxFill");
+      var text = document.getElementById("ctxText");
+      if (!meter || !fill || !text) return;
+      var pct = Math.max(0, Math.min(100, Number(ctx.pct) || 0));
+      meter.classList.remove("hidden");
+      fill.style.width = pct + "%";
+      meter.classList.toggle("warn", pct >= 75 && pct < 90);
+      meter.classList.toggle("hot", pct >= 90);
+      var line = "Context " + pct + "% · " + fmtTokens(ctx.used) + " / " + fmtTokens(ctx.limit);
+      if (ctx.compacted) {
+        line += " · earlier turns compressed" + (ctx.dropped ? " (" + ctx.dropped + ")" : "");
+      }
+      text.textContent = line;
+    }
+
+    function loadContext() {
+      // Works with no session too — the window size is knowable before the
+      // first turn, and the meter should not appear out of nowhere later.
+      var q = chatState.sessionId ? "?sessionId=" + encodeURIComponent(chatState.sessionId) : "?";
+      if (selectedModel()) q += (q === "?" ? "" : "&") + "model=" + encodeURIComponent(selectedModel());
+      fetch("/api/buzzy/context" + q,
+            { credentials: "same-origin", signal: AbortSignal.timeout(8000) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && d.ok && d.context) paintContext(d.context); })
+        .catch(function () {});
+    }
+
+    function resetContextMeter() {
+      var meter = document.getElementById("ctxMeter");
+      var fill = document.getElementById("ctxFill");
+      var text = document.getElementById("ctxText");
+      if (fill) fill.style.width = "0%";
+      if (text) text.textContent = "Context 0%";
+      if (meter) { meter.classList.remove("warn", "hot"); }
+    }
+
+    // A turn that produced no audio. Never substitutes the browser's voice.
+    function maybeSpeak(data) {
+      if (!data || !data.ok) return;
+      if (!voice.mic && !voice.replies) return;
+      voiceUnavailable();
+    }
+
+    function initVoice() {
+      voice.replies = voicePref();
+      mountAvatars();
+      var t = document.getElementById("voiceToggle");
+      if (t) t.addEventListener("click", toggleVoiceReplies);
+      var m = document.getElementById("micBtn");
+      if (m) m.addEventListener("click", toggleMic);
+      var end = document.getElementById("voiceStageEnd");
+      if (end) end.addEventListener("click", function () {
+        voice.mic = false;
+        stopListening();
+        stopSpeaking();
+        paintVoice();
+      });
+      paintVoice();
+    }
+
+    // ── Voice latency tracking ───────────────────────────────────────
+    // Every turn logs: mic stop → request sent (asr), sent → first text,
+    // sent → first sound (ttfa = time to talk), sent → turn done. Samples go
+    // to the server for per-user tracking and stay in the console for a
+    // quick read. No text, no audio — timings only.
+    function logVoiceMetrics(m) {
+      voice.metrics.push(m);
+      if (voice.metrics.length > 200) voice.metrics.shift();
+      if (window.console && console.table) {
+        try {
+          console.table(voice.metrics.slice(-8).map(function (x) {
+            return {
+              at: x.at, mode: x.mode, surface: x.surface,
+              "asr ms": x.asrMs, "ttft ms": x.ttftMs, "to talk ms": x.ttfaMs, "turn ms": x.turnMs,
+            };
+          }));
+        } catch (_) {}
+      }
+      paintLatency(m);
+      var body = {
+        jobId: chatState.jobId || null,
+        sessionId: chatState.sessionId || null,
+        mode: chatState.mode || "chat",
+        model: m.model || null,
+        lane: m.lane || null,
+        speechMs: m.userSpeechMs || null,
+        asrMs: m.asrMs, ttftMs: m.ttftMs, ttfaMs: m.ttfaMs, turnMs: m.turnMs,
+        replyChars: m.replyChars, spoken: !!m.spoken,
+      };
+      try {
+        fetch("/api/buzzy/voice-metrics", {
+          method: "POST",
+          credentials: "same-origin",
+          keepalive: true,
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify(body),
+        }).catch(function () {});
+      } catch (_) {}
+    }
+
+    function paintLatency(m) {
+      var el = document.getElementById("voiceStageLat");
+      if (!el) return;
+      if (!m) { el.textContent = ""; return; }
+      var parts = [];
+      if (m.ttfaMs != null) parts.push("<strong>" + (m.ttfaMs / 1000).toFixed(2) + "s</strong> to talk");
+      if (m.turnMs != null) parts.push((m.turnMs / 1000).toFixed(2) + "s turn");
+      if (m.asrMs != null && m.asrMs > 60) parts.push((m.asrMs / 1000).toFixed(2) + "s to send");
+      // Name the lane on screen: "voice" means the audio model answered,
+      // "text" means it fell back — that difference is the whole diagnosis.
+      // Report the lane that actually answered, not the one requested.
+      var laneName = m.lane || (m.surface === "voice" ? "audio" : "text");
+      parts.push(laneName === "audio" ? "voice lane" : "text lane (read back)");
+      el.innerHTML = parts.join(" · ");
+    }
+
+    /**
+     * One spoken turn. Same body as the text lane plus voice:true, consumed as
+     * Server-Sent Events:
+     *   text  → live transcript bubble (the answer appears as it is spoken)
+     *   audio → PCM played the moment it arrives (this is the time-to-talk path)
+     *   done  → the same ChatResponse the text lane returns
+     *   error → surfaces the failure instead of hanging on a dead stream
+     */
+    function streamVoiceTurn(sendBody, metrics, sendStarted) {
+      var liveBubble = null;
+      var liveText = "";
+      return fetch(CHAT_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(120000),
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(Object.assign({}, sendBody, { voice: true })),
+      }).then(function (res) {
+        if (!res.ok || !res.body) {
+          return res.json().catch(function () { return { error: "Voice turn failed." }; })
+            .then(function (j) { throw new Error((j && j.error) || "Voice turn failed."); });
+        }
+        var reader = res.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "";
+        var finalData = null;
+
+        function handleFrame(frame) {
+          var ev = "message";
+          var dataLines = [];
+          frame.split("\n").forEach(function (line) {
+            if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
+            else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
+          });
+          if (!dataLines.length) return;
+          var payload;
+          try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
+          if (ev === "text") {
+            if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
+            liveText += payload.t || "";
+            if (!liveBubble) {
+              liveBubble = document.createElement("div");
+              liveBubble.className = "bubble streaming";
+              var c = document.getElementById("chatMessages");
+              if (c) c.insertBefore(liveBubble, c.firstChild);
+            }
+            liveBubble.textContent = liveText;
+          } else if (ev === "audio") {
+            if (metrics.ttfaMs == null) {
+              metrics.ttfaMs = Math.round(performance.now() - sendStarted);
+              metrics.spoken = true;
+            }
+            playPcm(payload.b64);
+          } else if (ev === "done") {
+            finalData = payload;
+          } else if (ev === "error") {
+            throw new Error(payload.error || "Voice turn failed.");
+          }
+        }
+
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) {
+              if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
+              if (!finalData) throw new Error("The voice turn ended without a reply.");
+              return finalData;
+            }
+            buf += dec.decode(r.value, { stream: true });
+            var idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              var frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              handleFrame(frame);
+            }
+            return pump();
+          });
+        }
+        return pump();
+      });
+    }
+
+    // Both modes are the same free-form chat box. The mode changes the
+    // prompt and the steering the server applies — not the interface.
+    function setMode(mode, opts) {
+      mode = mode === "work" ? "work" : "chat";
+      chatState.mode = mode;
+      var main = document.querySelector(".chat-main");
+      if (main) main.classList.toggle("mode-work", mode === "work");
+      document.querySelectorAll("#modeTabs .mode-tab").forEach(function (b) {
+        var on = b.getAttribute("data-mode") === mode;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      var input = document.getElementById("chatInput");
+      if (input) {
+        input.placeholder = mode === "work"
+          ? "What are we going to accomplish together"
+          : "What do you want to talk about";
+      }
+      var briefH = document.querySelector("#briefPanel h3");
+      if (briefH) briefH.textContent = "Brief";
+      if (typeof updateChrome === "function") updateChrome();
+      if (input && !input.disabled && !(opts && opts.noFocus)) input.focus();
+    }
+
+    function shouldOfferWork() {
+      if (chatState.mode === "work") return false;
+      if (chatState.jobId) return false;
+      if (chatState.workOfferDismissed) return false;
+      if (chatState.draftText) return false;
+      return filledDecisions().length >= 2;
+    }
+
+    function draftBodyEl() {
+      return document.getElementById("draftBody");
+    }
+
+    function approvalMatches() {
+      if (chatState.moneyBlocks) return false;
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      return !!(chatState.approvedText != null && text === chatState.approvedText && text.trim());
+    }
+
+    function briefLinesForCheck() {
+      return Object.keys(SLOT_LABELS).map(function (id) {
+        var value = chatState.slots[id] || "";
+        var status = !value ? "open" : (value === "skipped" ? "skipped" : "confirmed");
+        return { label: SLOT_LABELS[id], value: value === "skipped" ? "" : value, status: status };
+      });
+    }
+
+    function paperFactsForCheck() {
+      var paper = chatState.paper;
+      if (!paper) return [];
+      return (paper.facts || []).map(function (f) {
+        return {
+          key: f.key,
+          label: f.label,
+          value: f.value || "",
+          status: f.status,
+          place: f.place || "",
+          source: f.source || "",
+        };
+      });
+    }
+
+    function currentMoneyCheck() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      if (typeof checkMoney !== "function") return null;
+      return checkMoney({
+        draft: text,
+        facts: paperFactsForCheck(),
+        brief: briefLinesForCheck(),
+        kind: (chatState.paper && chatState.paper.kind) || "",
+      });
+    }
+
+    function renderMoneyCheck() {
+      var list = document.getElementById("moneyCheck");
+      var approve = document.getElementById("approveDraft");
+      var banner = document.getElementById("draftBanner");
+      var showing = !!(banner && !banner.classList.contains("hidden"));
+      var note = document.getElementById("draftSendNote");
+      if (!showing) {
+        chatState.moneyBlocks = false;
+        if (list) { list.classList.add("hidden"); list.innerHTML = ""; }
+        if (approve) approve.disabled = false;
+        return null;
+      }
+      if (typeof checkMoney !== "function") {
+        chatState.moneyBlocks = true;
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+        if (list) {
+          list.classList.remove("hidden");
+          list.innerHTML = "<p>Before you approve</p><ul><li class=\"wrong\">This draft could not be checked. Approval stays closed.</li></ul>";
+        }
+        if (approve) approve.disabled = true;
+        if (note) note.textContent = "Nothing was approved. The amount could not be checked, so this stays a draft.";
+        paintDraftGate();
+        return null;
+      }
+      var check = currentMoneyCheck();
+      chatState.moneyBlocks = !!(check && check.blocksApproval);
+      if (chatState.moneyBlocks) {
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+      }
+      if (list) {
+        var rows = (check && check.items) || [];
+        if (!rows.length) {
+          list.classList.add("hidden");
+          list.innerHTML = "";
+        } else {
+          list.classList.remove("hidden");
+          list.innerHTML = "<p>Before you approve</p><ul>" + rows.map(function (item) {
+            return "<li class=\"" + esc(item.tone) + "\">" + esc(item.text) + "</li>";
+          }).join("") + "</ul>";
+        }
+      }
+      if (approve) approve.disabled = !!chatState.moneyBlocks;
+      if (note && chatState.moneyBlocks) {
+        note.textContent = "Nothing was approved. The amount does not match, so this stays a draft.";
+      } else if (note && note.textContent.indexOf("Nothing was approved") === 0) {
+        note.textContent = "";
+      }
+      paintDraftGate();
+      return check;
+    }
+
+    window.bzApplyMoneyCheck = function (paper, slots, draft) {
+      chatState.paper = paper || null;
+      chatState.slots = slots || {};
+      chatState.draftReady = true;
+      chatState.draftText = draft || "";
+      chatState.approvedText = null;
+      chatState.outwardConfirmed = false;
+      var body = draftBodyEl();
+      if (body) body.value = chatState.draftText;
+      var banner = document.getElementById("draftBanner");
+      if (banner) banner.classList.remove("hidden");
+      renderSlotChecklist();
+      renderMoneyCheck();
+    };
+
+    function paintDraftGate() {
+      var meta = document.getElementById("draftMeta");
+      var approved = approvalMatches();
+      if (meta) {
+        meta.textContent = "Version " + (chatState.draftVersion || 1) + (approved ? " · approved" : " · not approved");
+      }
+      var confirmBtn = document.getElementById("confirmOutward");
+      if (confirmBtn) confirmBtn.disabled = !approved;
+      if (!approved) chatState.outwardConfirmed = false;
+    }
+
+    function resetDraftGate() {
+      chatState.draftReady = false;
+      chatState.draftText = "";
+      chatState.draftVersion = 1;
+      chatState.approvedText = null;
+      chatState.outwardConfirmed = false;
+      setDraftWarning("");
+      var body = draftBodyEl();
+      if (body) body.value = "";
+      var note = document.getElementById("draftSendNote");
+      if (note) note.textContent = "";
+      var onote = document.getElementById("outwardNote");
+      if (onote) onote.textContent = "";
+      var banner = document.getElementById("draftBanner");
+      if (banner) banner.classList.add("hidden");
+      chatState.moneyBlocks = false;
+      var list = document.getElementById("moneyCheck");
+      if (list) { list.classList.add("hidden"); list.innerHTML = ""; }
+      var approve = document.getElementById("approveDraft");
+      if (approve) approve.disabled = false;
+      paintDraftGate();
+    }
+
+    function openDraftReview(text) {
+      var incoming = typeof text === "string" ? text : "";
+      if (!chatState.draftText) {
+        chatState.draftText = incoming;
+        chatState.draftVersion = 1;
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+      }
+      chatState.draftReady = true;
+      var banner = document.getElementById("draftBanner");
+      if (banner) banner.classList.remove("hidden");
+      var body = draftBodyEl();
+      if (body && !body.value) body.value = chatState.draftText;
+      renderMoneyCheck();
+      var csvBtn = document.getElementById("downloadCsvBtn");
+      if (csvBtn) csvBtn.classList.toggle("hidden", !mdTableToCsv(chatState.draftText || ""));
+    }
+
+    function setDraftWarning(text) {
+      var el = document.getElementById("draftWarning");
+      if (!el) return;
+      if (text) {
+        el.textContent = text;
+        el.classList.remove("hidden");
+      } else {
+        el.textContent = "";
+        el.classList.add("hidden");
+      }
+    }
+
+    function onDraftInput() {
+      var body = draftBodyEl();
+      if (!body) return;
+      var text = body.value;
+      chatState.draftText = text;
+      if (chatState.approvedText != null && text !== chatState.approvedText) {
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+        chatState.draftVersion = (chatState.draftVersion || 1) + 1;
+        var onote = document.getElementById("outwardNote");
+        if (onote) onote.textContent = "";
+        var note = document.getElementById("draftSendNote");
+        if (note) note.textContent = "That change clears the approval. Nothing can leave until you approve this version.";
+      }
+      renderMoneyCheck();
+    }
+
+    function onApproveDraft() {
+      var check = renderMoneyCheck();
+      if (chatState.moneyBlocks || (check && check.blocksApproval)) {
+        chatState.approvedText = null;
+        chatState.outwardConfirmed = false;
+        paintDraftGate();
+        return;
+      }
+      var body = draftBodyEl();
+      var text = body ? body.value : "";
+      if (!text.trim()) return;
+      chatState.approvedText = text;
+      chatState.draftText = text;
+      chatState.outwardConfirmed = false;
+      // Persist the approval so the job leaves "needs your input" and the
+      // Library holds the approved draft (not just the LLM's first pass).
+      if (chatState.jobId) {
+        fetch("/api/buzzy/jobs/" + encodeURIComponent(chatState.jobId), {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Approved", approved: true, draft: text }),
+        }).catch(function () { /* offline or signed out */ });
+      }
+      var onote = document.getElementById("outwardNote");
+      if (onote) onote.textContent = "";
+      var note = document.getElementById("draftSendNote");
+      if (note) note.textContent = "Version " + chatState.draftVersion + " is approved. Sending still needs the confirm below.";
+      paintDraftGate();
+    }
+
+    function onDraftSend() {
+      var note = document.getElementById("draftSendNote");
+      if (!note) return;
+      if (chatState.moneyBlocks || !approvalMatches()) {
+        note.textContent = "Nothing left the company. Approve this version before it can leave.";
+        return;
+      }
+      note.textContent = "Use Confirm send. Nothing left the company from this button.";
+    }
+
+    function onConfirmOutward() {
+      if (chatState.moneyBlocks || !approvalMatches()) {
+        paintDraftGate();
+        var onote = document.getElementById("outwardNote");
+        if (onote && chatState.moneyBlocks) onote.textContent = "Nothing left the company.";
+        return;
+      }
+      chatState.outwardConfirmed = true;
+      // Persist completion so the job reaches "Done" (Discovering → Draft ready
+      // → Approved → Done) durably, not just in this page.
+      if (chatState.jobId) {
+        fetch("/api/buzzy/jobs/" + encodeURIComponent(chatState.jobId), {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Done" }),
+        }).catch(function () { /* offline or signed out */ });
+      }
+      var onote = document.getElementById("outwardNote");
+      if (onote) onote.textContent = "Confirmed for version " + chatState.draftVersion + ". Nothing was emailed or published.";
+    }
+
+    function onDownloadDraft() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      var blob = new Blob([text], { type: "text/markdown" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "draft-v" + (chatState.draftVersion || 1) + ".md";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function mdToWordHtml(md) {
+      var lines = String(md || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").split(/\n+/);
+      var out = "";
+      var inList = false;
+      lines.forEach(function (line) {
+        var t = line.trim();
+        var h = t.match(/^(#{1,6})\s/);
+        if (h) {
+          if (inList) { out += "</ul>"; inList = false; }
+          var lvl = Math.min(h[1].length, 3);
+          out += "<h" + (lvl + 1) + ">" + t.replace(/^#+\s*/, "") + "</h" + (lvl + 1) + ">";
+        } else if (/^[-*]\s/.test(t)) {
+          if (!inList) { out += "<ul>"; inList = true; }
+          out += "<li>" + t.replace(/^[-*]\s*/, "") + "</li>";
+        } else if (t) {
+          if (inList) { out += "</ul>"; inList = false; }
+          out += "<p>" + t + "</p>";
+        }
+      });
+      if (inList) out += "</ul>";
+      return out;
+    }
+
+    function mdTableToCsv(md) {
+      var rows = [];
+      String(md || "").split("\n").forEach(function (line) {
+        var t = line.trim();
+        if (!/^\|.*\|$/.test(t)) return;
+        if (/^[\s|\-:]+$/.test(t)) return; // alignment separator row
+        rows.push(t.replace(/^\||\|$/g, "").split("|").map(function (c) { return c.trim(); }));
+      });
+      if (!rows.length) return null;
+      return rows.map(function (r) {
+        return r.map(function (c) {
+          return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+        }).join(",");
+      }).join("\n");
+    }
+
+    function downloadCsv(name, md) {
+      var csv = mdTableToCsv(md);
+      if (!csv) { alert("This deliverable has no table to export."); return; }
+      var blob = new Blob([csv], { type: "text/csv" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name.replace(/\.(md|doc|docx)$/, "") + ".csv";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function onDownloadWord() {
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      var full = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"></head><body>' + mdToWordHtml(text) + "</body></html>";
+      var blob = new Blob(["\ufeff", full], { type: "application/msword" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "draft-v" + (chatState.draftVersion || 1) + ".doc";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function onDownloadPdf() {
+      if (!window.beezillaSowPdf) { alert("PDF export isn't available right now."); return; }
+      var body = draftBodyEl();
+      var text = body ? body.value : (chatState.draftText || "");
+      var bytes = window.beezillaSowPdf(text);
+      var blob = new Blob([bytes], { type: "application/pdf" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "draft-v" + (chatState.draftVersion || 1) + ".pdf";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+
+    function onRestorePrevious() {
+      var prev = chatState.previousDraft;
+      if (!prev) return;
+      var body = draftBodyEl();
+      if (body) body.value = prev;
+      chatState.draftText = prev;
+      chatState.approvedText = null;
+      chatState.previousDraft = null;
+      paintDraftGate();
+      var btn = document.getElementById("restorePrevious");
+      if (btn) btn.classList.add("hidden");
+    }
+
     function showChatScreen() {
       document.getElementById("chatMessages").innerHTML = "";
       document.getElementById("chatError").classList.add("hidden");
-      document.getElementById("draftBanner").classList.add("hidden");
+      resetDraftGate();
       setChatMascot("17-attentive");
 
-      // Always show the decisions panel (form tab no longer needed)
+      // Brief lines are visible before any message. They start empty.
       document.body.dataset.intake = "chat";
+      renderSlotChecklist();
+      var paperCo = activeCompanyId();
+      if (paperCo) loadCompanyPaper(paperCo);
 
       // Load model catalog if not already loaded
       if (!modelCatalog.length) loadModels();
 
-      // If we have existing chat history, show it
+      // If we have existing chat history, show it; otherwise restore the
+      // server-side transcript for this job (dogfood 10007) before falling
+      // back to the job-context opener or the welcome message.
       if (chatState.messages.length > 0) {
+        setBackVisible(true);
         renderChatMessages();
         renderSlotChecklist();
+      } else if (chatState.jobId || chatState.sessionId || chatState.jobContext || chatState.expert) {
+        setBackVisible(true);
+        restoreTranscript();
       } else {
-        // Welcome message
-        setChatMascot("17-attentive");
-        chatState.messages.push({
-          role: "assistant",
-          content: "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.",
-        });
-        renderChatMessages();
-        renderSlotChecklist();
+        setBackVisible(false);
       }
+      // History is always below the chat — same place in every state.
+      showRecentWork();
 
       // FIX #5: enable/disable input based on auth state
       checkAuthAndEnableInput();
+      updateChrome();
+      loadContext();
 
-      setPhase("Talk to BeeZilla");
+      setPhase(chatState.jobContext ? "Chat — " + chatState.jobContext.title : "Talk to BeeZilla");
+    }
+
+    async function restoreTranscript() {
+      try {
+        const q = chatState.jobId
+        ? "?jobId=" + encodeURIComponent(chatState.jobId)
+        : chatState.sessionId
+          ? "?sessionId=" + encodeURIComponent(chatState.sessionId)
+          : "";
+        // Timeout so a hung request can't leave the transcript blank forever
+        // (seen live: stuck chat with no welcome message).
+        const r = await fetch("/api/buzzy/transcript" + q, {
+          credentials: "same-origin",
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) throw new Error("no transcript");
+        const data = await r.json();
+        const msgs = (data.messages || []).map((m) => ({ role: m.role, content: m.content }));
+        if (msgs.length >= 2) {
+          chatState.messages = msgs;
+          // BZ-F004: restore the structured Decisions captured so far — the
+          // box must show server state on reopen, not wait for the next turn.
+          if (data.slots && typeof data.slots === "object") {
+            Object.assign(chatState.slots, data.slots);
+          }
+          renderChatMessages();
+          renderSlotChecklist();
+          setChatMascot("12-content");
+          return;
+        }
+      } catch (_) { /* signed out, empty, or unreachable — fall through */ }
+      setChatMascot("17-attentive");
+      // Job context opener — the Chat button on a Jobs card carries the
+      // project here; greet with context instead of the generic welcome.
+      var jc = chatState.jobContext;
+      var opener;
+      if (jc) {
+        opener = "Picking up \"" + jc.title + "\" (" + (jc.template || "General") + ", " + jc.status + ")." +
+          (jc.problem ? " Where you left off: " + jc.problem.slice(0, 160) : "") +
+          " What do you need on it?";
+      } else if (chatState.expert) {
+        opener = "You're in the " + chatState.expert + " area. Describe the job — what needs to be done?";
+      } else {
+        opener = "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.";
+      }
+      chatState.messages.push({
+        role: "assistant",
+        content: opener,
+      });
+      renderChatMessages();
+      renderSlotChecklist();
+    }
+
+    // The brief is one inline strip above the transcript. Open/closed is a
+    // per-visit courtesy, not a persisted layout choice.
+    function setBrief(open) {
+      var bar = document.getElementById("briefBar");
+      var body = document.getElementById("briefPanel");
+      var isOpen = !!open;
+      if (bar) bar.classList.toggle("open", isOpen);
+      if (body) body.classList.toggle("hidden", !isOpen);
+      var toggle = document.getElementById("briefBarToggle");
+      if (toggle) toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+
+    function briefOpen() {
+      var bar = document.getElementById("briefBar");
+      return !!(bar && bar.classList.contains("open"));
+    }
+
+    // Landing vs conversation: the composer is the top-of-page element until a
+    // conversation exists, then it drops to the bottom like any chat.
+    function updateChrome() {
+      var main = document.getElementById("chatMain") || document.querySelector(".chat-main");
+      var inConversation = !!(chatState.messages.length || chatState.sessionId || chatState.jobId);
+      if (main) main.classList.toggle("is-conversation", inConversation);
+      var bar = document.getElementById("briefBar");
+      // The brief is a work-mode instrument; ordinary chat stays clean.
+      var showBrief = inConversation && chatState.mode === "work";
+      if (bar) bar.classList.toggle("hidden", !showBrief);
+      if (!showBrief) setBrief(false);
+      renderBriefStatus();
+    }
+
+    // Strip status: n/4 captured, one dot per statement, one-line preview.
+    function renderBriefStatus() {
+      var ids = Object.keys(SLOT_LABELS);
+      var count = document.getElementById("railCount");
+      var dots = document.getElementById("railDots");
+      var filled = 0;
+      var html = "";
+      ids.forEach(function (id) {
+        var v = chatState.slots[id];
+        var state = !v ? "open" : (v === "skipped" ? "skipped" : "filled");
+        if (state === "filled") filled++;
+        html += '<span class="' + state + '" data-dot="' + id + '" title="' +
+          SLOT_LABELS[id] + ": " + (state === "open" ? "still open" : state === "skipped" ? "skipped" : v) +
+          '"></span>';
+      });
+      if (count) count.textContent = filled + "/" + ids.length;
+      if (dots) {
+        // Pulse only the dot that just changed state.
+        var prev = chatState._railFilled || {};
+        dots.innerHTML = html;
+        ids.forEach(function (id) {
+          var now = !!(chatState.slots[id] && chatState.slots[id] !== "skipped");
+          if (now && !prev[id]) {
+            var el = dots.querySelector('[data-dot="' + id + '"]');
+            if (el) el.classList.add("pulse");
+          }
+          prev[id] = now;
+        });
+        chatState._railFilled = prev;
+      }
+      var preview = document.getElementById("bbPreview");
+      if (preview) {
+        var first = ids.map(function (id) { return chatState.slots[id]; })
+          .filter(function (v) { return v && v !== "skipped"; })[0];
+        preview.textContent = first
+          ? first
+          : (filled ? "Captured" : "Nothing captured yet");
+      }
+    }
+
+    function setBackVisible(show) {
+      var btn = document.getElementById("backToRecent");
+      if (btn) btn.classList.toggle("hidden", !show);
+    }
+
+    function goBackToRecent() {
+      chatState.sessionId = null;
+      chatState.jobId = null;
+      chatState.jobContext = null;
+      chatState.slots = {};
+      chatState.messages = [];
+      chatState.paper = null;
+      resetDraftGate();
+      try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      updateChrome();
+      showRecentWork();
+    }
+
+    function welcomeMessage() {
+      return "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.";
+    }
+
+    function newChatNow() {
+      resetContextMeter();
+      chatState.sessionId = null;
+      chatState.jobId = null;
+      chatState.jobContext = null;
+      chatState.slots = {};
+      chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
+      setBackVisible(true);
+      resetDraftGate();
+      setChatMascot("17-attentive");
+      renderChatMessages();
+      updateChrome();
+      renderSlotChecklist();
+      document.getElementById("chatInput").focus();
+    }
+
+    var rwShowAll = false;
+
+    function renameJob(it, done) {
+      var current = (it.job && it.job.title) || "";
+      var next = prompt("Rename this job:", current);
+      if (!next || next.trim() === current) { done(null); return; }
+      var title = next.trim();
+      fetch("/api/buzzy/jobs/" + encodeURIComponent(it.job.id), {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("rename failed");
+        return r.json();
+      }).then(function () {
+        it.job.title = title;
+        done(title);
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't rename that job. Try again.");
+        done(null);
+      });
+    }
+
+    function deleteJob(it, done) {
+      if (!confirm("Delete this job? This can't be undone.")) { done(); return; }
+      fetch("/api/buzzy/jobs/" + encodeURIComponent(it.job.id), {
+        method: "DELETE",
+        credentials: "same-origin",
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("delete failed");
+        return r.json();
+      }).then(function () {
+        done();
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't delete that job. Try again.");
+        done();
+      });
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return "";
+      var d = new Date(iso);
+      var s = Math.floor((Date.now() - d.getTime()) / 1000);
+      if (isNaN(s) || s < 0) return "";
+      if (s < 60) return "just now";
+      var m = Math.floor(s / 60);
+      if (m < 60) return m + "m ago";
+      var h = Math.floor(m / 60);
+      if (h < 24) return h + "h ago";
+      var d2 = Math.floor(h / 24);
+      if (d2 < 7) return d2 + "d ago";
+      return d.toLocaleDateString();
+    }
+
+    /** Start date for a conversation row: "Oct 26", with the year when it differs. */
+    function startedLabel(iso) {
+      if (!iso) return "";
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return "";
+      var opts = { month: "short", day: "numeric" };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+      return d.toLocaleDateString(undefined, opts);
+    }
+
+    /**
+     * One row's second line: what the conversation is about, when it started,
+     * and when it last moved. A row is never blank — before the summariser has
+     * run, the owner's own opening words stand in.
+     */
+    function rowSub(summaryLine, startedAt, at) {
+      var parts = [];
+      var line = String(summaryLine || "").trim();
+      if (line.length > 180) line = line.slice(0, 177).trim() + "…";
+      parts.push(line || "Pick up this conversation");
+      var started = startedLabel(startedAt);
+      if (started) parts.push("Started " + started);
+      if (at) parts.push("Active " + timeAgo(new Date(at).toISOString()));
+      return parts.join(" · ");
+    }
+
+    // ── Work search across all of the user's companies ─────────────────
+    var rwSearchQuery = "";
+
+    function workSearchBoxHtml() {
+      return '<div class="rw-search"><input id="rwSearch" type="search" ' +
+        'placeholder="Search all work across your companies…" autocomplete="off" ' +
+        'aria-label="Search all work across your companies" value="' + esc(rwSearchQuery) + '"></div>';
+    }
+
+    function bindWorkSearchBox(container) {
+      var el = container.querySelector("#rwSearch");
+      if (!el) return;
+      var t = null;
+      el.addEventListener("input", function () {
+        var q = el.value.trim();
+        clearTimeout(t);
+        t = setTimeout(function () {
+          rwSearchQuery = q;
+          if (q.length >= 2) { renderWorkSearch(q); }
+          else if (!q) { rwSearchQuery = ""; showRecentWork(); }
+        }, 300);
+      });
+      // Esc clears the search and returns to recent work.
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { el.value = ""; rwSearchQuery = ""; showRecentWork(); }
+      });
+    }
+
+    function renderWorkSearch(q) {
+      var container = document.getElementById("recentBelow");
+      container.innerHTML = '<div class="recent-work">' +
+        '<div class="rw-head-row">' +
+        '<h3 class="rw-head">Search</h3>' +
+        workSearchBoxHtml() +
+        '</div>' +
+        '<p class="muted rw-lead" id="rwSearchStatus">Searching…</p>' +
+        '<div id="rwSearchResults"></div>' +
+        '</div>';
+      bindWorkSearchBox(container);
+      var input = container.querySelector("#rwSearch");
+      if (input) { input.focus(); }
+      fetch("/api/buzzy/search?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+        .then(function (r) {
+          if (r.status === 401) { window.location.href = "/buzzy/landing"; return null; }
+          return r.ok ? r.json() : null;
+        })
+        .then(function (d) {
+          var status = container.querySelector("#rwSearchStatus");
+          if (!status) return; // re-rendered by a newer query
+          if (!d || d.ok === false) { status.textContent = "Couldn't search right now. Try again in a moment."; return; }
+          var jobs = d.jobs || [];
+          var sessions = d.sessions || [];
+          var total = jobs.length + sessions.length;
+          if (!total) { status.textContent = 'No work matches "' + q + '".'; return; }
+          status.textContent = total + " result" + (total === 1 ? "" : "s") + ' for "' + q + '"';
+          var items = [];
+          jobs.forEach(function (j) {
+            items.push({
+              kind: "job", job: j, title: j.title || "Untitled job", company: j.companyName || "No company",
+              sub: (j.status || "Discovering") + (j.updatedAt ? " · updated " + timeAgo(j.updatedAt) : "") +
+                (j.snippet ? " · " + j.snippet : ""),
+            });
+          });
+          sessions.forEach(function (s) {
+            items.push({
+              kind: "session", session: s, title: s.title || "Untitled chat", company: s.companyName || "No company",
+              sub: (s.messageCount != null ? s.messageCount + " message" + (s.messageCount === 1 ? "" : "s") : "chat") +
+                (s.updatedAt ? " · updated " + timeAgo(s.updatedAt) : "") + (s.snippet ? " · " + s.snippet : ""),
+            });
+          });
+          var groups = {}, order = [];
+          items.forEach(function (it) {
+            if (!groups[it.company]) { groups[it.company] = []; order.push(it.company); }
+            groups[it.company].push(it);
+          });
+          var html = "";
+          order.forEach(function (g) {
+            html += '<h4 class="rw-group">' + esc(g) + '</h4>';
+            groups[g].forEach(function (it) {
+              var idx = items.indexOf(it);
+              html += '<div class="rw-item' + (it.kind === "session" ? " rw-session" : "") + '" data-idx="' + idx +
+                '" role="button" tabindex="0" title="' + esc(it.title) + '">' +
+                '<span class="rw-title">' + esc(it.title) + '</span>' +
+                '<span class="rw-sub">' + esc(it.sub) + '</span></div>';
+            });
+          });
+          var res = container.querySelector("#rwSearchResults");
+          if (!res) return;
+          res.innerHTML = html;
+          res.querySelectorAll(".rw-item").forEach(function (el) {
+            el.addEventListener("click", function () {
+              var it = items[Number(el.getAttribute("data-idx"))];
+              if (!it) return;
+              if (it.kind === "session") { openSession(it.session); }
+              else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+            });
+            el.addEventListener("keydown", function (e) {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
+            });
+          });
+        })
+        .catch(function () {
+          var s = container.querySelector("#rwSearchStatus");
+          if (s) s.textContent = "Couldn't search right now. Try again in a moment.";
+        });
+    }
+
+    function showRecentWork() {
+      var co = activeCompanyId();
+      if (rwSearchQuery && rwSearchQuery.length >= 2) { renderWorkSearch(rwSearchQuery); return; }
+      var container = document.getElementById("recentBelow");
+      if (!container) return;
+      container.innerHTML = '<p class="muted" style="padding:0.5rem 0">Loading your recent work…</p>';
+      var jobsP = fetch("/api/buzzy/jobs" + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      var sessP = fetch(SESSIONS_BASE + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      Promise.all([jobsP, sessP]).then(function (res) {
+        var jobs = (res[0] && res[0].jobs) || [];
+        var sessions = (res[1] && res[1].sessions) || [];
+        var items = [];
+        var seen = {};
+        sessions.forEach(function (s) {
+          var key = s.jobId || ("s:" + s.id);
+          if (seen[key]) return;
+          seen[key] = true;
+          var sessAt = Date.parse(s.updatedAt || s.createdAt || "") || 0;
+          var sessLine = (s.summary || s.preview || "").trim();
+          items.push({
+            kind: "session", session: s, at: sessAt, startedAt: s.createdAt,
+            title: s.title || "Untitled chat",
+            sub: rowSub(sessLine, s.createdAt, sessAt),
+          });
+        });
+        jobs.forEach(function (j) {
+          if (seen[j.id]) return;
+          seen[j.id] = true;
+          var needsInput = !!(j.data && j.data.draft && !j.data.approved);
+          var d = j.data || {};
+          var revised = !!d.previous_draft;
+          var decided = d.slots ? Object.keys(d.slots).filter(function (k) {
+            var v = d.slots[k];
+            return v && v !== "skipped";
+          }).length : 0;
+          var tooltipParts = [
+            d.challenge || (d.slots && d.slots.challenge),
+            d.end_goal || (d.slots && d.slots.end_goal),
+          ].map(function (v) { return String(v || "").trim(); }).filter(function (v) { return v.length > 0; });
+          var tooltip = tooltipParts.join(" → ");
+          var jobAt = Date.parse(j.updatedAt || j.createdAt || "") || 0;
+          var jobLine = tooltip || [j.status || "Discovering",
+            revised ? "revised" : "",
+            decided ? decided + " detail" + (decided === 1 ? "" : "s") : ""]
+            .filter(Boolean).join(" · ");
+          items.push({
+            kind: "job", job: j, needsInput: needsInput,
+            at: jobAt, startedAt: j.createdAt,
+            title: j.title || "Untitled job",
+            tooltip: tooltip,
+            sub: (needsInput ? "Needs your input · " : "") + rowSub(jobLine, j.createdAt, jobAt),
+          });
+        });
+        // Most recent first. Drafts awaiting approval still float to the top —
+        // that pin is a product rule, but inside each group the order is by when
+        // the conversation last moved, not by the order the two APIs returned.
+        items.sort(function (a, b) {
+          var pin = (b.needsInput ? 1 : 0) - (a.needsInput ? 1 : 0);
+          if (pin !== 0) return pin;
+          return (b.at || 0) - (a.at || 0);
+        });
+        var shown = rwShowAll ? items : items.slice(0, 12);
+        var RW_EXAMPLES = ["Write a welcome email for new customers", "Draft a polite payment reminder", "Turn my services into a price list"];
+        var html = '<div class="recent-work">' +
+          '<div class="rw-head-row">' +
+          '<h3 class="rw-head">Recent work</h3>' +
+          workSearchBoxHtml() +
+          '</div>';
+        if (!shown.length) {
+          html += '<p class="muted rw-lead">Nothing yet. Start above, or try one of these:</p>' +
+            '<div class="rw-examples">' +
+            RW_EXAMPLES.map(function (ex) { return '<button type="button" class="rw-ex" data-ex="' + esc(ex) + '">' + esc(ex) + "</button>"; }).join("") +
+            '</div>';
+        } else {
+          shown.forEach(function (it, idx) {
+            html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0" title="' + esc(it.tooltip || it.title) + '">' +
+              '<span class="rw-title">' + esc(it.title) + '</span>' +
+              '<span class="rw-sub">' + esc(it.sub) + '</span>' +
+              (it.kind === "job" ? '<span class="rw-tools"><button type="button" class="rw-rename" title="Rename">✎</button><button type="button" class="rw-delete" title="Delete">🗑</button></span>' : '') +
+              '</div>';
+          });
+        }
+        if (items.length > 12) {
+          html += '<div class="rw-actions">' +
+            (rwShowAll
+              ? '<button type="button" class="secondary rw-all">Show less</button>'
+              : '<button type="button" class="secondary rw-all">Show all work (' + items.length + ')</button>') +
+            '</div>';
+        }
+        html += '</div>';
+        container.innerHTML = html;
+        container.querySelectorAll(".rw-item").forEach(function (el) {
+          el.addEventListener("click", function () {
+            var it = shown[Number(el.getAttribute("data-idx"))];
+            if (!it) return;
+            if (it.kind === "session") { openSession(it.session); }
+            else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+          });
+          el.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
+          });
+        });
+        container.querySelectorAll(".rw-rename").forEach(function (el) {
+          el.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            var it = shown[Number(el.closest(".rw-item").getAttribute("data-idx"))];
+            if (!it) return;
+            renameJob(it, function (title) {
+              if (title) {
+                var t = el.closest(".rw-item").querySelector(".rw-title");
+                if (t) t.textContent = title;
+              }
+            });
+          });
+        });
+        container.querySelectorAll(".rw-delete").forEach(function (el) {
+          el.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            var it = shown[Number(el.closest(".rw-item").getAttribute("data-idx"))];
+            if (!it) return;
+            deleteJob(it, function () { showRecentWork(); });
+          });
+        });
+        var newBtn = container.querySelector(".rw-new");
+        if (newBtn) newBtn.addEventListener("click", newChatNow);
+        var allBtn = container.querySelector(".rw-all");
+        if (allBtn) allBtn.addEventListener("click", function () { rwShowAll = !rwShowAll; showRecentWork(); });
+        container.querySelectorAll(".rw-ex").forEach(function (el) {
+          el.addEventListener("click", function () {
+            var ex = el.getAttribute("data-ex") || "";
+            newChatNow();
+            var input = document.getElementById("chatInput");
+            if (input) input.value = ex;
+          });
+        });
+        bindWorkSearchBox(container);
+      });
+    }
+
+    function ensureChatSession() {
+      if (chatState.sessionId) return Promise.resolve(chatState.sessionId);
+      var coId = activeCompanyId();
+      return fetch(SESSIONS_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId: coId || undefined }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        return r.ok ? r.json() : null;
+      }).then(function (data) {
+        var s = data && data.session;
+        if (s && s.id) {
+          chatState.sessionId = s.id;
+          if (s.companyId) chatState.boundCompanyId = s.companyId;
+        }
+        return chatState.sessionId;
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") throw e;
+        return chatState.sessionId;
+      });
     }
 
     async function sendChatMessage() {
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
       if (!text) return;
+      var pastedPaper = readThisBody(text);
+      if (pastedPaper !== null) {
+        input.value = "";
+        if (!pastedPaper) {
+          chatState.messages.push({ role: "user", content: text });
+          chatState.messages.push({
+            role: "assistant",
+            content: "Drop the invoice, letter, or photo on this chat, or paste it in the box above.",
+          });
+          renderChatMessages();
+          return;
+        }
+        submitPaper({ filename: "", fileKind: "paste", text: pastedPaper });
+        return;
+      }
+      try { await ensureChatSession(); } catch (e) {
+        if (e && e.message === "signed_out") return;
+      }
 
       input.value = "";
       setChatMascot("08-thinking");
@@ -1464,21 +4173,70 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       document.getElementById("chatSend").disabled = true;
 
       try {
-        const resp = await fetch(CHAT_BASE, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            ...getAuthHeaders(),
-          },
-          body: JSON.stringify({
-            jobId: chatState.jobId,
-            message: text,
-            model: selectedModel(),
-          }),
-        });
+        // BZ-F024: one attempt id per send. On a timeout/connection failure we
+        // retry ONCE with the SAME id — the server reconciles to the stored
+        // reply instead of running (and charging for) the turn twice (QA-09/10).
+        const attemptId =
+          "att_" + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : String(Date.now()));
+        const sendBody = {
+          jobId: chatState.jobId,
+          sessionId: chatState.sessionId || undefined,
+          companyId: activeCompanyId(),
+          message: text,
+          model: selectedModel(),
+          jobContext: chatState.jobContext || undefined,
+          mode: chatState.mode || "chat",
+          attemptId: attemptId,
+        };
+        // Abort after 60s so a slow LLM turn fails cleanly instead of reading
+        // as a dead connection (dogfood 10018).
+        const postOnce = function () {
+          return fetch(CHAT_BASE, {
+            method: "POST",
+            credentials: "same-origin",
+            signal: AbortSignal.timeout(60000),
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(sendBody),
+          });
+        };
 
-        const data = await resp.json();
+        // Voice turns take the streaming lane: text + audio arrive together,
+        // so the avatar starts talking on the first audio chunk instead of
+        // after the whole reply is buffered.
+        const useVoiceLane = (voice.mic || voice.replies) && typeof ReadableStream !== "undefined";
+        const sendStarted = performance.now();
+        const metrics = {
+          at: new Date().toLocaleTimeString(),
+          mode: chatState.mode || "chat",
+          surface: useVoiceLane ? "voice" : "text",
+          asrMs: voice.lastSpeechEnd ? Math.round(sendStarted - voice.lastSpeechEnd) : null,
+          ttftMs: null,
+          ttfaMs: null,
+          turnMs: null,
+          replyChars: null,
+          spoken: false,
+          model: null,
+          userSpeechMs: voice.userSpeechMs,
+        };
+        voice.lastSpeechEnd = 0;
+        voice.userSpeechMs = 0;
+
+        let data;
+        if (useVoiceLane) {
+          data = await streamVoiceTurn(sendBody, metrics, sendStarted);
+        } else {
+          let resp;
+          try {
+            resp = await postOnce();
+          } catch (firstErr) {
+            resp = await postOnce(); // bounded: exactly one retry, same attemptId
+          }
+          data = await resp.json();
+          metrics.turnMs = Math.round(performance.now() - sendStarted);
+        }
 
         if (!data.ok) {
           setChatMascot("18-unimpressed");
@@ -1487,6 +4245,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             input.disabled = true;
             document.getElementById("chatSend").disabled = true;
           }
+          if (data.slots) {
+            Object.assign(chatState.slots, data.slots);
+            renderSlotChecklist();
+          }
+          paintContext(data.context);
           document.getElementById("chatError").textContent = data.error || "Something went wrong.";
           document.getElementById("chatError").classList.remove("hidden");
           chatState.messages.push({
@@ -1511,24 +4274,62 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           Object.assign(chatState.slots, data.slots);
         }
 
-        // Check for draft readiness
+        // BZ-F011: expert handoff suggestion from intent (first turn only)
+        if (data.expertSuggestion) {
+          chatState.expertSuggestion = data.expertSuggestion;
+        }
+
+        // Check for draft readiness. The reply is the draft the owner reviews.
+        // Send on that step does not deliver it.
         if (data.draft) {
-          chatState.draftReady = true;
           setChatMascot("12-content");
-          document.getElementById("draftBanner").classList.remove("hidden");
+          openDraftReview(data.reply || "");
+          setDraftWarning(data.warning);
+          if (data.jobId) chatState.jobId = data.jobId;
+          if (data.previousDraft) {
+            chatState.previousDraft = data.previousDraft;
+            var rpBtn = document.getElementById("restorePrevious");
+            if (rpBtn) rpBtn.classList.remove("hidden");
+          }
         } else {
           setChatMascot("17-attentive");
         }
 
         renderChatMessages();
         renderSlotChecklist();
+        // The turn's own numbers are authoritative — don't re-fetch over them.
+        paintContext(data.context);
+        // One latency sample per turn: what the owner actually experienced.
+        metrics.turnMs = metrics.turnMs || Math.round(performance.now() - sendStarted);
+        metrics.replyChars = (data.reply || "").length;
+        metrics.model = data.timings && data.timings.model ? data.timings.model : null;
+        // Trust the server about which lane answered: a tool/draft turn runs on
+        // the text lane even though the request asked for voice.
+        if (data.timings && data.timings.surface) metrics.surface = data.timings.surface;
+        if (data.timings && data.timings.lane) metrics.lane = data.timings.lane;
+        if (metrics.ttfaMs == null && data.timings && data.timings.ttfaMs != null) {
+          metrics.ttfaMs = data.timings.ttfaMs;
+        }
+        logVoiceMetrics(metrics);
+        // The audio lane already spoke the answer; only the text lane needs the
+        // fallback speaker, and only if no audio came back at all.
+        // One voice only. Audio played -> done. No audio -> say so, never swap
+        // the browser's speech engine in mid-conversation.
+        if (!metrics.spoken && (voice.mic || voice.replies)) maybeSpeak(data);
 
       } catch (err) {
         setChatMascot("18-unimpressed");
         document.getElementById("chatError").textContent =
-          "Couldn't reach the server. Check your connection and try again.";
+          err && err.name === "TimeoutError"
+            ? "BeeZilla took too long on that one. Try again — or pick a faster agent."
+            : "Couldn't reach the server. Check your connection and try again.";
         document.getElementById("chatError").classList.remove("hidden");
       } finally {
+        voice.sending = false;
+        // A spoken turn ended without a reply: go back to listening.
+        if (voice.mic && !voice.speaking) setTimeout(function () {
+          if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
+        }, 600);
         // Only re-enable if not signed out
         if (chatState._signedOut) {
           input.disabled = true;
@@ -1546,7 +4347,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (session) {
           var user = session && session.user;
-          if (!user || !user.name) {
+          if (!user) {
             chatState._signedOut = true;
             document.getElementById("chatInput").disabled = true;
             document.getElementById("chatSend").disabled = true;
@@ -1566,30 +4367,301 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // Wire up chat events
     document.getElementById("chatSend").onclick = sendChatMessage;
+
+    // ── Chat / Work mode wiring ─────────────────────────────────────
+    (function initModes() {
+      var tabs = document.getElementById("modeTabs");
+      if (tabs) {
+        tabs.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest(".mode-tab") : null;
+          if (!b) return;
+          setMode(b.getAttribute("data-mode"));
+        });
+      }
+      // ── Inline brief strip ─────────────────────────────────────
+      var barToggle = document.getElementById("briefBarToggle");
+      if (barToggle) {
+        barToggle.addEventListener("click", function () { setBrief(!briefOpen()); });
+      }
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && briefOpen() && !document.querySelector(".slot-edit-input")) setBrief(false);
+      });
+      setBrief(false);
+      updateChrome();
+      initVoice();
+
+      var nsBtn = document.getElementById("newSessionBtn");
+      if (nsBtn) nsBtn.addEventListener("click", function () {
+        newChatNow();
+        var inp = document.getElementById("chatInput");
+        if (inp && !inp.disabled) inp.focus();
+      });
+
+      // Deep link: /buzzy/talk?mode=work opens the chat already in work mode.
+      var m = new URLSearchParams(window.location.search).get("mode");
+      if (m === "work") setMode("work", { noFocus: true });
+    })();
+
+    document.getElementById("paperRead").onclick = function () {
+      var note = document.getElementById("paperNote");
+      var fileInput = document.getElementById("paperFile");
+      var file = fileInput && fileInput.files && fileInput.files[0];
+      var pasted = (document.getElementById("paperPaste").value || "").trim();
+      if (file) {
+        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (e) {
+          if (note) note.textContent = e.message || "Couldn't read that file.";
+        });
+        return;
+      }
+      if (!pasted) {
+        if (note) note.textContent = "Drop a file or paste the letter first.";
+        return;
+      }
+      submitPaper({ filename: "", fileKind: "paste", text: pasted });
+    };
+    (function wirePaperDrop() {
+      var zone = document.getElementById("paperDrop");
+      if (!zone) return;
+      ["dragenter", "dragover"].forEach(function (name) {
+        zone.addEventListener(name, function (e) {
+          e.preventDefault();
+          zone.classList.add("over");
+        });
+      });
+      ["dragleave", "drop"].forEach(function (name) {
+        zone.addEventListener(name, function (e) {
+          e.preventDefault();
+          zone.classList.remove("over");
+        });
+      });
+      zone.addEventListener("drop", function (e) {
+        var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        var note = document.getElementById("paperNote");
+        if (!file) return;
+        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (err) {
+          if (note) note.textContent = err.message || "Couldn't read that file.";
+        });
+      });
+    })();
+    document.getElementById("paperToggle").onclick = function () {
+      var zone = document.getElementById("paperDrop");
+      var toggle = document.getElementById("paperToggle");
+      if (zone.classList.contains("hidden")) {
+        zone.classList.remove("hidden");
+        toggle.setAttribute("aria-expanded", "true");
+      } else {
+        zone.classList.add("hidden");
+        toggle.setAttribute("aria-expanded", "false");
+      }
+    };
     document.getElementById("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendChatMessage();
       }
     });
-    document.getElementById("viewDraft").onclick = () => {
-      // Switch to the existing draft flow
-      state.screen = "draft";
-      // Navigate to the jobs page for legacy flows
-      window.location.href = "/buzzy/";
+    document.getElementById("approveDraft").onclick = onApproveDraft;
+    document.getElementById("draftSend").onclick = onDraftSend;
+    document.getElementById("confirmOutward").onclick = onConfirmOutward;
+    document.getElementById("downloadDraft").onclick = onDownloadDraft;
+    document.getElementById("downloadWord").onclick = onDownloadWord;
+    document.getElementById("draftBody").addEventListener("input", onDraftInput);
+    document.getElementById("restorePrevious").onclick = onRestorePrevious;
+    document.getElementById("downloadCsvBtn").onclick = function () {
+      var body = draftBodyEl();
+      downloadCsv("draft-v" + (chatState.draftVersion || 1), body ? body.value : (chatState.draftText || ""));
     };
-    document.getElementById("newChatBtn").onclick = () => {
-      chatState = {
-        jobId: null,
-        slots: {},
-        messages: [],
-        draftReady: false,
-        userId: null,
-        _signedOut: chatState._signedOut,
-      };
-      document.getElementById("draftBanner").classList.add("hidden");
-      showChatScreen();
-    };
+    document.getElementById("downloadPdf").onclick = onDownloadPdf;
+    // ── Sessions drawer ───────────────────────────────────────
+    function openSessionsDrawer() {
+      const drawer = document.getElementById("sessionsDrawer");
+      const overlay = document.getElementById("sessionsOverlay");
+      overlay.classList.remove("hidden");
+      drawer.classList.add("open");
+      drawer.setAttribute("aria-hidden", "false");
+      loadSessions();
+    }
+    function closeSessionsDrawer() {
+      const drawer = document.getElementById("sessionsDrawer");
+      const overlay = document.getElementById("sessionsOverlay");
+      drawer.classList.remove("open");
+      drawer.setAttribute("aria-hidden", "true");
+      setTimeout(function () { overlay.classList.add("hidden"); }, 180);
+    }
+    // Handle auth/errors with plain-language notes; 401 → sign in.
+    function sessionsError(msg) {
+      if (msg === "signed_out") {
+        window.location.href = "/buzzy/landing";
+        return;
+      }
+      const list = document.getElementById("sessionsList");
+      list.innerHTML = '<p class="sessions-error">' + msg + "</p>";
+    }
+    async function loadSessions() {
+      const list = document.getElementById("sessionsList");
+      list.innerHTML = '<p class="sessions-empty">Loading…</p>';
+      try {
+        var sessionsCo = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.activeId() : null;
+        const r = await fetch(
+          sessionsCo ? SESSIONS_BASE + "?companyId=" + encodeURIComponent(sessionsCo) : SESSIONS_BASE,
+          { credentials: "same-origin" },
+        );
+        if (r.status === 401) { sessionsError("signed_out"); return; }
+        if (!r.ok) { sessionsError("Couldn't load your sessions. Try again in a moment."); return; }
+        const data = await r.json();
+        var sessions = data.sessions || [];
+        if (sessionsCo) sessions = sessions.filter(function (s) { return s.companyId === sessionsCo; });
+        if (!sessions.length) {
+          list.innerHTML = '<p class="sessions-empty">No sessions yet</p>';
+          return;
+        }
+        list.innerHTML = "";
+        sessions.forEach(function (s) {
+          const card = document.createElement("div");
+          card.className = "session-card" + (s.id === chatState.sessionId ? " active" : "");
+          const title = s.title || "Untitled session";
+          const summary = s.summary || "No summary yet.";
+          const mc = (s.messageCount != null ? s.messageCount : 0) + " message" + (s.messageCount === 1 ? "" : "s");
+          card.innerHTML =
+            '<p class="sc-title">' + title.replace(/</g, "&lt;") + "</p>" +
+            '<p class="sc-summary">' + summary.replace(/</g, "&lt;") + "</p>" +
+            '<p class="sc-meta">' + mc + "</p>" +
+            '<div class="sc-actions">' +
+            '<button type="button" class="sc-open">Open</button>' +
+            '<button type="button" class="sc-rename">Rename</button>' +
+            '<button type="button" class="sc-summarize">Summarize</button>' +
+            "</div>";
+          card.querySelector(".sc-open").addEventListener("click", function () { openSession(s); });
+          card.querySelector(".sc-rename").addEventListener("click", function () { renameSession(s, card); });
+          card.querySelector(".sc-summarize").addEventListener("click", function () { summarizeSession(s); });
+          list.appendChild(card);
+        });
+      } catch (e) {
+        sessionsError("Couldn't reach the server. Check your connection and try again.");
+      }
+    }
+    async function openSession(s) {
+      try {
+        const r = await fetch("/api/buzzy/transcript?sessionId=" + encodeURIComponent(s.id), {
+          credentials: "same-origin",
+        });
+        if (r.status === 401) { sessionsError("signed_out"); return; }
+        if (!r.ok) { sessionsError("Couldn't open that session."); return; }
+        const data = await r.json();
+        const msgs = (data.messages || []).map(function (m) {
+          return { role: m.role, content: m.content };
+        });
+        chatState.sessionId = s.id;
+        chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
+        chatState.messages = msgs;
+        // BZ-F004: restore structured Decisions from the server instead of
+        // blanking the box until the next turn.
+        chatState.slots = (data.slots && typeof data.slots === "object") ? data.slots : {};
+        setBackVisible(true);
+        resetDraftGate();
+        document.getElementById("chatError").classList.add("hidden");
+        setChatMascot(msgs.length >= 2 ? "12-content" : "17-attentive");
+        renderChatMessages();
+        renderSlotChecklist();
+        closeSessionsDrawer();
+      } catch (e) {
+        sessionsError("Couldn't open that session. Try again in a moment.");
+      }
+    }
+    function renameSession(s, card) {
+      const current = s.title || "";
+      const next = prompt("Rename this session:", current);
+      if (!next || next.trim() === current) return;
+      const title = next.trim();
+      fetch(SESSIONS_BASE + "/" + encodeURIComponent(s.id), {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("rename failed");
+        return r.json();
+      }).then(function () {
+        s.title = title;
+        const t = card.querySelector(".sc-title");
+        if (t) t.textContent = title;
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't rename the session. Try again in a moment.");
+      });
+    }
+    function summarizeSession(s) {
+      fetch(SESSIONS_BASE + "/" + encodeURIComponent(s.id) + "/summary", {
+        method: "POST",
+        credentials: "same-origin",
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        if (!r.ok) throw new Error("summary failed");
+        return r.json();
+      }).then(function (data) {
+        s.summary = data.summary || s.summary;
+        // Refresh the list so the new summary shows.
+        loadSessions();
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return;
+        alert("Couldn't summarize that session right now. Try again in a moment.");
+      });
+    }
+    // Start a truly new chat: create a real session, then reset local state.
+    function startNewChat() {
+      var coId = window.BZCompanies && BZCompanies.activeId && BZCompanies.activeId();
+      return fetch(SESSIONS_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId: chatState.jobId || undefined,
+          companyId: coId || undefined,
+        }),
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
+        return r.json();
+      }).then(function (data) {
+        const s = data.session;
+        chatState = {
+          jobId: chatState.jobId, // keep job-scoped behavior when a job is present
+          sessionId: s ? s.id : null,
+          slots: {},
+          messages: [],
+          draftReady: false,
+          draftText: "",
+          draftVersion: 1,
+          approvedText: null,
+          outwardConfirmed: false,
+          moneyBlocks: false,
+          paper: null,
+          userId: chatState.userId,
+          _signedOut: chatState._signedOut,
+          jobContext: chatState.jobContext,
+          boundCompanyId: (s && s.companyId) || coId || null,
+          expert: chatState.expert,
+        };
+        document.getElementById("chatError").classList.add("hidden");
+        closeSessionsDrawer();
+        showChatScreen();
+        return s;
+      }).catch(function (e) {
+        if (e && e.message === "signed_out") return null;
+        document.getElementById("chatError").textContent =
+          "Couldn't start a new chat. Try again in a moment.";
+        document.getElementById("chatError").classList.remove("hidden");
+        return null;
+      });
+    }
+    document.getElementById("newChatBtn").onclick = () => { startNewChat(); };
+    document.getElementById("sessionsToggle").onclick = () => { openSessionsDrawer(); };
+    document.getElementById("backToRecent").onclick = goBackToRecent;
+    document.getElementById("sessionsClose").onclick = () => { closeSessionsDrawer(); };
+    document.getElementById("drawerNewChat").onclick = () => { startNewChat(); };
+    document.getElementById("sessionsOverlay").addEventListener("click", function () {
+      closeSessionsDrawer();
+    });
 
     // Navigation
     document.getElementById("jobsLink").onclick = (e) => {
@@ -1601,10 +4673,100 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       window.location.href = "/buzzy/memory";
     };
 
+    function applyChatCompany(co) {
+      var nameEl = document.getElementById("chatCompanyName");
+      var kicker = document.getElementById("chatCompanyKicker");
+      var briefCo = document.getElementById("briefCompany");
+      var line = document.getElementById("chatCompany");
+      var name = co && co.name ? co.name : "";
+      if (nameEl) nameEl.textContent = name || "";
+      if (kicker) kicker.textContent = name ? "Working for" : "";
+      // Without a company the tab bar already says "No company yet" — don't
+      // say it twice. Hide the whole name block and leave the mascot.
+      var head = nameEl ? nameEl.closest(".chat-company-head") : null;
+      if (head) head.classList.toggle("hidden", !name);
+      if (briefCo) briefCo.textContent = name ? "For " + name : "";
+      if (line) line.textContent = co && co.oneLiner ? co.oneLiner : "";
+      var id = co ? co.id : null;
+      if (chatState.boundCompanyId && id && chatState.boundCompanyId !== id) {
+        chatState.boundCompanyId = id;
+        chatState.sessionId = null;
+        chatState.jobId = null;
+        chatState.jobContext = null;
+        chatState.slots = {};
+        chatState.messages = [{
+          role: "assistant",
+          content: "This chat is for " + co.name + ". Describe the job — what needs to be done.",
+        }];
+        resetDraftGate();
+        if (document.getElementById("chatMessages")) {
+          renderChatMessages();
+          renderSlotChecklist();
+        }
+      } else if (!chatState.boundCompanyId) {
+        chatState.boundCompanyId = id;
+      }
+      // Load after a switch clears the previous job, so the other company's paper cannot follow.
+      loadCompanyPaper(id);
+      var drawer = document.getElementById("sessionsDrawer");
+      if (drawer && drawer.classList.contains("open")) loadSessions();
+    }
+    if (window.BZCompanies) BZCompanies.onChange(applyChatCompany);
+
     // Show chat screen on load
     showChatScreen();
   </script>
-<script src="common.js"></script>
-<script>(function(){document.addEventListener("DOMContentLoaded",function(){if(window.__bzHeader)window.__bzHeader("talk")})})();</script>
+
+<script>
+/* ── Your week with BeeZilla — activity digest (plan doc 23 #7) ────────
+   Skippable by design: any failure or an empty week renders nothing. */
+(function () {
+  var card = document.getElementById("digestCard");
+  if (!card) return;
+  fetch("/api/buzzy/digest", { credentials: "include" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (!data || !data.ok || !data.digest) return;
+      var d = data.digest;
+      if (!d.turns && !d.draftsCreated) return; // quiet empty state
+      var bits = [];
+      bits.push(d.turns + " conversation" + (d.turns === 1 ? "" : "s"));
+      if (d.draftsCreated > 0) {
+        bits.push(d.draftsCreated + " draft" + (d.draftsCreated === 1 ? "" : "s") +
+          (d.draftsApproved > 0 ? " (" + d.draftsApproved + " approved)" : " ready for you"));
+      }
+      var money = "under a penny";
+      if (d.dollarsEstimate >= 0.005) money = "about $" + d.dollarsEstimate.toFixed(2);
+      bits.push(money + " this week");
+      card.textContent = "Your week with BeeZilla: " + bits.join(", ") + ".";
+      card.style.display = "block";
+    })
+    .catch(function () { /* never surface an error for the digest */ });
+})();
+</script>
+
+<script>
+/* ── Mobile/async: dictation input + draft notifications ────────────── */
+(function () {
+  // Dictation is now the #micBtn control (talk → listen → respond), wired in
+  // initVoice(). This block only handles draft notifications.
+  if ("Notification" in window && Notification.permission === "default") {
+    var askOnce = sessionStorage.getItem("bzNotifAsked");
+    if (!askOnce) {
+      sessionStorage.setItem("bzNotifAsked", "1");
+      Notification.requestPermission().then(function (perm) {
+        if (perm !== "granted") return;
+        fetch("/api/buzzy/notifications", { credentials: "include" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (d && d.ok && d.pendingDrafts > 0 && d.newest) {
+              new Notification("BeeZilla: " + d.pendingDrafts + " draft" + (d.pendingDrafts === 1 ? "" : "s") + " waiting", { body: d.newest.title });
+            }
+          }).catch(function () {});
+      });
+    }
+  }
+})();
+</script>
 </body>
 </html>

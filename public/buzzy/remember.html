@@ -159,20 +159,26 @@
       cursor: not-allowed;
     }
   </style>
+<link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
 <body>
   <header>
-    <div class="brand">
-      <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
-      <strong>BeeZilla</strong>
+    <div class="header-inner">
+      <a href="/buzzy/" class="brand-link">
+        <div class="brand">
+          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <strong>BeeZilla</strong>
+        </div>
+      </a>
+      <nav>
+        <a href="/buzzy/" id="jobsLink">Talk</a>
+        <a href="/buzzy/remember.html" id="memLink" class="active">What BeeZilla remembers</a>
+        <a href="/buzzy/recipes">Recipes</a>
+        <a href="/buzzy/library" id="libLink">Library</a>
+        <a href="/buzzy/landing" class="account-link">Sign in</a>
+        <span class="phase" id="phaseLabel">What BeeZilla remembers</span>
+      </nav>
     </div>
-    <nav>
-      <a href="/buzzy/" id="jobsLink">Your jobs</a>
-      <a href="/buzzy/talk.html" id="talkLink">Talk to BeeZilla</a>
-      <a href="/buzzy/remember.html" id="memLink" class="active">What BeeZilla remembers</a>
-      <a href="/login" class="account-link">Sign in</a>
-      <span class="phase" id="phaseLabel">What BeeZilla remembers</span>
-    </nav>
   </header>
   <main id="app"></main>
 
@@ -268,6 +274,18 @@
         "<p class='muted'>Device id (will be your Honcho peer later): " + escapeHtml(catalog.userId || "—") + "</p>" +
         "<div class='row'><button id='forgetJob' class='secondary'>Forget this job</button><button id='back' class='secondary'>Back</button></div>";
       document.getElementById("forgetJob").onclick = () => {
+        // BZ-F031: forget propagates to the SERVER memory, not just this
+        // device. The note from the server says exactly what was (and was
+        // not) forgotten — the Library and approved documents stay.
+        const jobId = state.id;
+        if (jobId) {
+          fetch("/api/buzzy/memory", {
+            method: "DELETE",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: jobId }),
+          }).catch(() => {});
+        }
         state.answers = {};
         state.skipped = {};
         state.q = 0;
@@ -278,9 +296,37 @@
       };
     }
 
+    // ── Account: session-aware Sign in / user name + Log out ──────────
+    (function account() {
+      var link = document.querySelector(".account-link");
+      if (!link) return;
+      fetch("/api/auth/get-session", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (session) {
+          var user = session && session.user;
+          if (!user) { window.location.replace("/buzzy/landing"); return; }
+          var bzDisplayName = user.name || user.email || "Account";
+          link.textContent = bzDisplayName;
+          link.removeAttribute("href");
+          link.style.cursor = "default";
+          var out = document.createElement("a");
+          out.href = "#";
+          out.textContent = "Log out";
+          out.addEventListener("click", function (e) {
+            e.preventDefault();
+            fetch("/api/auth/sign-out", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }).then(function () { window.location.href = "/buzzy/"; });
+          });
+          link.parentNode.insertBefore(out, link.nextSibling);
+        })
+        .catch(function () {});
+    })();
+
     goRemember();
   </script>
-<script src="common.js"></script>
-<script>(function(){var run=function(){if(window.__bzHeader)window.__bzHeader("memory")};if(document.readyState!=="loading")run();else document.addEventListener("DOMContentLoaded",run)})();</script>
 </body>
 </html>

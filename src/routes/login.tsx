@@ -127,7 +127,11 @@ function LoginPage() {
   return (
     <AuthShell
       title="Sign in"
-      subtitle="Human operators (Dev Boards). Agents use API keys from the Agents tab."
+      subtitle={
+        BZ_BRAND
+          ? "Sign in to your jobs — your drafts, chats, and documents."
+          : "Human operators (Dev Boards). Agents use API keys from the Agents tab."
+      }
       footer={
         <>
           <p>

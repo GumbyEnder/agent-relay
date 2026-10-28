@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — Honey Drops</title>
+  <style>
+    :root { --bz-black:#0A0A0A; --bz-panel:#141414; --bz-yellow:#FFC107; --bz-yellow-dim:#B8860B; --bz-silver:#C9CDD2; --bz-font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; }
+    * { box-sizing: border-box; }
+    body { font-family: var(--bz-font); color:#E8E8E8; background: var(--bz-black); margin:0; line-height:1.55; -webkit-font-smoothing:antialiased; }
+    main { max-width: 1120px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size:1.9rem; margin:0 0 0.35rem; color:#fff; letter-spacing:-0.01em; }
+    .lede { color:#B8B8B8; max-width:70ch; margin:0 0 1.75rem; font-size:0.95rem; }
+    .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:1rem; margin-bottom:2rem; }
+    .stat { background: var(--bz-panel); border:1px solid #2A2A2A; border-top:3px solid var(--bz-yellow); border-radius:6px; padding:1rem 1.15rem; }
+    .stat .label { font-size:0.72rem; letter-spacing:.11em; text-transform:uppercase; color:#8A8A8A; }
+    .stat .value { font-size:1.7rem; font-weight:700; color:#fff; font-variant-numeric: tabular-nums; }
+    .stat .note { font-size:0.74rem; color:#7A7A7A; }
+    h2 { font-size:0.78rem; letter-spacing:.12em; text-transform:uppercase; color:#8A8A8A; margin:2rem 0 0.75rem; padding-bottom:.5rem; border-bottom:1px solid #222; }
+    table { width:100%; border-collapse: collapse; font-size:0.85rem; }
+    th { text-align:left; font-weight:600; color:#8A8A8A; font-size:0.72rem; letter-spacing:.08em; text-transform:uppercase; padding:0.5rem 0.6rem; border-bottom:1px solid #222; }
+    td { padding:0.55rem 0.6rem; border-bottom:1px solid #1B1B1B; color:#C9CDD2; }
+    td.num { text-align:right; font-variant-numeric: tabular-nums; }
+    .pos { color:#67D99B; } .neg { color:#FF8A80; }
+    .empty { color:#7A7A7A; font-size:0.87rem; padding:1rem 0; }
+    .privacy { border-left:3px solid var(--bz-yellow); background: var(--bz-panel); padding:0.9rem 1.1rem; border-radius:4px; font-size:0.84rem; color:#A8A8A8; margin-top:2rem; }
+    a { color: var(--bz-yellow); }
+  </style>
+  <link rel="stylesheet" href="/buzzy/nav.css" />
+</head>
+<body data-bz-active="wallet">
+  <header>
+    <div class="header-inner">
+      <a href="/buzzy/" class="brand-link"><div class="brand"><img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" /><strong>BeeZilla</strong></div></a>
+      <nav>
+        <a href="/buzzy/">Talk</a>
+        <a href="/buzzy/memory">Memory</a>
+        <a href="/buzzy/experts">Experts</a>
+        <a href="/buzzy/recipes">Recipes</a>
+        <a href="/buzzy/library">Library</a>
+        <a href="/buzzy/landing" class="account-link">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>Honey Drops</h1>
+    <p class="lede">
+      Honey Drops are the currency here. You spend them to open a recipe and you earn them when
+      someone opens yours. This is play money for now — nothing here can be bought with real money,
+      and nothing can leave the site.
+    </p>
+
+    <div class="cards">
+      <div class="stat"><div class="label">Balance</div><div class="value" id="balance">—</div><div class="note">◈ Honey Drops</div></div>
+      <div class="stat"><div class="label">Earned</div><div class="value" id="earned">—</div><div class="note">from recipes you sold</div></div>
+      <div class="stat"><div class="label">Spent</div><div class="value" id="spent">—</div><div class="note">on recipes you opened</div></div>
+      <div class="stat"><div class="label">Owned</div><div class="value" id="owned">—</div><div class="note">recipes you can open</div></div>
+    </div>
+
+    <h2>Your sales</h2>
+    <div id="sales" class="empty">Loading…</div>
+
+    <h2>Ledger</h2>
+    <div id="ledger" class="empty">Loading…</div>
+
+    <div class="privacy">
+      <strong>Who bought what is private.</strong> If you sell a recipe you will see how many were
+      opened and what you earned — never who opened them. The platform keeps that record for refunds
+      and disputes, and it does not leave the server.
+    </div>
+  </main>
+
+  <script src="/buzzy/wallet-chip.js"></script>
+  <script>
+    (function () {
+      function money(n) { return Number(n || 0).toLocaleString(); }
+      function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+      function renderLedger(entries) {
+        var box = document.getElementById("ledger");
+        box.className = "";
+        if (!entries.length) { box.className = "empty"; box.textContent = "No movements yet."; return; }
+        var table = el("table");
+        var head = el("tr");
+        ["When", "What", "Change", "Balance"].forEach(function (h) { head.appendChild(el("th", null, h)); });
+        table.appendChild(head);
+        entries.forEach(function (e) {
+          var tr = el("tr");
+          tr.appendChild(el("td", null, new Date(e.created_at).toLocaleString()));
+          tr.appendChild(el("td", null, e.reason + (e.ref ? " · " + String(e.ref).slice(0, 18) : "")));
+          var d = el("td", "num " + (e.delta > 0 ? "pos" : "neg"), (e.delta > 0 ? "+" : "") + money(e.delta));
+          tr.appendChild(d);
+          tr.appendChild(el("td", "num", money(e.balance_after)));
+          table.appendChild(tr);
+        });
+        box.appendChild(table);
+      }
+
+      function renderSales(s) {
+        var box = document.getElementById("sales");
+        box.className = "";
+        if (!s || !s.sales) { box.className = "empty"; box.textContent = "Nothing sold yet. Publish a recipe and it appears here."; return; }
+        var table = el("table");
+        var head = el("tr");
+        ["Recipe", "Opened", "You earned"].forEach(function (h) { head.appendChild(el("th", null, h)); });
+        table.appendChild(head);
+        s.byRecipe.forEach(function (r) {
+          var tr = el("tr");
+          tr.appendChild(el("td", null, r.recipeId));
+          tr.appendChild(el("td", "num", money(r.sales)));
+          tr.appendChild(el("td", "num pos", "+" + money(r.earned)));
+          table.appendChild(tr);
+        });
+        box.appendChild(table);
+        var total = el("p", "empty", "Total: " + money(s.sales) + " opened, " + money(s.earned) + " Drops earned. Buyers are never identified.");
+        box.appendChild(total);
+      }
+
+      fetch("/api/wallet", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+        .then(function (d) {
+          document.getElementById("balance").textContent = money(d.balance);
+          document.getElementById("earned").textContent = money(d.earned);
+          document.getElementById("spent").textContent = money(d.spent);
+          document.getElementById("owned").textContent = money(d.owned_count);
+          renderLedger(d.entries || []);
+        })
+        .catch(function () { document.getElementById("ledger").textContent = "Could not load your wallet."; });
+
+      fetch("/api/wallet/sales", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(renderSales)
+        .catch(function () { document.getElementById("sales").textContent = "Could not load sales."; });
+
+      var link = document.querySelector(".account-link");
+      if (link) {
+        fetch("/api/auth/get-session", { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (s) {
+            var u = s && s.user;
+            if (!u) { window.location.replace("/buzzy/landing"); return; }
+            link.textContent = u.name || u.email || "Account";
+            link.href = "/buzzy/profile";
+          }).catch(function () {});
+      }
+    })();
+  </script>
+</body>
+</html>

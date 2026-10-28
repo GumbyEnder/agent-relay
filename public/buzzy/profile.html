@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — About your business</title>
+  <style>
+    :root {
+      --bz-black: #0A0A0A;
+      --bz-panel: #141414;
+      --bz-col: #1A1A1A;
+      --bz-yellow: #FFC107;
+      --bz-yellow-dim: #B8860B;
+      --bz-silver: #C9CDD2;
+      --bz-charcoal: #111111;
+      --bz-status-blue: #5B8DB8;
+      --bz-status-lavender: #9B8EC4;
+      --bz-status-green: #5BAF6B;
+      --bz-status-red: #C45B5B;
+      --bz-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: var(--bz-font);
+      color: #E8E8E8;
+      background: var(--bz-black);
+      margin: 0;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid #222;
+      background: var(--bz-panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header .brand { display: flex; align-items: center; gap: 0.6rem; }
+    header .brand strong {
+      letter-spacing: .06em; font-size: 1.15rem; color: var(--bz-yellow);
+      text-transform: uppercase; font-weight: 800;
+    }
+    header .brand .mascot-mark { width: 28px; height: 28px; border-radius: 4px; }
+    header nav { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    header nav a { color: #999; text-decoration: none; font-size: 0.85rem; transition: color 0.15s; }
+    header nav a:hover { color: var(--bz-yellow); }
+    header nav a.active { color: var(--bz-yellow); font-weight: 600; }
+    header nav .phase { color: var(--bz-yellow); font-weight: 600; font-size: 0.85rem; margin-left: 0.5rem; }
+    main { max-width: 720px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size: 1.75rem; margin: 0 0 0.5rem; color: #fff; font-weight: 700; letter-spacing: -0.01em; }
+    h2 { font-size: 1.05rem; margin: 0 0 0.5rem; color: var(--bz-yellow); font-weight: 600; }
+    p, li { color: #C8C8C8; line-height: 1.55; font-size: 0.92rem; }
+    .muted { color: #777; font-size: 0.82rem; }
+    .card {
+      background: var(--bz-panel); border: 1px solid #2A2A2A;
+      padding: 1rem 1.1rem; margin: 0.7rem 0; border-radius: 4px;
+    }
+    .card h2 { color: var(--bz-yellow); }
+    .card p, .card li { color: #C8C8C8; }
+    .hidden { display: none; }
+    .row { display: flex; gap: 0.6rem; margin-top: 1rem; flex-wrap: wrap; }
+    label { display: block; margin: 0.9rem 0 0.25rem; color: #E8E8E8; font-weight: 600; font-size: 0.9rem; }
+    label .hint { display: block; color: #777; font-weight: 400; font-size: 0.8rem; margin-top: 0.15rem; }
+    input, textarea {
+      width: 100%; font: inherit; color: #E8E8E8; background: var(--bz-col);
+      border: 1px solid #333; border-radius: 4px; padding: 0.55rem 0.7rem; font-size: 0.9rem;
+    }
+    textarea { min-height: 64px; resize: vertical; }
+    input:focus, textarea:focus { outline: none; border-color: var(--bz-yellow); }
+    .origin { color: #777; font-size: 0.78rem; margin-top: 0.2rem; }
+    button {
+      font: inherit; padding: 0.6rem 1.2rem; border: 1px solid var(--bz-yellow);
+      background: var(--bz-yellow); color: var(--bz-black); cursor: pointer;
+      font-weight: 600; font-size: 0.88rem; border-radius: 4px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    button:hover { background: var(--bz-yellow-dim); border-color: var(--bz-yellow-dim); }
+    button:active { transform: scale(0.98); }
+    button.secondary { background: transparent; color: var(--bz-yellow); border: 1px solid #444; }
+    button.secondary:hover { border-color: var(--bz-yellow); background: rgba(255,193,7,0.08); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .reuse-item { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid #222; }
+    .reuse-item input { width: auto; margin-top: 0.2rem; }
+    .reuse-item .label { font-weight: 600; font-size: 0.9rem; }
+    .reuse-item .val { color: #C8C8C8; font-size: 0.85rem; }
+    .reuse-item .src { color: #777; font-size: 0.78rem; }
+    .status { margin-top: 0.8rem; font-size: 0.88rem; }
+    .status.ok { color: var(--bz-status-green); }
+    .status.err { color: var(--bz-status-red); }
+  </style>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a href="/buzzy/" class="brand-link">
+        <div class="brand">
+          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <strong>BeeZilla</strong>
+        </div>
+      </a>
+      <nav>
+        <a href="/buzzy/" id="jobsLink">Talk</a>
+        <a href="/buzzy/remember.html" id="memLink">What BeeZilla remembers</a>
+        <a href="/buzzy/profile.html" id="profLink" class="active">About your business</a>
+        <a href="/buzzy/recipes">Recipes</a>
+        <a href="/buzzy/library" id="libLink">Library</a>
+        <a href="/buzzy/landing" class="account-link">Sign in</a>
+        <span class="phase" id="phaseLabel">About your business</span>
+      </nav>
+    </div>
+  </header>
+  <main id="app"></main>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    const $ = (html) => { document.getElementById("app").innerHTML = html; };
+
+    let FIELDS = [];
+    let PROFILE = { fields: {}, hasProfile: false };
+
+    function fmtWhen(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleString();
+    }
+
+    function render() {
+      const saved = PROFILE.fields;
+      const hasAny = Object.keys(saved).length > 0;
+      const form = FIELDS.map((f) => {
+        const v = saved[f.id] ? saved[f.id].value : "";
+        const origin = saved[f.id]
+          ? "You set this" + (saved[f.id].updatedAt ? " on " + fmtWhen(saved[f.id].updatedAt) : "")
+          : "Not set yet";
+        return (
+          "<label>" + escapeHtml(f.label) +
+          "<span class='hint'>" + escapeHtml(f.hint) + "</span>" +
+          "<textarea id='f_" + f.id + "' data-id='" + f.id + "'>" + escapeHtml(v) + "</textarea>" +
+          "<div class='origin'>" + escapeHtml(origin) + "</div>" +
+          "</label>"
+        );
+      }).join("");
+
+      const reuseItems = FIELDS.map((f) => {
+        const v = saved[f.id] ? saved[f.id].value : "";
+        const src = saved[f.id]
+          ? "You set this" + (saved[f.id].updatedAt ? " on " + fmtWhen(saved[f.id].updatedAt) : "")
+          : "No saved default";
+        return (
+          "<div class='reuse-item'>" +
+          "<input type='checkbox' id='r_" + f.id + "' data-id='" + f.id + "'" + (saved[f.id] ? " checked" : " disabled") + " />" +
+          "<div><div class='label'>" + escapeHtml(f.label) + "</div>" +
+          "<div class='val'>" + escapeHtml(v || "—") + "</div>" +
+          "<div class='src'>" + escapeHtml(src) + "</div></div>" +
+          "</div>"
+        );
+      }).join("");
+
+      $(
+        "<h1>About your business</h1>" +
+        "<p>Optional. Tell BeeZilla a little about your business once, and it can reuse those details on future jobs so you don't retype them. You can skip this entirely — it never blocks starting a job.</p>" +
+        "<div class='card'><h2>Your details</h2>" + form +
+        "<div class='row'><button id='save'>Save</button><button id='skip' class='secondary'>Skip for now</button></div>" +
+        "<div class='status' id='saveStatus'></div></div>" +
+        "<div class='card'><h2>Reuse these on a new job</h2>" +
+        "<p class='muted'>Pick which saved details to copy into a job. Each shows where it came from. Copying is a snapshot — editing these later won't change a job you already started.</p>" +
+        reuseItems +
+        "<label>Job id <span class='hint'>The job you want these copied into.</span>" +
+        "<input id='reuseJobId' placeholder='e.g. job_abc123' /></label>" +
+        "<div class='row'><button id='reuse' class='secondary'>Copy selected into job</button></div>" +
+        "<div class='status' id='reuseStatus'></div></div>" +
+        "<p class='muted'>BeeZilla never guesses tax jurisdiction, licenses, or customer consent from an address or a chat hint. Those are only ever added by you, explicitly.</p>"
+      );
+
+      document.getElementById("save").onclick = saveProfile;
+      document.getElementById("skip").onclick = () => { window.location.href = "/buzzy/"; };
+      document.getElementById("reuse").onclick = reuseIntoJob;
+    }
+
+    async function loadProfile() {
+      const r = await fetch("/api/buzzy/profile", { credentials: "same-origin" });
+      if (!r.ok) throw new Error("Could not load profile");
+      const data = await r.json();
+      FIELDS = data.fields || [];
+      PROFILE = data.profile || { fields: {}, hasProfile: false };
+    }
+
+    async function saveProfile() {
+      const fields = {};
+      FIELDS.forEach((f) => {
+        const el = document.getElementById("f_" + f.id);
+        if (el && el.value.trim()) fields[f.id] = el.value.trim();
+      });
+      const status = document.getElementById("saveStatus");
+      status.className = "status";
+      status.textContent = "Saving…";
+      try {
+        const r = await fetch("/api/buzzy/profile", {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ fields }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Save failed");
+        PROFILE = data.profile;
+        status.className = "status ok";
+        status.textContent = "Saved. " + (data.rejected && data.rejected.length ? "Ignored: " + data.rejected.join(", ") : "");
+        render();
+      } catch (e) {
+        status.className = "status err";
+        status.textContent = e.message || "Save failed";
+      }
+    }
+
+    async function reuseIntoJob() {
+      const jobId = document.getElementById("reuseJobId").value.trim();
+      const keys = FIELDS.filter((f) => {
+        const el = document.getElementById("r_" + f.id);
+        return el && el.checked;
+      }).map((f) => f.id);
+      const status = document.getElementById("reuseStatus");
+      status.className = "status";
+      if (!jobId) { status.className = "status err"; status.textContent = "Enter a job id first."; return; }
+      if (!keys.length) { status.className = "status err"; status.textContent = "Pick at least one saved detail."; return; }
+      status.textContent = "Copying…";
+      try {
+        const r = await fetch("/api/buzzy/profile/reuse", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId, keys }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Copy failed");
+        status.className = "status ok";
+        status.textContent = "Copied into job: " + (data.reused || []).join(", ") +
+          (data.skipped && data.skipped.length ? " (skipped: " + data.skipped.join(", ") + ")" : "");
+      } catch (e) {
+        status.className = "status err";
+        status.textContent = e.message || "Copy failed";
+      }
+    }
+
+    // ── Account: session-aware Sign in / user name + Log out ──────────
+    (function account() {
+      var link = document.querySelector(".account-link");
+      if (!link) return;
+      fetch("/api/auth/get-session", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (session) {
+          var user = session && session.user;
+          if (!user) { window.location.replace("/buzzy/landing"); return; }
+          var bzDisplayName = user.name || user.email || "Account";
+          link.textContent = bzDisplayName;
+          link.removeAttribute("href");
+          link.style.cursor = "default";
+          var out = document.createElement("a");
+          out.href = "#";
+          out.textContent = "Log out";
+          out.addEventListener("click", function (e) {
+            e.preventDefault();
+            fetch("/api/auth/sign-out", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }).then(function () { window.location.href = "/buzzy/"; });
+          });
+          link.parentNode.insertBefore(out, link.nextSibling);
+        })
+        .catch(function () {});
+    })();
+
+    loadProfile()
+      .then(render)
+      .catch(function (e) {
+        $("<h1>About your business</h1><p class='muted'>" + escapeHtml(e.message) + "</p><p>Please sign in to set up your business profile.</p><div class='row'><a href='/buzzy/landing'><button>Sign in</button></a></div>");
+      });
+  </script>
+</body>
+</html>

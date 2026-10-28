@@ -1,0 +1,1198 @@
+#!/usr/bin/env node
+/**
+ * test-buzzy-resume.mjs — BZ-F004 E2E: resume restores structured Decisions.
+ *
+ * Runs its own deterministic stub LLM in-process (so the app server must be
+ * started with BZ_CHAT_BASE_URL=http://127.0.0.1:4111/v1 BZ_CHAT_KEY=test).
+ * The stub answers the decisions-extraction prompt with fixed JSON and every
+ * other prompt with a canned reply.
+ *
+ * Asserts:
+ *  1. A chat turn persists the extracted decision server-side
+ *  2. GET /api/buzzy/transcript?jobId= returns slots + messages (BZ-F004)
+ *  3. ?sessionId= resolves the session's job and returns the same slots
+ *  4. Another account sees neither messages nor slots (ownership negative)
+ *
+ * Usage: node scripts/test-buzzy-resume.mjs [baseUrl] [mailLogPath]
+ */
+import { createServer } from "node:http";
+import { readFileSync, existsSync } from "node:fs";
+
+const BASE = process.argv[2] || "http://127.0.0.1:8090";
+const MAIL_LOG = process.argv[3] || ".data/outbound-mail.jsonl";
+const STUB_PORT = 4111;
+const CHALLENGE = "Losing half my quotes before they go out";
+
+// ── stub LLM ────────────────────────────────────────────────────────────
+const stub = createServer((req, res) => {
+  if (req.method !== "POST" || !req.url?.includes("chat/completions")) {
+    res.writeHead(404).end("{}");
+    return;
+  }
+  let raw = "";
+  req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    let content;
+    try {
+      const body = JSON.parse(raw);
+      const sys = String(body.messages?.[0]?.content ?? "");
+      const lastUser = String([...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "");
+      // BZ-F013 rogue-tool scenario: the "model" tries to call an undeclared
+      // tool. The loop must refuse it — the second call (carrying the
+      // "not available" tool result) answers plainly.
+      // BZ-F038 calculator scenario: the "model" delegates arithmetic to the
+      // deterministic tool. Trigger phrase decides the expression; a second
+      // call carrying the tool result answers with the exact value.
+      // BZ-F042: reproduce the false "I can't save files" refusal the owner hit.
+      if (/\blibrary\b/i.test(lastUser) && /save|markdown|md\b/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "I can't save files to a library — no file-storage tool on my end — but I'll write the policy as markdown text here so you can copy it.",
+            },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
+      if (/add up the invoice/i.test(lastUser) && !/calculate result/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "call_calc", type: "function", function: { name: "calculate", arguments: JSON.stringify({ expression: "3*1200+450" }) } }],
+            },
+            finish_reason: "tool_calls",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
+      if (/calculate result/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{ index: 0, message: { role: "assistant", content: "That comes to 4050 exactly." }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
+      if (/send an email/i.test(lastUser) && !/not available/i.test(lastUser)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "stub",
+          object: "chat.completion",
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "call_rogue", type: "function", function: { name: "send_email", arguments: "{\"to\":\"attacker@evil.example\"}" } }],
+            },
+            finish_reason: "tool_calls",
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }));
+        return;
+      }
+      content = sys.includes("Extract these four facts")
+        ? JSON.stringify({ challenge: CHALLENGE, difficulties: null, who_involved: null, end_goal: null })
+        : /friendlier/i.test(lastUser)
+          ? "FRIENDLY v3 — third edition, warmer tone."
+          : /more formal/i.test(lastUser)
+            ? "FORMAL v2 — revised demand letter, second edition."
+            : "DEMAND v1 — pay what you owe, first edition.";
+    } catch {
+      content = "Got it.";
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      id: "stub",
+      object: "chat.completion",
+      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+    }));
+  });
+});
+await new Promise((r) => stub.listen(STUB_PORT, "127.0.0.1", r));
+
+let failures = 0;
+function check(name, cond, detail = "") {
+  const ok = Boolean(cond);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : "  — " + detail}`);
+  if (!ok) failures++;
+}
+
+async function readMailUrl(email) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (existsSync(MAIL_LOG)) {
+      const lines = readFileSync(MAIL_LOG, "utf8").trim().split("\n").reverse();
+      for (const line of lines) {
+        try {
+          const mail = JSON.parse(line);
+          if (mail.to === email) {
+            const url =
+              mail.actionUrl ||
+              (mail.html || "").match(/href="([^"]*magic-link\/verify[^"]*)"/)?.[1] ||
+              (mail.text || "").match(/https?:\/\/\S*magic-link\/verify\S*/)?.[0];
+            if (url) return url.replace(/&amp;/g, "&");
+          }
+        } catch { /* partial line */ }
+      }
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`no magic-link mail found for ${email}`);
+}
+
+async function signIn(email) {
+  const res = await fetch(`${BASE}/api/auth/sign-in/magic-link`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE },
+    body: JSON.stringify({ email, callbackURL: "/" }),
+  });
+  if (!res.ok) throw new Error(`magic-link request failed ${res.status}: ${await res.text()}`);
+  const url = await readMailUrl(email);
+  const vres = await fetch(url, { redirect: "manual" });
+  const cookie = (vres.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
+  if (!cookie.includes("session_token")) throw new Error("no session cookie from verify");
+  return cookie;
+}
+
+async function api(cookie, method, path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "content-type": "application/json", origin: BASE, ...(cookie ? { cookie } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let json = null;
+  try { json = JSON.parse(await res.text()); } catch { /* non-json */ }
+  return { status: res.status, json };
+}
+
+const run = `rs${Date.now().toString(36)}`;
+const emailA = `bz-resume-${run}@test.local`;
+const emailB = `bz-resume2-${run}@test.local`;
+const jobId = `job_${run}_resume`;
+
+console.log(`base=${BASE} run=${run} stub=:${STUB_PORT}`);
+
+const cookieA = await signIn(emailA);
+const cookieB = await signIn(emailB);
+
+// 1. a chat turn persists the extracted decision server-side
+let r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId,
+  message: "I keep losing half my quotes before they go out",
+});
+check("chat turn accepted", r.status === 200 && typeof r.json?.reply === "string", JSON.stringify(r.json).slice(0, 200));
+
+// 2. transcript?jobId restores slots + messages
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${jobId}`);
+check(
+  "BZ-F004 transcript returns stored decision slot",
+  r.status === 200 && r.json?.slots?.challenge === CHALLENGE,
+  JSON.stringify(r.json?.slots),
+);
+check(
+  "BZ-F004 transcript returns both turns",
+  (r.json?.messages ?? []).length >= 2,
+  `messages=${(r.json?.messages ?? []).length}`,
+);
+
+// 3. session-bound restore resolves the job and returns the same slots
+r = await api(cookieA, "POST", "/api/buzzy/sessions", { jobId, title: "Resume QA" });
+const sessId = r.json?.session?.id;
+check("session created bound to job", r.status === 201 && typeof sessId === "string", JSON.stringify(r.json));
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId,
+  sessionId: sessId,
+  message: "It happens mostly on bigger jobs",
+});
+check("session chat turn accepted", r.status === 200, JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "GET", `/api/buzzy/transcript?sessionId=${sessId}`);
+check(
+  "BZ-F004 session transcript resolves job slots",
+  r.status === 200 && r.json?.slots?.challenge === CHALLENGE,
+  JSON.stringify(r.json?.slots),
+);
+
+// 4. ownership negative: B sees nothing
+r = await api(cookieB, "GET", `/api/buzzy/transcript?jobId=${jobId}`);
+check(
+  "BZ-F004 other account gets no messages or slots",
+  r.status === 200 && (r.json?.messages ?? []).length === 0 && Object.keys(r.json?.slots ?? {}).length === 0,
+  JSON.stringify(r.json).slice(0, 200),
+);
+
+// 5. BZ-F011: expert suggestion from intent — first turn, confident mapping only
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_legal`,
+  message: "I need a demand letter for a client who won't pay their invoice",
+});
+check(
+  "BZ-F011 legal intent suggests the Legal expert with a reason",
+  r.status === 200 && r.json?.expertSuggestion?.id === "legal" && typeof r.json?.expertSuggestion?.reason === "string" && r.json.expertSuggestion.reason.length > 10,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_legal`,
+  message: "They owe me for three months of work",
+});
+check(
+  "BZ-F011 suggestion fires on the first turn only",
+  r.status === 200 && r.json?.expertSuggestion === undefined,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_gen`,
+  message: "I need to organize my garage this weekend",
+});
+check(
+  "BZ-F011 no suggestion without a real registry mapping",
+  r.status === 200 && r.json?.expertSuggestion === undefined,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: `job_${run}_fromexp`,
+  message: "Context: the user came from the legal experts page.\n\nI need a contract reviewed",
+});
+check(
+  "BZ-F011 no suggestion when already in an expert context",
+  r.status === 200 && r.json?.expertSuggestion === undefined,
+  JSON.stringify(r.json?.expertSuggestion),
+);
+
+// 6. BZ-F015: durable documents — materialize, immutable versions, lifecycle
+const docJob = `job_${run}_docs`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", {
+  jobId: docJob,
+  message: "I need a demand letter for Acme who won't pay — write it up",
+});
+check("BZ-F015 draft produced", r.status === 200 && r.json?.draft === true, JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "GET", `/api/buzzy/documents?jobId=${docJob}`);
+const doc = (r.json?.documents ?? [])[0];
+check(
+  "BZ-F015 draft materialized as ready document v1 with exact output",
+  doc && doc.status === "ready" && doc.current_version === 1 && doc.content === "DEMAND v1 — pay what you owe, first edition.",
+  JSON.stringify(doc).slice(0, 250),
+);
+const docId = doc?.id;
+
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "make it more formal" });
+check("BZ-F015 revision produced", r.status === 200 && r.json?.draft === true, JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F015 revision bumped to v2",
+  r.json?.document?.current_version === 2 && r.json?.document?.content === "FORMAL v2 — revised demand letter, second edition.",
+  JSON.stringify(r.json?.document).slice(0, 250),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=1`);
+check(
+  "BZ-F015 prior version immutable (QA-12)",
+  r.json?.document?.version === 1 && r.json?.document?.content === "DEMAND v1 — pay what you owe, first edition.",
+  JSON.stringify(r.json?.document).slice(0, 250),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=99`);
+check("BZ-F015 unknown version is a clean 404", r.status === 404, `got ${r.status}`);
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true });
+check("BZ-F015 job approval accepted", r.status === 200, JSON.stringify(r.json).slice(0, 150));
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F015 approval marks document accepted", r.json?.document?.status === "accepted", JSON.stringify(r.json?.document?.status));
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: false });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F015 revoked approval returns document to ready", r.json?.document?.status === "ready", JSON.stringify(r.json?.document?.status));
+
+r = await api(cookieB, "GET", "/api/buzzy/documents");
+check("BZ-F015 other account's library excludes the doc", !(r.json?.documents ?? []).some((d) => d.id === docId));
+r = await api(cookieB, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F015 other account doc read → 404 (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 7. BZ-F017: per-version provenance + exact-version acceptance (QA-08)
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const ledger = r.json?.versions ?? [];
+const v2 = ledger.find((v) => v.version === 2);
+check(
+  "BZ-F017 v2 records parent version + brief snapshot + creator",
+  v2 && v2.parent_version === 1 && v2.creator && v2.brief_revision && typeof v2.brief_revision === "object",
+  JSON.stringify(v2).slice(0, 250),
+);
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "STALE TEXT the owner never had on screen" });
+check(
+  "BZ-F017 stale-version approval rejected (QA-08)",
+  r.status === 409 && r.json?.code === "stale_version" && r.json?.currentVersion === 2,
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check("BZ-F017 rejected approval left document ready", r.json?.document?.status === "ready", JSON.stringify(r.json?.document?.status));
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "FORMAL v2 — revised demand letter, second edition." });
+check("BZ-F017 exact-version approval succeeds", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F017 acceptance references the exact version",
+  r.json?.document?.status === "accepted" && r.json?.document?.accepted_version === 2,
+  JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version }),
+);
+const acceptedV2 = (r.json?.versions ?? []).find((v) => v.version === 2);
+check("BZ-F017 accepted version row stamped (accepted_at/by)", Boolean(acceptedV2?.accepted_at && acceptedV2?.accepted_by), JSON.stringify(acceptedV2).slice(0, 200));
+
+// 8. BZ-REUSE-159: on Approve, shop-floor board + agent created idempotently
+// (the exact-version approval PATCH above already fired it)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "FORMAL v2 — revised demand letter, second edition." });
+check(
+  "REUSE-159 approval returns execution linkage",
+  r.status === 200 && typeof r.json?.execution?.projectId === "string" && r.json.execution.projectId.length > 0,
+  JSON.stringify(r.json).slice(0, 250),
+);
+const execProject = r.json?.execution?.projectId;
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+const execJob = (r.json?.jobs ?? []).find((j) => j.id === docJob);
+check(
+  "REUSE-159 job stores board + agent + ticket linkage",
+  execJob?.data?.execution?.projectId === execProject &&
+    typeof execJob?.data?.execution?.agentName === "string" &&
+    typeof execJob?.data?.execution?.missionId === "string" &&
+    execJob?.data?.execution?.acceptedVersion === 2,
+  JSON.stringify(execJob?.data?.execution),
+);
+// Repeated approval must NOT duplicate the work set (QA-08/09)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "FORMAL v2 — revised demand letter, second edition." });
+check(
+  "REUSE-159 repeated approval reuses the same board (no duplicates)",
+  r.status === 200 && r.json?.execution?.projectId === execProject && r.json?.execution?.created === false,
+  JSON.stringify(r.json?.execution),
+);
+// Gate: approving a job with no versioned document creates nothing
+r = await api(cookieA, "POST", "/api/buzzy/jobs", { id: `job_${run}_nodoc`, title: "No doc job", data: {} });
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_nodoc`, { approved: true });
+check(
+  "REUSE-159 no versioned approval audit → no execution items",
+  r.status === 200 && r.json?.execution === undefined,
+  JSON.stringify(r.json).slice(0, 200),
+);
+
+// 9. BZ-F024: attempt reconciliation + pause/cancel gates
+const recJob = `job_${run}_rec`;
+const attId = `att_${run}_1`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "I need a demand letter — write it up", attemptId: attId });
+check("BZ-F024 first attempt runs", r.status === 200 && r.json?.ok === true, JSON.stringify(r.json).slice(0, 150));
+const firstReply = r.json?.reply;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "I need a demand letter — write it up", attemptId: attId });
+check(
+  "BZ-F024 same attemptId reconciles to the stored reply (no duplicate call)",
+  r.status === 200 && r.json?.reconciled === true && r.json?.reply === firstReply,
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F024 retried attempt stored no duplicate messages",
+  (r.json?.messages ?? []).length === 2,
+  `messages=${(r.json?.messages ?? []).length}`,
+);
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "make it more formal", attemptId: `att_${run}_2` });
+check("BZ-F024 a new attempt id runs normally", r.status === 200 && r.json?.ok === true && !r.json?.reconciled);
+
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Paused" });
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "hello?", attemptId: `att_${run}_3` });
+check(
+  "BZ-F024 paused job refuses new turns, consequences explained (QA-15)",
+  r.status === 409 && r.json?.code === "job_paused" && /paused/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Cancelled" });
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "hello?", attemptId: `att_${run}_4` });
+check(
+  "BZ-F024 cancelled job refuses new turns, consequences explained (QA-15)",
+  r.status === 409 && r.json?.code === "job_cancelled" && /cancelled/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Draft ready" });
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: recJob, message: "back to work", attemptId: `att_${run}_5` });
+check("BZ-F024 resumed job accepts turns again", r.status === 200 && r.json?.ok === true, `status ${r.status}`);
+// A cancelled job made no further model calls: transcript holds only the turns before the gates
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F024 gated turns never reached the transcript",
+  (r.json?.messages ?? []).filter((m) => m.role === "user").length === 3,
+  `user messages=${(r.json?.messages ?? []).filter((m) => m.role === "user").length}`,
+);
+
+// 10. BZ-F030: contacts directory — proposed→confirmed, no name-merge
+r = await api(cookieA, "POST", "/api/buzzy/contacts", { name: "Acme Supplies", kind: "supplier", role: "Main vendor", contact: { email: "sales@acme.test" } });
+const ct1 = r.json?.contact?.id;
+check("BZ-F030 contact created as proposed", r.status === 201 && r.json?.contact?.status === "proposed" && typeof ct1 === "string", JSON.stringify(r.json).slice(0, 200));
+r = await api(cookieA, "POST", "/api/buzzy/contacts", { name: "Acme Supplies", kind: "customer", role: "Other division" });
+const ct2 = r.json?.contact?.id;
+check(
+  "BZ-F030 same name creates a NEW entity + flags the duplicate (never merges)",
+  r.status === 201 && ct2 && ct2 !== ct1 && (r.json?.possibleDuplicates ?? []).some((d) => d.id === ct1),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/contacts");
+check("BZ-F030 both same-name entities coexist", (r.json?.contacts ?? []).filter((c) => c.name === "Acme Supplies").length === 2);
+r = await api(cookieA, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
+check("BZ-F030 owner confirms a proposed contact", r.status === 200 && r.json?.contact?.status === "confirmed", JSON.stringify(r.json));
+r = await api(cookieA, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
+check("BZ-F030 re-confirm is a clean 404", r.status === 404);
+r = await api(cookieB, "GET", "/api/buzzy/contacts");
+check("BZ-F030 other account sees no contacts (QA-05)", (r.json?.contacts ?? []).length === 0);
+r = await api(cookieB, "POST", `/api/buzzy/contacts/${ct1}/confirm`);
+check("BZ-F030 other account cannot confirm (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 11. BZ-F031: visible memory + forget propagation
+// (the first chat turn on `jobId` persisted the extracted challenge to memory)
+r = await api(cookieA, "GET", "/api/buzzy/memory");
+check(
+  "BZ-F031 memory shows the stored fact",
+  (r.json?.facts ?? []).some((f) => f.jobId === jobId && f.key === "challenge" && f.value === CHALLENGE),
+  JSON.stringify(r.json?.facts).slice(0, 250),
+);
+r = await api(cookieA, "DELETE", "/api/buzzy/memory", { jobId });
+check(
+  "BZ-F031 forget reports what was removed (and the Library is untouched)",
+  r.status === 200 && r.json?.ok === true && r.json?.forgotten >= 1 && /Library/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json),
+);
+r = await api(cookieA, "GET", "/api/buzzy/memory");
+check(
+  "BZ-F031 forgotten facts no longer readable for that job",
+  !(r.json?.facts ?? []).some((f) => f.jobId === jobId),
+  JSON.stringify(r.json?.facts).slice(0, 200),
+);
+// propagation to retrieval: a fresh transcript for the job returns no slots either
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${jobId}`);
+check(
+  "BZ-F031 forget propagates to derived retrieval (no slots surface)",
+  Object.keys(r.json?.slots ?? {}).length === 0,
+  JSON.stringify(r.json?.slots),
+);
+// forgetting the DOC job's memory leaves its materialized document untouched
+r = await api(cookieA, "DELETE", "/api/buzzy/memory", { jobId: docJob });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F031 job work survives a memory forget (forget ≠ delete)",
+  r.status === 200 && typeof r.json?.document?.content === "string" && r.json.document.content.length > 0,
+  `status ${r.status}`,
+);
+r = await api(cookieB, "DELETE", "/api/buzzy/memory", { jobId });
+check("BZ-F031 other account cannot forget A's memory (QA-05)", r.status === 200 && r.json?.forgotten === 0, JSON.stringify(r.json));
+
+// 12. BZ-F007: intake boundaries — unsupported types + locked PDFs
+r = await api(cookieA, "POST", "/api/buzzy/companies", { name: "QA07 Intake Co" });
+const coId = r.json?.company?.id;
+check("BZ-F007 company for intake", r.status === 201 && typeof coId === "string", JSON.stringify(r.json).slice(0, 150));
+r = await api(cookieA, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "docx", text: "some doc text" });
+check(
+  "BZ-F007 unsupported type → useful next action, not silent fallback (QA-11)",
+  r.status === 400 && r.json?.code === "unsupported_type" && /paste the text/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+const lockedPdf = Buffer.from("%PDF-1.4\n1 0 obj<</Encrypt 2 0 R>>endobj\n%%EOF").toString("base64");
+r = await api(cookieA, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "pdf", dataBase64: lockedPdf, filename: "locked.pdf" });
+check(
+  "BZ-F007 locked PDF detected with an explicit next action",
+  r.status === 422 && r.json?.code === "locked_pdf" && /paste the text/i.test(r.json?.error ?? ""),
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "pdf", dataBase64: Buffer.from("%PDF-1.1\n%%EOF").toString("base64"), filename: "blank.pdf" });
+check(
+  "BZ-F007 unreadable PDF → lines stay unknown, nothing final-ready (QA-11)",
+  r.status === 200 && (r.json?.paper?.accepted ?? []).length === 0 && /couldn't read/i.test(r.json?.paper?.sentence ?? ""),
+  JSON.stringify(r.json?.paper).slice(0, 250),
+);
+r = await api(cookieB, "POST", "/api/buzzy/papers", { companyId: coId, fileKind: "paste", text: "snooping" });
+check("BZ-F007 other account cannot file papers on A's company (QA-05)", r.status === 400 || r.status === 404, `got ${r.status}`);
+
+// 13. BZ-F020: exports match the chosen version (QA-12)
+// docJob is at v3 ("FRIENDLY v3…") by now — but that revision lands AFTER this
+// section runs? No: the QA-20 revision is below. Here docJob is at v2.
+const DL = "/api/buzzy/documents";
+let dl = await fetch(`${BASE}${DL}/${docId}?version=1&format=md`, { headers: { cookie: cookieA } });
+check(
+  "BZ-F020 markdown export of v1 is exactly the v1 text (QA-12)",
+  dl.status === 200 && (dl.headers.get("content-type") || "").includes("markdown") && (await dl.text()) === "DEMAND v1 — pay what you owe, first edition.",
+  `status ${dl.status}`,
+);
+dl = await fetch(`${BASE}${DL}/${docId}?version=2&format=pdf`, { headers: { cookie: cookieA } });
+const pdfBytes = Buffer.from(await dl.arrayBuffer());
+check(
+  "BZ-F020 pdf export of v2: valid %PDF containing the v2 text",
+  dl.status === 200 && (dl.headers.get("content-type") || "").includes("pdf") && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pdfBytes.toString("latin1").includes("FORMAL v2"),
+  `status ${dl.status} bytes ${pdfBytes.length}`,
+);
+dl = await fetch(`${BASE}${DL}/${docId}?version=2&format=docx`, { headers: { cookie: cookieA } });
+const docxBytes = Buffer.from(await dl.arrayBuffer());
+check(
+  "BZ-F020 docx export of v2: real Office zip, non-trivial size",
+  dl.status === 200 && docxBytes.subarray(0, 2).toString() === "PK" && docxBytes.length > 2000,
+  `status ${dl.status} bytes ${docxBytes.length}`,
+);
+dl = await fetch(`${BASE}${DL}/${docId}?version=99&format=pdf`, { headers: { cookie: cookieA } });
+check("BZ-F020 unknown version export → 404", dl.status === 404, `got ${dl.status}`);
+dl = await fetch(`${BASE}${DL}/${docId}?format=bogus`, { headers: { cookie: cookieA } });
+check("BZ-F020 unknown format → useful 400 (QA-11)", dl.status === 400, `got ${dl.status}`);
+dl = await fetch(`${BASE}${DL}/${docId}?format=csv`, { headers: { cookie: cookieA } });
+check("BZ-F020 non-tabular version → CSV explains itself (QA-11)", dl.status === 422 && (await dl.json())?.code === "no_table", `got ${dl.status}`);
+dl = await fetch(`${BASE}${DL}/${docId}?format=pdf`, { headers: { cookie: cookieB } });
+check("BZ-F020 other account export → 404 (QA-05)", dl.status === 404, `got ${dl.status}`);
+
+// 14. BZ-F019: ownership-scoped search across work and documents
+r = await api(cookieA, "GET", "/api/buzzy/search?q=quotes");
+check(
+  "BZ-F019 title search finds the job and document",
+  (r.json?.jobs ?? []).some((j) => j.id === docJob) && (r.json?.documents ?? []).some((d) => d.id === docId),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=second+edition");
+check(
+  "BZ-F019 content search finds the document with a snippet",
+  (r.json?.documents ?? []).some((d) => d.id === docId && /second edition/i.test(d.snippet ?? "")),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=quotes&status=accepted&type=documents");
+check(
+  "BZ-F019 status + type filters apply",
+  (r.json?.documents ?? []).every((d) => d.status === "accepted") && (r.json?.jobs ?? []).length === 0,
+  JSON.stringify(r.json).slice(0, 250),
+);
+// Cross-company search (59c344e): results must carry company context so the
+// Work view can group them, and sessions must be searchable too.
+const coSearchJob = `job_${run}_cosearch`;
+await api(cookieA, "POST", "/api/buzzy/recipes/quote-comparison/start", { companyId: coId });
+r = await api(cookieA, "GET", "/api/buzzy/search?q=supplier");
+check(
+  "BZ-F019 search works across companies and names the company",
+  r.status === 200 && (r.json?.jobs ?? []).every((j) => "companyName" in j),
+  JSON.stringify((r.json?.jobs ?? []).slice(0, 1)),
+);
+check(
+  "BZ-F019 search returns sessions and documents alongside jobs",
+  Array.isArray(r.json?.sessions) && Array.isArray(r.json?.documents) && Array.isArray(r.json?.jobs),
+  JSON.stringify(Object.keys(r.json ?? {})),
+);
+r = await api(cookieA, "GET", "/api/buzzy/search?q=");
+check("BZ-F019 empty query returns an empty set, not an error", r.status === 200 && (r.json?.jobs ?? []).length === 0, `status ${r.status}`);
+
+r = await api(cookieA, "GET", "/api/buzzy/search?q=z");
+check("BZ-F019 one-character query → useful 400", r.status === 400, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/search?q=quotes");
+check(
+  "BZ-F019 search never crosses accounts (QA-05)",
+  (r.json?.jobs ?? []).length === 0 && (r.json?.documents ?? []).length === 0,
+  JSON.stringify(r.json),
+);
+
+// 15. BZ-F037: archive retains, delete cascades and explains scope
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Archived" });
+check("BZ-F037 job archived", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+check(
+  "BZ-F037 archived job leaves the active view",
+  !(r.json?.jobs ?? []).some((j) => j.id === recJob),
+);
+r = await api(cookieA, "GET", "/api/buzzy/jobs?archived=1");
+check(
+  "BZ-F037 archived job retained and retrievable with ?archived=1",
+  (r.json?.jobs ?? []).some((j) => j.id === recJob && j.status === "Archived"),
+);
+// its conversation/history survive archiving (retained, not deleted)
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F037 archive retains history (QA-17)",
+  (r.json?.messages ?? []).length >= 2,
+  `messages=${(r.json?.messages ?? []).length}`,
+);
+// delete cascades with an explained scope
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${recJob}`, { status: "Draft ready" });
+r = await api(cookieA, "DELETE", `/api/buzzy/jobs/${recJob}`);
+check(
+  "BZ-F037 delete cascades and explains scope",
+  r.status === 200 && r.json?.deleted?.job === 1 && typeof r.json?.deleted?.messages === "number" && /backups/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=${recJob}`);
+check(
+  "BZ-F037 deleted job's messages are gone (propagation)",
+  (r.json?.messages ?? []).length === 0,
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F037 unrelated work unaffected by the delete",
+  r.status === 200 && typeof r.json?.document?.content === "string",
+  `status ${r.status}`,
+);
+r = await api(cookieB, "DELETE", `/api/buzzy/jobs/${docJob}`);
+check(
+  "BZ-F037 other account delete is a no-op with an honest note",
+  r.status === 200 && r.json?.deleted?.job === 0,
+  JSON.stringify(r.json),
+);
+
+// 16. BZ-F016: manual edit + changed-section summary
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const preEditVersion = r.json?.document?.current_version;
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/edit`, { content: "MANUAL EDIT — hand-tuned final wording." });
+check(
+  "BZ-F016 manual edit materializes a new version",
+  r.status === 200 && r.json?.changed === true && r.json?.version === preEditVersion + 1,
+  JSON.stringify(r.json),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=${preEditVersion}`);
+check(
+  "BZ-F016 earlier version kept immutable (QA-12)",
+  r.json?.document?.content === "FORMAL v2 — revised demand letter, second edition.",
+  JSON.stringify(r.json?.document).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/edit`, { content: "MANUAL EDIT — hand-tuned final wording." });
+check(
+  "BZ-F016 identical edit is an honest no-op (no false change)",
+  r.status === 200 && r.json?.changed === false && /matches the current version/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=2`);
+check(
+  "BZ-F016 diff summary names added and removed lines",
+  (r.json?.diff?.added ?? []).some((l) => /FORMAL v2/.test(l)) &&
+    (r.json?.diff?.removed ?? []).some((l) => /DEMAND v1/.test(l)) &&
+    r.json?.diff?.identical === false,
+  JSON.stringify(r.json?.diff).slice(0, 300),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=1`);
+check("BZ-F016 same-version diff → useful 400", r.status === 400, `got ${r.status}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=99`);
+check("BZ-F016 unknown version in diff → 404", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/edit`, { content: "hostile takeover" });
+check("BZ-F016 other account cannot edit (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", `/api/buzzy/documents/${docId}/diff?from=1&to=2`);
+check("BZ-F016 other account cannot diff (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 17. BZ-F021: delivery pack + controlled sharing
+// Re-accept the manual-edit version first (sharing requires the accepted version)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "MANUAL EDIT — hand-tuned final wording." });
+check("BZ-F021 manual version re-accepted", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/pack`);
+check(
+  "BZ-F021 pack carries accepted content + brief + evidence, no caveats",
+  r.status === 200 && r.json?.pack?.accepted === true &&
+    r.json?.pack?.content === "MANUAL EDIT — hand-tuned final wording." &&
+    (r.json?.pack?.caveats ?? []).length === 0 && r.json?.pack?.evidence,
+  JSON.stringify(r.json?.pack).slice(0, 300),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/share`, { version: 1 });
+check(
+  "BZ-F021 sharing a non-accepted version is refused (QA-16)",
+  r.status === 409 && r.json?.code === "not_accepted_version",
+  `status ${r.status} ${JSON.stringify(r.json)}`,
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/share`, { ttlHours: 24 });
+const shareToken = r.json?.share?.token;
+const shareId = r.json?.share?.id;
+check(
+  "BZ-F021 accepted version shares with an unguessable token",
+  r.status === 201 && typeof shareToken === "string" && shareToken.length > 30,
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/share`, { ttlHours: 24 });
+check(
+  "BZ-F021 repeat share is idempotent (same link, no duplicate)",
+  r.status === 200 && r.json?.created === false && r.json?.share?.token === shareToken,
+  JSON.stringify(r.json?.share),
+);
+let pub = await fetch(`${BASE}/api/buzzy/shared/${shareToken}`);
+const pubJson = await pub.json();
+check(
+  "BZ-F021 public link serves exactly the pinned version, no auth",
+  pub.status === 200 && pubJson?.version === 3 && pubJson?.content === "MANUAL EDIT — hand-tuned final wording.",
+  `status ${pub.status} ${JSON.stringify(pubJson).slice(0, 200)}`,
+);
+r = await api(cookieA, "GET", "/api/buzzy/shares");
+check(
+  "BZ-F021 share is recorded on the account",
+  (r.json?.shares ?? []).some((s) => s.id === shareId),
+);
+r = await api(cookieA, "DELETE", `/api/buzzy/shares/${shareId}`);
+check("BZ-F021 owner revokes the link", r.status === 200 && r.json?.revoked === true);
+pub = await fetch(`${BASE}/api/buzzy/shared/${shareToken}`);
+check(
+  "BZ-F021 revoked link is dead (410), document never silently public",
+  pub.status === 410,
+  `got ${pub.status}`,
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/share`, {});
+check("BZ-F021 other account cannot share A's document (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/shares");
+check("BZ-F021 other account sees no shares (QA-05)", (r.json?.shares ?? []).length === 0);
+
+// 18. BZ-F018: save accepted structure as a reusable template (QA-14)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: false });
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/save-as-template`, { name: "Premature skeleton" });
+check(
+  "BZ-F018 non-accepted document cannot become a template",
+  r.status === 409 && r.json?.code === "not_accepted",
+  `status ${r.status}`,
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: "MANUAL EDIT — hand-tuned final wording." });
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/save-as-template`, { name: "Demand letter skeleton", exclude: ["hand-tuned"] });
+const tplId = r.json?.template?.id;
+check(
+  "BZ-F018 accepted structure saves with private terms blanked",
+  r.status === 201 && typeof tplId === "string" && (r.json?.template?.variables ?? []).includes("detail_1"),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/templates");
+const tpl = (r.json?.templates ?? []).find((t) => t.id === tplId);
+const tplBody = JSON.stringify(tpl?.structure ?? {});
+check(
+  "BZ-F018 template carries structure, never the private wording (QA-14)",
+  tpl && tplBody.length > 10 && !/hand-tuned/i.test(tplBody) && /\{\{detail_1\}\}/.test(tplBody),
+  tplBody.slice(0, 250),
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/save-as-template`, { name: "hostile" });
+check("BZ-F018 other account cannot templatize A's document (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/templates");
+check("BZ-F018 other account sees no templates (QA-05)", !(r.json?.templates ?? []).some((t) => t.id === tplId));
+
+// A new revision after acceptance re-opens review and clears the pointer (QA-20)
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const preRevisionVersion = r.json?.document?.current_version;
+ r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: "actually make it friendlier" });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F017 revision after acceptance re-opens review, clears accepted_version (QA-20)",
+  r.json?.document?.status === "ready" && r.json?.document?.accepted_version === null && r.json?.document?.current_version === preRevisionVersion + 1,
+  JSON.stringify({ s: r.json?.document?.status, av: r.json?.document?.accepted_version, cv: r.json?.document?.current_version, expected: preRevisionVersion + 1 }),
+);
+
+// 19. BZ-F036: plain-language + accessible surface
+r = await api(cookieA, "GET", "/api/buzzy/models");
+const modelLabels = JSON.stringify(r.json?.models ?? []);
+check(
+  "BZ-F036 model catalog exposes friendly labels only — no raw provider ids",
+  r.status === 200 && (r.json?.models ?? []).length > 0 && !/glm|kimi|qwen|deepseek|claude|gpt|openrouter|nous/i.test(modelLabels),
+  modelLabels.slice(0, 200),
+);
+// The chat reply (stub) passes the jargon guard: no platform vocabulary
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_plain`, message: "hello", attemptId: `att_${run}_plain` });
+check(
+  "BZ-F036 chat replies carry no platform vocabulary",
+  r.status === 200 && !/\b(mission|claim|token|dev boards|gpt|claude)\b/i.test(r.json?.reply ?? ""),
+  r.json?.reply,
+);
+// Static page accessibility surface
+const talkPage = await (await fetch(`${BASE}/buzzy/talk`)).text();
+check(
+  "BZ-F036 talk page: viewport, labeled input, focus styles, alt text",
+  /viewport/.test(talkPage) && /aria-label="Describe the job/.test(talkPage) && /:focus/.test(talkPage) && /alt=/.test(talkPage),
+);
+const expertsPage = await (await fetch(`${BASE}/buzzy/experts`)).text();
+check(
+  "BZ-F036 experts page: keyboard-navigable cards + disclaimers in plain language",
+  /tabindex="0"/.test(expertsPage) && /not a licensed professional/i.test(expertsPage),
+);
+// user-facing error strings are plain and actionable (sample of live copy)
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { dueDate: "gibberish" });
+check(
+  "BZ-F036 error copy is plain-language with a next action",
+  r.status === 400 && /use a date like/i.test(r.json?.error ?? "") && !/\b(NaN|ISO 8601|string)\b/i.test(r.json?.error ?? ""),
+  r.json?.error,
+);
+
+// 20. BZ-F026: Today view — real state only
+r = await api(cookieA, "POST", "/api/buzzy/jobs", { id: `job_${run}_today`, title: "Undecided draft job", data: { draft: "half-done thing", approved: false } });
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_today`, { dueDate: "2020-01-01T00:00:00-05:00" });
+check("BZ-F026 due date stored", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { dueDate: "2999-01-01" });
+r = await api(cookieA, "GET", "/api/buzzy/today");
+check(
+  "BZ-F026 needs-your-decision bucket holds the undecided draft",
+  (r.json?.needsDecision ?? []).some((j) => j.id === `job_${run}_today` && j.href),
+  JSON.stringify(r.json?.needsDecision).slice(0, 200),
+);
+check(
+  "BZ-F026 ready-for-review bucket holds the ready document",
+  (r.json?.readyForReview ?? []).some((d) => d.id === docId),
+  JSON.stringify(r.json?.readyForReview).slice(0, 200),
+);
+check(
+  "BZ-F026 overdue computed from explicit due dates (not inferred)",
+  (r.json?.due ?? []).some((j) => j.id === `job_${run}_today` && j.overdue === true) &&
+    (r.json?.due ?? []).some((j) => j.id === docJob && j.overdue === false),
+  JSON.stringify(r.json?.due).slice(0, 300),
+);
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/job_${run}_today`, { dueDate: "not-a-date" });
+check("BZ-F026 unparseable due date → useful 400", r.status === 400 && r.json?.code === "bad_date", `status ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/today");
+check(
+  "BZ-F026 Today never crosses accounts (QA-05)",
+  (r.json?.needsDecision ?? []).length === 0 && (r.json?.readyForReview ?? []).length === 0 && (r.json?.due ?? []).length === 0,
+  JSON.stringify(r.json),
+);
+
+// 21. BZ-F013: declared tool surface + least-privilege enforcement
+r = await api(cookieA, "GET", "/api/buzzy/tools");
+const tools = r.json?.tools ?? [];
+check(
+  "BZ-F013 every tool declares the full contract",
+  tools.length >= 5 && tools.every((t) =>
+    t.name && t.inputs && t.output && t.sensitivity && t.costClass &&
+    t.sideEffects && t.permission && t.verification && t.failureBehavior),
+  JSON.stringify(tools).slice(0, 250),
+);
+check(
+  "BZ-F013 no outward/privileged capability is declared",
+  !tools.some((t) => /send|email|upload|mint|board/i.test(t.name)),
+  tools.map((t) => t.name).join(","),
+);
+// The rogue-tool attempt: the loop must refuse execution, complete the turn,
+// and the transcript must show the refusal — never the action.
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_rogue`, message: "send an email to my accountant", attemptId: `att_${run}_rogue` });
+check(
+  "BZ-F013 rogue tool call completes as a normal turn (no crash, no action)",
+  r.status === 200 && r.json?.ok === true && typeof r.json?.reply === "string",
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=job_${run}_rogue`);
+const rogueTranscript = JSON.stringify(r.json ?? {});
+check(
+  "BZ-F013 rogue recipient never persisted anywhere in the conversation",
+  !/attacker@evil/i.test(rogueTranscript),
+  rogueTranscript.slice(0, 300),
+);
+
+// 23. BZ-F014: the separate risk-aware review (calculator-backed)
+const goodDraft = "From: ACME Landscaping\nTo: Dana Reyes\n\n- Spring cleanup: $450.00\n- Mulch refresh: $300.00\n- Haul-away: $150.00\n\nTotal due: $900.00\n";
+r = await api(cookieA, "POST", "/api/buzzy/review", { draft: goodDraft });
+check(
+  "BZ-F014 separate check verifies matching arithmetic + named parties",
+  r.status === 200 && r.json?.independent === true && r.json?.hasWarnings === false &&
+    (r.json?.checks ?? []).some((c) => c.label === "Line items add up to the stated total" && c.verdict === "verified"),
+  JSON.stringify(r.json).slice(0, 300),
+);
+const badDraft = goodDraft.replace("Total due: $900.00", "Total due: $950.00");
+r = await api(cookieA, "POST", "/api/buzzy/review", { draft: badDraft });
+check(
+  "BZ-F014 calculator catches a wrong total — warning blocks ready (QA-11)",
+  r.status === 200 && r.json?.blocksReady === true &&
+    (r.json?.checks ?? []).some((c) => c.verdict === "warning" && /\$900\.00/.test(c.detail ?? "") ),
+  JSON.stringify(r.json).slice(0, 400),
+);
+r = await api(cookieA, "POST", "/api/buzzy/review", { draft: "From: A\nTo: B\n\nWe will sue you if you do not pay." });
+check(
+  "BZ-F014 fabricated legal threat is named as a warning (QA-13)",
+  (r.json?.checks ?? []).some((c) => c.label.includes("legal threats") && c.verdict === "warning"),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "POST", "/api/buzzy/review", { documentId: docId });
+check(
+  "BZ-F014 review accepts a stored document (ownership-scoped)",
+  r.status === 200 && Array.isArray(r.json?.checks),
+  `status ${r.status}`,
+);
+r = await api(cookieB, "POST", "/api/buzzy/review", { documentId: docId });
+check("BZ-F014 other account cannot review A's stored document (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 24. BZ-F012: model decisions recorded with policy version + reason
+r = await api(cookieA, "GET", `/api/buzzy/jobs/${docJob}/events`);
+const decisionEvent = (r.json?.events ?? []).find((e) => e.action === "model_decision");
+check(
+  "BZ-F012 each turn records a versioned, reasoned model decision internally",
+  // Pin the SHAPE (a versioned decision carrying a reason), not one frozen
+  // version string — bumping the policy version is not a product regression.
+  Boolean(decisionEvent) && /"policyVersion":"mp-\d+\.\d+\.\d+"/.test(decisionEvent.detail) && /"reason":"[^"]+"/.test(decisionEvent.detail),
+  JSON.stringify(r.json?.events).slice(0, 300),
+);
+
+// 25. BZ-F027: acceptance check sheet + human decision loop
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/check-sheet`);
+check(
+  "BZ-F027 check sheet lists produced / checked / uncertain / files",
+  r.status === 200 && r.json?.sheet?.produced?.version >= 1 &&
+    Array.isArray(r.json?.sheet?.checked) && r.json?.sheet?.files?.pdf &&
+    Array.isArray(r.json?.sheet?.uncertain),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "request_changes", note: "Make the payment paragraph firmer." });
+check(
+  "BZ-F027 request-changes is a bounded, version-tied correction",
+  r.status === 200 && r.json?.decision?.action === "request_changes" &&
+    r.json?.decision?.role === "internal" && /bounded correction/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "accept", role: "customer", version: 1 });
+check(
+  "BZ-F027 stale customer accept is refused (not the latest version)",
+  r.status === 409 && r.json?.code === "stale_version",
+  `status ${r.status}`,
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "accept", role: "customer" });
+check(
+  "BZ-F027 customer acceptance records a DISTINCT record",
+  r.status === 200 && r.json?.decision?.role === "customer",
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}/check-sheet`);
+const sheetDecisions = r.json?.sheet?.decisions ?? [];
+check(
+  "BZ-F027 both internal correction and customer acceptance appear in the ledger",
+  sheetDecisions.some((d) => d.action === "request_changes" && d.role === "internal") &&
+    sheetDecisions.some((d) => d.action === "accept" && d.role === "customer"),
+  JSON.stringify(sheetDecisions).slice(0, 300),
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "accept" });
+check("BZ-F027 other account cannot decide (QA-05)", r.status === 404, `got ${r.status}`);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "keep_draft" });
+check(
+  "BZ-F027 keep-as-draft is recorded without finalizing",
+  r.status === 200 && r.json?.decision?.action === "keep_draft",
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/decision`, { action: "request_changes" });
+check("BZ-F027 correction without a specific ask is refused", r.status === 400 && r.json?.code === "note_required", `status ${r.status}`);
+
+// 26. BZ-F028: three outcome-first starter journeys
+r = await api(cookieA, "GET", "/api/buzzy/starters");
+const starters = r.json?.starters ?? [];
+check(
+  "BZ-F028 exactly three working starters, each with outcome/discovery/outputs/checks/boundary",
+  starters.length === 3 && starters.every((s) =>
+    s.id && s.name && s.outcome && s.discovery?.length && s.outputs?.length &&
+    s.requiredChecks?.length && s.boundary && s.firstQuestion),
+  JSON.stringify(starters.map((s) => s.id)),
+);
+check(
+  "BZ-F028 starter set is reminder / proposal / handover",
+  JSON.stringify(starters.map((s) => s.id).sort()) === JSON.stringify(["customer-proposal", "overdue-reminder", "team-handover"]),
+  starters.map((s) => s.id).join(","),
+);
+check(
+  "BZ-F028 reminder boundary keeps sending separately approved",
+  /Draft only/i.test(starters.find((s) => s.id === "overdue-reminder")?.boundary ?? ""),
+);
+r = await api(cookieA, "POST", "/api/buzzy/starters/overdue-reminder/start", {});
+const starterJob = r.json?.job?.id;
+check(
+  "BZ-F028 starting a journey creates a Discovering job with the first question",
+  r.status === 201 && typeof starterJob === "string" && /invoice/i.test(r.json?.firstQuestion ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+const startedJob = (r.json?.jobs ?? []).find((j) => j.id === starterJob);
+check(
+  "BZ-F028 started journey is durable with its starter marker",
+  startedJob?.data?.starter === "overdue-reminder" && startedJob?.status === "Discovering",
+  JSON.stringify(startedJob?.data).slice(0, 200),
+);
+r = await api(cookieA, "POST", "/api/buzzy/starters/nope/start", {});
+check("BZ-F028 unknown starter → 404", r.status === 404, `got ${r.status}`);
+r = await api(cookieA, "POST", "/api/buzzy/starters/customer-proposal/start", { companyId: coId });
+check("BZ-F028 starter can bind to an owned company", r.status === 201, `status ${r.status}`);
+
+// 27. BZ-F029: repeat clones structure, never the approval
+r = await api(cookieA, "POST", `/api/buzzy/jobs/${docJob}/repeat`, {});
+const repeatJob = r.json?.job?.id;
+check(
+  "BZ-F029 repeat creates a fresh Discovering job asking for new inputs",
+  r.status === 201 && typeof repeatJob === "string" && /time period/i.test(r.json?.firstQuestion ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+check(
+  "BZ-F029 repeat explicitly disclaims carrying the old approval",
+  /approval.*did not|did not.*approval/i.test(r.json?.note ?? ""),
+  r.json?.note,
+);
+r = await api(cookieA, "GET", "/api/buzzy/jobs");
+const repeated = (r.json?.jobs ?? []).find((j) => j.id === repeatJob);
+check(
+  "BZ-F029 repeated job carries structure refs but no approval/draft",
+  repeated?.data?.repeatedFrom === docJob && repeated?.data?.approved === false &&
+    repeated?.status === "Discovering" && !repeated?.data?.draft,
+  JSON.stringify(repeated?.data).slice(0, 250),
+);
+r = await api(cookieA, "POST", `/api/buzzy/jobs/${repeatJob}/repeat`, {});
+check("BZ-F029 repeating a repeat works (chain preserved)", r.status === 201 && r.json?.job?.repeatedFrom === repeatJob);
+r = await api(cookieB, "POST", `/api/buzzy/jobs/${docJob}/repeat`, {});
+check("BZ-F029 other account cannot repeat A's job (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 28. BZ-F032: connected tools — explicit selection, revoke, outage tolerance
+r = await api(cookieA, "POST", "/api/buzzy/connections", { kind: "email", scope: "read", selected: ["Invoices", "Suppliers"] });
+check(
+  "BZ-F032 connection stores the exact selection (read-only first)",
+  r.status === 200 && (r.json?.selected ?? []).length === 2 && /selected/i.test(r.json?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 250),
+);
+r = await api(cookieA, "GET", "/api/buzzy/connections");
+const emailConn = (r.json?.connections ?? []).find((c) => c.kind === "email");
+check(
+  "BZ-F032 list surfaces scope detail for explanation/revocation",
+  emailConn?.scope_detail?.readOnly === true &&
+    JSON.stringify(emailConn?.scope_detail?.selected ?? []) === JSON.stringify(["Invoices", "Suppliers"]),
+  JSON.stringify(emailConn).slice(0, 250),
+);
+r = await api(cookieA, "DELETE", "/api/buzzy/connections/email");
+check("BZ-F032 revoke works", r.status === 200 && r.json?.ok === true);
+r = await api(cookieA, "GET", "/api/buzzy/connections");
+check("BZ-F032 revoked connection disappears", !(r.json?.connections ?? []).some((c) => c.kind === "email"));
+// Outage/revoke tolerance: saved work stays readable without the connection
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+check(
+  "BZ-F032 authored files survive disconnection (no connector dependency)",
+  r.status === 200 && typeof r.json?.document?.content === "string",
+  `status ${r.status}`,
+);
+r = await api(cookieB, "GET", "/api/buzzy/connections");
+check("BZ-F032 other account sees no connections (QA-05)", (r.json?.connections ?? []).length === 0);
+
+// 29. BZ-F033: outbound actions — preview, one-shot approval, truthful receipt
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+const curVersion = r.json?.document?.current_version;
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=${curVersion}`);
+const curText = r.json?.document?.content;
+r = await api(cookieA, "PATCH", `/api/buzzy/jobs/${docJob}`, { approved: true, draft: curText });
+check("BZ-F033 document accepted for outbound test", r.status === 200, `status ${r.status}`);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "dana@example.test", idempotencyKey: `out_${run}_1` });
+const outboundId = r.json?.action?.id;
+check(
+  "BZ-F033 preview pins exact version + recipient and sends nothing",
+  r.status === 201 && r.json?.action?.status === "pending" &&
+    r.json?.preview?.recipient === "dana@example.test" && /Nothing has been sent/i.test(r.json?.preview?.note ?? ""),
+  JSON.stringify(r.json).slice(0, 300),
+);
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "dana@example.test", idempotencyKey: `out_${run}_1` });
+check(
+  "BZ-F033 retry with the same key is idempotent (no duplicate action)",
+  r.status === 200 && r.json?.created === false && r.json?.action?.id === outboundId,
+  JSON.stringify(r.json).slice(0, 200),
+);
+r = await api(cookieA, "POST", `/api/buzzy/outbound/${outboundId}/approve`, {});
+check(
+  "BZ-F033 approval yields a TRUTHFUL receipt (nothing sent, no channel)",
+  r.status === 200 && r.json?.action?.status === "blocked" &&
+    r.json?.receipt?.result === "not_sent" && /no delivery channel/i.test(r.json?.receipt?.reason ?? ""),
+  JSON.stringify(r.json).slice(0, 300),
+);
+// The old action is invalidated by a material change (QA-16/20)
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "dana@example.test", idempotencyKey: `out_${run}_2` });
+const staleAction = r.json?.action?.id;
+r = await api(cookieA, "POST", `/api/buzzy/documents/${docId}/edit`, { content: curText + "\n\nP.S. One more line, hand-added." });
+check("BZ-F033 material change applied", r.status === 200 && r.json?.changed === true, JSON.stringify(r.json).slice(0, 150));
+r = await api(cookieA, "POST", `/api/buzzy/outbound/${staleAction}/approve`, {});
+check(
+  "BZ-F033 material change invalidates the pending approval (409 stale_action)",
+  r.status === 409 && r.json?.code === "stale_action",
+  `status ${r.status}`,
+);
+r = await api(cookieA, "GET", "/api/buzzy/outbound");
+check(
+  "BZ-F033 outbound ledger records every action + receipt",
+  (r.json?.actions ?? []).some((a) => a.id === outboundId && a.status === "blocked") &&
+    (r.json?.actions ?? []).some((a) => a.id === staleAction && a.status === "cancelled"),
+  JSON.stringify(r.json?.actions).slice(0, 300),
+);
+r = await api(cookieB, "POST", `/api/buzzy/documents/${docId}/outbound`, { recipient: "evil@example.test" });
+check("BZ-F033 other account cannot queue outbound (QA-05)", r.status === 404, `got ${r.status}`);
+
+// 30. BZ-F039: success telemetry + real journey verification
+const secretToken = `ZZTELEMETRYSECRET${run}`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: docJob, message: `note this ${secretToken} please`, attemptId: `att_${run}_tel` });
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}`);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?format=md`);
+r = await api(cookieA, "GET", "/api/buzzy/telemetry");
+const tel = r.json?.success ?? {};
+check(
+  "BZ-F039 journey emits the real event set (started/draft/approval/accepted/retrieved/exported)",
+  (tel.events?.project_started ?? 0) >= 1 && (tel.events?.draft_shown ?? 0) >= 1 &&
+    (tel.events?.approval_recorded ?? 0) >= 1 && (tel.events?.human_accepted ?? 0) >= 1 &&
+    (tel.events?.retrieved ?? 0) >= 1 && (tel.events?.exported ?? 0) >= 1,
+  JSON.stringify(tel.events),
+);
+check(
+  "BZ-F039 success metrics count accepted + retrievable outputs, not chats",
+  tel.acceptedOutputs >= 1 && tel.retrievableOutputs >= 1 && typeof tel.approvalRate === "number",
+  JSON.stringify({ a: tel.acceptedOutputs, r: tel.retrievableOutputs, rate: tel.approvalRate }),
+);
+check(
+  "BZ-F039 disclosure states what is collected and what never is",
+  /Chat messages/i.test(r.json?.disclosure?.neverCollects ?? "") &&
+    /accepted, retrievable/i.test(r.json?.disclosure?.purpose ?? ""),
+  JSON.stringify(r.json?.disclosure).slice(0, 200),
+);
+r = await api(cookieA, "GET", `/api/buzzy/documents/${docId}?version=999`);
+check("BZ-F039 unknown-version read still 404s (no false telemetry)", r.status === 404, `got ${r.status}`);
+r = await api(cookieB, "GET", "/api/buzzy/telemetry");
+check("BZ-F039 other account cannot read A's telemetry (QA-05)", r.status === 200 && (r.json?.success?.acceptedOutputs ?? 0) === 0, JSON.stringify(r.json?.success ?? {}).slice(0, 120));
+
+// 31. BZ-P04 review finding: unmatched API path is a clean 404, not a 500
+r = await api(cookieA, "GET", "/api/buzzy/definitely-not-a-route");
+check(
+  "BZ-P04 unreliable-path hygiene: unknown /api/buzzy route → 404 not_found",
+  r.status === 404 && r.json?.code === "not_found",
+  `status ${r.status} ${JSON.stringify(r.json).slice(0, 120)}`,
+);
+r = await api(cookieA, "POST", "/api/buzzy/documents/doc_nope/decision", { action: "accept" });
+check("BZ-P04 unknown document still 404s (unchanged)", r.status === 404, `got ${r.status}`);
+
+// 32. BZ-F042: never claim the product cannot save files; asking to save IS a draft
+const libJob = `job_${run}_library`;
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: libJob, message: "save the privacy policy as markdown in my library", attemptId: `att_${run}_lib` });
+check(
+  "BZ-F042 reply never claims the product cannot save files",
+  !/can'?t save files|no file-storage tool|file-storage/i.test(r.json?.reply ?? ""),
+  (r.json?.reply ?? "").slice(0, 160),
+);
+check(
+  "BZ-F042 the turn is treated as a deliverable request (draft gate opens)",
+  r.json?.draft === true,
+  JSON.stringify({ draft: r.json?.draft, done: r.json?.done }).slice(0, 120),
+);
+r = await api(cookieA, "GET", "/api/buzzy/documents");
+const libDoc = (r.json?.documents ?? []).find((d) => d.job_id === libJob);
+check(
+  "BZ-F042 asking for a saved file materializes a real Library document",
+  Boolean(libDoc?.id),
+  JSON.stringify((r.json?.documents ?? []).map((d) => d.job_id)).slice(0, 200),
+);
+check(
+  "BZ-F042 the saved document is versioned and readable",
+  libDoc?.current_version >= 1 && (libDoc?.status === "ready" || libDoc?.status === "draft" || libDoc?.status === "accepted"),
+  JSON.stringify(libDoc ?? {}).slice(0, 160),
+);
+
+// 22. BZ-F038: deterministic calculator through the tool loop
+r = await api(cookieA, "POST", "/api/buzzy/chat", { jobId: `job_${run}_calc`, message: "add up the invoice lines for me", attemptId: `att_${run}_calc` });
+check(
+  "BZ-F038 arithmetic runs in the deterministic calculator and lands in the reply",
+  r.status === 200 && r.json?.ok === true && /4050/.test(r.json?.reply ?? ""),
+  JSON.stringify(r.json).slice(0, 200),
+);
+// the transcript carries the exact computed working, not a model guess
+r = await api(cookieA, "GET", `/api/buzzy/transcript?jobId=job_${run}_calc`);
+check(
+  "BZ-F038 computed value persisted exactly",
+  /4050/.test(JSON.stringify(r.json ?? {})),
+);
+// unit-level: the parser itself (via a second scenario-free route is not exposed;
+// assert boundaries through the registry declaration instead)
+r = await api(cookieA, "GET", "/api/buzzy/tools");
+check(
+  "BZ-F038 calculator is a declared tool with explicit failure behavior",
+  (r.json?.tools ?? []).some((t) => t.name === "calculate" && /never a guessed number/i.test(t.failureBehavior)),
+);
+
+stub.close();
+console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
+process.exit(failures === 0 ? 0 : 1);

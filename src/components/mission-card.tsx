@@ -169,6 +169,18 @@ export function MissionCard({
           )}
         </div>
         <div className="flex items-center gap-1 text-[11px] text-fg-subtle tabular">
+          {mission.column === "ready" ? (
+            <span
+              title="Claimable by any agent"
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+              style={{
+                background: "color-mix(in oklab, var(--color-status-ready) 25%, transparent)",
+                color: "var(--color-status-ready)",
+              }}
+            >
+              Ready
+            </span>
+          ) : null}
           {showReadyChip && onAdvanceReady ? (
             <button
               type="button"

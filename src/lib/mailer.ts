@@ -39,8 +39,17 @@ function env(key: string): string | undefined {
   return v || undefined;
 }
 
+/** Product label for outbound mail — branded per deployment (dogfood B5). */
+function brandLabel(): string {
+  return process.env.BZ_BRAND === "beezilla" ? "BeeZilla" : "Dev Boards";
+}
+
 export function mailFromAddress(): string {
-  return env("SMTP_FROM") || env("MAIL_FROM") || "Dev Boards <noreply@localhost>";
+  return (
+    env("SMTP_FROM") ||
+    env("MAIL_FROM") ||
+    `${brandLabel()} <noreply@localhost>`
+  );
 }
 
 export function isSmtpConfigured(): boolean {
@@ -194,11 +203,11 @@ export async function sendVerificationMail(opts: {
   url: string;
 }): Promise<OutboundEmail> {
   const name = opts.name?.trim() || "there";
-  const subject = "Verify your Dev Boards email";
+  const subject = `Verify your ${brandLabel()} email`;
   const text = [
     `Hi ${name},`,
     "",
-    "Thanks for registering with Dev Boards.",
+    `Thanks for registering with ${brandLabel()}.`,
     "Please verify your email by opening this link:",
     "",
     opts.url,
@@ -206,12 +215,12 @@ export async function sendVerificationMail(opts: {
     "This link expires in about one hour.",
     "If you did not create an account, you can ignore this message.",
     "",
-    "— Dev Boards",
+    `— ${brandLabel()}`,
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
       <p>Hi ${escapeHtml(name)},</p>
-      <p>Thanks for registering with <strong>Dev Boards</strong>.</p>
+      <p>Thanks for registering with <strong>${brandLabel()}</strong>.</p>
       <p><a href="${escapeAttr(opts.url)}" style="display:inline-block;padding:0.6rem 1rem;background:#111;color:#fff;text-decoration:none;border-radius:6px">Verify email</a></p>
       <p style="color:#666;font-size:0.9rem">Or paste this URL:<br/><code>${escapeHtml(opts.url)}</code></p>
       <p style="color:#666;font-size:0.85rem">Link expires in about one hour. If you did not sign up, ignore this email.</p>
@@ -227,23 +236,23 @@ export async function sendMagicLinkMail(opts: {
   url: string;
 }): Promise<OutboundEmail> {
   const name = opts.name?.trim() || "there";
-  const subject = "Your Dev Boards sign-in link";
+  const subject = `Your ${brandLabel()} sign-in link`;
   const text = [
     `Hi ${name},`,
     "",
-    "Click this link to sign in to Dev Boards:",
+    `Click this link to sign in to ${brandLabel()}:`,
     "",
     opts.url,
     "",
     "This link expires in 15 minutes and can be used once.",
     "If you did not request it, you can ignore this message.",
     "",
-    "— Dev Boards",
+    `— ${brandLabel()}`,
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
       <p>Hi ${escapeHtml(name)},</p>
-      <p>Click below to sign in to <strong>Dev Boards</strong>:</p>
+      <p>Click below to sign in to <strong>${brandLabel()}</strong>:</p>
       <p><a href="${escapeAttr(opts.url)}" style="display:inline-block;padding:0.6rem 1rem;background:#111;color:#fff;text-decoration:none;border-radius:6px">Sign in</a></p>
       <p style="color:#666;font-size:0.9rem">Or paste this URL:<br/><code>${escapeHtml(opts.url)}</code></p>
       <p style="color:#666;font-size:0.85rem">This link expires in 15 minutes and can be used once. If you didn't request it, ignore this email.</p>
