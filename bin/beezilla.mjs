@@ -421,6 +421,47 @@ async function cmdRecipe(argv) {
     return (body.rejected?.length ?? 0) > 0 ? 1 : 0;
   }
 
+  // The catalog is the only cloud call: list what the cloud offers, then install
+  // one. Fetch verifies against pinned publishers server-side; the CLI only relays
+  // the verdict, so there is one implementation of "is this trustworthy".
+  if (sub === "catalog") {
+    const { status, body } = await api(rt, "/api/recipes/local/catalog");
+    if (status !== 200) {
+      console.error(`catalog failed (${status}): ${body?.error ?? ""}`);
+      return 1;
+    }
+    if (!body.configured) {
+      console.log(`no catalog configured — ${body.error}`);
+      return 0;
+    }
+    if (!body.ok) {
+      console.error(`catalog unreachable: ${body.error}`);
+      return 1;
+    }
+    if (!body.entries?.length) {
+      console.log(`catalog ${body.catalog} is empty`);
+      return 0;
+    }
+    console.log(`catalog ${body.catalog}`);
+    for (const e of body.entries) console.log(`  ${e.id}@${e.version}  ${e.title ?? ""}`);
+    return 0;
+  }
+
+  if (sub === "fetch") {
+    const id = argv.slice(1).find((a) => !a.startsWith("-"));
+    if (!id) {
+      console.error("usage: beezilla recipe fetch <id>");
+      return 2;
+    }
+    const { status, body } = await post("/api/recipes/local/fetch", { id });
+    if (body?.ok && status === 201) {
+      console.log(`installed ${body.cached?.id}@${body.cached?.version} (${body.cached?.title ?? body.entry?.title ?? ""})`);
+      return 0;
+    }
+    console.error(`refused: ${body?.error ?? body?.reason ?? status}${body?.detail ? ` — ${body.detail}` : ""}`);
+    return 1;
+  }
+
   const file = argv.find((a) => !a.startsWith("-") && a !== sub);
   if (!file) {
     console.error(`usage: beezilla recipe ${sub} <file.bezz>`);
