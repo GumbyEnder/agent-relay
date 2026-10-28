@@ -700,8 +700,10 @@ export default defineEventHandler(async (event) => {
     }
     const opsUser = ops ? queryValue(fullPath, "user") : null;
     const sql = await getSql();
-    // A fragment, so the ops path can read across owners without string surgery.
-    const scope = ops && !opsUser ? sql`TRUE` : sql`user_id = ${opsUser ?? user!.id}`;
+    // Never a nested query fragment (postgres.js would execute it). Two plain
+    // parameters instead: "everything" for the operator, "one owner" otherwise.
+    const scopeAll = ops && !opsUser;
+    const scopeUid = opsUser ?? user!.id;
     const daysRaw = Number(queryValue(fullPath, "days"));
     const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 7;
     const summary = (await sql`
@@ -718,7 +720,7 @@ export default defineEventHandler(async (event) => {
         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract_ms)    AS extract_p50,
         percentile_cont(0.5) WITHIN GROUP (ORDER BY asr_ms)        AS asr_p50
       FROM buzzy_voice_metrics
-      WHERE ${scope}
+      WHERE (${scopeAll} OR user_id = ${scopeUid})
         AND created_at > now() - (${days} || ' days')::interval
     `) as Array<Record<string, number | null>>;
     const byDay = (await sql`
@@ -729,7 +731,7 @@ export default defineEventHandler(async (event) => {
              percentile_cont(0.5) WITHIN GROUP (ORDER BY turn_ms) AS turn_p50,
              percentile_cont(0.95) WITHIN GROUP (ORDER BY turn_ms) AS turn_p95
       FROM buzzy_voice_metrics
-      WHERE ${scope}
+      WHERE (${scopeAll} OR user_id = ${scopeUid})
         AND created_at > now() - (${days} || ' days')::interval
       GROUP BY 1 ORDER BY 1 DESC
     `) as Array<Record<string, unknown>>;
@@ -737,7 +739,7 @@ export default defineEventHandler(async (event) => {
       SELECT created_at, source, mode, model, lane, asr_ms, ttft_ms, ttfa_ms, turn_ms,
              extract_ms, llm_ms, reply_chars, spoken, session_id, user_id
       FROM buzzy_voice_metrics
-      WHERE ${scope}
+      WHERE (${scopeAll} OR user_id = ${scopeUid})
       ORDER BY created_at DESC LIMIT 25
     `) as Array<Record<string, unknown>>;
     return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
