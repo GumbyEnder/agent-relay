@@ -14,7 +14,7 @@
  * The Electron layer is skipped (not failed) if no display/xvfb is available.
  */
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -129,6 +129,44 @@ if (!hasXvfb) {
   check("the bridge clears a credential", parsed?.clearOk === true && parsed?.searchAfterClear === null);
   check("the bridge exposes the app version", typeof parsed?.version === "string", String(parsed?.version));
   rmSync(probeDir, { recursive: true, force: true });
+}
+
+// ── 3. the whole chain: save a key -> restart -> a real answer ─────────────
+// The product promise is not "the key is stored", it is "the user gets answers".
+// This runs the real supervisor against the real runtime and a real model call.
+const testKey = (process.env.BZ_TEST_KEY ?? "").trim();
+if (!testKey) {
+  check("saving a key through the bridge produces real answers", true, "SKIP — BZ_TEST_KEY not set");
+} else {
+  const { RuntimeSupervisor } = await import("../desktop/supervisor.mjs");
+  const chainDir = mkdtempSync(join(tmpdir(), "bz-chain-"));
+  const supervisor = new RuntimeSupervisor({ root: ROOT, dataDir: chainDir });
+  const chain = createSettingsHandlers({ dataDir: () => chainDir, supervisor });
+
+  const t0 = Date.now();
+  const saved = await chain.saveInference({
+    provider: "byok",
+    key: testKey,
+    baseUrl: "https://inference-api.nousresearch.com/v1",
+    model: "z-ai/glm-5.3-flash",
+  });
+  check("the bridge started a stopped runtime", saved.started === true, `started=${saved.started}`);
+
+  const rt = JSON.parse(readFileSync(join(chainDir, "runtime.json"), "utf8"));
+  const reply = await fetch(`http://${rt.host}:${rt.port}/api/buzzy/chat`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${rt.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ message: "In one short sentence: what are you?", fresh: true }),
+  })
+    .then((r) => r.json())
+    .catch((err) => ({ ok: false, error: String(err) }));
+
+  const text = typeof reply?.reply === "string" ? reply.reply : "";
+  check("the runtime answers after the bridge saved a key", reply?.ok !== false && text.length > 10, `${Math.round((Date.now() - t0) / 1000)}s`);
+  check("the answer is not the connection-failure copy", !/trouble connecting|could not reach/i.test(text), text.slice(0, 90));
+
+  await supervisor.stop();
+  rmSync(chainDir, { recursive: true, force: true });
 }
 
 rmSync(dataDir, { recursive: true, force: true });
