@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "no
 import { homedir, platform } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveInference, saveInference, clearInference, redactKey } from "../scripts/lib/inference.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCHER = join(ROOT, "scripts", "beezilla-local.mjs");
@@ -191,11 +192,12 @@ async function cmdDoctor() {
   }
   ok("data dir writable", writable, DATA);
 
+  const inference = resolveInference(DATA);
   ok(
     "inference configured",
-    Boolean((process.env.BZ_CHAT_KEY ?? "").trim()),
-    (process.env.BZ_CHAT_KEY ?? "").trim()
-      ? "provider key present (ours or BYOK)"
+    Boolean(inference?.key),
+    inference
+      ? `${inference.provider} via ${inference.source}${inference.encrypted === false ? " (stored UNENCRYPTED)" : ""}`
       : "no key — chat will refuse by name; the rest works offline",
   );
 
@@ -262,6 +264,49 @@ async function cmdExport(argv) {
   return 0;
 }
 
+async function cmdKey(argv) {
+  const sub = argv[0] ?? "show";
+  const flag = (name) => {
+    const i = argv.indexOf(name);
+    return i !== -1 ? argv[i + 1] : undefined;
+  };
+
+  if (sub === "set") {
+    const key = flag("--key") ?? "";
+    if (!key.trim()) {
+      console.error('usage: beezilla key set --key <KEY> [--base-url <URL>] [--model <ID>] [--provider byok|beezilla]');
+      return 2;
+    }
+    const saved = saveInference(DATA, {
+      provider: flag("--provider") ?? "byok",
+      key,
+      baseUrl: flag("--base-url") ?? "",
+      model: flag("--model") ?? "",
+    });
+    console.log(`saved ${saved.provider} key ${redactKey(key)}${saved.encrypted ? " (encrypted)" : " (unencrypted — 0600 file)"}`);
+    console.log("restart the runtime for it to take effect: beezilla stop && beezilla serve");
+    return 0;
+  }
+
+  if (sub === "clear") {
+    clearInference(DATA);
+    console.log("inference credentials removed");
+    return 0;
+  }
+
+  const inf = resolveInference(DATA);
+  if (!inf) {
+    console.log("none configured — chat will refuse by name until a key is set");
+    return 0;
+  }
+  console.log(`provider  ${inf.provider} (${inf.source})`);
+  console.log(`key       ${redactKey(inf.key)}`);
+  console.log(`base url  ${inf.baseUrl || "(provider default)"}`);
+  console.log(`model     ${inf.model || "(provider default)"}`);
+  if (inf.encrypted === false) console.log("storage   unencrypted file (0600) — the desktop app uses the OS keychain");
+  return 0;
+}
+
 const [, , verb, ...rest] = process.argv;
 const verbs = {
   serve: cmdServe,
@@ -270,11 +315,12 @@ const verbs = {
   doctor: cmdDoctor,
   run: cmdRun,
   export: cmdExport,
+  key: cmdKey,
 };
 
 const fn = verbs[verb];
 if (!fn) {
-  console.log(`beezilla <command>\n\n  serve [--port N]   start the runtime\n  status             is it running\n  stop               graceful shutdown\n  doctor             diagnose this install\n  run "<message>"    one chat turn [--job id] [--work]\n  export [file]      full local data as JSON`);
+  console.log(`beezilla <command>\n\n  serve [--port N]   start the runtime\n  status             is it running\n  stop               graceful shutdown\n  doctor             diagnose this install\n  run "<message>"    one chat turn [--job id] [--work]\n  export [file]      full local data as ZIP\n  key set|show|clear inference credentials (BYOK, or ours via device token)`);
   process.exit(verb ? 2 : 0);
 }
 process.exit(await fn(rest));

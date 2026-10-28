@@ -10,10 +10,11 @@
  * so patching `window.fetch` there does not touch the page's fetch — a trap that
  * produces a window where every API call 401s while the preload "looks right".
  */
-import { app, BrowserWindow, Menu, session, shell, dialog } from "electron";
+import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RuntimeSupervisor } from "./supervisor.mjs";
+import { RuntimeSupervisor, defaultDataDir } from "./supervisor.mjs";
+import { loadInference } from "../scripts/lib/inference.mjs";
 
 const ROOT = app.isPackaged
   ? join(process.resourcesPath, "app")
@@ -136,6 +137,25 @@ async function createWindow() {
 
 app.whenReady().then(async () => {
   installMenu();
+
+  // Decrypt the stored inference key into the environment the runtime inherits.
+  // safeStorage (DPAPI on Windows / Keychain on macOS) only works once the app is
+  // ready, which is why this cannot happen at module load.
+  try {
+    const inf = loadInference(supervisor.dataDir, {
+      decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
+    });
+    if (inf?.key) {
+      process.env.BZ_CHAT_KEY = inf.key;
+      if (inf.baseUrl) process.env.BZ_CHAT_BASE_URL = inf.baseUrl;
+      if (inf.model) process.env.BZ_CHAT_MODEL = inf.model;
+      console.log(`[desktop] inference: ${inf.provider} (stored${inf.encrypted ? ", encrypted" : ""})`);
+    }
+  } catch (err) {
+    // A store we cannot decrypt must not take the app down — chat refuses by name.
+    console.warn("[desktop] could not read the stored inference key:", err instanceof Error ? err.message : err);
+  }
+
   try {
     await createWindow();
   } catch (err) {
