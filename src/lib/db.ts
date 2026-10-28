@@ -1,3 +1,5 @@
+import { isLocalRuntime, localDataDir } from "./runtime";
+
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
@@ -21,7 +23,11 @@ const rawPgliteDataDir =
 const pgliteDataDir =
   rawPgliteDataDir && rawPgliteDataDir.trim()
     ? rawPgliteDataDir.trim()
-    : undefined;
+    : // Local installs get a durable store without any env plumbing: the
+      // desktop app is useless if a restart forgets every job.
+      isLocalRuntime()
+      ? localDataDir()
+      : undefined;
 
 /**
  * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured

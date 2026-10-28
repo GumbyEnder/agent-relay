@@ -43,6 +43,8 @@
     "test:buzzy-resume": "node scripts/test-buzzy-resume.mjs",
     "smoke": "npm run test:engine && npm run test:api",
     "start": "node scripts/migrate.mjs && HOST=0.0.0.0 NITRO_HOST=0.0.0.0 node .output/server/index.mjs",
+    "local": "node scripts/beezilla-local.mjs",
+    "test:local": "node scripts/test-local-e2e.mjs",
     "postbuild": "echo build complete",
     "test:history": "npx tsx scripts/test-history.ts",
     "test:build-order": "npx tsx scripts/test-build-order.ts",
