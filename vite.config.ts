@@ -440,6 +440,12 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/search-token.nitro.ts",
               },
               {
+                // The gateway itself: holds the Brave key, spends our quota on a
+                // token's behalf, passes the provider payload through unchanged.
+                route: "/api/search",
+                handler: "./src/lib/search-gateway.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/chat",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
