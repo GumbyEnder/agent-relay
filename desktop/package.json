@@ -25,7 +25,8 @@
       "supervisor.mjs",
       "package.json",
       "settings.mjs",
-      "preload.cjs"
+      "preload.cjs",
+      "connect.mjs"
     ],
     "extraResources": [
       {
