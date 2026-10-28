@@ -284,12 +284,19 @@
     }
 
     loadState();
+    // A saved state from an older shape (or a half-written one) must not take the
+    // page down: loadState replaces the defaults, so re-apply the containers this
+    // screen reads unconditionally.
+    state.answers = state.answers && typeof state.answers === "object" ? state.answers : {};
+    state.skipped = state.skipped && typeof state.skipped === "object" ? state.skipped : {};
+    state.messages = Array.isArray(state.messages) ? state.messages : [];
+    state.board = state.board && typeof state.board === "object" ? state.board : { Waiting: [], Working: [], "Needs you": [], Done: [] };
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
 
     function goRemember() {
-      const stm = Object.keys(state.answers).length
+      const stm = Object.keys(state.answers || {}).length
         ? "<ul>" + QUESTIONS.map((q) => "<li>" + q.prompt.split("—")[0] + ": " + escapeHtml(state.answers[q.id] || "—") + "</li>").join("") + "</ul>"
         : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
       const completedJobs = catalog.jobs.filter(jobComplete);
