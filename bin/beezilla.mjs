@@ -201,6 +201,20 @@ async function cmdDoctor() {
       : "no key — chat will refuse by name; the rest works offline",
   );
 
+  // A build with no pinned publisher cannot trust a single fetched recipe, so
+  // say it at install time rather than at the first import.
+  const pins = (process.env.BZ_RECIPE_PUBLISHER_KEYS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  ok(
+    "publisher keys pinned",
+    pins.length > 0,
+    pins.length > 0
+      ? `${pins.length} pinned — fetched recipes can be trusted`
+      : "NONE pinned — no fetched recipe will be trusted (set BZ_RECIPE_PUBLISHER_KEYS; the release build bakes these in)",
+  );
+
   const rt = readRuntime();
   ok("runtime", Boolean(rt && (await healthy(rt))), rt ? `http://${rt.host}:${rt.port}` : "not started");
 

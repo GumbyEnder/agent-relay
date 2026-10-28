@@ -8,6 +8,40 @@
   "main": "main.mjs",
   "author": "BeeZilla",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "stage": "node dist.mjs stage",
+    "dist": "node dist.mjs all"
+  },
+  "build": {
+    "appId": "ai.beezilla.desktop",
+    "productName": "BeeZilla",
+    "copyright": "BeeZilla",
+    "directories": {
+      "output": "../dist-desktop",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.mjs",
+      "supervisor.mjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "stage/app",
+        "to": "app"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
