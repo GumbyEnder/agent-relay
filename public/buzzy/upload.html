@@ -3,33 +3,35 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BeeZilla — Publish a recipe</title>
+  <title>BeeZilla — Learn a recipe</title>
   <style>
     :root { --bz-black:#0A0A0A; --bz-panel:#141414; --bz-yellow:#FFC107; --bz-yellow-dim:#B8860B; --bz-font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; }
     * { box-sizing: border-box; }
     body { font-family: var(--bz-font); color:#E8E8E8; background: var(--bz-black); margin:0; line-height:1.55; }
-    main { max-width: 760px; margin:0 auto; padding:2rem 1.25rem 4rem; }
+    main { max-width: 860px; margin:0 auto; padding:2rem 1.25rem 4rem; }
     h1 { font-size:1.8rem; margin:0 0 0.35rem; color:#fff; }
     .lede { color:#B8B8B8; margin:0 0 1.75rem; font-size:0.95rem; }
-    label { display:block; font-size:0.75rem; letter-spacing:.08em; text-transform:uppercase; color:#8A8A8A; margin:1.1rem 0 0.35rem; }
-    input, select, textarea {
-      width:100%; background:#101010; border:1px solid #2A2A2A; border-radius:6px;
-      color:#E8E8E8; font:inherit; font-size:0.94rem; padding:0.6rem 0.7rem;
-    }
-    input:focus, select:focus, textarea:focus { outline:none; border-color: var(--bz-yellow-dim); }
-    textarea { min-height: 110px; resize: vertical; }
-    .hint { font-size:0.76rem; color:#7A7A7A; margin:0.3rem 0 0; }
-    .row { display:flex; gap:1rem; }
-    .row > div { flex:1; }
-    button {
-      margin-top:1.5rem; background: var(--bz-yellow); color:#111; border:0; border-radius:6px;
-      font-weight:700; font-size:0.95rem; padding:0.7rem 1.4rem; cursor:pointer;
-    }
-    button:disabled { opacity:0.5; cursor:default; }
-    .msg { margin-top:1.25rem; font-size:0.9rem; }
+    h2 { font-size:0.78rem; letter-spacing:.12em; text-transform:uppercase; color:#8A8A8A; margin:2rem 0 0.75rem; padding-bottom:.5rem; border-bottom:1px solid #222; }
+    label { display:block; font-size:0.72rem; letter-spacing:.08em; text-transform:uppercase; color:#8A8A8A; margin:1rem 0 0.3rem; }
+    input, textarea { width:100%; background:#101010; border:1px solid #2A2A2A; border-radius:6px; color:#E8E8E8; font:inherit; font-size:0.93rem; padding:0.55rem 0.7rem; }
+    textarea { min-height: 74px; resize: vertical; }
+    input:focus, textarea:focus { outline:none; border-color: var(--bz-yellow-dim); }
+    .hint { font-size:0.75rem; color:#7A7A7A; margin:0.25rem 0 0; }
+    button { font:inherit; border-radius:6px; cursor:pointer; }
+    .job { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:0.7rem 0.85rem; border:1px solid #232323; background:var(--bz-panel); border-radius:6px; margin-bottom:0.5rem; }
+    .job .t { font-size:0.92rem; color:#fff; }
+    .job .m { font-size:0.73rem; color:#7A7A7A; }
+    .job button { background:var(--bz-yellow); color:#111; border:0; font-weight:700; font-size:0.78rem; padding:0.4rem 0.8rem; }
+    .job button:disabled { opacity:0.45; cursor:default; }
+    .publish { background:var(--bz-yellow); color:#111; border:0; font-weight:700; font-size:0.95rem; padding:0.7rem 1.4rem; margin-top:1.5rem; }
+    .publish:disabled { opacity:0.5; cursor:default; }
+    .msg { margin-top:1rem; font-size:0.9rem; }
     .msg.ok { color:#67D99B; } .msg.err { color:#FF8A80; }
-    .note { border-left:3px solid var(--bz-yellow); background:var(--bz-panel); padding:0.9rem 1.1rem; border-radius:4px; font-size:0.84rem; color:#A8A8A8; margin-top:2rem; }
+    .note { border-left:3px solid var(--bz-yellow); background:var(--bz-panel); padding:0.9rem 1.1rem; border-radius:4px; font-size:0.84rem; color:#A8A8A8; margin-top:1.5rem; }
+    .hidden { display:none; }
+    .row { display:flex; gap:1rem; } .row > div { flex:1; }
     a { color: var(--bz-yellow); }
+    ul.derived { margin:0.2rem 0 0; padding-left:1.1rem; color:#C9CDD2; font-size:0.88rem; }
   </style>
   <link rel="stylesheet" href="/buzzy/nav.css" />
 </head>
@@ -47,79 +49,137 @@
   </header>
 
   <main>
-    <h1>Publish a recipe</h1>
+    <h1>Learn a recipe</h1>
     <p class="lede">
-      You are the author, so you are the seller. Put it on the shelf with a price, or leave it free.
-      The method is sealed the moment you publish — what people see is what it does, never how.
+      You don't write a recipe here. You pick a job you already finished, and BeeZilla reads the
+      method out of what you actually did — the first draft, the version you kept, and every
+      correction you made along the way.
     </p>
 
-    <label for="basis">What kind of job does it do?</label>
-    <select id="basis">
-      <option value="quote-comparison">Comparing quotes or suppliers</option>
-      <option value="complaint-resolution">Answering a complaint</option>
-      <option value="meeting-action-pack">Turning a meeting into actions</option>
-      <option value="bookkeeping-prep">Getting the books ready</option>
-      <option value="campaign-brief">Writing a campaign brief</option>
-      <option value="people-ops-paperwork">People-ops paperwork</option>
-      <option value="grants-rfp">A grant or RFP response</option>
-      <option value="dispute-paperwork">Dispute paperwork</option>
-    </select>
+    <h2>1. Pick a finished job</h2>
+    <div id="jobs"><p class="hint">Loading your jobs…</p></div>
 
-    <label for="title">Title</label>
-    <input id="title" maxlength="120" placeholder="e.g. Pick Between Bids" />
-    <p class="hint">1–120 characters. This is the shelf label.</p>
+    <div id="draftBox" class="hidden">
+      <h2>2. This is what it learned — correct it</h2>
+      <p class="hint">Everything below came from your job. If something is wrong, change it: this is what buyers will follow.</p>
 
-    <label for="description">What does it do for the buyer?</label>
-    <textarea id="description" maxlength="600" placeholder="Say what they get, not how it works."></textarea>
-    <p class="hint">
-      Up to 600 characters. Write what the buyer receives — if you describe the method, the
-      seal will refuse it, because the description is published in clear.
-    </p>
+      <label for="title">Title</label>
+      <input id="title" maxlength="120" />
 
-    <label for="price">Price in Honey Drops</label>
-    <input id="price" type="number" min="0" step="1" value="0" />
-    <p class="hint">0 means free. Whole Drops only.</p>
+      <label for="description">What a buyer gets</label>
+      <textarea id="description" maxlength="600"></textarea>
 
-    <button id="go">Seal and publish</button>
-    <div id="msg" class="msg"></div>
+      <label for="boundary">What it must never do</label>
+      <textarea id="boundary" maxlength="400"></textarea>
+
+      <label>Questions it asks before starting</label>
+      <ul class="derived" id="discoveryList"></ul>
+
+      <label>What the finished document always contains</label>
+      <ul class="derived" id="contractList"></ul>
+
+      <label for="price">Price in Honey Drops</label>
+      <input id="price" type="number" min="0" step="1" value="0" />
+      <p class="hint">0 means free. Whole Drops only.</p>
+
+      <button class="publish" id="publish">Seal and publish</button>
+      <div id="msg" class="msg"></div>
+    </div>
 
     <div class="note">
-      <strong>What gets published:</strong> your title, description, price, the date, and the checks
-      the recipe ships with. <strong>What stays sealed:</strong> the instructions themselves — they are
-      encrypted before they are stored, and neither a shopper nor the shelf ever serves them.
+      The method is sealed when you publish: buyers never see it, and neither does the shelf.
+      What they see is the title, the description, the price, and what it refuses to do.
     </div>
   </main>
 
   <script src="/buzzy/wallet-chip.js"></script>
   <script>
     (function () {
-      var btn = document.getElementById("go");
+      var jobsBox = document.getElementById("jobs");
+      var draftBox = document.getElementById("draftBox");
       var msg = document.getElementById("msg");
+      var CURRENT = null;   // { job, draft }
+
+      function el(t, c, x) { var n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; }
       function say(text, ok) { msg.className = "msg " + (ok ? "ok" : "err"); msg.textContent = text; }
 
-      btn.addEventListener("click", function () {
+      fetch("/api/recipes/derive", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+        .then(function (d) {
+          var jobs = (d && d.jobs) || [];
+          jobsBox.textContent = "";
+          if (!jobs.length) { jobsBox.appendChild(el("p", "hint", "No jobs yet. Do one in Talk first — recipes come from work, not from forms.")); return; }
+          jobs.forEach(function (j) {
+            var row = el("div", "job");
+            var left = el("div");
+            left.appendChild(el("div", "t", j.title));
+            left.appendChild(el("div", "m", j.canDerive ? ("finished · " + j.versions + " version" + (j.versions === 1 ? "" : "s")) : "not finished yet"));
+            row.appendChild(left);
+            var btn = el("button", null, j.canDerive ? "Learn from this" : "No document");
+            btn.disabled = !j.canDerive;
+            btn.addEventListener("click", function () { learn(j, btn); });
+            row.appendChild(btn);
+            jobsBox.appendChild(row);
+          });
+        })
+        .catch(function (e) { jobsBox.textContent = "Could not load your jobs (" + e.message + ")."; });
+
+      function learn(job, btn) {
+        btn.disabled = true; btn.textContent = "Reading…";
+        fetch("/api/recipes/derive", {
+          method: "POST", credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId: job.id })
+        })
+          .then(function (r) { return r.json().then(function (b) { return { s: r.status, b: b }; }); })
+          .then(function (res) {
+            btn.disabled = false; btn.textContent = "Learn from this";
+            if (res.s !== 200 || !res.b.ok) { jobsBox.appendChild(el("p", "msg err", res.b.error || "Could not read that job.")); return; }
+            CURRENT = { job: job, draft: res.b.draft };
+            fill(res.b.draft);
+            draftBox.classList.remove("hidden");
+            draftBox.scrollIntoView({ behavior: "smooth" });
+          })
+          .catch(function () { btn.disabled = false; btn.textContent = "Learn from this"; });
+      }
+
+      function fill(d) {
+        document.getElementById("title").value = d.title || "";
+        document.getElementById("description").value = d.description || "";
+        document.getElementById("boundary").value = d.boundary || "";
+        var dl = document.getElementById("discoveryList"); dl.textContent = "";
+        (d.discovery || []).forEach(function (q) { dl.appendChild(el("li", null, q)); });
+        var cl = document.getElementById("contractList"); cl.textContent = "";
+        (d.outputContract || []).forEach(function (s) { cl.appendChild(el("li", null, s)); });
+      }
+
+      document.getElementById("publish").addEventListener("click", function () {
+        if (!CURRENT) return;
+        var btn = this;
+        var d = CURRENT.draft;
         var body = {
-          basis: document.getElementById("basis").value,
+          basis: CURRENT.job.basis || "quote-comparison",
           title: document.getElementById("title").value.trim(),
           description: document.getElementById("description").value.trim(),
-          priceHoneyDrops: Number(document.getElementById("price").value || 0)
+          priceHoneyDrops: Number(document.getElementById("price").value || 0),
+          method: {
+            discovery: d.discovery,
+            boundary: document.getElementById("boundary").value.trim(),
+            checklist: d.checklist,
+            outputContract: d.outputContract
+          }
         };
-        if (body.title.length < 3) { say("Give it a title first.", false); return; }
+        if (body.title.length < 3) { say("Give it a title.", false); return; }
         btn.disabled = true; say("Sealing…", true);
         fetch("/api/recipes/upload", {
           method: "POST", credentials: "same-origin",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body)
         })
-          .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+          .then(function (r) { return r.json().then(function (b) { return { s: r.status, b: b }; }); })
           .then(function (res) {
-            if (res.status === 201) {
-              say("Published. It is on the shelf now.", true);
-              setTimeout(function () { window.location.href = "/buzzy/recipes"; }, 900);
-            } else {
-              say(res.j.error || "That did not publish.", false);
-              btn.disabled = false;
-            }
+            if (res.s === 201) { say("Published. It is on the shelf now.", true); setTimeout(function () { location.href = "/buzzy/recipes"; }, 900); }
+            else { say(res.b.error || "That did not publish.", false); btn.disabled = false; }
           })
           .catch(function (e) { say("Could not reach the server (" + e.message + ").", false); btn.disabled = false; });
       });
