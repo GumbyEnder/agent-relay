@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { RuntimeSupervisor, defaultDataDir } from "./supervisor.mjs";
 import { isExpired, loadInference } from "../scripts/lib/inference.mjs";
 import { createSettingsHandlers } from "./settings.mjs";
+import { connectAccount } from "./connect.mjs";
 
 const ROOT = app.isPackaged
   ? join(process.resourcesPath, "app")
@@ -90,6 +91,8 @@ function applyStoredInferenceToEnv() {
  * handlers are built there — but they are plain functions, so the contract can be
  * tested without a display (see scripts/test-desktop-settings.mjs).
  */
+let settingsHandlers = null;
+
 function registerSettingsIpc() {
   const handlers = createSettingsHandlers({
     dataDir: () => supervisor.dataDir,
@@ -115,6 +118,8 @@ function registerSettingsIpc() {
   ipcMain.handle("beezilla:settings:saveSearch", wrap((cfg) => handlers.saveSearch(cfg)));
   ipcMain.handle("beezilla:settings:clear", wrap((kind) => handlers.clear(kind)));
   ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion() })));
+  // "Connect BeeZilla account" from the Settings screen: same flow as the menu item.
+  ipcMain.handle("beezilla:settings:connect", wrap(() => connectManagedAccount()));
 
   return handlers;
 }
@@ -142,6 +147,11 @@ function installMenu() {
             label: "Settings…",
             accelerator: "CmdOrCtrl+,",
             click: () => void openSettings(),
+          },
+          {
+            label: "Connect BeeZilla account…",
+            enabled: Boolean(process.env.BZ_CLOUD_URL || process.env.BZ_CONNECT_TEST),
+            click: () => void connectManagedAccount(),
           },
           { type: "separator" },
           { role: "reload" },
@@ -186,6 +196,60 @@ function settingsWindowFor(url) {
   void settingsWindow.loadURL(url);
   console.log(`[desktop] settings window opened ${url}`);
   return settingsWindow;
+}
+
+/**
+ * Connect a BeeZilla account so the app can use OUR inference.
+ *
+ * The token is minted inside our own page (session cookie stays there) and handed
+ * straight to the credential store; the store restart then puts it in the runtime's
+ * environment. Nothing about the account itself is copied locally.
+ */
+async function connectManagedAccount() {
+  const win = new BrowserWindow({
+    width: 520,
+    height: 760,
+    title: "Connect BeeZilla",
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  win.setMenuBarVisibility(false);
+
+  const outcome = await connectAccount({
+    baseUrl: process.env.BZ_CLOUD_URL,
+    open: (url) => win.loadURL(url),
+    evaluate: (script) => win.webContents.executeJavaScript(script, true),
+    isOpen: () => !win.isDestroyed(),
+    close: () => {
+      if (!win.isDestroyed()) win.destroy();
+    },
+    signInDeadlineMs: Number(process.env.BZ_CONNECT_DEADLINE_MS ?? 180_000),
+  });
+
+  if (!outcome.ok) {
+    console.warn(`[desktop] connect: ${outcome.error}`);
+    if (!process.env.BZ_CONNECT_TEST && mainWindow && !mainWindow.isDestroyed()) {
+      void dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "BeeZilla inference",
+        message: outcome.needsSignIn ? "Sign-in did not complete." : "Could not connect.",
+        detail: `${outcome.error}\n\nYou can still use your own key: BeeZilla → Settings.`,
+      });
+    }
+    return outcome;
+  }
+
+  const saved = await settingsHandlers.saveInference({
+    provider: "beezilla",
+    key: outcome.token,
+    baseUrl: outcome.baseUrl,
+    model: outcome.model,
+    expiresAt: outcome.expiresAt,
+  });
+  console.log(
+    `[desktop] connect: BeeZilla inference connected (expires ${outcome.expiresAt ?? "unknown"}), runtime ${saved.started ? "started" : "restarted"}`,
+  );
+  return { ...outcome, token: undefined, savedTo: saved.saved?.key };
 }
 
 async function openSettings() {
@@ -270,6 +334,9 @@ async function createWindow() {
   // Test hook: load a probe page instead of the product UI, so the privileged
 // bridge can be exercised in a real sandboxed renderer.
   const probe = process.env.BZ_SETTINGS_TEST;
+  // The connect probe drives its own window; it must not be mistaken for the
+  // settings probe (which loads test-settings.html and waits for a result line).
+  const quiet = Boolean(probe || process.env.BZ_CONNECT_TEST);
   // BZ_PROBE_URL lets a test load a real product page (e.g. the settings screen)
   // and drive it, instead of a synthetic probe document.
   const probePath = process.env.BZ_PROBE_PATH;
@@ -287,6 +354,15 @@ async function createWindow() {
   // prove the window actually paints instead of only proving the process boots.
   // Capture AFTER loadURL resolves — registering a `did-finish-load` listener
   // here would never fire, because the event has already been emitted by then.
+  if (process.env.BZ_CONNECT_TEST) {
+    // Drive the real flow (window -> mint inside the page -> credential store) and
+    // report it in one parseable line for scripts/test-desktop-connect.mjs.
+    const outcome = await connectManagedAccount();
+    console.log(`CONNECT_RESULT:${JSON.stringify({ ok: outcome.ok, error: outcome.error ?? null, needsSignIn: outcome.needsSignIn ?? false })}`);
+    setTimeout(() => app.quit(), 500);
+    return;
+  }
+
   if (probe && process.env.BZ_SETTINGS_DRIVE) {
     // Drive the real settings form: pick "my own key", paste, save, read the
     // result out of the DOM. A UI that renders but cannot save is not a feature.
@@ -332,11 +408,11 @@ async function createWindow() {
 
   // First run with nothing configured: chat can only refuse, so open the thing
   // that makes it usable instead of handing a new user a dead window.
-  if (!probe && !process.env.BZ_CHAT_KEY) {
+  if (!quiet && !process.env.BZ_CHAT_KEY) {
     console.log("[desktop] onboarding: no inference configured — opening Settings");
     void openSettings();
   }
-  if (!probe && process.env.BZ_FIRSTRUN_TEST) {
+  if (!quiet && process.env.BZ_FIRSTRUN_TEST) {
     // Bounded test launch: a configured install has nothing to prove and no other
     // reason to exit, so without this the suite waits out its own timeout.
     setTimeout(() => app.quit(), 4000);
@@ -368,7 +444,7 @@ app.whenReady().then(async () => {
   installMenu();
 
   applyStoredInferenceToEnv();
-  registerSettingsIpc();
+  settingsHandlers = registerSettingsIpc();
 
   try {
     await createWindow();
