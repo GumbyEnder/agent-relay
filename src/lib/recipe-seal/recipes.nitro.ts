@@ -209,6 +209,80 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── POST /api/recipes/:hash/rate — score a recipe you own ─────────────────
+//
+// Only an owner may rate: a score from someone who never ran it is a review of the
+// description. The rater id is stored to stop double-voting and is never returned.
+const rateMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/rate$"));
+if (rateMatch && method === "POST") {
+  const user = opCtx?.user ?? null;
+  if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+  const rDeps = await getDeps();
+  const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => rDeps.q<T>(text, params ?? []);
+  const hash = rateMatch[1];
+  if (!(await ownsRecipe(q, user.id, hash))) {
+    setResponseStatus(event, 403);
+    return { ok: false, error: "You can rate a recipe once you own it", code: "not_owned" };
+  }
+  const b = (body ?? {}) as Record<string, unknown>;
+  const stars = Number(b.stars);
+  try {
+    await rateRecipe(q, hash, user.id, stars);
+  } catch (e) {
+    setResponseStatus(event, 400);
+    return { ok: false, error: String((e as Error).message), code: "invalid_stars" };
+  }
+  const summary = (await ratingsFor(q, [hash]))[hash] ?? { average: null, count: 0 };
+  return { ok: true, your_stars: Math.trunc(stars), ...summary };
+}
+
+// ── POST /api/recipes/:hash/use — run a recipe this account owns ──────────
+//
+// The door is the session plus the entitlement, not a bearer token: a person who
+// paid already has a session, and inventing a secret to hand back to the same
+// browser adds a leak surface for nothing. The sealed method is opened here and
+// never leaves the server — the caller gets the document and the verdict.
+const useMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/use$"));
+if (useMatch && method === "POST") {
+  const user = opCtx?.user ?? null;
+  if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+
+  const rDeps = await getDeps();
+  if (!rDeps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Running is not configured", code: "run_unavailable" }; }
+  if (!process.env.BZ_CHAT_KEY && !process.env.BZ_CHAT_BASE_URL) {
+    setResponseStatus(event, 503);
+    return { ok: false, error: "No model lane is configured", code: "run_unavailable" };
+  }
+
+  const hash = useMatch[1];
+  const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => rDeps.q<T>(text, params ?? []);
+  if (!(await ownsRecipe(q, user.id, hash))) {
+    setResponseStatus(event, 402);
+    return { ok: false, error: "You do not own this recipe yet", code: "not_owned" };
+  }
+
+  const b = (body ?? {}) as Record<string, unknown>;
+  const input = typeof b.input === "string" ? b.input.trim() : "";
+  if (!input) { setResponseStatus(event, 400); return { ok: false, error: "Tell it what you need", code: "input_required" }; }
+
+  try {
+    const result = await useRecipe({
+      storage: rDeps.storage,
+      kek: rDeps.kek,
+      hash,
+      input,
+      model: (prompt: string) => chatCompletion([{ role: "user", content: prompt }], { temperature: 0.2 }),
+    });
+    if (!result.artifact) { setResponseStatus(event, 502); return result; }
+    return { hash, ...result };
+  } catch (e) {
+    setResponseStatus(event, 502);
+    return { ok: false, error: String((e as Error).message).slice(0, 300), code: "run_failed" };
+  }
+}
+
+const rDeps = await getDeps();
+
   // ── POST /api/recipes/upload — a person publishes their own recipe ─────────
   //
   // Everything else on this route is operator-only because it enrols a *bundle
@@ -224,79 +298,7 @@ export default defineEventHandler(async (event) => {
     const user = opCtx?.user ?? null;
     if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
 
-    // ── POST /api/recipes/:hash/rate — score a recipe you own ─────────────────
-  //
-  // Only an owner may rate: a score from someone who never ran it is a review of the
-  // description. The rater id is stored to stop double-voting and is never returned.
-  const rateMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/rate$"));
-  if (rateMatch && method === "POST") {
-    const user = opCtx?.user ?? null;
-    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
     const deps = await getDeps();
-    const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => deps.q<T>(text, params ?? []);
-    const hash = rateMatch[1];
-    if (!(await ownsRecipe(q, user.id, hash))) {
-      setResponseStatus(event, 403);
-      return { ok: false, error: "You can rate a recipe once you own it", code: "not_owned" };
-    }
-    const b = (body ?? {}) as Record<string, unknown>;
-    const stars = Number(b.stars);
-    try {
-      await rateRecipe(q, hash, user.id, stars);
-    } catch (e) {
-      setResponseStatus(event, 400);
-      return { ok: false, error: String((e as Error).message), code: "invalid_stars" };
-    }
-    const summary = (await ratingsFor(q, [hash]))[hash] ?? { average: null, count: 0 };
-    return { ok: true, your_stars: Math.trunc(stars), ...summary };
-  }
-
-  // ── POST /api/recipes/:hash/use — run a recipe this account owns ──────────
-  //
-  // The door is the session plus the entitlement, not a bearer token: a person who
-  // paid already has a session, and inventing a secret to hand back to the same
-  // browser adds a leak surface for nothing. The sealed method is opened here and
-  // never leaves the server — the caller gets the document and the verdict.
-  const useMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/use$"));
-  if (useMatch && method === "POST") {
-    const user = opCtx?.user ?? null;
-    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
-
-    const deps = await getDeps();
-    if (!deps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Running is not configured", code: "run_unavailable" }; }
-    if (!process.env.BZ_CHAT_KEY && !process.env.BZ_CHAT_BASE_URL) {
-      setResponseStatus(event, 503);
-      return { ok: false, error: "No model lane is configured", code: "run_unavailable" };
-    }
-
-    const hash = useMatch[1];
-    const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => deps.q<T>(text, params ?? []);
-    if (!(await ownsRecipe(q, user.id, hash))) {
-      setResponseStatus(event, 402);
-      return { ok: false, error: "You do not own this recipe yet", code: "not_owned" };
-    }
-
-    const b = (body ?? {}) as Record<string, unknown>;
-    const input = typeof b.input === "string" ? b.input.trim() : "";
-    if (!input) { setResponseStatus(event, 400); return { ok: false, error: "Tell it what you need", code: "input_required" }; }
-
-    try {
-      const result = await useRecipe({
-        storage: deps.storage,
-        kek: deps.kek,
-        hash,
-        input,
-        model: (prompt: string) => chatCompletion([{ role: "user", content: prompt }], { temperature: 0.2 }),
-      });
-      if (!result.artifact) { setResponseStatus(event, 502); return result; }
-      return { hash, ...result };
-    } catch (e) {
-      setResponseStatus(event, 502);
-      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "run_failed" };
-    }
-  }
-
-  const deps = await getDeps();
     if (!deps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Publishing is not configured", code: "publish_unavailable" }; }
 
     const b = (body ?? {}) as Record<string, unknown>;
