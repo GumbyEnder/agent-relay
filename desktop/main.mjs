@@ -150,7 +150,9 @@ function installMenu() {
           },
           {
             label: "Connect BeeZilla account…",
-            enabled: Boolean(process.env.BZ_CLOUD_URL || process.env.BZ_CONNECT_TEST),
+            // On by default: a normal install must be able to connect. Only an explicit
+            // BZ_CONNECT_DISABLED=1 turns it off (air-gapped or white-label builds).
+            enabled: process.env.BZ_CONNECT_DISABLED !== "1",
             click: () => void connectManagedAccount(),
           },
           { type: "separator" },
@@ -216,7 +218,8 @@ async function connectManagedAccount() {
   win.setMenuBarVisibility(false);
 
   const outcome = await connectAccount({
-    baseUrl: process.env.BZ_CLOUD_URL,
+    // undefined lets connectAccount resolve the baked default; an env value overrides.
+    baseUrl: process.env.BZ_CLOUD_URL || undefined,
     open: (url) => win.loadURL(url),
     evaluate: (script) => win.webContents.executeJavaScript(script, true),
     isOpen: () => !win.isDestroyed(),
