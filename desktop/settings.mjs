@@ -54,11 +54,13 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
       // The runtime inherits credentials from the parent environment, so the new
       // key must be decrypted into process.env BEFORE the child is spawned.
       if (beforeRestart) await beforeRestart();
+      // Always start afterwards, even if nothing was running: a user who saves a
+      // key on a stopped (or crashed) runtime must end up with a working app, not
+      // a "saved" dialog over a dead window.
       const wasRunning = await supervisor.isHealthy();
       await supervisor.stop();
-      if (!wasRunning) return { restarted: false, reason: "was not running" };
       const rt = await supervisor.start();
-      return { restarted: true, port: rt?.port ?? null };
+      return { restarted: wasRunning, started: !wasRunning, port: rt?.port ?? null };
     } catch (err) {
       return { restarted: false, reason: err instanceof Error ? err.message : String(err) };
     }
