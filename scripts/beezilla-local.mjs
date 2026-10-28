@@ -20,6 +20,7 @@ import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveInference } from "./lib/inference.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOST = "127.0.0.1";
@@ -94,6 +95,17 @@ ensurePgliteAssets();
 const port = await pickPort(argPort());
 const runtimeFile = join(dir, "runtime.json");
 
+// Inference credentials: env wins, then the local store (BYOK or our device
+// token). The runtime reads plain env, so this is where the store becomes reach.
+const inference = resolveInference(dir);
+if (inference) {
+  console.log(
+    `[beezilla] inference: ${inference.provider}${inference.encrypted === false ? " (stored, unencrypted)" : inference.encrypted ? " (stored, encrypted)" : ""}`,
+  );
+} else {
+  console.log("[beezilla] inference: none — chat will refuse by name");
+}
+
 // Per-launch auth token: dies with the process, so a stale copy on disk is
 // useless. The window receives it via preload; the CLI reads runtime.json.
 const localToken = randomBytes(32).toString("base64url");
@@ -105,6 +117,13 @@ const child = spawn(process.execPath, [entry], {
     BZ_RUNTIME: "local",
     BZ_DATA_DIR: dir,
     BZ_LOCAL_TOKEN: localToken,
+    ...(inference
+      ? {
+          BZ_CHAT_KEY: inference.key,
+          ...(inference.baseUrl ? { BZ_CHAT_BASE_URL: inference.baseUrl } : {}),
+          ...(inference.model ? { BZ_CHAT_MODEL: inference.model } : {}),
+        }
+      : {}),
     HOST,
     NITRO_HOST: HOST,
     PORT: String(port),
