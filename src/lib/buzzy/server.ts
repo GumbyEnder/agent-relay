@@ -587,7 +587,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
   const toolCtx = { draftGateOpen };
-  const loopTools = offeredTools(toolCtx) as unknown[];
+  // Only a turn that can actually produce something gets a tool surface. An
+  // always-on tool list forced every chat turn onto the buffered path (a
+  // non-empty tool list is what disables streaming), which is the 12s answer.
+  // Web lookups are already handled by the deterministic research pre-pass.
+  const loopTools = (draftGateOpen || isExplicitDocumentRequest(message))
+    ? (offeredTools(toolCtx) as unknown[])
+    : [];
   // glm-class models treat an optional tool as optional and answer in prose.
   // When the owner EXPLICITLY asks for the file, force the tool call (plan doc
   // 23, open decision #3: native tool_calls with a fallback path).
