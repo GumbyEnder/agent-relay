@@ -62,6 +62,30 @@ check("store used when env is absent", resolveInference(dataDir)?.source === "st
 
 // 5. redaction never leaks the key
 const red = redactKey("sk-test-abcdefghijklmnop");
+// ── managed (our inference) token lifecycle ────────────────────────────────
+// A managed token is short-lived by design: it must carry its expiry, default to
+// OUR endpoint, and fail as a session problem — never as "invalid API key".
+const managedDir = mkdtempSync(join(tmpdir(), "bz-managed-"));
+const managed = saveInference(managedDir, {
+  provider: "beezilla",
+  key: "tok-managed-abcdef123456",
+  expiresAt: "2020-01-01T00:00:00Z",
+});
+check("managed store defaults to our endpoint", managed.baseUrl === "https://inference-api.nousresearch.com/v1", managed.baseUrl);
+check("managed store keeps its expiry", managed.expiresAt === "2020-01-01T00:00:00Z");
+const managedResolved = resolveInference(managedDir);
+check("expired managed token is flagged expired", managedResolved?.expired === true);
+saveInference(managedDir, { provider: "beezilla", key: "tok-managed-abcdef123456", expiresAt: new Date(Date.now() + 3600_000).toISOString() });
+check("a live managed token is not expired", resolveInference(managedDir)?.expired === false);
+
+saveInference(managedDir, { provider: "beezilla", key: "tok-managed-abcdef123456", expiresAt: "2020-01-01T00:00:00Z" });
+const expiredResult = await new Promise((res) =>
+  execFile(process.execPath, [CLI, "run", "hello"], { cwd: ROOT, env: { ...process.env, BZ_DATA_DIR: managedDir, BZ_RUNTIME: "local" } },
+    (err, stdout, stderr) => res({ code: Number(err?.code ?? 0), out: String(stdout) + String(stderr) })));
+check("an expired managed token refuses before spending a request", expiredResult.code === 2, `exit ${expiredResult.code}`);
+check("the refusal says reconnect, not invalid key", /session expired[\s\S]*reconnect/i.test(expiredResult.out), expiredResult.out.split("\n")[0]);
+rmSync(managedDir, { recursive: true, force: true });
+
 check("redaction hides the middle", !red.includes("abcdefghij") && red.length < 40, red);
 
 // 6. CLI: set → show → doctor, with nothing secret in the output

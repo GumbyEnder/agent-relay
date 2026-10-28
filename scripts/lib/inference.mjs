@@ -11,6 +11,11 @@
  * binding, stores 0600 and reports `encrypted: false` so `doctor` can say so out
  * loud instead of implying protection it does not have.
  *
+ * Managed tokens are SHORT-LIVED by design (a mint-proxy issues scoped tokens,
+ * never a shared key), so the store records `expiresAt`. An expired managed
+ * token is a session problem, not a bad credential: it must say "reconnect",
+ * not "invalid API key", and it must fail before spending a request.
+ *
  * Precedence: explicit environment always wins. A desktop user who exported
  * BZ_CHAT_KEY for a test must not be silently overridden by a stale store file.
  */
@@ -20,6 +25,11 @@ import { join } from "node:path";
 export const STORE_FILE = "inference.json";
 
 const PROVIDERS = new Set(["beezilla", "byok"]);
+
+/** Defaults for OUR inference, so a managed install never asks for a base URL. */
+export const MANAGED_DEFAULTS = {
+  baseUrl: "https://inference-api.nousresearch.com/v1",
+};
 
 export function storePath(dataDir) {
   return join(dataDir, STORE_FILE);
@@ -64,7 +74,15 @@ export function loadInference(dataDir, cipher = {}) {
     key,
     encrypted: Boolean(raw.encrypted),
     updatedAt: raw.updatedAt ?? null,
+    expiresAt: typeof raw.expiresAt === "string" ? raw.expiresAt : null,
   };
+}
+
+/** True when a managed token carries an expiry that has passed. */
+export function isExpired(cred, now = Date.now()) {
+  if (!cred?.expiresAt) return false;
+  const at = Date.parse(cred.expiresAt);
+  return Number.isFinite(at) && at <= now;
 }
 
 /**
@@ -82,9 +100,11 @@ export function saveInference(dataDir, cfg, cipher = {}) {
     ? Buffer.from(cipher.encrypt(key)).toString("base64")
     : key;
 
+  const baseUrl = (cfg.baseUrl ?? "").trim();
   const payload = {
     provider: cfg.provider,
-    baseUrl: (cfg.baseUrl ?? "").trim(),
+    baseUrl: baseUrl || (cfg.provider === "beezilla" ? MANAGED_DEFAULTS.baseUrl : ""),
+    expiresAt: (cfg.expiresAt ?? "").trim() || null,
     model: (cfg.model ?? "").trim(),
     encrypted,
     keyCipher,
@@ -139,6 +159,8 @@ export function resolveInference(dataDir, cipher = {}) {
       baseUrl: envBase || stored.baseUrl,
       model: envModel || stored.model,
       encrypted: stored.encrypted,
+      expiresAt: stored.expiresAt ?? null,
+      expired: isExpired(stored),
     };
   }
   return null;
