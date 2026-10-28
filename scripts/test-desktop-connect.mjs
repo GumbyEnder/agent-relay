@@ -60,7 +60,7 @@ if (!hasXvfb) {
   const saved = process.env.BZ_CLOUD_URL;
   delete process.env.BZ_CLOUD_URL;
   check("a normal install has a default BeeZilla address", cloudBaseUrl() === DEFAULT_CLOUD_URL, cloudBaseUrl());
-  check("the default is a secure, named host", /^https:\/\/app\.beezilla\.ai$/.test(DEFAULT_CLOUD_URL), DEFAULT_CLOUD_URL);
+  check("the default is a live https host, not a hopeful one", /^https:\/\/[a-z0-9.-]+$/.test(DEFAULT_CLOUD_URL) && !/app\.beezilla\.ai$/.test(DEFAULT_CLOUD_URL), DEFAULT_CLOUD_URL);
   process.env.BZ_CLOUD_URL = "https://staging.beezilla.ai/";
   check("an env override still wins, trailing slash trimmed", cloudBaseUrl() === "https://staging.beezilla.ai", cloudBaseUrl());
   delete process.env.BZ_CLOUD_URL;
@@ -71,7 +71,7 @@ if (!hasXvfb) {
 
 // ── an unreachable BeeZilla must fail fast, in words a user can act on ─────
 {
-  const { connectAccount, isUnreachable } = await import("../desktop/connect.mjs");
+  const { connectAccount, isUnreachable, DEFAULT_CLOUD_URL } = await import("../desktop/connect.mjs");
   const started = Date.now();
   const result = await connectAccount({
     baseUrl: "https://app.beezilla.ai",
@@ -90,6 +90,12 @@ if (!hasXvfb) {
   check("an unreachable host fails immediately", elapsed < 2000, `${elapsed}ms (not the 180s sign-in wait)`);
   check("it is reported as unreachable", result.unreachable === true, JSON.stringify(result));
   check("the message names BeeZilla, not an Electron code", /could not reach BeeZilla at app\.beezilla\.ai/.test(result.error) && !/ERR_/.test(result.error), result.error);
+  // The default host itself must answer, or every install starts at a dead end.
+  const live = await fetch(`${DEFAULT_CLOUD_URL}/api/inference-token`, { method: "POST", signal: AbortSignal.timeout(20000) })
+    .then((r) => ({ status: r.status, body: r.text() }))
+    .catch((err) => ({ status: 0, body: Promise.resolve(String(err)) }));
+  const liveBody = await live.body;
+  check("the default BeeZilla host is really answering (mint = 401, not a 404 page)", live.status === 401 && /unauthenticated/.test(liveBody), `status ${live.status}: ${String(liveBody).slice(0, 70)}`);
   check("the message offers BYOK as the way forward", /your own API key/i.test(result.error), "byok offered");
 }
 
