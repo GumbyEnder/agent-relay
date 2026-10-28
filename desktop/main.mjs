@@ -26,6 +26,24 @@ const supervisor = new RuntimeSupervisor({
   onLog: (line) => console.log(line),
 });
 
+/**
+ * The runtime is local: caching its HTML/JS buys nothing and guarantees a stale
+ * UI after an app update (Electron's disk cache outlives the process). This was
+ * found by a test that kept seeing the previous build's copy while the file on
+ * disk was current.
+ */
+app.commandLine.appendSwitch("disable-http-cache");
+
+// Silence is the worst failure mode in a packaged app: log the real error and
+// keep the process alive long enough to show it.
+process.on("unhandledRejection", (err) => {
+  console.error("[desktop] unhandled rejection:", err instanceof Error ? err.stack : err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[desktop] uncaught exception:", err instanceof Error ? err.stack : err);
+});
+process.on("exit", (code) => console.log(`[desktop] exiting code=${code}`));
+
 let mainWindow = null;
 let settingsWindow = null;
 let runtimeBase = null;
@@ -155,6 +173,7 @@ function settingsWindowFor(url) {
     console.log(`[settings] ${message}`),
   );
   void settingsWindow.loadURL(url);
+  console.log(`[desktop] settings window opened ${url}`);
   return settingsWindow;
 }
 
@@ -268,6 +287,10 @@ async function createWindow() {
       const radio = document.getElementById("provider-byok");
       if (radio) { radio.checked = true; radio.dispatchEvent(new Event("change", { bubbles: true })); }
       out.byokFieldsShown = !document.getElementById("byok-fields").hidden;
+      // The unconfigured copy must match the radio just picked: "nothing to
+      // configure" beside "answers will refuse" reads like a broken app.
+      out.emptyNote = document.getElementById("inference-current").textContent.trim();
+      out.clearDisabledWhenEmpty = document.getElementById("clear-inference").disabled;
       document.getElementById("key").value = "sk-drive-probe-1234567890";
       document.getElementById("save-inference").click();
       await new Promise((resolve) => {
@@ -296,11 +319,27 @@ async function createWindow() {
     return;
   }
 
+  // First run with nothing configured: chat can only refuse, so open the thing
+  // that makes it usable instead of handing a new user a dead window.
+  if (!probe && !process.env.BZ_CHAT_KEY) {
+    console.log("[desktop] onboarding: no inference configured — opening Settings");
+    void openSettings();
+  }
+  if (!probe && process.env.BZ_FIRSTRUN_TEST) {
+    // Bounded test launch: a configured install has nothing to prove and no other
+    // reason to exit, so without this the suite waits out its own timeout.
+    setTimeout(() => app.quit(), 4000);
+    return;
+  }
+
   if (process.env.BZ_SMOKE) {
     await new Promise((r) => setTimeout(r, Number(process.env.BZ_SMOKE_DELAY_MS ?? 2500)));
     // A capture that never resolves would hang CI forever; race it.
+    // Capture what the user actually sees: on a first run that is the Settings
+    // window, not the chat window behind it.
+    const shotWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows().at(-1) ?? mainWindow;
     const image = await Promise.race([
-      mainWindow.webContents.capturePage(),
+      shotWindow.webContents.capturePage(),
       new Promise((r) => setTimeout(() => r(null), 15_000)),
     ]);
     const { writeFileSync } = await import("node:fs");

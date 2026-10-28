@@ -153,10 +153,12 @@ const child = spawn(process.execPath, [entry], {
 // (electron crash, `timeout`, a test harness that gave up), stop cleanly instead
 // of lingering as an orphan holding the port.
 const launcherParent = process.ppid;
+if (process.env.BZ_DEBUG) console.log(`[beezilla] launcher pid=${process.pid} ppid=${launcherParent}`);
 const parentTimer = setInterval(() => {
   try {
     process.kill(launcherParent, 0);
   } catch {
+    if (process.env.BZ_DEBUG) console.log(`[beezilla] parent ${launcherParent} is gone — shutting down`);
     stop("SIGTERM");
   }
 }, 2000);
