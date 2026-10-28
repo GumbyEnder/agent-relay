@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>BeeZilla settings probe</title>
+  </head>
+  <body>
+    <h1>settings probe</h1>
+    <p id="out">running…</p>
+    <script>
+      // Exercises the privileged bridge from a SANDBOXED, isolated renderer — the
+      // exact conditions that broke the old fetch-patching preload. Results go to
+      // the main process via console (it forwards renderer console messages).
+      (async () => {
+        const log = (o) => console.log("SETTINGS_RESULT:" + JSON.stringify(o));
+        try {
+          if (!window.beezilla?.settings) return log({ ok: false, error: "bridge missing" });
+
+          const before = await window.beezilla.settings.get();
+          if (!before?.ok) return log({ ok: false, error: "get failed", detail: before });
+
+          const savedSearch = await window.beezilla.settings.saveSearch({ key: "BSA-bridge-probe-key-9876" });
+          const afterSearch = await window.beezilla.settings.get();
+          const cleared = await window.beezilla.settings.clear("search");
+          const afterClear = await window.beezilla.settings.get();
+
+          log({
+            ok: true,
+            before: before.data,
+            saveOk: savedSearch.ok,
+            searchAfterSave: afterSearch.data?.search ?? null,
+            clearOk: cleared.ok,
+            searchAfterClear: afterClear.data?.search ?? null,
+            version: (await window.beezilla.app.version())?.data?.version ?? null,
+          });
+        } catch (err) {
+          log({ ok: false, error: String(err && err.message ? err.message : err) });
+        }
+      })();
+    </script>
+  </body>
+</html>
