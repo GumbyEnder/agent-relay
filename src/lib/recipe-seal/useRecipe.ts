@@ -119,10 +119,18 @@ function normalise(parsed: unknown, method: SealedMethod): UseResult["artifact"]
 
   // If the model dropped sections the contract asked for, say so rather than
   // presenting a short document as complete.
-  const wanted = method.outputContract ?? [];
-  const present = new Set(sections.map((s) => s.title.toLowerCase()));
-  for (const w of wanted) {
-    if (!present.has(w.toLowerCase())) sections.push({ id: `s${sections.length + 1}`, title: w, body: "[not produced — the owner must fill this in]" });
+  // Compare loosely: the model renames headings ("Comparison Table (with Source)"
+  // for "comparison table with source column"), and an exact match reported a
+  // section as missing while it sat right there in the document.
+  const key = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const present = sections.map((s) => key(s.title));
+  for (const w of method.outputContract ?? []) {
+    const k = key(w);
+    const found = present.some((p) => p.length > 0 && (p.includes(k) || k.includes(p)));
+    if (!found) {
+      sections.push({ id: `s${sections.length + 1}`, title: w, body: "[not produced — the owner must fill this in]" });
+      present.push(k);
+    }
   }
   return { title, sections };
 }
