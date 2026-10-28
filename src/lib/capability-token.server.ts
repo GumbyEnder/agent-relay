@@ -34,7 +34,8 @@ export async function handleCapabilityToken(
   label: string,
 ): Promise<Response> {
   if (req.method !== "POST") {
-    return json(405, { ok: false, error: `use POST to mint a ${label} token`, code: "method_not_allowed" });
+    // "an inference token", "a search token" — the article is a user-facing string too.
+    return json(405, { ok: false, error: `use POST to mint ${label === "inference" ? "an" : "a"} ${label} token`, code: "method_not_allowed" });
   }
 
   const user = await getSessionUserFromHeaders(req.headers);
