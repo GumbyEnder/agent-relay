@@ -34,7 +34,10 @@
           body: "{}",
         }).then(function () { window.location.href = "/buzzy/"; });
       });
-      link.parentNode.insertBefore(out, link.nextSibling);
+      // Place the Log out link beside the nav, not as a 9th nav item.
+      var navEl = document.querySelector("#bzNav");
+      if (navEl && navEl.parentNode && navEl.contains(link)) navEl.parentNode.insertBefore(out, navEl.nextSibling);
+      else link.parentNode.insertBefore(out, link.nextSibling);
     });
   }
 
@@ -46,19 +49,17 @@
     experts: ["", "Experts"]
   };
 
+  // The nav labels and active state are owned by the page markup + the shared
+  // nav script. This used to rename links BY INDEX against a hard-coded href
+  // map, so once the nav order changed it relabelled the Talk link "Jobs" —
+  // a link called Jobs that opened the chat. It no longer touches labels.
   function renderHeader(active) {
-    // Normalize nav labels in place; mark the active tab.
-    var nav = document.querySelector("header nav");
-    if (!nav) return;
-    var links = nav.querySelectorAll("a");
-    var map = ["/buzzy/", "/buzzy/talk", "/buzzy/memory", "/buzzy/experts"];
-    var names = ["Jobs", "Chat", "Memory", "Experts"];
-    for (var i = 0; i < links.length && i < 4; i++) {
-      var href = links[i].getAttribute("href") || "";
-      if (map.indexOf(href) !== -1) {
-        links[i].textContent = names[i];
-        if (names[i].toLowerCase() === active) links[i].classList.add("active");
-      }
+    var nav = document.querySelector("#bzNav") || document.querySelector("header nav");
+    if (!nav || !active) return;
+    var links = nav.querySelectorAll("a[data-nav]");
+    for (var i = 0; i < links.length; i++) {
+      var on = links[i].getAttribute("data-nav") === active;
+      links[i].classList.toggle("active", on);
     }
   }
 
