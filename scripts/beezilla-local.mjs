@@ -21,7 +21,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isExpired, resolveInference } from "./lib/inference.mjs";
-import { resolveSearch } from "./lib/search-keys.mjs";
+import { loadManagedSearch, resolveSearch } from "./lib/search-keys.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOST = "127.0.0.1";
@@ -114,6 +114,9 @@ if (inference && !managedExpired) {
 // Web search: our Brave key (injected for the desktop build) or the owner's own
 // stored key. Logged without the secret, like every other credential.
 const search = resolveSearch(dir);
+// An expired managed search token means "reconnect", not "search is off". Resolved
+// here so the runtime can say which, without ever seeing an expired credential.
+const managedSearchExpired = !search && Boolean(loadManagedSearch(dir));
 console.log(
   search
     ? `[beezilla] web search: brave via ${search.source}${search.encrypted === false ? " (stored, unencrypted)" : ""}`
@@ -137,6 +140,7 @@ const child = spawn(process.execPath, [entry], {
         ? { BZ_BRAVE_KEY: search.key }
         : {}),
     ...(managedExpired ? { BZ_MANAGED_EXPIRED: "1" } : {}),
+    ...(managedSearchExpired ? { BZ_SEARCH_EXPIRED: "1" } : {}),
     ...(inference && !managedExpired
       ? {
           BZ_CHAT_KEY: inference.key,

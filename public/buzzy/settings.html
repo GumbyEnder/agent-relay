@@ -212,9 +212,18 @@
           if (inf.provider === "byok" && inf.model) $("model").value = inf.model;
         }
         const search = state?.search;
-        $("search-current").innerHTML = search
-          ? `Now: <strong>${search.provider}</strong> · ${search.key} · from ${search.source}`
-          : "Now: off — answers will not cite sources.";
+        // Three different situations, three different sentences. "Off" would send a
+        // signed-in user hunting for a key they were never meant to need.
+        if (state?.searchNeedsReconnect) {
+          $("search-current").innerHTML =
+            "Now: <strong>BeeZilla search</strong> · session expired — <strong>Connect your account again</strong> to keep citing sources. Your own Brave key works meanwhile.";
+        } else if (search) {
+          $("search-current").innerHTML = search.provider === "beezilla"
+            ? "Now: <strong>BeeZilla search</strong> · included with your account (renews when you connect)."
+            : `Now: <strong>${search.provider}</strong> · your own key · from ${search.source}`;
+        } else {
+          $("search-current").innerHTML = "Now: off — answers will not cite sources. Connect your account or paste a Brave key.";
+        }
       }
 
       async function refresh() {

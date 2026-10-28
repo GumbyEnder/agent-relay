@@ -33,7 +33,7 @@ import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
-import { searchAvailable, searchProvider } from "./search";
+import { searchAvailable, searchNeedsReconnect, searchProvider } from "./search";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
@@ -164,7 +164,12 @@ export default defineEventHandler(async (event) => {
   // Availability only: never the key, never a prefix of it. The desktop app shows
   // "search: on (our key)" / "on (your key)" / "off" from this.
   if (method === "GET" && path === "/api/buzzy/search-status") {
-    return { available: searchAvailable(), provider: searchProvider() };
+    return {
+      available: searchAvailable(),
+      provider: searchProvider(),
+      // Present only when the session lapsed, so a UI can tell "off" from "stale".
+      ...(searchNeedsReconnect() ? { needsReconnect: true } : {}),
+    };
   }
 
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──
