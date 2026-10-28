@@ -2901,12 +2901,24 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       rec.continuous = false;
       rec.interimResults = true;
       voice.rec = rec;
+      voice.firstInterimAt = 0;
       rec.onresult = function (e) {
+        // Speaking window: first recognised sound → final transcript. This is
+        // the owner's own talk time, separate from our processing time.
+        if (!voice.firstInterimAt && e.results && e.results.length) {
+          var heard = e.results[e.resultIndex || 0];
+          if (heard && heard[0] && String(heard[0].transcript || "").trim()) {
+            voice.firstInterimAt = performance.now();
+          }
+        }
         var finalText = "";
         for (var i = e.resultIndex; i < e.results.length; i++) {
           if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
         }
         if (finalText.trim()) {
+          voice.userSpeechMs = voice.firstInterimAt
+            ? Math.round(performance.now() - voice.firstInterimAt)
+            : null;
           stopListening();
           // Timestamp the moment the owner stopped talking: time-to-talk is
           // measured from here, not from when we happened to send.
@@ -3058,6 +3070,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         mode: chatState.mode || "chat",
         model: m.model || null,
         lane: m.lane || null,
+        speechMs: m.userSpeechMs || null,
         asrMs: m.asrMs, ttftMs: m.ttftMs, ttfaMs: m.ttfaMs, turnMs: m.turnMs,
         replyChars: m.replyChars, spoken: !!m.spoken,
       };
@@ -4206,8 +4219,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           replyChars: null,
           spoken: false,
           model: null,
+          userSpeechMs: voice.userSpeechMs,
         };
         voice.lastSpeechEnd = 0;
+        voice.userSpeechMs = 0;
 
         let data;
         if (useVoiceLane) {

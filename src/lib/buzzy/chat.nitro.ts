@@ -84,19 +84,20 @@ async function recordVoiceMetrics(
     audioBytes?: number | null;
     spoken?: boolean;
     lane?: string | null;
+    speechMs?: number | null;
   },
 ): Promise<void> {
   try {
     await sql`
       INSERT INTO buzzy_voice_metrics
         (user_id, job_id, session_id, source, mode, model, asr_ms, ttft_ms, ttfa_ms,
-         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane)
+         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane, speech_ms)
       VALUES
         (${row.userId}, ${row.jobId ?? null}, ${row.sessionId ?? null}, ${row.source},
          ${row.mode ?? null}, ${row.model ?? null}, ${row.asrMs ?? null}, ${row.ttftMs ?? null},
          ${row.ttfaMs ?? null}, ${row.turnMs ?? null}, ${row.extractMs ?? null},
          ${row.llmMs ?? null}, ${row.honchoMs ?? null}, ${row.replyChars ?? null},
-         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null})
+         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null}, ${row.speechMs ?? null})
     `;
   } catch (err) {
     // A lost metric must never break a turn.
@@ -688,6 +689,7 @@ export default defineEventHandler(async (event) => {
       audioBytes: num("audioBytes"),
       spoken: body.spoken === true,
       lane: typeof body.lane === "string" ? body.lane.slice(0, 8) : null,
+      speechMs: num("speechMs"),
     });
     return { ok: true };
   }
@@ -739,12 +741,47 @@ export default defineEventHandler(async (event) => {
     `) as Array<Record<string, unknown>>;
     const recent = (await sql`
       SELECT created_at, source, mode, model, lane, asr_ms, ttft_ms, ttfa_ms, turn_ms,
-             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id
+             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id, speech_ms
       FROM buzzy_voice_metrics
       WHERE (${scopeAll} OR user_id = ${scopeUid})
       ORDER BY created_at DESC LIMIT 25
     `) as Array<Record<string, unknown>>;
-    return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
+    // One row per TURN, not per sample: the server row and the client row are
+    // written ~1ms apart for the same turn, and only together do they answer
+    // "how long did the owner talk, and how long did we take to answer".
+    const seen = new Set<string>();
+    const turns: Array<Record<string, unknown>> = [];
+    for (const row of recent as Array<Record<string, any>>) {
+      const key = `${row.session_id ?? "-"}:${Math.floor(new Date(row.created_at).getTime() / 3000)}`;
+      const existing = turns.find((t) => t.key === key);
+      const isClient = row.source === "client";
+      if (existing) {
+        // The client row wins for experienced timings; keep server-only fields.
+        if (isClient) Object.assign(existing, { client: row });
+        else Object.assign(existing, { server: row });
+        continue;
+      }
+      seen.add(key);
+      turns.push({ key, at: row.created_at, session_id: row.session_id, user_id: row.user_id,
+        [isClient ? "client" : "server"]: row });
+    }
+    const shaped = turns.map((t) => {
+      const c = (t.client ?? {}) as Record<string, any>;
+      const v = (t.server ?? {}) as Record<string, any>;
+      return {
+        at: t.at, session_id: t.session_id, user_id: t.user_id,
+        model: c.model ?? v.model ?? null,
+        lane: c.lane ?? v.lane ?? null,
+        speech_ms: c.speech_ms ?? v.speech_ms ?? null,
+        asr_ms: c.asr_ms ?? null,
+        ttfa_ms: c.ttfa_ms ?? v.ttfa_ms ?? null,
+        turn_ms: c.turn_ms ?? v.turn_ms ?? null,
+        reply_chars: c.reply_chars ?? v.reply_chars ?? null,
+        spoken: c.spoken ?? v.spoken ?? null,
+        client_ms: c.turn_ms != null && v.turn_ms != null ? c.turn_ms - v.turn_ms : null,
+      };
+    });
+    return { ok: true, days, summary: summary[0] ?? null, byDay, turns: shaped, recent };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[buzzy/ops] voice-metrics read failed:", msg);
