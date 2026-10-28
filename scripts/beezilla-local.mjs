@@ -14,6 +14,7 @@
  *   - graceful shutdown       → PGLite flushes its WAL instead of being killed
  */
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync, copyFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
@@ -93,12 +94,17 @@ ensurePgliteAssets();
 const port = await pickPort(argPort());
 const runtimeFile = join(dir, "runtime.json");
 
+// Per-launch auth token: dies with the process, so a stale copy on disk is
+// useless. The window receives it via preload; the CLI reads runtime.json.
+const localToken = randomBytes(32).toString("base64url");
+
 const child = spawn(process.execPath, [entry], {
   cwd: ROOT,
   env: {
     ...process.env,
     BZ_RUNTIME: "local",
     BZ_DATA_DIR: dir,
+    BZ_LOCAL_TOKEN: localToken,
     HOST,
     NITRO_HOST: HOST,
     PORT: String(port),
@@ -147,10 +153,18 @@ for (;;) {
       writeFileSync(
         runtimeFile,
         JSON.stringify(
-          { pid: child.pid, host: HOST, port, dataDir: dir, startedAt: new Date().toISOString() },
+          {
+            pid: child.pid,
+            host: HOST,
+            port,
+            dataDir: dir,
+            token: localToken,
+            startedAt: new Date().toISOString(),
+          },
           null,
           2,
         ) + "\n",
+        { mode: 0o600 },
       );
       console.log(`[beezilla] local runtime ready → http://${HOST}:${port}`);
       console.log(`[beezilla] data ${dir}`);
