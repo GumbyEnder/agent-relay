@@ -308,6 +308,73 @@
         confirm.addEventListener("click", function () { close(); doPurchase(btn, r); });
       }
 
+      /* Running a recipe you own: give it a brief, get the document and the verdict.
+         The method stays on the server; what comes back is the work and the checks. */
+      function useRecipe(r) {
+        var backdrop = el("div", "bz-modal-backdrop");
+        var box = el("div", "bz-modal");
+        box.setAttribute("role", "dialog");
+        box.appendChild(el("h2", null, "Use this recipe"));
+        box.appendChild(el("p", "sub", r.title || r.id));
+
+        var brief = document.createElement("textarea");
+        brief.placeholder = "Tell it what this job is. The more specific, the better.";
+        brief.style.cssText = "width:100%;min-height:110px;background:#101010;border:1px solid #2A2A2A;border-radius:6px;color:#E8E8E8;font:inherit;font-size:0.9rem;padding:0.6rem 0.7rem;margin-top:0.4rem;";
+        box.appendChild(brief);
+
+        var out = el("div");
+        out.style.cssText = "margin-top:0.9rem;font-size:0.86rem;color:#C9CDD2;max-height:320px;overflow:auto;";
+        box.appendChild(out);
+
+        var actions = el("div", "actions");
+        var close = el("button", "cancel", "Close");
+        var run = el("button", "confirm", "Run it");
+        actions.appendChild(close); actions.appendChild(run);
+        box.appendChild(actions);
+        backdrop.appendChild(box);
+        document.body.appendChild(backdrop);
+
+        function dismiss() { backdrop.remove(); document.removeEventListener("keydown", onKey); }
+        function onKey(e) { if (e.key === "Escape") dismiss(); }
+        document.addEventListener("keydown", onKey);
+        close.addEventListener("click", dismiss);
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) dismiss(); });
+
+        run.addEventListener("click", function () {
+          var text = brief.value.trim();
+          if (!text) { out.textContent = "Tell it what the job is first."; return; }
+          run.disabled = true; run.textContent = "Working…"; out.textContent = "Running the method…";
+          fetch("/api/recipes/" + encodeURIComponent(r.hash) + "/use", {
+            method: "POST", credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ input: text })
+          })
+            .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
+            .then(function (res) {
+              run.disabled = false; run.textContent = "Run it";
+              out.textContent = "";
+              if (!res.j.artifact) { out.textContent = res.j.error || res.j.note || "It could not run this."; return; }
+              var h = el("div", null, res.j.artifact.title);
+              h.style.cssText = "font-weight:700;color:#fff;margin-bottom:0.5rem;";
+              out.appendChild(h);
+              res.j.artifact.sections.forEach(function (sec) {
+                var t = el("div", null, sec.title);
+                t.style.cssText = "font-weight:650;color:#FFC107;margin:0.6rem 0 0.2rem;";
+                out.appendChild(t);
+                var b = el("div", null, sec.body);
+                b.style.cssText = "white-space:pre-wrap;color:#C9CDD2;";
+                out.appendChild(b);
+              });
+              var verdict = el("div", null, res.j.ok
+                ? "Checks: all " + (res.j.codes.length ? "clear" : "passed")
+                : "Checks flagged: " + (res.j.codes || []).join(", "));
+              verdict.style.cssText = "margin-top:0.8rem;font-size:0.78rem;color:" + (res.j.ok ? "#67D99B" : "#FF8A80") + ";";
+              out.appendChild(verdict);
+            })
+            .catch(function (e) { run.disabled = false; run.textContent = "Run it"; out.textContent = "Could not run it (" + e.message + ")."; });
+        });
+      }
+
       function card(r) {
         var c = el("article", "card");
         var row = el("div", "row");
@@ -341,13 +408,13 @@
         var lock = el("div", "lock");
         lock.appendChild(el("span", "sealed", "Method sealed"));
         var mine = OWNED.has(r.hash);
-        var btn = el("button", "buy", mine ? "Owned ✓" : (r.is_free ? "Claim it →" : "Buy →"));
+        var btn = el("button", "buy", mine ? "Use this recipe →" : (r.is_free ? "Claim it →" : "Buy →"));
         if (mine) {
-          btn.disabled = true;
-          btn.style.cssText = "background:#2F6F4F;color:#E8F7EE;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;";
+          btn.style.cssText = "background:#2F6F4F;color:#E8F7EE;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
         }
         if (!mine) btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
         btn.addEventListener("click", function () {
+          if (OWNED.has(r.hash)) return useRecipe(r);
           if (r.is_free) return doPurchase(btn, r);
           confirmPurchase(btn, r);
         });
