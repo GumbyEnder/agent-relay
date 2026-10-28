@@ -17,6 +17,8 @@ import { bundleKey, checksKey, semanticKey } from "./storage";
 import { compileRecipeChecks } from "@/lib/recipe-checks";
 import { RECIPES } from "@/lib/buzzy/recipes";
 import { deriveRecipe, gatherEvidence } from "@/lib/buzzy/deriveRecipe";
+import { useRecipe } from "./useRecipe";
+import { ownsRecipe } from "@/lib/wallet/wallet";
 
 let depsPromise: Promise<RouteDeps> | null = null;
 let authorKeyCache: ReturnType<typeof generateAuthorKey> | null = null;
@@ -78,6 +80,27 @@ function toHeaders(raw: Record<string, string | string[] | undefined>): Headers 
     else if (Array.isArray(v)) headers.set(k, v.join(","));
   }
   return headers;
+}
+
+
+/**
+ * Why a shelf description was refused, in words the author can act on.
+ *
+ * The seal refuses any manifest that reproduces the sealed method, which is correct
+ * and completely unhelpful: "leaks_sealed_text" does not tell you which sentence to
+ * change. This finds the actual colliding runs so the message can name them.
+ */
+function collidingPhrases(shelfCopy: string, method: unknown): string[] {
+  const norm = (v: string) => v.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "");
+  const sealed = norm(JSON.stringify(method));
+  const copy = norm(shelfCopy);
+  const hits = new Set<string>();
+  for (let i = 0; i + 10 <= copy.length; i++) {
+    const w = copy.slice(i, i + 10);
+    if (sealed.includes(w)) hits.add(w);
+    if (hits.size >= 6) break;
+  }
+  return [...hits];
 }
 
 export default defineEventHandler(async (event) => {
@@ -201,7 +224,52 @@ export default defineEventHandler(async (event) => {
     const user = opCtx?.user ?? null;
     if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
 
+    // ── POST /api/recipes/:hash/use — run a recipe this account owns ──────────
+  //
+  // The door is the session plus the entitlement, not a bearer token: a person who
+  // paid already has a session, and inventing a secret to hand back to the same
+  // browser adds a leak surface for nothing. The sealed method is opened here and
+  // never leaves the server — the caller gets the document and the verdict.
+  const useMatch = path.match(/^\/api\/recipes\/([a-f0-9]{64})\/use$/);
+  if (useMatch && method === "POST") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+
     const deps = await getDeps();
+    if (!deps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Running is not configured", code: "run_unavailable" }; }
+    if (!process.env.BZ_CHAT_KEY && !process.env.BZ_CHAT_BASE_URL) {
+      setResponseStatus(event, 503);
+      return { ok: false, error: "No model lane is configured", code: "run_unavailable" };
+    }
+
+    const hash = useMatch[1];
+    const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => deps.q<T>(text, params ?? []);
+    if (!(await ownsRecipe(q, user.id, hash))) {
+      setResponseStatus(event, 402);
+      return { ok: false, error: "You do not own this recipe yet", code: "not_owned" };
+    }
+
+    const b = (body ?? {}) as Record<string, unknown>;
+    const input = typeof b.input === "string" ? b.input.trim() : "";
+    if (!input) { setResponseStatus(event, 400); return { ok: false, error: "Tell it what you need", code: "input_required" }; }
+
+    try {
+      const result = await useRecipe({
+        storage: deps.storage,
+        kek: deps.kek,
+        hash,
+        input,
+        model: (prompt: string) => chatCompletion([{ role: "user", content: prompt }], { temperature: 0.2 }),
+      });
+      if (!result.artifact) { setResponseStatus(event, 502); return result; }
+      return { hash, ...result };
+    } catch (e) {
+      setResponseStatus(event, 502);
+      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "run_failed" };
+    }
+  }
+
+  const deps = await getDeps();
     if (!deps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Publishing is not configured", code: "publish_unavailable" }; }
 
     const b = (body ?? {}) as Record<string, unknown>;
@@ -273,9 +341,21 @@ export default defineEventHandler(async (event) => {
       });
     } catch (e) {
       // The leak gate lives here too: an upload whose copy reproduces its own
-      // sealed half is refused before it can be stored or served.
+      // sealed half is refused before it can be stored or served. When that is what
+      // happened, say which words are shared — otherwise the author is guessing.
+      const message = String((e as Error).message);
+      const phrases = /leaks_sealed_text/.test(message)
+        ? collidingPhrases(`${title} ${description}`, semantic)
+        : [];
       setResponseStatus(event, 422);
-      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "refused" };
+      return {
+        ok: false,
+        code: phrases.length ? "shelf_copy_collides" : "refused",
+        error: phrases.length
+          ? `Your title or description reuses wording from the method: ${phrases.join(", ")}. Say what the buyer gets in your own words.`
+          : message.slice(0, 300),
+        collides: phrases,
+      };
     }
 
     const verified = verifyBundle(sealed.bytes);
