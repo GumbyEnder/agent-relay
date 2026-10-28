@@ -21,6 +21,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveInference } from "./lib/inference.mjs";
+import { resolveSearch } from "./lib/search-keys.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOST = "127.0.0.1";
@@ -106,6 +107,15 @@ if (inference) {
   console.log("[beezilla] inference: none — chat will refuse by name");
 }
 
+// Web search: our Brave key (injected for the desktop build) or the owner's own
+// stored key. Logged without the secret, like every other credential.
+const search = resolveSearch(dir);
+console.log(
+  search
+    ? `[beezilla] web search: brave via ${search.source}${search.encrypted === false ? " (stored, unencrypted)" : ""}`
+    : "[beezilla] web search: not configured — the model will answer without sources",
+);
+
 // Per-launch auth token: dies with the process, so a stale copy on disk is
 // useless. The window receives it via preload; the CLI reads runtime.json.
 const localToken = randomBytes(32).toString("base64url");
@@ -117,6 +127,7 @@ const child = spawn(process.execPath, [entry], {
     BZ_RUNTIME: "local",
     BZ_DATA_DIR: dir,
     BZ_LOCAL_TOKEN: localToken,
+    ...(search ? { BZ_BRAVE_KEY: search.key } : {}),
     ...(inference
       ? {
           BZ_CHAT_KEY: inference.key,
