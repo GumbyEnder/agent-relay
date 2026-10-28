@@ -22,6 +22,7 @@ const LADDER = [
   { name: "desktop settings bridge", cmd: "node", args: ["scripts/test-desktop-settings.mjs"] },
   { name: "desktop settings screen", cmd: "node", args: ["scripts/test-desktop-settings-ui.mjs"] },
   { name: "desktop first run", cmd: "node", args: ["scripts/test-desktop-firstrun.mjs"] },
+  { name: "desktop connect", cmd: "node", args: ["scripts/test-desktop-connect.mjs"] },
   { name: "inference credentials", cmd: "node", args: ["scripts/test-inference-e2e.mjs"] },
   { name: "managed expiry", cmd: "node", args: ["scripts/test-managed-expiry.mjs"] },
   { name: "search credentials", cmd: "node", args: ["scripts/test-search-e2e.mjs"] },
