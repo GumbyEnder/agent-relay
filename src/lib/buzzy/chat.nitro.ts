@@ -706,6 +706,7 @@ export default defineEventHandler(async (event) => {
     const scopeUid = opsUser ?? user!.id;
     const daysRaw = Number(queryValue(fullPath, "days"));
     const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 7;
+    try {
     const summary = (await sql`
       SELECT
         count(*)::int                                              AS turns,
@@ -743,6 +744,12 @@ export default defineEventHandler(async (event) => {
       ORDER BY created_at DESC LIMIT 25
     `) as Array<Record<string, unknown>>;
     return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[buzzy/ops] voice-metrics read failed:", msg);
+      if (ops) { setResponseStatus(event, 500); return { ok: false, error: msg }; }
+      throw err;
+    }
   }
 
   // ── GET /api/buzzy/tool-calls — what the harness actually ran ───────
