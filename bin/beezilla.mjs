@@ -24,7 +24,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveInference, saveInference, clearInference, redactKey, isExpired } from "../scripts/lib/inference.mjs";
 import { resolvePins } from "../scripts/lib/pins.mjs";
-import { resolveSearch, saveSearchKey, clearSearchKey } from "../scripts/lib/search-keys.mjs";
+import { loadManagedSearch, resolveSearch, saveSearchKey, clearSearchKey } from "../scripts/lib/search-keys.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCHER = join(ROOT, "scripts", "beezilla-local.mjs");
@@ -211,12 +211,18 @@ async function cmdDoctor() {
   // Search is optional: an install with no key still chats, it just cannot cite.
   // A soft check keeps `doctor` honest without failing a healthy install.
   const search = resolveSearch(DATA);
+  // "off" and "your session lapsed" are different problems with different fixes.
+  const staleSearch = !search && Boolean(loadManagedSearch(DATA));
   soft(
     "web search",
     Boolean(search),
     search
-      ? `brave via ${search.source}${search.encrypted === false ? " (stored UNENCRYPTED)" : ""}`
-      : "not configured — the model answers without sources (beezilla key search set)",
+      ? search.provider === "beezilla"
+        ? `BeeZilla search via our gateway (expires ${search.expiresAt ?? "unknown"}) — reconnect to renew`
+        : `brave via ${search.source}${search.encrypted === false ? " (stored UNENCRYPTED)" : ""}`
+      : staleSearch
+        ? "BeeZilla search session expired — reconnect from Settings (BeeZilla → Settings), or use your own Brave key"
+        : "not configured — the model answers without sources (beezilla key search set)",
   );
 
   const pins = resolvePins(ROOT);

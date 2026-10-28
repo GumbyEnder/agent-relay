@@ -49,6 +49,15 @@ function managedToken(): string {
   return env("BZ_SEARCH_TOKEN");
 }
 
+/**
+ * A managed (BeeZilla) search session that has expired. Reported to the UI so the app
+ * can say "reconnect" instead of "search is off" — the user's account is fine, their
+ * 15-minute token is just stale.
+ */
+export function searchNeedsReconnect(): boolean {
+  return env("BZ_SEARCH_EXPIRED") === "1";
+}
+
 export function searchAvailable(): boolean {
   return braveKey() !== "" || (gatewayUrl() !== "" && managedToken() !== "");
 }
