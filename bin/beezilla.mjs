@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "no
 import { homedir, platform } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveInference, saveInference, clearInference, redactKey } from "../scripts/lib/inference.mjs";
+import { resolveInference, saveInference, clearInference, redactKey, isExpired } from "../scripts/lib/inference.mjs";
 import { resolvePins } from "../scripts/lib/pins.mjs";
 import { resolveSearch, saveSearchKey, clearSearchKey } from "../scripts/lib/search-keys.mjs";
 
@@ -198,9 +198,11 @@ async function cmdDoctor() {
   const inference = resolveInference(DATA);
   ok(
     "inference configured",
-    Boolean(inference?.key),
+    Boolean(inference?.key) && !inference?.expired,
     inference
-      ? `${inference.provider} via ${inference.source}${inference.encrypted === false ? " (stored UNENCRYPTED)" : ""}`
+      ? inference.expired
+        ? `${inference.provider} via ${inference.source} — managed session EXPIRED, reconnect (beezilla key set --provider beezilla --token …)`
+        : `${inference.provider} via ${inference.source}${inference.expired ? "" : ""}${inference.encrypted === false ? " (stored UNENCRYPTED)" : ""}`
       : "no key — chat will refuse by name; the rest works offline",
   );
 
@@ -244,6 +246,16 @@ async function cmdRun(argv) {
     console.error('usage: beezilla run "<what you want>" [--job <id>] [--work]');
     return 2;
   }
+  // An expired managed token is a session problem, not a bad key. Spending a
+  // request to learn that gives the user a confusing 401; say it up front.
+  const cred = resolveInference(DATA);
+  if (cred?.expired) {
+    console.error(
+      `your BeeZilla session expired at ${cred.expiresAt}. Reconnect with \`beezilla key set --provider beezilla --token <token>\`, or switch to your own key with --provider byok.`,
+    );
+    return 2;
+  }
+
   const jobIdx = argv.indexOf("--job");
   const jobId = jobIdx !== -1 ? argv[jobIdx + 1] : undefined;
   const mode = argv.includes("--work") ? "work" : "chat";
@@ -341,7 +353,7 @@ async function cmdKey(argv) {
   };
 
   if (sub === "set") {
-    const key = flag("--key") ?? "";
+    const key = flag("--key") ?? flag("--token") ?? "";
     if (!key.trim()) {
       console.error('usage: beezilla key set --key <KEY> [--base-url <URL>] [--model <ID>] [--provider byok|beezilla]');
       return 2;
@@ -351,8 +363,11 @@ async function cmdKey(argv) {
       key,
       baseUrl: flag("--base-url") ?? "",
       model: flag("--model") ?? "",
+      expiresAt: flag("--expires-at") ?? "",
     });
     console.log(`saved ${saved.provider} key ${redactKey(key)}${saved.encrypted ? " (encrypted)" : " (unencrypted — 0600 file)"}`);
+    if (saved.expiresAt) console.log(`expires   ${saved.expiresAt}${isExpired(saved) ? " — ALREADY EXPIRED" : ""}`);
+    if (saved.provider === "beezilla" && !saved.baseUrl) console.error("no base url — managed inference needs ours");
     console.log("restart the runtime for it to take effect: beezilla stop && beezilla serve");
     return 0;
   }
@@ -370,6 +385,9 @@ async function cmdKey(argv) {
   }
   console.log(`provider  ${inf.provider} (${inf.source})`);
   console.log(`key       ${redactKey(inf.key)}`);
+  if (inf.expiresAt) {
+    console.log(`expires   ${inf.expiresAt}${isExpired(inf) ? " — EXPIRED, reconnect" : ""}`);
+  }
   console.log(`base url  ${inf.baseUrl || "(provider default)"}`);
   console.log(`model     ${inf.model || "(provider default)"}`);
   if (inf.encrypted === false) console.log("storage   unencrypted file (0600) — the desktop app uses the OS keychain");
