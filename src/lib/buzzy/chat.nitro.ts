@@ -42,7 +42,7 @@ import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
-import { searchAvailable, searchProvider } from "./search";
+import { searchAvailable, searchNeedsReconnect, searchProvider } from "./search";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
