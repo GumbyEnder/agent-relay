@@ -72,6 +72,8 @@ if (!existsSync(ASAR)) {
     const serverText = existsSync(join(APP, ".output", "server", "index.mjs"))
       ? readFileSync(join(APP, ".output", "server", "index.mjs"), "utf8")
       : "";
+    // s9i: the shipped shell must degrade honestly when our cloud is unreachable.
+    check("the app says so when BeeZilla is unreachable", archive.includes("could not reach BeeZilla at"));
     // s9f: the shipped launcher must be able to say "expired", not "off".
     check("the launcher can distinguish an expired session", launcherText.includes("BZ_SEARCH_EXPIRED"));
     check("the runtime API reports needsReconnect", serverText.includes("needsReconnect"));
