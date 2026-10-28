@@ -174,13 +174,30 @@
         el.className = `status ${kind || ""}`.trim();
       };
 
+      let lastState = null;
+
+      // The status line has to agree with the radio the user just picked.
+      // "BeeZilla inference — nothing to configure" next to "no key, answers will
+      // refuse" reads like a broken app, so the unconfigured copy is written per
+      // selection instead of once.
+      function selectionNote(state) {
+        const selected = document.querySelector('input[name="provider"]:checked')?.value;
+        if (selected === "beezilla") {
+          return "Nothing configured yet. BeeZilla inference needs an account sign-in, which this build cannot do — pick “My own key” to start working.";
+        }
+        return "Nothing configured yet. Paste your key above and choose Save intelligence.";
+      }
+
       function renderStatus(state) {
+        lastState = state ?? lastState;
         const inf = state?.inference;
         $("inference-current").innerHTML = inf
           ? `Now: <strong>${inf.provider === "beezilla" ? "BeeZilla inference" : "your own key"}</strong> · ${inf.key}` +
             (inf.expired ? ' · <span style="color:#a4262c">expired — add a new one</span>' : "") +
             (inf.encrypted === false ? " · stored unencrypted" : "")
-          : "Now: no key — answers will refuse until you add one.";
+          : selectionNote(state);
+        // Nothing to remove when nothing is configured.
+        $("clear-inference").disabled = !inf;
         if (inf) {
           const radio = document.querySelector(`input[name="provider"][value="${inf.provider}"]`);
           if (radio) {
@@ -207,6 +224,7 @@
           $("byok-fields").hidden = radio.value !== "byok" || !radio.checked;
           $("model-hint").textContent =
             document.querySelector('input[name="provider"]:checked')?.value === "byok" ? "(optional)" : "";
+          if (lastState) renderStatus(lastState);
         });
       });
 
