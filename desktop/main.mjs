@@ -231,11 +231,17 @@ async function connectManagedAccount() {
 
   if (!outcome.ok) {
     console.warn(`[desktop] connect: ${outcome.error}`);
+    // Never leave a blank BeeZilla window behind after a failed load.
+    if (!win.isDestroyed()) win.destroy();
     if (!process.env.BZ_CONNECT_TEST && mainWindow && !mainWindow.isDestroyed()) {
       void dialog.showMessageBox(mainWindow, {
         type: "info",
         title: "BeeZilla inference",
-        message: outcome.needsSignIn ? "Sign-in did not complete." : "Could not connect.",
+        message: outcome.unreachable
+          ? "BeeZilla is not reachable."
+          : outcome.needsSignIn
+            ? "Sign-in did not complete."
+            : "Could not connect.",
         detail: `${outcome.error}\n\nYou can still use your own key: BeeZilla → Settings.`,
       });
     }
