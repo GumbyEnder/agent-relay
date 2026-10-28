@@ -236,9 +236,13 @@
           var tot = line("After this purchase", after.toLocaleString() + " Drops");
           tot.className = "line total";
           box.appendChild(tot);
-          if (balance < price) {
-            box.appendChild(el("p", "warn", "Not enough Honey Drops — you need " + (price - balance).toLocaleString() + " more."));
-            confirm.disabled = true;
+          // Re-enable as well as disable: the first paint happens before the balance
+          // arrives, so a one-way disable leaves a purchasable recipe un-buyable.
+          var short = balance < price;
+          confirm.disabled = short;
+          if (short) {
+            box.appendChild(el("p", "warn", "Not enough Honey Drops — you need " +
+              (price - balance).toLocaleString() + " more."));
           }
         }
         function line(label, value) {
