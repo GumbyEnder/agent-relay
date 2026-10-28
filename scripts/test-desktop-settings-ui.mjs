@@ -70,11 +70,17 @@ if (line) {
   }
 }
 
-check("the settings page loads in the window", Boolean(parsed), line ? line.slice(0, 140) : "no result line — page did not load");
+check("the settings page loads in the window", Boolean(parsed), line ? line.slice(0, 140) : "no result line — page did not load (is another BeeZilla/Electron instance holding the single-instance lock?)");
 check("the page finds the preload bridge", parsed?.hasBridge === true, String(parsed?.hasBridge));
 check("the form is present", parsed?.formPresent === true, String(parsed?.formPresent));
 check("controls are enabled", parsed?.buttonsEnabled === true, String(parsed?.buttonsEnabled));
 check("choosing 'my own key' reveals the key field", parsed?.byokFieldsShown === true, String(parsed?.byokFieldsShown));
+check(
+  "the empty-state copy matches the selected option",
+  /paste your key/i.test(parsed?.emptyNote ?? "") && !/will refuse/i.test(parsed?.emptyNote ?? ""),
+  parsed?.emptyNote ?? "(empty)",
+);
+check("Remove key is disabled while nothing is configured", parsed?.clearDisabledWhenEmpty === true, String(parsed?.clearDisabledWhenEmpty));
 check("saving reports success in the UI", /Saved/i.test(parsed?.statusText ?? ""), parsed?.statusText ?? "(empty)");
 check("the form reflects the saved key", /your own key/i.test(parsed?.currentText ?? ""), (parsed?.currentText ?? "").slice(0, 100));
 check("the UI never shows the key itself", !/sk-drive-probe/.test(JSON.stringify(parsed ?? {})), "checked status + current lines");
