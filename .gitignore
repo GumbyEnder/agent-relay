@@ -20,3 +20,6 @@ brand-assets/
 # desktop release staging (generated; see desktop/dist.mjs)
 desktop/stage/
 dist-desktop/
+
+# test outputs
+fixtures/results/
