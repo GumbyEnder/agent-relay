@@ -52,7 +52,16 @@ export const SEARCH_MINT_SCRIPT = `(async () => {
   }
 })()`;
 
-export function cloudBaseUrl(raw = process.env.BZ_CLOUD_URL) {
+/**
+ * Where a shipped app looks for BeeZilla by default.
+ *
+ * Without a baked default the Connect menu item is disabled on every real install and
+ * "our inference" can only be reached by a user who exports an env var — which is not
+ * a product. Env override still wins for testing and staging.
+ */
+export const DEFAULT_CLOUD_URL = "https://app.beezilla.ai";
+
+export function cloudBaseUrl(raw = process.env.BZ_CLOUD_URL || DEFAULT_CLOUD_URL) {
   const value = (raw ?? "").trim().replace(/\/+$/, "");
   if (!value) return "";
   if (!/^https?:\/\//i.test(value)) throw new Error(`the BeeZilla URL must be http(s), got ${value.slice(0, 40)}`);
