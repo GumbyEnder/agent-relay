@@ -10,7 +10,7 @@ import { getSql } from "@/lib/db";
 import { resolveOperatorContext } from "@/lib/auth/verify.server";
 import { chatCompletion } from "@/lib/buzzy/llm";
 import { createRouteDeps, routeRecipes, type RouteDeps } from "./routes";
-import { FsStorage } from "./storage";
+import { FsStorage, PgStorage } from "./storage";
 import { generateAuthorKey, partsOf, sealBundle, verifyBundle } from "./bundle";
 import { publishBundle } from "./registry";
 import { bundleKey, checksKey, semanticKey } from "./storage";
@@ -53,7 +53,12 @@ async function getDeps(): Promise<RouteDeps> {
         sql.query<T>(text, params ?? []);
       return createRouteDeps({
         q,
-        storage: new FsStorage(process.env.RECIPE_SEAL_STORAGE_DIR ?? ".data/recipe-seal"),
+        // Durable by default. The filesystem adapter is opt-in for local work via
+        // RECIPE_SEAL_STORAGE_DIR; a container that forgets it would otherwise lose
+        // every bundle on the next deploy.
+        storage: process.env.RECIPE_SEAL_STORAGE_DIR
+          ? new FsStorage(process.env.RECIPE_SEAL_STORAGE_DIR)
+          : new PgStorage(q),
         // Absent KEK is a valid state: verify works, run answers 503.
         kek: kekFromEnv(),
         // Local-open mode is opt-in for these routes. humanAuthRequired() returns
