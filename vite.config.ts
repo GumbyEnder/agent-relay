@@ -444,6 +444,8 @@ export default defineConfig(({ command }) => ({
                 // token's behalf, passes the provider payload through unchanged.
                 route: "/api/search",
                 handler: "./src/lib/search-gateway.nitro.ts",
+              },
+              {
                 route: "/api/recipes",
                 handler: "./src/lib/recipe-seal/recipes.nitro.ts",
               },
