@@ -23,6 +23,7 @@ import { homedir, platform } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveInference, saveInference, clearInference, redactKey } from "../scripts/lib/inference.mjs";
+import { resolvePins } from "../scripts/lib/pins.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCHER = join(ROOT, "scripts", "beezilla-local.mjs");
@@ -204,16 +205,13 @@ async function cmdDoctor() {
 
   // A build with no pinned publisher cannot trust a single fetched recipe, so
   // say it at install time rather than at the first import.
-  const pins = (process.env.BZ_RECIPE_PUBLISHER_KEYS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const pins = resolvePins(ROOT);
   soft(
     "publisher keys pinned",
-    pins.length > 0,
-    pins.length > 0
-      ? `${pins.length} pinned — fetched recipes can be trusted`
-      : "NONE pinned — no fetched recipe will be trusted (set BZ_RECIPE_PUBLISHER_KEYS; the release build bakes these in)",
+    pins.count > 0,
+    pins.count > 0
+      ? `${pins.count} pinned via ${pins.source} — fetched recipes can be trusted`
+      : "NONE pinned — no fetched recipe will be trusted (set BZ_RECIPE_PUBLISHER_KEYS, or ship publishers.json in a release)",
   );
 
   const rt = readRuntime();
