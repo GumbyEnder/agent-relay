@@ -16,7 +16,7 @@
  * 9. Return structured response.
  */
 
-import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
+import { chatCompletion, chatCompletionFull, chatCompletionStream, resolveModel, resolveReasoningModel } from "./llm";
 import { selectModel } from "./modelPolicy";
 import { readModelPrefs } from "./modelPrefs";
 import {
@@ -239,6 +239,8 @@ export interface ChatRequest {
   surface?: "text" | "voice";
   /** Streaming sinks. Present only on the voice lane. */
   speech?: VoiceHandlers;
+  /** Text deltas for the typed lane, so words appear at TTFT not at the end. */
+  onText?: (delta: string) => void;
   /** Preferred audio voice for the voice lane. */
   voiceName?: string;
 }
@@ -696,6 +698,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         model: spoken.model,
         finishReason: spoken.finishReason,
       };
+    } else if (typeof req.onText === "function" && !(loopTools && loopTools.length)) {
+      // Typed turns stream too. Buffered, a 489-char answer arrived 12.6s after
+      // the question with nothing on screen; the same answer streams its first
+      // words at ~1s. Tool turns stay buffered — a tool call needs the whole
+      // assistant message before it can be executed.
+      let firstDelta = true;
+      reply = await chatCompletionStream(
+        messages,
+        { model: routedModel, maxTokens: undefined },
+        (delta) => {
+          if (firstDelta) { ttftMs = Date.now() - llmStarted; firstDelta = false; }
+          req.onText!(delta);
+        },
+      );
+      llmMs = Date.now() - llmStarted;
     } else {
       reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
       llmMs = Date.now() - llmStarted;

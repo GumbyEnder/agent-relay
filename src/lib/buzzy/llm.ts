@@ -168,6 +168,78 @@ export async function chatCompletionFull(
   throw lastError instanceof Error ? lastError : new Error("LLM call failed");
 }
 
+/**
+ * Streaming text lane. The buffered call is why a typed turn showed nothing for
+ * 9-13s: the client waited for the WHOLE reply before painting a word. This
+ * streams deltas so the first words land at TTFT (~1s) instead of at the end.
+ *
+ * Tool turns stay on the buffered path — a tool call needs the complete
+ * assistant message before anything can be executed.
+ */
+export async function chatCompletionStream(
+  messages: Array<{ role: string; content: string }>,
+  opts: { model?: string; temperature?: number; maxTokens?: number } | undefined,
+  onText: (delta: string) => void,
+): Promise<FullCompletion> {
+  const model = opts?.model || DEFAULT_MODEL;
+  const url = BASE_URL.replace(/\/+$/, "") + "/chat/completions";
+  const started = Date.now();
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: opts?.temperature ?? 0.7,
+      max_tokens: opts?.maxTokens ?? 2048,
+      stream: true,
+    }),
+  });
+  if (!res.ok || !res.body) {
+    const text = res.ok ? "no body" : await res.text();
+    throw new Error(`LLM request failed (${res.status}): ${text.slice(0, 500)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let finishReason: string | null = null;
+  let servedModel = model;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      let parsed: any;
+      try { parsed = JSON.parse(payload); } catch { continue; }
+      if (parsed.model) servedModel = String(parsed.model);
+      const choice = parsed.choices?.[0];
+      if (!choice) continue;
+      const delta = choice.delta?.content;
+      if (typeof delta === "string" && delta) {
+        content += delta;
+        onText(delta);
+      }
+      if (choice.finish_reason) finishReason = String(choice.finish_reason);
+    }
+  }
+  return {
+    content: content.trim(),
+    toolCalls: [],
+    usage: null,
+    latencyMs: Date.now() - started,
+    model: servedModel,
+    finishReason,
+  };
+}
+
 async function postCompletionFull(body: Record<string, unknown>): Promise<FullCompletion> {
   const url = new URL(
     BASE_URL.replace(/\/+$/, "") + "/chat/completions",

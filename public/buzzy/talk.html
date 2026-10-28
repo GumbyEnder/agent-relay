@@ -2756,17 +2756,43 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function startLevelLoop() {
       if (voice.raf || !voice.analyser) return;
       var data = new Uint8Array(voice.analyser.frequencyBinCount);
+      var spec = new Uint8Array(voice.analyser.frequencyBinCount);
+      // 24kHz / 1024 bins → ~23.4Hz per bin. Bands: low (jaw) 80–400Hz,
+      // mid (vowel body) 400–1600Hz, high (consonants) 1600–6000Hz.
+      var BIN_HZ = (voice.ctx ? voice.ctx.sampleRate : 24000) / 2 / spec.length;
       function frame() {
         voice.raf = 0;
         if (!voice.analyser) return;
         voice.analyser.getByteTimeDomainData(data);
+        voice.analyser.getByteFrequencyData(spec);
         var sum = 0;
         for (var i = 0; i < data.length; i++) {
           var v = (data[i] - 128) / 128;
           sum += v * v;
         }
         var level = Math.min(1, Math.sqrt(sum / data.length) * 3.4);
-        for (var a = 0; a < avatars.length; a++) avatars[a].setLevel(level);
+        var low = 0, mid = 0, high = 0, nLow = 0, nMid = 0, nHigh = 0;
+        for (var b = 1; b < spec.length; b++) {
+          var hz = b * BIN_HZ;
+          if (hz < 80 || hz > 6000) continue;
+          var e = spec[b] / 255;
+          if (hz < 400) { low += e; nLow++; }
+          else if (hz < 1600) { mid += e; nMid++; }
+          else { high += e; nHigh++; }
+        }
+        low = nLow ? low / nLow : 0;
+        mid = nMid ? mid / nMid : 0;
+        high = nHigh ? high / nHigh : 0;
+        var total = low + mid + high;
+        var viseme = {
+          open: Math.min(1, (low * 1.5 + mid * 0.9) * 2.2),
+          wide: total > 0.02 ? Math.min(1, (high * 1.4 + mid * 0.4) / total) : 0.5,
+          bright: Math.min(1, high * 2.4)
+        };
+        for (var a = 0; a < avatars.length; a++) {
+          avatars[a].setLevel(level);
+          if (avatars[a].setViseme) avatars[a].setViseme(viseme);
+        }
         if (voice.speaking || voice.active) voice.raf = requestAnimationFrame(frame);
       }
       voice.raf = requestAnimationFrame(frame);
@@ -3166,6 +3192,80 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (r.done) {
               if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
               if (!finalData) throw new Error("The voice turn ended without a reply.");
+              return finalData;
+            }
+            buf += dec.decode(r.value, { stream: true });
+            var idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              var frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              handleFrame(frame);
+            }
+            return pump();
+          });
+        }
+        return pump();
+      });
+    }
+
+    // Typed turns stream for the same reason the voice lane does: a buffered
+    // reply paints nothing until the whole answer exists. Same SSE contract,
+    // no audio.
+    function streamTextTurn(sendBody, metrics, sendStarted) {
+      var liveBubble = null;
+      var liveText = "";
+      return fetch(CHAT_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(120000),
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(Object.assign({}, sendBody, { stream: true })),
+      }).then(function (res) {
+        var ctype = (res.headers.get("content-type") || "");
+        if (!res.ok || !res.body || ctype.indexOf("text/event-stream") === -1) {
+          return res.json().catch(function () { return { error: "The turn failed." }; })
+            .then(function (j) {
+              if (j && j.error) throw new Error(j.error);
+              return j;
+            });
+        }
+        var reader = res.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "";
+        var finalData = null;
+
+        function handleFrame(frame) {
+          var ev = "message";
+          var dataLines = [];
+          frame.split("\n").forEach(function (line) {
+            if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
+            else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
+          });
+          if (!dataLines.length) return;
+          var payload;
+          try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
+          if (ev === "text") {
+            if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
+            liveText += payload.t || "";
+            if (!liveBubble) {
+              liveBubble = document.createElement("div");
+              liveBubble.className = "bubble streaming";
+              var c = document.getElementById("chatMessages");
+              if (c) c.insertBefore(liveBubble, c.firstChild);
+            }
+            liveBubble.textContent = liveText;
+          } else if (ev === "done") {
+            finalData = payload;
+          } else if (ev === "error") {
+            throw new Error(payload.error || "The turn failed.");
+          }
+        }
+
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) {
+              if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
+              if (!finalData) throw new Error("The turn ended without a reply.");
               return finalData;
             }
             buf += dec.decode(r.value, { stream: true });
@@ -4227,6 +4327,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         let data;
         if (useVoiceLane) {
           data = await streamVoiceTurn(sendBody, metrics, sendStarted);
+        } else if (typeof ReadableStream !== "undefined") {
+          data = await streamTextTurn(sendBody, metrics, sendStarted);
+          metrics.turnMs = Math.round(performance.now() - sendStarted);
         } else {
           let resp;
           try {

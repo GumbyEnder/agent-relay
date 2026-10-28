@@ -560,7 +560,7 @@ export default defineEventHandler(async (event) => {
     const turnStarted = Date.now();
     await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface } });
 
-    const runTurn = (speech?: VoiceHandlers) =>
+    const runTurn = (opts?: { speech?: VoiceHandlers; onText?: (t: string) => void }) =>
       chatLoop({
         userId,
         jobId,
@@ -574,8 +574,9 @@ export default defineEventHandler(async (event) => {
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,
         surface,
-        speech,
+        speech: opts?.speech,
         voiceName,
+        onText: opts?.onText,
       });
 
     // ── Voice lane: text + audio streamed as Server-Sent Events ────────
@@ -597,8 +598,10 @@ export default defineEventHandler(async (event) => {
           };
           try {
             const result = await runTurn({
-              onText: (t) => send("text", { t }),
-              onAudio: (b64, format) => send("audio", { b64, format }),
+              speech: {
+                onText: (t) => send("text", { t }),
+                onAudio: (b64, format) => send("audio", { b64, format }),
+              },
             });
             send("done", result);
             if (result.timings) {
@@ -634,6 +637,45 @@ export default defineEventHandler(async (event) => {
       });
       return new Response(stream, {
         status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    // ── Typed lane, streamed ───────────────────────────────────────────
+    // Same SSE contract as the voice lane minus audio: `text` deltas then
+    // `done`. The page paints words as they arrive instead of after the whole
+    // reply is buffered.
+    if (body.stream === true) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          let closed = false;
+          const send = (event: string, data: unknown) => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            } catch {
+              closed = true;
+            }
+          };
+          try {
+            const result = await runTurn({ onText: (t) => send("text", { t }) });
+            send("done", result);
+          } catch (err) {
+            console.error("[buzzy/text] turn failed:", err instanceof Error ? err.message : err);
+            send("error", { error: "The turn failed. Try again." });
+          } finally {
+            closed = true;
+            try { controller.close(); } catch { /* already closed */ }
+          }
+        },
+      });
+      return new Response(stream, {
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
