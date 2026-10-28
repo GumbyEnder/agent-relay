@@ -26,6 +26,7 @@ const LADDER = [
   { name: "inference credentials", cmd: "node", args: ["scripts/test-inference-e2e.mjs"] },
   { name: "managed expiry", cmd: "node", args: ["scripts/test-managed-expiry.mjs"] },
   { name: "search credentials", cmd: "node", args: ["scripts/test-search-e2e.mjs"] },
+  { name: "search live", cmd: "node", args: ["scripts/test-search-live.mjs"] },
   { name: "recipe trust + cache", cmd: "npx", args: ["tsx", "scripts/test-recipe-trust.ts"] },
   { name: "recipe catalog", cmd: "npx", args: ["tsx", "scripts/test-recipe-catalog.ts"] },
   { name: "local recipe API", cmd: "npx", args: ["tsx", "scripts/test-recipe-local-api.ts"] },

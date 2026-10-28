@@ -14,6 +14,17 @@ const env = (key: string): string => process.env[key]?.trim() ?? "";
 const ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 
 /**
+ * Where to search. Brave's real endpoint unless BZ_BRAVE_URL says otherwise —
+ * that override exists so the search PATH can be tested end-to-end (tool loop,
+ * citation formatting, failure copy) without spending a live Brave quota, and so a
+ * deployment can point at its own gateway later.
+ */
+function endpoint(): string {
+  const override = (process.env.BZ_BRAVE_URL ?? "").trim();
+  return override || ENDPOINT;
+}
+
+/**
  * Read at CALL time, not module load.
  *
  * Capturing the key at import meant a credential resolved after boot (a BYOK key
@@ -76,7 +87,7 @@ export async function webSearch(
   if (!key) return { ok: false, query: q, results: [], error: "search is not configured" };
 
   const count = Math.max(1, Math.min(10, Math.round(opts?.count ?? 5)));
-  const url = new URL(ENDPOINT);
+  const url = new URL(endpoint());
   url.searchParams.set("q", q);
   url.searchParams.set("count", String(count));
   url.searchParams.set("safesearch", "moderate");
