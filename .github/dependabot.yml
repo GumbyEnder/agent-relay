@@ -28,6 +28,18 @@ updates:
       - dependency-name: "nitropack"
         update-types: ["version-update:semver-major"]
 
+  # Dependabot auto-detected this nested manifest; make it explicit and grouped so
+  # the adapter cannot open its own pile of PRs on top of the root queue.
+  - package-ecosystem: npm
+    directory: "/packages/beezilla-adapter"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    versioning-strategy: increase
+    groups:
+      adapter-minor-patch:
+        update-types: ["minor", "patch"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
