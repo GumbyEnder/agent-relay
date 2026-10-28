@@ -11,11 +11,26 @@
  */
 
 const env = (key: string): string => process.env[key]?.trim() ?? "";
-const BRAVE_KEY = env("BZ_BRAVE_KEY");
 const ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 
+/**
+ * Read at CALL time, not module load.
+ *
+ * Capturing the key at import meant a credential resolved after boot (a BYOK key
+ * saved by the user, a desktop store) never took effect until a restart, and a
+ * key cleared in the store kept working for the life of the process.
+ */
+function braveKey(): string {
+  return env("BZ_BRAVE_KEY");
+}
+
 export function searchAvailable(): boolean {
-  return BRAVE_KEY !== "";
+  return braveKey() !== "";
+}
+
+/** Which provider would serve a search right now. */
+export function searchProvider(): "brave" | null {
+  return braveKey() !== "" ? "brave" : null;
 }
 
 export interface SearchHit {
@@ -57,7 +72,8 @@ export async function webSearch(
 ): Promise<SearchResult> {
   const q = String(query || "").trim().slice(0, 400);
   if (!q) return { ok: false, query: q, results: [], error: "empty query" };
-  if (!BRAVE_KEY) return { ok: false, query: q, results: [], error: "search is not configured" };
+  const key = braveKey();
+  if (!key) return { ok: false, query: q, results: [], error: "search is not configured" };
 
   const count = Math.max(1, Math.min(10, Math.round(opts?.count ?? 5)));
   const url = new URL(ENDPOINT);
@@ -73,7 +89,7 @@ export async function webSearch(
       headers: {
         Accept: "application/json",
         "Accept-Encoding": "gzip",
-        "X-Subscription-Token": BRAVE_KEY,
+        "X-Subscription-Token": key,
       },
       signal: AbortSignal.timeout(8000),
     });

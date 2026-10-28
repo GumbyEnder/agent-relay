@@ -19,6 +19,7 @@ const LADDER = [
   { name: "cli", cmd: "node", args: ["scripts/test-cli-e2e.mjs"] },
   { name: "desktop supervisor", cmd: "node", args: ["scripts/test-desktop-supervisor.mjs"] },
   { name: "inference credentials", cmd: "node", args: ["scripts/test-inference-e2e.mjs"] },
+  { name: "search credentials", cmd: "node", args: ["scripts/test-search-e2e.mjs"] },
   { name: "recipe trust + cache", cmd: "npx", args: ["tsx", "scripts/test-recipe-trust.ts"] },
   { name: "local recipe API", cmd: "npx", args: ["tsx", "scripts/test-recipe-local-api.ts"] },
 ];

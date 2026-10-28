@@ -24,6 +24,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveInference, saveInference, clearInference, redactKey } from "../scripts/lib/inference.mjs";
 import { resolvePins } from "../scripts/lib/pins.mjs";
+import { resolveSearch, saveSearchKey, clearSearchKey } from "../scripts/lib/search-keys.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCHER = join(ROOT, "scripts", "beezilla-local.mjs");
@@ -205,6 +206,15 @@ async function cmdDoctor() {
 
   // A build with no pinned publisher cannot trust a single fetched recipe, so
   // say it at install time rather than at the first import.
+  const search = resolveSearch(DATA);
+  ok(
+    "web search",
+    Boolean(search),
+    search
+      ? `brave via ${search.source}${search.encrypted === false ? " (stored UNENCRYPTED)" : ""}`
+      : "not configured — the model answers without sources (beezilla key search set)",
+  );
+
   const pins = resolvePins(ROOT);
   soft(
     "publisher keys pinned",
@@ -288,6 +298,40 @@ async function cmdExport(argv) {
 }
 
 async function cmdKey(argv) {
+  // `key search ...` manages web-search credentials; `key ...` manages inference.
+  if (argv[0] === "search") {
+    const action = argv[1] ?? "show";
+    const flag = (name) => {
+      const i = argv.indexOf(name);
+      return i !== -1 ? argv[i + 1] : undefined;
+    };
+    if (action === "set") {
+      const key = flag("--key") ?? "";
+      if (!key.trim()) {
+        console.error('usage: beezilla key search set --key <BRAVE_API_KEY>');
+        return 2;
+      }
+      const saved = saveSearchKey(DATA, { key });
+      console.log(`saved brave search key ${redactKey(key)}${saved.encrypted ? " (encrypted)" : " (unencrypted — 0600 file)"}`);
+      console.log("restart the runtime for it to take effect: beezilla stop && beezilla serve");
+      return 0;
+    }
+    if (action === "clear") {
+      clearSearchKey(DATA);
+      console.log("web search credentials removed");
+      return 0;
+    }
+    const inf = resolveSearch(DATA);
+    if (!inf) {
+      console.log("web search: not configured — answers will have no sources");
+      return 0;
+    }
+    console.log(`provider  ${inf.provider} (${inf.source})`);
+    console.log(`key       ${redactKey(inf.key)}`);
+    if (inf.encrypted === false) console.log("storage   unencrypted file (0600) — the desktop app uses the OS keychain");
+    return 0;
+  }
+
   const sub = argv[0] ?? "show";
   const flag = (name) => {
     const i = argv.indexOf(name);
@@ -395,7 +439,7 @@ const verbs = {
 
 const fn = verbs[verb];
 if (!fn) {
-  console.log(`beezilla <command>\n\n  serve [--port N]   start the runtime\n  status             is it running\n  stop               graceful shutdown\n  doctor             diagnose this install\n  run "<message>"    one chat turn [--job id] [--work]\n  export [file]      full local data as ZIP\n  key set|show|clear inference credentials (BYOK, or ours via device token)`);
+  console.log(`beezilla <command>\n\n  serve [--port N]   start the runtime\n  status             is it running\n  stop               graceful shutdown\n  doctor             diagnose this install\n  run "<message>"    one chat turn [--job id] [--work]\n  export [file]      full local data as ZIP\n  key set|show|clear inference credentials (BYOK, or ours via device token)\n  key search set|show|clear  web search credentials (Brave; ours or BYOK)`);
   process.exit(verb ? 2 : 0);
 }
 process.exit(await fn(rest));
