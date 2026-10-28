@@ -139,9 +139,28 @@ const child = spawn(process.execPath, [entry], {
     NITRO_HOST: HOST,
     PORT: String(port),
     NITRO_PORT: String(port),
+    // The child must not outlive this launcher. If this process is SIGKILLed it
+    // cannot clean up, so the child watches the pid itself.
+    BZ_PARENT_PID: String(process.pid),
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require ${join(ROOT, "scripts/lib/parent-watchdog.cjs")}`]
+      .filter(Boolean)
+      .join(" "),
   },
   stdio: ["ignore", "inherit", "inherit"],
 });
+
+// Same contract one level up: if whatever spawned this launcher disappears
+// (electron crash, `timeout`, a test harness that gave up), stop cleanly instead
+// of lingering as an orphan holding the port.
+const launcherParent = process.ppid;
+const parentTimer = setInterval(() => {
+  try {
+    process.kill(launcherParent, 0);
+  } catch {
+    stop("SIGTERM");
+  }
+}, 2000);
+parentTimer.unref();
 
 let stopping = false;
 function stop(signal) {
