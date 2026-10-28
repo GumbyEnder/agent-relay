@@ -54,6 +54,16 @@ if (!existsSync(ASAR)) {
   for (const file of ["main.mjs", "preload.cjs", "settings.mjs", "supervisor.mjs", "connect.mjs"]) {
     check(`the shell ships ${file}`, listing.split("\n").includes(`/${file}`), file);
   }
+  // The connect flow is the only thing that can obtain OUR credentials, so a stage
+  // that ships it without the search half would silently ship BYOK-only behaviour.
+  // asar stores file bodies uncompressed, so the bytes of connect.mjs are searchable
+  // in the archive itself — no extraction, no temp files, no cwd surprises.
+  try {
+    const archive = readFileSync(ASAR, "latin1");
+    check("the connect flow also asks for a search token", archive.includes("api/search-token"));
+  } catch (err) {
+    check("the connect flow also asks for a search token", false, `could not read the asar: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 // ── the runtime tree inside the asar's extraResources ───────────────────────
