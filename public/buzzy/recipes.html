@@ -109,6 +109,23 @@
     .bz-modal .confirm { background: var(--bz-yellow); color: #111; border-color: var(--bz-yellow); font-weight: 700; }
     .bz-modal .confirm:disabled { opacity: 0.55; cursor: default; }
 
+    .tabs { display: flex; gap: 0.4rem; margin: 0 0 1.25rem; flex-wrap: wrap; border-bottom: 1px solid #222; }
+    .tab {
+      background: none; border: 0; border-bottom: 2px solid transparent;
+      color: #8A8A8A; font: inherit; font-size: 0.86rem; font-weight: 600;
+      padding: 0.55rem 0.85rem; cursor: pointer;
+    }
+    .tab:hover { color: #C9CDD2; }
+    .tab.active { color: #fff; border-bottom-color: var(--bz-yellow); }
+    .tab .n {
+      display: inline-block; min-width: 1.35rem; text-align: center;
+      font-size: 0.7rem; font-weight: 700; color: #8A8A8A;
+      background: #1B1B1B; border-radius: 999px; padding: 0.05rem 0.35rem; margin-left: 0.3rem;
+    }
+    .tab.active .n { color: #111; background: var(--bz-yellow); }
+
+    .chip.owned { color: #67D99B; border-color: #2F6F4F; background: rgba(103,217,155,0.08); }
+
     .state { padding: 2rem 0; color: #7A7A7A; font-size: 0.88rem; }
     .state.error { color: #FF8A80; }
 
@@ -157,6 +174,12 @@
       <span><b>Sealed</b> — the steps are never published</span>
       <span><b>Checked</b> — every recipe ships with its rules</span>
       <span class="hint" id="count"></span>
+    </div>
+
+    <div class="tabs" id="tabs" role="tablist">
+      <button class="tab" data-tab="mine" role="tab">My Recipes <span class="n" id="n-mine">0</span></button>
+      <button class="tab" data-tab="acquired" role="tab">Recipes Acquired <span class="n" id="n-acq">0</span></button>
+      <button class="tab active" data-tab="community" role="tab">Community Recipes <span class="n" id="n-all">0</span></button>
     </div>
 
     <div id="shelf" class="grid"></div>
@@ -271,6 +294,7 @@
         c.appendChild(meta);
 
         var chips = el("div", "chips");
+        if (OWNED.has(r.hash)) chips.appendChild(el("span", "chip owned", r.author && r.author.id === ME ? "Yours" : "Owned"));
         var cap = r.capability || {};
         (cap.outputs || []).forEach(function (o) { chips.appendChild(el("span", "chip", String(o))); });
         if (r.hash) chips.appendChild(el("span", "chip record", r.hash.slice(0, 10)));
@@ -279,7 +303,12 @@
 
         var lock = el("div", "lock");
         lock.appendChild(el("span", "sealed", "Method sealed"));
-        var btn = el("button", "buy", r.is_free ? "Claim it →" : "Buy →");
+        var mine = OWNED.has(r.hash);
+        var btn = el("button", "buy", mine ? "Owned ✓" : (r.is_free ? "Claim it →" : "Buy →"));
+        if (mine) {
+          btn.disabled = true;
+          btn.style.cssText = "background:#2F6F4F;color:#E8F7EE;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;";
+        }
         btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
         btn.addEventListener("click", function () {
           if (r.is_free) return doPurchase(btn, r);
@@ -321,17 +350,59 @@
         return c;
       }
 
-      fetch("/api/recipes", { credentials: "same-origin" })
-        .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          return res.json();
-        })
-        .then(function (data) {
-          var rows = (data && data.recipes) || [];
-          if (!rows.length) { state.textContent = "No recipes on the shelf yet."; return; }
-          state.remove();
-          rows.forEach(function (r) { shelf.appendChild(card(r)); });
-          count.textContent = rows.length + (rows.length === 1 ? " recipe" : " recipes");
+      function json(url) {
+        return fetch(url, { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .catch(function () { return null; });
+      }
+
+      var ALL = [], OWNED = new Set(), ME = null, TAB = "community";
+
+      function visible() {
+        if (TAB === "mine") return ALL.filter(function (r) { return r.author && r.author.id === ME; });
+        if (TAB === "acquired") return ALL.filter(function (r) { return OWNED.has(r.hash); });
+        return ALL;
+      }
+
+      function paint() {
+        shelf.textContent = "";
+        var rows = visible();
+        document.getElementById("n-mine").textContent = ALL.filter(function (r) { return r.author && r.author.id === ME; }).length;
+        document.getElementById("n-acq").textContent = ALL.filter(function (r) { return OWNED.has(r.hash); }).length;
+        document.getElementById("n-all").textContent = ALL.length;
+        [].forEach.call(document.querySelectorAll(".tab"), function (t) {
+          t.classList.toggle("active", t.getAttribute("data-tab") === TAB);
+        });
+        count.textContent = rows.length + (rows.length === 1 ? " recipe" : " recipes");
+
+        if (!rows.length) {
+          state.className = "state";
+          state.textContent = TAB === "mine" ? "You have not published a recipe yet."
+            : TAB === "acquired" ? "Nothing acquired yet — open something from Community Recipes."
+            : "No recipes on the shelf yet.";
+          if (!state.parentNode) document.querySelector("main").appendChild(state);
+          return;
+        }
+        if (state.parentNode) state.remove();
+        rows.forEach(function (r) { shelf.appendChild(card(r)); });
+      }
+
+      [].forEach.call(document.querySelectorAll(".tab"), function (t) {
+        t.addEventListener("click", function () { TAB = t.getAttribute("data-tab"); paint(); });
+      });
+
+      // One load, three views: the shelf, what this account owns, and who it is.
+      Promise.all([json("/api/recipes"), json("/api/wallet/owned"), json("/api/auth/get-session")])
+        .then(function (out) {
+          var recipes = (out[0] && out[0].recipes) || [];
+          var owned = (out[1] && out[1].hashes) || [];
+          var session = out[2] && out[2].user ? out[2].user : null;
+          ALL = recipes;
+          OWNED = new Set(owned);
+          ME = session ? session.id : null;
+          // Your own recipes are yours to open without buying.
+          ALL.forEach(function (r) { if (r.author && r.author.id === ME) OWNED.add(r.hash); });
+          paint();
         })
         .catch(function (err) {
           state.className = "state error";
