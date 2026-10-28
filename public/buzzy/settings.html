@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BeeZilla — Settings</title>
+    <style>
+      :root {
+        --ink: #12161f;
+        --muted: #5c6675;
+        --line: #e3e7ee;
+        --bg: #f7f8fa;
+        --accent: #2f6f4f;
+        --warn: #8a5a12;
+        --err: #a4262c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 15px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      main { max-width: 680px; margin: 0 auto; padding: 32px 24px 64px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 24px; }
+      section {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+      h2 { font-size: 15px; margin: 0 0 2px; }
+      .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+      label.opt {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin-bottom: 8px;
+        cursor: pointer;
+      }
+      label.opt:has(input:checked) { border-color: var(--accent); background: #f3f8f5; }
+      label.opt strong { display: block; font-weight: 600; }
+      label.opt span { color: var(--muted); font-size: 13px; }
+      input[type="text"], input[type="password"], input[type="url"] {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+        background: #fff;
+      }
+      input:focus { outline: 2px solid #bcd8c9; outline-offset: 1px; }
+      .field { margin-top: 10px; }
+      .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+      details { margin-top: 12px; }
+      summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+      button {
+        font: inherit;
+        padding: 9px 16px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary { background: #fff; border-color: var(--line); color: var(--ink); }
+      button:disabled { opacity: 0.55; cursor: default; }
+      .status { margin-top: 14px; font-size: 13px; min-height: 18px; }
+      .status.ok { color: var(--accent); }
+      .status.warn { color: var(--warn); }
+      .status.err { color: var(--err); }
+      .current { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+      code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+      .nobridge {
+        display: none;
+        border: 1px solid #f0d9a8;
+        background: #fffaf0;
+        color: var(--warn);
+        border-radius: 10px;
+        padding: 14px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Settings</h1>
+      <p class="sub">Choose how BeeZilla thinks and searches. Everything stays on this machine.</p>
+
+      <div class="nobridge" id="nobridge">
+        This page manages app credentials, so it only works inside the BeeZilla window.
+        Open BeeZilla, then choose <strong>BeeZilla → Settings</strong>.
+      </div>
+
+      <!-- ── inference ─────────────────────────────────────────────── -->
+      <section id="inference">
+        <h2>Intelligence</h2>
+        <p class="hint">Where answers come from. Your key is stored in this computer's secure storage.</p>
+
+        <label class="opt">
+          <input type="radio" name="provider" value="beezilla" id="provider-beezilla" checked />
+          <span>
+            <strong>BeeZilla inference</strong>
+            <span>Included with your account. Nothing to configure.</span>
+          </span>
+        </label>
+        <label class="opt">
+          <input type="radio" name="provider" value="byok" id="provider-byok" />
+          <span>
+            <strong>My own key</strong>
+            <span>Bring a key from any OpenAI-compatible provider.</span>
+          </span>
+        </label>
+
+        <div id="byok-fields" hidden>
+          <div class="field">
+            <label for="key">API key</label>
+            <input type="password" id="key" placeholder="sk-…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label for="model">Model <span id="model-hint"></span></label>
+            <input type="text" id="model" placeholder="e.g. gpt-4o-mini" autocomplete="off" />
+          </div>
+          <details>
+            <summary>Advanced</summary>
+            <div class="field">
+              <label for="baseUrl">Base URL</label>
+              <input type="url" id="baseUrl" placeholder="https://api.openai.com/v1" autocomplete="off" />
+            </div>
+          </details>
+        </div>
+
+        <div class="row">
+          <button id="save-inference">Save intelligence</button>
+          <button id="clear-inference" class="secondary">Remove key</button>
+          <span class="status" id="inference-status"></span>
+        </div>
+        <p class="current" id="inference-current"></p>
+      </section>
+
+      <!-- ── search ────────────────────────────────────────────────── -->
+      <section id="search">
+        <h2>Web search</h2>
+        <p class="hint">Lets answers cite real pages. BeeZilla includes search when configured, or use your own Brave key.</p>
+        <div class="field">
+          <label for="search-key">Brave Search API key</label>
+          <input type="password" id="search-key" placeholder="BSA…" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <button id="save-search">Save search</button>
+          <button id="clear-search" class="secondary">Remove key</button>
+          <span class="status" id="search-status"></span>
+        </div>
+        <p class="current" id="search-current"></p>
+      </section>
+
+      <p class="sub" style="margin-top: 26px">
+        Changes restart BeeZilla's local engine automatically — the button tells you when it is ready.
+      </p>
+    </main>
+
+    <script>
+      const bridge = window.beezilla?.settings;
+      const $ = (id) => document.getElementById(id);
+
+      const say = (el, text, kind) => {
+        el.textContent = text;
+        el.className = `status ${kind || ""}`.trim();
+      };
+
+      function renderStatus(state) {
+        const inf = state?.inference;
+        $("inference-current").innerHTML = inf
+          ? `Now: <strong>${inf.provider === "beezilla" ? "BeeZilla inference" : "your own key"}</strong> · ${inf.key}` +
+            (inf.expired ? ' · <span style="color:#a4262c">expired — add a new one</span>' : "") +
+            (inf.encrypted === false ? " · stored unencrypted" : "")
+          : "Now: no key — answers will refuse until you add one.";
+        if (inf) {
+          const radio = document.querySelector(`input[name="provider"][value="${inf.provider}"]`);
+          if (radio) {
+            radio.checked = true;
+            $("byok-fields").hidden = inf.provider !== "byok";
+          }
+          if (inf.provider === "byok" && inf.baseUrl) $("baseUrl").value = inf.baseUrl;
+          if (inf.provider === "byok" && inf.model) $("model").value = inf.model;
+        }
+        const search = state?.search;
+        $("search-current").innerHTML = search
+          ? `Now: <strong>${search.provider}</strong> · ${search.key} · from ${search.source}`
+          : "Now: off — answers will not cite sources.";
+      }
+
+      async function refresh() {
+        const res = await bridge.get();
+        if (res.ok) renderStatus(res.data);
+        return res;
+      }
+
+      document.querySelectorAll('input[name="provider"]').forEach((radio) => {
+        radio.addEventListener("change", () => {
+          $("byok-fields").hidden = radio.value !== "byok" || !radio.checked;
+          $("model-hint").textContent =
+            document.querySelector('input[name="provider"]:checked')?.value === "byok" ? "(optional)" : "";
+        });
+      });
+
+      async function withBusy(button, label, fn) {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = label;
+        try {
+          return await fn();
+        } finally {
+          button.disabled = false;
+          button.textContent = original;
+        }
+      }
+
+      $("save-inference").addEventListener("click", async () => {
+        const provider = document.querySelector('input[name="provider"]:checked')?.value ?? "byok";
+        const status = $("inference-status");
+        if (provider === "beezilla") {
+          say(status, "Managed inference needs a BeeZilla account session, which this build cannot mint yet. Add your own key for now.", "warn");
+          return;
+        }
+        const key = $("key").value.trim();
+        if (!key) return say(status, "Paste your key first.", "err");
+        await withBusy($("save-inference"), "Saving…", async () => {
+          const res = await bridge.saveInference({
+            provider: "byok",
+            key,
+            baseUrl: $("baseUrl").value.trim(),
+            model: $("model").value.trim(),
+          });
+          if (!res.ok) return say(status, res.error || "Could not save.", "err");
+          $("key").value = "";
+          say(status, res.data.started ? "Saved. BeeZilla started." : "Saved. BeeZilla restarted.", "ok");
+          renderStatus(res.data.status);
+        });
+      });
+
+      $("save-search").addEventListener("click", async () => {
+        const status = $("search-status");
+        const key = $("search-key").value.trim();
+        if (!key) return say(status, "Paste a Brave key first.", "err");
+        await withBusy($("save-search"), "Saving…", async () => {
+          const res = await bridge.saveSearch({ key });
+          if (!res.ok) return say(status, res.error || "Could not save.", "err");
+          $("search-key").value = "";
+          say(status, res.data.started ? "Saved. BeeZilla started." : "Saved. BeeZilla restarted.", "ok");
+          renderStatus(res.data.status);
+        });
+      });
+
+      $("clear-inference").addEventListener("click", async () => {
+        const res = await bridge.clear("inference");
+        if (!res.ok) return say($("inference-status"), res.error || "Could not remove.", "err");
+        say($("inference-status"), "Key removed.", "ok");
+        renderStatus(res.data.status);
+      });
+
+      $("clear-search").addEventListener("click", async () => {
+        const res = await bridge.clear("search");
+        if (!res.ok) return say($("search-status"), res.error || "Could not remove.", "err");
+        say($("search-status"), "Key removed.", "ok");
+        renderStatus(res.data.status);
+      });
+
+      if (!bridge) {
+        $("nobridge").style.display = "block";
+        document.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      } else {
+        refresh().catch(() => say($("inference-status"), "Could not read current settings.", "err"));
+      }
+    </script>
+  </body>
+</html>
