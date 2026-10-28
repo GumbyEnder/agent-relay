@@ -307,6 +307,57 @@ async function cmdKey(argv) {
   return 0;
 }
 
+async function cmdRecipe(argv) {
+  const sub = argv[0] ?? "list";
+  const rt = await ensureServer();
+
+  const post = async (path, bodyObj) => {
+    const { status, body } = await api(rt, path, { method: "POST", body: JSON.stringify(bodyObj) });
+    return { status, body };
+  };
+
+  if (sub === "list") {
+    const { status, body } = await api(rt, "/api/recipes/local");
+    if (status !== 200) {
+      console.error(`recipe list failed (${status}): ${body?.error ?? ""}`);
+      return 1;
+    }
+    if (!body.pins) {
+      console.log("no publisher keys pinned in this build — nothing can be trusted (set BZ_RECIPE_PUBLISHER_KEYS)");
+    }
+    if (!body.valid?.length && !body.rejected?.length) {
+      console.log("no recipes cached");
+      return 0;
+    }
+    for (const r of body.valid ?? []) console.log(`ok    ${r.id}@${r.version}  ${r.title}`);
+    for (const r of body.rejected ?? []) console.log(`BAD   ${r.file}  ${r.reason}${r.detail ? ` — ${r.detail}` : ""}`);
+    return (body.rejected?.length ?? 0) > 0 ? 1 : 0;
+  }
+
+  const file = argv.find((a) => !a.startsWith("-") && a !== sub);
+  if (!file) {
+    console.error(`usage: beezilla recipe ${sub} <file.bezz>`);
+    return 2;
+  }
+  const bytes = readFileSync(file);
+  const bundle = bytes.toString("base64");
+  const path = sub === "verify" ? "/api/recipes/local/verify" : "/api/recipes/local";
+  const { status, body } = await post(path, { bundle });
+
+  if (sub === "verify") {
+    const verdict = body?.ok ? `trusted (${body.anchor})` : `${body?.reason ?? "invalid"}${body?.detail ? ` — ${body.detail}` : ""}`;
+    console.log(`${body?.ok ? "ok" : "BAD"}  ${body?.recipe?.id ?? file}${body?.recipe?.version ? `@${body.recipe.version}` : ""}: ${verdict}`);
+    return body?.ok ? 0 : 1;
+  }
+
+  if (status === 201 && body?.ok) {
+    console.log(`added ${body.cached?.id}@${body.cached?.version} (${body.cached?.title}), verified against ${body.anchor}`);
+    return 0;
+  }
+  console.error(`refused: ${body?.reason ?? status}${body?.detail ? ` — ${body.detail}` : ""}`);
+  return 1;
+}
+
 const [, , verb, ...rest] = process.argv;
 const verbs = {
   serve: cmdServe,
@@ -316,6 +367,7 @@ const verbs = {
   run: cmdRun,
   export: cmdExport,
   key: cmdKey,
+  recipe: cmdRecipe,
 };
 
 const fn = verbs[verb];

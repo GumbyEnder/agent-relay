@@ -16,6 +16,10 @@ import { publishBundle } from "./registry";
 import { bundleKey, checksKey, semanticKey } from "./storage";
 import { compileRecipeChecks } from "@/lib/recipe-checks";
 import { RECIPES } from "@/lib/buzzy/recipes";
+import { isLocalRuntime, localDataDir } from "@/lib/runtime";
+import { resolveLocalRequester } from "@/lib/local-owner";
+import { trustAnchorsFromEnv, verifyTrustedBundle } from "./trust";
+import { listRecipes, putRecipe } from "./cache";
 
 let depsPromise: Promise<RouteDeps> | null = null;
 let authorKeyCache: ReturnType<typeof generateAuthorKey> | null = null;
@@ -90,6 +94,79 @@ export default defineEventHandler(async (event) => {
 
   const rawHeaders = (event.node?.req?.headers ?? {}) as Record<string, string | string[] | undefined>;
   const headers = toHeaders(rawHeaders);
+
+  // ── Local (desktop/CLI) recipe cache ──────────────────────────────────────────
+  //
+  // Local installs keep recipes in a filesystem cache, not the cloud registry, so
+  // these three paths never touch the DB. Every bundle is verified against the
+  // build's pinned publishers before it is stored OR served — the cache is not a
+  // laundering path for an unpinned recipe.
+  if (isLocalRuntime() && path.startsWith("/api/recipes/local")) {
+    const user = await resolveLocalRequester(headers).catch(() => null);
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Unauthorized", code: "unauthorized" };
+    }
+    const dataDir = localDataDir();
+    const anchors = trustAnchorsFromEnv();
+
+    // POST body carries the bundle as base64 (a ZIP cannot ride in JSON otherwise).
+    let body: unknown = undefined;
+    if (method === "POST") body = await readBody(event).catch(() => ({}));
+
+    if (path === "/api/recipes/local" && method === "GET") {
+      const listed = listRecipes(dataDir, anchors);
+      setResponseStatus(event, 200);
+      return { ok: true, pins: anchors.length, ...listed };
+    }
+
+    if (path === "/api/recipes/local" && method === "POST") {
+      const b64 = typeof (body as { bundle?: unknown })?.bundle === "string"
+        ? ((body as { bundle: string }).bundle)
+        : "";
+      if (!b64) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "body.bundle (base64) is required", code: "bad_request" };
+      }
+      const bytes = new Uint8Array(Buffer.from(b64, "base64"));
+      const result = putRecipe(dataDir, bytes, anchors);
+      setResponseStatus(event, result.ok ? 201 : 422);
+      return {
+        ok: result.ok,
+        reason: result.verdict.reason,
+        detail: result.verdict.detail,
+        anchor: result.verdict.anchor,
+        cached: result.cached
+          ? { id: result.cached.id, version: result.cached.version, title: result.cached.title, sha256: result.cached.sha256 }
+          : undefined,
+      };
+    }
+
+    if (path === "/api/recipes/local/verify" && method === "POST") {
+      const b64 = typeof (body as { bundle?: unknown })?.bundle === "string"
+        ? ((body as { bundle: string }).bundle)
+        : "";
+      if (!b64) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "body.bundle (base64) is required", code: "bad_request" };
+      }
+      const verdict = verifyTrustedBundle(new Uint8Array(Buffer.from(b64, "base64")), anchors);
+      setResponseStatus(event, 200);
+      return {
+        ok: verdict.ok,
+        trusted: verdict.trusted,
+        reason: verdict.reason,
+        detail: verdict.detail,
+        anchor: verdict.anchor,
+        recipe: verdict.manifest
+          ? { id: verdict.manifest.id, version: verdict.manifest.version, title: verdict.manifest.listing?.title }
+          : undefined,
+      };
+    }
+
+    setResponseStatus(event, 404);
+    return { ok: false, error: "Not found", code: "not_found" };
+  }
   // Role, not mere presence: publish and licence issue gate on `manage_keys`.
   // Roles are durable rows (`ar_operator_roles`), not env flags. Without this the
   // context resolves to role:null for every signed-in human, so publish and licence
