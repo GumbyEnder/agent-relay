@@ -61,6 +61,20 @@ if (!existsSync(ASAR)) {
   try {
     const archive = readFileSync(ASAR, "latin1");
     check("the connect flow also asks for a search token", archive.includes("api/search-token"));
+    // s9g: without a baked default the Connect item is dead on every real install.
+    check("the app knows the BeeZilla address without env", archive.includes("https://app.beezilla.ai"));
+    // These two live OUTSIDE app.asar (scripts/ and .output/ are staged as real files
+    // in resources/app), so searching the archive finds nothing and lies about a good
+    // build — the same mistake as the earlier PGLite check.
+    const launcherText = existsSync(join(APP, "scripts", "beezilla-local.mjs"))
+      ? readFileSync(join(APP, "scripts", "beezilla-local.mjs"), "utf8")
+      : "";
+    const serverText = existsSync(join(APP, ".output", "server", "index.mjs"))
+      ? readFileSync(join(APP, ".output", "server", "index.mjs"), "utf8")
+      : "";
+    // s9f: the shipped launcher must be able to say "expired", not "off".
+    check("the launcher can distinguish an expired session", launcherText.includes("BZ_SEARCH_EXPIRED"));
+    check("the runtime API reports needsReconnect", serverText.includes("needsReconnect"));
   } catch (err) {
     check("the connect flow also asks for a search token", false, `could not read the asar: ${err instanceof Error ? err.message : err}`);
   }
