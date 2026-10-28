@@ -20,7 +20,7 @@ import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveInference } from "./lib/inference.mjs";
+import { isExpired, resolveInference } from "./lib/inference.mjs";
 import { resolveSearch } from "./lib/search-keys.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -99,11 +99,15 @@ const runtimeFile = join(dir, "runtime.json");
 // Inference credentials: env wins, then the local store (BYOK or our device
 // token). The runtime reads plain env, so this is where the store becomes reach.
 const inference = resolveInference(dir);
-if (inference) {
+const managedExpired = Boolean(inference && inference.provider === "beezilla" && isExpired(inference));
+if (managedExpired) {
+  console.warn("[beezilla] BeeZilla token expired — chat will ask the owner to reconnect");
+}
+if (inference && !managedExpired) {
   console.log(
     `[beezilla] inference: ${inference.provider}${inference.encrypted === false ? " (stored, unencrypted)" : inference.encrypted ? " (stored, encrypted)" : ""}`,
   );
-} else {
+} else if (!inference) {
   console.log("[beezilla] inference: none — chat will refuse by name");
 }
 
@@ -128,7 +132,8 @@ const child = spawn(process.execPath, [entry], {
     BZ_DATA_DIR: dir,
     BZ_LOCAL_TOKEN: localToken,
     ...(search ? { BZ_BRAVE_KEY: search.key } : {}),
-    ...(inference
+    ...(managedExpired ? { BZ_MANAGED_EXPIRED: "1" } : {}),
+    ...(inference && !managedExpired
       ? {
           BZ_CHAT_KEY: inference.key,
           ...(inference.baseUrl ? { BZ_CHAT_BASE_URL: inference.baseUrl } : {}),
