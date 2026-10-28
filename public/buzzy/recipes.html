@@ -214,6 +214,39 @@
         return n;
       }
 
+      /* The single write path: every buy button and the dialog both end here. */
+      function doPurchase(btn, r) {
+        btn.disabled = true;
+        btn.textContent = "Working…";
+        fetch("/api/wallet/purchase", {
+          method: "POST", credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ hash: r.hash })
+        })
+          .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
+          .then(function (out) {
+            if (out.s === 200 && out.j.ok) {
+              btn.textContent = "Opened ✓";
+              btn.style.background = "#2F6F4F";
+              btn.style.color = "#E8F7EE";
+              if (window.BZ_HONEY) window.BZ_HONEY.refresh();
+            } else if (out.j.code === "free_recipe") {
+              btn.textContent = "Claimed ✓";
+              btn.style.background = "#2F6F4F";
+            } else if (out.j.code === "already_owned") {
+              btn.textContent = "Already yours";
+              btn.disabled = true;
+            } else if (out.s === 402) {
+              btn.textContent = "Not enough Drops";
+              btn.disabled = false;
+            } else {
+              btn.textContent = out.j.error || "Could not buy";
+              btn.disabled = false;
+            }
+          })
+          .catch(function () { btn.textContent = "Try again"; btn.disabled = false; });
+      }
+
       /* Spend nothing on an accidental click. The dialog states the price, what the
          buyer holds now, and what they will hold afterwards — the only three numbers
          that decide whether this is a good idea. */
@@ -313,42 +346,11 @@
           btn.disabled = true;
           btn.style.cssText = "background:#2F6F4F;color:#E8F7EE;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;";
         }
-        btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
+        if (!mine) btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
         btn.addEventListener("click", function () {
           if (r.is_free) return doPurchase(btn, r);
           confirmPurchase(btn, r);
         });
-        function doPurchase(btn, r) {
-          btn.disabled = true;
-          btn.textContent = "Working…";
-          fetch("/api/wallet/purchase", {
-            method: "POST", credentials: "same-origin",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ hash: r.hash })
-          })
-            .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
-            .then(function (out) {
-              if (out.s === 200 && out.j.ok) {
-                btn.textContent = "Opened ✓";
-                btn.style.background = "#2F6F4F";
-                btn.style.color = "#E8F7EE";
-                if (window.BZ_HONEY) window.BZ_HONEY.refresh();
-              } else if (out.j.code === "free_recipe") {
-                btn.textContent = "Claimed ✓";
-                btn.style.background = "#2F6F4F";
-              } else if (out.j.code === "already_owned") {
-                btn.textContent = "Already yours";
-                btn.disabled = true;
-              } else if (out.s === 402) {
-                btn.textContent = "Not enough Drops";
-                btn.disabled = false;
-              } else {
-                btn.textContent = out.j.error || "Could not buy";
-                btn.disabled = false;
-              }
-            })
-            .catch(function () { btn.textContent = "Try again"; btn.disabled = false; });
-        }
         lock.appendChild(btn);
         c.appendChild(lock);
         return c;
