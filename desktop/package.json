@@ -3,7 +3,7 @@
   "productName": "BeeZilla",
   "version": "0.1.0",
   "private": true,
-  "description": "BeeZilla desktop — the local runtime in a window",
+  "description": "BeeZilla desktop \u2014 the local runtime in a window",
   "type": "module",
   "main": "main.mjs",
   "author": "BeeZilla",
@@ -43,5 +43,9 @@
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
     }
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
   }
 }
