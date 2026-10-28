@@ -83,6 +83,32 @@
     .lock a { color: var(--bz-yellow); text-decoration: none; font-weight: 600; }
     .lock a:hover { text-decoration: underline; }
 
+    /* Purchase confirmation. A price is a promise; clicking once should not spend. */
+    .bz-modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+      display: flex; align-items: center; justify-content: center; padding: 1.25rem;
+      z-index: 50;
+    }
+    .bz-modal {
+      background: var(--bz-panel); border: 1px solid #2F2F2F; border-top: 3px solid var(--bz-yellow);
+      border-radius: 8px; max-width: 420px; width: 100%; padding: 1.35rem 1.4rem 1.2rem;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+    }
+    .bz-modal h2 { margin: 0 0 0.35rem; font-size: 1.12rem; color: #fff; }
+    .bz-modal .sub { margin: 0 0 1rem; color: #A8A8A8; font-size: 0.88rem; }
+    .bz-modal .line {
+      display: flex; justify-content: space-between; gap: 1rem;
+      padding: 0.45rem 0; border-top: 1px solid #242424; font-size: 0.88rem; color: #C9CDD2;
+    }
+    .bz-modal .line b { color: #fff; font-variant-numeric: tabular-nums; }
+    .bz-modal .line.total { border-top: 1px solid #3A3A3A; font-weight: 700; }
+    .bz-modal .warn { color: #FF8A80; font-size: 0.82rem; margin: 0.7rem 0 0; }
+    .bz-modal .actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.15rem; }
+    .bz-modal button { font: inherit; font-size: 0.85rem; border-radius: 6px; padding: 0.5rem 1rem; cursor: pointer; border: 1px solid #333; }
+    .bz-modal .cancel { background: transparent; color: #C9CDD2; }
+    .bz-modal .confirm { background: var(--bz-yellow); color: #111; border-color: var(--bz-yellow); font-weight: 700; }
+    .bz-modal .confirm:disabled { opacity: 0.55; cursor: default; }
+
     .state { padding: 2rem 0; color: #7A7A7A; font-size: 0.88rem; }
     .state.error { color: #FF8A80; }
 
@@ -165,6 +191,63 @@
         return n;
       }
 
+      /* Spend nothing on an accidental click. The dialog states the price, what the
+         buyer holds now, and what they will hold afterwards — the only three numbers
+         that decide whether this is a good idea. */
+      function confirmPurchase(btn, r) {
+        var price = Number(r.price_honey_drops || 0);
+        var backdrop = el("div", "bz-modal-backdrop");
+        var box = el("div", "bz-modal");
+        box.setAttribute("role", "dialog");
+        box.setAttribute("aria-modal", "true");
+        box.appendChild(el("h2", null, "Buy this recipe?"));
+        box.appendChild(el("p", "sub", r.title || r.id));
+
+        var balanceNow = null;
+        function render(balance) {
+          balanceNow = balance;
+          var after = Math.max(0, balance - price);
+          box.querySelectorAll(".line, .warn").forEach(function (n) { n.remove(); });
+          box.appendChild(line("Price", price.toLocaleString() + " Honey Drops"));
+          box.appendChild(line("You have", balance.toLocaleString() + " Drops"));
+          var tot = line("After this purchase", after.toLocaleString() + " Drops");
+          tot.className = "line total";
+          box.appendChild(tot);
+          if (balance < price) {
+            box.appendChild(el("p", "warn", "Not enough Honey Drops — you need " + (price - balance).toLocaleString() + " more."));
+            confirm.disabled = true;
+          }
+        }
+        function line(label, value) {
+          var d = el("div", "line");
+          d.appendChild(el("span", null, label));
+          d.appendChild(el("b", null, value));
+          return d;
+        }
+
+        var actions = el("div", "actions");
+        var cancel = el("button", "cancel", "Cancel");
+        var confirm = el("button", "confirm", "Buy for " + price.toLocaleString() + " Drops");
+        actions.appendChild(cancel); actions.appendChild(confirm);
+        box.appendChild(actions);
+        backdrop.appendChild(box);
+        document.body.appendChild(backdrop);
+        confirm.disabled = true;
+        render(0);
+
+        fetch("/api/wallet", { credentials: "same-origin" })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (w) { render(w && typeof w.balance === "number" ? w.balance : 0); })
+          .catch(function () { render(0); });
+
+        function close() { backdrop.remove(); document.removeEventListener("keydown", onKey); }
+        function onKey(e) { if (e.key === "Escape") close(); }
+        document.addEventListener("keydown", onKey);
+        cancel.addEventListener("click", close);
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) close(); });
+        confirm.addEventListener("click", function () { close(); doPurchase(btn, r); });
+      }
+
       function card(r) {
         var c = el("article", "card");
         var row = el("div", "row");
@@ -199,6 +282,10 @@
         var btn = el("button", "buy", r.is_free ? "Claim it →" : "Buy →");
         btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
         btn.addEventListener("click", function () {
+          if (r.is_free) return doPurchase(btn, r);
+          confirmPurchase(btn, r);
+        });
+        function doPurchase(btn, r) {
           btn.disabled = true;
           btn.textContent = "Working…";
           fetch("/api/wallet/purchase", {
@@ -228,7 +315,7 @@
               }
             })
             .catch(function () { btn.textContent = "Try again"; btn.disabled = false; });
-        });
+        }
         lock.appendChild(btn);
         c.appendChild(lock);
         return c;
