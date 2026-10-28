@@ -122,11 +122,21 @@ function normalise(parsed: unknown, method: SealedMethod): UseResult["artifact"]
   // Compare loosely: the model renames headings ("Comparison Table (with Source)"
   // for "comparison table with source column"), and an exact match reported a
   // section as missing while it sat right there in the document.
-  const key = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  const present = sections.map((s) => key(s.title));
+  // Word overlap, not string equality: "Missing Terms / Gaps" and "missing terms
+  // section" are the same section written by two people. Two thirds of the shorter
+  // heading's words is enough to call it present.
+  const words = (v: string) => new Set(v.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const similar = (a: string, b: string) => {
+    const A = words(a), B = words(b);
+    if (!A.size || !B.size) return false;
+    let hit = 0;
+    A.forEach((w) => { if (B.has(w)) hit++; });
+    return hit / Math.min(A.size, B.size) >= 0.66;
+  };
+  const present = sections.map((s) => s.title);
   for (const w of method.outputContract ?? []) {
-    const k = key(w);
-    const found = present.some((p) => p.length > 0 && (p.includes(k) || k.includes(p)));
+    const k = w;
+    const found = present.some((p) => p.length > 0 && (similar(p, k) || p.toLowerCase().includes(k.toLowerCase())));
     if (!found) {
       sections.push({ id: `s${sections.length + 1}`, title: w, body: "[not produced — the owner must fill this in]" });
       present.push(k);
