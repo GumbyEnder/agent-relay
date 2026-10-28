@@ -52,14 +52,17 @@ function stage() {
 
   // Publisher pins travel with the app. A build that ships zero pins trusts no
   // recipe — correct-but-useless, so `all` (the release path) refuses outright.
-  const pinsFile = join(ROOT, "publishers.json");
+  // Production pins should NOT live in the repo — they come from a build secret.
+  // Same resolution order the runtime uses (env file -> repo file), so what the
+  // installer trusts is exactly what the build was told to trust.
+  const pinsFile = process.env.BZ_RECIPE_PUBLISHER_FILE || join(ROOT, "publishers.json");
   if (existsSync(pinsFile)) {
     cpSync(pinsFile, join(APP, "publishers.json"));
     const pins = JSON.parse(readFileSync(pinsFile, "utf8")).publishers ?? [];
-    log(`publisher pins: ${pins.length}`);
+    log(`publisher pins: ${pins.length} (from ${pinsFile})`);
     if (pins.length === 0 && mode === "all") {
       throw new Error(
-        "refusing to build a release with no publisher pins — replace publishers.json with the production key set",
+        "refusing to build a release with no publisher pins — point BZ_RECIPE_PUBLISHER_FILE at the production key set",
       );
     }
   } else if (mode === "all") {
