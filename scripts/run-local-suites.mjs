@@ -17,6 +17,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LADDER = [
   { name: "local runtime", cmd: "node", args: ["scripts/test-local-e2e.mjs"] },
   { name: "cli", cmd: "node", args: ["scripts/test-cli-e2e.mjs"] },
+  { name: "runtime orphans", cmd: "node", args: ["scripts/test-runtime-orphans.mjs"] },
   { name: "desktop supervisor", cmd: "node", args: ["scripts/test-desktop-supervisor.mjs"] },
   { name: "desktop settings bridge", cmd: "node", args: ["scripts/test-desktop-settings.mjs"] },
   { name: "desktop settings screen", cmd: "node", args: ["scripts/test-desktop-settings-ui.mjs"] },
