@@ -1316,16 +1316,8 @@
         if (on) links[i].setAttribute("aria-current", "page");
         else links[i].removeAttribute("aria-current");
       }
-      // "Sign in" is a lie once you are signed in. Ask the API and relabel.
-      var acct = document.getElementById("accountLink");
-      if (acct) {
-        fetch("/api/buzzy/documents?limit=1", { credentials: "same-origin" })
-          .then(function (r) {
-            if (r.ok) { acct.textContent = "Account"; acct.href = "/buzzy/profile"; }
-            else { acct.textContent = "Sign in"; acct.href = "/buzzy/landing"; }
-          })
-          .catch(function () {});
-      }
+      // Account identity is the page's own job (each page has its own session
+      // code). The nav only guarantees the links and their order.
     })();
     </script>
     </div>
@@ -3196,6 +3188,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         voice.mic = true;
         voice.replies = true;
         paintVoice();
+        // Re-apply the title marker too — the intent survived the reload, so the
+        // tab should say so without waiting for the next toggle.
+        try { document.title = "🎙 BeeZilla — Listening"; } catch (_) {}
         startListening();
         var rearm = function () {
           if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
@@ -4910,15 +4905,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       closeSessionsDrawer();
     });
 
-    // Navigation
-    document.getElementById("jobsLink").onclick = (e) => {
-      e.preventDefault();
-      window.location.href = "/buzzy/";
-    };
-    document.getElementById("memLink").onclick = (e) => {
-      e.preventDefault();
-      window.location.href = "/buzzy/memory";
-    };
+    // Navigation is plain links now (one nav, defined once in each page). The
+    // old handlers here overrode "Talk" to /buzzy/ — the jobs page — which is
+    // why the nav could never get back to the chat. Removed on purpose.
 
     function applyChatCompany(co) {
       var nameEl = document.getElementById("chatCompanyName");

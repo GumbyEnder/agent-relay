@@ -66,16 +66,8 @@
         if (on) links[i].setAttribute("aria-current", "page");
         else links[i].removeAttribute("aria-current");
       }
-      // "Sign in" is a lie once you are signed in. Ask the API and relabel.
-      var acct = document.getElementById("accountLink");
-      if (acct) {
-        fetch("/api/buzzy/documents?limit=1", { credentials: "same-origin" })
-          .then(function (r) {
-            if (r.ok) { acct.textContent = "Account"; acct.href = "/buzzy/profile"; }
-            else { acct.textContent = "Sign in"; acct.href = "/buzzy/landing"; }
-          })
-          .catch(function () {});
-      }
+      // Account identity is the page's own job (each page has its own session
+      // code). The nav only guarantees the links and their order.
     })();
     </script>
     </div>
