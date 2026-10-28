@@ -313,6 +313,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
   }
 
+  // A managed token that has expired is a SESSION problem, not a bad credential.
+  // Say "reconnect" and stop: spending the request would surface a provider 401,
+  // which reads to a user as "my key is wrong" and sends them to the wrong fix.
+  if (process.env.BZ_MANAGED_EXPIRED === "1") {
+    return {
+      ok: false,
+      reply:
+        "Your BeeZilla sign-in has expired. Reconnect from Settings (BeeZilla → Settings) and I'll pick up where we left off — nothing was sent.",
+      error: "managed token expired",
+      code: "managed_expired",
+    };
+  }
+
   // ── Validate model against catalog (client sends a label; resolve to id) ──
   let resolvedModel: string | undefined;
   if (model) {
