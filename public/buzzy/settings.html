@@ -107,9 +107,13 @@
           <input type="radio" name="provider" value="beezilla" id="provider-beezilla" checked />
           <span>
             <strong>BeeZilla inference</strong>
-            <span>Included with your account. Nothing to configure.</span>
+            <span>Included with your account. Sign in and we handle the rest.</span>
           </span>
         </label>
+        <div id="managed-fields">
+          <button id="connect-account" class="secondary">Connect BeeZilla account…</button>
+          <p class="hint" id="connect-hint">A short-lived token is issued to this computer; your password never reaches the app.</p>
+        </div>
         <label class="opt">
           <input type="radio" name="provider" value="byok" id="provider-byok" />
           <span>
@@ -183,7 +187,7 @@
       function selectionNote(state) {
         const selected = document.querySelector('input[name="provider"]:checked')?.value;
         if (selected === "beezilla") {
-          return "Nothing configured yet. BeeZilla inference needs an account sign-in, which this build cannot do — pick “My own key” to start working.";
+          return "Nothing configured yet. Connect your BeeZilla account, or pick “My own key” to start working.";
         }
         return "Nothing configured yet. Paste your key above and choose Save intelligence.";
       }
@@ -222,6 +226,7 @@
       document.querySelectorAll('input[name="provider"]').forEach((radio) => {
         radio.addEventListener("change", () => {
           $("byok-fields").hidden = radio.value !== "byok" || !radio.checked;
+          $("managed-fields").hidden = radio.value !== "beezilla" || !radio.checked;
           $("model-hint").textContent =
             document.querySelector('input[name="provider"]:checked')?.value === "byok" ? "(optional)" : "";
           if (lastState) renderStatus(lastState);
@@ -239,6 +244,20 @@
           button.textContent = original;
         }
       }
+
+      // "Connect BeeZilla account": the token is minted inside our own sign-in
+      // window and stored here — the app never sees the password or the cookie.
+      $("connect-account").addEventListener("click", async () => {
+        await withBusy($("connect-account"), "Waiting for sign-in…", async () => {
+          const res = await window.beezilla.settings.connect();
+          if (!res?.ok || res.data?.ok === false) {
+            $("connect-hint").textContent = res?.error || res?.data?.error || "Could not connect.";
+            return;
+          }
+          $("connect-hint").textContent = "Connected. BeeZilla started.";
+          await refresh();
+        });
+      });
 
       $("save-inference").addEventListener("click", async () => {
         const provider = document.querySelector('input[name="provider"]:checked')?.value ?? "byok";

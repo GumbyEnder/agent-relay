@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("beezilla", {
     saveInference: (cfg) => call("settings:saveInference", cfg),
     saveSearch: (cfg) => call("settings:saveSearch", cfg),
     clear: (kind) => call("settings:clear", kind),
+    /** sign in on our site and store the short-lived inference token */
+    connect: () => call("settings:connect"),
   },
   app: {
     version: () => call("app:version"),
