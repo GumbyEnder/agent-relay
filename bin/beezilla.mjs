@@ -172,7 +172,8 @@ async function cmdStop() {
 
 async function cmdDoctor() {
   const checks = [];
-  const ok = (name, pass, detail = "") => checks.push({ name, pass, detail });
+  const ok = (name, pass, detail = "") => checks.push({ name, pass, detail, soft: false });
+  const soft = (name, pass, detail = "") => checks.push({ name, pass, detail, soft: true });
 
   ok("build present", existsSync(join(ROOT, ".output", "server", "index.mjs")), ".output/server/index.mjs");
   const libs = join(ROOT, ".output", "server", "_libs");
@@ -207,7 +208,7 @@ async function cmdDoctor() {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  ok(
+  soft(
     "publisher keys pinned",
     pins.length > 0,
     pins.length > 0
@@ -221,7 +222,9 @@ async function cmdDoctor() {
   for (const c of checks) {
     console.log(`${c.pass ? "PASS" : "warn"}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}`);
   }
-  const blocking = checks.filter((c) => !c.pass && c.name !== "inference configured" && c.name !== "runtime");
+  // "inference configured" and "runtime" are states, not faults; "publisher keys"
+  // is only a fault in a release build, so it warns rather than fails a dev install.
+  const blocking = checks.filter((c) => !c.pass && !c.soft && c.name !== "inference configured" && c.name !== "runtime");
   return blocking.length ? 1 : 0;
 }
 
@@ -243,6 +246,14 @@ async function cmdRun(argv) {
 
   if (status !== 200) {
     console.error(body?.error ?? `request failed (${status})`);
+    return 1;
+  }
+  // A 200 is not a success: the chat lane answers 200 with `ok:false` and
+  // friendly copy when the model call fails ("trouble connecting"). Printing
+  // that and exiting 0 tells a script everything is fine when nothing ran.
+  if (body?.ok === false) {
+    if (typeof body.reply === "string" && body.reply.trim()) console.error(body.reply);
+    console.error(`[${body.code ?? "failed"}] ${body.error ?? "the turn did not complete"}`);
     return 1;
   }
   if (typeof body?.reply === "string" && body.reply.trim()) {
