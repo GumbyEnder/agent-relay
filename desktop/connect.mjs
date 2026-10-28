@@ -61,6 +61,20 @@ export const SEARCH_MINT_SCRIPT = `(async () => {
  */
 export const DEFAULT_CLOUD_URL = "https://app.beezilla.ai";
 
+/**
+ * Network failures read very differently from credential failures, and the user-facing
+ * answer is different too: "check your connection, or use your own key" — not an
+ * Electron error string, and definitely not a 180-second wait on a blank window.
+ */
+const UNREACHABLE = /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ENOTFOUND|ECONNREFUSED|EAI_AGAIN/i;
+
+export function isUnreachable(error) {
+  return UNREACHABLE.test(String(error?.message ?? error ?? ""));
+}
+
+const unreachableMessage = (base) =>
+  `could not reach BeeZilla at ${base.replace(/^https?:\/\//, "")} — check your connection and try again, or use your own API key in the meantime`;
+
 export function cloudBaseUrl(raw = process.env.BZ_CLOUD_URL || DEFAULT_CLOUD_URL) {
   const value = (raw ?? "").trim().replace(/\/+$/, "");
   if (!value) return "";
@@ -148,13 +162,21 @@ export async function connectAccount(deps) {
   try {
     await deps.open(`${base}${CONNECT_PATH}`);
   } catch (err) {
+    // The likely case for a shipped app: the host does not resolve yet, or the user is
+    // offline. Say that in words a non-technical user can act on, and stop.
+    if (isUnreachable(err)) return { ok: false, unreachable: true, error: unreachableMessage(base) };
     return { ok: false, error: `could not open the BeeZilla window: ${err instanceof Error ? err.message : err}` };
   }
 
   let outcome;
   let search = null;
   try {
-    outcome = interpretMintResult(await deps.evaluate(MINT_SCRIPT));
+    try {
+      outcome = interpretMintResult(await deps.evaluate(MINT_SCRIPT));
+    } catch (err) {
+      if (isUnreachable(err)) return { ok: false, unreachable: true, error: unreachableMessage(base) };
+      throw err;
+    }
 
     // A first visit is usually signed OUT. Rather than making the user find the
     // "connect" menu item again, keep the window open and watch for the sign-in to
@@ -167,7 +189,10 @@ export async function connectAccount(deps) {
       if (deps.isOpen && !deps.isOpen()) break;
       try {
         outcome = interpretMintResult(await deps.evaluate(MINT_SCRIPT));
-      } catch {
+      } catch (err) {
+        if (isUnreachable(err)) {
+          return { ok: false, unreachable: true, error: unreachableMessage(base) };
+        }
         break; // the window went away mid-poll
       }
     }
