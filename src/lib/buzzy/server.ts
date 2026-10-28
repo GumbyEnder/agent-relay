@@ -434,9 +434,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   };
   if (surface !== "voice") {
-    newlyExtracted = await extractPromise;
+    // The extract used to be awaited in full before the reply model was even
+    // called: +3.3s p50 on every typed turn, measured. Give it a small head
+    // start (Work mode gets a real budget because the brief IS the product),
+    // then let the reply go and merge whatever lands afterwards.
+    const budgetMs = mode === "work" ? 6000 : 700;
+    const firstPass = await Promise.race([
+      extractPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
+    ]);
+    if (firstPass) {
+      newlyExtracted = firstPass;
+      await mergeExtracted(newlyExtracted);
+    }
     extractMs = Date.now() - extractStarted;
-    await mergeExtracted(newlyExtracted);
   }
 
   // ── Build system prompt ────────────────────────────────────────────
@@ -899,9 +910,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     };
   }
 
-  // VOICE lane: the owner already heard the answer — merge the deferred slot
-  // extraction now (it ran alongside the reply, not before it).
-  if (surface === "voice") {
+  // Deferred merge: the owner already heard (or read) the answer — fold in the
+  // slot extraction that ran alongside it instead of gating the turn on it.
+  if (surface === "voice" || !Object.keys(newlyExtracted).length) {
     newlyExtracted = await extractPromise;
     extractMs = Date.now() - extractStarted;
     await mergeExtracted(newlyExtracted);
