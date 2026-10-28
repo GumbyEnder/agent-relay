@@ -23,7 +23,9 @@
     "files": [
       "main.mjs",
       "supervisor.mjs",
-      "package.json"
+      "package.json",
+      "settings.mjs",
+      "preload.cjs"
     ],
     "extraResources": [
       {
