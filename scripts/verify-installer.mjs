@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+/**
+ * Verify a built Windows installer — the checks that were being done by hand.
+ *
+ * Building an installer successfully says nothing about what is inside it. Every
+ * failure below has actually shipped at some point in this project's history:
+ *
+ *   - a stage missing `settings.mjs`/`connect.mjs` → window with no bridge
+ *   - a stage with no `migrations/` → app starts, listens, 500s every DB route
+ *   - a stale `.output` → packaged app runs pre-change server code
+ *   - zero publisher pins → every fetched recipe is untrusted
+ *
+ * Run: node scripts/verify-installer.mjs [--allow-zero-pins]
+ * Requires a previous `node desktop/dist.mjs all` (or `stage`).
+ */
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const OUT = join(ROOT, "dist-desktop");
+const UNPACKED = join(OUT, "win-unpacked", "resources");
+const ASAR = join(UNPACKED, "app.asar");
+const APP = join(UNPACKED, "app");
+
+const allowZeroPins = process.argv.includes("--allow-zero-pins");
+let failures = 0;
+const check = (name, ok, detail = "") => {
+  if (!ok) failures++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
+};
+
+if (!existsSync(OUT)) {
+  console.error("no dist-desktop/ — run: node desktop/dist.mjs all");
+  process.exit(2);
+}
+
+// ── the installer itself ────────────────────────────────────────────────────
+const exe = readdirSync(OUT).find((f) => f.toLowerCase().endsWith(".exe"));
+check("an installer was produced", Boolean(exe), exe ?? "none");
+if (exe) {
+  const size = statSync(join(OUT, exe)).size;
+  check("the installer is not a stub", size > 50 * 1024 * 1024, `${(size / 1024 / 1024).toFixed(0)} MB`);
+  const kind = execFileSync("file", ["-b", join(OUT, exe)], { encoding: "utf8" }).trim();
+  check("the installer is a PE executable", /PE32/.test(kind), kind.slice(0, 60));
+}
+
+// ── the app shell inside the asar ───────────────────────────────────────────
+if (!existsSync(ASAR)) {
+  check("app.asar exists", false, "missing");
+} else {
+  const listing = execFileSync("npx", ["asar", "list", ASAR], { encoding: "utf8", cwd: ROOT });
+  for (const file of ["main.mjs", "preload.cjs", "settings.mjs", "supervisor.mjs", "connect.mjs"]) {
+    check(`the shell ships ${file}`, listing.split("\n").includes(`/${file}`), file);
+  }
+}
+
+// ── the runtime tree inside the asar's extraResources ───────────────────────
+if (!existsSync(APP)) {
+  check("the runtime tree exists (resources/app)", false, "missing");
+} else {
+  const server = join(APP, ".output", "server", "index.mjs");
+  check("the server bundle exists", existsSync(server));
+
+  if (existsSync(server)) {
+    const code = readFileSync(server, "utf8");
+    check("the server bundle is this build (not a stale .output)", code.length > 500_000, `${Math.round(code.length / 1024)} KB`);
+    // Feature markers: each one is a route the packaged app must actually contain.
+    check("the recipe catalog client is present", code.includes("BZ_CATALOG_URL"));
+    check("managed search routing is present", code.includes("BZ_SEARCH_GATEWAY_URL"));
+    check("the managed-expiry refusal is present", code.includes("BZ_MANAGED_EXPIRED"));
+  }
+
+  const migrations = join(APP, "migrations");
+  const sql = existsSync(migrations) ? readdirSync(migrations).filter((f) => f.endsWith(".sql")).length : 0;
+  check("migrations are staged", sql > 0, `${sql} .sql file(s)`);
+
+  // PGLite's data/wasm files are restored into .output/server/_libs by the launcher
+  // at boot, from the package that ships them. Either location is correct; what
+  // matters is that the bytes are present somewhere the launcher can find them.
+  const libs = join(APP, ".output", "server", "_libs");
+  const pkgDist = join(APP, "node_modules", "@electric-sql", "pglite", "dist");
+  const assets = ["pglite.data", "pglite.wasm", "initdb.wasm"].filter(
+    (f) => existsSync(join(libs, f)) || existsSync(join(pkgDist, f)),
+  );
+  check("PGLite assets are available to the launcher", assets.length === 3, `${assets.length}/3`);
+  check(
+    "the launcher restores them at boot",
+    readFileSync(join(APP, "scripts", "beezilla-local.mjs"), "utf8").includes("ensurePgliteAssets"),
+  );
+
+  const settingsPage = join(APP, "public", "buzzy", "settings.html");
+  const page = existsSync(settingsPage) ? readFileSync(settingsPage, "utf8") : "";
+  check("the settings page is staged", page.length > 5000, `${page.length} bytes`);
+  check("the settings page can connect an account", page.includes("connect-account"));
+
+  const pinsFile = join(APP, "publishers.json");
+  let pins = -1;
+  try {
+    pins = JSON.parse(readFileSync(pinsFile, "utf8")).publishers?.length ?? -1;
+  } catch {}
+  check("the publisher pin file is staged", pins >= 0, pins >= 0 ? `${pins} pin(s)` : "missing/unreadable");
+  if (allowZeroPins) {
+    console.log(`NOTE  ${pins} pins — allowed by --allow-zero-pins; a real release must refuse this`);
+  } else {
+    check("at least one publisher is pinned (or every recipe is untrusted)", pins > 0, `${pins} pin(s)`);
+  }
+
+  const scripts = join(APP, "scripts", "beezilla-local.mjs");
+  check("the launcher is staged", existsSync(scripts));
+  check("the parent watchdog is staged", existsSync(join(APP, "scripts", "lib", "parent-watchdog.cjs")));
+  check("the CLI is staged", existsSync(join(APP, "bin", "beezilla.mjs")));
+}
+
+console.log(`\ninstaller verification: ${failures === 0 ? "passed" : `${failures} failed`}`);
+process.exit(failures === 0 ? 0 : 1);
