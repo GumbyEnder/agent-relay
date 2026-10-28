@@ -18,7 +18,7 @@ import { compileRecipeChecks } from "@/lib/recipe-checks";
 import { RECIPES } from "@/lib/buzzy/recipes";
 import { isLocalRuntime, localDataDir } from "@/lib/runtime";
 import { resolveLocalRequester } from "@/lib/local-owner";
-import { trustAnchorsFromEnv, verifyTrustedBundle } from "./trust";
+import { defaultAnchors, verifyTrustedBundle } from "./trust";
 import { listRecipes, putRecipe } from "./cache";
 
 let depsPromise: Promise<RouteDeps> | null = null;
@@ -108,7 +108,7 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "Unauthorized", code: "unauthorized" };
     }
     const dataDir = localDataDir();
-    const anchors = trustAnchorsFromEnv();
+    const anchors = defaultAnchors();
 
     // POST body carries the bundle as base64 (a ZIP cannot ride in JSON otherwise).
     let body: unknown = undefined;

@@ -33,10 +33,12 @@ function stage() {
   rmSync(STAGE, { recursive: true, force: true });
   mkdirSync(APP, { recursive: true });
 
-  if (!existsSync(join(ROOT, ".output", "server", "index.mjs"))) {
-    log("building the runtime (vite build)…");
-    run("npx", ["vite", "build"], { env: { ...process.env, NODE_ENV: "production" } });
-  }
+  // Always rebuild. `vite build` takes under a second here, and skipping it when
+  // `.output` merely EXISTS ships whatever was built last — that is how the
+  // packaged app ended up running pre-pin-file server code and reporting zero
+  // publisher keys while the shipped publishers.json had one.
+  log("building the runtime (vite build)…");
+  run("npx", ["vite", "build"], { env: { ...process.env, NODE_ENV: "production" } });
 
   // `migrations/` is not optional: the schema comes from those .sql files at
   // boot. A stage without them starts, listens, and fails every DB route with
@@ -47,6 +49,22 @@ function stage() {
     cpSync(join(ROOT, dir), join(APP, dir), { recursive: true });
   }
   cpSync(join(ROOT, "package.json"), join(APP, "package.json"));
+
+  // Publisher pins travel with the app. A build that ships zero pins trusts no
+  // recipe — correct-but-useless, so `all` (the release path) refuses outright.
+  const pinsFile = join(ROOT, "publishers.json");
+  if (existsSync(pinsFile)) {
+    cpSync(pinsFile, join(APP, "publishers.json"));
+    const pins = JSON.parse(readFileSync(pinsFile, "utf8")).publishers ?? [];
+    log(`publisher pins: ${pins.length}`);
+    if (pins.length === 0 && mode === "all") {
+      throw new Error(
+        "refusing to build a release with no publisher pins — replace publishers.json with the production key set",
+      );
+    }
+  } else if (mode === "all") {
+    throw new Error("refusing to build a release with no publishers.json");
+  }
 
   // Production dependency closure.
   //

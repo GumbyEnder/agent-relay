@@ -11,6 +11,8 @@
  * with no anchors has no business executing recipes from the network, and
  * failing open there is how "verified" becomes meaningless.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { verifyBundle, type RecipeManifest } from "./bundle";
 
 export interface TrustAnchor {
@@ -60,6 +62,60 @@ export function trustAnchorsFromEnv(raw = process.env.BZ_RECIPE_PUBLISHER_KEYS):
   return anchors;
 }
 
+/**
+ * Pins shipped with the build, as a file next to the app
+ * (`publishers.json` → `{ "publishers": [{ keyId, publicKey }] }`).
+ *
+ * Loaded at call time from, in order: `BZ_RECIPE_PUBLISHER_FILE`, the working
+ * directory (the app root the launcher runs from), then one level up (a repo
+ * checkout). The release pipeline replaces this file with the production key
+ * set, so a shipped installer cannot silently trust nothing.
+ */
+export function loadPinFile(filePath: string): TrustAnchor[] {
+  try {
+    const raw = readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw) as { publishers?: unknown };
+    if (!Array.isArray(parsed.publishers)) return [];
+    const anchors: TrustAnchor[] = [];
+    for (const entry of parsed.publishers) {
+      const e = entry as { keyId?: unknown; publicKey?: unknown; label?: unknown };
+      const publicKey = typeof e.publicKey === "string" ? e.publicKey.trim() : "";
+      if (!publicKey) continue;
+      anchors.push({
+        keyId: typeof e.keyId === "string" && e.keyId ? e.keyId : `ed25519:${publicKey.slice(0, 8)}`,
+        publicKey,
+        label: typeof e.label === "string" ? e.label : undefined,
+      });
+    }
+    return anchors;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Effective pins: explicit env (dev/staging) wins, then the shipped pin file.
+ * Returning [] is a valid answer — it means "this build trusts nothing", which
+ * `verifyTrustedBundle` refuses out loud rather than failing open.
+ */
+export function defaultAnchors(): TrustAnchor[] {
+  const fromEnv = trustAnchorsFromEnv();
+  if (fromEnv.length > 0) return fromEnv;
+
+  const explicit = (process.env.BZ_RECIPE_PUBLISHER_FILE ?? "").trim();
+  const candidates = explicit
+    ? [explicit]
+    : [join(process.cwd(), "publishers.json"), join(process.cwd(), "..", "publishers.json")];
+
+  for (const file of candidates) {
+    if (existsSync(file)) {
+      const anchors = loadPinFile(file);
+      if (anchors.length > 0) return anchors;
+    }
+  }
+  return [];
+}
+
 /** Normalise base64 so whitespace or a trailing newline cannot defeat an exact match. */
 function sameKey(a: string, b: string): boolean {
   return a.replace(/\s+/g, "") === b.replace(/\s+/g, "");
@@ -73,7 +129,7 @@ function sameKey(a: string, b: string): boolean {
  */
 export function verifyTrustedBundle(
   bytes: Uint8Array,
-  anchors: TrustAnchor[] = trustAnchorsFromEnv(),
+  anchors: TrustAnchor[] = defaultAnchors(),
 ): TrustVerdict {
   const base = verifyBundle(bytes);
   if (!base.ok) {

@@ -18,7 +18,7 @@ import {
   type Capability, type SealInput,
 } from "../src/lib/recipe-seal/bundle";
 import { readZip, makeZip } from "../src/lib/recipe-seal/zip";
-import { verifyTrustedBundle, trustAnchorsFromEnv, type TrustAnchor } from "../src/lib/recipe-seal/trust";
+import { verifyTrustedBundle, trustAnchorsFromEnv, defaultAnchors, type TrustAnchor } from "../src/lib/recipe-seal/trust";
 import { putRecipe, listRecipes, readRecipe, cacheDir } from "../src/lib/recipe-seal/cache";
 
 let failures = 0;
@@ -99,6 +99,23 @@ check("tampered bundle rejected before trust is considered", !tamperedVerdict.ok
 const envAnchors = trustAnchorsFromEnv(`${ours.keyId}:${ours.publicKeyRaw},${theirs.publicKeyRaw}`);
 check("env pins parse keyId:base64 and bare keys", envAnchors.length === 2 && envAnchors[0].keyId === ours.keyId);
 check("env pins are empty when unset", trustAnchorsFromEnv("").length === 0);
+
+// pin FILE (what a release ships) — env is unset here, so resolution falls
+// through to the file, exactly as it does in an installed app.
+const pinDir = mkdtempSync(join(tmpdir(), "bz-pins-"));
+const pinFile = join(pinDir, "publishers.json");
+writeFileSync(pinFile, JSON.stringify({ publishers: [{ keyId: ours.keyId, publicKey: ours.publicKeyRaw, label: "release" }] }));
+delete process.env.BZ_RECIPE_PUBLISHER_KEYS;
+process.env.BZ_RECIPE_PUBLISHER_FILE = pinFile;
+check("shipped pin file is loaded when env is unset", defaultAnchors().length === 1, defaultAnchors()[0]?.keyId);
+check("bundle verifies against the shipped pin file", verifyTrustedBundle(good.bytes).trusted);
+check("foreign bundle still refused via the pin file", verifyTrustedBundle(foreign.bytes).reason === "UNPINNED_PUBLISHER");
+
+// An empty pin file must mean "trust nothing", never "trust anything".
+writeFileSync(pinFile, JSON.stringify({ publishers: [] }));
+check("an empty pin file trusts nothing", defaultAnchors().length === 0);
+delete process.env.BZ_RECIPE_PUBLISHER_FILE;
+rmSync(pinDir, { recursive: true, force: true });
 
 // ── cache ────────────────────────────────────────────────────────────────────
 const dataDir = mkdtempSync(join(tmpdir(), "bz-recipe-cache-"));

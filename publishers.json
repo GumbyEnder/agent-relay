@@ -1,0 +1,4 @@
+{
+  "_comment": "Publisher keys this build trusts. The release pipeline replaces this file with the production key set; an empty list means no fetched recipe can be trusted (verifyTrustedBundle refuses with NO_TRUST_ANCHOR).",
+  "publishers": []
+}
