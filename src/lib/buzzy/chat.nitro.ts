@@ -82,6 +82,18 @@ import {
 } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
+import {
+  isCompanyId,
+  asMoneyBrief,
+  companyName,
+  linePayload,
+  companyPayload,
+  factValue,
+  confirmedCompanyContext,
+  companyFacts,
+  type CompanyRow,
+  type FactRow,
+} from "./companyContext";
 import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 import { buildWeeklyDigest } from "./digest";
