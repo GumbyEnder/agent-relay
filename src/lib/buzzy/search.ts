@@ -35,13 +35,29 @@ function braveKey(): string {
   return env("BZ_BRAVE_KEY");
 }
 
+/**
+ * OUR search. The Brave key never leaves the server: a desktop install gets a
+ * short-lived, search-scoped token instead and calls our gateway, which is the only
+ * thing that holds the real key. BYOK always wins — a user who brought their own key
+ * goes straight to Brave and never touches our quota.
+ */
+function gatewayUrl(): string {
+  return env("BZ_SEARCH_GATEWAY_URL").replace(/\/+$/, "");
+}
+
+function managedToken(): string {
+  return env("BZ_SEARCH_TOKEN");
+}
+
 export function searchAvailable(): boolean {
-  return braveKey() !== "";
+  return braveKey() !== "" || (gatewayUrl() !== "" && managedToken() !== "");
 }
 
 /** Which provider would serve a search right now. */
-export function searchProvider(): "brave" | null {
-  return braveKey() !== "" ? "brave" : null;
+export function searchProvider(): "brave" | "beezilla" | null {
+  if (braveKey() !== "") return "brave";
+  if (gatewayUrl() !== "" && managedToken() !== "") return "beezilla";
+  return null;
 }
 
 export interface SearchHit {
@@ -84,24 +100,32 @@ export async function webSearch(
   const q = String(query || "").trim().slice(0, 400);
   if (!q) return { ok: false, query: q, results: [], error: "empty query" };
   const key = braveKey();
-  if (!key) return { ok: false, query: q, results: [], error: "search is not configured" };
+  const managed = key === "" ? managedToken() : "";
+  if (!key && !(managed && gatewayUrl())) {
+    return { ok: false, query: q, results: [], error: "search is not configured" };
+  }
 
   const count = Math.max(1, Math.min(10, Math.round(opts?.count ?? 5)));
-  const url = new URL(endpoint());
+  // Two routes to the same payload: our own key direct, or our gateway with a
+  // short-lived token when the user is on BeeZilla search.
+  const url = new URL(managed ? gatewayUrl() : endpoint());
   url.searchParams.set("q", q);
   url.searchParams.set("count", String(count));
   url.searchParams.set("safesearch", "moderate");
   url.searchParams.set("text_decorations", "false");
   if (opts?.freshness) url.searchParams.set("freshness", opts.freshness);
 
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Accept-Encoding": "gzip",
+  };
+  if (managed) headers.Authorization = `Bearer ${managed}`;
+  else headers["X-Subscription-Token"] = key;
+
   try {
     const res = await fetch(url.toString(), {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": key,
-      },
+      headers,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {

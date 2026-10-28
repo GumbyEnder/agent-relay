@@ -27,6 +27,7 @@ const LADDER = [
   { name: "managed expiry", cmd: "node", args: ["scripts/test-managed-expiry.mjs"] },
   { name: "search credentials", cmd: "node", args: ["scripts/test-search-e2e.mjs"] },
   { name: "search live", cmd: "node", args: ["scripts/test-search-live.mjs"] },
+  { name: "search managed", cmd: "node", args: ["scripts/test-search-managed.mjs"] },
   { name: "recipe trust + cache", cmd: "npx", args: ["tsx", "scripts/test-recipe-trust.ts"] },
   { name: "recipe catalog", cmd: "npx", args: ["tsx", "scripts/test-recipe-catalog.ts"] },
   { name: "local recipe API", cmd: "npx", args: ["tsx", "scripts/test-recipe-local-api.ts"] },
