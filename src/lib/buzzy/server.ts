@@ -394,8 +394,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The work item's own title. A follow-up turn must not rename the folder to
   // whatever the latest chat message happened to be.
   let previousTitle: string | null = null;
-  if (jobId) {
-    const jrows = await sql`SELECT data->>'draft' AS draft, title FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
+  // A conversation that began in chat has no jobId in the request: the client
+  // only knows a job id from ?job= on the URL (it reads res.d.paper, which this
+  // server never sends), and the draft block below files the work under
+  // `recordId = jobId || sessionId`. Looking up only `jobId` therefore reported
+  // "no draft on file" for exactly the conversations that had one, so a revision
+  // to a chat-born draft would not version. Look up the session's item too.
+  const draftLookupId = jobId || sessionId || null;
+  if (draftLookupId) {
+    const jrows = await sql`SELECT data->>'draft' AS draft, title FROM buzzy_jobs WHERE id = ${draftLookupId} AND user_id = ${userId}`;
     const prev = jrows[0] && jrows[0].draft ? String(jrows[0].draft).trim() : null;
     hasExistingDraft = !!prev;
     if (prev) previousDraft = prev;
