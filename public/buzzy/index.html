@@ -1119,8 +1119,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // otherwise "Open in Library" dumped the owner on the grid and made them
     // hunt for the file they had just been handed. Assigned HERE, after the
     // `let`: doing it further up threw "Cannot access before initialization".
+    // docsOpenFromLink survives the company-scope guard below: a file handed
+    // over in chat may belong to a job the Library's scope filter would drop,
+    // and a link the owner just clicked must not bounce them to the grid.
     const docsJobParam = new URLSearchParams(window.location.search).get("job");
-    if (docsJobParam) docsOpenFolder = docsJobParam;
+    let docsOpenFromLink = null;
+    if (docsJobParam) { docsOpenFolder = docsJobParam; docsOpenFromLink = docsJobParam; }
 
     function loadDocs() {
       try { return JSON.parse(localStorage.getItem(DOCS_KEY)) || {}; }
@@ -1239,7 +1243,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const co = window.BZCompanies && BZCompanies.ready() ? BZCompanies.active() : null;
       if (docsOpenFolder) {
         const openJob = catalog.jobs.find((x) => x.id === docsOpenFolder);
-        if (openJob && !inWorkspace(openJob)) { docsOpenFolder = null; docsOpenDoc = null; }
+        const pinnedByLink = docsOpenFolder === docsOpenFromLink;
+        if (pinnedByLink) { /* keep: the owner asked for this folder by link */ }
+        else if (openJob && !inWorkspace(openJob)) { docsOpenFolder = null; docsOpenDoc = null; }
         else if (!openJob && co) { docsOpenFolder = null; docsOpenDoc = null; }
       }
 
@@ -1296,7 +1302,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 "</div>").join("")
             : "<p class='muted'>No documents in this folder yet.</p>") +
           "</div>";
-        document.getElementById("docsBackFolders").onclick = () => { docsOpenFolder = null; goDocs(); };
+        document.getElementById("docsBackFolders").onclick = () => { docsOpenFolder = null; docsOpenFromLink = null; goDocs(); };
         app.querySelectorAll("[data-open]").forEach((el) => { el.onclick = () => { docsOpenDoc = el.getAttribute("data-open"); goDocs(); }; });
         app.querySelectorAll(".di-name").forEach((el) => { el.onclick = () => { docsOpenDoc = el.getAttribute("data-doc"); goDocs(); }; });
         app.querySelectorAll("[data-dl]").forEach((el) => {
