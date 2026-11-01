@@ -956,11 +956,6 @@
     if (window.location.pathname.replace(/\/+$/, "") === "/buzzy/library") {
       state.screen = "docs";
     }
-    // A chat file card links back with ?job=<id>. Open that folder on arrival —
-    // otherwise "Open in Library" dumped the owner on the grid and made them
-    // hunt for the file they had just been handed.
-    const docsJobParam = new URLSearchParams(window.location.search).get("job");
-    if (docsJobParam) docsOpenFolder = docsJobParam;
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
@@ -1120,6 +1115,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     const DOCS_KEY = "bz_docs_v1";
     let docsOpenFolder = null; // jobId currently browsed, null = folder grid
     let docsOpenDoc = null;    // doc name currently viewed, null = file list
+    // A chat file card links back with ?job=<id>. Open that folder on arrival —
+    // otherwise "Open in Library" dumped the owner on the grid and made them
+    // hunt for the file they had just been handed. Assigned HERE, after the
+    // `let`: doing it further up threw "Cannot access before initialization".
+    const docsJobParam = new URLSearchParams(window.location.search).get("job");
+    if (docsJobParam) docsOpenFolder = docsJobParam;
 
     function loadDocs() {
       try { return JSON.parse(localStorage.getItem(DOCS_KEY)) || {}; }
