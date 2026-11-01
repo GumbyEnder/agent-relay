@@ -628,3 +628,58 @@ html[data-density="compact"] .density-compact,
 .bz-landing-btn:hover { background: rgba(255,193,7,.12); }
 .bz-landing-btn.primary { background: #FFC107; color: #0A0A0A; }
 .bz-landing-btn.primary:hover { background: #e0ac06; }
+
+/* Dev Boards front door — deliberately unbranded: neutral theme tokens only.
+   BeeZilla's mascot, yellow and clasp styling must never appear here. */
+.db-landing {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.5rem;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+.db-landing-inner { max-width: 34rem; text-align: center; }
+.db-landing-kicker {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.db-landing-title {
+  margin: 0 0 0.9rem;
+  font-size: 1.75rem;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.db-landing-copy {
+  margin: 0 0 1.6rem;
+  color: var(--color-fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+.db-landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: center;
+  justify-content: center;
+}
+.db-landing-btn {
+  display: inline-block;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  padding: 0.6rem 1.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-fg);
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.db-landing-btn:hover { background: var(--color-bg-hover); border-color: var(--color-fg-subtle); }
+.db-landing-btn.primary { background: var(--color-accent); color: var(--color-accent-fg); border-color: var(--color-accent); }
+.db-landing-btn.primary:hover { background: var(--color-fg); border-color: var(--color-fg); }
+.db-landing-link { font-size: 0.85rem; color: var(--color-fg-muted); text-decoration: none; }
+.db-landing-link:hover { color: var(--color-fg); text-decoration: underline; }

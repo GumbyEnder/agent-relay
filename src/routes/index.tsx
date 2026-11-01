@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import React, { useState, useEffect } from "react";
-import { authClient, authEnabled } from "@/lib/auth/client";
+import React from "react";
+import { authEnabled } from "@/lib/auth/client";
 import { AppShell } from "@/components/app-shell";
 import { PlatformAdminShell } from "@/components/platform-admin-shell";
 import { OperatorGate } from "@/components/operator-gate";
+import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { BZ_BRAND } from "@/lib/brand";
 import { resolveSurface } from "@/lib/surface";
 import { z } from "zod";
@@ -31,12 +32,22 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   const search = Route.useSearch();
-  // Signed-out visitors get a minimal brand landing (logo + Register + Login);
-  // signed-in visitors go straight to the Buzzy console.
-  if (authEnabled) {
-    return <SignedOutLanding />;
-  }
   const surface = resolveSurface();
+
+  // The session decides the surface; `authEnabled` only decides whether we have
+  // to ask. Returning <SignedOutLanding/> whenever auth was on is what made the
+  // operator console unreachable in production: every signed-in operator got the
+  // landing, whose only links (/login, /register) bounce straight back to it.
+  if (authEnabled) {
+    return <SessionEntry search={search} surface={surface} />;
+  }
+
+  return <Console search={search} surface={surface} />;
+}
+
+type Search = z.infer<typeof searchSchema>;
+
+function Console({ search, surface }: { search: Search; surface: "app" | "admin" }) {
   if (surface === "admin") {
     return (
       <OperatorGate>
@@ -54,41 +65,52 @@ function Home() {
   );
 }
 
+/**
+ * Session-aware entry. Renders nothing while the session resolves (the same
+ * first paint the landing had), then: signed out → brand landing, signed in →
+ * the console. BeeZilla-branded builds keep sending their people to /buzzy/,
+ * because that deployment is civilian-facing and has no operator board.
+ */
+function SessionEntry({ search, surface }: { search: Search; surface: "app" | "admin" }) {
+  const { user, isPending } = useCurrentUserState();
+  if (isPending) return null;
+  if (!user) return <SignedOutLanding />;
+  if (BZ_BRAND) {
+    if (typeof window !== "undefined") window.location.replace("/buzzy/");
+    return null;
+  }
+  return <Console search={search} surface={surface} />;
+}
+
 function SignedOutLanding() {
-  // Resolve the session, then either go to the console or show the landing.
-  const [state, setState] = useState<{ user: { id: string } | null; pending: boolean }>({
-    user: null,
-    pending: true,
-  });
-  useEffect(() => {
-    let alive = true;
-    authClient
-      .getSession()
-      .then((res: { data?: { user?: { id: string } | null } | null }) => {
-        if (!alive) return;
-        setState({ user: res?.data?.user ?? null, pending: false });
-      })
-      .catch(() => alive && setState({ user: null, pending: false }));
-    return () => {
-      alive = false;
-    };
-  }, []);
-  if (state.pending) return null;
-  if (state.user) {
-    // Signed in: brand deployments are civilian-facing — go to the Buzzy console.
-    // (Non-brand operator builds keep the operator board below.)
-    if (BZ_BRAND && typeof window !== "undefined") {
-      window.location.replace("/buzzy/");
-      return null;
-    }
+  // Brand separation is rule zero: BeeZilla's mascot and yellow do not belong on
+  // a Dev Boards surface, so each build gets its own front door.
+  if (BZ_BRAND) {
+    return (
+      <div className="bz-landing">
+        <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" className="bz-landing-logo" />
+        <h1 className="bz-landing-title">BeeZilla</h1>
+        <div className="bz-landing-actions">
+          <a href="/register" className="bz-landing-btn primary">Register</a>
+          <a href="/login" className="bz-landing-btn">Login</a>
+        </div>
+      </div>
+    );
   }
   return (
-    <div className="bz-landing">
-      <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" className="bz-landing-logo" />
-      <h1 className="bz-landing-title">BeeZilla</h1>
-      <div className="bz-landing-actions">
-        <a href="/register" className="bz-landing-btn primary">Register</a>
-        <a href="/login" className="bz-landing-btn">Login</a>
+    <div className="db-landing">
+      <div className="db-landing-inner">
+        <p className="db-landing-kicker">Dev Boards</p>
+        <h1 className="db-landing-title">Mission control for AI agents &amp; humans</h1>
+        <p className="db-landing-copy">
+          Kanban automation without the PM theater. Poll, claim, heartbeat, escalate, deliver —
+          every human gets their own board.
+        </p>
+        <div className="db-landing-actions">
+          <a href="/register" className="db-landing-btn primary">Create an account</a>
+          <a href="/login" className="db-landing-btn">Sign in</a>
+          <a href="https://devboards.ai" className="db-landing-link">What is Dev Boards? →</a>
+        </div>
       </div>
     </div>
   );
