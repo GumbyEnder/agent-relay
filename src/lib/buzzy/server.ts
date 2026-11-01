@@ -51,7 +51,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -391,11 +391,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // further discovery — the owner isn't still answering questions.
   let hasExistingDraft = false;
   let previousDraft: string | null = null;
+  // The work item's own title. A follow-up turn must not rename the folder to
+  // whatever the latest chat message happened to be.
+  let previousTitle: string | null = null;
   if (jobId) {
-    const jrows = await sql`SELECT data->>'draft' AS draft FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
+    const jrows = await sql`SELECT data->>'draft' AS draft, title FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
     const prev = jrows[0] && jrows[0].draft ? String(jrows[0].draft).trim() : null;
     hasExistingDraft = !!prev;
     if (prev) previousDraft = prev;
+    const t = jrows[0] && typeof jrows[0].title === "string" ? jrows[0].title.trim() : "";
+    if (t) previousTitle = t;
   }
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
@@ -1117,9 +1122,24 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       lane,
     },
   };
+  // ── Does THIS turn deliver something? ──────────────────────────────
+  // `draftGateOpen` answers "may this conversation produce a document"; it
+  // stays open for every later turn. The materialise block below must key off
+  // "did this turn produce one" instead, or every reply in a draft-bearing
+  // conversation becomes a new version of one document (and a chat answer to
+  // "what is a fence quote?" grows a Download card). See producesDeliverable.
+  const deliversThisTurn = producesDeliverable({
+    renderedDocText,
+    requestedDraft,
+    mode,
+    draftGateOpen,
+    hasExistingDraft,
+    message,
+  });
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
-  // draft — before the owner approves work, never after.
-  if (draftGateOpen) {
+  // draft — before the owner approves work, never after. It belongs to a turn
+  // that is actually showing a draft, not to a question answered in chat.
+  if (deliversThisTurn) {
     try {
       response.estimate = await buildJobEstimate(sql, userId, draftGateOpen);
     } catch { /* estimate is additive — never block the reply */ }
@@ -1141,9 +1161,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     if (suggestion) response.expertSuggestion = suggestion;
   }
 
-  // Draft only on the turn AFTER all four were already captured (the owner
-  // is confirming), never the instant the fourth statement lands.
-  if (wereAllFilled || requestedDraft || hasExistingDraft) {
+  // Draft only on a turn that actually delivers: see deliversThisTurn above
+  // (a confirming turn on a full brief, an explicit ask, a render, a revision).
+  if (deliversThisTurn) {
     response.draft = true;
     response.done = true;
     // Multi-step review (component #8): deterministic approval-time checks,
@@ -1170,14 +1190,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // conversation; a slot may have been contaminated by an older job (the gate
     // found a fence SOW titled "Quote request letter to landlord for a new AC
     // unit" because the extraction pulled another job's facts into this one).
+    // Once a work item exists its title is settled: a follow-up turn is a
+    // revision of that item, not a new one, so it must not rename the folder to
+    // whatever this turn's message happened to say ("Make the actual Word
+    // document of the AC letter now, as a downloadable file."). The owner can
+    // still rename it with PATCH /api/buzzy/jobs/:id.
     const baseTitle =
       renderedDocTitle && renderedDocTitle.trim()
         ? renderedDocTitle
-        : slotValues.end_goal && slotValues.end_goal !== "skipped"
-          ? slotValues.end_goal
-          : slotValues.challenge && slotValues.challenge !== "skipped"
-            ? slotValues.challenge
-            : message;
+        : previousTitle
+          ? previousTitle
+          : slotValues.end_goal && slotValues.end_goal !== "skipped"
+            ? slotValues.end_goal
+            : slotValues.challenge && slotValues.challenge !== "skipped"
+              ? slotValues.challenge
+              : message;
     await sql`
       INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
       VALUES (

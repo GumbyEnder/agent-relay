@@ -8,7 +8,7 @@
  *
  * Run: npx tsx scripts/test-file-intent.ts
  */
-import { isDraftRequest, isExplicitDocumentRequest, isFileRequest } from "../src/lib/buzzy/intent";
+import { isDraftRequest, isExplicitDocumentRequest, isFileRequest, isRevisionRequest, producesDeliverable } from "../src/lib/buzzy/intent";
 
 let failures = 0;
 function expect(label: string, actual: boolean, want: boolean) {
@@ -58,6 +58,50 @@ for (const m of [
   "produce the file",
 ]) expect(JSON.stringify(m), isExplicitDocumentRequest(m), true);
 expect("plain question", isExplicitDocumentRequest("what does it cost?"), false);
+
+console.log("revision of the draft on file (not a question about it):");
+for (const m of [
+  "make the second paragraph shorter",
+  "can you make the intro shorter?",
+  "add a line about our weekend hours",
+  "change the price to 450",
+  "rewrite the opening so it sounds less stiff",
+  "drop the last sentence",
+]) expect(JSON.stringify(m), isRevisionRequest(m), true);
+for (const m of [
+  "what is a fence quote?",
+  "Reply with exactly: pong",
+  "In one short sentence: what is a fence quote?",
+  "what does it cost?",
+  "how do I file a complaint with the county?",
+  "who should sign off on quotes?",
+  "what should I add to the quote?",
+]) expect(JSON.stringify(m), isRevisionRequest(m), false);
+
+console.log("delivers a document this turn:");
+const turn = (over: Partial<Parameters<typeof producesDeliverable>[0]>) =>
+  producesDeliverable({
+    renderedDocText: null,
+    requestedDraft: false,
+    mode: "chat" as const,
+    draftGateOpen: false,
+    hasExistingDraft: false,
+    message: "",
+    ...over,
+  });
+// The production defect, as a test: gate open on inherited memory, plain question.
+expect(
+  "chat + gate open + plain question (the bug)",
+  turn({ draftGateOpen: true, message: "In one short sentence: what is a fence quote?" }),
+  false,
+);
+expect("chat + existing draft + 'pong' (the bug)", turn({ draftGateOpen: true, hasExistingDraft: true, message: "Reply with exactly: pong" }), false);
+expect("chat + owner asks for the file", turn({ requestedDraft: true, draftGateOpen: true, message: "save it in the file" }), true);
+expect("chat + revision of the draft", turn({ draftGateOpen: true, hasExistingDraft: true, message: "make the second paragraph shorter" }), true);
+expect("the render tool actually ran", turn({ renderedDocText: "# Quote\n…" }), true);
+expect("work mode, brief confirmed", turn({ mode: "work", draftGateOpen: true, message: "ok, go ahead" }), true);
+expect("work mode, still discovering", turn({ mode: "work", draftGateOpen: false, message: "it's a fence job" }), false);
+expect("fresh chat, no gate", turn({ message: "hello" }), false);
 
 console.log("");
 if (failures > 0) {
