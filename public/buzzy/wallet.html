@@ -59,7 +59,9 @@
       else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
       else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
       else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
-      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "library";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
       var links = document.querySelectorAll("#bzNav a[data-nav]");
       for (var i = 0; i < links.length; i++) {
         var on = links[i].getAttribute("data-nav") === section;
@@ -118,6 +120,9 @@
       function renderLedger(entries) {
         var box = document.getElementById("ledger");
         box.className = "";
+        // The markup ships a "Loading…" placeholder; replace it, never append
+        // under it. Left in place it sat above a populated table forever.
+        box.textContent = "";
         if (!entries.length) { box.className = "empty"; box.textContent = "No movements yet."; return; }
         var table = el("table");
         var head = el("tr");
@@ -139,6 +144,9 @@
         var box = document.getElementById("sales");
         var led = document.getElementById("salesledger");
         box.className = ""; led.className = "";
+        // Same trap as the ledger: the static "Loading…" text is a sibling of
+        // whatever gets appended, so it has to be cleared explicitly.
+        box.textContent = ""; led.textContent = "";
         if (!s || !s.sales) {
           box.className = "empty"; box.textContent = "Nothing sold yet. Publish a recipe and it appears here.";
           led.className = "empty"; led.textContent = "No transactions yet.";

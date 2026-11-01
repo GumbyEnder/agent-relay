@@ -129,7 +129,9 @@
       else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
       else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
       else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
-      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "library";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
       var links = document.querySelectorAll("#bzNav a[data-nav]");
       for (var i = 0; i < links.length; i++) {
         var on = links[i].getAttribute("data-nav") === section;

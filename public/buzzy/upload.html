@@ -66,7 +66,9 @@
       else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
       else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
       else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
-      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "library";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
       var links = document.querySelectorAll("#bzNav a[data-nav]");
       for (var i = 0; i < links.length; i++) {
         var on = links[i].getAttribute("data-nav") === section;
@@ -158,7 +160,15 @@
         .catch(function (e) { jobsBox.textContent = "Could not load your jobs (" + e.message + ")."; });
 
       function learn(job, btn) {
-        btn.disabled = true; btn.textContent = "Reading…";
+        btn.disabled = true;
+        // A derive takes a minute or more. A frozen "Reading…" reads as a hung
+        // page, so show elapsed time — and put the button back on failure.
+        var startedAt = Date.now();
+        btn.textContent = "Reading… 0s";
+        var tick = setInterval(function () {
+          btn.textContent = "Reading… " + Math.round((Date.now() - startedAt) / 1000) + "s";
+        }, 1000);
+        var stopTick = function () { clearInterval(tick); };
         fetch("/api/recipes/derive", {
           method: "POST", credentials: "same-origin",
           headers: { "content-type": "application/json" },
@@ -166,6 +176,7 @@
         })
           .then(function (r) { return r.json().then(function (b) { return { s: r.status, b: b }; }); })
           .then(function (res) {
+            stopTick();
             btn.disabled = false; btn.textContent = "Learn from this";
             if (res.s !== 200 || !res.b.ok) { jobsBox.appendChild(el("p", "msg err", res.b.error || "Could not read that job.")); return; }
             CURRENT = { job: job, draft: res.b.draft };
@@ -173,7 +184,7 @@
             draftBox.classList.remove("hidden");
             draftBox.scrollIntoView({ behavior: "smooth" });
           })
-          .catch(function () { btn.disabled = false; btn.textContent = "Learn from this"; });
+          .catch(function () { stopTick(); btn.disabled = false; btn.textContent = "Learn from this"; });
       }
 
       function fill(d) {

@@ -206,7 +206,16 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "Finish the job first — there is no accepted document to learn from", code: "no_document" };
     }
     try {
-      const draft = await deriveRecipe(evidence);
+      // One long model call over the job's evidence. Measured at 60–90s in the
+      // browser audit; with no ceiling a stalled provider held the request open
+      // indefinitely and the page sat on "Reading…" forever. 150s is real
+      // headroom over p95 and still fails honestly instead of hanging.
+      const draft = await Promise.race([
+        deriveRecipe(evidence),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("derive timed out — the model did not answer in 150s")), 150_000),
+        ),
+      ]);
       return { ok: true, draft, evidence: { job: evidence.title, corrections: evidence.corrections.length } };
     } catch (e) {
       setResponseStatus(event, 502);

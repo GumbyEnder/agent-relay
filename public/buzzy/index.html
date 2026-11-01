@@ -594,7 +594,9 @@
       else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
       else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
       else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
-      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "library";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
       var links = document.querySelectorAll("#bzNav a[data-nav]");
       for (var i = 0; i < links.length; i++) {
         var on = links[i].getAttribute("data-nav") === section;
@@ -954,6 +956,11 @@
     if (window.location.pathname.replace(/\/+$/, "") === "/buzzy/library") {
       state.screen = "docs";
     }
+    // A chat file card links back with ?job=<id>. Open that folder on arrival —
+    // otherwise "Open in Library" dumped the owner on the grid and made them
+    // hunt for the file they had just been handed.
+    const docsJobParam = new URLSearchParams(window.location.search).get("job");
+    if (docsJobParam) docsOpenFolder = docsJobParam;
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
