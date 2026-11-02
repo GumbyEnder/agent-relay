@@ -679,7 +679,7 @@ export default defineEventHandler(async (event) => {
       let pin: ModelPin;
       if (category) pin = { mode: "frontier", category, position: Number(qs.get("position") || 1) };
       else if (family) pin = { mode: "latest", family };
-      else return { ok: true, frontier: frontierAsOf(), catalog: catalog.length };
+      else return { ok: true, frontier: frontierAsOf(), catalog: catalog.length, reachable: catalog };
       const r = resolvePin(pin, catalog, qs.get("avoid") || undefined);
       return { ok: true, resolution: r };
     } catch (e) {
