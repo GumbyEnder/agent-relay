@@ -39,6 +39,7 @@ import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
+import { buildRanking } from "./ranking";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
@@ -666,6 +667,26 @@ export default defineEventHandler(async (event) => {
       reachable: all.filter((p) => reachable.has(p.model)),
       frontier: (await frontierModels()).filter((m) => reachable.has(m)),
       frontierTotal: (await frontierModels()).length,
+    };
+  }
+
+  // ── POST /api/buzzy/frontier/rebuild — derive the ranking, do not hand-write it ──
+  if (method === "POST" && path === "/api/buzzy/frontier/rebuild") {
+    const opsKey = getHeader(event, "x-bz-ops-key") || "";
+    const expected = process.env.BZ_OPS_KEY || "";
+    if (!expected || opsKey !== expected) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    const reachable = getModels().map((m) => m.model);
+    const built = await buildRanking(reachable);
+    await saveSnapshot(built as unknown as Parameters<typeof saveSnapshot>[0], built.source, built.note);
+    return {
+      ok: true,
+      saved: await frontierAsOfLive(),
+      reachable: reachable.length,
+      frontierFlagged: built.all.filter((e) => e.onFrontier).map((e) => e.model),
+      order: Object.fromEntries(Object.entries(built.categories).map(([k, v]) => [k, v.map((e) => e.model)])),
     };
   }
 
