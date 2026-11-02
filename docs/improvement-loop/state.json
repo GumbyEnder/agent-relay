@@ -7,9 +7,14 @@
       "priority": "P0",
       "status": "in_progress",
       "title": "Voice works only in Chrome; Firefox + Brave fail silently",
-      "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition (public/buzzy/talk.html startListening). Firefox has no such API; Brave ships it but blocks the Google speech service (service-not-allowed). startListening returned silently when SR was absent, so the mic lit up and nothing happened.",
-      "done_when": "Browser matrix probe proves capture -> transcript -> SSE audio on Chromium (Chrome, Brave) and Firefox, and a failing browser says which step failed on screen.",
-      "attempts": []
+      "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition in public/buzzy/talk.html startListening(). Firefox has no such API. Brave exposes it but returns service-not-allowed (Google speech service blocked by default). startListening used to return silently when SR was absent, so the mic lit up and nothing happened; error codes other than not-allowed were ignored.",
+      "shipped": [
+        "7403270 explicit unsupported-browser + error-code messages, honest exit from listen mode",
+        "<next> voice.note persists the message through paintVoice repaints (paintVoice was wiping it instantly)"
+      ],
+      "evidence": "Authenticated matrix (Playwright + magic link), 4 cases: chrome-natural, chrome-noSR, brave-natural, brave-noSR — all four now show a visible #voiceStatus message, mic drops out, bz_listen_mode reset to 0. Served asset carries voice.note.",
+      "next": "Real cross-browser voice needs server-side ASR: getUserMedia + MediaRecorder chunk -> POST /api/buzzy/transcribe -> transcript into the same turn. Browser SpeechRecognition can never work in Firefox and needs a Brave flag.",
+      "done_when": "Transcript -> SSE audio proven on Chromium and Firefox, or an explicit in-product statement that voice is Chrome/Edge-only with typed chat everywhere."
     },
     {
       "id": "public-repo-cleanup",
@@ -47,15 +52,27 @@
       "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost."
     }
   ],
+  "probes": {
+    "voice_matrix": "~/.hermes/profiles/buzzy/cache/scratch/bz-voice-matrix-auth.mjs (needs VERIFY_URL from /mnt/nas/host-ops/beezilla-magiclink-request.py, sourced from frodo .env)"
+  },
   "log": [
     {
       "n": 1,
       "at": "2026-11-01",
       "item": "voice-browser-matrix",
-      "cause": "startListening() returns silently when SpeechRecognition is missing (Firefox) and only handled 'not-allowed' (Brave reports service-not-allowed).",
-      "change": "Added stageNote() + explicit unsupported-browser and error messages; listen mode drops out honestly instead of pretending to listen.",
-      "gates": "tsc OK, build complete, inline script blocks=4 errors=0",
-      "production_evidence": "pending deploy"
+      "found": "grep for getUserMedia across public/buzzy returned 0 — ASR is the browser SpeechRecognition API, Chrome-only by construction.",
+      "change": "stageNote() + unsupported/error branches (7403270)",
+      "gates": "tsc OK, build complete, blocks=4 errors=0",
+      "production_evidence": "new string present on served /buzzy/talk"
+    },
+    {
+      "n": 2,
+      "at": "2026-11-01",
+      "item": "voice-browser-matrix",
+      "found": "First fix was invisible: paintVoice repainted #voiceStatus right after stageNote wrote it, so the message never rendered. Matrix caught it (stage stayed 'Voice', status empty).",
+      "change": "voice.note on state; paintVoice renders it when idle; cleared on a fresh listen",
+      "gates": "tsc OK, build complete, blocks=4 errors=0, redeploy landed (voice.note x3 on served page)",
+      "production_evidence": "authenticated 4-case matrix: chrome-natural + brave-natural -> 'Mic or speech service blocked in this browser'; chrome-noSR + brave-noSR -> 'This browser can't transcribe speech'. Message visible (statusShown true), mic off, pref 0 in all cases."
     }
   ]
 }
