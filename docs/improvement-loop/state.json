@@ -68,14 +68,14 @@
       "title": "Node-graph orchestration in the whiteboard (6a-6e)",
       "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost.",
       "phases": {
-        "6a": "done \u2014 migration 0049 (graphs/nodes/edges/runs/node_results)",
-        "6b": "next \u2014 frontier-position model selection behind a cached Arena adapter",
-        "6c": "todo \u2014 review edge requires a different provider",
-        "6d": "todo \u2014 whiteboard authoring + per-node status/cost",
+        "6a": "done \u2014 migration 0049 + save/list/read API proven in prod",
+        "6b": "done \u2014 frontier.json cached ranking, resolvePin/resolveReview, GET /api/buzzy/frontier",
+        "6c": "done (resolver level) \u2014 review pins resolve to a different provider; recording happens per node result in 6e",
+        "6d": "next \u2014 whiteboard authoring UI and per-node status/cost",
         "6e": "todo \u2014 resolver with bounded retries and replay"
       },
-      "evidence": "Migration 0049 validated in PGLite: 5 tables created, graph/node/edge/run/result inserts succeed, kind CHECK rejects an unknown kind, cascade delete clears children. Production after deploy: /api/agent/health 200 {\"store\":\"durable\"}, /buzzy/talk|library|wallet all 200 \u2014 the boot-time migration did not break startup. Direct row-level proof in prod arrives with the first save (6b/6d), since there is no SQL console by design.",
-      "open": "No whiteboard/orchestration code existed before this; 6a is groundwork only."
+      "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true.",
+      "open": "The ranking is a hand-ordered seed over the 6 reachable models, not scraped from Arena. refresh() is not built yet \u2014 that is a cached job, not a run-time dependency."
     }
   ],
   "probes": {
@@ -162,6 +162,15 @@
       "change": "migrations/0049_buzzy_graphs.sql \u2014 graphs, nodes, edges, runs, node_results; review is a first-class node kind with a recorded 'independent' flag",
       "gates": "tsc OK, build OK, PGLite exec + insert + CHECK + cascade all pass",
       "production_evidence": "health 200 durable, three pages 200 after boot migration"
+    },
+    {
+      "n": 10,
+      "at": "2026-11-02",
+      "item": "orchestration-programme",
+      "found": "First seed ranked families the deployment could not call, so every pin resolved to 'nothing reachable' \u2014 caught in production, not in tests.",
+      "change": "graphs API (save/list/read), frontier resolver + endpoint, clamp marked as substitution",
+      "gates": "tsc OK, build complete, deploys verified by served behaviour",
+      "production_evidence": "see evidence string: graph saved/read/versioned, 3 providers across positions, cross-provider review independent:true"
     }
   ]
 }
