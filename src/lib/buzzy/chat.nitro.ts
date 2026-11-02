@@ -37,6 +37,7 @@ import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { generateMusic, storeAudio, musicConfigured } from "./music";
+import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
@@ -508,6 +509,65 @@ export default defineEventHandler(async (event) => {
         code: "transcribe_failed",
       };
     }
+  }
+
+  // ── /api/buzzy/model3d — make a 3D model, poll it, keep the .glb ──────
+  // Two calls because generation outlives a proxy's patience: POST creates the
+  // task, GET polls it and stores the file the first time it is finished.
+  if (path === "/api/buzzy/model3d" || path.startsWith("/api/buzzy/model3d/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const taskId = path.startsWith("/api/buzzy/model3d/") ? path.split("/").pop()! : "";
+
+    if (method === "GET" && !taskId) return { ok: true, configured: threeDConfigured() };
+
+    if (method === "GET" && taskId) {
+      const state = await readModelTask(taskId);
+      if (!state) {
+        setResponseStatus(event, 503);
+        return { ok: false, error: "No 3D provider is configured.", code: "not_configured" };
+      }
+      if (state.status !== "SUCCEEDED" || !state.glbUrl) {
+        return { ok: true, taskId, status: state.status, progress: state.progress, error: state.error };
+      }
+      const name = `model-${taskId.slice(0, 8)}.glb`;
+      const stored = await storeModel(user.id, state.glbUrl, name);
+      if (!stored) {
+        setResponseStatus(event, 502);
+        return { ok: false, error: "Meshy finished but the file could not be fetched.", code: "download_failed" };
+      }
+      return {
+        ok: true,
+        taskId,
+        status: "SUCCEEDED",
+        progress: 100,
+        thumbnail: state.thumbnailUrl,
+        asset: { id: stored.id, url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: "model/gltf-binary" },
+        duplicate: stored.duplicate,
+      };
+    }
+
+    if (method === "POST" && !taskId) {
+      let body: { prompt?: string } = {};
+      try {
+        body = (await event.req.json()) as { prompt?: string };
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { prompt }.", code: "bad_json" };
+      }
+      const r = await createModelTask(String(body.prompt || ""));
+      if (!r.ok) {
+        setResponseStatus(event, r.code === "not_configured" ? 503 : r.code === "no_credits" ? 402 : 502);
+        return { ok: false, error: r.error, code: r.code };
+      }
+      return { ok: true, taskId: r.taskId, status: "PENDING" };
+    }
+
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use POST to start, GET to poll.", code: "method_not_allowed" };
   }
 
   // ── POST /api/buzzy/music — make a piece of music, keep it in the chat ──
