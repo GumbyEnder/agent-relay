@@ -36,6 +36,7 @@ import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
+import { resolvePin, resolveReview, frontierAsOf, providerOf, type ModelPin } from "./frontier";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
@@ -647,6 +648,44 @@ export default defineEventHandler(async (event) => {
     setResponseHeader(event, "content-type", row.content_type || "application/octet-stream");
     setResponseHeader(event, "content-disposition", `inline; filename="${row.filename.replace(/"/g, "")}"`);
     return new Uint8Array(row.body);
+  }
+
+  // ── GET /api/buzzy/frontier — what a pin resolves to, before it runs ──
+  // The whiteboard uses this to show the model a node will use, and a run uses
+  // the same function so what you see authored is what executes.
+  if (method === "GET" && path === "/api/buzzy/frontier") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const qs = new URLSearchParams(fullPath.split("?")[1] || "");
+    // The catalog is what this deployment can actually call; resolving against it
+    // is what makes "unavailable" detectable instead of hypothetical.
+    let catalog: string[] = [];
+    try {
+      catalog = getModels().map((m) => m.model);
+    } catch {
+      catalog = []; // unknown: resolvePin trusts the cache and marks it
+    }
+    const category = qs.get("category");
+    const family = qs.get("family");
+    const review = qs.get("review");
+    try {
+      if (review && category) {
+        const r = resolveReview(review, category, Number(qs.get("position") || 1), catalog);
+        return { ok: true, resolution: r, independent: r.provider !== providerOf(review) };
+      }
+      let pin: ModelPin;
+      if (category) pin = { mode: "frontier", category, position: Number(qs.get("position") || 1) };
+      else if (family) pin = { mode: "latest", family };
+      else return { ok: true, frontier: frontierAsOf(), catalog: catalog.length };
+      const r = resolvePin(pin, catalog, qs.get("avoid") || undefined);
+      return { ok: true, resolution: r };
+    } catch (e) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: (e as Error).message, code: "unresolvable" };
+    }
   }
 
   // ── /api/buzzy/graphs — author, list and read orchestration graphs ────

@@ -1,0 +1,30 @@
+{
+  "as_of": "2026-11-02",
+  "source": "seed",
+  "note": "Cached ranking. A run must never depend on a live third-party page, so the resolver reads this file and the gateway catalog, never the network. 'seed' = hand-ordered from model ids this deployment can actually reach (verified against /v1/models), not scraped from Arena. refresh() replaces it out of band.",
+  "categories": {
+    "writing": [
+      { "model": "google/gemini-3.1-pro-preview", "family": "gemini", "provider": "google" },
+      { "model": "openai/gpt-5.1", "family": "gpt", "provider": "openai" },
+      { "model": "anthropic/claude-sonnet-4.6", "family": "claude", "provider": "anthropic" },
+      { "model": "x-ai/grok-4.7", "family": "grok", "provider": "x-ai" },
+      { "model": "deepseek/deepseek-v3.2", "family": "deepseek", "provider": "deepseek" }
+    ],
+    "reasoning": [
+      { "model": "openai/gpt-5.1", "family": "gpt", "provider": "openai" },
+      { "model": "google/gemini-3.1-pro-preview", "family": "gemini", "provider": "google" },
+      { "model": "anthropic/claude-opus-4.5", "family": "claude", "provider": "anthropic" },
+      { "model": "deepseek/deepseek-r1-0528", "family": "deepseek", "provider": "deepseek" }
+    ],
+    "fast": [
+      { "model": "google/gemini-3.1-flash-lite", "family": "gemini", "provider": "google" },
+      { "model": "z-ai/glm-4.7-flash", "family": "glm", "provider": "z-ai" },
+      { "model": "openai/gpt-5-nano", "family": "gpt", "provider": "openai" }
+    ],
+    "coding": [
+      { "model": "anthropic/claude-sonnet-4.6", "family": "claude", "provider": "anthropic" },
+      { "model": "openai/gpt-5.1", "family": "gpt", "provider": "openai" },
+      { "model": "deepseek/deepseek-v3.2", "family": "deepseek", "provider": "deepseek" }
+    ]
+  }
+}
