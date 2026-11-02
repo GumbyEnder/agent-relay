@@ -75,7 +75,7 @@
         "6e": "done \u2014 runner.ts: dependency order, bounded retries (2), per-attempt persistence, gate stop/resume, replay from stored outputs"
       },
       "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true. | Whiteboard E2E: 4 nodes added, 3 links drawn and persisted as n1->n2:data, n2->n3:review, n3->n4:gate, review node pinned to writing position 2 resolves to moonshotai/kimi-k3 in the inspector, saved v1, reopened from the list with 4 nodes and 3 edges, 0 console errors. | Resolver E2E: graph with agent+review+gate ran in 6913ms -> write done on google/gemini-3.1-flash-lite (900ms), critique done on moonshotai/kimi-k3 (5558ms, independent=true) with a real critique, gate awaiting_approval; approve -> run done, 3 results, read_back ok. Retry proven: a glm node failed on attempt 1 and succeeded on attempt 2 (3 result rows for 2 nodes). Spec freeze proven: after shrinking the authored graph to one node the finished run still reports its original 2 nodes and order. UI: Run renders per-node badges ('done \u00b7 google/gemini-3.1-flash-lite \u00b7 858 ms') and the Approve button appears on a gated run; 0 console errors. Anonymous run 401. | Refresh: writing position 1 changed google/gemini-3.1-flash-lite -> upstage/solar-pro4 with no deploy (61s after the refresh, past the memo); POST without the ops key 403; an empty category 400; the seed was restored and reads back as source=seed.",
-      "open": "Costs are real now (pricing.ts).  The ranking now lives in the database and can be replaced by POST /api/buzzy/frontier (ops key); what is still missing is an automated Arena scraper \u2014 the last refresh was performed by hand."
+      "open": "Costs are real now (pricing.ts).  The ranking now lives in the database and can be replaced by POST /api/buzzy/frontier (ops key); the ranking is now derived (frontier flag + price) and refreshed by POST /api/buzzy/frontier/rebuild; an Arena scraper remains unbuilt."
     },
     {
       "id": "frontier-refresh",
@@ -88,6 +88,12 @@
       "priority": "P1",
       "status": "done",
       "title": "A run's cost is a real number from the gateway's published prices"
+    },
+    {
+      "id": "derived-ranking",
+      "priority": "P1",
+      "status": "done",
+      "title": "The frontier ranking is derived from the gateway's frontier flag and prices, not hand-picked"
     }
   ],
   "probes": {
@@ -219,6 +225,15 @@
       "change": "src/lib/buzzy/pricing.ts (10-minute memo), runner records costOf(), output.priced flag, GET /api/buzzy/pricing",
       "gates": "tsc OK (after fixing a bad env import), build complete",
       "production_evidence": "2-node run: gemini 1468ms priced, kimi/qwen review 7563ms $0.0024 independent=true; run total $0.0025. Prices: gemini 0.25/1.5, kimi-k3 0.192/15, qwen 0.45/3.5, glm 0.12/0.4, deepseek 0.115/4, solar 0.15/0.6 USD per MTok. Only kimi-k3 of the six reachable models is frontier-flagged."
+    },
+    {
+      "n": 15,
+      "at": "2026-11-02",
+      "item": "derived-ranking",
+      "found": "The ranking was hand-picked, and my first derived version dropped 'writing' and 'coding' entirely \u2014 which stranded every saved graph that pinned them.",
+      "change": "ranking.ts buildRanking(); fixed canonical category vocabulary with an explicit fallback to the whole ordering; POST /api/buzzy/frontier/rebuild",
+      "gates": "tsc OK, build complete, 2 deploys verified by behaviour",
+      "production_evidence": "rebuild: 6 reachable, kimi-k3 the only frontier-flagged, categories writing/coding/fast/general/reasoning/vision all resolve; writing pos1 -> moonshotai/kimi-k3, fast pos1 -> google/gemini-3.1-flash-lite; a writing-pinned graph then ran: write moonshotai/kimi-k3 $0.00970, review deepseek/deepseek-v4-pro-0813 independent=true $0.00050"
     }
   ]
 }
