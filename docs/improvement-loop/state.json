@@ -53,9 +53,13 @@
     {
       "id": "music-3d",
       "priority": "P2",
-      "status": "todo",
+      "status": "in_progress",
       "title": "Music + 3D surfaces",
-      "done_when": "Generated audio / 3D artifact ends as a downloadable file card in chat."
+      "done_when": "Generated audio / 3D artifact ends as a downloadable file card in chat.",
+      "found": "Generation providers: the Nous gateway has 378 models \u2014 audio (gpt-audio) and image (gemini-3-pro-image) but NO music and NO 3D. FAL_KEY is present but returns 401 'invalid key credentials'. MINIMAX_API_KEY is empty. So nothing can generate music or 3D today.",
+      "shipped": "Dropped images/audio/.glb/.gltf now upload to the content-addressed asset store and render in the chat as a card: image preview, audio player, or a labelled 3D file, each with a working download (/api/buzzy/assets/:id).",
+      "evidence": "Authenticated E2E: dropped asr-probe.mp3 -> card with <audio> + download /api/buzzy/assets/8221 (audio/mpeg, 104832 bytes); dropped triangle.gltf -> card with download /api/buzzy/assets/8222 (1024 bytes). 0 console errors. Assets listing shows both.",
+      "open": "1) A music model needs a working provider key (FAL key is dead; MiniMax unset) or a local model. 2) A real 3D viewer needs an engine vendored into the page (three.js ~600 KB) \u2014 a bundle-size decision, not sneaked in."
     },
     {
       "id": "orchestration-programme",
@@ -131,6 +135,15 @@
       "change": "All local asset refs in public/buzzy/*.html made absolute (/buzzy/...), 54b080e",
       "gates": "tsc OK, build complete, every page's inline scripts parse",
       "production_evidence": "re-sweep after deploy: SUMMARY pages=11 problems=0 (was problems=1)"
+    },
+    {
+      "n": 8,
+      "at": "2026-11-02",
+      "item": "music-3d",
+      "found": "Media dropped on the chat was reduced to a 'photo' paper with zero bytes. No provider exists for music or 3D generation.",
+      "change": "images/audio/glb/gltf upload to /api/buzzy/assets and render as playable/viewable cards with downloads",
+      "gates": "tsc OK, build complete, inline blocks 4/0",
+      "production_evidence": "2 real files -> 2 cards with audio element and working download links, no console errors"
     }
   ]
 }
