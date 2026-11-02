@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": false,
   "license": "MIT",
-  "description": "Dev Boards \u2014 harness-agnostic mission kanban for AI agents",
+  "description": "Dev Boards + BeeZilla \u2014 mission boards for AI agents, and a consumer orchestrator for people",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/GumbyEnder/agent-relay.git"
