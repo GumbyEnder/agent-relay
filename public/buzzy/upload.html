@@ -125,9 +125,101 @@
       The method is sealed when you publish: buyers never see it, and neither does the shelf.
       What they see is the title, the description, the price, and what it refuses to do.
     </div>
+
+    <h2 id="skills">Your skills and images</h2>
+    <p class="hint">
+      Pick a whole folder — markdown, images, hundreds or thousands of files. Every file is stored
+      once: if the upload is interrupted, pick the folder again and everything that already arrived
+      is skipped instead of duplicated.
+    </p>
+    <input id="folderPick" type="file" webkitdirectory multiple aria-label="Choose a folder to upload" />
+    <div id="bulkBar" class="hint" role="status"></div>
+    <div id="bulkList"></div>
+    <button id="bulkRetry" class="secondary hidden" type="button">Retry the ones that failed</button>
   </main>
 
   <script src="/buzzy/wallet-chip.js"></script>
+  <script>
+    // ── Bulk upload: a folder, not a file ──────────────────────────────────
+    // A skills corpus is markdown plus thousands of images, so the unit here is
+    // a directory. Files go one per request with bounded concurrency; the
+    // server is content-addressed, so re-picking the same folder after an
+    // interruption costs nothing for what already landed.
+    (function () {
+      var pick = document.getElementById("folderPick");
+      var bar = document.getElementById("bulkBar");
+      var list = document.getElementById("bulkList");
+      var retryBtn = document.getElementById("bulkRetry");
+      var failed = [];
+      var CONC = 6;
+
+      function el(t, c, x) { var n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; }
+      function label(f) { return f.webkitRelativePath || f.name; }
+
+      function send(f) {
+        return fetch("/api/buzzy/assets", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "content-type": f.type || "application/octet-stream",
+            "x-bz-path": label(f)
+          },
+          body: f
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            return { ok: r.ok && j && j.ok, dup: !!(j && j.duplicate), error: (j && j.error) || ("HTTP " + r.status) };
+          });
+        });
+      }
+
+      function run(files) {
+        var total = files.length;
+        var done = 0, stored = 0, dup = 0;
+        failed = [];
+        var i = 0;
+        retryBtn.classList.add("hidden");
+        list.textContent = "";
+        bar.textContent = "Uploading 0 / " + total + "…";
+
+        function worker() {
+          if (i >= files.length) return Promise.resolve();
+          var f = files[i++];
+          return send(f)
+            .catch(function () { return { ok: false, error: "network" }; })
+            .then(function (r) {
+              done++;
+              if (r.ok) { if (r.dup) dup++; else stored++; }
+              else {
+                failed.push(f);
+                if (failed.length <= 20) list.appendChild(el("p", "msg err", label(f) + " — " + r.error));
+              }
+              bar.textContent = done + " / " + total + " — " + stored + " new, " +
+                dup + " already here, " + failed.length + " failed";
+              return worker();
+            });
+        }
+
+        var lanes = [];
+        for (var k = 0; k < Math.min(CONC, total); k++) lanes.push(worker());
+        return Promise.all(lanes).then(function () {
+          bar.textContent = "Done. " + stored + " new, " + dup + " already here, " + failed.length + " failed.";
+          if (failed.length) retryBtn.classList.remove("hidden");
+        });
+      }
+
+      pick.addEventListener("change", function () {
+        var fs = this.files ? Array.prototype.slice.call(this.files) : [];
+        if (!fs.length) return;
+        run(fs);
+      });
+
+      retryBtn.addEventListener("click", function () {
+        if (!failed.length) return;
+        var again = failed.slice();
+        run(again);
+      });
+    })();
+  </script>
   <script>
     (function () {
       var jobsBox = document.getElementById("jobs");
