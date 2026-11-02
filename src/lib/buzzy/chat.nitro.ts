@@ -36,6 +36,7 @@ import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
+import { generateMusic, storeAudio, musicConfigured } from "./music";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
@@ -507,6 +508,49 @@ export default defineEventHandler(async (event) => {
         code: "transcribe_failed",
       };
     }
+  }
+
+  // ── POST /api/buzzy/music — make a piece of music, keep it in the chat ──
+  // The result lands in the asset shelf and is returned in the same shape the
+  // chat's media card already renders, so it plays and downloads like any other
+  // file the conversation produced.
+  if (path === "/api/buzzy/music") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    if (method === "GET") return { ok: true, configured: musicConfigured() };
+    if (method !== "POST") {
+      setResponseStatus(event, 405);
+      return { ok: false, error: "Use POST.", code: "method_not_allowed" };
+    }
+    let body: { prompt?: string; seconds?: number } = {};
+    try {
+      body = (await event.req.json()) as { prompt?: string; seconds?: number };
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON: { prompt, seconds }.", code: "bad_json" };
+    }
+    const r = await generateMusic(String(body.prompt || ""), (Number(body.seconds) || 20) * 1000);
+    if (!r.ok) {
+      // 402 is the account's plan, not the caller's mistake — keep that status.
+      setResponseStatus(event, r.code === "paid_plan_required" ? 402 : r.code === "not_configured" ? 503 : 502);
+      return { ok: false, error: r.error, code: r.code };
+    }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const stored = await storeAudio(user.id, r.bytes!, `music-${stamp}.mp3`, r.contentType || "audio/mpeg");
+    return {
+      ok: true,
+      asset: {
+        id: stored.id,
+        url: `/api/buzzy/assets/${stored.id}`,
+        name: `music-${stamp}.mp3`,
+        bytes: stored.bytes,
+        type: "audio/mpeg",
+      },
+      duplicate: stored.duplicate,
+    };
   }
 
   // ── POST /api/buzzy/assets — one file of a bulk upload ───────────────
