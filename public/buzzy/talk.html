@@ -1381,6 +1381,8 @@
 
           <div class="paper-attach">
               <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
+              <button type="button" id="makeMusic" class="paper-toggle" title="Ask BeeZilla to make a piece of music">&#9835; Music</button>
+              <button type="button" id="make3d" class="paper-toggle" title="Ask BeeZilla to make a 3D model">&#9671; 3D</button>
             </div>
           </div>
 
@@ -2313,6 +2315,91 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         '<a href="' + url + '" download="' + name + '">Download</a>' +
       "</div>";
     }
+
+    // ── Make music or a 3D model, from the composer ───────────────────────
+    // The result is pushed into the same conversation as an asset message, so it
+    // plays or downloads exactly like anything else the chat produced.
+    function makeBrief(what) {
+      var box = document.getElementById("chatInput");
+      var typed = box && box.value ? box.value.trim() : "";
+      if (typed) { box.value = ""; return typed; }
+      return window.prompt("Describe the " + what + " you want");
+    }
+
+    function sayToChat(text) {
+      chatState.messages.push({ role: "assistant", content: text });
+      renderChatMessages();
+    }
+
+    function makeMusic() {
+      var brief = makeBrief("music");
+      if (!brief) return;
+      chatState.messages.push({ role: "user", content: "Make music: " + brief });
+      var note = { role: "assistant", content: "Making that music…" };
+      chatState.messages.push(note);
+      renderChatMessages();
+      fetch("/api/buzzy/music", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: brief, seconds: 20 })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok) { note.content = j.error || "Music did not come back."; renderChatMessages(); return; }
+          note.content = "Here it is.";
+          note.asset = j.asset;
+          renderChatMessages();
+        })
+        .catch(function () { note.content = "Music failed — check the connection."; renderChatMessages(); });
+    }
+
+    function make3d() {
+      var brief = makeBrief("3D model");
+      if (!brief) return;
+      chatState.messages.push({ role: "user", content: "Make a 3D model: " + brief });
+      var note = { role: "assistant", content: "Starting the model…" };
+      chatState.messages.push(note);
+      renderChatMessages();
+      fetch("/api/buzzy/model3d", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: brief })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok || !j.taskId) { note.content = j.error || "The model could not be started."; renderChatMessages(); return; }
+          var tries = 0;
+          var tick = setInterval(function () {
+            tries++;
+            fetch("/api/buzzy/model3d/" + encodeURIComponent(j.taskId), { credentials: "same-origin" })
+              .then(function (r) { return r.json(); })
+              .then(function (p) {
+                if (p.asset) {
+                  clearInterval(tick);
+                  note.content = "Here it is.";
+                  note.asset = p.asset;
+                  renderChatMessages();
+                  return;
+                }
+                if (p.status === "FAILED" || p.status === "error" || tries > 60) {
+                  clearInterval(tick);
+                  note.content = p.error || "The model did not finish.";
+                  renderChatMessages();
+                  return;
+                }
+                note.content = "Making the model… " + (p.progress || 0) + "%";
+                renderChatMessages();
+              })
+              .catch(function () { clearInterval(tick); note.content = "Polling failed."; renderChatMessages(); });
+          }, 4000);
+        })
+        .catch(function () { note.content = "The model could not be started."; renderChatMessages(); });
+    }
+
+    var _mm = document.getElementById("makeMusic");
+    if (_mm) _mm.addEventListener("click", makeMusic);
+    var _m3 = document.getElementById("make3d");
+    if (_m3) _m3.addEventListener("click", make3d);
 
     function renderFileCard(doc) {
       var name = String(doc.filename || "document");
