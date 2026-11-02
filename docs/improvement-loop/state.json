@@ -5,18 +5,22 @@
     {
       "id": "voice-browser-matrix",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "done",
       "title": "Voice works only in Chrome; Firefox + Brave fail silently",
       "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition in public/buzzy/talk.html startListening(). Firefox has no such API. Brave exposes it but returns service-not-allowed (Google speech service blocked by default). startListening used to return silently when SR was absent, so the mic lit up and nothing happened; error codes other than not-allowed were ignored.",
       "shipped": [
         "7403270 explicit unsupported-browser + error-code messages, honest exit from listen mode",
         "<next> voice.note persists the message through paintVoice repaints (paintVoice was wiping it instantly)",
         "e2069ee server ASR: POST /api/buzzy/transcribe (session-gated, raw WAV body, gpt-audio-mini, no new key)",
-        "e2069ee client recorder fallback: getUserMedia + ScriptProcessor -> 16k mono WAV -> transcribe -> same turn"
+        "e2069ee client recorder fallback: getUserMedia + ScriptProcessor -> 16k mono WAV -> transcribe -> same turn",
+        "7c7570c silence is never a transcript: SILENCE sentinel + refusal filter",
+        "b8c74ee client skips upload when RMS saw no speech; server drops meta-answers",
+        "feat: \u00a7asr_ms recorded with lane='asr' in buzzy_voice_metrics"
       ],
-      "evidence": "Authenticated matrix (Playwright + magic link), 4 cases: chrome-natural, chrome-noSR, brave-natural, brave-noSR \u2014 all four now show a visible #voiceStatus message, mic drops out, bz_listen_mode reset to 0. Served asset carries voice.note. | Prod curl with cookie: 200, transcript exact, 2673ms for 6.5s audio. Browser E2E (chrome+brave, SpeechRecognition deleted, fake mic feeding a real spoken WAV): posted 475/480KB, server transcript correct, 1372/3111ms, chat turn started. Note: 21s wall time in the probe is the 15s VAD cap (fake audio never goes quiet, so silence never ends the clip).",
+      "evidence": "Prod: transcribe 200 with exact transcript, asr_ms 917-1089 for a 6.5s clip; silence clip -> {\"text\":\"\"}; unauth -> 401. Browser matrix (authenticated): chrome-natural/brave-natural show 'Mic or speech service blocked'; noSR cases show the recorder taking over. Recorder E2E with a real spoken WAV as the fake mic: chrome 475KB -> correct transcript 1.37s; brave 480KB -> correct transcript 3.11s. Real Firefox (playwright firefox 151, no SpeechRecognition): recorder path opens the mic, posts, handles an empty transcript by re-arming, no JS errors from our code. Timing on a 6.55s utterance + 3s pad: VAD ends the clip 0.88s after speech stops, transcript lands 1.20s after the clip ends (asr_ms 1201). Ops read-back shows lane='asr', asr_ms 978.",
       "next": "1) Prove a real Firefox page (install playwright firefox) takes the recorder path without JS errors. 2) Real end-of-speech timing: measure time from 'stop talking' to transcript for a normal 3-5s utterance. 3) Record asr_ms into buzzy_voice_metrics so ops can see it.",
-      "done_when": "Transcript -> SSE audio proven on Chromium and Firefox, or an explicit in-product statement that voice is Chrome/Edge-only with typed chat everywhere."
+      "done_when": "Transcript -> SSE audio proven on Chromium and Firefox, or an explicit in-product statement that voice is Chrome/Edge-only with typed chat everywhere.",
+      "open": "A real Firefox microphone on Shane's machine is still unproven (headless fake streams are tone/silence, not speech). Everything else is verified."
     },
     {
       "id": "public-repo-cleanup",
@@ -84,6 +88,15 @@
       "change": "asr.ts + POST /api/buzzy/transcribe + recorder fallback in talk.html (e2069ee)",
       "gates": "tsc OK, build complete, blocks=4 errors=0, speechSynthesis count 0",
       "production_evidence": "unauth 401; auth curl 200 {text exact, ms 2673}; chrome+brave recorder E2E posted real WAV and got the right transcript"
+    },
+    {
+      "n": 4,
+      "at": "2026-11-01",
+      "item": "voice-browser-matrix",
+      "found": "The audio model answers silence/meta-requests with prose ('I'm sorry, but I can't hear any speech\u2026', 'please provide the audio'), which was returned as a transcript and typed into the composer as if the owner had said it.",
+      "change": "SILENCE sentinel + refusal/meta-answer filter (7c7570c); client refuses to upload a clip with no speech (b8c74ee); asr_ms telemetry with lane='asr'",
+      "gates": "tsc OK, build OK, blocks=4 errors=0",
+      "production_evidence": "silence -> \"\"; speech -> exact text 978ms; ops endpoint shows lane=asr row"
     }
   ]
 }
