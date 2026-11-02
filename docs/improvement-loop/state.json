@@ -94,6 +94,13 @@
       "priority": "P1",
       "status": "done",
       "title": "The frontier ranking is derived from the gateway's frontier flag and prices, not hand-picked"
+    },
+    {
+      "id": "consolidation-audit",
+      "priority": "P0",
+      "status": "done",
+      "title": "Full-surface audit after the build",
+      "evidence": "12 pages swept authenticated: problems=0 (was 1 before the asset-URL fix). Rules: speechSynthesis hits 0 on /buzzy/talk, listen mode survives a reload (localStorage 1, title '\ud83c\udf99 BeeZilla \u2014 Listening', mic-btn on), nav links identical across 10 pages and the account label is common.js's own (name + separate Log out), /buzzy/graph loads with the canonical nav. Vault note written: BeeZilla/BUILD-2026-11-02-orchestration-assets-voice.md."
     }
   ],
   "probes": {
@@ -234,6 +241,15 @@
       "change": "ranking.ts buildRanking(); fixed canonical category vocabulary with an explicit fallback to the whole ordering; POST /api/buzzy/frontier/rebuild",
       "gates": "tsc OK, build complete, 2 deploys verified by behaviour",
       "production_evidence": "rebuild: 6 reachable, kimi-k3 the only frontier-flagged, categories writing/coding/fast/general/reasoning/vision all resolve; writing pos1 -> moonshotai/kimi-k3, fast pos1 -> google/gemini-3.1-flash-lite; a writing-pinned graph then ran: write moonshotai/kimi-k3 $0.00970, review deepseek/deepseek-v4-pro-0813 independent=true $0.00050"
+    },
+    {
+      "n": 16,
+      "at": "2026-11-02",
+      "item": "consolidation-audit",
+      "found": "All green; confirmed the account link losing its href is common.js doing its job (name + separate Log out), not a dead link \u2014 checked before 'fixing' it.",
+      "change": "none needed; vault note written",
+      "gates": "n/a",
+      "production_evidence": "12 pages problems=0; three product rules verified in the browser"
     }
   ]
 }
