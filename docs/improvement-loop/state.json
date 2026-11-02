@@ -34,9 +34,11 @@
     {
       "id": "bulk-skill-upload",
       "priority": "P1",
-      "status": "todo",
+      "status": "done",
       "title": "Bulk skills + 4,000 image upload path",
-      "done_when": "Archive import streams to storage, dedupes by hash, keeps structure, per-file report; proven with 4,000-file fixture."
+      "done_when": "Archive import streams to storage, dedupes by hash, keeps structure, per-file report; proven with 4,000-file fixture.",
+      "evidence": "API benchmark with a generated 4,000-file corpus (3,900 images + 100 markdown): first pass 4,000 stored, 0 failed, 65.3s at 61.3 files/s concurrency 10; second pass 4,000 duplicates, 0 stored, 66.9s. GET /api/buzzy/assets reports files=4000 totalBytes=184256. Download of one asset: 200, content-type image/png, correct bytes; unauthenticated 401. UI: /buzzy/upload folder picker, 110 real files -> 110 POSTs -> 'Done. 0 new, 110 already here, 0 failed'; after touching one file -> '1 new, 109 already here, 0 failed'.",
+      "open": "Bytes live in Postgres bytea (25 MB/file cap). Fine for a corpus of thousands of small files; a corpus of large media would want object storage (S3/R2) with signed URLs. No zip import \u2014 the folder walk covers the same job and stays resumable."
     },
     {
       "id": "install-new-ui",
@@ -108,6 +110,15 @@
       "change": "Complete .env.example (94 documented entries), relative public root in browser-money-check.mjs, de-personalised comment, package.json description, README env table covers voice/ASR/tools",
       "gates": "clean clone npm ci + npm run build exit 0",
       "production_evidence": "n/a (docs/scripts only, no runtime behaviour changed)"
+    },
+    {
+      "n": 6,
+      "at": "2026-11-02",
+      "item": "bulk-skill-upload",
+      "found": "No file-upload path existed at all: upload.html only published recipes from a finished job, and the only way in was one chat attachment.",
+      "change": "migration 0048 buzzy_assets; POST/GET /api/buzzy/assets (content-addressed, 25MB cap, path sanitised); folder picker + concurrency 6 + retry on the Publish page",
+      "gates": "tsc OK, build complete, inline blocks 3/0 errors, migration ran at boot",
+      "production_evidence": "4,000 files in 65.3s, idempotent second pass, listing 4,000, download 200/401, UI folder upload with dedupe counts"
     }
   ]
 }
