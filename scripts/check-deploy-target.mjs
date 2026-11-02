@@ -4,7 +4,7 @@
  *
  * The Railway CLI resolves a link by walking UP from the current directory. This repo
  * has no link of its own, so `railway up` here silently inherits
- * `~/.railway/config.json` for `/home/gumbyender` — which points at
+ * `~/.railway/config.json` for the home directory — which may point at
  * **BNS Medusa Storefront**. That is a live storefront: deploying BeeZilla's server
  * into it would take a commerce site down and ship the wrong product.
  *
