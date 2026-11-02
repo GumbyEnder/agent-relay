@@ -2796,6 +2796,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var LISTEN_KEY = "bz_listen_mode";
     var voice = {
       replies: false, mic: false, rec: null, speaking: false, sending: false, note: "",
+      // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
+      // (Chrome, and anything with a working speech service); "recorder" = record
+      // locally and let the server transcribe (Firefox, Brave, blocked service).
+      asr: "sr",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
       // Timings
@@ -3043,19 +3047,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // One spoken turn: returns the final transcript, or "" if nothing heard.
     function startListening() {
+      if (voice.rec || recState) return;
+      // Firefox ships no SpeechRecognition and Brave's service is blocked, so
+      // those browsers record the clip and let the server transcribe it.
+      if (!srAvailable() || voice.asr === "recorder") { startRecording(); return; }
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (voice.rec) return;
-      if (!SR) {
-        // Firefox ships no SpeechRecognition at all and Brave disables it by
-        // default, so this used to fail silently: the mic button lit up, the
-        // stage said "Listening", and nothing was ever heard. Say what happened
-        // and which browser can hear, then drop out of listen mode.
-        stageNote("This browser can't transcribe speech — Chrome or Edge can. Typed chat works here.");
-        voice.mic = false;
-        saveListenPref(false);
-        paintVoice();
-        return;
-      }
       var rec = new SR();
       rec.lang = "en-US";
       rec.continuous = false;
@@ -3093,16 +3089,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       };
       rec.onerror = function (e) {
         var err = e && e.error;
-        if (err === "not-allowed" || err === "service-not-allowed") {
-          // Brave returns service-not-allowed: the API exists but the speech
-          // service behind it is off. Permission denial looks identical to the
-          // user, so name both causes.
-          stageNote("Mic or speech service blocked in this browser — Chrome or Edge can hear you.");
+        if (err === "not-allowed") {
+          // A denied permission has no route around it.
+          stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
           voice.mic = false;
           saveListenPref(false);
           paintVoice();
-        } else if (err === "network") {
-          stageNote("Speech service unreachable — check the connection, then tap the mic again.");
+        } else if (err === "service-not-allowed" || err === "network") {
+          // Brave exposes SpeechRecognition but blocks Google's service, and a
+          // blocked service hits Chrome the same way. Recording needs nothing
+          // but getUserMedia, so this session switches to the server transcriber.
+          voice.asr = "recorder";
+          try { rec.stop(); } catch (_) {}
+          voice.rec = null;
+          if (voice.mic) startRecording();
         } else if (err === "no-speech") {
           // Expected: a silent window. onend re-arms the mic.
         } else if (err) {
@@ -3120,10 +3120,198 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function stopListening() {
+      if (recState) cancelRecording();
       if (!voice.rec) return;
       try { voice.rec.stop(); } catch (_) {}
       voice.rec = null;
       paintVoice();
+    }
+
+    // ── Recorder fallback ─────────────────────────────────────────────────
+    // Firefox ships no SpeechRecognition and Brave blocks its service, so those
+    // browsers record a clip themselves and the server does the listening.
+    // Everything here is getUserMedia + WebAudio, which every browser has.
+    var REC_RATE = 16000;
+    var recState = null;
+
+    function srAvailable() {
+      return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    }
+
+    function rearmListening() {
+      if (voice.mic && !voice.speaking && !voice.sending) {
+        setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
+      }
+    }
+
+    // Average-decimate to 16 kHz mono: small upload, no resampling library.
+    function downsampleTo16k(samples, rate) {
+      if (rate === REC_RATE) return samples;
+      var ratio = rate / REC_RATE;
+      var out = new Float32Array(Math.floor(samples.length / ratio));
+      for (var i = 0; i < out.length; i++) {
+        var start = Math.floor(i * ratio);
+        var end = Math.min(samples.length, Math.floor((i + 1) * ratio));
+        var sum = 0;
+        for (var j = start; j < end; j++) sum += samples[j];
+        out[i] = sum / Math.max(1, end - start);
+      }
+      return out;
+    }
+
+    // 16-bit PCM WAV: the one container every browser can produce and the
+    // transcription endpoint accepts without a server-side converter.
+    function encodeWav(samples) {
+      var buf = new ArrayBuffer(44 + samples.length * 2);
+      var view = new DataView(buf);
+      var tag = function (off, s) { for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+      tag(0, "RIFF");
+      view.setUint32(4, 36 + samples.length * 2, true);
+      tag(8, "WAVEfmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, REC_RATE, true);
+      view.setUint32(28, REC_RATE * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      tag(36, "data");
+      view.setUint32(40, samples.length * 2, true);
+      for (var k = 0; k < samples.length; k++) {
+        var s = Math.max(-1, Math.min(1, samples[k]));
+        view.setInt16(44 + k * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    }
+
+    function startRecording() {
+      if (recState || voice.sending) return;
+      var md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) {
+        stageNote("This browser can't record audio — typed chat works here.");
+        voice.mic = false;
+        saveListenPref(false);
+        paintVoice();
+        return;
+      }
+      md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+        .then(function (stream) {
+          if (!voice.mic) {
+            stream.getTracks().forEach(function (t) { t.stop(); });
+            return;
+          }
+          var AC = window.AudioContext || window.webkitAudioContext;
+          var ctx = new AC();
+          var src = ctx.createMediaStreamSource(stream);
+          var proc = ctx.createScriptProcessor(2048, 1, 1);
+          var chunks = [];
+          var speechSeen = false;
+          var quietSince = 0;
+          var startedAt = Date.now();
+          proc.onaudioprocess = function (ev) {
+            if (!recState) return;
+            var input = ev.inputBuffer.getChannelData(0);
+            var copy = new Float32Array(input.length);
+            copy.set(input);
+            chunks.push(copy);
+            var sum = 0;
+            for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
+            var rms = Math.sqrt(sum / copy.length);
+            if (rms > 0.02) { speechSeen = true; quietSince = 0; }
+            else if (speechSeen && !quietSince) { quietSince = Date.now(); }
+            var elapsed = Date.now() - startedAt;
+            // End of speech: ~0.9s of quiet after talking. Hard caps keep a
+            // forgotten mic from uploading a minute of silence.
+            if ((speechSeen && quietSince && Date.now() - quietSince > 900) ||
+                elapsed > 15000 || (!speechSeen && elapsed > 8000)) {
+              finishRecording();
+            }
+          };
+          // ScriptProcessor has to reach a destination to be pumped; it writes
+          // nothing, so this is silent.
+          src.connect(proc);
+          proc.connect(ctx.destination);
+          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate };
+          voice.note = "";
+          setAvatarState("listening");
+          paintVoice();
+        })
+        .catch(function (e) {
+          var name = (e && e.name) || "";
+          if (name === "NotAllowedError" || name === "SecurityError") {
+            stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
+            voice.mic = false;
+            saveListenPref(false);
+          } else {
+            stageNote("Couldn't open the microphone" + (name ? " (" + name + ")" : "") + " — tap the mic to try again.");
+            rearmListening();
+          }
+          paintVoice();
+        });
+    }
+
+    function finishRecording() {
+      var r = recState;
+      if (!r) return;
+      recState = null;
+      try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
+      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+      try { r.ctx.close(); } catch (_) {}
+      var total = 0;
+      for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
+      if (total < r.rate * 0.3) { rearmListening(); return; }
+      var flat = new Float32Array(total);
+      var off = 0;
+      for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
+      sendForTranscription(encodeWav(downsampleTo16k(flat, r.rate)));
+    }
+
+    function cancelRecording() {
+      var r = recState;
+      if (!r) return;
+      recState = null;
+      try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
+      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+      try { r.ctx.close(); } catch (_) {}
+    }
+
+    function sendForTranscription(wav) {
+      voice.sending = true;
+      setAvatarState("thinking");
+      paintVoice();
+      fetch("/api/buzzy/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: wav,
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          voice.sending = false;
+          if (!data || !data.ok) {
+            stageNote((data && data.error) || "Couldn't transcribe that — try again.");
+            rearmListening();
+            return;
+          }
+          var text = String(data.text || "").trim();
+          if (!text) {
+            stageNote("Didn't catch that — try again.");
+            rearmListening();
+            return;
+          }
+          voice.note = "";
+          var input = document.getElementById("chatInput");
+          if (input) input.value = text;
+          voice.lastSpeechEnd = performance.now();
+          voice.sending = true;
+          setAvatarState("thinking");
+          paintVoice();
+          sendChatMessage();
+        })
+        .catch(function () {
+          voice.sending = false;
+          stageNote("Couldn't reach the transcriber — check the connection.");
+          rearmListening();
+        });
     }
 
     function toggleMic() {

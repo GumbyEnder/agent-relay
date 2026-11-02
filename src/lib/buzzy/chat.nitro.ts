@@ -27,7 +27,7 @@
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
  */
 
-import { defineEventHandler, getMethod, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, getHeader, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
@@ -57,6 +57,7 @@ import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemet
 import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
 import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
+import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES } from "./asr";
 
 /**
  * One latency sample. Two sources: `server` (our own stage timings) and
@@ -434,6 +435,54 @@ export default defineEventHandler(async (event) => {
       })),
       slots,
     };
+  }
+
+  // ── POST /api/buzzy/transcribe — session-gated ───────────────────────
+  // Server-side ASR so Firefox and Brave can talk at all: Firefox ships no
+  // SpeechRecognition and Brave only returns service-not-allowed from it.
+  // The page posts a raw 16 kHz mono WAV clip; the audio model does the
+  // listening, on the same gateway and key as the voice lane.
+  if (method === "POST" && path === "/api/buzzy/transcribe") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const format = formatFromContentType(getHeader(event, "content-type"));
+    if (!format) {
+      setResponseStatus(event, 415);
+      return {
+        ok: false,
+        error: "Send the clip as audio/wav, audio/mpeg, audio/webm or audio/ogg.",
+        code: "bad_audio_type",
+      };
+    }
+    let audio: Uint8Array;
+    try {
+      audio = new Uint8Array(await event.req.arrayBuffer());
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The recording could not be read.", code: "bad_audio" };
+    }
+    if (audio.byteLength < 1200) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That recording was too short to hear anything.", code: "audio_too_short" };
+    }
+    if (audio.byteLength > ASR_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: "That recording is too long — keep it under a minute.", code: "audio_too_large" };
+    }
+    try {
+      const r = await transcribeAudio(audio, format);
+      return { ok: true, text: r.text, ms: r.ms, model: r.model };
+    } catch (e) {
+      setResponseStatus(event, 502);
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "transcription failed",
+        code: "transcribe_failed",
+      };
+    }
   }
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
