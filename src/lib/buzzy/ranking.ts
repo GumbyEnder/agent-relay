@@ -35,6 +35,9 @@ export interface BuiltRanking {
   all: RankedEntry[];
 }
 
+/** The categories a saved graph may pin. */
+const CANONICAL_CATEGORIES = ["general", "writing", "reasoning", "coding", "fast", "vision"];
+
 const CATEGORY_HINTS: Array<[string, RegExp]> = [
   ["coding", /(code|coder|codestral|devstral|swe|opus-4|sonnet-5|k2\.7-code)/i],
   ["reasoning", /(thinking|reason|r1|o3|o4|pro-0|ultra|deep-research)/i],
@@ -81,6 +84,18 @@ export async function buildRanking(reachable: string[]): Promise<BuiltRanking> {
   for (const list of Object.values(categories)) list.sort(rank);
   entries.sort(rank);
 
+  // A pin is part of a saved graph, so a category that vanishes from the
+  // heuristic would make every graph that pins it unresolvable. The vocabulary
+  // is fixed and an empty category borrows the whole ordering rather than
+  // disappearing — a fallback, said out loud in the note, beats a broken graph.
+  const emptyFallbacks: string[] = [];
+  for (const name of CANONICAL_CATEGORIES) {
+    if (!categories[name] || !categories[name]!.length) {
+      categories[name] = entries.slice();
+      emptyFallbacks.push(name);
+    }
+  }
+
   const frontierCount = entries.filter((e) => e.onFrontier).length;
   return {
     as_of: new Date().toISOString().slice(0, 10),
@@ -88,7 +103,8 @@ export async function buildRanking(reachable: string[]): Promise<BuiltRanking> {
     note:
       `Derived from the gateway's frontier flag and published prices over the ${entries.length} models this deployment can call ` +
       `(${frontierCount} frontier-flagged). Order inside a category: frontier first, then completion price descending — a documented proxy, not a benchmark. ` +
-      `Category is a heuristic over the model id.`,
+      `Category is a heuristic over the model id.` +
+      (emptyFallbacks.length ? ` No model matched ${emptyFallbacks.join(", ")}, so those categories fall back to the whole ordering.` : ""),
     categories,
     all: entries,
   };
