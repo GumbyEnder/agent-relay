@@ -230,7 +230,14 @@
       state.sel = n.key;
       drag = { n: n, dx: ev.clientX - n.x, dy: ev.clientY - n.y };
       node.setPointerCapture(ev.pointerId);
-      draw(); inspect();
+      // Do NOT redraw here: replacing the node elements on pointerdown detaches
+      // the element the browser is about to deliver `click` to, so linking a
+      // node silently did nothing. Move the highlight in place instead.
+      var all = canvas.querySelectorAll(".node");
+      for (var i = 0; i < all.length; i++) {
+        all[i].classList.toggle("sel", all[i].getAttribute("data-key") === n.key);
+      }
+      inspect();
     });
     canvas.addEventListener("pointermove", function (ev) {
       if (!drag) return;
