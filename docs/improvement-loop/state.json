@@ -25,9 +25,11 @@
     {
       "id": "public-repo-cleanup",
       "priority": "P0",
-      "status": "todo",
+      "status": "done",
       "title": "Scrub repo for public release",
-      "done_when": "Secret scan clean, clean-clone build passes, LICENSE/README/.env.example present."
+      "done_when": "Secret scan clean, clean-clone build passes, LICENSE/README/.env.example present.",
+      "evidence": "Working tree: 0 high-entropy tokens across all tracked files; ark_DATABASE_URL hits are doc placeholders and localhost test URLs; no .env ever tracked (.gitignore covers .env and .env.*). History: 0 hits for sk-/ghp_/github_pat_/xoxb-/AIza/ark_ key shapes across all 507 commits. Clean clone: git clone --depth 1 -b main -> npm ci (629 pkgs) -> npm run build exit 0, 'build complete'. .env.example: 91/91 env vars read by src/scripts are now documented (was 26). Hardcoded /home/gumbyender path removed from scripts/browser-money-check.mjs. LICENSE MIT, README/CONTRIBUTING/SECURITY/CODE_OF_CONDUCT present.",
+      "open": "History was scanned by key-shape patterns, not per-blob entropy; a full gitleaks pass before the repo is flipped public would be the belt-and-braces step."
     },
     {
       "id": "bulk-skill-upload",
@@ -97,6 +99,15 @@
       "change": "SILENCE sentinel + refusal/meta-answer filter (7c7570c); client refuses to upload a clip with no speech (b8c74ee); asr_ms telemetry with lane='asr'",
       "gates": "tsc OK, build OK, blocks=4 errors=0",
       "production_evidence": "silence -> \"\"; speech -> exact text 978ms; ops endpoint shows lane=asr row"
+    },
+    {
+      "n": 5,
+      "at": "2026-11-01",
+      "item": "public-repo-cleanup",
+      "found": "Repo was already mostly publishable (LICENSE/README/SECURITY/.gitignore fine, no secrets in tree or history), but .env.example documented 26 of 91 variables and one script served files from a hardcoded home directory.",
+      "change": "Complete .env.example (94 documented entries), relative public root in browser-money-check.mjs, de-personalised comment, package.json description, README env table covers voice/ASR/tools",
+      "gates": "clean clone npm ci + npm run build exit 0",
+      "production_evidence": "n/a (docs/scripts only, no runtime behaviour changed)"
     }
   ]
 }
