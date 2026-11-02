@@ -64,9 +64,18 @@
     {
       "id": "orchestration-programme",
       "priority": "P2",
-      "status": "todo",
+      "status": "in_progress",
       "title": "Node-graph orchestration in the whiteboard (6a-6e)",
-      "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost."
+      "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost.",
+      "phases": {
+        "6a": "done \u2014 migration 0049 (graphs/nodes/edges/runs/node_results)",
+        "6b": "next \u2014 frontier-position model selection behind a cached Arena adapter",
+        "6c": "todo \u2014 review edge requires a different provider",
+        "6d": "todo \u2014 whiteboard authoring + per-node status/cost",
+        "6e": "todo \u2014 resolver with bounded retries and replay"
+      },
+      "evidence": "Migration 0049 validated in PGLite: 5 tables created, graph/node/edge/run/result inserts succeed, kind CHECK rejects an unknown kind, cascade delete clears children. Production after deploy: /api/agent/health 200 {\"store\":\"durable\"}, /buzzy/talk|library|wallet all 200 \u2014 the boot-time migration did not break startup. Direct row-level proof in prod arrives with the first save (6b/6d), since there is no SQL console by design.",
+      "open": "No whiteboard/orchestration code existed before this; 6a is groundwork only."
     }
   ],
   "probes": {
@@ -144,6 +153,15 @@
       "change": "images/audio/glb/gltf upload to /api/buzzy/assets and render as playable/viewable cards with downloads",
       "gates": "tsc OK, build complete, inline blocks 4/0",
       "production_evidence": "2 real files -> 2 cards with audio element and working download links, no console errors"
+    },
+    {
+      "n": 9,
+      "at": "2026-11-02",
+      "item": "orchestration-programme",
+      "found": "No orchestration code or tables existed anywhere in the repo.",
+      "change": "migrations/0049_buzzy_graphs.sql \u2014 graphs, nodes, edges, runs, node_results; review is a first-class node kind with a recorded 'independent' flag",
+      "gates": "tsc OK, build OK, PGLite exec + insert + CHECK + cascade all pass",
+      "production_evidence": "health 200 durable, three pages 200 after boot migration"
     }
   ]
 }
