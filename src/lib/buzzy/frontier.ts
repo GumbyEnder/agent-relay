@@ -100,7 +100,8 @@ export function resolvePin(pin: ModelPin, catalog: string[] = [], avoidProvider?
   if (!ranking || !ranking.length) {
     throw new Error(`Unknown frontier category "${pin.category}". Known: ${Object.keys(SNAP.categories).join(", ")}.`);
   }
-  const wanted = Math.max(1, Math.min(pin.position | 0, ranking.length));
+  const asked = Math.max(1, pin.position | 0);
+  const wanted = Math.min(asked, ranking.length);
   const order = avoidProvider
     ? [...ranking.filter((e) => e.provider !== avoidProvider), ...ranking.filter((e) => e.provider === avoidProvider)]
     : ranking;
@@ -110,10 +111,14 @@ export function resolvePin(pin: ModelPin, catalog: string[] = [], avoidProvider?
     const independent = !avoidProvider || exactHit.provider !== avoidProvider;
     return {
       model: exactHit.model, provider: exactHit.provider, family: exactHit.family, position: wanted,
-      substituted: false,
-      reason: independent
-        ? `position ${wanted} on ${pin.category}`
-        : `position ${wanted} on ${pin.category} — same provider as the node it reviews`,
+      // Clamping is a substitution of intent and must say so: asking for
+      // position 99 and silently getting the last one would read as position 99.
+      substituted: asked !== wanted,
+      reason: asked !== wanted
+        ? `${pin.category} has ${ranking.length} models; asked for position ${asked}, took ${wanted}`
+        : independent
+          ? `position ${wanted} on ${pin.category}`
+          : `position ${wanted} on ${pin.category} — same provider as the node it reviews`,
       as_of: SNAP.as_of,
     };
   }
