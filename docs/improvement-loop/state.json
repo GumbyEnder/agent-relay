@@ -74,8 +74,14 @@
         "6d": "done \u2014 /buzzy/graph whiteboard: add/drag/link nodes, per-kind config, live resolution preview, save+version, reopen. Per-node status/cost needs a run (6e).",
         "6e": "done \u2014 runner.ts: dependency order, bounded retries (2), per-attempt persistence, gate stop/resume, replay from stored outputs"
       },
-      "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true. | Whiteboard E2E: 4 nodes added, 3 links drawn and persisted as n1->n2:data, n2->n3:review, n3->n4:gate, review node pinned to writing position 2 resolves to moonshotai/kimi-k3 in the inspector, saved v1, reopened from the list with 4 nodes and 3 edges, 0 console errors. | Resolver E2E: graph with agent+review+gate ran in 6913ms -> write done on google/gemini-3.1-flash-lite (900ms), critique done on moonshotai/kimi-k3 (5558ms, independent=true) with a real critique, gate awaiting_approval; approve -> run done, 3 results, read_back ok. Retry proven: a glm node failed on attempt 1 and succeeded on attempt 2 (3 result rows for 2 nodes). Spec freeze proven: after shrinking the authored graph to one node the finished run still reports its original 2 nodes and order. UI: Run renders per-node badges ('done \u00b7 google/gemini-3.1-flash-lite \u00b7 858 ms') and the Approve button appears on a gated run; 0 console errors. Anonymous run 401.",
-      "open": "Cost reads $0.0000 because the deployment's model catalog carries no per-token prices; the columns and the arithmetic are in place, the numbers need BZ_CHAT_MODELS price fields. Frontier ranking is still a hand-ordered seed, and refresh() is not built."
+      "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true. | Whiteboard E2E: 4 nodes added, 3 links drawn and persisted as n1->n2:data, n2->n3:review, n3->n4:gate, review node pinned to writing position 2 resolves to moonshotai/kimi-k3 in the inspector, saved v1, reopened from the list with 4 nodes and 3 edges, 0 console errors. | Resolver E2E: graph with agent+review+gate ran in 6913ms -> write done on google/gemini-3.1-flash-lite (900ms), critique done on moonshotai/kimi-k3 (5558ms, independent=true) with a real critique, gate awaiting_approval; approve -> run done, 3 results, read_back ok. Retry proven: a glm node failed on attempt 1 and succeeded on attempt 2 (3 result rows for 2 nodes). Spec freeze proven: after shrinking the authored graph to one node the finished run still reports its original 2 nodes and order. UI: Run renders per-node badges ('done \u00b7 google/gemini-3.1-flash-lite \u00b7 858 ms') and the Approve button appears on a gated run; 0 console errors. Anonymous run 401. | Refresh: writing position 1 changed google/gemini-3.1-flash-lite -> upstage/solar-pro4 with no deploy (61s after the refresh, past the memo); POST without the ops key 403; an empty category 400; the seed was restored and reads back as source=seed.",
+      "open": "Cost reads $0.0000 because the deployment's model catalog carries no per-token prices; the columns and the arithmetic are in place, the numbers need BZ_CHAT_MODELS price fields. The ranking now lives in the database and can be replaced by POST /api/buzzy/frontier (ops key); what is still missing is an automated Arena scraper \u2014 the last refresh was performed by hand."
+    },
+    {
+      "id": "frontier-refresh",
+      "priority": "P1",
+      "status": "done",
+      "title": "The frontier ranking is data, refreshable without a deploy"
     }
   ],
   "probes": {
@@ -189,6 +195,15 @@
       "change": "runner.ts + /api/buzzy/graphs/:id/run, /api/buzzy/runs/:id, /api/buzzy/runs/:id/approve; whiteboard Run + per-node badges + Approve",
       "gates": "tsc OK, build complete, inline blocks parse, 2 deploys verified by behaviour",
       "production_evidence": "see evidence string"
+    },
+    {
+      "n": 13,
+      "at": "2026-11-02",
+      "item": "frontier-refresh",
+      "found": "The ranking was compiled into the deployed bundle, so 'position 3' meant 'position 3 as of the last release'.",
+      "change": "migration 0050 buzzy_frontier; getSnapshot/saveSnapshot/validateSnapshot; live resolvers; POST /api/buzzy/frontier guarded by BZ_OPS_KEY",
+      "gates": "tsc OK, build complete, SQL validated in PGLite",
+      "production_evidence": "position 1 rotated to upstage/solar-pro4 without a deploy, then restored to the seed"
     }
   ]
 }
