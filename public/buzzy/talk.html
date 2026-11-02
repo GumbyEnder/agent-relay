@@ -1278,7 +1278,7 @@
     <div class="header-inner">
     <a href="/buzzy/talk" class="brand-link">
       <div class="brand">
-        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
         <strong>BeeZilla</strong>
       </div>
     </a>
@@ -1464,7 +1464,7 @@
   <script src="/buzzy/money-check.js"></script>
   <script src="/buzzy/promise-check.js"></script>
   <script src="/buzzy/avatar.js"></script>
-  <script src="sow-pdf.js"></script>
+  <script src="/buzzy/sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
       { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
@@ -1676,7 +1676,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }).join("")
         : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
         "<h1>Your jobs</h1>" +
         "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
         "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
@@ -1701,7 +1701,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return "<button class='secondary" + sel + "' data-id='" + t.id + "'><strong>" + t.name + "</strong><br><span class='muted'>" + t.hint + "</span></button>";
       }).join("");
       document.getElementById("app").innerHTML =
-        "<img class='mascot' src='brand/revision6_expressions_13-idea.png' alt='BeeZilla' />" +
+        "<img class='mascot' src='/buzzy/brand/revision6_expressions_13-idea.png' alt='BeeZilla' />" +
         "<h1>What kind of job is this?</h1>" +
         "<p>Pick a template. Then tell BeeZilla the problem in your own words. The product is a chat — this is the start of that conversation.</p>" +
         "<div class='templates'>" + tiles + "</div>" +
@@ -1722,7 +1722,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const t = TEMPLATES.find((x) => x.id === state.template);
       setPhase((t && t.name) || "New job");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
         "<h1>What's the problem?</h1>" +
         "<p class='muted'>" + (t ? t.name : "") + " — write it like you'd say it out loud. Nothing starts until you approve a draft later.</p>" +
         "<textarea id='prob' rows='7' placeholder='Describe what you need…'></textarea>" +
@@ -1749,7 +1749,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setPhase("Talk it through");
       const msgs = (state.messages || []).map((m) => "<div class='bubble" + (m.who === "me" ? " me" : "") + "'>" + String(m.text).replace(/</g,"&lt;").replace(/\n/g,"<br>") + "</div>").join("");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>" + (t ? t.name : "Job") + "</h1>" +
         msgs +
         "<textarea id='more' rows='3' placeholder='Add more…'></textarea>" +
@@ -1791,7 +1791,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const q = QUESTIONS[state.q];
       setPhase("Question " + (state.q + 1) + " of 8");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
         "<div class='step-indicator'><span class='hex-badge'>" + (state.q + 1) + "</span><span>" + (state.q + 1) + " of 8</span></div>" +
         "<p class='muted'>You can skip this. I'll use a default.</p>" +
         "<h1>" + q.prompt + "</h1>" +
@@ -1821,7 +1821,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function goPause() {
       setPhase("Needs you");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>Before we go further</h1><p>" + state.pause.question + "</p>" +
         "<div class='row'><button id='flex'>My budget is flexible</button>" +
         "<button id='stay' class='secondary'>I need to stay at my number</button></div>" +
@@ -1858,7 +1858,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         ? "BeeZilla finishes the draft, double-checks it, and hands you files. You'll see each step on the board."
         : "BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.";
       document.getElementById("app").innerHTML =
-        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot-lg' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
         "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>What you asked for</h2><p>" + echo + "</p></div>" +
         "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>The plan, in steps</h2><ol>" + plan + "</ol></div>" +
@@ -1928,7 +1928,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return "<div class='col'><h3>" + name + "</h3>" + chips + "</div>";
       }).join("");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>Watch the work move</h1><p class='muted'>These steps only exist because you approved the draft.</p>" +
         "<div class='board'>" + cols + "</div>";
     }
@@ -1939,7 +1939,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         ? "<ul>" + QUESTIONS.map((q) => "<li>" + q.prompt.split("—")[0] + ": " + (state.answers[q.id] || "—") + "</li>").join("") + "</ul>"
         : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
       document.getElementById("app").innerHTML =
-        "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>What BeeZilla remembers</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
         "<div class='card'><h2>Across jobs</h2>" + (catalog.jobs.filter(jobComplete).length
@@ -1964,7 +1964,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function goResult() {
       setPhase("Your documents are ready");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot-lg' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>Your documents are ready.</h1>" +
         "<p>Download the editable copy and a PDF.</p>" +
         "<div class='row'><button id='dl'>Download editable copy</button><button id='dlpdf' class='secondary'>Download PDF</button></div>" +
@@ -4631,7 +4631,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       thinkingEl.className = "thinking-bubble";
       thinkingEl.id = "thinkingIndicator";
       thinkingEl.innerHTML =
-        '<img class="thinking-mascot" src="brand/revision6_expressions_08-thinking.png" alt="" />' +
+        '<img class="thinking-mascot" src="/buzzy/brand/revision6_expressions_08-thinking.png" alt="" />' +
         '<span class="thinking-dots">...</span>';
       messagesContainer.appendChild(thinkingEl);
       messagesContainer.scrollTop = messagesContainer.scrollHeight;

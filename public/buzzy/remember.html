@@ -166,7 +166,7 @@
     <div class="header-inner">
       <a href="/buzzy/talk" class="brand-link">
         <div class="brand">
-          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
           <strong>BeeZilla</strong>
         </div>
       </a>
@@ -306,7 +306,7 @@
         ? "<ul>" + completedJobs.map((j) => "<li>" + escapeHtml(jobTitle(j)) + "</li>").join("") + "</ul><p class='muted'>This list is on this device. Honcho (the real across-jobs memory) is not wired to this demo.</p>"
         : "<p>Nothing yet across jobs. BeeZilla does not pretend to know you.</p><p class='muted'>Later: short facts you can read, correct, or forget. Not model names, not your wallet.</p>";
       document.getElementById("app").innerHTML =
-        "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>What BeeZilla remembers</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
         "<div class='card'><h2>Across jobs</h2>" + acrossJobs + "</div>" +
