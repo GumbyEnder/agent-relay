@@ -35,6 +35,7 @@ import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
+import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
@@ -646,6 +647,52 @@ export default defineEventHandler(async (event) => {
     setResponseHeader(event, "content-type", row.content_type || "application/octet-stream");
     setResponseHeader(event, "content-disposition", `inline; filename="${row.filename.replace(/"/g, "")}"`);
     return new Uint8Array(row.body);
+  }
+
+  // ── /api/buzzy/graphs — author, list and read orchestration graphs ────
+  // 6d's whiteboard writes through here; a run (6e) freezes what it reads.
+  if (path === "/api/buzzy/graphs" || /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const graphId = path.startsWith("/api/buzzy/graphs/") ? path.split("/").pop()! : null;
+
+    if (method === "GET" && graphId) {
+      const g = await loadGraph(user.id, graphId);
+      if (!g) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such graph on this account.", code: "not_found" };
+      }
+      return { ok: true, graph: g };
+    }
+
+    if (method === "GET") {
+      const qs = new URLSearchParams(fullPath.split("?")[1] || "");
+      const graphs = await listGraphs(user.id, Number(qs.get("limit") || 50));
+      return { ok: true, graphs };
+    }
+
+    if (method === "POST") {
+      let body: unknown;
+      try {
+        body = await event.req.json();
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+      const checked = validateGraph(body);
+      if (!checked.ok) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: checked.error, code: checked.code };
+      }
+      const saved = await saveGraph(user.id, checked.graph);
+      return { ok: true, id: saved.id, version: saved.version };
+    }
+
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET or POST.", code: "method_not_allowed" };
   }
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
