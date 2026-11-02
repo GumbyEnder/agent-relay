@@ -53,13 +53,14 @@
     {
       "id": "music-3d",
       "priority": "P2",
-      "status": "in_progress",
+      "status": "done",
       "title": "Music + 3D surfaces",
       "done_when": "Generated audio / 3D artifact ends as a downloadable file card in chat.",
       "found": "Generation providers: the Nous gateway has 378 models \u2014 audio (gpt-audio) and image (gemini-3-pro-image) but NO music and NO 3D. FAL_KEY is present but returns 401 'invalid key credentials'. MINIMAX_API_KEY is empty. So nothing can generate music or 3D today.",
       "shipped": "Dropped images/audio/.glb/.gltf now upload to the content-addressed asset store and render in the chat as a card: image preview, audio player, or a labelled 3D file, each with a working download (/api/buzzy/assets/:id).",
-      "evidence": "Authenticated E2E: dropped asr-probe.mp3 -> card with <audio> + download /api/buzzy/assets/8221 (audio/mpeg, 104832 bytes); dropped triangle.gltf -> card with download /api/buzzy/assets/8222 (1024 bytes). 0 console errors. Assets listing shows both.",
-      "open": "1) A music model needs a working provider key (FAL key is dead; MiniMax unset) or a local model. 2) A real 3D viewer needs an engine vendored into the page (three.js ~600 KB) \u2014 a bundle-size decision, not sneaked in."
+      "evidence": "3D: Meshy text-to-3D end to end in production \u2014 POST task, polled 3%\u2192100% over ~45s, stored as /api/buzzy/assets/8223, download 200 model/gltf-binary 971944 bytes magic 'glTF', re-poll returns duplicate:true, anonymous 401. UI: composer 3D button showed 'Making the model\u2026 N%' then rendered the card model-01a19e84.glb with a working download; 0 console errors. Music: ElevenLabs key is valid but the account is on a FREE plan \u2014 /v1/music answers 402 paid_plan_required and library voices 402. The endpoint maps that to a plain sentence in the chat.",
+      "open": "Music needs an ElevenLabs paid plan (key also lacks scopes user_read, models_read, voices_read, sound_generation \u2014 tick them if we ever use TTS/SFX). The moment the plan is active, /api/buzzy/music and the Music button work with no code change. A real 3D viewer (three.js) is still not vendored: a .glb downloads, it does not spin on screen.",
+      "blocked_on": "ElevenLabs subscription tier"
     },
     {
       "id": "orchestration-programme",
@@ -101,6 +102,13 @@
       "status": "done",
       "title": "Full-surface audit after the build",
       "evidence": "12 pages swept authenticated: problems=0 (was 1 before the asset-URL fix). Rules: speechSynthesis hits 0 on /buzzy/talk, listen mode survives a reload (localStorage 1, title '\ud83c\udf99 BeeZilla \u2014 Listening', mic-btn on), nav links identical across 10 pages and the account label is common.js's own (name + separate Log out), /buzzy/graph loads with the canonical nav. Vault note written: BeeZilla/BUILD-2026-11-02-orchestration-assets-voice.md."
+    },
+    {
+      "id": "providers-3d-music",
+      "priority": "P0",
+      "status": "done",
+      "title": "3D (Meshy) live; music (ElevenLabs) wired and waiting on the plan",
+      "evidence": "BZ_MESHY_KEY and BZ_ELEVEN_KEY set on service agent-relay; keys never entered the repo."
     }
   ],
   "probes": {
@@ -250,6 +258,15 @@
       "change": "none needed; vault note written",
       "gates": "n/a",
       "production_evidence": "12 pages problems=0; three product rules verified in the browser"
+    },
+    {
+      "n": 17,
+      "at": "2026-11-02",
+      "item": "providers-3d-music",
+      "found": "ElevenLabs key authenticates but the account is free (music + library voices 402) and the key is missing four scopes. Meshy key works: 45s text-to-3D.",
+      "change": "music.ts, models3d.ts, /api/buzzy/music, /api/buzzy/model3d (task API), composer Music/3D buttons",
+      "gates": "tsc OK, build complete, inline blocks 4/0",
+      "production_evidence": "3D card with 971,944-byte glTF download; music refusal shown as a sentence in the chat"
     }
   ]
 }
