@@ -30,6 +30,9 @@
     .node .k { font-size:0.62rem; letter-spacing:.1em; text-transform:uppercase; color:#8A8A8A; }
     .node .t { font-size:0.86rem; color:#fff; margin-top:0.1rem; }
     .node .m { font-size:0.68rem; color:#7FD1A8; margin-top:0.25rem; word-break:break-all; }
+    .node .s { font-size:0.64rem; margin-top:0.2rem; color:#8A8A8A; }
+    .node .s.done { color:#67D99B; } .node .s.failed { color:#FF8A80; }
+    .node .s.awaiting_approval { color:#FFC107; } .node .s.running { color:#6BA8FF; }
     .node.agent { border-left:3px solid #6BA8FF; }
     .node.skill { border-left:3px solid #FFC107; }
     .node.model { border-left:3px solid #A98BFF; }
@@ -91,6 +94,7 @@
     <div class="bar">
       <input type="text" id="title" placeholder="Workflow title" style="max-width:320px" />
       <button class="primary" id="save">Save</button>
+      <button id="run">Run</button>
       <button id="new">New</button>
       <span id="status" class="hint"></span>
     </div>
@@ -160,7 +164,8 @@
           '" style="left:' + n.x + "px;top:" + n.y + 'px">' +
           '<div class="k">' + n.kind + "</div>" +
           '<div class="t">' + esc(n.title || n.key) + "</div>" +
-          '<div class="m" id="m-' + n.key + '"></div></div>';
+          '<div class="m" id="m-' + n.key + '"></div>' +
+          '<div class="s" id="s-' + n.key + '"></div></div>';
       }
       var keep = canvas.querySelectorAll(".node");
       for (var j = 0; j < keep.length; j++) keep[j].remove();
@@ -355,6 +360,60 @@
       state = { graphId: null, nodes: [], edges: [], sel: null, linkFrom: null, seq: 0 };
       document.getElementById("title").value = "";
       draw(); inspect(); say("");
+    });
+
+    // ── run ──────────────────────────────────────────────────────────────
+    function paintRun(run) {
+      var byKey = {};
+      for (var i = 0; i < run.results.length; i++) { var r = run.results[i]; byKey[r.node_key] = r; }
+      for (var j = 0; j < state.nodes.length; j++) {
+        var n = state.nodes[j], el = document.getElementById("s-" + n.key);
+        if (!el) continue;
+        var r = byKey[n.key];
+        if (!r) { el.textContent = ""; el.className = "s"; continue; }
+        el.className = "s " + r.status;
+        var bits = [r.status];
+        if (r.model && r.status === "done") bits.push(r.model);
+        if (r.latency_ms) bits.push(r.latency_ms + " ms");
+        if (r.cost_usd && Number(r.cost_usd) > 0) bits.push("$" + Number(r.cost_usd).toFixed(4));
+        if (r.error) bits.push(r.error.slice(0, 48));
+        el.textContent = bits.join(" · ");
+      }
+      var line = "run " + run.id + " · " + run.status;
+      if (run.cost_usd) line += " · $" + Number(run.cost_usd).toFixed(4);
+      say(line, run.status === "failed" ? "bad" : "ok");
+      var old = document.getElementById("approve");
+      if (old) old.remove();
+      if (run.status === "awaiting_approval") {
+        var b = document.createElement("button");
+        b.id = "approve";
+        b.className = "primary";
+        b.textContent = "Approve and continue";
+        b.addEventListener("click", function () {
+          say("Continuing…");
+          fetch("/api/buzzy/runs/" + encodeURIComponent(run.id) + "/approve", { method: "POST", credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (!j.ok) { say(j.error || "Could not continue.", "bad"); return; }
+              paintRun(j.run);
+            });
+        });
+        document.querySelector(".bar").appendChild(b);
+      }
+    }
+
+    document.getElementById("run").addEventListener("click", function () {
+      if (!state.graphId) { say("Save the workflow before running it.", "bad"); return; }
+      say("Running…");
+      var btn = this; btn.disabled = true;
+      fetch("/api/buzzy/graphs/" + encodeURIComponent(state.graphId) + "/run", { method: "POST", credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          btn.disabled = false;
+          if (!j.ok) { say(j.error || "Run failed to start.", "bad"); return; }
+          paintRun(j.run);
+        })
+        .catch(function () { btn.disabled = false; say("Run failed — check the connection.", "bad"); });
     });
 
     function loadList() {

@@ -37,6 +37,7 @@ import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { resolvePin, resolveReview, frontierAsOf, providerOf, type ModelPin } from "./frontier";
+import { startRun, resumeRun, readRun } from "./runner";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
@@ -685,6 +686,60 @@ export default defineEventHandler(async (event) => {
     } catch (e) {
       setResponseStatus(event, 400);
       return { ok: false, error: (e as Error).message, code: "unresolvable" };
+    }
+  }
+
+  // ── /api/buzzy/runs — execute a graph, resume past a gate, read it back ──
+  // Running is synchronous: a four-node workflow is a handful of model calls,
+  // and a run that returns only after it finished cannot lie about its status.
+  if (path.startsWith("/api/buzzy/runs")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const parts = path.split("/").filter(Boolean); // [api, buzzy, runs, id?, approve?]
+    const runId = parts[3] || "";
+    const action = parts[4] || "";
+
+    if (method === "GET" && runId) {
+      const run = await readRun(user.id, runId);
+      if (!run) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such run on this account.", code: "not_found" };
+      }
+      return { ok: true, run };
+    }
+
+    if (method === "POST" && runId && action === "approve") {
+      try {
+        const r = await resumeRun(user.id, runId);
+        const run = await readRun(user.id, runId);
+        return { ok: true, resumed: r, run };
+      } catch (e) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: (e as Error).message, code: "cannot_resume" };
+      }
+    }
+    setResponseStatus(event, 404);
+    return { ok: false, error: "Use GET /api/buzzy/runs/:id or POST /api/buzzy/runs/:id/approve.", code: "not_found" };
+  }
+
+  // ── POST /api/buzzy/graphs/:id/run — start it ────────────────────────
+  if (method === "POST" && /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+\/run$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const graphId = path.split("/")[4]!;
+    try {
+      const r = await startRun(user.id, graphId);
+      const run = await readRun(user.id, r.runId);
+      return { ok: true, ...r, run };
+    } catch (e) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: (e as Error).message, code: "cannot_run" };
     }
   }
 
