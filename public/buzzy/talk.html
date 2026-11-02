@@ -597,6 +597,9 @@
     }
     .paper-toggle:hover { color: #FFC107; border-color: #B8860B; }
     .paper-toggle[aria-expanded="true"] { color: #FFC107; border-color: #FFC107; }
+    .media-card { flex-wrap: wrap; }
+    .media-img { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 0.4rem; }
+    .media-audio { display: block; width: 100%; margin-top: 0.4rem; }
     .paper-drop.hidden { display: none; }
     .paper-drop {
       margin-top: 0.8rem;
@@ -1402,7 +1405,7 @@
           <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
           <div id="paperDrop" class="paper-drop hidden">
             <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
-            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,application/pdf,text/plain" />
+            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz" />
             <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
             <div class="row">
               <button type="button" id="paperRead">Read it</button>
@@ -2243,6 +2246,74 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      * Built from the turn's own response.document, so the link is in the reply
      * that announced the file — not a separate banner the owner has to notice.
      */
+    /**
+     * A picture, a piece of music or a 3D model the owner dropped in.
+     * Uploaded to the content-addressed asset store and shown in the same
+     * conversation, with the same delivery promise as a document: it is here,
+     * it plays or shows, and it can be downloaded.
+     */
+    function submitMedia(file) {
+      var label = file.name || "file";
+      chatState.messages.push({ role: "user", content: "Added " + label });
+      renderChatMessages();
+      return fetch("/api/buzzy/assets", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+          "x-bz-path": label
+        },
+        body: file
+      })
+        .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j || {} }; }); })
+        .then(function (res) {
+          if (!res.j.ok) {
+            chatState.messages.push({ role: "assistant", content: "That file did not upload: " + (res.j.error || ("HTTP " + res.s)) });
+            renderChatMessages();
+            return;
+          }
+          chatState.messages.push({
+            role: "assistant",
+            content: res.j.duplicate ? "Already here — same file." : "Saved.",
+            asset: { id: res.j.id, url: "/api/buzzy/assets/" + res.j.id, name: label, bytes: res.j.bytes || file.size, type: file.type || "" }
+          });
+          renderChatMessages();
+        })
+        .catch(function () {
+          chatState.messages.push({ role: "assistant", content: "Couldn't upload that file — check the connection." });
+          renderChatMessages();
+        });
+    }
+
+    function renderMediaCard(a) {
+      var esc = function (v) { return String(v == null ? "" : v).replace(/</g, "&lt;").replace(/"/g, "&quot;"); };
+      var name = esc(a.name || "file");
+      var size = a.bytes ? " · " + Math.max(1, Math.round(a.bytes / 1024)) + " KB" : "";
+      var url = esc(a.url);
+      var isAudio = /^audio\//i.test(a.type || "") || /\.(mp3|wav|m4a|ogg)$/i.test(name);
+      var isImage = /^image\//i.test(a.type || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
+      var is3d = /\.(glb|gltf|obj|usdz)$/i.test(name);
+      var body = "";
+      if (isAudio) {
+        body = '<audio class="media-audio" controls preload="metadata" src="' + url + '"></audio>';
+      } else if (isImage) {
+        body = '<img class="media-img" src="' + url + '" alt="' + name + '" loading="lazy" />';
+      } else if (is3d) {
+        // No engine is bundled yet, so a model is offered as its file, plainly
+        // labelled — not a broken viewer pretending to render.
+        body = '<span class="file-sub">3D model · download to open in any 3D viewer</span>';
+      }
+      return '<div class="file-card media-card">' +
+        '<span class="file-icon">' + (isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
+        '<span class="file-meta">' +
+          '<span class="file-name">' + name + "</span>" +
+          '<span class="file-sub">' + (is3d ? "" : "Saved to your files") + size + "</span>" +
+          body +
+        "</span>" +
+        '<a href="' + url + '" download="' + name + '">Download</a>' +
+      "</div>";
+    }
+
     function renderFileCard(doc) {
       var name = String(doc.filename || "document");
       var size = doc.bytes ? " · " + Math.max(1, Math.round(doc.bytes / 1024)) + " KB" : "";
@@ -2286,6 +2357,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var bubble = '<div class="' + cls + '">' + escaped + "</div>";
         if (m.document && m.document.downloadUrl) {
           bubble += renderFileCard(m.document);
+        }
+        if (m.asset && m.asset.url) {
+          bubble += renderMediaCard(m.asset);
         }
         return bubble;
       }).join("");
@@ -2535,6 +2609,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function readDroppedFile(file) {
       return new Promise(function (resolve, reject) {
         if (!file) { reject(new Error("Drop a file or paste the letter first.")); return; }
+        // Pictures, sound and 3D models are not "papers": they are kept as
+        // themselves, played or shown in the conversation, and downloadable.
+        // The 1.5 MB paper limit does not apply — the asset endpoint allows 25 MB.
+        var isMedia = /^(image|audio)\//.test(file.type || "") ||
+          /\.(glb|gltf|obj|usdz)$/i.test(file.name || "");
+        if (isMedia) {
+          if (file.size > 25 * 1024 * 1024) { reject(new Error("That file is over 25 MB.")); return; }
+          resolve({ mediaFile: file, filename: file.name || "file" });
+          return;
+        }
         if (file.size > 1500000) { reject(new Error("That file is too large. Paste the letter instead.")); return; }
         var isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
         var isText = /^text\//.test(file.type || "") || /\.(txt|md|csv)$/i.test(file.name || "");
@@ -4881,7 +4965,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var file = fileInput && fileInput.files && fileInput.files[0];
       var pasted = (document.getElementById("paperPaste").value || "").trim();
       if (file) {
-        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (e) {
+        readDroppedFile(file).then(function (payload) { return payload.mediaFile ? submitMedia(payload.mediaFile) : submitPaper(payload); }).catch(function (e) {
           if (note) note.textContent = e.message || "Couldn't read that file.";
         });
         return;
@@ -4911,7 +4995,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         var note = document.getElementById("paperNote");
         if (!file) return;
-        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (err) {
+        readDroppedFile(file).then(function (payload) { return payload.mediaFile ? submitMedia(payload.mediaFile) : submitPaper(payload); }).catch(function (err) {
           if (note) note.textContent = err.message || "Couldn't read that file.";
         });
       });
