@@ -71,10 +71,10 @@
         "6a": "done \u2014 migration 0049 + save/list/read API proven in prod",
         "6b": "done \u2014 frontier.json cached ranking, resolvePin/resolveReview, GET /api/buzzy/frontier",
         "6c": "done (resolver level) \u2014 review pins resolve to a different provider; recording happens per node result in 6e",
-        "6d": "next \u2014 whiteboard authoring UI and per-node status/cost",
-        "6e": "todo \u2014 resolver with bounded retries and replay"
+        "6d": "done \u2014 /buzzy/graph whiteboard: add/drag/link nodes, per-kind config, live resolution preview, save+version, reopen. Per-node status/cost needs a run (6e).",
+        "6e": "next \u2014 resolver executing nodes with bounded retries, replay from the frozen spec"
       },
-      "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true.",
+      "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true. | Whiteboard E2E: 4 nodes added, 3 links drawn and persisted as n1->n2:data, n2->n3:review, n3->n4:gate, review node pinned to writing position 2 resolves to moonshotai/kimi-k3 in the inspector, saved v1, reopened from the list with 4 nodes and 3 edges, 0 console errors.",
       "open": "The ranking is a hand-ordered seed over the 6 reachable models, not scraped from Arena. refresh() is not built yet \u2014 that is a cached job, not a run-time dependency."
     }
   ],
@@ -171,6 +171,15 @@
       "change": "graphs API (save/list/read), frontier resolver + endpoint, clamp marked as substitution",
       "gates": "tsc OK, build complete, deploys verified by served behaviour",
       "production_evidence": "see evidence string: graph saved/read/versioned, 3 providers across positions, cross-provider review independent:true"
+    },
+    {
+      "n": 11,
+      "at": "2026-11-02",
+      "item": "orchestration-programme",
+      "found": "Link clicks landed on detached nodes because pointerdown redrew the canvas before the click was delivered; the first whiteboard build could not connect anything.",
+      "change": "public/buzzy/graph.html + route; pointerdown moves highlight in place instead of redrawing",
+      "gates": "tsc OK, build complete, inline blocks parse, deploy verified by served behaviour",
+      "production_evidence": "4 nodes / 3 edges persisted with typed kinds; resolver preview live; reopen works"
     }
   ]
 }
