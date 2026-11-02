@@ -1,0 +1,61 @@
+{
+  "loop": "beezilla-improvement-loop",
+  "started": "2026-11-01",
+  "items": [
+    {
+      "id": "voice-browser-matrix",
+      "priority": "P0",
+      "status": "in_progress",
+      "title": "Voice works only in Chrome; Firefox + Brave fail silently",
+      "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition (public/buzzy/talk.html startListening). Firefox has no such API; Brave ships it but blocks the Google speech service (service-not-allowed). startListening returned silently when SR was absent, so the mic lit up and nothing happened.",
+      "done_when": "Browser matrix probe proves capture -> transcript -> SSE audio on Chromium (Chrome, Brave) and Firefox, and a failing browser says which step failed on screen.",
+      "attempts": []
+    },
+    {
+      "id": "public-repo-cleanup",
+      "priority": "P0",
+      "status": "todo",
+      "title": "Scrub repo for public release",
+      "done_when": "Secret scan clean, clean-clone build passes, LICENSE/README/.env.example present."
+    },
+    {
+      "id": "bulk-skill-upload",
+      "priority": "P1",
+      "status": "todo",
+      "title": "Bulk skills + 4,000 image upload path",
+      "done_when": "Archive import streams to storage, dedupes by hash, keeps structure, per-file report; proven with 4,000-file fixture."
+    },
+    {
+      "id": "install-new-ui",
+      "priority": "P1",
+      "status": "todo",
+      "title": "Install the new UI he built",
+      "done_when": "Identify the UI, deploy it behind the #bzNav contract, E2E sweep clean."
+    },
+    {
+      "id": "music-3d",
+      "priority": "P2",
+      "status": "todo",
+      "title": "Music + 3D surfaces",
+      "done_when": "Generated audio / 3D artifact ends as a downloadable file card in chat."
+    },
+    {
+      "id": "orchestration-programme",
+      "priority": "P2",
+      "status": "todo",
+      "title": "Node-graph orchestration in the whiteboard (6a-6e)",
+      "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost."
+    }
+  ],
+  "log": [
+    {
+      "n": 1,
+      "at": "2026-11-01",
+      "item": "voice-browser-matrix",
+      "cause": "startListening() returns silently when SpeechRecognition is missing (Firefox) and only handled 'not-allowed' (Brave reports service-not-allowed).",
+      "change": "Added stageNote() + explicit unsupported-browser and error messages; listen mode drops out honestly instead of pretending to listen.",
+      "gates": "tsc OK, build complete, inline script blocks=4 errors=0",
+      "production_evidence": "pending deploy"
+    }
+  ]
+}

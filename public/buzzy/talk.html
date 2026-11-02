@@ -3018,6 +3018,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      * voice mid-conversation is worse than hearing nothing. If a turn produces
      * no audio, say so on screen and keep the loop going.
      */
+    // One-line status on the voice stage, without touching the audio path.
+    function stageNote(msg) {
+      var st = document.getElementById("voiceStageState");
+      if (st) st.textContent = msg;
+      var mb = document.getElementById("micBtn");
+      if (mb) mb.title = msg;
+    }
+
     function voiceUnavailable() {
       var st = document.getElementById("voiceStageState");
       if (st) st.textContent = "Voice unavailable for this turn — the answer is on screen";
@@ -3033,7 +3041,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // One spoken turn: returns the final transcript, or "" if nothing heard.
     function startListening() {
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR || voice.rec) return;
+      if (voice.rec) return;
+      if (!SR) {
+        // Firefox ships no SpeechRecognition at all and Brave disables it by
+        // default, so this used to fail silently: the mic button lit up, the
+        // stage said "Listening", and nothing was ever heard. Say what happened
+        // and which browser can hear, then drop out of listen mode.
+        stageNote("This browser can't transcribe speech — Chrome or Edge can. Typed chat works here.");
+        voice.mic = false;
+        saveListenPref(false);
+        paintVoice();
+        return;
+      }
       var rec = new SR();
       rec.lang = "en-US";
       rec.continuous = false;
@@ -3070,9 +3089,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
       };
       rec.onerror = function (e) {
-        if (e && e.error === "not-allowed") {
+        var err = e && e.error;
+        if (err === "not-allowed" || err === "service-not-allowed") {
+          // Brave returns service-not-allowed: the API exists but the speech
+          // service behind it is off. Permission denial looks identical to the
+          // user, so name both causes.
+          stageNote("Mic or speech service blocked in this browser — Chrome or Edge can hear you.");
           voice.mic = false;
+          saveListenPref(false);
           paintVoice();
+        } else if (err === "network") {
+          stageNote("Speech service unreachable — check the connection, then tap the mic again.");
+        } else if (err === "no-speech") {
+          // Expected: a silent window. onend re-arms the mic.
+        } else if (err) {
+          stageNote("Voice stopped: " + err);
         }
       };
       rec.onend = function () {
