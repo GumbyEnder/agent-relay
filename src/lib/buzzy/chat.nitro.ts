@@ -38,6 +38,7 @@ import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
+import { priceTable, frontierModels } from "./pricing";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
@@ -649,6 +650,23 @@ export default defineEventHandler(async (event) => {
     setResponseHeader(event, "content-type", row.content_type || "application/octet-stream");
     setResponseHeader(event, "content-disposition", `inline; filename="${row.filename.replace(/"/g, "")}"`);
     return new Uint8Array(row.body);
+  }
+
+  // ── GET /api/buzzy/pricing — what a model costs and who is on the frontier ──
+  if (method === "GET" && path === "/api/buzzy/pricing") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const reachable = new Set(getModels().map((m) => m.model));
+    const all = await priceTable();
+    return {
+      ok: true,
+      reachable: all.filter((p) => reachable.has(p.model)),
+      frontier: (await frontierModels()).filter((m) => reachable.has(m)),
+      frontierTotal: (await frontierModels()).length,
+    };
   }
 
   // ── POST /api/buzzy/frontier — refresh the cached ranking ─────────────

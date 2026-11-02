@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import { chatCompletionFull, getModels } from "./llm";
 import { resolvePinLive, resolveReviewLive, providerOf, type ModelPin } from "./frontier";
 import { loadGraph } from "./graphs";
+import { costOf } from "./pricing";
 
 /**
  * The resolver (6e).
@@ -270,10 +271,12 @@ async function executeFrom(
         );
         if (!out.content || !out.content.trim()) throw new Error("the model returned nothing");
 
-        const price = catalog().find((m) => m.model === model);
-        const cost = out.usage && price
-          ? ((out.usage.promptTokens || 0) / 1e6) * (price.priceInPerMTok ?? 0) + ((out.usage.completionTokens || 0) / 1e6) * (price.priceOutPerMTok ?? 0)
-          : 0;
+        // Real money: the gateway publishes per-token prices, so a cost is a
+        // number or it is null ("unknown"), never a silent zero.
+        const priced = out.usage
+          ? await costOf(model, out.usage.promptTokens || 0, out.usage.completionTokens || 0)
+          : null;
+        const cost = priced ?? 0;
         spent += cost;
 
         await sql`
@@ -281,7 +284,7 @@ async function executeFrom(
             (run_id, node_key, attempt, status, provider, model, independent, input, output, latency_ms, cost_usd, started_at, finished_at)
           VALUES (${runId}, ${node.key}, ${attempt}, 'done', ${provider}, ${model}, ${independent},
                   ${JSON.stringify({ context: context.slice(0, 1500) })}::jsonb,
-                  ${JSON.stringify({ text: out.content.trim(), usage: out.usage })}::jsonb,
+                  ${JSON.stringify({ text: out.content.trim(), usage: out.usage, priced: priced != null })}::jsonb,
                   ${out.latencyMs}, ${cost}, ${startedAt.toISOString()}, ${new Date().toISOString()})
           ON CONFLICT (run_id, node_key, attempt) DO UPDATE SET
             status = 'done', output = EXCLUDED.output, latency_ms = EXCLUDED.latency_ms, cost_usd = EXCLUDED.cost_usd
