@@ -1,6 +1,6 @@
 import { getSql } from "@/lib/db";
 import { chatCompletionFull, getModels } from "./llm";
-import { resolvePin, resolveReview, providerOf, type ModelPin } from "./frontier";
+import { resolvePinLive, resolveReviewLive, providerOf, type ModelPin } from "./frontier";
 import { loadGraph } from "./graphs";
 
 /**
@@ -244,14 +244,14 @@ async function executeFrom(
           const producer = lastProducerModel || (catalog()[0]?.model ?? "");
           const r = pin.mode === "exact"
             ? { model: pin.model, provider: providerOf(pin.model), independent: providerOf(pin.model) !== providerOf(producer) }
-            : { ...resolveReview(producer, (pin as { category: string }).category || "writing", (pin as { position: number }).position || 1, catalog().map((m) => m.model)), independent: true };
+            : { ...(await resolveReviewLive(producer, (pin as { category: string }).category || "writing", (pin as { position: number }).position || 1, catalog().map((m) => m.model))), independent: true };
           model = r.model;
           provider = r.provider;
           independent = r.independent;
         } else {
           const pin = pinFor(node);
           if (pin) {
-            const r = resolvePin(pin, catalog().map((m) => m.model));
+            const r = await resolvePinLive(pin, catalog().map((m) => m.model));
             model = r.model;
             provider = r.provider;
           } else {

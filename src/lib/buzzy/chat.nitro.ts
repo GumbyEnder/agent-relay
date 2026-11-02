@@ -36,7 +36,7 @@ import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
-import { resolvePin, resolveReview, frontierAsOf, providerOf, type ModelPin } from "./frontier";
+import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
@@ -651,6 +651,32 @@ export default defineEventHandler(async (event) => {
     return new Uint8Array(row.body);
   }
 
+  // ── POST /api/buzzy/frontier — refresh the cached ranking ─────────────
+  // Out-of-band only: a run must never wait on a third-party page. Guarded by
+  // the ops key so a user cannot silently re-point every graph's model choice.
+  if (method === "POST" && path === "/api/buzzy/frontier") {
+    const opsKey = getHeader(event, "x-bz-ops-key") || "";
+    const expected = process.env.BZ_OPS_KEY || "";
+    if (!expected || opsKey !== expected) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    let body: unknown;
+    try {
+      body = await event.req.json();
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON.", code: "bad_json" };
+    }
+    const checked = validateSnapshot(body);
+    if (!checked.ok) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: checked.error, code: "bad_ranking" };
+    }
+    await saveSnapshot(checked.snap, checked.snap.source, checked.snap.note);
+    return { ok: true, saved: await frontierAsOfLive() };
+  }
+
   // ── GET /api/buzzy/frontier — what a pin resolves to, before it runs ──
   // The whiteboard uses this to show the model a node will use, and a run uses
   // the same function so what you see authored is what executes.
@@ -674,14 +700,14 @@ export default defineEventHandler(async (event) => {
     const review = qs.get("review");
     try {
       if (review && category) {
-        const r = resolveReview(review, category, Number(qs.get("position") || 1), catalog);
+        const r = await resolveReviewLive(review, category, Number(qs.get("position") || 1), catalog);
         return { ok: true, resolution: r, independent: r.provider !== providerOf(review) };
       }
       let pin: ModelPin;
       if (category) pin = { mode: "frontier", category, position: Number(qs.get("position") || 1) };
       else if (family) pin = { mode: "latest", family };
-      else return { ok: true, frontier: frontierAsOf(), catalog: catalog.length, reachable: catalog };
-      const r = resolvePin(pin, catalog, qs.get("avoid") || undefined);
+      else return { ok: true, frontier: await frontierAsOfLive(), catalog: catalog.length, reachable: catalog };
+      const r = await resolvePinLive(pin, catalog, qs.get("avoid") || undefined);
       return { ok: true, resolution: r };
     } catch (e) {
       setResponseStatus(event, 400);
