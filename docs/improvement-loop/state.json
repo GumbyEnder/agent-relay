@@ -10,10 +10,12 @@
       "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition in public/buzzy/talk.html startListening(). Firefox has no such API. Brave exposes it but returns service-not-allowed (Google speech service blocked by default). startListening used to return silently when SR was absent, so the mic lit up and nothing happened; error codes other than not-allowed were ignored.",
       "shipped": [
         "7403270 explicit unsupported-browser + error-code messages, honest exit from listen mode",
-        "<next> voice.note persists the message through paintVoice repaints (paintVoice was wiping it instantly)"
+        "<next> voice.note persists the message through paintVoice repaints (paintVoice was wiping it instantly)",
+        "e2069ee server ASR: POST /api/buzzy/transcribe (session-gated, raw WAV body, gpt-audio-mini, no new key)",
+        "e2069ee client recorder fallback: getUserMedia + ScriptProcessor -> 16k mono WAV -> transcribe -> same turn"
       ],
-      "evidence": "Authenticated matrix (Playwright + magic link), 4 cases: chrome-natural, chrome-noSR, brave-natural, brave-noSR — all four now show a visible #voiceStatus message, mic drops out, bz_listen_mode reset to 0. Served asset carries voice.note.",
-      "next": "Real cross-browser voice needs server-side ASR: getUserMedia + MediaRecorder chunk -> POST /api/buzzy/transcribe -> transcript into the same turn. Browser SpeechRecognition can never work in Firefox and needs a Brave flag.",
+      "evidence": "Authenticated matrix (Playwright + magic link), 4 cases: chrome-natural, chrome-noSR, brave-natural, brave-noSR \u2014 all four now show a visible #voiceStatus message, mic drops out, bz_listen_mode reset to 0. Served asset carries voice.note. | Prod curl with cookie: 200, transcript exact, 2673ms for 6.5s audio. Browser E2E (chrome+brave, SpeechRecognition deleted, fake mic feeding a real spoken WAV): posted 475/480KB, server transcript correct, 1372/3111ms, chat turn started. Note: 21s wall time in the probe is the 15s VAD cap (fake audio never goes quiet, so silence never ends the clip).",
+      "next": "1) Prove a real Firefox page (install playwright firefox) takes the recorder path without JS errors. 2) Real end-of-speech timing: measure time from 'stop talking' to transcript for a normal 3-5s utterance. 3) Record asr_ms into buzzy_voice_metrics so ops can see it.",
       "done_when": "Transcript -> SSE audio proven on Chromium and Firefox, or an explicit in-product statement that voice is Chrome/Edge-only with typed chat everywhere."
     },
     {
@@ -60,7 +62,7 @@
       "n": 1,
       "at": "2026-11-01",
       "item": "voice-browser-matrix",
-      "found": "grep for getUserMedia across public/buzzy returned 0 — ASR is the browser SpeechRecognition API, Chrome-only by construction.",
+      "found": "grep for getUserMedia across public/buzzy returned 0 \u2014 ASR is the browser SpeechRecognition API, Chrome-only by construction.",
       "change": "stageNote() + unsupported/error branches (7403270)",
       "gates": "tsc OK, build complete, blocks=4 errors=0",
       "production_evidence": "new string present on served /buzzy/talk"
@@ -73,6 +75,15 @@
       "change": "voice.note on state; paintVoice renders it when idle; cleared on a fresh listen",
       "gates": "tsc OK, build complete, blocks=4 errors=0, redeploy landed (voice.note x3 on served page)",
       "production_evidence": "authenticated 4-case matrix: chrome-natural + brave-natural -> 'Mic or speech service blocked in this browser'; chrome-noSR + brave-noSR -> 'This browser can't transcribe speech'. Message visible (statusShown true), mic off, pref 0 in all cases."
+    },
+    {
+      "n": 3,
+      "at": "2026-11-01",
+      "item": "voice-browser-matrix",
+      "found": "Nous inference API has no /v1/audio/transcriptions (404 for whisper-1, gpt-4o-mini-transcribe), but openai/gpt-audio-mini accepts input_audio on /chat/completions and transcribes accurately. That is the only STT available on the existing key.",
+      "change": "asr.ts + POST /api/buzzy/transcribe + recorder fallback in talk.html (e2069ee)",
+      "gates": "tsc OK, build complete, blocks=4 errors=0, speechSynthesis count 0",
+      "production_evidence": "unauth 401; auth curl 200 {text exact, ms 2673}; chrome+brave recorder E2E posted real WAV and got the right transcript"
     }
   ]
 }
