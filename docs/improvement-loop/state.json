@@ -43,9 +43,12 @@
     {
       "id": "install-new-ui",
       "priority": "P1",
-      "status": "todo",
+      "status": "blocked",
       "title": "Install the new UI he built",
-      "done_when": "Identify the UI, deploy it behind the #bzNav contract, E2E sweep clean."
+      "done_when": "Identify the UI, deploy it behind the #bzNav contract, E2E sweep clean.",
+      "blocked_on": "No UI artifact exists in this environment. Evidence: feat/beezilla-civilian-sow is 323 commits behind main and 0 ahead; open PRs are dependabot only; ~/agents/agent-relay{,-beezilla,-local,-contrib} all date to 2026-10-28 or earlier with no UI work; vault has no newer design note than BRAND-UI-BRIEF.md (49 lines).",
+      "asked": "Need the branch, zip or folder he means \u2014 or confirmation that 'the new UI' = applying docs/BRAND-UI-BRIEF.md to the /buzzy surfaces (today only src/components/auth-shell.tsx consumes public/brand/beezilla).",
+      "interim": "Ran a full 11-page authenticated sweep instead; found and fixed a real defect (see log n=7)."
     },
     {
       "id": "music-3d",
@@ -119,6 +122,15 @@
       "change": "migration 0048 buzzy_assets; POST/GET /api/buzzy/assets (content-addressed, 25MB cap, path sanitised); folder picker + concurrency 6 + retry on the Publish page",
       "gates": "tsc OK, build complete, inline blocks 3/0 errors, migration ran at boot",
       "production_evidence": "4,000 files in 65.3s, idempotent second pass, listing 4,000, download 200/401, UI folder upload with dedupe counts"
+    },
+    {
+      "n": 7,
+      "at": "2026-11-02",
+      "item": "install-new-ui",
+      "found": "11-page sweep: /buzzy and /buzzy/library requested /brand/revision6_expressions_16-smiling.png and /sow-pdf.js and got 404s, because ten pages used document-relative asset URLs that only resolve under /buzzy/<page>.",
+      "change": "All local asset refs in public/buzzy/*.html made absolute (/buzzy/...), 54b080e",
+      "gates": "tsc OK, build complete, every page's inline scripts parse",
+      "production_evidence": "re-sweep after deploy: SUMMARY pages=11 problems=0 (was problems=1)"
     }
   ]
 }
