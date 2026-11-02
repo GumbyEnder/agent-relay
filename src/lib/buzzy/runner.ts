@@ -135,12 +135,26 @@ export async function resumeRun(userId: string, runId: string): Promise<{ status
   if (run.status === "done") return { status: "done", resumedAt: -1 };
   if (run.status !== "awaiting_approval") throw new Error(`That run is ${run.status}, nothing to resume.`);
 
-  // The gate node that stopped us gets its approval recorded, then we continue.
+  // The gate that stopped us gets its approval recorded, and the walk continues
+  // PAST it. Without this the run re-enters the same gate and waits forever.
   const done = await sql<{ node_key: string }>`
     SELECT node_key FROM buzzy_graph_node_results WHERE run_id = ${runId} AND status = 'done'
   `;
   const finished = new Set(done.map((r) => r.node_key));
-  const nextIdx = run.spec.order.findIndex((k) => !finished.has(k));
+  let nextIdx = run.spec.order.findIndex((k) => !finished.has(k));
+  if (nextIdx >= 0) {
+    const gateKey = run.spec.order[nextIdx]!;
+    const node = run.spec.nodes.find((n) => n.key === gateKey);
+    if (node && node.kind === "gate") {
+      await sql`
+        UPDATE buzzy_graph_node_results
+        SET status = 'done', output = ${JSON.stringify({ approved: true, at: new Date().toISOString() })}::jsonb, finished_at = now()
+        WHERE run_id = ${runId} AND node_key = ${gateKey} AND status = 'awaiting_approval'
+      `;
+      finished.add(gateKey);
+      nextIdx = run.spec.order.findIndex((k) => !finished.has(k));
+    }
+  }
 
   await sql`UPDATE buzzy_graph_runs SET status = 'running' WHERE id = ${runId}`;
   const outcome = await executeFrom(userId, runId, run.spec, nextIdx < 0 ? run.spec.order.length : nextIdx);
