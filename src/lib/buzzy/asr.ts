@@ -107,7 +107,11 @@ export async function transcribeAudio(
     /^\[?(silence|no speech|no audio|inaudible)\]?\.?$/i.test(text) ||
     /^(i'?m sorry|sorry)[,.]?\s*(but)?\s*i (can'?t|cannot|couldn'?t|could not)/i.test(text) ||
     /(can'?t|cannot|couldn'?t) hear any (speech|audio)/i.test(text) ||
-    /no (intelligible )?speech/i.test(text);
+    /no (intelligible )?speech/i.test(text) ||
+    // Meta-answers: the model talking about the request instead of doing it.
+    /(provide|send|share) (the|some|your) (audio|speech|recording)/i.test(text) ||
+    /you would like (me )?to transcribe/i.test(text) ||
+    /^understood[.,]?\s+please\s+(provide|send|share)/i.test(text);
   return { text: saidNothing ? "" : text.slice(0, 4000), ms, model: ASR_MODEL };
 }
 

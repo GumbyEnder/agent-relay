@@ -3219,6 +3219,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var rms = Math.sqrt(sum / copy.length);
             if (rms > 0.02) { speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
+            if (recState) recState.speechSeen = speechSeen;
             var elapsed = Date.now() - startedAt;
             // End of speech: ~0.9s of quiet after talking. Hard caps keep a
             // forgotten mic from uploading a minute of silence.
@@ -3231,7 +3232,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // nothing, so this is silent.
           src.connect(proc);
           proc.connect(ctx.destination);
-          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate };
+          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false };
           voice.note = "";
           setAvatarState("listening");
           paintVoice();
@@ -3257,6 +3258,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
       try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
       try { r.ctx.close(); } catch (_) {}
+      // Nothing was said: re-arm instead of uploading a silent clip and paying
+      // the model to tell us it heard nothing.
+      if (!r.speechSeen) { rearmListening(); return; }
       var total = 0;
       for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
       if (total < r.rate * 0.3) { rearmListening(); return; }
