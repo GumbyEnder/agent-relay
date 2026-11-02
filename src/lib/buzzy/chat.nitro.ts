@@ -27,7 +27,7 @@
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
  */
 
-import { defineEventHandler, getMethod, getHeader, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
@@ -57,7 +57,15 @@ import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemet
 import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
 import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
+import { createHash } from "node:crypto";
 import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES } from "./asr";
+
+/**
+ * Largest single file the bulk asset path will store. A skills corpus is
+ * thousands of small files (markdown + images); anything this big is a video or
+ * a mistake, and one 200 MB body would take the whole process down with it.
+ */
+const ASSET_MAX_BYTES = 25 * 1024 * 1024;
 
 /**
  * One latency sample. Two sources: `server` (our own stage timings) and
@@ -494,6 +502,150 @@ export default defineEventHandler(async (event) => {
         code: "transcribe_failed",
       };
     }
+  }
+
+  // ── POST /api/buzzy/assets — one file of a bulk upload ───────────────
+  // The unit a person actually has is a folder: a skills corpus is markdown
+  // plus thousands of images. The page walks the folder and posts files one at
+  // a time, so an interrupted run resumes instead of re-sending everything.
+  // Content-addressed server-side: the body is hashed here, never trusted from
+  // the client, and a repeat upload of the same bytes returns the existing row.
+  if (method === "POST" && path === "/api/buzzy/assets") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    // x-bz-path carries the folder-relative name; it is display metadata only,
+    // so sanitise hard and never use it to touch the filesystem.
+    const rawPath = (getHeader(event, "x-bz-path") || getHeader(event, "x-bz-filename") || "")
+      .trim()
+      .slice(0, 400);
+    const relPath = rawPath
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .split("/")
+      .filter((seg) => seg && seg !== "." && seg !== "..")
+      .join("/");
+    if (!relPath) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Give the file a name (x-bz-path).", code: "path_required" };
+    }
+    let body: Uint8Array;
+    try {
+      body = new Uint8Array(await event.req.arrayBuffer());
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The file could not be read.", code: "bad_file" };
+    }
+    if (body.byteLength === 0) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That file is empty.", code: "empty_file" };
+    }
+    if (body.byteLength > ASSET_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return {
+        ok: false,
+        error: `That file is ${(body.byteLength / 1048576).toFixed(1)} MB — the limit is ${ASSET_MAX_BYTES / 1048576} MB.`,
+        code: "file_too_large",
+      };
+    }
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    const filename = relPath.split("/").pop() || relPath;
+    const contentType = (getHeader(event, "content-type") || "application/octet-stream").slice(0, 120);
+    const sql = await getSql();
+    const inserted = await sql<{ id: number; rel_path: string }>`
+      INSERT INTO buzzy_assets (user_id, sha256, filename, rel_path, content_type, bytes, body)
+      VALUES (${user.id}, ${sha256}, ${filename}, ${relPath}, ${contentType}, ${body.byteLength}, ${Buffer.from(body)})
+      ON CONFLICT (user_id, sha256) DO NOTHING
+      RETURNING id, rel_path
+    `;
+    if (!inserted.length) {
+      // Same bytes already stored for this account: report it as a hit, not an error.
+      const prior = await sql<{ id: number; rel_path: string; bytes: number }>`
+        SELECT id, rel_path, bytes FROM buzzy_assets
+        WHERE user_id = ${user.id} AND sha256 = ${sha256} LIMIT 1
+      `;
+      return {
+        ok: true,
+        duplicate: true,
+        id: prior[0]?.id ?? null,
+        path: prior[0]?.rel_path ?? relPath,
+        bytes: prior[0]?.bytes ?? body.byteLength,
+        sha256,
+      };
+    }
+    return {
+      ok: true,
+      duplicate: false,
+      id: inserted[0]!.id,
+      path: inserted[0]!.rel_path,
+      bytes: body.byteLength,
+      sha256,
+    };
+  }
+
+  // ── GET /api/buzzy/assets — what this account already has ────────────
+  if (method === "GET" && path === "/api/buzzy/assets") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const qs = new URLSearchParams(fullPath.split("?")[1] || "");
+    const prefix = (qs.get("prefix") || "").slice(0, 200);
+    const want = Math.min(Math.max(Number(qs.get("limit") || 200), 1), 1000);
+    const offset = Math.max(Number(qs.get("offset") || 0), 0);
+    const sql = await getSql();
+    const totals = await sql<{ files: string; total_bytes: string }>`
+      SELECT COUNT(*)::text AS files, COALESCE(SUM(bytes), 0)::text AS total_bytes
+      FROM buzzy_assets WHERE user_id = ${user.id}
+        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
+    `;
+    const rows = await sql<{
+      id: number; filename: string; rel_path: string; content_type: string | null;
+      bytes: number; created_at: string;
+    }>`
+      SELECT id, filename, rel_path, content_type, bytes, created_at
+      FROM buzzy_assets
+      WHERE user_id = ${user.id}
+        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
+      ORDER BY rel_path ASC
+      LIMIT ${want} OFFSET ${offset}
+    `;
+    return {
+      ok: true,
+      files: Number(totals[0]?.files ?? 0),
+      totalBytes: Number(totals[0]?.total_bytes ?? 0),
+      limit: want,
+      offset,
+      items: rows,
+    };
+  }
+
+  // ── GET /api/buzzy/assets/:id — one stored file back ─────────────────
+  if (method === "GET" && /^\/api\/buzzy\/assets\/\d+$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const id = Number(path.split("/").pop());
+    const sql = await getSql();
+    const rows = await sql<{
+      filename: string; content_type: string | null; body: Buffer;
+    }>`
+      SELECT filename, content_type, body FROM buzzy_assets
+      WHERE id = ${id} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { ok: false, error: "No such file on this account.", code: "not_found" };
+    }
+    const row = rows[0]!;
+    setResponseHeader(event, "content-type", row.content_type || "application/octet-stream");
+    setResponseHeader(event, "content-disposition", `inline; filename="${row.filename.replace(/"/g, "")}"`);
+    return new Uint8Array(row.body);
   }
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
