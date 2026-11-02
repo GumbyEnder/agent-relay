@@ -42,8 +42,8 @@ export interface AsrResult {
 const INSTRUCTION =
   "Transcribe the speech verbatim. Return only the transcript text — no quotes, " +
   "no commentary, no speaker labels. The speaker is usually talking to a product " +
-  "called BeeZilla (spoken \"bee-zilla\"); spell it BeeZilla. If there is no speech, " +
-  "return an empty string.";
+  "called BeeZilla (spoken \"bee-zilla\"); spell it BeeZilla. " +
+  "If there is no intelligible speech, reply with exactly one word: SILENCE.";
 
 /**
  * Transcribe one recorded clip. Throws on transport failure; an empty string is a
@@ -93,14 +93,22 @@ export async function transcribeAudio(
     choices?: Array<{ message?: { content?: string } }>;
   };
   const raw = data.choices?.[0]?.message?.content ?? "";
-  // Models sometimes wrap the transcript in quotes or answer "no speech".
+  // Models sometimes wrap the transcript in quotes, answer "no speech", or
+  // apologise instead of staying silent. A refusal must never reach the
+  // composer: it would be typed in as if the owner had said it.
   const text = String(raw)
     .trim()
     .replace(/^["'“”]+|["'“”]+$/g, "")
     .replace(/^transcript:\s*/i, "")
     .trim();
-  const silent = /^(no speech|no audio|\[silence\]|\(silence\)|silence)\.?$/i.test(text);
-  return { text: silent ? "" : text.slice(0, 4000), ms, model: ASR_MODEL };
+  const saidNothing =
+    !text ||
+    /^silence\.?$/i.test(text) ||
+    /^\[?(silence|no speech|no audio|inaudible)\]?\.?$/i.test(text) ||
+    /^(i'?m sorry|sorry)[,.]?\s*(but)?\s*i (can'?t|cannot|couldn'?t|could not)/i.test(text) ||
+    /(can'?t|cannot|couldn'?t) hear any (speech|audio)/i.test(text) ||
+    /no (intelligible )?speech/i.test(text);
+  return { text: saidNothing ? "" : text.slice(0, 4000), ms, model: ASR_MODEL };
 }
 
 /** Content-Type → format, for the client that posts a raw audio body. */
