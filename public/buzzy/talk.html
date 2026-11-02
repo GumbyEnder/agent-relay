@@ -2795,7 +2795,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // the recognizer is re-armed as soon as the browser allows it.
     var LISTEN_KEY = "bz_listen_mode";
     var voice = {
-      replies: false, mic: false, rec: null, speaking: false, sending: false,
+      replies: false, mic: false, rec: null, speaking: false, sending: false, note: "",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
       // Timings
@@ -2978,7 +2978,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           ? "Speaking — I'll listen again when I'm done."
           : voice.mic
             ? "Listening — speak, then pause."
-            : "";
+            : (voice.note || "");
         s.textContent = msg;
         s.classList.toggle("hidden", !msg);
       }
@@ -3020,10 +3020,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      */
     // One-line status on the voice stage, without touching the audio path.
     function stageNote(msg) {
-      var st = document.getElementById("voiceStageState");
-      if (st) st.textContent = msg;
+      // Persist the note, then let paintVoice render it. Writing the DOM here
+      // directly is not enough: paintVoice repaints the status line immediately
+      // after and used to wipe the message that had just been written.
+      voice.note = msg;
       var mb = document.getElementById("micBtn");
       if (mb) mb.title = msg;
+      paintVoice();
     }
 
     function voiceUnavailable() {
@@ -3127,6 +3130,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.mic = !voice.mic;
       saveListenPref(voice.mic);
       if (voice.mic) {
+        // A fresh listen clears whatever the last failure said.
+        voice.note = "";
         // A spoken conversation needs spoken answers.
         if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
         startListening();
