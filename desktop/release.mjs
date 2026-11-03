@@ -37,6 +37,7 @@ const flag = (n) => args.includes(n);
 const DRY = flag("--dry-run");
 const SKIP_BUILD = flag("--skip-build");
 const ALLOW_DEV = flag("--allow-dev-pin");
+const MOVE_TAG = flag("--move-tag");
 const FORCE_PRE = flag("--prerelease");
 // The commit the artifact was built from. Defaults to HEAD; pass --ref when the
 // packaging script or notes changed after the build (the app bytes did not).
@@ -130,6 +131,23 @@ if (DRY) {
 
 /* -- tag: idempotent -------------------------------------------------------- */
 const hasTag = run("git", ["-C", ROOT, "tag", "--list", tag], { capture: true }).trim() === tag;
+if (hasTag) {
+  // A tag that points at a different commit than the one that was built is the
+  // worst kind of lie: the download is real, the source link is not.
+  const tagged = run("git", ["-C", ROOT, "rev-parse", "--short", `${tag}^{commit}`], { capture: true }).trim();
+  if (tagged !== head) {
+    if (!MOVE_TAG) {
+      console.error(
+        `refusing: ${tag} points at ${tagged} but this artifact was built from ${head}.\n` +
+          `Re-run with --move-tag to move the tag onto the built commit.`,
+      );
+      process.exit(1);
+    }
+    run("git", ["-C", ROOT, "tag", "-f", "-a", tag, REF ?? "HEAD", "-m", `BeeZilla Desktop ${version}`]);
+    run("git", ["-C", ROOT, "push", "--force", "github", tag]);
+    log(`tag ${tag} moved ${tagged} -> ${head}`);
+  }
+}
 if (!hasTag) {
   run("git", ["-C", ROOT, "tag", "-a", tag, REF ?? "HEAD", "-m", `BeeZilla Desktop ${version}`]);
   run("git", ["-C", ROOT, "push", "github", tag]);
