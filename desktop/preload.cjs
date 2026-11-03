@@ -30,5 +30,8 @@ contextBridge.exposeInMainWorld("beezilla", {
   },
   app: {
     version: () => call("app:version"),
+    /** where main.log lives — so a bug report can name a file instead of a symptom */
+    logs: () => call("app:logPath"),
+    openLogs: () => call("app:openLogs"),
   },
 });
