@@ -13,14 +13,32 @@
 import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RuntimeSupervisor, defaultDataDir } from "./supervisor.mjs";
-import { isExpired, loadInference } from "../scripts/lib/inference.mjs";
-import { createSettingsHandlers } from "./settings.mjs";
+import { RuntimeSupervisor } from "./supervisor.mjs";
+import { ROOT, runtimeLib } from "./paths.mjs";
+import { installLogging, logPaths } from "./logger.mjs";
 import { connectAccount } from "./connect.mjs";
 
-const ROOT = app.isPackaged
-  ? join(process.resourcesPath, "app")
-  : join(dirname(fileURLToPath(import.meta.url)), "..");
+// FIRST, before anything that can throw. 0.2.0 died at module-link time and left
+// no trace anywhere; every launch now writes a session block to
+// %APPDATA%\BeeZilla\logs\main.log (BZ_LOG_DIR overrides), tees console output into
+// it, and turns an uncaught exception into a readable dialog naming that file.
+installLogging({
+  version: app.getVersion(),
+  facts: { resourcesRoot: ROOT },
+  onFatal: (kind, err) => {
+    const detail = err instanceof Error ? err.stack || err.message : String(err);
+    const { file, dir } = logPaths();
+    try {
+      dialog.showErrorBox(
+        `BeeZilla — ${kind}`,
+        `${detail}\n\nLog file:\n${file ?? dir ?? "(logging unavailable)"}\n\n` +
+          `Send this file to support; it records what the app was doing.`,
+      );
+    } finally {
+      app.exit(1);
+    }
+  },
+});
 
 const supervisor = new RuntimeSupervisor({
   root: ROOT,
@@ -35,14 +53,9 @@ const supervisor = new RuntimeSupervisor({
  */
 app.commandLine.appendSwitch("disable-http-cache");
 
-// Silence is the worst failure mode in a packaged app: log the real error and
-// keep the process alive long enough to show it.
-process.on("unhandledRejection", (err) => {
-  console.error("[desktop] unhandled rejection:", err instanceof Error ? err.stack : err);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[desktop] uncaught exception:", err instanceof Error ? err.stack : err);
-});
+// Silence is the worst failure mode in a packaged app. The logger installs the
+// process handlers (uncaught exception → dialog naming the log file); here we
+// only add the exit breadcrumb, so "it closed itself" is answerable from disk.
 process.on("exit", (code) => console.log(`[desktop] exiting code=${code}`));
 
 let mainWindow = null;
@@ -53,9 +66,13 @@ let runtimeBase = null;
  * Decrypt the stored inference key into the environment the runtime inherits.
  * safeStorage only works after `app.whenReady()`, so this cannot run at module
  * load — and it must run again after the user saves a key, before the restart.
+ *
+ * Async only because the inference library is loaded from the runtime tree at
+ * call time (see paths.mjs); a missing file becomes a sentence, not a crash.
  */
-function applyStoredInferenceToEnv() {
+async function applyStoredInferenceToEnv() {
   try {
+    const { loadInference, isExpired } = await runtimeLib("scripts/lib/inference.mjs");
     const inf = loadInference(supervisor.dataDir, {
       decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
     });
@@ -94,34 +111,46 @@ function applyStoredInferenceToEnv() {
 let settingsHandlers = null;
 
 function registerSettingsIpc() {
-  const handlers = createSettingsHandlers({
-    dataDir: () => supervisor.dataDir,
-    supervisor,
-    cipher: {
-      encrypt: (s) => safeStorage.encryptString(s),
-      decrypt: (b) => safeStorage.decryptString(Buffer.from(b)),
-    },
-    beforeRestart: applyStoredInferenceToEnv,
+  // Imported here, not at the top: settings.mjs loads the runtime's credential
+  // libraries, so a broken install must fail inside this try/catch (logged, and
+  // shown as a sentence) rather than at module-link time before logging exists.
+  return import("./settings.mjs").then(({ createSettingsHandlers }) => {
+    const handlers = createSettingsHandlers({
+      dataDir: () => supervisor.dataDir,
+      supervisor,
+      cipher: {
+        encrypt: (s) => safeStorage.encryptString(s),
+        decrypt: (b) => safeStorage.decryptString(Buffer.from(b)),
+      },
+      beforeRestart: applyStoredInferenceToEnv,
+    });
+
+    const wrap = (fn) => async (_event, payload) => {
+      try {
+        return { ok: true, data: await fn(payload) };
+      } catch (err) {
+        // The page shows this text, so it must be a sentence a user can act on.
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    };
+
+    ipcMain.handle("beezilla:settings:get", wrap(() => handlers.status()));
+    ipcMain.handle("beezilla:settings:saveInference", wrap((cfg) => handlers.saveInference(cfg)));
+    ipcMain.handle("beezilla:settings:saveSearch", wrap((cfg) => handlers.saveSearch(cfg)));
+    ipcMain.handle("beezilla:settings:clear", wrap((kind) => handlers.clear(kind)));
+    ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion() })));
+    // "Connect BeeZilla account" from the Settings screen: same flow as the menu item.
+    ipcMain.handle("beezilla:settings:connect", wrap(() => connectManagedAccount()));
+    // Diagnostics from the UI: one click to the folder that holds main.log.
+    ipcMain.handle("beezilla:app:openLogs", wrap(async () => {
+      const { dir } = logPaths();
+      if (dir) await shell.openPath(dir);
+      return { dir, file: logPaths().file };
+    }));
+    ipcMain.handle("beezilla:app:logPath", wrap(async () => logPaths()));
+
+    return handlers;
   });
-
-  const wrap = (fn) => async (_event, payload) => {
-    try {
-      return { ok: true, data: await fn(payload) };
-    } catch (err) {
-      // The page shows this text, so it must be a sentence a user can act on.
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  };
-
-  ipcMain.handle("beezilla:settings:get", wrap(() => handlers.status()));
-  ipcMain.handle("beezilla:settings:saveInference", wrap((cfg) => handlers.saveInference(cfg)));
-  ipcMain.handle("beezilla:settings:saveSearch", wrap((cfg) => handlers.saveSearch(cfg)));
-  ipcMain.handle("beezilla:settings:clear", wrap((kind) => handlers.clear(kind)));
-  ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion() })));
-  // "Connect BeeZilla account" from the Settings screen: same flow as the menu item.
-  ipcMain.handle("beezilla:settings:connect", wrap(() => connectManagedAccount()));
-
-  return handlers;
 }
 
 // One install, one runtime: a second launch must focus the existing window, not
@@ -156,6 +185,15 @@ function installMenu() {
             click: () => void connectManagedAccount(),
           },
           { type: "separator" },
+          {
+            label: "Open Logs Folder",
+            click: () => {
+              const { dir, file } = logPaths();
+              console.log(`[desktop] opening logs folder ${dir}`);
+              if (dir) void shell.openPath(dir);
+              else dialog.showErrorBox("BeeZilla", `Logging is unavailable.\n${file ?? ""}`);
+            },
+          },
           { role: "reload" },
           { role: "toggleDevTools" },
           { type: "separator" },
@@ -485,18 +523,21 @@ async function createWindow() {
 app.whenReady().then(async () => {
   installMenu();
 
-  applyStoredInferenceToEnv();
-  settingsHandlers = registerSettingsIpc();
-
   try {
+    await applyStoredInferenceToEnv();
+    settingsHandlers = await registerSettingsIpc();
     await createWindow();
   } catch (err) {
-    console.error("[desktop] failed to start:", err);
+    const detail = err instanceof Error ? err.stack || err.message : String(err);
+    console.error("[desktop] failed to start:", detail);
+    const { file } = logPaths();
     dialog.showErrorBox(
       "BeeZilla could not start",
-      `${err instanceof Error ? err.message : String(err)}\n\nRun \`beezilla doctor\` from a terminal for details.`,
+      `${err instanceof Error ? err.message : String(err)}\n\nLog file:\n${file ?? "(logging unavailable)"}\n\n` +
+        `Run \`beezilla doctor\` from a terminal for details.`,
     );
     app.quit();
+    return;
   }
 
   app.on("activate", () => {
