@@ -52,7 +52,7 @@ const run = (cmd, argv, opts = {}) =>
 const pkg = JSON.parse(readFileSync(join(DESKTOP, "package.json"), "utf8"));
 const version = pkg.version;
 const tag = `desktop-v${version}`;
-const installer = join(ROOT, "dist-desktop", `BeeZilla Setup ${version}.exe`);
+const installer = join(ROOT, "dist-desktop", `BeeZilla-Setup-${version}.exe`);
 const blockmap = `${installer}.blockmap`;
 
 /* -- trust anchor: never publish a dev pin as a normal release -------------- */
@@ -169,7 +169,9 @@ if (exists) {
 /* -- verify what the world will download ------------------------------------ */
 const remote = run("gh", ["release", "view", tag, "-R", REPO, "--json", "assets,isPrerelease,url"], { capture: true });
 const parsed = JSON.parse(remote);
-const asset = parsed.assets.find((a) => a.name === `BeeZilla Setup ${version}.exe`);
+const wanted = `BeeZilla-Setup-${version}.exe`;
+const legacy = `BeeZilla.Setup.${version}.exe`; // GitHub turns spaces into dots
+const asset = parsed.assets.find((a) => a.name === wanted || a.name === legacy);
 if (!asset) {
   console.error(`FAILED: ${tag} has no installer asset`);
   process.exit(1);
