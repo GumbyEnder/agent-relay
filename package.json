@@ -29,6 +29,7 @@
     "build:dev": "vite build --mode development",
     "preview": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
+    "parity": "node scripts/parity-check.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "verify": "npm run typecheck && npm run build && npm run test:ci",
