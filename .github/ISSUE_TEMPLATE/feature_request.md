@@ -1,17 +1,22 @@
 ---
 name: Feature request
-about: Improvement to core protocol, self-host, UI, or harnesses
+about: Improvement to core protocol, self-host, UI, BeeZilla journey, or harnesses
 title: "[feat] "
 labels: []
 ---
 
 ## Problem
 
+<!-- The user or operator problem. Not the solution. -->
+
 ## Proposal
 
-## Core vs optional
+## Which surface
 
-- [ ] Core (verbs, claim, keys, self-host)
-- [ ] Optional (OAuth, integrations, hosted-only)
+- [ ] Dev Boards core (verbs, claim, keys, self-host)
+- [ ] Dev Boards operator UI
+- [ ] BeeZilla journey (`/buzzy/*`, documents, memory, recipes)
+- [ ] Shared engine / docs / tooling
+- [ ] Optional edge (OAuth, integrations, hosted-only)
 
 ## Alternatives considered

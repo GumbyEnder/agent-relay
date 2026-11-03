@@ -12,7 +12,12 @@ import { defineEventHandler, getMethod, setResponseStatus } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-const PAGES = new Set(["index", "talk", "memory", "remember", "form", "experts", "library", "profile", "landing", "recipes", "wallet", "upload"]);
+// Every name here must have a file in public/buzzy — "form" was listed with no
+  // form.html behind it, so /buzzy/form answered 404 from a route that claimed
+  // to serve it.
+// "settings" is desktop-only: the Electron shell lowers the Settings window
+// through this route so it stops depending on a static .html fallback.
+const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "recipes", "wallet", "upload", "graph", "settings"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {

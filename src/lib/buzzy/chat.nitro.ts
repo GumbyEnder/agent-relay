@@ -27,7 +27,7 @@
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
  */
 
-import { defineEventHandler, getMethod, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
 import { chatLoop } from "./server";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
@@ -36,6 +36,13 @@ import { getModels, chatCompletion } from "./llm";
 import { searchAvailable, searchNeedsReconnect, searchProvider } from "./search";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
+import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
+import { generateMusic, storeAudio, musicConfigured } from "./music";
+import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
+import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
+import { startRun, resumeRun, readRun } from "./runner";
+import { priceTable, frontierModels } from "./pricing";
+import { buildRanking } from "./ranking";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
@@ -52,7 +59,6 @@ import {
   type CompanyRow,
   type FactRow,
 } from "./companyContext";
-import { runChatTurn } from "./turn";
 import { recordVoiceMetrics } from "./voiceMetrics";
 import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
@@ -72,6 +78,15 @@ import { recordTelemetry, successSummary, TELEMETRY_DISCLOSURE } from "./telemet
 import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViolations } from "./recipes";
 import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
+import { createHash } from "node:crypto";
+import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES } from "./asr";
+
+/**
+ * Largest single file the bulk asset path will store. A skills corpus is
+ * thousands of small files (markdown + images); anything this big is a video or
+ * a mistake, and one 200 MB body would take the whole process down with it.
+ */
+const ASSET_MAX_BYTES = 25 * 1024 * 1024;
 
 /**
  * One latency sample. Two sources: `server` (our own stage timings) and
@@ -108,6 +123,18 @@ function headersFromEvent(event: any): Headers {
     (rawHeaders ?? {}) as Record<string, string | string[] | undefined>,
   ).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")]);
   return new Headers(init);
+}
+
+/**
+ * Operator read-back. The owner asking "review my last turn" cannot be answered
+ * from a signed-in endpoint, and timing rows carry no message text — so a
+ * timing-only read is allowed with the ops key. Never widen this to content.
+ */
+function opsAuthorized(event: any): boolean {
+  const want = (process.env.BZ_OPS_KEY || "").trim();
+  if (!want) return false;
+  const got = (headersFromEvent(event).get("x-bz-ops-key") || "").trim();
+  return got.length > 0 && got === want;
 }
 
 export default defineEventHandler(async (event) => {
@@ -278,6 +305,512 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── POST /api/buzzy/transcribe — session-gated ───────────────────────
+  // Server-side ASR so Firefox and Brave can talk at all: Firefox ships no
+  // SpeechRecognition and Brave only returns service-not-allowed from it.
+  // The page posts a raw 16 kHz mono WAV clip; the audio model does the
+  // listening, on the same gateway and key as the voice lane.
+  if (method === "POST" && path === "/api/buzzy/transcribe") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const format = formatFromContentType(getHeader(event, "content-type"));
+    if (!format) {
+      setResponseStatus(event, 415);
+      return {
+        ok: false,
+        error: "Send the clip as audio/wav, audio/mpeg, audio/webm or audio/ogg.",
+        code: "bad_audio_type",
+      };
+    }
+    let audio: Uint8Array;
+    try {
+      audio = new Uint8Array(await event.req.arrayBuffer());
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The recording could not be read.", code: "bad_audio" };
+    }
+    if (audio.byteLength < 1200) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That recording was too short to hear anything.", code: "audio_too_short" };
+    }
+    if (audio.byteLength > ASR_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: "That recording is too long — keep it under a minute.", code: "audio_too_large" };
+    }
+    try {
+      const r = await transcribeAudio(audio, format);
+      // Time to transcript is a product number, not a log line. Recorded with
+      // lane "asr" so ops can tell the browser recognizer apart from this path.
+      const sql = await getSql();
+      await recordVoiceMetrics(sql, {
+        userId: user.id,
+        source: "server",
+        mode: "voice",
+        model: r.model,
+        asrMs: r.ms,
+        lane: "asr",
+      });
+      return { ok: true, text: r.text, ms: r.ms, model: r.model };
+    } catch (e) {
+      setResponseStatus(event, 502);
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "transcription failed",
+        code: "transcribe_failed",
+      };
+    }
+  }
+
+  // ── /api/buzzy/model3d — make a 3D model, poll it, keep the .glb ──────
+  // Two calls because generation outlives a proxy's patience: POST creates the
+  // task, GET polls it and stores the file the first time it is finished.
+  if (path === "/api/buzzy/model3d" || path.startsWith("/api/buzzy/model3d/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const taskId = path.startsWith("/api/buzzy/model3d/") ? path.split("/").pop()! : "";
+
+    if (method === "GET" && !taskId) return { ok: true, configured: threeDConfigured() };
+
+    if (method === "GET" && taskId) {
+      const state = await readModelTask(taskId);
+      if (!state) {
+        setResponseStatus(event, 503);
+        return { ok: false, error: "No 3D provider is configured.", code: "not_configured" };
+      }
+      if (state.status !== "SUCCEEDED" || !state.glbUrl) {
+        return { ok: true, taskId, status: state.status, progress: state.progress, error: state.error };
+      }
+      const name = `model-${taskId.slice(0, 8)}.glb`;
+      const stored = await storeModel(user.id, state.glbUrl, name);
+      if (!stored) {
+        setResponseStatus(event, 502);
+        return { ok: false, error: "Meshy finished but the file could not be fetched.", code: "download_failed" };
+      }
+      return {
+        ok: true,
+        taskId,
+        status: "SUCCEEDED",
+        progress: 100,
+        thumbnail: state.thumbnailUrl,
+        asset: { id: stored.id, url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: "model/gltf-binary" },
+        duplicate: stored.duplicate,
+      };
+    }
+
+    if (method === "POST" && !taskId) {
+      let body: { prompt?: string } = {};
+      try {
+        body = (await event.req.json()) as { prompt?: string };
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { prompt }.", code: "bad_json" };
+      }
+      const r = await createModelTask(String(body.prompt || ""));
+      if (!r.ok) {
+        setResponseStatus(event, r.code === "not_configured" ? 503 : r.code === "no_credits" ? 402 : 502);
+        return { ok: false, error: r.error, code: r.code };
+      }
+      return { ok: true, taskId: r.taskId, status: "PENDING" };
+    }
+
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use POST to start, GET to poll.", code: "method_not_allowed" };
+  }
+
+  // ── POST /api/buzzy/music — make a piece of music, keep it in the chat ──
+  // The result lands in the asset shelf and is returned in the same shape the
+  // chat's media card already renders, so it plays and downloads like any other
+  // file the conversation produced.
+  if (path === "/api/buzzy/music") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    if (method === "GET") return { ok: true, configured: musicConfigured() };
+    if (method !== "POST") {
+      setResponseStatus(event, 405);
+      return { ok: false, error: "Use POST.", code: "method_not_allowed" };
+    }
+    let body: { prompt?: string; seconds?: number } = {};
+    try {
+      body = (await event.req.json()) as { prompt?: string; seconds?: number };
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON: { prompt, seconds }.", code: "bad_json" };
+    }
+    const r = await generateMusic(String(body.prompt || ""), (Number(body.seconds) || 20) * 1000);
+    if (!r.ok) {
+      // 402 is the account's plan, not the caller's mistake — keep that status.
+      setResponseStatus(event, r.code === "paid_plan_required" ? 402 : r.code === "not_configured" ? 503 : 502);
+      return { ok: false, error: r.error, code: r.code };
+    }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const stored = await storeAudio(user.id, r.bytes!, `music-${stamp}.mp3`, r.contentType || "audio/mpeg");
+    return {
+      ok: true,
+      asset: {
+        id: stored.id,
+        url: `/api/buzzy/assets/${stored.id}`,
+        name: `music-${stamp}.mp3`,
+        bytes: stored.bytes,
+        type: "audio/mpeg",
+      },
+      duplicate: stored.duplicate,
+    };
+  }
+
+  // ── POST /api/buzzy/assets — one file of a bulk upload ───────────────
+  // The unit a person actually has is a folder: a skills corpus is markdown
+  // plus thousands of images. The page walks the folder and posts files one at
+  // a time, so an interrupted run resumes instead of re-sending everything.
+  // Content-addressed server-side: the body is hashed here, never trusted from
+  // the client, and a repeat upload of the same bytes returns the existing row.
+  if (method === "POST" && path === "/api/buzzy/assets") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    // x-bz-path carries the folder-relative name; it is display metadata only,
+    // so sanitise hard and never use it to touch the filesystem.
+    const rawPath = (getHeader(event, "x-bz-path") || getHeader(event, "x-bz-filename") || "")
+      .trim()
+      .slice(0, 400);
+    const relPath = rawPath
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .split("/")
+      .filter((seg) => seg && seg !== "." && seg !== "..")
+      .join("/");
+    if (!relPath) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Give the file a name (x-bz-path).", code: "path_required" };
+    }
+    let body: Uint8Array;
+    try {
+      body = new Uint8Array(await event.req.arrayBuffer());
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The file could not be read.", code: "bad_file" };
+    }
+    if (body.byteLength === 0) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That file is empty.", code: "empty_file" };
+    }
+    if (body.byteLength > ASSET_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return {
+        ok: false,
+        error: `That file is ${(body.byteLength / 1048576).toFixed(1)} MB — the limit is ${ASSET_MAX_BYTES / 1048576} MB.`,
+        code: "file_too_large",
+      };
+    }
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    const filename = relPath.split("/").pop() || relPath;
+    const contentType = (getHeader(event, "content-type") || "application/octet-stream").slice(0, 120);
+    const sql = await getSql();
+    const inserted = await sql<{ id: number; rel_path: string }>`
+      INSERT INTO buzzy_assets (user_id, sha256, filename, rel_path, content_type, bytes, body)
+      VALUES (${user.id}, ${sha256}, ${filename}, ${relPath}, ${contentType}, ${body.byteLength}, ${Buffer.from(body)})
+      ON CONFLICT (user_id, sha256) DO NOTHING
+      RETURNING id, rel_path
+    `;
+    if (!inserted.length) {
+      // Same bytes already stored for this account: report it as a hit, not an error.
+      const prior = await sql<{ id: number; rel_path: string; bytes: number }>`
+        SELECT id, rel_path, bytes FROM buzzy_assets
+        WHERE user_id = ${user.id} AND sha256 = ${sha256} LIMIT 1
+      `;
+      return {
+        ok: true,
+        duplicate: true,
+        id: prior[0]?.id ?? null,
+        path: prior[0]?.rel_path ?? relPath,
+        bytes: prior[0]?.bytes ?? body.byteLength,
+        sha256,
+      };
+    }
+    return {
+      ok: true,
+      duplicate: false,
+      id: inserted[0]!.id,
+      path: inserted[0]!.rel_path,
+      bytes: body.byteLength,
+      sha256,
+    };
+  }
+
+  // ── GET /api/buzzy/assets — what this account already has ────────────
+  if (method === "GET" && path === "/api/buzzy/assets") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const qs = new URLSearchParams(fullPath.split("?")[1] || "");
+    const prefix = (qs.get("prefix") || "").slice(0, 200);
+    const want = Math.min(Math.max(Number(qs.get("limit") || 200), 1), 1000);
+    const offset = Math.max(Number(qs.get("offset") || 0), 0);
+    const sql = await getSql();
+    const totals = await sql<{ files: string; total_bytes: string }>`
+      SELECT COUNT(*)::text AS files, COALESCE(SUM(bytes), 0)::text AS total_bytes
+      FROM buzzy_assets WHERE user_id = ${user.id}
+        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
+    `;
+    const rows = await sql<{
+      id: number; filename: string; rel_path: string; content_type: string | null;
+      bytes: number; created_at: string;
+    }>`
+      SELECT id, filename, rel_path, content_type, bytes, created_at
+      FROM buzzy_assets
+      WHERE user_id = ${user.id}
+        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
+      ORDER BY rel_path ASC
+      LIMIT ${want} OFFSET ${offset}
+    `;
+    return {
+      ok: true,
+      files: Number(totals[0]?.files ?? 0),
+      totalBytes: Number(totals[0]?.total_bytes ?? 0),
+      limit: want,
+      offset,
+      items: rows,
+    };
+  }
+
+  // ── GET /api/buzzy/assets/:id — one stored file back ─────────────────
+  if (method === "GET" && /^\/api\/buzzy\/assets\/\d+$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const id = Number(path.split("/").pop());
+    const sql = await getSql();
+    const rows = await sql<{
+      filename: string; content_type: string | null; body: Buffer;
+    }>`
+      SELECT filename, content_type, body FROM buzzy_assets
+      WHERE id = ${id} AND user_id = ${user.id} LIMIT 1
+    `;
+    if (!rows.length) {
+      setResponseStatus(event, 404);
+      return { ok: false, error: "No such file on this account.", code: "not_found" };
+    }
+    const row = rows[0]!;
+    setResponseHeader(event, "content-type", row.content_type || "application/octet-stream");
+    setResponseHeader(event, "content-disposition", `inline; filename="${row.filename.replace(/"/g, "")}"`);
+    return new Uint8Array(row.body);
+  }
+
+  // ── GET /api/buzzy/pricing — what a model costs and who is on the frontier ──
+  if (method === "GET" && path === "/api/buzzy/pricing") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const reachable = new Set(getModels().map((m) => m.model));
+    const all = await priceTable();
+    return {
+      ok: true,
+      reachable: all.filter((p) => reachable.has(p.model)),
+      frontier: (await frontierModels()).filter((m) => reachable.has(m)),
+      frontierTotal: (await frontierModels()).length,
+    };
+  }
+
+  // ── POST /api/buzzy/frontier/rebuild — derive the ranking, do not hand-write it ──
+  if (method === "POST" && path === "/api/buzzy/frontier/rebuild") {
+    const opsKey = getHeader(event, "x-bz-ops-key") || "";
+    const expected = process.env.BZ_OPS_KEY || "";
+    if (!expected || opsKey !== expected) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    const reachable = getModels().map((m) => m.model);
+    const built = await buildRanking(reachable);
+    await saveSnapshot(built as unknown as Parameters<typeof saveSnapshot>[0], built.source, built.note);
+    return {
+      ok: true,
+      saved: await frontierAsOfLive(),
+      reachable: reachable.length,
+      frontierFlagged: built.all.filter((e) => e.onFrontier).map((e) => e.model),
+      order: Object.fromEntries(Object.entries(built.categories).map(([k, v]) => [k, v.map((e) => e.model)])),
+    };
+  }
+
+  // ── POST /api/buzzy/frontier — refresh the cached ranking ─────────────
+  // Out-of-band only: a run must never wait on a third-party page. Guarded by
+  // the ops key so a user cannot silently re-point every graph's model choice.
+  if (method === "POST" && path === "/api/buzzy/frontier") {
+    const opsKey = getHeader(event, "x-bz-ops-key") || "";
+    const expected = process.env.BZ_OPS_KEY || "";
+    if (!expected || opsKey !== expected) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    let body: unknown;
+    try {
+      body = await event.req.json();
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON.", code: "bad_json" };
+    }
+    const checked = validateSnapshot(body);
+    if (!checked.ok) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: checked.error, code: "bad_ranking" };
+    }
+    await saveSnapshot(checked.snap, checked.snap.source, checked.snap.note);
+    return { ok: true, saved: await frontierAsOfLive() };
+  }
+
+  // ── GET /api/buzzy/frontier — what a pin resolves to, before it runs ──
+  // The whiteboard uses this to show the model a node will use, and a run uses
+  // the same function so what you see authored is what executes.
+  if (method === "GET" && path === "/api/buzzy/frontier") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const qs = new URLSearchParams(fullPath.split("?")[1] || "");
+    // The catalog is what this deployment can actually call; resolving against it
+    // is what makes "unavailable" detectable instead of hypothetical.
+    let catalog: string[] = [];
+    try {
+      catalog = getModels().map((m) => m.model);
+    } catch {
+      catalog = []; // unknown: resolvePin trusts the cache and marks it
+    }
+    const category = qs.get("category");
+    const family = qs.get("family");
+    const review = qs.get("review");
+    try {
+      if (review && category) {
+        const r = await resolveReviewLive(review, category, Number(qs.get("position") || 1), catalog);
+        return { ok: true, resolution: r, independent: r.provider !== providerOf(review) };
+      }
+      let pin: ModelPin;
+      if (category) pin = { mode: "frontier", category, position: Number(qs.get("position") || 1) };
+      else if (family) pin = { mode: "latest", family };
+      else return { ok: true, frontier: await frontierAsOfLive(), catalog: catalog.length, reachable: catalog };
+      const r = await resolvePinLive(pin, catalog, qs.get("avoid") || undefined);
+      return { ok: true, resolution: r };
+    } catch (e) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: (e as Error).message, code: "unresolvable" };
+    }
+  }
+
+  // ── /api/buzzy/runs — execute a graph, resume past a gate, read it back ──
+  // Running is synchronous: a four-node workflow is a handful of model calls,
+  // and a run that returns only after it finished cannot lie about its status.
+  if (path.startsWith("/api/buzzy/runs")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const parts = path.split("/").filter(Boolean); // [api, buzzy, runs, id?, approve?]
+    const runId = parts[3] || "";
+    const action = parts[4] || "";
+
+    if (method === "GET" && runId) {
+      const run = await readRun(user.id, runId);
+      if (!run) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such run on this account.", code: "not_found" };
+      }
+      return { ok: true, run };
+    }
+
+    if (method === "POST" && runId && action === "approve") {
+      try {
+        const r = await resumeRun(user.id, runId);
+        const run = await readRun(user.id, runId);
+        return { ok: true, resumed: r, run };
+      } catch (e) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: (e as Error).message, code: "cannot_resume" };
+      }
+    }
+    setResponseStatus(event, 404);
+    return { ok: false, error: "Use GET /api/buzzy/runs/:id or POST /api/buzzy/runs/:id/approve.", code: "not_found" };
+  }
+
+  // ── POST /api/buzzy/graphs/:id/run — start it ────────────────────────
+  if (method === "POST" && /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+\/run$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const graphId = path.split("/")[4]!;
+    try {
+      const r = await startRun(user.id, graphId);
+      const run = await readRun(user.id, r.runId);
+      return { ok: true, ...r, run };
+    } catch (e) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: (e as Error).message, code: "cannot_run" };
+    }
+  }
+
+  // ── /api/buzzy/graphs — author, list and read orchestration graphs ────
+  // 6d's whiteboard writes through here; a run (6e) freezes what it reads.
+  if (path === "/api/buzzy/graphs" || /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const graphId = path.startsWith("/api/buzzy/graphs/") ? path.split("/").pop()! : null;
+
+    if (method === "GET" && graphId) {
+      const g = await loadGraph(user.id, graphId);
+      if (!g) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such graph on this account.", code: "not_found" };
+      }
+      return { ok: true, graph: g };
+    }
+
+    if (method === "GET") {
+      const qs = new URLSearchParams(fullPath.split("?")[1] || "");
+      const graphs = await listGraphs(user.id, Number(qs.get("limit") || 50));
+      return { ok: true, graphs };
+    }
+
+    if (method === "POST") {
+      let body: unknown;
+      try {
+        body = await event.req.json();
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+      const checked = validateGraph(body);
+      if (!checked.ok) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: checked.error, code: checked.code };
+      }
+      const saved = await saveGraph(user.id, checked.graph);
+      return { ok: true, id: saved.id, version: saved.version };
+    }
+
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET or POST.", code: "method_not_allowed" };
+  }
+
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
   if (method === "POST" && path === "/api/buzzy/chat") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
@@ -297,10 +830,267 @@ export default defineEventHandler(async (event) => {
       /* empty body → bad_request from chatLoop */
     }
 
-    const turn = await runChatTurn({ userId, body });
-    if (turn.kind === "stream") return turn.response;
-    if (turn.status !== 200) setResponseStatus(event, turn.status);
-    return turn.payload;
+    const jobId: string | null = typeof body.jobId === "string" ? body.jobId : null;
+    const sessionId: string | null = typeof body.sessionId === "string" ? body.sessionId : null;
+    const message: string = typeof body.message === "string" ? body.message : "";
+    const model: string | undefined = typeof body.model === "string" ? body.model : undefined;
+    const attemptId: string | null = typeof body.attemptId === "string" && body.attemptId.trim()
+      ? body.attemptId.trim().slice(0, 80)
+      : null;
+    const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
+    // UI mode: "work" steers toward a work effort, "chat" is ordinary
+    // conversation. Unknown values fall back to chat inside chatLoop.
+    const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
+    // Voice lane: stream text + audio back over SSE so speech starts on the
+    // first audio chunk instead of after the whole buffered reply.
+    const voice = body.voice === true;
+    const voiceName = typeof body.voiceName === "string" ? body.voiceName.trim().slice(0, 24) : undefined;
+    const surface: "text" | "voice" = voice ? "voice" : "text";
+
+    const sql = await getSql();
+
+    // ── BZ-F024: pause/cancel stops future work (QA-15) ───────────────
+    // A cancelled or paused job takes no new turns — no further model calls
+    // happen against it until the owner deliberately resumes. Plain-language
+    // consequences, never a silent no-op.
+    if (jobId) {
+      const st = await sql<{ status: string | null }>`
+        SELECT status FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId} LIMIT 1
+      `;
+      const status = st[0]?.status ?? null;
+      if (status === "Cancelled") {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          error: "This job is cancelled — nothing more will run on it. Start a new job if you want to pick the idea up again.",
+          code: "job_cancelled",
+        };
+      }
+      if (status === "Paused") {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          error: "This job is paused — no work (and no spend) is happening. Resume it when you're ready and we'll pick up where we stopped.",
+          code: "job_paused",
+        };
+      }
+    }
+
+    // ── BZ-F024: attempt reconciliation (QA-09/10) ─────────────────────
+    // A retried send with the same attemptId returns the STORED reply —
+    // the model is not called twice, so no duplicate charge or artifact.
+    if (attemptId) {
+      const prior = await sql<{ content: string }>`
+        SELECT content FROM buzzy_chat_messages
+        WHERE user_id = ${userId}
+          AND COALESCE(job_id, '') = COALESCE(${jobId}, '')
+          AND COALESCE(session_id, '') = COALESCE(${sessionId}, '')
+          AND attempt_id = ${attemptId}
+          AND role = 'assistant'
+        ORDER BY created_at ASC LIMIT 1
+      `;
+      if (prior.length) {
+        // Return the current brief so a retry after a reload still fills the box.
+        const slotRows = await sql<{ key: string; value: string }>`
+          SELECT key, value FROM buzzy_user_memory
+          WHERE user_id = ${userId} AND job_id IS NOT DISTINCT FROM ${jobId || sessionId}
+        `;
+        const known = new Set([...STATEMENT_IDS, ...DEEPENING_IDS]);
+        const slots: Record<string, string> = {};
+        for (const r of slotRows) {
+          if (known.has(r.key) && r.value?.trim()) slots[r.key] = r.value;
+        }
+        return { ok: true, reply: prior[0].content, reconciled: true, slots };
+      }
+    }
+
+    let companyId: string | null = null;
+    if (typeof body.companyId === "string" && isCompanyId(body.companyId)) {
+      companyId = body.companyId;
+    } else if (sessionId) {
+      const sess = await sql<{ company_id: string | null }>`
+        SELECT company_id FROM buzzy_sessions
+        WHERE id = ${sessionId} AND user_id = ${userId}
+        LIMIT 1
+      `;
+      const fromSession = sess[0]?.company_id;
+      if (typeof fromSession === "string" && isCompanyId(fromSession)) companyId = fromSession;
+    }
+    const company = companyId ? await confirmedCompanyContext(sql, userId, companyId) : null;
+    // Customer memory (component #2): inject approved-work history so later
+    // jobs don't re-ask what earlier approvals already established.
+    let customerMemoryBlock = "";
+    if (companyId) {
+      try {
+        const memRows = await sql`
+          SELECT customer_memory FROM buzzy_companies
+          WHERE id = ${companyId} AND user_id = ${userId} AND customer_memory != '[]'::jsonb
+          LIMIT 1
+        `;
+        const mem = memRows[0]?.customer_memory as CustomerMemoryEntry[] | undefined;
+        if (Array.isArray(mem) && mem.length > 0) customerMemoryBlock = memoryContextBlock(mem);
+      } catch { /* memory is additive — never block the chat */ }
+    }
+
+    const turnStarted = Date.now();
+    await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface } });
+
+    const runTurn = (opts?: { speech?: VoiceHandlers; onText?: (t: string) => void }) =>
+      chatLoop({
+        userId,
+        jobId,
+        sessionId,
+        message,
+        model,
+        attemptId,
+        jobContext,
+        mode,
+        companyName: company?.name ?? null,
+        companyFacts: company?.facts ?? [],
+        customerMemoryBlock,
+        surface,
+        speech: opts?.speech,
+        voiceName,
+        onText: opts?.onText,
+      });
+
+    // ── Voice lane: text + audio streamed as Server-Sent Events ────────
+    // Events: text {t} · audio {b64,format} · done {ChatResponse} · error {error}
+    // The final `done` payload is the SAME ChatResponse the text lane returns,
+    // so the client runs one post-processing path for both.
+    if (voice) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          let closed = false;
+          const send = (event: string, data: unknown) => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            } catch {
+              closed = true;
+            }
+          };
+          try {
+            const result = await runTurn({
+              speech: {
+                onText: (t) => send("text", { t }),
+                onAudio: (b64, format) => send("audio", { b64, format }),
+              },
+            });
+            send("done", result);
+            if (result.timings) {
+              await recordVoiceMetrics(sql, {
+                userId,
+                jobId,
+                sessionId,
+                source: "server",
+                mode,
+                model: result.timings.model,
+                ttftMs: result.timings.ttftMs,
+                ttfaMs: result.timings.ttfaMs,
+                turnMs: result.timings.totalMs,
+                extractMs: result.timings.extractMs,
+                llmMs: result.timings.llmMs,
+                honchoMs: result.timings.honchoMs,
+                replyChars: result.reply?.length ?? 0,
+                spoken: true,
+              });
+            }
+          } catch (err) {
+            console.error("[buzzy/voice] turn failed:", err instanceof Error ? err.message : err);
+            send("error", { error: "The voice turn failed. Try again — the text chat still works." });
+          } finally {
+            closed = true;
+            try {
+              controller.close();
+            } catch {
+              /* already closed by the client */
+            }
+          }
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    // ── Typed lane, streamed ───────────────────────────────────────────
+    // Same SSE contract as the voice lane minus audio: `text` deltas then
+    // `done`. The page paints words as they arrive instead of after the whole
+    // reply is buffered.
+    if (body.stream === true) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          let closed = false;
+          const send = (event: string, data: unknown) => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            } catch {
+              closed = true;
+            }
+          };
+          try {
+            const result = await runTurn({ onText: (t) => send("text", { t }) });
+            send("done", result);
+          } catch (err) {
+            console.error("[buzzy/text] turn failed:", err instanceof Error ? err.message : err);
+            send("error", { error: "The turn failed. Try again." });
+          } finally {
+            closed = true;
+            try { controller.close(); } catch { /* already closed */ }
+          }
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    const result = await runTurn();
+    // Typed turns belong in the same log. Until now only the voice lane wrote a
+    // server sample, so a slow typed turn left no trace at all — which is
+    // exactly the turn the owner asked to have reviewed.
+    if (result.timings) {
+      try {
+        await recordVoiceMetrics(sql, {
+          userId,
+          jobId,
+          sessionId,
+          source: "server",
+          mode,
+          lane: "text",
+          model: result.timings.model,
+          ttftMs: result.timings.ttftMs,
+          ttfaMs: result.timings.ttfaMs,
+          turnMs: result.timings.totalMs,
+          extractMs: result.timings.extractMs,
+          llmMs: result.timings.llmMs,
+          honchoMs: result.timings.honchoMs,
+          replyChars: result.reply?.length ?? 0,
+          spoken: false,
+        });
+      } catch { /* metrics never break a turn */ }
+    }
+    // BZ-F039: a draft was shown to the human (no content recorded — ids and
+    // timing only). Check verdicts travel as their own events.
+    const replyText = typeof (result as { reply?: unknown }).reply === "string" ? String((result as { reply: string }).reply) : "";
+    await recordTelemetry(sql, { userId, jobId, event: "draft_shown",
+      props: { surface: "chat", ms: Date.now() - turnStarted, count: replyText.length > 0 ? 1 : 0 } });
+    return result;
   }
 
   // ── Voice + turn latency metrics ───────────────────────────────────
@@ -339,18 +1129,28 @@ export default defineEventHandler(async (event) => {
       replyChars: num("replyChars"),
       audioBytes: num("audioBytes"),
       spoken: body.spoken === true,
+      lane: typeof body.lane === "string" ? body.lane.slice(0, 8) : null,
+      speechMs: num("speechMs"),
     });
     return { ok: true };
   }
   if (method === "GET" && path === "/api/buzzy/voice-metrics") {
-    const user = await getSessionUserFromHeaders(headersFromEvent(event));
-    if (!user) {
+    const ops = opsAuthorized(event);
+    const user = ops ? null : await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!ops && !user) {
       setResponseStatus(event, 401);
       return { error: "Sign in required", code: "signed_out" };
     }
+    const opsUser = ops ? queryValue(fullPath, "user") : null;
     const sql = await getSql();
+    // Never a nested query fragment (postgres.js would execute it). Two plain
+    // parameters instead: "everything" for the operator, "one owner" otherwise.
+    const scopeAll = ops && !opsUser;
+    // `user` is null on the ops path, so it must be optional here.
+    const scopeUid = opsUser ?? user?.id ?? "";
     const daysRaw = Number(queryValue(fullPath, "days"));
     const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(90, Math.round(daysRaw)) : 7;
+    try {
     const summary = (await sql`
       SELECT
         count(*)::int                                              AS turns,
@@ -365,8 +1165,8 @@ export default defineEventHandler(async (event) => {
         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract_ms)    AS extract_p50,
         percentile_cont(0.5) WITHIN GROUP (ORDER BY asr_ms)        AS asr_p50
       FROM buzzy_voice_metrics
-      WHERE user_id = ${user.id}
-        AND created_at > now() - (${days} || ' days')::interval
+      WHERE (${scopeAll} OR user_id = ${scopeUid})
+        AND created_at > now() - (${days} * interval '1 day')
     `) as Array<Record<string, number | null>>;
     const byDay = (await sql`
       SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
@@ -376,18 +1176,68 @@ export default defineEventHandler(async (event) => {
              percentile_cont(0.5) WITHIN GROUP (ORDER BY turn_ms) AS turn_p50,
              percentile_cont(0.95) WITHIN GROUP (ORDER BY turn_ms) AS turn_p95
       FROM buzzy_voice_metrics
-      WHERE user_id = ${user.id}
-        AND created_at > now() - (${days} || ' days')::interval
+      WHERE (${scopeAll} OR user_id = ${scopeUid})
+        AND created_at > now() - (${days} * interval '1 day')
       GROUP BY 1 ORDER BY 1 DESC
     `) as Array<Record<string, unknown>>;
     const recent = (await sql`
-      SELECT created_at, source, mode, model, asr_ms, ttft_ms, ttfa_ms, turn_ms,
-             extract_ms, llm_ms, reply_chars, spoken
+      SELECT created_at, source, mode, model, lane, asr_ms, ttft_ms, ttfa_ms, turn_ms,
+             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id, speech_ms
       FROM buzzy_voice_metrics
-      WHERE user_id = ${user.id}
+      WHERE (${scopeAll} OR user_id = ${scopeUid})
       ORDER BY created_at DESC LIMIT 25
     `) as Array<Record<string, unknown>>;
-    return { ok: true, days, summary: summary[0] ?? null, byDay, recent };
+    // One row per TURN, not per sample: the server row and the client row are
+    // written ~1ms apart for the same turn, and only together do they answer
+    // "how long did the owner talk, and how long did we take to answer".
+    // One entry per TURN. The server row and the client row for the same turn
+    // are written ~1ms apart, so pair by session id and proximity — bucketing by
+    // clock time splits them at bucket edges.
+    const rowsSorted = (recent as Array<Record<string, any>>)
+      .slice()
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const used = new Set<number>();
+    const shaped: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < rowsSorted.length; i++) {
+      if (used.has(i)) continue;
+      const r = rowsSorted[i];
+      used.add(i);
+      let partner: Record<string, any> | null = null;
+      for (let j = i + 1; j < rowsSorted.length; j++) {
+        if (used.has(j)) continue;
+        const q = rowsSorted[j];
+        if (q.session_id !== r.session_id || q.source === r.source) continue;
+        if (Math.abs(new Date(r.created_at).getTime() - new Date(q.created_at).getTime()) > 3000) break;
+        partner = q;
+        used.add(j);
+        break;
+      }
+      const c = (r.source === "client" ? r : partner) ?? {};
+      const v = (r.source === "server" ? r : partner) ?? {};
+      shaped.push({
+        at: r.created_at,
+        session_id: r.session_id,
+        user_id: r.user_id,
+        model: c.model ?? v.model ?? null,
+        lane: c.lane ?? v.lane ?? null,
+        speech_ms: c.speech_ms ?? v.speech_ms ?? null,
+        asr_ms: c.asr_ms ?? null,
+        ttft_ms: c.ttft_ms ?? v.ttft_ms ?? null,
+        ttfa_ms: c.ttfa_ms ?? v.ttfa_ms ?? null,
+        turn_ms: c.turn_ms ?? v.turn_ms ?? null,
+        reply_chars: c.reply_chars ?? v.reply_chars ?? null,
+        spoken: c.spoken ?? v.spoken ?? null,
+        overhead_ms:
+          c.turn_ms != null && v.turn_ms != null ? Math.round(c.turn_ms - v.turn_ms) : null,
+      });
+    }
+    return { ok: true, days, summary: summary[0] ?? null, byDay, turns: shaped, recent };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[buzzy/ops] voice-metrics read failed:", msg);
+      if (ops) { setResponseStatus(event, 500); return { ok: false, error: msg }; }
+      throw err;
+    }
   }
 
   // ── GET /api/buzzy/tool-calls — what the harness actually ran ───────
@@ -406,7 +1256,7 @@ export default defineEventHandler(async (event) => {
       SELECT created_at, tool, gate, ms, ok, error_code, result_bytes, path, job_id
       FROM buzzy_tool_calls
       WHERE user_id = ${user.id}
-        AND created_at > now() - (${days} || ' days')::interval
+        AND created_at > now() - (${days} * interval '1 day')
       ORDER BY created_at DESC
       LIMIT 50
     `) as Array<Record<string, unknown>>;
@@ -418,7 +1268,7 @@ export default defineEventHandler(async (event) => {
              percentile_cont(0.95) WITHIN GROUP (ORDER BY ms)     AS ms_p95
       FROM buzzy_tool_calls
       WHERE user_id = ${user.id}
-        AND created_at > now() - (${days} || ' days')::interval
+        AND created_at > now() - (${days} * interval '1 day')
       GROUP BY tool ORDER BY calls DESC
     `) as Array<Record<string, unknown>>;
     return { ok: true, days, summary, calls };

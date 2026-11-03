@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something broken in core board / agent API / self-host
+about: Something broken in core board / agent API / BeeZilla / self-host
 title: "[bug] "
 labels: ["core"]
 ---
@@ -16,9 +16,10 @@ labels: ["core"]
 
 ## Environment
 
-- Dev Boards version / commit:
-- Node:
+- Version / commit:
+- Node (`node -v`):
 - Postgres or PGLite:
 - Self-host / hosted:
+- Surface (`/api/agent`, `/buzzy/*`, operator UI, TUI, desktop):
 
-## Logs (redact secrets)
+## Logs (redact secrets — no API keys, tokens, or `.env` values)

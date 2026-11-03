@@ -83,6 +83,49 @@
     .lock a { color: var(--bz-yellow); text-decoration: none; font-weight: 600; }
     .lock a:hover { text-decoration: underline; }
 
+    /* Purchase confirmation. A price is a promise; clicking once should not spend. */
+    .bz-modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+      display: flex; align-items: center; justify-content: center; padding: 1.25rem;
+      z-index: 50;
+    }
+    .bz-modal {
+      background: var(--bz-panel); border: 1px solid #2F2F2F; border-top: 3px solid var(--bz-yellow);
+      border-radius: 8px; max-width: 420px; width: 100%; padding: 1.35rem 1.4rem 1.2rem;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+    }
+    .bz-modal h2 { margin: 0 0 0.35rem; font-size: 1.12rem; color: #fff; }
+    .bz-modal .sub { margin: 0 0 1rem; color: #A8A8A8; font-size: 0.88rem; }
+    .bz-modal .line {
+      display: flex; justify-content: space-between; gap: 1rem;
+      padding: 0.45rem 0; border-top: 1px solid #242424; font-size: 0.88rem; color: #C9CDD2;
+    }
+    .bz-modal .line b { color: #fff; font-variant-numeric: tabular-nums; }
+    .bz-modal .line.total { border-top: 1px solid #3A3A3A; font-weight: 700; }
+    .bz-modal .warn { color: #FF8A80; font-size: 0.82rem; margin: 0.7rem 0 0; }
+    .bz-modal .actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.15rem; }
+    .bz-modal button { font: inherit; font-size: 0.85rem; border-radius: 6px; padding: 0.5rem 1rem; cursor: pointer; border: 1px solid #333; }
+    .bz-modal .cancel { background: transparent; color: #C9CDD2; }
+    .bz-modal .confirm { background: var(--bz-yellow); color: #111; border-color: var(--bz-yellow); font-weight: 700; }
+    .bz-modal .confirm:disabled { opacity: 0.55; cursor: default; }
+
+    .tabs { display: flex; gap: 0.4rem; margin: 0 0 1.25rem; flex-wrap: wrap; border-bottom: 1px solid #222; }
+    .tab {
+      background: none; border: 0; border-bottom: 2px solid transparent;
+      color: #8A8A8A; font: inherit; font-size: 0.86rem; font-weight: 600;
+      padding: 0.55rem 0.85rem; cursor: pointer;
+    }
+    .tab:hover { color: #C9CDD2; }
+    .tab.active { color: #fff; border-bottom-color: var(--bz-yellow); }
+    .tab .n {
+      display: inline-block; min-width: 1.35rem; text-align: center;
+      font-size: 0.7rem; font-weight: 700; color: #8A8A8A;
+      background: #1B1B1B; border-radius: 999px; padding: 0.05rem 0.35rem; margin-left: 0.3rem;
+    }
+    .tab.active .n { color: #111; background: var(--bz-yellow); }
+
+    .chip.owned { color: #67D99B; border-color: #2F6F4F; background: rgba(103,217,155,0.08); }
+
     .state { padding: 2rem 0; color: #7A7A7A; font-size: 0.88rem; }
     .state.error { color: #FF8A80; }
 
@@ -97,22 +140,53 @@
 <body data-bz-active="recipes">
   <header>
     <div class="header-inner">
-      <a href="/buzzy/" class="brand-link">
+      <a href="/buzzy/talk" class="brand-link">
         <div class="brand">
-          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
           <strong>BeeZilla</strong>
         </div>
       </a>
-      <nav>
-        <a href="/buzzy/">Talk</a>
-        <a href="/buzzy/memory">Memory</a>
-        <a href="/buzzy/experts">Experts</a>
-        <a href="/buzzy/recipes" class="active">Recipes</a>
-        <a href="/buzzy/library">Library</a>
-        <a href="/buzzy/wallet">Honey Drops</a>
-        <a href="/buzzy/upload">Publish</a>
-        <a href="/buzzy/landing" class="account-link">Sign in</a>
-      </nav>
+      <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+    </nav>
+    <script>
+    /* ONE navigation, defined once. Every page used to hand-write its own nav
+       and they drifted: "Talk" pointed at /buzzy/ (the Jobs/Library page), so the
+       chat was unreachable from the nav — that is why you could not get back to
+       TALK. Active state is computed here from the path, not hard-coded per page. */
+    (function () {
+      var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+      // index.html serves ONLY /buzzy/library; every other /buzzy route
+      // redirects to the chat, so bare /buzzy counts as Talk here.
+      var section = "library";
+      if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
+      else if (/^\/buzzy\/library$/.test(path)) section = "library";
+      else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
+      else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
+      else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
+      else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
+      else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
+      var links = document.querySelectorAll("#bzNav a[data-nav]");
+      for (var i = 0; i < links.length; i++) {
+        var on = links[i].getAttribute("data-nav") === section;
+        links[i].classList.toggle("active", on);
+        if (on) links[i].setAttribute("aria-current", "page");
+        else links[i].removeAttribute("aria-current");
+      }
+      // Account identity is the page's own job (each page has its own session
+      // code). The nav only guarantees the links and their order.
+    })();
+    </script>
     </div>
   </header>
 
@@ -124,6 +198,10 @@
         You can see what it does, who made it, when it last changed and what it costs — <strong>the
         method stays sealed</strong> until you buy it.
       </p>
+      <p class="lede">
+        Got a sequence of your own? <a href="/buzzy/graph">Put it on the canvas</a> — steps, models
+        and the review, in the order you want them run.
+      </p>
     </div>
 
     <div class="legend">
@@ -131,6 +209,12 @@
       <span><b>Sealed</b> — the steps are never published</span>
       <span><b>Checked</b> — every recipe ships with its rules</span>
       <span class="hint" id="count"></span>
+    </div>
+
+    <div class="tabs" id="tabs" role="tablist">
+      <button class="tab" data-tab="mine" role="tab">My Recipes <span class="n" id="n-mine">0</span></button>
+      <button class="tab" data-tab="acquired" role="tab">Recipes Acquired <span class="n" id="n-acq">0</span></button>
+      <button class="tab active" data-tab="community" role="tab">Community Recipes <span class="n" id="n-all">0</span></button>
     </div>
 
     <div id="shelf" class="grid"></div>
@@ -165,6 +249,167 @@
         return n;
       }
 
+      /* The single write path: every buy button and the dialog both end here. */
+      function doPurchase(btn, r) {
+        btn.disabled = true;
+        btn.textContent = "Working…";
+        fetch("/api/wallet/purchase", {
+          method: "POST", credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ hash: r.hash })
+        })
+          .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
+          .then(function (out) {
+            if (out.s === 200 && out.j.ok) {
+              btn.textContent = "Opened ✓";
+              btn.style.background = "#2F6F4F";
+              btn.style.color = "#E8F7EE";
+              if (window.BZ_HONEY) window.BZ_HONEY.refresh();
+            } else if (out.j.code === "free_recipe") {
+              btn.textContent = "Claimed ✓";
+              btn.style.background = "#2F6F4F";
+            } else if (out.j.code === "already_owned") {
+              btn.textContent = "Already yours";
+              btn.disabled = true;
+            } else if (out.s === 402) {
+              btn.textContent = "Not enough Drops";
+              btn.disabled = false;
+            } else {
+              btn.textContent = out.j.error || "Could not buy";
+              btn.disabled = false;
+            }
+          })
+          .catch(function () { btn.textContent = "Try again"; btn.disabled = false; });
+      }
+
+      /* Spend nothing on an accidental click. The dialog states the price, what the
+         buyer holds now, and what they will hold afterwards — the only three numbers
+         that decide whether this is a good idea. */
+      function confirmPurchase(btn, r) {
+        var price = Number(r.price_honey_drops || 0);
+        var backdrop = el("div", "bz-modal-backdrop");
+        var box = el("div", "bz-modal");
+        box.setAttribute("role", "dialog");
+        box.setAttribute("aria-modal", "true");
+        box.appendChild(el("h2", null, "Buy this recipe?"));
+        box.appendChild(el("p", "sub", r.title || r.id));
+
+        var balanceNow = null;
+        function render(balance) {
+          balanceNow = balance;
+          var after = Math.max(0, balance - price);
+          box.querySelectorAll(".line, .warn").forEach(function (n) { n.remove(); });
+          box.appendChild(line("Price", price.toLocaleString() + " Honey Drops"));
+          box.appendChild(line("You have", balance.toLocaleString() + " Drops"));
+          var tot = line("After this purchase", after.toLocaleString() + " Drops");
+          tot.className = "line total";
+          box.appendChild(tot);
+          // Re-enable as well as disable: the first paint happens before the balance
+          // arrives, so a one-way disable leaves a purchasable recipe un-buyable.
+          var short = balance < price;
+          confirm.disabled = short;
+          if (short) {
+            box.appendChild(el("p", "warn", "Not enough Honey Drops — you need " +
+              (price - balance).toLocaleString() + " more."));
+          }
+        }
+        function line(label, value) {
+          var d = el("div", "line");
+          d.appendChild(el("span", null, label));
+          d.appendChild(el("b", null, value));
+          return d;
+        }
+
+        var actions = el("div", "actions");
+        var cancel = el("button", "cancel", "Cancel");
+        var confirm = el("button", "confirm", "Buy for " + price.toLocaleString() + " Drops");
+        actions.appendChild(cancel); actions.appendChild(confirm);
+        box.appendChild(actions);
+        backdrop.appendChild(box);
+        document.body.appendChild(backdrop);
+        confirm.disabled = true;
+        render(0);
+
+        fetch("/api/wallet", { credentials: "same-origin" })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (w) { render(w && typeof w.balance === "number" ? w.balance : 0); })
+          .catch(function () { render(0); });
+
+        function close() { backdrop.remove(); document.removeEventListener("keydown", onKey); }
+        function onKey(e) { if (e.key === "Escape") close(); }
+        document.addEventListener("keydown", onKey);
+        cancel.addEventListener("click", close);
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) close(); });
+        confirm.addEventListener("click", function () { close(); doPurchase(btn, r); });
+      }
+
+      /* Running a recipe you own: give it a brief, get the document and the verdict.
+         The method stays on the server; what comes back is the work and the checks. */
+      function useRecipe(r) {
+        var backdrop = el("div", "bz-modal-backdrop");
+        var box = el("div", "bz-modal");
+        box.setAttribute("role", "dialog");
+        box.appendChild(el("h2", null, "Use this recipe"));
+        box.appendChild(el("p", "sub", r.title || r.id));
+
+        var brief = document.createElement("textarea");
+        brief.placeholder = "Tell it what this job is. The more specific, the better.";
+        brief.style.cssText = "width:100%;min-height:110px;background:#101010;border:1px solid #2A2A2A;border-radius:6px;color:#E8E8E8;font:inherit;font-size:0.9rem;padding:0.6rem 0.7rem;margin-top:0.4rem;";
+        box.appendChild(brief);
+
+        var out = el("div");
+        out.style.cssText = "margin-top:0.9rem;font-size:0.86rem;color:#C9CDD2;max-height:320px;overflow:auto;";
+        box.appendChild(out);
+
+        var actions = el("div", "actions");
+        var close = el("button", "cancel", "Close");
+        var run = el("button", "confirm", "Run it");
+        actions.appendChild(close); actions.appendChild(run);
+        box.appendChild(actions);
+        backdrop.appendChild(box);
+        document.body.appendChild(backdrop);
+
+        function dismiss() { backdrop.remove(); document.removeEventListener("keydown", onKey); }
+        function onKey(e) { if (e.key === "Escape") dismiss(); }
+        document.addEventListener("keydown", onKey);
+        close.addEventListener("click", dismiss);
+        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) dismiss(); });
+
+        run.addEventListener("click", function () {
+          var text = brief.value.trim();
+          if (!text) { out.textContent = "Tell it what the job is first."; return; }
+          run.disabled = true; run.textContent = "Working…"; out.textContent = "Running the method…";
+          fetch("/api/recipes/" + encodeURIComponent(r.hash) + "/use", {
+            method: "POST", credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ input: text })
+          })
+            .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
+            .then(function (res) {
+              run.disabled = false; run.textContent = "Run it";
+              out.textContent = "";
+              if (!res.j.artifact) { out.textContent = res.j.error || res.j.note || "It could not run this."; return; }
+              var h = el("div", null, res.j.artifact.title);
+              h.style.cssText = "font-weight:700;color:#fff;margin-bottom:0.5rem;";
+              out.appendChild(h);
+              res.j.artifact.sections.forEach(function (sec) {
+                var t = el("div", null, sec.title);
+                t.style.cssText = "font-weight:650;color:#FFC107;margin:0.6rem 0 0.2rem;";
+                out.appendChild(t);
+                var b = el("div", null, sec.body);
+                b.style.cssText = "white-space:pre-wrap;color:#C9CDD2;";
+                out.appendChild(b);
+              });
+              var verdict = el("div", null, res.j.ok
+                ? "Checks: all " + (res.j.codes.length ? "clear" : "passed")
+                : "Checks flagged: " + (res.j.codes || []).join(", "));
+              verdict.style.cssText = "margin-top:0.8rem;font-size:0.78rem;color:" + (res.j.ok ? "#67D99B" : "#FF8A80") + ";";
+              out.appendChild(verdict);
+            })
+            .catch(function (e) { run.disabled = false; run.textContent = "Run it"; out.textContent = "Could not run it (" + e.message + ")."; });
+        });
+      }
+
       function card(r) {
         var c = el("article", "card");
         var row = el("div", "row");
@@ -188,63 +433,124 @@
         c.appendChild(meta);
 
         var chips = el("div", "chips");
+        if (OWNED.has(r.hash)) chips.appendChild(el("span", "chip owned", r.author && r.author.id === ME ? "Yours" : "Owned"));
+        var rt = r.rating || { average: null, count: 0 };
+        if (rt.count > 0) {
+          chips.appendChild(el("span", "chip rating", "★ " + rt.average.toFixed(1) + " (" + rt.count + ")"));
+        } else {
+          chips.appendChild(el("span", "chip rating dim", "★ no ratings yet"));
+        }
         var cap = r.capability || {};
         (cap.outputs || []).forEach(function (o) { chips.appendChild(el("span", "chip", String(o))); });
         if (r.hash) chips.appendChild(el("span", "chip record", r.hash.slice(0, 10)));
         if (r.version) chips.appendChild(el("span", "chip", "v" + r.version));
         c.appendChild(chips);
 
+        if (r.author && r.author.id !== ME && OWNED.has(r.hash)) {
+          var stars = el("div", "stars");
+          stars.style.cssText = "display:flex;gap:0.2rem;align-items:center;font-size:0.8rem;color:#7A7A7A;";
+          stars.appendChild(el("span", null, "Rate it:"));
+          for (var si = 1; si <= 5; si++) {
+            (function (n) {
+              var b = el("button", "star", "★");
+              b.style.cssText = "background:none;border:0;color:#4A4A4A;font-size:0.95rem;cursor:pointer;padding:0 0.1rem;line-height:1;";
+              b.setAttribute("aria-label", n + " star" + (n === 1 ? "" : "s"));
+              b.addEventListener("click", function () {
+                fetch("/api/recipes/" + encodeURIComponent(r.hash) + "/rate", {
+                  method: "POST", credentials: "same-origin",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ stars: n })
+                })
+                  .then(function (res) { return res.json(); })
+                  .then(function (j) {
+                    if (!j.ok) { stars.appendChild(el("span", null, " " + (j.error || "could not save"))); return; }
+                    [].forEach.call(stars.querySelectorAll(".star"), function (el2, idx) {
+                      el2.style.color = idx < n ? "#FFC107" : "#4A4A4A";
+                    });
+                    var note = stars.querySelector(".thanks") || el("span", "thanks", "");
+                    note.style.cssText = "margin-left:0.5rem;font-size:0.74rem;color:#67D99B;";
+                    note.textContent = j.count > 1 ? "saved · ★ " + j.average.toFixed(1) + " from " + j.count : "saved";
+                    stars.appendChild(note);
+                  })
+                  .catch(function () {});
+              });
+              stars.appendChild(b);
+            })(si);
+          }
+          c.appendChild(stars);
+        }
+
         var lock = el("div", "lock");
         lock.appendChild(el("span", "sealed", "Method sealed"));
-        var btn = el("button", "buy", r.is_free ? "Claim it →" : "Buy →");
-        btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
+        var mine = OWNED.has(r.hash);
+        var btn = el("button", "buy", mine ? "Use this recipe →" : (r.is_free ? "Claim it →" : "Buy →"));
+        if (mine) {
+          btn.style.cssText = "background:#2F6F4F;color:#E8F7EE;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
+        }
+        if (!mine) btn.style.cssText = "background:var(--bz-yellow);color:#111;border:0;border-radius:5px;font-weight:700;font-size:0.76rem;padding:0.35rem 0.8rem;cursor:pointer;";
         btn.addEventListener("click", function () {
-          btn.disabled = true;
-          btn.textContent = "Working…";
-          fetch("/api/wallet/purchase", {
-            method: "POST", credentials: "same-origin",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ hash: r.hash })
-          })
-            .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
-            .then(function (out) {
-              if (out.s === 200 && out.j.ok) {
-                btn.textContent = "Opened ✓";
-                btn.style.background = "#2F6F4F";
-                btn.style.color = "#E8F7EE";
-                if (window.BZ_HONEY) window.BZ_HONEY.refresh();
-              } else if (out.j.code === "free_recipe") {
-                btn.textContent = "Claimed ✓";
-                btn.style.background = "#2F6F4F";
-              } else if (out.j.code === "already_owned") {
-                btn.textContent = "Already yours";
-                btn.disabled = true;
-              } else if (out.s === 402) {
-                btn.textContent = "Not enough Drops";
-                btn.disabled = false;
-              } else {
-                btn.textContent = out.j.error || "Could not buy";
-                btn.disabled = false;
-              }
-            })
-            .catch(function () { btn.textContent = "Try again"; btn.disabled = false; });
+          if (OWNED.has(r.hash)) return useRecipe(r);
+          if (r.is_free) return doPurchase(btn, r);
+          confirmPurchase(btn, r);
         });
         lock.appendChild(btn);
         c.appendChild(lock);
         return c;
       }
 
-      fetch("/api/recipes", { credentials: "same-origin" })
-        .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          return res.json();
-        })
-        .then(function (data) {
-          var rows = (data && data.recipes) || [];
-          if (!rows.length) { state.textContent = "No recipes on the shelf yet."; return; }
-          state.remove();
-          rows.forEach(function (r) { shelf.appendChild(card(r)); });
-          count.textContent = rows.length + (rows.length === 1 ? " recipe" : " recipes");
+      function json(url) {
+        return fetch(url, { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .catch(function () { return null; });
+      }
+
+      var ALL = [], OWNED = new Set(), ME = null, TAB = "community";
+
+      function visible() {
+        if (TAB === "mine") return ALL.filter(function (r) { return r.author && r.author.id === ME; });
+        if (TAB === "acquired") return ALL.filter(function (r) { return OWNED.has(r.hash); });
+        return ALL;
+      }
+
+      function paint() {
+        shelf.textContent = "";
+        var rows = visible();
+        document.getElementById("n-mine").textContent = ALL.filter(function (r) { return r.author && r.author.id === ME; }).length;
+        document.getElementById("n-acq").textContent = ALL.filter(function (r) { return OWNED.has(r.hash); }).length;
+        document.getElementById("n-all").textContent = ALL.length;
+        [].forEach.call(document.querySelectorAll(".tab"), function (t) {
+          t.classList.toggle("active", t.getAttribute("data-tab") === TAB);
+        });
+        count.textContent = rows.length + (rows.length === 1 ? " recipe" : " recipes");
+
+        if (!rows.length) {
+          state.className = "state";
+          state.textContent = TAB === "mine" ? "You have not published a recipe yet."
+            : TAB === "acquired" ? "Nothing acquired yet — open something from Community Recipes."
+            : "No recipes on the shelf yet.";
+          if (!state.parentNode) document.querySelector("main").appendChild(state);
+          return;
+        }
+        if (state.parentNode) state.remove();
+        rows.forEach(function (r) { shelf.appendChild(card(r)); });
+      }
+
+      [].forEach.call(document.querySelectorAll(".tab"), function (t) {
+        t.addEventListener("click", function () { TAB = t.getAttribute("data-tab"); paint(); });
+      });
+
+      // One load, three views: the shelf, what this account owns, and who it is.
+      Promise.all([json("/api/recipes"), json("/api/wallet/owned"), json("/api/auth/get-session")])
+        .then(function (out) {
+          var recipes = (out[0] && out[0].recipes) || [];
+          var owned = (out[1] && out[1].hashes) || [];
+          var session = out[2] && out[2].user ? out[2].user : null;
+          ALL = recipes;
+          OWNED = new Set(owned);
+          ME = session ? session.id : null;
+          // Your own recipes are yours to open without buying.
+          ALL.forEach(function (r) { if (r.author && r.author.id === ME) OWNED.add(r.hash); });
+          paint();
         })
         .catch(function (err) {
           state.className = "state error";

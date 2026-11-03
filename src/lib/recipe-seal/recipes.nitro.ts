@@ -10,7 +10,7 @@ import { getSql } from "@/lib/db";
 import { resolveOperatorContext } from "@/lib/auth/verify.server";
 import { chatCompletion } from "@/lib/buzzy/llm";
 import { createRouteDeps, routeRecipes, type RouteDeps } from "./routes";
-import { FsStorage } from "./storage";
+import { FsStorage, PgStorage } from "./storage";
 import { generateAuthorKey, partsOf, sealBundle, verifyBundle } from "./bundle";
 import { publishBundle } from "./registry";
 import { bundleKey, checksKey, semanticKey } from "./storage";
@@ -21,6 +21,9 @@ import { catalogBaseUrl, fetchCatalog, installRecipe } from "@/lib/recipe-seal/c
 import { resolveLocalRequester } from "@/lib/local-owner";
 import { defaultAnchors, verifyTrustedBundle } from "./trust";
 import { listRecipes, putRecipe } from "./cache";
+import { deriveRecipe, gatherEvidence } from "@/lib/buzzy/deriveRecipe";
+import { useRecipe } from "./useRecipe";
+import { ownsRecipe, rateRecipe, ratingsFor } from "@/lib/wallet/wallet";
 
 let depsPromise: Promise<RouteDeps> | null = null;
 let authorKeyCache: ReturnType<typeof generateAuthorKey> | null = null;
@@ -55,7 +58,12 @@ async function getDeps(): Promise<RouteDeps> {
         sql.query<T>(text, params ?? []);
       return createRouteDeps({
         q,
-        storage: new FsStorage(process.env.RECIPE_SEAL_STORAGE_DIR ?? ".data/recipe-seal"),
+        // Durable by default. The filesystem adapter is opt-in for local work via
+        // RECIPE_SEAL_STORAGE_DIR; a container that forgets it would otherwise lose
+        // every bundle on the next deploy.
+        storage: process.env.RECIPE_SEAL_STORAGE_DIR
+          ? new FsStorage(process.env.RECIPE_SEAL_STORAGE_DIR)
+          : new PgStorage(q),
         // Absent KEK is a valid state: verify works, run answers 503.
         kek: kekFromEnv(),
         // Local-open mode is opt-in for these routes. humanAuthRequired() returns
@@ -82,6 +90,27 @@ function toHeaders(raw: Record<string, string | string[] | undefined>): Headers 
     else if (Array.isArray(v)) headers.set(k, v.join(","));
   }
   return headers;
+}
+
+
+/**
+ * Why a shelf description was refused, in words the author can act on.
+ *
+ * The seal refuses any manifest that reproduces the sealed method, which is correct
+ * and completely unhelpful: "leaks_sealed_text" does not tell you which sentence to
+ * change. This finds the actual colliding runs so the message can name them.
+ */
+function collidingPhrases(shelfCopy: string, method: unknown): string[] {
+  const norm = (v: string) => v.toLowerCase().normalize("NFKC").replace(/[^a-z0-9]+/g, "");
+  const sealed = norm(JSON.stringify(method));
+  const copy = norm(shelfCopy);
+  const hits = new Set<string>();
+  for (let i = 0; i + 10 <= copy.length; i++) {
+    const w = copy.slice(i, i + 10);
+    if (sealed.includes(w)) hits.add(w);
+    if (hits.size >= 6) break;
+  }
+  return [...hits];
 }
 
 export default defineEventHandler(async (event) => {
@@ -260,6 +289,163 @@ export default defineEventHandler(async (event) => {
     body = await readBody(event).catch(() => ({}));
   }
 
+  // ── GET /api/recipes/derive — jobs that could become a recipe ─────────────
+  if (path === "/api/recipes/derive" && method === "GET") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+    const sql = await getSql();
+    const rows = await sql.query<{ id: string; title: string | null; template: string | null; updated_at: string; doc_title: string | null; versions: string }>(
+      `SELECT j.id, j.title, j.template, j.updated_at::text AS updated_at,
+              d.title AS doc_title,
+              (SELECT count(*)::text FROM buzzy_document_versions v WHERE v.doc_id = d.id) AS versions
+         FROM buzzy_jobs j
+         LEFT JOIN LATERAL (
+           SELECT id, title FROM buzzy_documents
+            WHERE job_id = j.id AND user_id = j.user_id
+            ORDER BY updated_at DESC LIMIT 1
+         ) d ON true
+        WHERE j.user_id = $1
+        ORDER BY j.updated_at DESC
+        LIMIT 25`,
+      [user.id],
+    );
+    return {
+      ok: true,
+      jobs: rows.map((r) => ({
+        id: r.id,
+        title: r.title ?? r.doc_title ?? "Untitled job",
+        basis: r.template,
+        versions: Number(r.versions ?? 0),
+        updated_at: r.updated_at,
+        canDerive: Number(r.versions ?? 0) > 0,
+      })),
+    };
+  }
+
+  // ── POST /api/recipes/derive — read a recipe out of a finished job ─────────
+  //
+  // Nothing is published here. The output is a draft for the owner to read and
+  // correct, because a method derived from one job is a claim about the next one.
+  if (path === "/api/recipes/derive" && method === "POST") {
+    const user = opCtx?.user ?? null;
+    if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const jobId = typeof b.jobId === "string" ? b.jobId.trim() : "";
+    if (!jobId) { setResponseStatus(event, 400); return { ok: false, error: "jobId is required", code: "invalid_body" }; }
+
+    const sql = await getSql();
+    const evidence = await gatherEvidence(sql, user.id, jobId);
+    if (!evidence) { setResponseStatus(event, 404); return { ok: false, error: "No such job", code: "unknown_job" }; }
+    if (!evidence.finalDraft) {
+      setResponseStatus(event, 409);
+      return { ok: false, error: "Finish the job first — there is no accepted document to learn from", code: "no_document" };
+    }
+    try {
+      // One long model call over the job's evidence. Measured at 60–90s in the
+      // browser audit; with no ceiling a stalled provider held the request open
+      // indefinitely and the page sat on "Reading…" forever. 150s is real
+      // headroom over p95 and still fails honestly instead of hanging.
+      const draft = await Promise.race([
+        deriveRecipe(evidence),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("derive timed out — the model did not answer in 150s")), 150_000),
+        ),
+      ]);
+      return { ok: true, draft, evidence: { job: evidence.title, corrections: evidence.corrections.length } };
+    } catch (e) {
+      setResponseStatus(event, 502);
+      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "derive_failed" };
+    }
+  }
+
+  // ── POST /api/recipes/:hash/rate — score a recipe you own ─────────────────
+//
+// Only an owner may rate: a score from someone who never ran it is a review of the
+// description. The rater id is stored to stop double-voting and is never returned.
+const rateMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/rate$"));
+if (rateMatch && method === "POST") {
+  const user = opCtx?.user ?? null;
+  if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+  const rDeps = await getDeps();
+  const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => rDeps.q<T>(text, params ?? []);
+  const hash = rateMatch[1];
+  if (!(await ownsRecipe(q, user.id, hash))) {
+    setResponseStatus(event, 403);
+    return { ok: false, error: "You can rate a recipe once you own it", code: "not_owned" };
+  }
+  const b = (body ?? {}) as Record<string, unknown>;
+  const stars = Number(b.stars);
+  try {
+    await rateRecipe(q, hash, user.id, stars);
+  } catch (e) {
+    setResponseStatus(event, 400);
+    return { ok: false, error: String((e as Error).message), code: "invalid_stars" };
+  }
+  const summary = (await ratingsFor(q, [hash]))[hash] ?? { average: null, count: 0 };
+  return { ok: true, your_stars: Math.trunc(stars), ...summary };
+}
+
+// ── POST /api/recipes/:hash/use — run a recipe this account owns ──────────
+//
+// The door is the session plus the entitlement, not a bearer token: a person who
+// paid already has a session, and inventing a secret to hand back to the same
+// browser adds a leak surface for nothing. The sealed method is opened here and
+// never leaves the server — the caller gets the document and the verdict.
+const useMatch = path.match(new RegExp("^/api/recipes/([a-f0-9]{64})/use$"));
+if (useMatch && method === "POST") {
+  const user = opCtx?.user ?? null;
+  if (!user) { setResponseStatus(event, 401); return { ok: false, error: "Sign in first", code: "signed_out" }; }
+
+  const rDeps = await getDeps();
+  if (!rDeps.kek) { setResponseStatus(event, 503); return { ok: false, error: "Running is not configured", code: "run_unavailable" }; }
+  if (!process.env.BZ_CHAT_KEY && !process.env.BZ_CHAT_BASE_URL) {
+    setResponseStatus(event, 503);
+    return { ok: false, error: "No model lane is configured", code: "run_unavailable" };
+  }
+
+  const hash = useMatch[1];
+  const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) => rDeps.q<T>(text, params ?? []);
+  if (!(await ownsRecipe(q, user.id, hash))) {
+    setResponseStatus(event, 402);
+    return { ok: false, error: "You do not own this recipe yet", code: "not_owned" };
+  }
+
+  const b = (body ?? {}) as Record<string, unknown>;
+  const input = typeof b.input === "string" ? b.input.trim() : "";
+  if (!input) { setResponseStatus(event, 400); return { ok: false, error: "Tell it what you need", code: "input_required" }; }
+
+  try {
+    // Providers occasionally answer with reasoning and no content. A buyer who paid
+    // Drops for this deserves a second attempt before they get an error back.
+    const attempt = () => useRecipe({
+      storage: rDeps.storage,
+      kek: rDeps.kek as Uint8Array,
+      hash,
+      input,
+      model: (prompt: string) => chatCompletion(
+        [
+          { role: "system", content: "Reply with the JSON object only. No commentary, no reasoning." },
+          { role: "user", content: prompt },
+        ],
+        { temperature: 0.2 },
+      ),
+    });
+    let result;
+    try { result = await attempt(); }
+    catch (first) {
+      if (!/reasoning only/i.test(String((first as Error).message))) throw first;
+      result = await attempt();
+    }
+    if (!result.artifact) { setResponseStatus(event, 502); return result; }
+    return { hash, ...result };
+  } catch (e) {
+    setResponseStatus(event, 502);
+    return { ok: false, error: String((e as Error).message).slice(0, 300), code: "run_failed" };
+  }
+}
+
+const rDeps = await getDeps();
+
   // ── POST /api/recipes/upload — a person publishes their own recipe ─────────
   //
   // Everything else on this route is operator-only because it enrols a *bundle
@@ -294,16 +480,36 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "Price must be a whole number of Honey Drops", code: "invalid_price" };
     }
 
-    const semantic = {
-      discovery: template.discovery,
-      boundary: template.boundary,
-      checklist: template.checklist,
-      outputContract: template.outputContract,
-    };
+    // A recipe's METHOD comes from the job it was learned from. The template only
+    // decides which checks are applied — the house rules — never what the method
+    // says. Falling back to the template's own text is the demo path, and is the
+    // reason every seeded recipe of a kind shared one method.
+    const m = (b.method ?? null) as Record<string, unknown> | null;
+    const methodOk =
+      m && typeof m.boundary === "string" && m.boundary.trim().length > 0 &&
+      Array.isArray(m.discovery) && m.discovery.length >= 2;
+    const semantic = methodOk
+      ? {
+          discovery: (m!.discovery as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 10),
+          boundary: String(m!.boundary).slice(0, 400),
+          checklist: (m!.checklist ?? {}) as Record<string, string>,
+          outputContract: Array.isArray(m!.outputContract)
+            ? (m!.outputContract as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 10)
+            : [],
+        }
+      : {
+          discovery: template.discovery,
+          boundary: template.boundary,
+          checklist: template.checklist,
+          outputContract: template.outputContract,
+        };
     const compiled = compileRecipeChecks(template.id, { salt: new Uint8Array(8) });
     const authorKey = platformAuthorKey();
+    // The manifest id charset is [a-z0-9._-]; auth user ids are mixed-case base58,
+    // so an id built straight from one fails `id:charset` at seal time.
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "recipe";
-    const recipeId = `user.${user.id.slice(0, 8)}.${slug}`;
+    const owner = user.id.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
+    const recipeId = `user.${owner}.${slug}`.slice(0, 64);
 
     let sealed;
     try {
@@ -327,9 +533,21 @@ export default defineEventHandler(async (event) => {
       });
     } catch (e) {
       // The leak gate lives here too: an upload whose copy reproduces its own
-      // sealed half is refused before it can be stored or served.
+      // sealed half is refused before it can be stored or served. When that is what
+      // happened, say which words are shared — otherwise the author is guessing.
+      const message = String((e as Error).message);
+      const phrases = /leaks_sealed_text/.test(message)
+        ? collidingPhrases(`${title} ${description}`, semantic)
+        : [];
       setResponseStatus(event, 422);
-      return { ok: false, error: String((e as Error).message).slice(0, 300), code: "refused" };
+      return {
+        ok: false,
+        code: phrases.length ? "shelf_copy_collides" : "refused",
+        error: phrases.length
+          ? `Your title or description reuses wording from the method: ${phrases.join(", ")}. Say what the buyer gets in your own words.`
+          : message.slice(0, 300),
+        collides: phrases,
+      };
     }
 
     const verified = verifyBundle(sealed.bytes);

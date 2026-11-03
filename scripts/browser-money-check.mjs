@@ -6,9 +6,12 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { join, normalize } from "node:path";
+import { dirname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = "/home/gumbyender/agents/agent-relay/public";
+// Relative to this file so the script runs from any checkout — a hardcoded home
+// directory made it silently serve nothing on another machine.
+const root = process.env.BZ_PUBLIC_ROOT || join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 
 function mime(file) {
   if (file.endsWith(".html")) return "text/html; charset=utf-8";

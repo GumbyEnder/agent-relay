@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — Build a workflow</title>
+  <style>
+    :root { --bz-black:#0A0A0A; --bz-panel:#141414; --bz-yellow:#FFC107; --bz-yellow-dim:#B8860B; --bz-silver:#C9CDD2; --bz-font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; }
+    * { box-sizing: border-box; }
+    body { font-family: var(--bz-font); color:#E8E8E8; background: var(--bz-black); margin:0; line-height:1.55; -webkit-font-smoothing:antialiased; }
+    main { max-width: 1240px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+    h1 { font-size:1.6rem; margin:0 0 0.3rem; color:#fff; letter-spacing:-0.01em; }
+    .lede { color:#B8B8B8; max-width:78ch; margin:0 0 1.25rem; font-size:0.9rem; }
+    .bar { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-bottom:1rem; }
+    button { font:inherit; font-size:0.82rem; padding:0.42rem 0.8rem; border-radius:5px; border:1px solid #333; background:#1B1B1B; color:#E8E8E8; cursor:pointer; }
+    button:hover { border-color: var(--bz-yellow-dim); }
+    button.primary { background: var(--bz-yellow); color:#111; border-color: var(--bz-yellow); font-weight:600; }
+    button.on { border-color: var(--bz-yellow); color: var(--bz-yellow); }
+    input[type=text], input[type=number], select, textarea { font:inherit; font-size:0.82rem; background:#0E0E0E; color:#E8E8E8; border:1px solid #2A2A2A; border-radius:4px; padding:0.35rem 0.5rem; width:100%; }
+    label { display:block; font-size:0.7rem; letter-spacing:.08em; text-transform:uppercase; color:#8A8A8A; margin:0.6rem 0 0.2rem; }
+    .layout { display:grid; grid-template-columns: 190px 1fr 290px; gap:1rem; align-items:start; }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+    .panel { background: var(--bz-panel); border:1px solid #242424; border-radius:7px; padding:0.85rem; }
+    .panel h2 { font-size:0.7rem; letter-spacing:.12em; text-transform:uppercase; color:#8A8A8A; margin:0 0 0.6rem; }
+    #canvas { position:relative; min-height:520px; background:
+        radial-gradient(circle at 1px 1px, #1C1C1C 1px, transparent 0) 0 0/22px 22px, #101010;
+      border:1px solid #242424; border-radius:7px; overflow:hidden; }
+    .node { position:absolute; width:172px; background:#191919; border:1px solid #3A3A3A; border-radius:6px; padding:0.5rem 0.6rem; cursor:grab; user-select:none; }
+    .node.sel { border-color: var(--bz-yellow); box-shadow:0 0 0 1px var(--bz-yellow-dim); }
+    .node .k { font-size:0.62rem; letter-spacing:.1em; text-transform:uppercase; color:#8A8A8A; }
+    .node .t { font-size:0.86rem; color:#fff; margin-top:0.1rem; }
+    .node .m { font-size:0.68rem; color:#7FD1A8; margin-top:0.25rem; word-break:break-all; }
+    .node .s { font-size:0.64rem; margin-top:0.2rem; color:#8A8A8A; }
+    .node .s.done { color:#67D99B; } .node .s.failed { color:#FF8A80; }
+    .node .s.awaiting_approval { color:#FFC107; } .node .s.running { color:#6BA8FF; }
+    .node.agent { border-left:3px solid #6BA8FF; }
+    .node.skill { border-left:3px solid #FFC107; }
+    .node.model { border-left:3px solid #A98BFF; }
+    .node.review { border-left:3px solid #FF8A80; }
+    .node.gate { border-left:3px solid #67D99B; }
+    svg#edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+    .gl { display:block; font-size:0.8rem; padding:0.35rem 0.4rem; border-radius:4px; color:#C9CDD2; text-decoration:none; }
+    .gl:hover { background:#1E1E1E; color:#fff; }
+    .gl.sel { background:#1E1E1E; color: var(--bz-yellow); }
+    .hint { font-size:0.75rem; color:#7A7A7A; }
+    .ok { color:#67D99B; } .bad { color:#FF8A80; }
+    .row { display:flex; gap:0.4rem; }
+  </style>
+  <link rel="stylesheet" href="/buzzy/nav.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+    <a href="/buzzy/talk" class="brand-link">
+      <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="" width="28" height="28" />
+      <span>BeeZilla</span>
+    </a>
+    <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+    </nav>
+    <script>
+    /* ONE navigation, defined once. Active state comes from the path — the
+       whiteboard is not a nav section, so nothing gets the active class. */
+    (function () {
+      var section = (location.pathname.split("/")[2] || "talk").replace(/\.html$/, "");
+      var links = document.querySelectorAll("#bzNav a[data-nav]");
+      for (var i = 0; i < links.length; i++) {
+        var on = links[i].getAttribute("data-nav") === section;
+        links[i].classList.toggle("active", on);
+        if (on) links[i].setAttribute("aria-current", "page");
+        else links[i].removeAttribute("aria-current");
+      }
+    })();
+    </script>
+    </div>
+  </header>
+
+  <main>
+    <h1>Build a workflow</h1>
+    <p class="lede">
+      Put the steps on the canvas, give each one its job, and pin the model by
+      <em>position on the frontier</em> rather than by name — so the graph keeps
+      meaning when models change. A review node runs on a different provider than
+      the step it checks.
+    </p>
+
+    <div class="bar">
+      <input type="text" id="title" placeholder="Workflow title" style="max-width:320px" />
+      <button class="primary" id="save">Save</button>
+      <button id="run">Run</button>
+      <button id="new">New</button>
+      <span id="status" class="hint"></span>
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <h2>Your workflows</h2>
+        <div id="list"><span class="hint">Loading…</span></div>
+      </div>
+
+      <div>
+        <div class="bar" style="margin-bottom:0.5rem">
+          <button data-add="agent">+ Agent</button>
+          <button data-add="skill">+ Skill</button>
+          <button data-add="model">+ Model</button>
+          <button data-add="review">+ Review</button>
+          <button data-add="gate">+ Gate</button>
+          <button id="linkBtn">Link →</button>
+          <span class="hint" id="linkHint"></span>
+        </div>
+        <div id="canvas">
+          <svg id="edges"></svg>
+        </div>
+      </div>
+
+      <div class="panel" id="inspector">
+        <h2>Node</h2>
+        <div id="inspectorBody"><span class="hint">Select a node.</span></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    var state = { graphId: null, nodes: [], edges: [], sel: null, linkFrom: null, seq: 0 };
+    var canvas = document.getElementById("canvas");
+    var svg = document.getElementById("edges");
+    var statusEl = document.getElementById("status");
+
+    function say(msg, cls) { statusEl.textContent = msg; statusEl.className = "hint " + (cls || ""); }
+    function rid() { return "n" + (++state.seq); }
+    function byId(id) { for (var i = 0; i < state.nodes.length; i++) if (state.nodes[i].key === id) return state.nodes[i]; return null; }
+
+    // ── config that differs per kind ─────────────────────────────────────
+    function defaultConfig(kind) {
+      if (kind === "agent") return { agent: "AGENT.md", prompt: "" };
+      if (kind === "skill") return { skill: "" };
+      if (kind === "model") return { family: "gemini" };
+      if (kind === "review") return { category: "writing", position: 1 };
+      return { approval: true };
+    }
+
+    function pinOf(n) {
+      if (n.kind === "review" || n.kind === "model") {
+        if (n.config && n.config.category) return { category: n.config.category, position: Number(n.config.position || 1) };
+        if (n.config && n.config.family) return { family: n.config.family };
+        if (n.config && n.config.model) return { model: n.config.model };
+      }
+      return null;
+    }
+
+    function draw() {
+      var html = "";
+      for (var i = 0; i < state.nodes.length; i++) {
+        var n = state.nodes[i];
+        html += '<div class="node ' + n.kind + (state.sel === n.key ? " sel" : "") + '" data-key="' + n.key +
+          '" style="left:' + n.x + "px;top:" + n.y + 'px">' +
+          '<div class="k">' + n.kind + "</div>" +
+          '<div class="t">' + esc(n.title || n.key) + "</div>" +
+          '<div class="m" id="m-' + n.key + '"></div>' +
+          '<div class="s" id="s-' + n.key + '"></div></div>';
+      }
+      var keep = canvas.querySelectorAll(".node");
+      for (var j = 0; j < keep.length; j++) keep[j].remove();
+      canvas.insertAdjacentHTML("beforeend", html);
+      drawEdges();
+      for (var k = 0; k < state.nodes.length; k++) showResolution(state.nodes[k]);
+    }
+
+    function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+
+    function drawEdges() {
+      var out = "";
+      for (var i = 0; i < state.edges.length; i++) {
+        var e = state.edges[i], a = byId(e.from), b = byId(e.to);
+        if (!a || !b) continue;
+        var x1 = a.x + 172, y1 = a.y + 28, x2 = b.x, y2 = b.y + 28;
+        var colour = e.kind === "review" ? "#FF8A80" : e.kind === "gate" ? "#67D99B" : "#4A4A4A";
+        out += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+          '" stroke="' + colour + '" stroke-width="1.6" marker-end="url(#arrow)" />';
+      }
+      svg.innerHTML = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">' +
+        '<path d="M0,0 L10,5 L0,10 z" fill="#6A6A6A" /></marker></defs>' + out;
+    }
+
+    // What this node will actually run on — asked of the resolver, not guessed.
+    function showResolution(n) {
+      var el = document.getElementById("m-" + n.key);
+      if (!el) return;
+      var pin = pinOf(n);
+      if (!pin) { el.textContent = n.kind === "gate" ? "waits for you" : ""; return; }
+      var qs = pin.category ? "?category=" + encodeURIComponent(pin.category) + "&position=" + encodeURIComponent(pin.position)
+        : pin.family ? "?family=" + encodeURIComponent(pin.family)
+        : "?model=" + encodeURIComponent(pin.model);
+      fetch("/api/buzzy/frontier" + qs, { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          el.textContent = j.ok ? j.resolution.model : ("unresolved — " + (j.error || ""));
+          el.style.color = j.ok ? "" : "#FF8A80";
+        })
+        .catch(function () { el.textContent = ""; });
+    }
+
+    function addNode(kind) {
+      var n = {
+        key: rid(),
+        kind: kind,
+        title: kind.charAt(0).toUpperCase() + kind.slice(1) + " " + (state.nodes.length + 1),
+        config: defaultConfig(kind),
+        x: 30 + (state.nodes.length % 4) * 200,
+        y: 30 + Math.floor(state.nodes.length / 4) * 120
+      };
+      state.nodes.push(n); state.sel = n.key;
+      draw(); inspect();
+    }
+
+    document.querySelectorAll("[data-add]").forEach(function (b) {
+      b.addEventListener("click", function () { addNode(b.getAttribute("data-add")); });
+    });
+
+    // ── drag ─────────────────────────────────────────────────────────────
+    var drag = null;
+    canvas.addEventListener("pointerdown", function (ev) {
+      var node = ev.target.closest ? ev.target.closest(".node") : null;
+      if (!node) return;
+      var n = byId(node.getAttribute("data-key"));
+      if (!n) return;
+      state.sel = n.key;
+      drag = { n: n, dx: ev.clientX - n.x, dy: ev.clientY - n.y };
+      node.setPointerCapture(ev.pointerId);
+      // Do NOT redraw here: replacing the node elements on pointerdown detaches
+      // the element the browser is about to deliver `click` to, so linking a
+      // node silently did nothing. Move the highlight in place instead.
+      var all = canvas.querySelectorAll(".node");
+      for (var i = 0; i < all.length; i++) {
+        all[i].classList.toggle("sel", all[i].getAttribute("data-key") === n.key);
+      }
+      inspect();
+    });
+    canvas.addEventListener("pointermove", function (ev) {
+      if (!drag) return;
+      drag.n.x = Math.max(0, ev.clientX - drag.dx);
+      drag.n.y = Math.max(0, ev.clientY - drag.dy);
+      var el = canvas.querySelector('.node[data-key="' + drag.n.key + '"]');
+      if (el) { el.style.left = drag.n.x + "px"; el.style.top = drag.n.y + "px"; }
+      drawEdges();
+    });
+    canvas.addEventListener("pointerup", function () { drag = null; });
+
+    // ── link two nodes: click Link, then source, then target ─────────────
+    var linkMode = false;
+    document.getElementById("linkBtn").addEventListener("click", function () {
+      linkMode = !linkMode; state.linkFrom = null;
+      this.classList.toggle("on", linkMode);
+      document.getElementById("linkHint").textContent = linkMode ? "click the source, then the target" : "";
+    });
+    canvas.addEventListener("click", function (ev) {
+      if (!linkMode) return;
+      var node = ev.target.closest ? ev.target.closest(".node") : null;
+      if (!node) return;
+      var key = node.getAttribute("data-key");
+      if (!state.linkFrom) { state.linkFrom = key; say("from " + key + " — now pick the target"); return; }
+      var from = state.linkFrom;
+      if (from === key) { state.linkFrom = null; return; }
+      var target = byId(key);
+      var kind = target && (target.kind === "review" || target.kind === "gate") ? target.kind : "data";
+      state.edges.push({ from: from, to: key, kind: kind });
+      state.linkFrom = null; linkMode = false;
+      document.getElementById("linkBtn").classList.remove("on");
+      document.getElementById("linkHint").textContent = "";
+      draw(); say("linked " + from + " → " + key + " (" + kind + ")", "ok");
+    });
+
+    // ── inspector ────────────────────────────────────────────────────────
+    function inspect() {
+      var body = document.getElementById("inspectorBody");
+      var n = state.sel ? byId(state.sel) : null;
+      if (!n) { body.innerHTML = '<span class="hint">Select a node.</span>'; return; }
+      var h = '<label>Title</label><input type="text" id="f-title" value="' + esc(n.title) + '" />';
+      if (n.kind === "agent") {
+        h += '<label>AGENT.md</label><input type="text" id="f-agent" value="' + esc(n.config.agent || "") + '" />';
+        h += '<label>Brief</label><textarea id="f-prompt" rows="4">' + esc(n.config.prompt || "") + "</textarea>";
+      } else if (n.kind === "skill") {
+        h += '<label>Skill</label><input type="text" id="f-skill" value="' + esc(n.config.skill || "") + '" />';
+      } else if (n.kind === "gate") {
+        h += '<p class="hint">The run stops here until you approve.</p>';
+      } else {
+        h += '<label>Pick by</label><select id="f-mode">' +
+          '<option value="frontier"' + (n.config.category ? " selected" : "") + ">frontier position</option>" +
+          '<option value="family"' + (!n.config.category ? " selected" : "") + ">latest of family</option></select>";
+        h += '<div id="frontierFields"' + (n.config.category ? "" : ' style="display:none"') + '>' +
+          '<label>Category</label><input type="text" id="f-cat" value="' + esc(n.config.category || "writing") + '" />' +
+          '<label>Position</label><input type="number" id="f-pos" min="1" value="' + (n.config.position || 1) + '" /></div>';
+        h += '<div id="familyFields"' + (n.config.category ? ' style="display:none"' : "") + '>' +
+          '<label>Family</label><input type="text" id="f-family" value="' + esc(n.config.family || "gemini") + '" /></div>';
+        if (n.kind === "review") h += '<p class="hint">A review always resolves to a provider different from the node it checks.</p>';
+      }
+      h += '<div class="row" style="margin-top:0.8rem"><button id="del">Delete node</button></div>';
+      h += '<p class="hint" id="insp-resolve"></p>';
+      body.innerHTML = h;
+
+      function commit() {
+        n.title = document.getElementById("f-title").value;
+        if (n.kind === "agent") { n.config.agent = document.getElementById("f-agent").value; n.config.prompt = document.getElementById("f-prompt").value; }
+        if (n.kind === "skill") n.config.skill = document.getElementById("f-skill").value;
+        if (n.kind === "model" || n.kind === "review") {
+          var mode = document.getElementById("f-mode").value;
+          if (mode === "frontier") { n.config.category = document.getElementById("f-cat").value; n.config.position = Number(document.getElementById("f-pos").value || 1); delete n.config.family; }
+          else { n.config.family = document.getElementById("f-family").value; delete n.config.category; }
+        }
+        draw();
+      }
+      ["f-title", "f-agent", "f-prompt", "f-skill", "f-cat", "f-pos", "f-family"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener("input", commit);
+      });
+      var mode = document.getElementById("f-mode");
+      if (mode) mode.addEventListener("change", function () {
+        var frontier = mode.value === "frontier";
+        document.getElementById("frontierFields").style.display = frontier ? "" : "none";
+        document.getElementById("familyFields").style.display = frontier ? "none" : "";
+        commit();
+      });
+      document.getElementById("del").addEventListener("click", function () {
+        state.nodes = state.nodes.filter(function (x) { return x.key !== n.key; });
+        state.edges = state.edges.filter(function (e) { return e.from !== n.key && e.to !== n.key; });
+        state.sel = null; draw(); inspect();
+      });
+    }
+
+    // ── save / load ──────────────────────────────────────────────────────
+    document.getElementById("save").addEventListener("click", function () {
+      var body = {
+        id: state.graphId || undefined,
+        title: (document.getElementById("title").value || "Untitled workflow").trim(),
+        nodes: state.nodes.map(function (n) { return { key: n.key, kind: n.kind, title: n.title, config: n.config, x: n.x, y: n.y }; }),
+        edges: state.edges.map(function (e) { return { from: e.from, to: e.to, kind: e.kind }; })
+      };
+      if (!body.nodes.length) { say("Add at least one node first.", "bad"); return; }
+      say("Saving…");
+      fetch("/api/buzzy/graphs", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok) { say(j.error || "Save failed.", "bad"); return; }
+          state.graphId = j.id;
+          say("Saved · version " + j.version, "ok");
+          loadList();
+        })
+        .catch(function () { say("Save failed — check the connection.", "bad"); });
+    });
+
+    document.getElementById("new").addEventListener("click", function () {
+      state = { graphId: null, nodes: [], edges: [], sel: null, linkFrom: null, seq: 0 };
+      document.getElementById("title").value = "";
+      draw(); inspect(); say("");
+    });
+
+    // ── run ──────────────────────────────────────────────────────────────
+    function paintRun(run) {
+      var byKey = {};
+      for (var i = 0; i < run.results.length; i++) { var r = run.results[i]; byKey[r.node_key] = r; }
+      for (var j = 0; j < state.nodes.length; j++) {
+        var n = state.nodes[j], el = document.getElementById("s-" + n.key);
+        if (!el) continue;
+        var r = byKey[n.key];
+        if (!r) { el.textContent = ""; el.className = "s"; continue; }
+        el.className = "s " + r.status;
+        var bits = [r.status];
+        if (r.model && r.status === "done") bits.push(r.model);
+        if (r.latency_ms) bits.push(r.latency_ms + " ms");
+        if (r.cost_usd && Number(r.cost_usd) > 0) bits.push("$" + Number(r.cost_usd).toFixed(4));
+        if (r.error) bits.push(r.error.slice(0, 48));
+        el.textContent = bits.join(" · ");
+      }
+      var line = "run " + run.id + " · " + run.status;
+      if (run.cost_usd) line += " · $" + Number(run.cost_usd).toFixed(4);
+      say(line, run.status === "failed" ? "bad" : "ok");
+      var old = document.getElementById("approve");
+      if (old) old.remove();
+      if (run.status === "awaiting_approval") {
+        var b = document.createElement("button");
+        b.id = "approve";
+        b.className = "primary";
+        b.textContent = "Approve and continue";
+        b.addEventListener("click", function () {
+          say("Continuing…");
+          fetch("/api/buzzy/runs/" + encodeURIComponent(run.id) + "/approve", { method: "POST", credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (!j.ok) { say(j.error || "Could not continue.", "bad"); return; }
+              paintRun(j.run);
+            });
+        });
+        document.querySelector(".bar").appendChild(b);
+      }
+    }
+
+    document.getElementById("run").addEventListener("click", function () {
+      if (!state.graphId) { say("Save the workflow before running it.", "bad"); return; }
+      say("Running…");
+      var btn = this; btn.disabled = true;
+      fetch("/api/buzzy/graphs/" + encodeURIComponent(state.graphId) + "/run", { method: "POST", credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          btn.disabled = false;
+          if (!j.ok) { say(j.error || "Run failed to start.", "bad"); return; }
+          paintRun(j.run);
+        })
+        .catch(function () { btn.disabled = false; say("Run failed — check the connection.", "bad"); });
+    });
+
+    function loadList() {
+      fetch("/api/buzzy/graphs?limit=20", { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var box = document.getElementById("list");
+          if (!j.ok || !j.graphs.length) { box.innerHTML = '<span class="hint">Nothing saved yet.</span>'; return; }
+          box.innerHTML = j.graphs.map(function (g) {
+            return '<a href="#" class="gl" data-g="' + g.id + '">' + esc(g.title) + '<br><span class="hint">v' + g.version + " · " + g.nodes + " nodes</span></a>";
+          }).join("");
+          Array.prototype.forEach.call(box.querySelectorAll(".gl"), function (a) {
+            a.addEventListener("click", function (ev) { ev.preventDefault(); open(a.getAttribute("data-g")); });
+          });
+        })
+        .catch(function () { document.getElementById("list").innerHTML = '<span class="hint">Could not load.</span>'; });
+    }
+
+    function open(id) {
+      fetch("/api/buzzy/graphs/" + encodeURIComponent(id), { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok) { say(j.error || "Could not open.", "bad"); return; }
+          var g = j.graph;
+          state.graphId = g.id;
+          state.nodes = g.nodes.map(function (n) {
+            return { key: n.key, kind: n.kind, title: n.title || n.key, config: n.config || {}, x: n.x || 30, y: n.y || 30 };
+          });
+          state.seq = state.nodes.length;
+          state.edges = g.edges.map(function (e) { return { from: e.from, to: e.to, kind: e.kind }; });
+          document.getElementById("title").value = g.title;
+          state.sel = null;
+          draw(); inspect();
+          say("Opened v" + g.version, "ok");
+        });
+    }
+
+    // Session check: the resolver and the graph API both need a signed-in owner.
+    fetch("/api/buzzy/assets?limit=1", { credentials: "same-origin" })
+      .then(function (r) {
+        if (r.status === 401) {
+          say("Sign in to save workflows.", "bad");
+          document.getElementById("save").disabled = true;
+        }
+      })
+      .catch(function () {});
+
+    loadList();
+    draw();
+  })();
+  </script>
+</body>
+</html>

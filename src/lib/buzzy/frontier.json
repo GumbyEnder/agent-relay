@@ -1,0 +1,95 @@
+{
+  "as_of": "2026-11-02",
+  "source": "seed",
+  "note": "Cached ranking, hand-ordered over the six models this deployment can actually call (verified against /api/buzzy/frontier?  reachable). A run never reads a live leaderboard: the resolver reads this file plus the catalog, and marks every substitution. refresh() replaces it out of band.",
+  "categories": {
+    "writing": [
+      {
+        "model": "google/gemini-3.1-flash-lite",
+        "family": "gemini",
+        "provider": "google"
+      },
+      {
+        "model": "moonshotai/kimi-k3",
+        "family": "kimi",
+        "provider": "moonshotai"
+      },
+      {
+        "model": "qwen/qwen3-235b-a22b-thinking-2507",
+        "family": "qwen",
+        "provider": "qwen"
+      },
+      {
+        "model": "upstage/solar-pro4",
+        "family": "solar",
+        "provider": "upstage"
+      },
+      {
+        "model": "z-ai/glm-5.3-flash",
+        "family": "glm",
+        "provider": "z-ai"
+      }
+    ],
+    "reasoning": [
+      {
+        "model": "deepseek/deepseek-v4-pro-0813",
+        "family": "deepseek",
+        "provider": "deepseek"
+      },
+      {
+        "model": "qwen/qwen3-235b-a22b-thinking-2507",
+        "family": "qwen",
+        "provider": "qwen"
+      },
+      {
+        "model": "moonshotai/kimi-k3",
+        "family": "kimi",
+        "provider": "moonshotai"
+      },
+      {
+        "model": "google/gemini-3.1-flash-lite",
+        "family": "gemini",
+        "provider": "google"
+      }
+    ],
+    "fast": [
+      {
+        "model": "google/gemini-3.1-flash-lite",
+        "family": "gemini",
+        "provider": "google"
+      },
+      {
+        "model": "z-ai/glm-5.3-flash",
+        "family": "glm",
+        "provider": "z-ai"
+      },
+      {
+        "model": "upstage/solar-pro4",
+        "family": "solar",
+        "provider": "upstage"
+      }
+    ],
+    "coding": [
+      {
+        "model": "deepseek/deepseek-v4-pro-0813",
+        "family": "deepseek",
+        "provider": "deepseek"
+      },
+      {
+        "model": "moonshotai/kimi-k3",
+        "family": "kimi",
+        "provider": "moonshotai"
+      },
+      {
+        "model": "qwen/qwen3-235b-a22b-thinking-2507",
+        "family": "qwen",
+        "provider": "qwen"
+      },
+      {
+        "model": "google/gemini-3.1-flash-lite",
+        "family": "gemini",
+        "provider": "google"
+      }
+    ]
+  }
+}

@@ -111,6 +111,9 @@ BZ_BRAND=beezilla npm run dev
 | `BZ_BRAND` | `beezilla` turns the same build into the consumer app |
 | `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` | Human sessions (email + password, magic link, optional GitHub) |
 | `BZ_CHAT_KEY` / `BZ_CHAT_BASE_URL` / `BZ_CHAT_MODEL` / `BZ_CHAT_MODELS` | BeeZilla's model provider and the visible picker catalog |
+| `BZ_VOICE_MODEL` / `BZ_VOICE_NAME` / `BZ_VOICE_FORMAT` | The spoken lane: one voice, the audio model's — never the browser's |
+| `BZ_ASR_MODEL` | Speech-to-text for `/api/buzzy/transcribe`, the path Firefox and Brave use (they have no usable `SpeechRecognition`) |
+| `BZ_BRAVE_KEY` / `BZ_HYPERBROWSER_KEY` | Live web search and pages a plain fetch cannot read |
 | `BZ_HONCHO_URL` / `BZ_HONCHO_KEY` / `BZ_HONCHO_WORKSPACE` | Long-term memory — one workspace, one peer per account |
 | `AGENT_RELAY_API_KEY` | Optional gate for Dev Boards agent demos |
 
@@ -134,7 +137,8 @@ Builds run under **Railpack** (`npm install && npm run build`, start `npm run st
 | [docs/TOPOLOGY.md](docs/TOPOLOGY.md) | How the services fit together |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | OSS vs hosted; what may break on 0.x |
 | [CHANGELOG.md](CHANGELOG.md) | Releases |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | PRs, branch policy |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | PRs, branch policy, review process |
+| [docs/MAINTAINING.md](docs/MAINTAINING.md) | Triage, review and merge playbook |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 
 Full index: [docs/README.md](docs/README.md).
@@ -142,6 +146,21 @@ Full index: [docs/README.md](docs/README.md).
 ## License
 
 [MIT](LICENSE)
+
+## Contributing
+
+External contributions are wanted. Fork or branch from `main`, open a PR — no invitation needed.
+
+```bash
+npm run verify     # typecheck + build + the hermetic test suite CI gates on
+```
+
+- CI runs `verify` on every PR: typecheck, build, and the hermetic suite (`npm run test:ci`). Lint runs advisory while existing debt is burned down.
+- Every PR gets a human response within **5 working days**, including a "no".
+- `good first issue` items name the file, the expected outcome, and the command that proves it works.
+- Questions and ideas → [Discussions](https://github.com/GumbyEnder/agent-relay/discussions). Security → private advisory per [SECURITY.md](SECURITY.md).
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before your first PR; [docs/MAINTAINING.md](docs/MAINTAINING.md) if you are reviewing or merging.
 
 ## Status
 

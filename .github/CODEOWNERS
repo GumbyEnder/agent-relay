@@ -1,0 +1,7 @@
+# Default owner: every PR requests a review from the maintainer.
+*                       @GumbyEnder
+
+# Protocol and claim semantics are the stability contract — maintainer review required.
+/src/lib/agent/         @GumbyEnder
+/docs/PROTOCOL.md       @GumbyEnder
+/docs/API.md            @GumbyEnder

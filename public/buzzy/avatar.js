@@ -102,6 +102,20 @@
     this.target = clamp(Number(v) || 0, 0, 1);
   };
 
+  /**
+   * Viseme input from the real audio spectrum. A single loudness number can
+   * only make the mouth taller — every syllable looks the same. These three
+   * numbers come from the spectrum and give the mouth a SHAPE:
+   *   open   0..1  low-band energy  → jaw drop (ah/oh)
+   *   wide   0..1  high-band ratio  → lip spread (ee/ih) vs rounded (oo)
+   *   bright 0..1  spectral tilt    → eye squint / brow lift on hard consonants
+   */
+  Avatar.prototype.setViseme = function (v) {
+    this.visOpen = clamp(Number(v && v.open) || 0, 0, 1);
+    this.visWide = clamp(Number(v && v.wide) || 0, 0, 1);
+    this.visBright = clamp(Number(v && v.bright) || 0, 0, 1);
+  };
+
   Avatar.prototype.start = function () {
     if (this.running) return;
     this.running = true;
@@ -132,6 +146,10 @@
     // Audio level: fast attack, slow release — reads like a mouth, not a bar.
     var k = this.target > this.level ? 0.5 : 0.12;
     this.level = lerp(this.level, this.target, k);
+    // Visemes: fast in, slower out, so a consonant still reads on 16ms frames.
+    this.smoothOpen = lerp(this.smoothOpen || 0, this.visOpen || 0, (this.visOpen || 0) > (this.smoothOpen || 0) ? 0.55 : 0.18);
+    this.smoothWide = lerp(this.smoothWide == null ? 0.5 : this.smoothWide, this.visWide == null ? 0.5 : this.visWide, 0.2);
+    this.smoothBright = lerp(this.smoothBright || 0, this.visBright || 0, 0.25);
     if (this.state !== "speaking" && this.state !== "listening") {
       this.level = lerp(this.level, 0, 0.15);
     }
@@ -217,22 +235,26 @@
     });
     ctx.shadowBlur = 0;
 
-    // Mouth: a rounded bar that opens with the real audio level.
+    // Mouth: shape follows the spectrum, not just loudness. Wide when the sound
+    // is bright (ee/ih), rounded when it is dark (oo/oh), taller on low energy.
     var mouthCx = MOUTH.cx * scale;
     var mouthCy = MOUTH.cy * scale;
-    var mouthW = MOUTH.w * scale * (thinking ? 0.35 : 1);
+    var wideAmt = this.smoothWide == null ? 0.5 : this.smoothWide;
+    var openAmt = speaking ? Math.max(lvl, this.smoothOpen || 0) : 0;
+    var shapeW = (0.72 + wideAmt * 0.62) * (1 - openAmt * 0.16);
+    var mouthW = MOUTH.w * scale * shapeW * (thinking ? 0.35 : 1);
     var mouthH;
     if (thinking) {
       mouthH = 2.2 * scale + Math.abs(Math.sin(this.t * 3.2)) * 2.6 * scale;
     } else if (speaking) {
-      mouthH = (1.6 + lvl * 22) * scale;
+      mouthH = (1.4 + openAmt * 24) * scale;
     } else {
       mouthH = 2.6 * scale;
     }
     ctx.fillStyle = speaking ? "#ffe9a8" : "#f7f2e2";
     ctx.shadowColor = "rgba(255,214,102," + (speaking ? 0.85 : 0.35) + ")";
     ctx.shadowBlur = (speaking ? 12 : 4) * scale;
-    roundRect(ctx, mouthCx - mouthW / 2, mouthCy - mouthH / 2, mouthW, mouthH, Math.min(mouthH / 2, 6 * scale));
+    roundRect(ctx, mouthCx - mouthW / 2, mouthCy - mouthH / 2, mouthW, mouthH, Math.min(mouthH / 2, (5 + wideAmt * 5) * scale));
     ctx.fill();
     ctx.shadowBlur = 0;
 

@@ -164,20 +164,53 @@
 <body>
   <header>
     <div class="header-inner">
-      <a href="/buzzy/" class="brand-link">
+      <a href="/buzzy/talk" class="brand-link">
         <div class="brand">
-          <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+          <img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
           <strong>BeeZilla</strong>
         </div>
       </a>
-      <nav>
-        <a href="/buzzy/" id="jobsLink">Talk</a>
-        <a href="/buzzy/remember.html" id="memLink" class="active">What BeeZilla remembers</a>
-        <a href="/buzzy/recipes">Recipes</a>
-        <a href="/buzzy/library" id="libLink">Library</a>
-        <a href="/buzzy/landing" class="account-link">Sign in</a>
-        <span class="phase" id="phaseLabel">What BeeZilla remembers</span>
-      </nav>
+      <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+    </nav>
+    <script>
+    /* ONE navigation, defined once. Every page used to hand-write its own nav
+       and they drifted: "Talk" pointed at /buzzy/ (the Jobs/Library page), so the
+       chat was unreachable from the nav — that is why you could not get back to
+       TALK. Active state is computed here from the path, not hard-coded per page. */
+    (function () {
+      var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+      // index.html serves ONLY /buzzy/library; every other /buzzy route
+      // redirects to the chat, so bare /buzzy counts as Talk here.
+      var section = "library";
+      if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
+      else if (/^\/buzzy\/library$/.test(path)) section = "library";
+      else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
+      else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
+      else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
+      else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
+      else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
+      var links = document.querySelectorAll("#bzNav a[data-nav]");
+      for (var i = 0; i < links.length; i++) {
+        var on = links[i].getAttribute("data-nav") === section;
+        links[i].classList.toggle("active", on);
+        if (on) links[i].setAttribute("aria-current", "page");
+        else links[i].removeAttribute("aria-current");
+      }
+      // Account identity is the page's own job (each page has its own session
+      // code). The nav only guarantees the links and their order.
+    })();
+    </script>
     </div>
   </header>
   <main id="app"></main>
@@ -253,12 +286,19 @@
     }
 
     loadState();
+    // A saved state from an older shape (or a half-written one) must not take the
+    // page down: loadState replaces the defaults, so re-apply the containers this
+    // screen reads unconditionally.
+    state.answers = state.answers && typeof state.answers === "object" ? state.answers : {};
+    state.skipped = state.skipped && typeof state.skipped === "object" ? state.skipped : {};
+    state.messages = Array.isArray(state.messages) ? state.messages : [];
+    state.board = state.board && typeof state.board === "object" ? state.board : { Waiting: [], Working: [], "Needs you": [], Done: [] };
     if (!catalog.userId) catalog.userId = "bz_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
     const $ = (html) => { document.getElementById("app").innerHTML = html; };
 
     function goRemember() {
-      const stm = Object.keys(state.answers).length
+      const stm = Object.keys(state.answers || {}).length
         ? "<ul>" + QUESTIONS.map((q) => "<li>" + q.prompt.split("—")[0] + ": " + escapeHtml(state.answers[q.id] || "—") + "</li>").join("") + "</ul>"
         : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
       const completedJobs = catalog.jobs.filter(jobComplete);
@@ -266,7 +306,7 @@
         ? "<ul>" + completedJobs.map((j) => "<li>" + escapeHtml(jobTitle(j)) + "</li>").join("") + "</ul><p class='muted'>This list is on this device. Honcho (the real across-jobs memory) is not wired to this demo.</p>"
         : "<p>Nothing yet across jobs. BeeZilla does not pretend to know you.</p><p class='muted'>Later: short facts you can read, correct, or forget. Not model names, not your wallet.</p>";
       document.getElementById("app").innerHTML =
-        "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>What BeeZilla remembers</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
         "<div class='card'><h2>Across jobs</h2>" + acrossJobs + "</div>" +
@@ -321,7 +361,9 @@
               body: "{}",
             }).then(function () { window.location.href = "/buzzy/"; });
           });
-          link.parentNode.insertBefore(out, link.nextSibling);
+          var navEl = document.querySelector("#bzNav");
+          if (navEl && navEl.parentNode && navEl.contains(link)) navEl.parentNode.insertBefore(out, navEl.nextSibling);
+          else link.parentNode.insertBefore(out, link.nextSibling);
         })
         .catch(function () {});
     })();

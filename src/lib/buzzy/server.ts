@@ -16,7 +16,7 @@
  * 9. Return structured response.
  */
 
-import { chatCompletion, chatCompletionFull, resolveModel, resolveReasoningModel } from "./llm";
+import { chatCompletion, chatCompletionFull, chatCompletionStream, resolveModel, resolveReasoningModel } from "./llm";
 import { selectModel } from "./modelPolicy";
 import { readModelPrefs } from "./modelPrefs";
 import {
@@ -42,7 +42,7 @@ import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
-import { materializeDraft } from "./documents";
+import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
@@ -51,7 +51,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -239,6 +239,8 @@ export interface ChatRequest {
   surface?: "text" | "voice";
   /** Streaming sinks. Present only on the voice lane. */
   speech?: VoiceHandlers;
+  /** Text deltas for the typed lane, so words appear at TTFT not at the end. */
+  onText?: (delta: string) => void;
   /** Preferred audio voice for the voice lane. */
   voiceName?: string;
 }
@@ -275,6 +277,8 @@ export interface ChatResponse {
   context?: ContextState;
   /** Per-turn latency breakdown (ms). */
   timings?: TurnTimings;
+  /** The file this turn produced, with links the chat can show inline. */
+  document?: { filename: string; contentType: string; bytes: number | null; documentId?: string; downloadUrl: string; libraryUrl: string };
   error?: string;
   code?: string;
 }
@@ -400,11 +404,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // further discovery — the owner isn't still answering questions.
   let hasExistingDraft = false;
   let previousDraft: string | null = null;
-  if (jobId) {
-    const jrows = await sql`SELECT data->>'draft' AS draft FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
+  // The work item's own title. A follow-up turn must not rename the folder to
+  // whatever the latest chat message happened to be.
+  let previousTitle: string | null = null;
+  // A conversation that began in chat has no jobId in the request: the client
+  // only knows a job id from ?job= on the URL (it reads res.d.paper, which this
+  // server never sends), and the draft block below files the work under
+  // `recordId = jobId || sessionId`. Looking up only `jobId` therefore reported
+  // "no draft on file" for exactly the conversations that had one, so a revision
+  // to a chat-born draft would not version. Look up the session's item too.
+  const draftLookupId = jobId || sessionId || null;
+  if (draftLookupId) {
+    const jrows = await sql`SELECT data->>'draft' AS draft, title FROM buzzy_jobs WHERE id = ${draftLookupId} AND user_id = ${userId}`;
     const prev = jrows[0] && jrows[0].draft ? String(jrows[0].draft).trim() : null;
     hasExistingDraft = !!prev;
     if (prev) previousDraft = prev;
+    const t = jrows[0] && typeof jrows[0].title === "string" ? jrows[0].title.trim() : "";
+    if (t) previousTitle = t;
   }
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
@@ -447,9 +463,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   };
   if (surface !== "voice") {
-    newlyExtracted = await extractPromise;
+    // The extract used to be awaited in full before the reply model was even
+    // called: +3.3s p50 on every typed turn, measured. Give it a small head
+    // start (Work mode gets a real budget because the brief IS the product),
+    // then let the reply go and merge whatever lands afterwards.
+    const budgetMs = mode === "work" ? 6000 : 700;
+    const firstPass = await Promise.race([
+      extractPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
+    ]);
+    if (firstPass) {
+      newlyExtracted = firstPass;
+      await mergeExtracted(newlyExtracted);
+    }
     extractMs = Date.now() - extractStarted;
-    await mergeExtracted(newlyExtracted);
   }
 
   // ── Build system prompt ────────────────────────────────────────────
@@ -587,7 +614,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
   const toolCtx = { draftGateOpen };
-  const loopTools = offeredTools(toolCtx) as unknown[];
+  // Only a turn that can actually produce something gets a tool surface. An
+  // always-on tool list forced every chat turn onto the buffered path (a
+  // non-empty tool list is what disables streaming), which is the 12s answer.
+  // Web lookups are already handled by the deterministic research pre-pass.
+  const loopTools = (draftGateOpen || isExplicitDocumentRequest(message))
+    ? (offeredTools(toolCtx) as unknown[])
+    : [];
   // glm-class models treat an optional tool as optional and answer in prose.
   // When the owner EXPLICITLY asks for the file, force the tool call (plan doc
   // 23, open decision #3: native tool_calls with a fallback path).
@@ -698,6 +731,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         model: spoken.model,
         finishReason: spoken.finishReason,
       };
+    } else if (typeof req.onText === "function" && !(loopTools && loopTools.length)) {
+      // Typed turns stream too. Buffered, a 489-char answer arrived 12.6s after
+      // the question with nothing on screen; the same answer streams its first
+      // words at ~1s. Tool turns stay buffered — a tool call needs the whole
+      // assistant message before it can be executed.
+      let firstDelta = true;
+      reply = await chatCompletionStream(
+        messages,
+        { model: routedModel, maxTokens: undefined },
+        (delta) => {
+          if (firstDelta) { ttftMs = Date.now() - llmStarted; firstDelta = false; }
+          req.onText!(delta);
+        },
+      );
+      llmMs = Date.now() - llmStarted;
     } else {
       reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
       llmMs = Date.now() - llmStarted;
@@ -912,12 +960,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     };
   }
 
-  // VOICE lane: the owner already heard the answer — merge the deferred slot
-  // extraction now (it ran alongside the reply, not before it).
-  if (surface === "voice") {
-    newlyExtracted = await extractPromise;
+  // Deferred merge: the owner already heard (or read) the answer — fold in the
+  // slot extraction that ran alongside it instead of gating the turn on it.
+  if (surface === "voice" || !Object.keys(newlyExtracted).length) {
+    // Never hold the response for this. The words are already on screen / in the
+    // owner's ears; waiting here only delays the `done` event (measured: a 2.3s
+    // streamed turn reported 9.2s because extraction was still awaited).
+    const late = await Promise.race([
+      extractPromise.catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 400)),
+    ]);
+    if (late) {
+      newlyExtracted = late;
+      await mergeExtracted(late);
+    } else {
+      void extractPromise.then(mergeExtracted).catch(() => {});
+    }
     extractMs = Date.now() - extractStarted;
-    await mergeExtracted(newlyExtracted);
   }
 
   // ── Sanitize reply ─────────────────────────────────────────────────
@@ -1083,9 +1142,24 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       lane,
     },
   };
+  // ── Does THIS turn deliver something? ──────────────────────────────
+  // `draftGateOpen` answers "may this conversation produce a document"; it
+  // stays open for every later turn. The materialise block below must key off
+  // "did this turn produce one" instead, or every reply in a draft-bearing
+  // conversation becomes a new version of one document (and a chat answer to
+  // "what is a fence quote?" grows a Download card). See producesDeliverable.
+  const deliversThisTurn = producesDeliverable({
+    renderedDocText,
+    requestedDraft,
+    mode,
+    draftGateOpen,
+    hasExistingDraft,
+    message,
+  });
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
-  // draft — before the owner approves work, never after.
-  if (draftGateOpen) {
+  // draft — before the owner approves work, never after. It belongs to a turn
+  // that is actually showing a draft, not to a question answered in chat.
+  if (deliversThisTurn) {
     try {
       response.estimate = await buildJobEstimate(sql, userId, draftGateOpen);
     } catch { /* estimate is additive — never block the reply */ }
@@ -1107,9 +1181,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     if (suggestion) response.expertSuggestion = suggestion;
   }
 
-  // Draft only on the turn AFTER all four were already captured (the owner
-  // is confirming), never the instant the fourth statement lands.
-  if (wereAllFilled || requestedDraft || hasExistingDraft) {
+  // Draft only on a turn that actually delivers: see deliversThisTurn above
+  // (a confirming turn on a full brief, an explicit ask, a render, a revision).
+  if (deliversThisTurn) {
     response.draft = true;
     response.done = true;
     // Multi-step review (component #8): deterministic approval-time checks,
@@ -1136,14 +1210,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // conversation; a slot may have been contaminated by an older job (the gate
     // found a fence SOW titled "Quote request letter to landlord for a new AC
     // unit" because the extraction pulled another job's facts into this one).
+    // Once a work item exists its title is settled: a follow-up turn is a
+    // revision of that item, not a new one, so it must not rename the folder to
+    // whatever this turn's message happened to say ("Make the actual Word
+    // document of the AC letter now, as a downloadable file."). The owner can
+    // still rename it with PATCH /api/buzzy/jobs/:id.
     const baseTitle =
       renderedDocTitle && renderedDocTitle.trim()
         ? renderedDocTitle
-        : slotValues.end_goal && slotValues.end_goal !== "skipped"
-          ? slotValues.end_goal
-          : slotValues.challenge && slotValues.challenge !== "skipped"
-            ? slotValues.challenge
-            : message;
+        : previousTitle
+          ? previousTitle
+          : slotValues.end_goal && slotValues.end_goal !== "skipped"
+            ? slotValues.end_goal
+            : slotValues.challenge && slotValues.challenge !== "skipped"
+              ? slotValues.challenge
+              : message;
     await sql`
       INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
       VALUES (
@@ -1169,16 +1250,44 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
     // BZ-F015: materialize the actual produced text as a durable document
     // with immutable versions — never reconstruct it later from the brief.
+    let materializedId: string | null = null;
     try {
       // The rendered document when there is one; the reply only when the turn
       // produced no artifact at all.
-      await materializeDraft(sql, userId, recordId, baseTitle, renderedDocText ?? cleanReply, {
+      const mat = await materializeDraft(sql, userId, recordId, baseTitle, renderedDocText ?? cleanReply, {
         slots: slotValues,
         review: response.review,
         creator: userId,
       });
+      materializedId = mat && mat.id ? String(mat.id) : null;
     } catch (derr) {
       console.error("[buzzy/documents] materialize failed:", derr instanceof Error ? derr.message : derr);
+    }
+    // The chat must hand over the file it just made. A banner at the top of the
+    // page is not "delivered": the link belongs in the reply that announced it.
+    // TS narrows the outer variable to null here (it is assigned inside the
+    // tool loop), so take it through an explicitly typed local.
+    const renderedDoc = renderedDocument as { filename: string; bytesB64: string; contentType: string } | null;
+    if (renderedDoc || materializedId) {
+      // The chat delivers the file. Two links, both real:
+      //   downloadUrl — /api/buzzy/documents/:id?format=… renders the exact
+      //     version on demand and is NOT approval-gated (the owner's own file,
+      //     made in this conversation).
+      //   libraryUrl  — the Library row for the work item this chat produced.
+      const docId = materializedId ?? documentIdForJob(recordId);
+      const fmt = /pdf/i.test(renderedDoc?.contentType ?? "")
+        ? "pdf"
+        : /word|officedocument/i.test(renderedDoc?.contentType ?? "")
+          ? "docx"
+          : "md";
+      response.document = {
+        filename: renderedDoc?.filename ?? `${baseTitle.slice(0, 60)}.${fmt}`,
+        contentType: renderedDoc?.contentType ?? "text/markdown",
+        bytes: renderedDoc?.bytesB64 ? Math.round((renderedDoc.bytesB64.length * 3) / 4) : null,
+        documentId: docId,
+        downloadUrl: `/api/buzzy/documents/${encodeURIComponent(docId)}?format=${fmt}`,
+        libraryUrl: `/buzzy/library?job=${encodeURIComponent(recordId)}`,
+      };
     }
   }
 

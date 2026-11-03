@@ -37,6 +37,69 @@ export function isDraftRequest(message: string): boolean {
 }
 
 /**
+ * An EDIT to the document already on file — as opposed to a question asked
+ * while a document happens to be on file.
+ *
+ * This exists because "is this a draft conversation" and "did this turn touch
+ * the deliverable" are different questions. A conversation that produced a
+ * draft keeps its draft for every later turn; without a separate signal, every
+ * later turn — including "what is a fence quote?" — was materialised as a new
+ * version of that document.
+ *
+ * The bar is two things at once: an edit verb AND a reference to the artifact.
+ * Bare "make it shorter" is enough (the artifact is the only "it" in the room);
+ * "what does it cost?" is not, because there is no edit verb. It is only ever
+ * consulted when a draft already exists, so a false positive can cost one
+ * version, never a document in a fresh chat.
+ */
+export function isRevisionRequest(message: string): boolean {
+  const m = String(message || "");
+  if (isDraftRequest(m)) return false; // already covered by the request gate
+  // A question ABOUT the work ("what should I add to the quote?") is not an
+  // edit to it. A polite request ("can you make the intro shorter?") is.
+  if (/^\s*(what|why|how|who|when|where|which|is|are|does|do|did|should)\b/i.test(m)) return false;
+  const EDIT =
+    /\b(make|change|shorten|lengthen|add|remove|delete|cut|trim|replace|rewrite|reword|edit|update|fix|tweak|adjust|expand|tighten|soften|simplify|reorder|split|merge|reformat|swap|drop|keep|turn)\b/i;
+  const ARTIFACT =
+    /\b(it|this|that|(?:the|a|an|my|our|your)\s+(?:\w+\s+){0,2}(?:draft|document|doc|letter|email|note|quote|proposal|report|memo|version|wording|opening|intro|introduction|body|copy|text|section|paragraph|line|sentence|heading|title|list|closing|sign-?off|price|amount)s?)\b/i;
+  return EDIT.test(m) && ARTIFACT.test(m);
+}
+
+/**
+ * Did THIS turn deliver a document?
+ *
+ * The draft gate ("may this conversation produce a document?") is deliberately
+ * separate from this question. The gate opens on state the conversation already
+ * carries — all four decisions captured (possibly inherited from memory that is
+ * not this conversation's), or a job that already holds a draft — and it stays
+ * open for every later turn. Materialising off the gate is what put a Download
+ * card under "Reply with exactly: pong" and grew one Library folder to eleven
+ * versions, one per chat message.
+ *
+ * Every case below is a turn that actually produced the deliverable:
+ *   - the render tool ran  → the owner has a file, the card is how he gets it;
+ *   - the owner asked for it now ("save it in the file", "write it up");
+ *   - Work mode with the gate open → the brief IS the product, each turn revises;
+ *   - an edit to the draft on file ("make the second paragraph shorter").
+ * Nothing else. A conversational answer is answerable in chat and is not a file.
+ */
+export function producesDeliverable(input: {
+  renderedDocText: string | null;
+  requestedDraft: boolean;
+  mode: "chat" | "work";
+  draftGateOpen: boolean;
+  hasExistingDraft: boolean;
+  message: string;
+}): boolean {
+  return (
+    !!input.renderedDocText ||
+    input.requestedDraft ||
+    (input.mode === "work" && input.draftGateOpen) ||
+    (input.hasExistingDraft && isRevisionRequest(input.message))
+  );
+}
+
+/**
  * When the file is named explicitly, the harness forces `render_document`
  * rather than hoping the model chooses it. glm-class models treat an optional
  * tool as optional.

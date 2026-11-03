@@ -1,0 +1,68 @@
+{
+  "version": "v0",
+  "job_scope": "civilian-document",
+  "note": "Cost figures are rendered to civilians as 'about $X'. No model ids in any user-facing field.",
+  "skills": [
+    {
+      "id": "interview",
+      "civilian_name": "The Interview",
+      "when_pulled": "Up front — asks the few work-changing questions before any drafting",
+      "cost_class": "trivial",
+      "dana_sow": true
+    },
+    {
+      "id": "doc-draft",
+      "civilian_name": "Document Draft",
+      "when_pulled": "Once interview signals are in — writes the first full draft",
+      "cost_class": "light",
+      "dana_sow": true
+    },
+    {
+      "id": "plain-language",
+      "civilian_name": "Plain Language Pass",
+      "when_pulled": "After a draft exists — strips jargon so a non-expert can act on it",
+      "cost_class": "light",
+      "dana_sow": true
+    },
+    {
+      "id": "research",
+      "civilian_name": "Research",
+      "when_pulled": "When the job needs outside facts (rules, norms, requirements)",
+      "cost_class": "moderate",
+      "dana_sow": true
+    },
+    {
+      "id": "rates-research",
+      "civilian_name": "Rates Research",
+      "when_pulled": "When the job involves money — checks what rates are typical",
+      "cost_class": "moderate",
+      "dana_sow": true
+    },
+    {
+      "id": "source-verify",
+      "civilian_name": "Source Check",
+      "when_pulled": "Verifies any factual claim in the draft against a real source",
+      "cost_class": "verify-tier",
+      "dana_sow": true
+    },
+    {
+      "id": "fairness-review",
+      "civilian_name": "Fairness Review",
+      "when_pulled": "Checks the deal is balanced — flags one-sided terms",
+      "cost_class": "verify-tier",
+      "dana_sow": true
+    },
+    {
+      "id": "doc-format",
+      "civilian_name": "Document Format",
+      "when_pulled": "On approval — produces the clean, ready-to-send document",
+      "cost_class": "light",
+      "dana_sow": true
+    }
+  ],
+  "pull_rules": {
+    "selection": "two passes: interview signals, then the draft with a one-line reason per skill",
+    "model_policy": "least expensive capable model; escalate once on verification fail or low confidence, then pause",
+    "hard_exclusions": ["github", "railway"]
+  }
+}

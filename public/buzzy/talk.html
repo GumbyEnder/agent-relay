@@ -405,6 +405,41 @@
       margin: 0.5rem 0;
       font-size: 0.88rem;
     }
+    /* The file a turn produced. Delivered IN the conversation — a banner at the
+       top of the page is not delivery. */
+    .file-card {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      margin: 0.5rem 0;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid var(--bz-yellow-dim, #6b5a1e);
+      border-left: 3px solid var(--yellow, #f5c518);
+      border-radius: 6px;
+      background: #1b1b1b;
+      font-size: 0.85rem;
+    }
+    .file-card .file-icon { font-size: 1.25rem; line-height: 1; }
+    .file-card .file-meta { flex: 1; min-width: 0; }
+    .file-card .file-name {
+      display: block;
+      font-weight: 600;
+      color: #EDEDED;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-card .file-sub { color: #9A9A9A; font-size: 0.75rem; }
+    .file-card a {
+      color: var(--yellow, #f5c518);
+      text-decoration: none;
+      border: 1px solid var(--bz-yellow-dim, #6b5a1e);
+      border-radius: 4px;
+      padding: 0.25rem 0.55rem;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+    .file-card a:hover { background: #2a2a1a; }
 
     /* ── Chat input ─────────────────────────────────────── */
     .chat-input-row {
@@ -562,6 +597,9 @@
     }
     .paper-toggle:hover { color: #FFC107; border-color: #B8860B; }
     .paper-toggle[aria-expanded="true"] { color: #FFC107; border-color: #FFC107; }
+    .media-card { flex-wrap: wrap; }
+    .media-img { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 0.4rem; }
+    .media-audio { display: block; width: 100%; margin-top: 0.4rem; }
     .paper-drop.hidden { display: none; }
     .paper-drop {
       margin-top: 0.8rem;
@@ -1241,20 +1279,53 @@
 <body>
   <header>
     <div class="header-inner">
-    <a href="/buzzy/" class="brand-link">
+    <a href="/buzzy/talk" class="brand-link">
       <div class="brand">
-        <img class="mascot-mark" src="brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
         <strong>BeeZilla</strong>
       </div>
     </a>
-    <nav>
-      <a href="/buzzy/" id="jobsLink" class="active">Talk</a>
-      <a href="/buzzy/memory" id="memLink">Memory</a>
-      <a href="/buzzy/experts">Experts</a>
-        <a href="/buzzy/recipes">Recipes</a>
-        <a href="/buzzy/library" id="libLink">Library</a>
-      <a href="/buzzy/landing" class="account-link">Sign in</a>
+    <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
     </nav>
+    <script>
+    /* ONE navigation, defined once. Every page used to hand-write its own nav
+       and they drifted: "Talk" pointed at /buzzy/ (the Jobs/Library page), so the
+       chat was unreachable from the nav — that is why you could not get back to
+       TALK. Active state is computed here from the path, not hard-coded per page. */
+    (function () {
+      var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+      // index.html serves ONLY /buzzy/library; every other /buzzy route
+      // redirects to the chat, so bare /buzzy counts as Talk here.
+      var section = "library";
+      if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
+      else if (/^\/buzzy\/library$/.test(path)) section = "library";
+      else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
+      else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
+      else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
+      else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
+      else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
+      // These screens are not in the nav, so nothing lights up — claiming
+      // "Library" was active on the business profile was simply wrong.
+      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
+      var links = document.querySelectorAll("#bzNav a[data-nav]");
+      for (var i = 0; i < links.length; i++) {
+        var on = links[i].getAttribute("data-nav") === section;
+        links[i].classList.toggle("active", on);
+        if (on) links[i].setAttribute("aria-current", "page");
+        else links[i].removeAttribute("aria-current");
+      }
+      // Account identity is the page's own job (each page has its own session
+      // code). The nav only guarantees the links and their order.
+    })();
+    </script>
     </div>
   </header>
   <div id="companyTabs"></div>
@@ -1310,6 +1381,8 @@
 
           <div class="paper-attach">
               <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
+              <button type="button" id="makeMusic" class="paper-toggle" title="Ask BeeZilla to make a piece of music">&#9835; Music</button>
+              <button type="button" id="make3d" class="paper-toggle" title="Ask BeeZilla to make a 3D model">&#9671; 3D</button>
             </div>
           </div>
 
@@ -1334,7 +1407,7 @@
           <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
           <div id="paperDrop" class="paper-drop hidden">
             <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
-            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,application/pdf,text/plain" />
+            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz" />
             <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
             <div class="row">
               <button type="button" id="paperRead">Read it</button>
@@ -1396,7 +1469,7 @@
   <script src="/buzzy/money-check.js"></script>
   <script src="/buzzy/promise-check.js"></script>
   <script src="/buzzy/avatar.js"></script>
-  <script src="sow-pdf.js"></script>
+  <script src="/buzzy/sow-pdf.js"></script>
   <script>
     const QUESTIONS = [
       { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
@@ -1608,7 +1681,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }).join("")
         : "<p class='muted'>No jobs to show. Start one, or turn off Hide completed work.</p>";
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
         "<h1>Your jobs</h1>" +
         "<p>Current and past work. Completed jobs stay here unless you hide them.</p>" +
         "<label class='filter'><input type='checkbox' id='hideDone'" + (catalog.hideCompleted ? " checked" : "") + "> Hide completed work</label>" +
@@ -1633,7 +1706,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return "<button class='secondary" + sel + "' data-id='" + t.id + "'><strong>" + t.name + "</strong><br><span class='muted'>" + t.hint + "</span></button>";
       }).join("");
       document.getElementById("app").innerHTML =
-        "<img class='mascot' src='brand/revision6_expressions_13-idea.png' alt='BeeZilla' />" +
+        "<img class='mascot' src='/buzzy/brand/revision6_expressions_13-idea.png' alt='BeeZilla' />" +
         "<h1>What kind of job is this?</h1>" +
         "<p>Pick a template. Then tell BeeZilla the problem in your own words. The product is a chat — this is the start of that conversation.</p>" +
         "<div class='templates'>" + tiles + "</div>" +
@@ -1654,7 +1727,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const t = TEMPLATES.find((x) => x.id === state.template);
       setPhase((t && t.name) || "New job");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
         "<h1>What's the problem?</h1>" +
         "<p class='muted'>" + (t ? t.name : "") + " — write it like you'd say it out loud. Nothing starts until you approve a draft later.</p>" +
         "<textarea id='prob' rows='7' placeholder='Describe what you need…'></textarea>" +
@@ -1681,7 +1754,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setPhase("Talk it through");
       const msgs = (state.messages || []).map((m) => "<div class='bubble" + (m.who === "me" ? " me" : "") + "'>" + String(m.text).replace(/</g,"&lt;").replace(/\n/g,"<br>") + "</div>").join("");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>" + (t ? t.name : "Job") + "</h1>" +
         msgs +
         "<textarea id='more' rows='3' placeholder='Add more…'></textarea>" +
@@ -1723,7 +1796,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const q = QUESTIONS[state.q];
       setPhase("Question " + (state.q + 1) + " of 8");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_08-thinking.png' alt='BeeZilla' />" +
         "<div class='step-indicator'><span class='hex-badge'>" + (state.q + 1) + "</span><span>" + (state.q + 1) + " of 8</span></div>" +
         "<p class='muted'>You can skip this. I'll use a default.</p>" +
         "<h1>" + q.prompt + "</h1>" +
@@ -1753,7 +1826,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function goPause() {
       setPhase("Needs you");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>Before we go further</h1><p>" + state.pause.question + "</p>" +
         "<div class='row'><button id='flex'>My budget is flexible</button>" +
         "<button id='stay' class='secondary'>I need to stay at my number</button></div>" +
@@ -1790,7 +1863,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         ? "BeeZilla finishes the draft, double-checks it, and hands you files. You'll see each step on the board."
         : "BeeZilla finishes the document, double-checks it, and hands you files. You'll see each step. Nothing goes to contractors unless you send it.";
       document.getElementById("app").innerHTML =
-        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot-lg' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>Here's what BeeZilla will do — check it before anything starts.</h1>" +
         "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>What you asked for</h2><p>" + echo + "</p></div>" +
         "<div class='riveted'><span class='rivet r-tl'></span><span class='rivet r-tr'></span><span class='rivet r-bl'></span><span class='rivet r-br'></span><h2>The plan, in steps</h2><ol>" + plan + "</ol></div>" +
@@ -1860,7 +1933,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return "<div class='col'><h3>" + name + "</h3>" + chips + "</div>";
       }).join("");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-sm' src='brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
+        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_17-attentive.png' alt='BeeZilla' />" +
         "<h1>Watch the work move</h1><p class='muted'>These steps only exist because you approved the draft.</p>" +
         "<div class='board'>" + cols + "</div>";
     }
@@ -1871,7 +1944,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         ? "<ul>" + QUESTIONS.map((q) => "<li>" + q.prompt.split("—")[0] + ": " + (state.answers[q.id] || "—") + "</li>").join("") + "</ul>"
         : "<p class='muted'>Nothing for this job yet — we have not asked you anything.</p>";
       document.getElementById("app").innerHTML =
-        "<img class='mascot' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>What BeeZilla remembers</h1>" +
         "<div class='card'><h2>This job</h2>" + stm + "<p class='muted'>This stays with the paperwork until the job is done.</p></div>" +
         "<div class='card'><h2>Across jobs</h2>" + (catalog.jobs.filter(jobComplete).length
@@ -1896,7 +1969,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function goResult() {
       setPhase("Your documents are ready");
       document.getElementById("app").innerHTML =
-        "<img class='mascot-lg' src='brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
+        "<img class='mascot-lg' src='/buzzy/brand/revision6_expressions_12-content.png' alt='BeeZilla' />" +
         "<h1>Your documents are ready.</h1>" +
         "<p>Download the editable copy and a PDF.</p>" +
         "<div class='row'><button id='dl'>Download editable copy</button><button id='dlpdf' class='secondary'>Download PDF</button></div>" +
@@ -2170,6 +2243,185 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return sel && sel.value ? sel.value : null;
     }
 
+    /**
+     * The file this turn produced, with a working download and a Library link.
+     * Built from the turn's own response.document, so the link is in the reply
+     * that announced the file — not a separate banner the owner has to notice.
+     */
+    /**
+     * A picture, a piece of music or a 3D model the owner dropped in.
+     * Uploaded to the content-addressed asset store and shown in the same
+     * conversation, with the same delivery promise as a document: it is here,
+     * it plays or shows, and it can be downloaded.
+     */
+    function submitMedia(file) {
+      var label = file.name || "file";
+      chatState.messages.push({ role: "user", content: "Added " + label });
+      renderChatMessages();
+      return fetch("/api/buzzy/assets", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+          "x-bz-path": label
+        },
+        body: file
+      })
+        .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j || {} }; }); })
+        .then(function (res) {
+          if (!res.j.ok) {
+            chatState.messages.push({ role: "assistant", content: "That file did not upload: " + (res.j.error || ("HTTP " + res.s)) });
+            renderChatMessages();
+            return;
+          }
+          chatState.messages.push({
+            role: "assistant",
+            content: res.j.duplicate ? "Already here — same file." : "Saved.",
+            asset: { id: res.j.id, url: "/api/buzzy/assets/" + res.j.id, name: label, bytes: res.j.bytes || file.size, type: file.type || "" }
+          });
+          renderChatMessages();
+        })
+        .catch(function () {
+          chatState.messages.push({ role: "assistant", content: "Couldn't upload that file — check the connection." });
+          renderChatMessages();
+        });
+    }
+
+    function renderMediaCard(a) {
+      var esc = function (v) { return String(v == null ? "" : v).replace(/</g, "&lt;").replace(/"/g, "&quot;"); };
+      var name = esc(a.name || "file");
+      var size = a.bytes ? " · " + Math.max(1, Math.round(a.bytes / 1024)) + " KB" : "";
+      var url = esc(a.url);
+      var isAudio = /^audio\//i.test(a.type || "") || /\.(mp3|wav|m4a|ogg)$/i.test(name);
+      var isImage = /^image\//i.test(a.type || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
+      var is3d = /\.(glb|gltf|obj|usdz)$/i.test(name);
+      var body = "";
+      if (isAudio) {
+        body = '<audio class="media-audio" controls preload="metadata" src="' + url + '"></audio>';
+      } else if (isImage) {
+        body = '<img class="media-img" src="' + url + '" alt="' + name + '" loading="lazy" />';
+      } else if (is3d) {
+        // No engine is bundled yet, so a model is offered as its file, plainly
+        // labelled — not a broken viewer pretending to render.
+        body = '<span class="file-sub">3D model · download to open in any 3D viewer</span>';
+      }
+      return '<div class="file-card media-card">' +
+        '<span class="file-icon">' + (isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
+        '<span class="file-meta">' +
+          '<span class="file-name">' + name + "</span>" +
+          '<span class="file-sub">' + (is3d ? "" : "Saved to your files") + size + "</span>" +
+          body +
+        "</span>" +
+        '<a href="' + url + '" download="' + name + '">Download</a>' +
+      "</div>";
+    }
+
+    // ── Make music or a 3D model, from the composer ───────────────────────
+    // The result is pushed into the same conversation as an asset message, so it
+    // plays or downloads exactly like anything else the chat produced.
+    function makeBrief(what) {
+      var box = document.getElementById("chatInput");
+      var typed = box && box.value ? box.value.trim() : "";
+      if (typed) { box.value = ""; return typed; }
+      return window.prompt("Describe the " + what + " you want");
+    }
+
+    function sayToChat(text) {
+      chatState.messages.push({ role: "assistant", content: text });
+      renderChatMessages();
+    }
+
+    function makeMusic() {
+      var brief = makeBrief("music");
+      if (!brief) return;
+      chatState.messages.push({ role: "user", content: "Make music: " + brief });
+      var note = { role: "assistant", content: "Making that music…" };
+      chatState.messages.push(note);
+      renderChatMessages();
+      fetch("/api/buzzy/music", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: brief, seconds: 20 })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok) { note.content = j.error || "Music did not come back."; renderChatMessages(); return; }
+          note.content = "Here it is.";
+          note.asset = j.asset;
+          renderChatMessages();
+        })
+        .catch(function () { note.content = "Music failed — check the connection."; renderChatMessages(); });
+    }
+
+    function make3d() {
+      var brief = makeBrief("3D model");
+      if (!brief) return;
+      chatState.messages.push({ role: "user", content: "Make a 3D model: " + brief });
+      var note = { role: "assistant", content: "Starting the model…" };
+      chatState.messages.push(note);
+      renderChatMessages();
+      fetch("/api/buzzy/model3d", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: brief })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok || !j.taskId) { note.content = j.error || "The model could not be started."; renderChatMessages(); return; }
+          var tries = 0;
+          var tick = setInterval(function () {
+            tries++;
+            fetch("/api/buzzy/model3d/" + encodeURIComponent(j.taskId), { credentials: "same-origin" })
+              .then(function (r) { return r.json(); })
+              .then(function (p) {
+                if (p.asset) {
+                  clearInterval(tick);
+                  note.content = "Here it is.";
+                  note.asset = p.asset;
+                  renderChatMessages();
+                  return;
+                }
+                if (p.status === "FAILED" || p.status === "error" || tries > 60) {
+                  clearInterval(tick);
+                  note.content = p.error || "The model did not finish.";
+                  renderChatMessages();
+                  return;
+                }
+                note.content = "Making the model… " + (p.progress || 0) + "%";
+                renderChatMessages();
+              })
+              .catch(function () { clearInterval(tick); note.content = "Polling failed."; renderChatMessages(); });
+          }, 4000);
+        })
+        .catch(function () { note.content = "The model could not be started."; renderChatMessages(); });
+    }
+
+    var _mm = document.getElementById("makeMusic");
+    if (_mm) _mm.addEventListener("click", makeMusic);
+    var _m3 = document.getElementById("make3d");
+    if (_m3) _m3.addEventListener("click", make3d);
+
+    function renderFileCard(doc) {
+      var name = String(doc.filename || "document");
+      var size = doc.bytes ? " · " + Math.max(1, Math.round(doc.bytes / 1024)) + " KB" : "";
+      var icon = /\.pdf$/i.test(name) ? "\uD83D\uDCC4"
+        : /\.(docx|doc)$/i.test(name) ? "\uD83D\uDCDD"
+        : /\.csv$/i.test(name) ? "\uD83D\uDCCA"
+        : "\uD83D\uDCCE";
+      var esc = function (v) { return String(v == null ? "" : v).replace(/</g, "&lt;").replace(/"/g, "&quot;"); };
+      var dl = doc.downloadUrl.indexOf("/api/") === 0 ? doc.downloadUrl : esc(doc.downloadUrl);
+      var lib = doc.libraryUrl && doc.libraryUrl.indexOf("/buzzy/") === 0 ? doc.libraryUrl : null;
+      return '<div class="file-card">' +
+        '<span class="file-icon">' + icon + "</span>" +
+        '<span class="file-meta">' +
+          '<span class="file-name">' + esc(name) + "</span>" +
+          '<span class="file-sub">Saved to your Library' + size + "</span>" +
+        "</span>" +
+        '<a href="' + esc(dl) + '" download>Download</a>' +
+        (lib ? '<a href="' + esc(lib) + '" target="_blank" rel="noopener">Open in Library</a>' : "") +
+      "</div>";
+    }
+
     function renderChatMessages() {
       const container = document.getElementById("chatMessages");
       // Newest first, but each exchange still reads question-then-answer:
@@ -2189,7 +2441,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const html = ordered.map((m) => {
         const cls = m.role === "user" ? "bubble me" : "bubble";
         const escaped = String(m.content).replace(/</g, "&lt;").replace(/\n/g, "<br>");
-        return '<div class="' + cls + '">' + escaped + "</div>";
+        var bubble = '<div class="' + cls + '">' + escaped + "</div>";
+        if (m.document && m.document.downloadUrl) {
+          bubble += renderFileCard(m.document);
+        }
+        if (m.asset && m.asset.url) {
+          bubble += renderMediaCard(m.asset);
+        }
+        return bubble;
       }).join("");
       container.innerHTML = html;
       // BZ-F011: expert handoff suggestion (never an auto-switch). Re-appended
@@ -2437,6 +2696,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function readDroppedFile(file) {
       return new Promise(function (resolve, reject) {
         if (!file) { reject(new Error("Drop a file or paste the letter first.")); return; }
+        // Pictures, sound and 3D models are not "papers": they are kept as
+        // themselves, played or shown in the conversation, and downloadable.
+        // The 1.5 MB paper limit does not apply — the asset endpoint allows 25 MB.
+        var isMedia = /^(image|audio)\//.test(file.type || "") ||
+          /\.(glb|gltf|obj|usdz)$/i.test(file.name || "");
+        if (isMedia) {
+          if (file.size > 25 * 1024 * 1024) { reject(new Error("That file is over 25 MB.")); return; }
+          resolve({ mediaFile: file, filename: file.name || "file" });
+          return;
+        }
         if (file.size > 1500000) { reject(new Error("That file is too large. Paste the letter instead.")); return; }
         var isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
         var isText = /^text\//.test(file.type || "") || /\.(txt|md|csv)$/i.test(file.name || "");
@@ -2691,8 +2960,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // The flag up top controls whether replies are read aloud. The mic turns
     // the page into a hands-free loop: listen, send, speak, listen again.
     var VOICE_KEY = "bz_voice_replies";
+    // "Listen" is a MODE, not a page state. If the owner flips to the Library
+    // and comes back — or reloads, or a navigation drops the page — the mic
+    // comes back on without them having to press it again. Stored as intent;
+    // the recognizer is re-armed as soon as the browser allows it.
+    var LISTEN_KEY = "bz_listen_mode";
     var voice = {
-      replies: false, mic: false, rec: null, speaking: false, sending: false,
+      replies: false, mic: false, rec: null, speaking: false, sending: false, note: "",
+      // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
+      // (Chrome, and anything with a working speech service); "recorder" = record
+      // locally and let the server transcribe (Firefox, Brave, blocked service).
+      asr: "sr",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
       // Timings
@@ -2756,17 +3034,43 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function startLevelLoop() {
       if (voice.raf || !voice.analyser) return;
       var data = new Uint8Array(voice.analyser.frequencyBinCount);
+      var spec = new Uint8Array(voice.analyser.frequencyBinCount);
+      // 24kHz / 1024 bins → ~23.4Hz per bin. Bands: low (jaw) 80–400Hz,
+      // mid (vowel body) 400–1600Hz, high (consonants) 1600–6000Hz.
+      var BIN_HZ = (voice.ctx ? voice.ctx.sampleRate : 24000) / 2 / spec.length;
       function frame() {
         voice.raf = 0;
         if (!voice.analyser) return;
         voice.analyser.getByteTimeDomainData(data);
+        voice.analyser.getByteFrequencyData(spec);
         var sum = 0;
         for (var i = 0; i < data.length; i++) {
           var v = (data[i] - 128) / 128;
           sum += v * v;
         }
         var level = Math.min(1, Math.sqrt(sum / data.length) * 3.4);
-        for (var a = 0; a < avatars.length; a++) avatars[a].setLevel(level);
+        var low = 0, mid = 0, high = 0, nLow = 0, nMid = 0, nHigh = 0;
+        for (var b = 1; b < spec.length; b++) {
+          var hz = b * BIN_HZ;
+          if (hz < 80 || hz > 6000) continue;
+          var e = spec[b] / 255;
+          if (hz < 400) { low += e; nLow++; }
+          else if (hz < 1600) { mid += e; nMid++; }
+          else { high += e; nHigh++; }
+        }
+        low = nLow ? low / nLow : 0;
+        mid = nMid ? mid / nMid : 0;
+        high = nHigh ? high / nHigh : 0;
+        var total = low + mid + high;
+        var viseme = {
+          open: Math.min(1, (low * 1.5 + mid * 0.9) * 2.2),
+          wide: total > 0.02 ? Math.min(1, (high * 1.4 + mid * 0.4) / total) : 0.5,
+          bright: Math.min(1, high * 2.4)
+        };
+        for (var a = 0; a < avatars.length; a++) {
+          avatars[a].setLevel(level);
+          if (avatars[a].setViseme) avatars[a].setViseme(viseme);
+        }
         if (voice.speaking || voice.active) voice.raf = requestAnimationFrame(frame);
       }
       voice.raf = requestAnimationFrame(frame);
@@ -2821,6 +3125,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function saveVoicePref(on) {
       try { localStorage.setItem(VOICE_KEY, on ? "1" : "0"); } catch (_) {}
     }
+    function listenPref() {
+      try { return localStorage.getItem(LISTEN_KEY) === "1"; } catch (_) { return false; }
+    }
+    function saveListenPref(on) {
+      try { localStorage.setItem(LISTEN_KEY, on ? "1" : "0"); } catch (_) {}
+      // The "on" state also drives the tab title marker, so a background tab
+      // still says whether it is listening.
+      try { document.title = on ? "🎙 BeeZilla — Listening" : "🐴 BeeZilla — Chat"; } catch (_) {}
+    }
 
     function paintVoice() {
       var t = document.getElementById("voiceToggle");
@@ -2840,7 +3153,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           ? "Speaking — I'll listen again when I'm done."
           : voice.mic
             ? "Listening — speak, then pause."
-            : "";
+            : (voice.note || "");
         s.textContent = msg;
         s.classList.toggle("hidden", !msg);
       }
@@ -2880,6 +3193,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      * voice mid-conversation is worse than hearing nothing. If a turn produces
      * no audio, say so on screen and keep the loop going.
      */
+    // One-line status on the voice stage, without touching the audio path.
+    function stageNote(msg) {
+      // Persist the note, then let paintVoice render it. Writing the DOM here
+      // directly is not enough: paintVoice repaints the status line immediately
+      // after and used to wipe the message that had just been written.
+      voice.note = msg;
+      var mb = document.getElementById("micBtn");
+      if (mb) mb.title = msg;
+      paintVoice();
+    }
+
     function voiceUnavailable() {
       var st = document.getElementById("voiceStageState");
       if (st) st.textContent = "Voice unavailable for this turn — the answer is on screen";
@@ -2894,19 +3218,34 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // One spoken turn: returns the final transcript, or "" if nothing heard.
     function startListening() {
+      if (voice.rec || recState) return;
+      // Firefox ships no SpeechRecognition and Brave's service is blocked, so
+      // those browsers record the clip and let the server transcribe it.
+      if (!srAvailable() || voice.asr === "recorder") { startRecording(); return; }
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR || voice.rec) return;
       var rec = new SR();
       rec.lang = "en-US";
       rec.continuous = false;
       rec.interimResults = true;
       voice.rec = rec;
+      voice.firstInterimAt = 0;
       rec.onresult = function (e) {
+        // Speaking window: first recognised sound → final transcript. This is
+        // the owner's own talk time, separate from our processing time.
+        if (!voice.firstInterimAt && e.results && e.results.length) {
+          var heard = e.results[e.resultIndex || 0];
+          if (heard && heard[0] && String(heard[0].transcript || "").trim()) {
+            voice.firstInterimAt = performance.now();
+          }
+        }
         var finalText = "";
         for (var i = e.resultIndex; i < e.results.length; i++) {
           if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
         }
         if (finalText.trim()) {
+          voice.userSpeechMs = voice.firstInterimAt
+            ? Math.round(performance.now() - voice.firstInterimAt)
+            : null;
           stopListening();
           // Timestamp the moment the owner stopped talking: time-to-talk is
           // measured from here, not from when we happened to send.
@@ -2920,9 +3259,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
       };
       rec.onerror = function (e) {
-        if (e && e.error === "not-allowed") {
+        var err = e && e.error;
+        if (err === "not-allowed") {
+          // A denied permission has no route around it.
+          stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
           voice.mic = false;
+          saveListenPref(false);
           paintVoice();
+        } else if (err === "service-not-allowed" || err === "network") {
+          // Brave exposes SpeechRecognition but blocks Google's service, and a
+          // blocked service hits Chrome the same way. Recording needs nothing
+          // but getUserMedia, so this session switches to the server transcriber.
+          voice.asr = "recorder";
+          try { rec.stop(); } catch (_) {}
+          voice.rec = null;
+          if (voice.mic) startRecording();
+        } else if (err === "no-speech") {
+          // Expected: a silent window. onend re-arms the mic.
+        } else if (err) {
+          stageNote("Voice stopped: " + err);
         }
       };
       rec.onend = function () {
@@ -2936,15 +3291,210 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function stopListening() {
+      if (recState) cancelRecording();
       if (!voice.rec) return;
       try { voice.rec.stop(); } catch (_) {}
       voice.rec = null;
       paintVoice();
     }
 
+    // ── Recorder fallback ─────────────────────────────────────────────────
+    // Firefox ships no SpeechRecognition and Brave blocks its service, so those
+    // browsers record a clip themselves and the server does the listening.
+    // Everything here is getUserMedia + WebAudio, which every browser has.
+    var REC_RATE = 16000;
+    var recState = null;
+
+    function srAvailable() {
+      return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    }
+
+    function rearmListening() {
+      if (voice.mic && !voice.speaking && !voice.sending) {
+        setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
+      }
+    }
+
+    // Average-decimate to 16 kHz mono: small upload, no resampling library.
+    function downsampleTo16k(samples, rate) {
+      if (rate === REC_RATE) return samples;
+      var ratio = rate / REC_RATE;
+      var out = new Float32Array(Math.floor(samples.length / ratio));
+      for (var i = 0; i < out.length; i++) {
+        var start = Math.floor(i * ratio);
+        var end = Math.min(samples.length, Math.floor((i + 1) * ratio));
+        var sum = 0;
+        for (var j = start; j < end; j++) sum += samples[j];
+        out[i] = sum / Math.max(1, end - start);
+      }
+      return out;
+    }
+
+    // 16-bit PCM WAV: the one container every browser can produce and the
+    // transcription endpoint accepts without a server-side converter.
+    function encodeWav(samples) {
+      var buf = new ArrayBuffer(44 + samples.length * 2);
+      var view = new DataView(buf);
+      var tag = function (off, s) { for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+      tag(0, "RIFF");
+      view.setUint32(4, 36 + samples.length * 2, true);
+      tag(8, "WAVEfmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, REC_RATE, true);
+      view.setUint32(28, REC_RATE * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      tag(36, "data");
+      view.setUint32(40, samples.length * 2, true);
+      for (var k = 0; k < samples.length; k++) {
+        var s = Math.max(-1, Math.min(1, samples[k]));
+        view.setInt16(44 + k * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    }
+
+    function startRecording() {
+      if (recState || voice.sending) return;
+      var md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) {
+        stageNote("This browser can't record audio — typed chat works here.");
+        voice.mic = false;
+        saveListenPref(false);
+        paintVoice();
+        return;
+      }
+      md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+        .then(function (stream) {
+          if (!voice.mic) {
+            stream.getTracks().forEach(function (t) { t.stop(); });
+            return;
+          }
+          var AC = window.AudioContext || window.webkitAudioContext;
+          var ctx = new AC();
+          var src = ctx.createMediaStreamSource(stream);
+          var proc = ctx.createScriptProcessor(2048, 1, 1);
+          var chunks = [];
+          var speechSeen = false;
+          var quietSince = 0;
+          var startedAt = Date.now();
+          proc.onaudioprocess = function (ev) {
+            if (!recState) return;
+            var input = ev.inputBuffer.getChannelData(0);
+            var copy = new Float32Array(input.length);
+            copy.set(input);
+            chunks.push(copy);
+            var sum = 0;
+            for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
+            var rms = Math.sqrt(sum / copy.length);
+            if (rms > 0.02) { speechSeen = true; quietSince = 0; }
+            else if (speechSeen && !quietSince) { quietSince = Date.now(); }
+            if (recState) recState.speechSeen = speechSeen;
+            var elapsed = Date.now() - startedAt;
+            // End of speech: ~0.9s of quiet after talking. Hard caps keep a
+            // forgotten mic from uploading a minute of silence.
+            if ((speechSeen && quietSince && Date.now() - quietSince > 900) ||
+                elapsed > 15000 || (!speechSeen && elapsed > 8000)) {
+              finishRecording();
+            }
+          };
+          // ScriptProcessor has to reach a destination to be pumped; it writes
+          // nothing, so this is silent.
+          src.connect(proc);
+          proc.connect(ctx.destination);
+          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false };
+          voice.note = "";
+          setAvatarState("listening");
+          paintVoice();
+        })
+        .catch(function (e) {
+          var name = (e && e.name) || "";
+          if (name === "NotAllowedError" || name === "SecurityError") {
+            stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
+            voice.mic = false;
+            saveListenPref(false);
+          } else {
+            stageNote("Couldn't open the microphone" + (name ? " (" + name + ")" : "") + " — tap the mic to try again.");
+            rearmListening();
+          }
+          paintVoice();
+        });
+    }
+
+    function finishRecording() {
+      var r = recState;
+      if (!r) return;
+      recState = null;
+      try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
+      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+      try { r.ctx.close(); } catch (_) {}
+      // Nothing was said: re-arm instead of uploading a silent clip and paying
+      // the model to tell us it heard nothing.
+      if (!r.speechSeen) { rearmListening(); return; }
+      var total = 0;
+      for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
+      if (total < r.rate * 0.3) { rearmListening(); return; }
+      var flat = new Float32Array(total);
+      var off = 0;
+      for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
+      sendForTranscription(encodeWav(downsampleTo16k(flat, r.rate)));
+    }
+
+    function cancelRecording() {
+      var r = recState;
+      if (!r) return;
+      recState = null;
+      try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
+      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+      try { r.ctx.close(); } catch (_) {}
+    }
+
+    function sendForTranscription(wav) {
+      voice.sending = true;
+      setAvatarState("thinking");
+      paintVoice();
+      fetch("/api/buzzy/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: wav,
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          voice.sending = false;
+          if (!data || !data.ok) {
+            stageNote((data && data.error) || "Couldn't transcribe that — try again.");
+            rearmListening();
+            return;
+          }
+          var text = String(data.text || "").trim();
+          if (!text) {
+            stageNote("Didn't catch that — try again.");
+            rearmListening();
+            return;
+          }
+          voice.note = "";
+          var input = document.getElementById("chatInput");
+          if (input) input.value = text;
+          voice.lastSpeechEnd = performance.now();
+          voice.sending = true;
+          setAvatarState("thinking");
+          paintVoice();
+          sendChatMessage();
+        })
+        .catch(function () {
+          voice.sending = false;
+          stageNote("Couldn't reach the transcriber — check the connection.");
+          rearmListening();
+        });
+    }
+
     function toggleMic() {
       voice.mic = !voice.mic;
+      saveListenPref(voice.mic);
       if (voice.mic) {
+        // A fresh listen clears whatever the last failure said.
+        voice.note = "";
         // A spoken conversation needs spoken answers.
         if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
         startListening();
@@ -3026,11 +3576,38 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var end = document.getElementById("voiceStageEnd");
       if (end) end.addEventListener("click", function () {
         voice.mic = false;
+        saveListenPref(false);
         stopListening();
         stopSpeaking();
         paintVoice();
       });
       paintVoice();
+      // ── Listen mode survives leaving the page ──────────────────────────
+      // The recognizer runs in the page; a navigation or reload kills it. The
+      // INTENT persists, so returning re-arms it without a click. A click is
+      // the reliable gesture when the browser refuses an ungestured start.
+      if (listenPref()) {
+        voice.mic = true;
+        voice.replies = true;
+        paintVoice();
+        // Re-apply the title marker too — the intent survived the reload, so the
+        // tab should say so without waiting for the next toggle.
+        try { document.title = "🎙 BeeZilla — Listening"; } catch (_) {}
+        startListening();
+        var rearm = function () {
+          if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
+        };
+        var onceClick = function () {
+          rearm();
+          document.removeEventListener("click", onceClick);
+        };
+        document.addEventListener("click", onceClick);
+        window.addEventListener("focus", rearm);
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "visible") rearm();
+        });
+        window.addEventListener("pageshow", rearm);
+      }
     }
 
     // ── Voice latency tracking ───────────────────────────────────────
@@ -3057,6 +3634,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sessionId: chatState.sessionId || null,
         mode: chatState.mode || "chat",
         model: m.model || null,
+        lane: m.lane || null,
+        speechMs: m.userSpeechMs || null,
         asrMs: m.asrMs, ttftMs: m.ttftMs, ttfaMs: m.ttfaMs, turnMs: m.turnMs,
         replyChars: m.replyChars, spoken: !!m.spoken,
       };
@@ -3152,6 +3731,80 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (r.done) {
               if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
               if (!finalData) throw new Error("The voice turn ended without a reply.");
+              return finalData;
+            }
+            buf += dec.decode(r.value, { stream: true });
+            var idx;
+            while ((idx = buf.indexOf("\n\n")) !== -1) {
+              var frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              handleFrame(frame);
+            }
+            return pump();
+          });
+        }
+        return pump();
+      });
+    }
+
+    // Typed turns stream for the same reason the voice lane does: a buffered
+    // reply paints nothing until the whole answer exists. Same SSE contract,
+    // no audio.
+    function streamTextTurn(sendBody, metrics, sendStarted) {
+      var liveBubble = null;
+      var liveText = "";
+      return fetch(CHAT_BASE, {
+        method: "POST",
+        credentials: "same-origin",
+        signal: AbortSignal.timeout(120000),
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(Object.assign({}, sendBody, { stream: true })),
+      }).then(function (res) {
+        var ctype = (res.headers.get("content-type") || "");
+        if (!res.ok || !res.body || ctype.indexOf("text/event-stream") === -1) {
+          return res.json().catch(function () { return { error: "The turn failed." }; })
+            .then(function (j) {
+              if (j && j.error) throw new Error(j.error);
+              return j;
+            });
+        }
+        var reader = res.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "";
+        var finalData = null;
+
+        function handleFrame(frame) {
+          var ev = "message";
+          var dataLines = [];
+          frame.split("\n").forEach(function (line) {
+            if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
+            else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
+          });
+          if (!dataLines.length) return;
+          var payload;
+          try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
+          if (ev === "text") {
+            if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
+            liveText += payload.t || "";
+            if (!liveBubble) {
+              liveBubble = document.createElement("div");
+              liveBubble.className = "bubble streaming";
+              var c = document.getElementById("chatMessages");
+              if (c) c.insertBefore(liveBubble, c.firstChild);
+            }
+            liveBubble.textContent = liveText;
+          } else if (ev === "done") {
+            finalData = payload;
+          } else if (ev === "error") {
+            throw new Error(payload.error || "The turn failed.");
+          }
+        }
+
+        function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) {
+              if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
+              if (!finalData) throw new Error("The turn ended without a reply.");
               return finalData;
             }
             buf += dec.decode(r.value, { stream: true });
@@ -4149,7 +4802,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       thinkingEl.className = "thinking-bubble";
       thinkingEl.id = "thinkingIndicator";
       thinkingEl.innerHTML =
-        '<img class="thinking-mascot" src="brand/revision6_expressions_08-thinking.png" alt="" />' +
+        '<img class="thinking-mascot" src="/buzzy/brand/revision6_expressions_08-thinking.png" alt="" />' +
         '<span class="thinking-dots">...</span>';
       messagesContainer.appendChild(thinkingEl);
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -4205,12 +4858,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           replyChars: null,
           spoken: false,
           model: null,
+          userSpeechMs: voice.userSpeechMs,
         };
         voice.lastSpeechEnd = 0;
+        voice.userSpeechMs = 0;
 
         let data;
         if (useVoiceLane) {
           data = await streamVoiceTurn(sendBody, metrics, sendStarted);
+        } else if (typeof ReadableStream !== "undefined") {
+          data = await streamTextTurn(sendBody, metrics, sendStarted);
+          metrics.turnMs = Math.round(performance.now() - sendStarted);
         } else {
           let resp;
           try {
@@ -4247,10 +4905,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Hide error if present
         document.getElementById("chatError").classList.add("hidden");
 
-        // Add assistant reply
+        // Add assistant reply. A turn that produced a file carries the file
+        // descriptor with it so the chat renders the link inline.
         chatState.messages.push({
           role: "assistant",
           content: data.reply,
+          document: data.document || null,
         });
 
         // Update slots if present
@@ -4392,7 +5052,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var file = fileInput && fileInput.files && fileInput.files[0];
       var pasted = (document.getElementById("paperPaste").value || "").trim();
       if (file) {
-        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (e) {
+        readDroppedFile(file).then(function (payload) { return payload.mediaFile ? submitMedia(payload.mediaFile) : submitPaper(payload); }).catch(function (e) {
           if (note) note.textContent = e.message || "Couldn't read that file.";
         });
         return;
@@ -4422,7 +5082,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         var note = document.getElementById("paperNote");
         if (!file) return;
-        readDroppedFile(file).then(function (payload) { return submitPaper(payload); }).catch(function (err) {
+        readDroppedFile(file).then(function (payload) { return payload.mediaFile ? submitMedia(payload.mediaFile) : submitPaper(payload); }).catch(function (err) {
           if (note) note.textContent = err.message || "Couldn't read that file.";
         });
       });
@@ -4647,15 +5307,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       closeSessionsDrawer();
     });
 
-    // Navigation
-    document.getElementById("jobsLink").onclick = (e) => {
-      e.preventDefault();
-      window.location.href = "/buzzy/";
-    };
-    document.getElementById("memLink").onclick = (e) => {
-      e.preventDefault();
-      window.location.href = "/buzzy/memory";
-    };
+    // Navigation is plain links now (one nav, defined once in each page). The
+    // old handlers here overrode "Talk" to /buzzy/ — the jobs page — which is
+    // why the nav could never get back to the chat. Removed on purpose.
 
     function applyChatCompany(co) {
       var nameEl = document.getElementById("chatCompanyName");

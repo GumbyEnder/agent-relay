@@ -8,6 +8,7 @@ Versioning is **0.x** until the agent protocol is frozen for 1.0 — breaking ch
 ## Unreleased
 
 ### Added
+- **Contributor readiness:** GitHub Actions `ci` workflow (typecheck, build, hermetic test suite) on every PR; `npm run test:ci` and `npm run verify` scripts; pull-request template; `good first issue` issue template; CODEOWNERS; Dependabot config; [docs/MAINTAINING.md](docs/MAINTAINING.md) triage/review/merge playbook; contribution and review-SLA guidance in `CONTRIBUTING.md`.
 - **devboards-tui** (`apps/tui`): Ink/React terminal client P0 — board columns, claim/deliver/escalate/heartbeat, detail, search, multi-board, `--status` (see `docs/TUI_DESIGN.md`).
 
 ### Fixed
