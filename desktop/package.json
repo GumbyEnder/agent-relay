@@ -45,7 +45,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "artifactName": "BeeZilla-Setup-${version}.${ext}"
   },
   "devDependencies": {
     "electron": "^32.2.0",
