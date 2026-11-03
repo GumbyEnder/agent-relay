@@ -11,21 +11,27 @@
  * telling the user to "restart the app" — is the difference between a product
  * and a wrapper around a CLI.
  */
-import {
+import { runtimeLib } from "./paths.mjs";
+
+// Loaded from the runtime tree, not by a relative path: inside app.asar a
+// `../scripts/...` import resolves to <install>/resources/scripts, which the
+// installer does not ship (it lives at resources/app/scripts). That import
+// killed 0.2.0 on launch before this file ran. See paths.mjs.
+const {
   loadInference,
   saveInference,
   clearInference,
   resolveInference,
   isExpired,
   redactKey,
-} from "../scripts/lib/inference.mjs";
-import {
+} = await runtimeLib("scripts/lib/inference.mjs");
+const {
   resolveSearch,
   saveSearchKey,
   clearSearchKey,
-  saveManagedSearch as saveManagedSearchStore,
+  saveManagedSearch: saveManagedSearchStore,
   loadManagedSearch,
-} from "../scripts/lib/search-keys.mjs";
+} = await runtimeLib("scripts/lib/search-keys.mjs");
 
 /**
  * @param {{ dataDir: () => string, supervisor?: any, cipher?: {encrypt?:Function, decrypt?:Function} }} deps

@@ -164,6 +164,23 @@
         <p class="current" id="search-current"></p>
       </section>
 
+      <!-- ── troubleshooting ───────────────────────────────────────── -->
+      <!-- A packaged app that fails must not be a dead end: every launch writes
+           %APPDATA%\BeeZilla\logs\main.log, and this is the one-click path to it.
+           Shown only inside the desktop shell (no window.beezilla.app in a browser). -->
+      <section id="diagnostics" hidden>
+        <h2>Troubleshooting</h2>
+        <p class="hint">
+          If something goes wrong, the log records what the app was doing. Opening it is often
+          faster than describing the problem.
+        </p>
+        <div class="row">
+          <button id="open-logs" class="secondary">Open logs folder</button>
+          <span class="status" id="logs-status"></span>
+        </div>
+        <p class="current" id="logs-path"></p>
+      </section>
+
       <p class="sub" style="margin-top: 26px">
         Changes restart BeeZilla's local engine automatically — the button tells you when it is ready.
       </p>
@@ -323,6 +340,24 @@
         document.querySelectorAll("button").forEach((b) => (b.disabled = true));
       } else {
         refresh().catch(() => say($("inference-status"), "Could not read current settings.", "err"));
+      }
+
+      // Diagnostics — desktop only. `window.beezilla.app` exists only under the
+      // Electron shell, so a browser view of this page simply never shows it.
+      const appBridge = window.beezilla?.app;
+      if (appBridge?.logs) {
+        $("diagnostics").hidden = false;
+        appBridge
+          .logs()
+          .then((res) => {
+            if (res?.ok && res.data?.file) $("logs-path").textContent = `Log: ${res.data.file}`;
+          })
+          .catch(() => {});
+        $("open-logs").addEventListener("click", async () => {
+          const res = await appBridge.openLogs();
+          if (!res?.ok) say($("logs-status"), res?.error || "Could not open the folder.", "err");
+          else say($("logs-status"), "Opened.", "ok");
+        });
       }
     </script>
   </body>

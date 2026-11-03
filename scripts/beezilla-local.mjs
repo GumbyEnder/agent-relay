@@ -155,7 +155,16 @@ const child = spawn(process.execPath, [entry], {
     // The child must not outlive this launcher. If this process is SIGKILLed it
     // cannot clean up, so the child watches the pid itself.
     BZ_PARENT_PID: String(process.pid),
-    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require ${join(ROOT, "scripts/lib/parent-watchdog.cjs")}`]
+    // The watchdog is injected through NODE_OPTIONS, which is re-parsed by the
+    // child's own option parser: double quotes group a path with spaces, but a
+    // BACKSLASH inside them is an escape, so `--require "C:\Users\...\watchdog.cjs"`
+    // arrived as `C:usersgumbyender...` and the child died at preload with
+    // MODULE_NOT_FOUND. Node accepts forward slashes on Windows, and only the
+    // quoting is then left to matter.
+    NODE_OPTIONS: [
+      process.env.NODE_OPTIONS,
+      `--require "${join(ROOT, "scripts/lib/parent-watchdog.cjs").replace(/\\/g, "/")}"`,
+    ]
       .filter(Boolean)
       .join(" "),
   },
@@ -203,9 +212,13 @@ child.on("exit", (code) => {
 // Publish the endpoint as soon as the server answers, so a window/CLI never
 // has to poll a hard-coded port.
 const deadline = Date.now() + 60_000;
+// "did not become ready" on its own sends the reader to the wrong place: a
+// server that is listening but answering 500 and one that never bound look
+// identical. Keep the last probe outcome and print it.
+let lastProbe = "no probe completed";
 for (;;) {
   if (Date.now() > deadline) {
-    console.error("[beezilla] server did not become ready within 60s");
+    console.error(`[beezilla] server did not become ready within 60s — last probe: ${lastProbe}`);
     stop("SIGTERM");
     break;
   }
@@ -213,6 +226,7 @@ for (;;) {
     const res = await fetch(`http://${HOST}:${port}/api/agent/health`, {
       signal: AbortSignal.timeout(1500),
     });
+    lastProbe = `HTTP ${res.status}`;
     if (res.ok) {
       writeFileSync(
         runtimeFile,
@@ -234,8 +248,10 @@ for (;;) {
       console.log(`[beezilla] data ${dir}`);
       break;
     }
-  } catch {
-    /* not up yet */
+  } catch (err) {
+    // Not up yet — but say WHY on the final report; a refused TCP connection and
+    // a 500 are different bugs.
+    lastProbe = `error: ${err?.cause?.code || err?.cause?.message || err?.message || String(err)}`;
   }
   await new Promise((r) => setTimeout(r, 400));
 }

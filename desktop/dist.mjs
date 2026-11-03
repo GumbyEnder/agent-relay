@@ -15,7 +15,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DESKTOP = dirname(fileURLToPath(import.meta.url));
@@ -93,6 +93,17 @@ function stage() {
   // A staged tree without the PGLite runtime assets boots and then 500s every DB
   // route, so check for them here rather than after install.
   const libs = join(APP, ".output", "server", "_libs");
+  const pgliteSrc = join(APP, "node_modules", "@electric-sql", "pglite", "dist");
+  // Ship the payloads instead of letting the launcher copy them on first start:
+  // that restore WRITES into the install folder, which a per-machine NSIS install
+  // cannot do, and a read-only install must not need to write to start.
+  for (const f of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+    const target = join(libs, f);
+    if (!existsSync(target) && existsSync(join(pgliteSrc, f))) {
+      mkdirSync(libs, { recursive: true });
+      cpSync(join(pgliteSrc, f), target);
+    }
+  }
   const assets = ["pglite.data", "pglite.wasm", "initdb.wasm"].filter((f) => !existsSync(join(libs, f)));
   const pgliteInModules = existsSync(join(APP, "node_modules", "@electric-sql", "pglite", "dist"));
   if (assets.length > 0 && !pgliteInModules) {
@@ -106,6 +117,10 @@ function stage() {
   }
   log(`${migrations} migrations staged`);
 
+  // The gate that would have caught 0.2.0. See assertPackagedImports for what it
+  // checks and why the failure is invisible in a dev run.
+  assertPackagedImports();
+
   const size = du(APP);
   writeFileSync(join(STAGE, "MANIFEST.json"), JSON.stringify({
     stagedAt: new Date().toISOString(),
@@ -114,6 +129,83 @@ function stage() {
     megabytes: Math.round(size / 1e6),
   }, null, 2) + "\n");
   log(`staged tree: ${Math.round(size / 1e6)} MB at ${APP}`);
+}
+
+/** Package files the shell loads out of the runtime tree at call time. */
+const REQUIRED_RUNTIME_FILES = [
+  "scripts/lib/inference.mjs",
+  "scripts/lib/search-keys.mjs",
+  "bin/beezilla.mjs",
+];
+
+/**
+ * Prove every relative import in the packaged shell resolves in the INSTALLED
+ * layout, not just in this repo.
+ *
+ * 0.2.0 shipped `import { loadInference } from "../scripts/lib/inference.mjs"`.
+ * In the repo that file is `<repo>/scripts/lib/inference.mjs`, so every dev run
+ * passed. Packaged, the shell lives at `resources/app.asar/main.mjs`, so `..` is
+ * `resources/` and the import asked for `resources/scripts/lib/inference.mjs` —
+ * never shipped (the tree is at `resources/app/scripts`). Electron dies at
+ * module-LINK time, before a line of main.mjs runs, so the app shows a bare
+ * "A JavaScript error occurred in the main process" with no log at all.
+ *
+ * Rules encoded here:
+ *   - a specifier that stays inside the asar must name another build.files entry
+ *     (a file that is not listed is silently absent from the asar);
+ *   - a specifier that climbs out with `../` must exist in the staged tree, i.e.
+ *     be something the installer actually ships;
+ *   - the runtime libraries the shell loads dynamically must be staged.
+ */
+function assertPackagedImports() {
+  const pkg = JSON.parse(readFileSync(join(DESKTOP, "package.json"), "utf8"));
+  const asarFiles = (pkg.build?.files ?? []).filter((f) => typeof f === "string");
+  const problems = [];
+
+  for (const file of asarFiles.filter((f) => /\.(mjs|cjs|js)$/.test(f))) {
+    const full = join(DESKTOP, file);
+    if (!existsSync(full)) {
+      problems.push(`${file}: listed in build.files but missing from desktop/`);
+      continue;
+    }
+    const src = readFileSync(full, "utf8");
+    const specs = [
+      ...src.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']*)["']/g),
+    ].map((m) => m[1]);
+
+    for (const spec of new Set(specs)) {
+      // Every build.files entry is flat at the asar root, so resolve against it.
+      const rel = posix.normalize(spec);
+      if (!rel.startsWith("../")) {
+        if (!asarFiles.includes(rel.replace(/^\.\//, ""))) {
+          problems.push(
+            `${file}: imports "${spec}" but "${rel.replace(/^\.\//, "")}" is not in build.files — it would be absent from app.asar`,
+          );
+        }
+        continue;
+      }
+      // Escaped the asar: from resources/app.asar/<file>, ../.. is resources/.
+      const escaped = rel.replace(/^(\.\.\/)+/, "");
+      if (!existsSync(join(STAGE, escaped))) {
+        problems.push(
+          `${file}: imports "${spec}" → <install>/resources/${escaped}, which the installer does not ship ` +
+            `(the runtime tree is at <install>/resources/app/${escaped}). Load it with runtimeLib() from paths.mjs.`,
+        );
+      }
+    }
+  }
+
+  for (const rel of REQUIRED_RUNTIME_FILES) {
+    if (!existsSync(join(APP, rel))) problems.push(`runtime tree is missing ${rel} — the packaged shell cannot start`);
+  }
+
+  if (problems.length > 0) {
+    throw new Error(
+      `packaged layout is broken (${problems.length}):\n  - ${problems.join("\n  - ")}\n` +
+        `A dev run cannot see any of these; only the installed layout can.`,
+    );
+  }
+  log(`packaged imports: ok (${asarFiles.length} shell files, ${REQUIRED_RUNTIME_FILES.length} runtime libs)`);
 }
 
 function prodClosure(root) {

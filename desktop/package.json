@@ -1,7 +1,7 @@
 {
   "name": "beezilla-desktop",
   "productName": "BeeZilla",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "BeeZilla desktop \u2014 the local runtime in a window",
   "type": "module",
@@ -26,7 +26,9 @@
       "package.json",
       "settings.mjs",
       "preload.cjs",
-      "connect.mjs"
+      "connect.mjs",
+      "paths.mjs",
+      "logger.mjs"
     ],
     "extraResources": [
       {
