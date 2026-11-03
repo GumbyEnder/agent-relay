@@ -1,13 +1,23 @@
 {
   "version": 1,
   "updated": "2026-11-03",
-  "purpose": "Every user-facing function of Dev Boards / BeeZilla and where it actually exists. Two release lines serve this product — web (app.devboards.ai, github main) and desktop (BeeZilla installer, branch feat/local-runtime). This file is the contract between them: `node scripts/parity-check.mjs` fails when a page, an API family or a migration appears on one line and is not named here, or when a declaration stops being true. Divergence is allowed; unrecorded divergence is not.",
+  "purpose": "Every user-facing function of Dev Boards / BeeZilla and where it actually exists. Two release lines serve this product \u2014 web (app.devboards.ai, github main) and desktop (BeeZilla installer, branch feat/local-runtime). This file is the contract between them: `node scripts/parity-check.mjs` fails when a page, an API family or a migration appears on one line and is not named here, or when a declaration stops being true. Divergence is allowed; unrecorded divergence is not.",
   "surfaces": {
-    "web": { "tree": "~/agents/agent-relay-recipes", "remote": "github main", "deploy": "app.devboards.ai", "built": "git push github HEAD:main → railway redeploy --service agent-relay" },
-    "desktop": { "tree": "~/agents/agent-relay-local", "remote": "github feat/local-runtime", "deploy": "BeeZilla installer (Electron shell + local runtime)", "built": "desktop/dist.mjs staging → Windows installer" }
+    "web": {
+      "tree": "~/agents/agent-relay-recipes",
+      "remote": "github main",
+      "deploy": "app.devboards.ai",
+      "built": "git push github HEAD:main \u2192 railway redeploy --service agent-relay"
+    },
+    "desktop": {
+      "tree": "~/agents/agent-relay-local",
+      "remote": "github feat/local-runtime",
+      "deploy": "BeeZilla installer (Electron shell + local runtime)",
+      "built": "desktop/dist.mjs staging \u2192 Windows installer"
+    }
   },
   "rules": [
-    "A function is 'both' only when it is proven present on both surfaces — evidence paths, not intentions.",
+    "A function is 'both' only when it is proven present on both surfaces \u2014 evidence paths, not intentions.",
     "A web-only function ships to the desktop by porting it to feat/local-runtime, then flipping this entry to 'both' in the same commit.",
     "A desktop-only function stays desktop-only only if it cannot work on the web (local runtime, BYOK key store, installer). Anything else is a product decision to write down.",
     "'drift' means present on both but behaviour is known to differ. It needs a note saying how, or it is a bug.",
@@ -18,15 +28,15 @@
       "id": "cloud.inference-token",
       "endpoint": "POST /api/inference-token",
       "mints": "15-minute, inference-scoped, HMAC-signed token (bz1.<claims>.<sig>) for a desktop install",
-      "consumedBy": "desktop/connect.mjs → scripts/lib/inference.mjs",
+      "consumedBy": "desktop/connect.mjs \u2192 scripts/lib/inference.mjs",
       "breaks": "a desktop install cannot chat at all; it refuses by name rather than 401",
-      "verify": "curl -s -o /dev/null -w '%{http_code}' -X POST https://app.devboards.ai/api/inference-token → 401 anonymous is correct; a signed-in mint returns bz1.*"
+      "verify": "curl -s -o /dev/null -w '%{http_code}' -X POST https://app.devboards.ai/api/inference-token \u2192 401 anonymous is correct; a signed-in mint returns bz1.*"
     },
     {
       "id": "cloud.search-token",
       "endpoint": "POST /api/search-token",
       "mints": "search-scoped token for the gateway route",
-      "consumedBy": "desktop connect (search half) → scripts/lib/search-keys.mjs",
+      "consumedBy": "desktop connect (search half) \u2192 scripts/lib/search-keys.mjs",
       "breaks": "desktop search silently falls back to BYOK-only",
       "verify": "desktop connect log line 'BeeZilla search connected'"
     },
@@ -35,11 +45,11 @@
       "endpoint": "GET /api/search",
       "consumedBy": "desktop runtime search.ts pointed at the cloud gateway",
       "breaks": "desktop turns answer 'search is off' while the web still searches",
-      "verify": "web-only today — no desktop route defines it"
+      "verify": "web-only today \u2014 no desktop route defines it"
     },
     {
       "id": "chat.sse",
-      "endpoint": "POST /api/buzzy/chat (SSE: text · audio · done · error)",
+      "endpoint": "POST /api/buzzy/chat (SSE: text \u00b7 audio \u00b7 done \u00b7 error)",
       "consumedBy": "both surfaces' talk.html",
       "breaks": "one surface streams, the other waits or drops the audio lane",
       "verify": "both trees contain voice.ts + the same event names"
@@ -48,11 +58,37 @@
   "functions": [
     {
       "id": "chat.text",
-      "name": "Talk — typed turn, streamed reply",
+      "name": "Talk \u2014 typed turn, streamed reply",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/server.ts", "src/lib/buzzy/chat.nitro.ts"], "pages": ["talk"], "routes": ["/api/buzzy/chat", "/api/buzzy/sessions", "/api/buzzy/transcript"] },
-      "desktop": { "evidence": ["src/lib/buzzy/server.ts", "src/lib/buzzy/chat.nitro.ts"], "pages": ["talk"], "routes": ["/api/buzzy/chat", "/api/buzzy/sessions", "/api/buzzy/transcript"] },
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/server.ts",
+          "src/lib/buzzy/chat.nitro.ts"
+        ],
+        "pages": [
+          "talk"
+        ],
+        "routes": [
+          "/api/buzzy/chat",
+          "/api/buzzy/sessions",
+          "/api/buzzy/transcript"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/server.ts",
+          "src/lib/buzzy/chat.nitro.ts"
+        ],
+        "pages": [
+          "talk"
+        ],
+        "routes": [
+          "/api/buzzy/chat",
+          "/api/buzzy/sessions",
+          "/api/buzzy/transcript"
+        ]
+      },
       "note": "Same turn code on both lines; desktop runs it on a local PGlite runtime instead of Railway Postgres."
     },
     {
@@ -60,94 +96,363 @@
       "name": "Model catalog, tool surface, per-turn telemetry",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/toolRegistry.ts", "src/lib/buzzy/toolTelemetry.ts"], "routes": ["/api/buzzy/models", "/api/buzzy/tools", "/api/buzzy/tool-calls", "/api/buzzy/telemetry"] },
-      "desktop": { "evidence": ["src/lib/buzzy/toolRegistry.ts", "src/lib/buzzy/toolTelemetry.ts"], "routes": ["/api/buzzy/models", "/api/buzzy/tools", "/api/buzzy/tool-calls", "/api/buzzy/telemetry"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/toolRegistry.ts",
+          "src/lib/buzzy/toolTelemetry.ts"
+        ],
+        "routes": [
+          "/api/buzzy/models",
+          "/api/buzzy/tools",
+          "/api/buzzy/tool-calls",
+          "/api/buzzy/telemetry"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/toolRegistry.ts",
+          "src/lib/buzzy/toolTelemetry.ts"
+        ],
+        "routes": [
+          "/api/buzzy/models",
+          "/api/buzzy/tools",
+          "/api/buzzy/tool-calls",
+          "/api/buzzy/telemetry"
+        ]
+      }
     },
     {
       "id": "voice.reply",
-      "name": "Voice out — one voice, streamed PCM",
+      "name": "Voice out \u2014 one voice, streamed PCM",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/voice.ts"], "routes": ["/api/buzzy/voice-metrics"], "migrations": ["0046_buzzy_turn_lane.sql", "0047_buzzy_speech_time.sql"] },
-      "desktop": { "evidence": ["src/lib/buzzy/voice.ts"], "routes": ["/api/buzzy/voice-metrics"] },
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/voice.ts"
+        ],
+        "routes": [
+          "/api/buzzy/voice-metrics"
+        ],
+        "migrations": [
+          "0046_buzzy_turn_lane.sql",
+          "0047_buzzy_speech_time.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/voice.ts"
+        ],
+        "routes": [
+          "/api/buzzy/voice-metrics"
+        ]
+      },
       "note": "Desktop's voice.ts is the 27-Oct version: it predates the lane/speech-time telemetry columns, so its metrics rows have no lane."
     },
     {
       "id": "voice.input",
-      "name": "Hearing — speak instead of type (recorder + server ASR)",
+      "name": "Hearing \u2014 speak instead of type (recorder + server ASR)",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/asr.ts", "public/buzzy/talk.html#startRecording"], "pages": ["talk"], "routes": ["/api/buzzy/transcribe"] },
-      "desktop": { "evidence": [], "note": "desktop 27ee40d has no asr.ts, no /api/buzzy/transcribe and no recorder in talk.html — voice input there is the browser SpeechRecognition API only, i.e. Chrome-only." },
-      "next": "Port asr.ts + the transcribe route + the recorder branch to feat/local-runtime; gpt-audio-mini input_audio needs no new key."
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/asr.ts",
+          "public/buzzy/talk.html#startRecording"
+        ],
+        "pages": [
+          "talk"
+        ],
+        "routes": [
+          "/api/buzzy/transcribe"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/asr.ts",
+          "public/buzzy/talk.html#startRecording"
+        ],
+        "pages": [
+          "talk"
+        ],
+        "routes": [
+          "/api/buzzy/transcribe"
+        ]
+      },
+      "note": "Ported by the parity merge (7b94027): recorder in talk.html + server ASR on gpt-audio-mini, same as web."
     },
     {
       "id": "listen.mode",
-      "name": "Listen is a mode — survives reload and navigation",
+      "name": "Listen is a mode \u2014 survives reload and navigation",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["public/buzzy/talk.html#bz_listen_mode"], "pages": ["talk"] },
-      "desktop": { "evidence": [], "note": "talk.html on the desktop line has no persisted listen intent." },
-      "next": "Port with voice.input — they touch the same block of talk.html."
+      "state": "both",
+      "web": {
+        "evidence": [
+          "public/buzzy/talk.html#bz_listen_mode"
+        ],
+        "pages": [
+          "talk"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "public/buzzy/talk.html#bz_listen_mode"
+        ],
+        "pages": [
+          "talk"
+        ]
+      },
+      "note": "listening survives reload and navigation on both surfaces."
     },
     {
       "id": "nav.canonical",
-      "name": "One nav — eight links, active state from the path",
+      "name": "One nav \u2014 eight links, active state from the path",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["public/buzzy/common.js", "public/buzzy/talk.html#bzNav"], "pages": ["talk", "index", "memory", "remember", "experts", "recipes", "wallet", "upload", "profile", "landing"] },
-      "desktop": { "evidence": [], "note": "the desktop bundle has no common.js: its eleven pages each carry their own nav markup, so Talk/Library/Recipes can drift apart page by page." },
-      "next": "Copy common.js + the #bzNav block into the desktop line. Highest-value port: it removes a whole class of divergence."
+      "state": "both",
+      "web": {
+        "evidence": [
+          "public/buzzy/common.js",
+          "public/buzzy/talk.html#bzNav"
+        ],
+        "pages": [
+          "talk",
+          "index",
+          "memory",
+          "remember",
+          "experts",
+          "recipes",
+          "wallet",
+          "upload",
+          "profile",
+          "landing"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "public/buzzy/common.js",
+          "public/buzzy/talk.html#bzNav"
+        ],
+        "pages": [
+          "talk",
+          "index",
+          "memory",
+          "remember",
+          "experts",
+          "recipes",
+          "wallet",
+          "upload",
+          "profile",
+          "landing",
+          "graph"
+        ]
+      },
+      "note": "Same 12 pages, same #bzNav block, same absolute asset URLs as web \u2014 the desktop no longer carries its own per-page navs."
     },
     {
       "id": "library.documents",
-      "name": "Library — documents, versions, export, approval gate",
+      "name": "Library \u2014 documents, versions, export, approval gate",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/documents.ts", "src/lib/buzzy/paper.ts"], "pages": ["index"], "routes": ["/api/buzzy/documents", "/api/buzzy/jobs", "/api/buzzy/papers", "/api/buzzy/export", "/api/buzzy/review"] },
-      "desktop": { "evidence": ["src/lib/buzzy/documents.ts", "src/lib/buzzy/paper.ts"], "pages": ["index"], "routes": ["/api/buzzy/documents", "/api/buzzy/jobs", "/api/buzzy/papers", "/api/buzzy/export", "/api/buzzy/review"] },
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/documents.ts",
+          "src/lib/buzzy/paper.ts"
+        ],
+        "pages": [
+          "index"
+        ],
+        "routes": [
+          "/api/buzzy/documents",
+          "/api/buzzy/jobs",
+          "/api/buzzy/papers",
+          "/api/buzzy/export",
+          "/api/buzzy/review"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/documents.ts",
+          "src/lib/buzzy/paper.ts"
+        ],
+        "pages": [
+          "index"
+        ],
+        "routes": [
+          "/api/buzzy/documents",
+          "/api/buzzy/jobs",
+          "/api/buzzy/papers",
+          "/api/buzzy/export",
+          "/api/buzzy/review"
+        ]
+      },
       "note": "/buzzy/library serves index.html on both surfaces."
     },
     {
       "id": "assets.shelf",
-      "name": "Asset shelf — dropped pictures/audio/3D and bulk folder upload",
+      "name": "Asset shelf \u2014 dropped pictures/audio/3D and bulk folder upload",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/chat.nitro.ts#buzzy_assets", "migrations/0048_buzzy_assets.sql"], "routes": ["/api/buzzy/assets"], "migrations": ["0048_buzzy_assets.sql"] },
-      "desktop": { "evidence": [], "note": "desktop has no asset table and no /api/buzzy/assets; a dropped image/audio/.glb has nowhere to go." },
-      "next": "Port 0048 + the two routes; the desktop runtime migrates at boot like the server does."
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/chat.nitro.ts#buzzy_assets",
+          "migrations/0048_buzzy_assets.sql"
+        ],
+        "routes": [
+          "/api/buzzy/assets"
+        ],
+        "migrations": [
+          "0048_buzzy_assets.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/chat.nitro.ts#buzzy_assets",
+          "migrations/0048_buzzy_assets.sql"
+        ],
+        "routes": [
+          "/api/buzzy/assets"
+        ],
+        "migrations": [
+          "0048_buzzy_assets.sql"
+        ]
+      },
+      "note": "0048 applies at boot on the local PGlite runtime; GET /api/buzzy/assets answers {files:0} on a fresh install."
     },
     {
       "id": "memory.facts",
-      "name": "Memory — facts, company context, people",
+      "name": "Memory \u2014 facts, company context, people",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/memory.ts", "src/lib/buzzy/team.ts"], "pages": ["memory", "remember"], "routes": ["/api/buzzy/memory", "/api/buzzy/context", "/api/buzzy/companies", "/api/buzzy/contacts", "/api/buzzy/team", "/api/buzzy/connections"] },
-      "desktop": { "evidence": ["src/lib/buzzy/memory.ts", "src/lib/buzzy/team.ts"], "pages": ["memory", "remember"], "routes": ["/api/buzzy/memory", "/api/buzzy/context", "/api/buzzy/companies", "/api/buzzy/contacts", "/api/buzzy/team", "/api/buzzy/connections"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/memory.ts",
+          "src/lib/buzzy/team.ts"
+        ],
+        "pages": [
+          "memory",
+          "remember"
+        ],
+        "routes": [
+          "/api/buzzy/memory",
+          "/api/buzzy/context",
+          "/api/buzzy/companies",
+          "/api/buzzy/contacts",
+          "/api/buzzy/team",
+          "/api/buzzy/connections"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/memory.ts",
+          "src/lib/buzzy/team.ts"
+        ],
+        "pages": [
+          "memory",
+          "remember"
+        ],
+        "routes": [
+          "/api/buzzy/memory",
+          "/api/buzzy/context",
+          "/api/buzzy/companies",
+          "/api/buzzy/contacts",
+          "/api/buzzy/team",
+          "/api/buzzy/connections"
+        ]
+      }
     },
     {
       "id": "profile.identity",
       "name": "Profile and account",
       "owner": "devboards",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/profile.ts"], "pages": ["profile"], "routes": ["/api/buzzy/profile", "/api/buzzy/account", "/api/auth"] },
-      "desktop": { "evidence": ["src/lib/buzzy/profile.ts"], "pages": ["profile"], "routes": ["/api/buzzy/profile", "/api/buzzy/account", "/api/auth"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/profile.ts"
+        ],
+        "pages": [
+          "profile"
+        ],
+        "routes": [
+          "/api/buzzy/profile",
+          "/api/buzzy/account",
+          "/api/auth"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/profile.ts"
+        ],
+        "pages": [
+          "profile"
+        ],
+        "routes": [
+          "/api/buzzy/profile",
+          "/api/buzzy/account",
+          "/api/auth"
+        ]
+      }
     },
     {
       "id": "experts.starters",
-      "name": "Experts — starter prompt library",
+      "name": "Experts \u2014 starter prompt library",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/starters.ts"], "pages": ["experts"], "routes": ["/api/buzzy/starters", "/api/buzzy/templates"] },
-      "desktop": { "evidence": ["src/lib/buzzy/starters.ts"], "pages": ["experts"], "routes": ["/api/buzzy/starters", "/api/buzzy/templates"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/starters.ts"
+        ],
+        "pages": [
+          "experts"
+        ],
+        "routes": [
+          "/api/buzzy/starters",
+          "/api/buzzy/templates"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/starters.ts"
+        ],
+        "pages": [
+          "experts"
+        ],
+        "routes": [
+          "/api/buzzy/starters",
+          "/api/buzzy/templates"
+        ]
+      }
     },
     {
       "id": "recipes.browse",
-      "name": "Recipes — sealed catalog, purchase confirmation",
+      "name": "Recipes \u2014 sealed catalog, purchase confirmation",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/recipes.ts"], "pages": ["recipes"], "routes": ["/api/buzzy/recipes", "/api/recipes"], "migrations": ["0046_recipe_ratings.sql", "0047_recipe_blobs.sql"] },
-      "desktop": { "evidence": ["src/lib/buzzy/recipes.ts"], "pages": ["recipes"], "routes": ["/api/buzzy/recipes", "/api/recipes"] },
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/recipes.ts"
+        ],
+        "pages": [
+          "recipes"
+        ],
+        "routes": [
+          "/api/buzzy/recipes",
+          "/api/recipes"
+        ],
+        "migrations": [
+          "0046_recipe_ratings.sql",
+          "0047_recipe_blobs.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/recipes.ts"
+        ],
+        "pages": [
+          "recipes"
+        ],
+        "routes": [
+          "/api/buzzy/recipes",
+          "/api/recipes"
+        ]
+      },
       "note": "Ratings/blobs exist only in the web schema; the desktop catalog is the cloud catalog fetched and verified against publisher pins."
     },
     {
@@ -155,171 +460,489 @@
       "name": "Local recipe fetch, verify, offline cache",
       "owner": "desktop",
       "state": "desktop-only",
-      "web": { "evidence": [], "note": "the web line has no local cache — it is already the origin." },
-      "desktop": { "evidence": ["scripts/lib/pins.mjs", "scripts/lib/inference.mjs"], "routes": ["/api/recipes/local"] }
+      "web": {
+        "evidence": [],
+        "note": "the web line has no local cache \u2014 it is already the origin."
+      },
+      "desktop": {
+        "evidence": [
+          "scripts/lib/pins.mjs",
+          "scripts/lib/inference.mjs"
+        ],
+        "routes": [
+          "/api/recipes/local"
+        ]
+      }
     },
     {
       "id": "wallet.drops",
       "name": "Honey Drops wallet and ledger",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/money.ts"], "pages": ["wallet"], "routes": ["/api/wallet", "/api/buzzy/money-check"] },
-      "desktop": { "evidence": ["src/lib/buzzy/money.ts"], "pages": ["wallet"], "routes": ["/api/wallet", "/api/buzzy/money-check"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/money.ts"
+        ],
+        "pages": [
+          "wallet"
+        ],
+        "routes": [
+          "/api/wallet",
+          "/api/buzzy/money-check"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/money.ts"
+        ],
+        "pages": [
+          "wallet"
+        ],
+        "routes": [
+          "/api/wallet",
+          "/api/buzzy/money-check"
+        ]
+      }
     },
     {
       "id": "publish.upload",
-      "name": "Publish — upload a recipe or a folder of skills",
+      "name": "Publish \u2014 upload a recipe or a folder of skills",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["public/buzzy/upload.html"], "pages": ["upload"], "routes": ["/api/recipes"] },
-      "desktop": { "evidence": ["public/buzzy/upload.html"], "pages": ["upload"], "routes": ["/api/recipes"] },
-      "note": "The folder-of-files path itself rides the asset shelf, which is web-only — so bulk upload is effectively web-only today."
+      "web": {
+        "evidence": [
+          "public/buzzy/upload.html"
+        ],
+        "pages": [
+          "upload"
+        ],
+        "routes": [
+          "/api/recipes"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "public/buzzy/upload.html"
+        ],
+        "pages": [
+          "upload"
+        ],
+        "routes": [
+          "/api/recipes"
+        ]
+      },
+      "note": "Bulk folder upload now rides the asset shelf on both surfaces."
     },
     {
       "id": "landing.frontdoor",
       "name": "Signed-out front door (brand-separated)",
       "owner": "devboards",
       "state": "both",
-      "web": { "evidence": ["src/lib/surface.ts", "public/buzzy/landing.html"], "pages": ["landing"] },
-      "desktop": { "evidence": ["src/lib/surface.ts", "public/buzzy/landing.html"], "pages": ["landing"] }
+      "web": {
+        "evidence": [
+          "src/lib/surface.ts",
+          "public/buzzy/landing.html"
+        ],
+        "pages": [
+          "landing"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/surface.ts",
+          "public/buzzy/landing.html"
+        ],
+        "pages": [
+          "landing"
+        ]
+      }
     },
     {
       "id": "outbound.approval",
-      "name": "Nothing outbound without approval — shares and outbound calls",
+      "name": "Nothing outbound without approval \u2014 shares and outbound calls",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/review.ts"], "routes": ["/api/buzzy/outbound", "/api/buzzy/shares"] },
-      "desktop": { "evidence": ["src/lib/buzzy/review.ts"], "routes": ["/api/buzzy/outbound", "/api/buzzy/shares"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/review.ts"
+        ],
+        "routes": [
+          "/api/buzzy/outbound",
+          "/api/buzzy/shares"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/review.ts"
+        ],
+        "routes": [
+          "/api/buzzy/outbound",
+          "/api/buzzy/shares"
+        ]
+      }
     },
     {
       "id": "workspace.cadence",
       "name": "Inbox, digest, today, scheduled work, notifications",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/digest.ts", "src/lib/buzzy/scheduled.ts"], "routes": ["/api/buzzy/inbox", "/api/buzzy/digest", "/api/buzzy/today", "/api/buzzy/scheduled", "/api/buzzy/notifications"] },
-      "desktop": { "evidence": ["src/lib/buzzy/digest.ts", "src/lib/buzzy/scheduled.ts"], "routes": ["/api/buzzy/inbox", "/api/buzzy/digest", "/api/buzzy/today", "/api/buzzy/scheduled", "/api/buzzy/notifications"] }
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/digest.ts",
+          "src/lib/buzzy/scheduled.ts"
+        ],
+        "routes": [
+          "/api/buzzy/inbox",
+          "/api/buzzy/digest",
+          "/api/buzzy/today",
+          "/api/buzzy/scheduled",
+          "/api/buzzy/notifications"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/digest.ts",
+          "src/lib/buzzy/scheduled.ts"
+        ],
+        "routes": [
+          "/api/buzzy/inbox",
+          "/api/buzzy/digest",
+          "/api/buzzy/today",
+          "/api/buzzy/scheduled",
+          "/api/buzzy/notifications"
+        ]
+      }
     },
     {
       "id": "search.lookup",
       "name": "Web search inside a turn",
       "owner": "buzzy",
       "state": "both",
-      "web": { "evidence": ["src/lib/buzzy/search.ts", "src/lib/search-token.nitro.ts"], "routes": ["/api/buzzy/search", "/api/search-token"] },
-      "desktop": { "evidence": ["src/lib/buzzy/search.ts", "scripts/lib/search-keys.mjs"], "routes": ["/api/buzzy/search", "/api/buzzy/search-status"] },
-      "note": "Both can search; the desktop does it with OUR gateway token or its own Brave key. The cloud gateway route (/api/search) is web-only — declared separately."
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/search.ts",
+          "src/lib/search-token.nitro.ts"
+        ],
+        "routes": [
+          "/api/buzzy/search",
+          "/api/search-token"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/search.ts",
+          "scripts/lib/search-keys.mjs"
+        ],
+        "routes": [
+          "/api/buzzy/search",
+          "/api/buzzy/search-status",
+          "/api/search-token"
+        ]
+      },
+      "note": "Both can search; the desktop does it with OUR gateway token or its own Brave key."
     },
     {
       "id": "cloud.token-minting",
       "name": "Short-lived inference and search tokens for desktop installs",
       "owner": "devboards",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/inference-token.nitro.ts", "src/lib/buzzy/inferenceToken.ts"], "routes": ["/api/inference-token"] },
-      "desktop": { "evidence": [], "note": "the desktop consumes this route through connect.mjs and must never host it — a shared provider key must not ship in an installer." },
-      "note": "This is the hard coupling between the two lines: an installed desktop breaks if the minting shape changes. See `contract`."
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/inference-token.nitro.ts",
+          "src/lib/buzzy/inferenceToken.ts"
+        ],
+        "routes": [
+          "/api/inference-token"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/inference-token.nitro.ts",
+          "src/lib/buzzy/inferenceToken.ts"
+        ],
+        "routes": [
+          "/api/inference-token"
+        ]
+      },
+      "note": "The code is shared, but the desktop never sets BZ_INFERENCE_SIGNING_KEY, so minting fails closed there. The secret belongs to the cloud only."
     },
     {
       "id": "search.cloud-gateway",
-      "name": "Search gateway — our Brave key, token-gated",
+      "name": "Search gateway \u2014 our Brave key, token-gated",
       "owner": "devboards",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/search-gateway.nitro.ts"], "routes": ["/api/search"] },
-      "desktop": { "evidence": [], "note": "the desktop is a consumer of this route, not a host of it." }
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/search-gateway.nitro.ts"
+        ],
+        "routes": [
+          "/api/search"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/search-gateway.nitro.ts"
+        ],
+        "routes": [
+          "/api/search"
+        ]
+      },
+      "note": "Shared code; on the desktop the gateway is only reachable if a Brave key or a cloud search token is configured."
     },
     {
       "id": "graphs.whiteboard",
-      "name": "Build a workflow — node graph, run, gate, approve",
+      "name": "Build a workflow \u2014 node graph, run, gate, approve",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/graphs.ts", "src/lib/buzzy/runner.ts", "public/buzzy/graph.html"], "pages": ["graph"], "routes": ["/api/buzzy/graphs", "/api/buzzy/runs"], "migrations": ["0049_buzzy_graphs.sql"] },
-      "desktop": { "evidence": [], "note": "no graph tables, no canvas, no resolver on feat/local-runtime." },
-      "next": "Port 0049 + runner + graph.html; the desktop runtime can run the same resolver against local PGlite."
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/graphs.ts",
+          "src/lib/buzzy/runner.ts",
+          "public/buzzy/graph.html"
+        ],
+        "pages": [
+          "graph"
+        ],
+        "routes": [
+          "/api/buzzy/graphs",
+          "/api/buzzy/runs"
+        ],
+        "migrations": [
+          "0049_buzzy_graphs.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/graphs.ts",
+          "src/lib/buzzy/runner.ts",
+          "public/buzzy/graph.html"
+        ],
+        "pages": [
+          "graph"
+        ],
+        "routes": [
+          "/api/buzzy/graphs",
+          "/api/buzzy/runs"
+        ],
+        "migrations": [
+          "0049_buzzy_graphs.sql"
+        ]
+      },
+      "note": "/buzzy/graph renders on the local runtime; graphs are per-install in PGlite."
     },
     {
       "id": "frontier.ranking",
-      "name": "Frontier ranking — derived, refreshable without a deploy",
+      "name": "Frontier ranking \u2014 derived, refreshable without a deploy",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/frontier.ts", "src/lib/buzzy/ranking.ts"], "routes": ["/api/buzzy/frontier"], "migrations": ["0050_buzzy_frontier.sql"] },
-      "desktop": { "evidence": [], "note": "desktop picks models from BZ_CHAT_MODELS ordering; no ranking table." }
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/frontier.ts",
+          "src/lib/buzzy/ranking.ts"
+        ],
+        "routes": [
+          "/api/buzzy/frontier"
+        ],
+        "migrations": [
+          "0050_buzzy_frontier.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/frontier.ts",
+          "src/lib/buzzy/ranking.ts"
+        ],
+        "routes": [
+          "/api/buzzy/frontier"
+        ],
+        "migrations": [
+          "0050_buzzy_frontier.sql"
+        ]
+      }
     },
     {
       "id": "cost.pricing",
       "name": "Real cost per run from the gateway's own prices",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/pricing.ts"], "routes": ["/api/buzzy/pricing"] },
-      "desktop": { "evidence": [], "note": "no pricing.ts on the desktop line, so graph/run costs do not exist there (and neither do runs)." }
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/pricing.ts"
+        ],
+        "routes": [
+          "/api/buzzy/pricing"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/pricing.ts"
+        ],
+        "routes": [
+          "/api/buzzy/pricing"
+        ]
+      },
+      "note": "Live on the local runtime: GET /api/buzzy/pricing returned the reachable catalog with per-MTok prices."
     },
     {
       "id": "generation.music",
       "name": "Music generation (ElevenLabs, task API)",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/music.ts"], "routes": ["/api/buzzy/music"] },
-      "desktop": { "evidence": [], "note": "also blocked on the ElevenLabs plan — see improvement-loop state.json music-3d." }
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/music.ts"
+        ],
+        "routes": [
+          "/api/buzzy/music"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/music.ts"
+        ],
+        "routes": [
+          "/api/buzzy/music"
+        ]
+      },
+      "note": "Code is at parity; the ElevenLabs plan still refuses music on both surfaces (402 paid_plan_required)."
     },
     {
       "id": "generation.model3d",
       "name": "3D generation (Meshy, task API, stored as an asset)",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/models3d.ts"], "routes": ["/api/buzzy/model3d"] },
-      "desktop": { "evidence": [], "note": "depends on the asset shelf, which the desktop does not have." }
+      "state": "both",
+      "web": {
+        "evidence": [
+          "src/lib/buzzy/models3d.ts"
+        ],
+        "routes": [
+          "/api/buzzy/model3d"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/buzzy/models3d.ts"
+        ],
+        "routes": [
+          "/api/buzzy/model3d"
+        ]
+      },
+      "note": "Task API + the asset shelf are both present; a .glb lands in the local asset store."
     },
     {
       "id": "platform.board",
-      "name": "Dev Boards — board, missions, agent API",
+      "name": "Dev Boards \u2014 board, missions, agent API",
       "owner": "devboards",
       "state": "both",
-      "web": { "evidence": ["src/lib/agent-api.server.ts", "src/lib/board-store.server.ts"], "routes": ["/api/agent", "/api/rtc"] },
-      "desktop": { "evidence": ["src/lib/agent-api.server.ts", "src/lib/board-store.server.ts"], "routes": ["/api/agent", "/api/rtc"] }
+      "web": {
+        "evidence": [
+          "src/lib/agent-api.server.ts",
+          "src/lib/board-store.server.ts"
+        ],
+        "routes": [
+          "/api/agent",
+          "/api/rtc"
+        ]
+      },
+      "desktop": {
+        "evidence": [
+          "src/lib/agent-api.server.ts",
+          "src/lib/board-store.server.ts"
+        ],
+        "routes": [
+          "/api/agent",
+          "/api/rtc"
+        ]
+      }
     },
     {
       "id": "desktop.runtime",
-      "name": "Local runtime — embedded Postgres, loopback bind, per-launch token",
+      "name": "Local runtime \u2014 embedded Postgres, loopback bind, per-launch token",
       "owner": "desktop",
       "state": "desktop-only",
-      "web": { "evidence": [], "note": "the web line is the multi-tenant server; it has no local owner." },
-      "desktop": { "evidence": ["desktop/supervisor.mjs", "src/lib/runtime.ts", "src/lib/local-owner.ts"] }
+      "web": {
+        "evidence": [],
+        "note": "the web line is the multi-tenant server; it has no local owner."
+      },
+      "desktop": {
+        "evidence": [
+          "desktop/supervisor.mjs",
+          "src/lib/runtime.ts",
+          "src/lib/local-owner.ts"
+        ]
+      }
     },
     {
       "id": "desktop.cli",
-      "name": "beezilla CLI — serve · status · stop · doctor · run · export",
+      "name": "beezilla CLI \u2014 serve \u00b7 status \u00b7 stop \u00b7 doctor \u00b7 run \u00b7 export",
       "owner": "desktop",
       "state": "desktop-only",
-      "web": { "evidence": [] },
-      "desktop": { "evidence": ["bin/beezilla.mjs", "scripts/beezilla-local.mjs"] }
+      "web": {
+        "evidence": []
+      },
+      "desktop": {
+        "evidence": [
+          "bin/beezilla.mjs",
+          "scripts/beezilla-local.mjs"
+        ]
+      }
     },
     {
       "id": "desktop.settings",
-      "name": "Settings screen — BYOK key store, search, reconnect",
+      "name": "Settings screen \u2014 BYOK key store, search, reconnect",
       "owner": "desktop",
       "state": "desktop-only",
-      "web": { "evidence": [], "note": "a cloud account has no key to store; the web mints tokens instead." },
-      "desktop": { "evidence": ["public/buzzy/settings.html", "desktop/settings.mjs", "desktop/preload.cjs"], "pages": ["settings"] }
+      "web": {
+        "evidence": [],
+        "note": "a cloud account has no key to store; the web mints tokens instead."
+      },
+      "desktop": {
+        "evidence": [
+          "public/buzzy/settings.html",
+          "desktop/settings.mjs",
+          "desktop/preload.cjs"
+        ],
+        "pages": [
+          "settings"
+        ]
+      }
     },
     {
       "id": "desktop.connect",
-      "name": "Connect BeeZilla account — uses OUR inference and search",
+      "name": "Connect BeeZilla account \u2014 uses OUR inference and search",
       "owner": "desktop",
       "state": "desktop-only",
-      "web": { "evidence": [], "note": "the minting half lives on the web line: see `contract` cloud.inference-token / cloud.search-token." },
-      "desktop": { "evidence": ["desktop/connect.mjs", "scripts/lib/inference.mjs"] }
+      "web": {
+        "evidence": [],
+        "note": "the minting half lives on the web line: see `contract` cloud.inference-token / cloud.search-token."
+      },
+      "desktop": {
+        "evidence": [
+          "desktop/connect.mjs",
+          "scripts/lib/inference.mjs"
+        ]
+      }
     },
     {
       "id": "desktop.installer",
-      "name": "Installer — deterministic staging, publisher pins, Windows build",
+      "name": "Installer \u2014 deterministic staging, publisher pins, Windows build",
       "owner": "desktop",
       "state": "desktop-only",
-      "web": { "evidence": [] },
-      "desktop": { "evidence": ["desktop/dist.mjs", "publishers.json"] }
+      "web": {
+        "evidence": []
+      },
+      "desktop": {
+        "evidence": [
+          "desktop/dist.mjs",
+          "publishers.json"
+        ]
+      }
     }
   ],
   "open": [
-    "Desktop voice input (recorder + ASR) is missing — the biggest user-visible gap: Firefox/Brave users cannot talk to the desktop app at all.",
-    "Desktop has no canonical nav, so its eleven pages are eleven separate navs.",
-    "Desktop has no asset shelf, so a dropped picture, song or .glb vanishes instead of becoming a card.",
-    "Desktop has no graphs/frontier/pricing/music/3D — the whole post-Oct-27 web line.",
-    "37 desktop commits lived only on one machine until 2026-11-03; branch feat/local-runtime is now on GitHub so they can be rebased rather than lost."
+    "Installed BeeZilla 0.1.0 (2026-10-28) predates the merge; a rebuilt installer is required before a user sees parity.",
+    "Music generation still refuses on both surfaces until the ElevenLabs account is on a paid plan (402 paid_plan_required).",
+    "The transport-free turn extraction (turn.ts) was removed by the merge \u2014 re-applying it is a pure refactor, not a behaviour change.",
+    "The ranking is derived and refreshable, but there is still no Arena scraper; refresh is a manual ops call."
   ]
 }

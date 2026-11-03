@@ -45,48 +45,42 @@ its own branch** — the failure a user actually feels.
 
 Exit 2 means a tree could not be read (wrong path), never "something is wrong".
 
-## Current state — 2026-11-03
+## Current state — 2026-11-03 (parity reached)
 
-Web line `80c1f91`, desktop line `27ee40d` (branch `feat/local-runtime`, which lives only on
-one machine until now — it is pushed to GitHub as of this note so 37 commits can be rebased
-instead of lost).
+Web line `80c1f91`, desktop line `7b94027` — a merge of main into `feat/local-runtime`
+(38 ahead, 0 behind). **26 functions `both`, 6 `desktop-only`, 0 `web-only`, 0 migrations
+apart.** Every remaining difference is a capability that only makes sense on one surface.
 
-**Both lines (15 functions):** typed chat, model catalog + tool telemetry, voice out,
-Library/documents/export, memory + company context, profile, experts/starters, recipes browse,
-Honey Drops wallet, publish/upload, landing, outbound approval, inbox/digest/scheduled,
-search inside a turn, Dev Boards board.
+### How the merge went
 
-**Web-only (11):**
+main had moved 156 commits while the desktop line built the local runtime. Two conflicts:
 
-| Function | Why it matters |
+| File | Resolution |
 |---|---|
-| `voice.input` — recorder + `/api/buzzy/transcribe` | desktop voice input is the browser SpeechRecognition API only → **Chrome-only**; Firefox/Brave users cannot talk to the desktop app |
-| `listen.mode` | listen intent not persisted on desktop |
-| `nav.canonical` — `common.js` + `#bzNav` | desktop's 11 pages each carry their own nav; Talk/Library/Recipes can drift page by page |
-| `assets.shelf` — `0048` | a dropped picture, song or `.glb` has nowhere to go on desktop |
-| `cloud.token-minting` — `/api/inference-token` | the desktop **consumes** this; it must never host it |
-| `search.cloud-gateway` — `/api/search` | our Brave key, token-gated |
-| `graphs.whiteboard` — `0049` | whole orchestration programme absent on desktop |
-| `frontier.ranking` — `0050` | model choice is a static list on desktop |
-| `cost.pricing` | no real per-run cost without pricing.ts |
-| `generation.music` · `generation.model3d` | depend on the asset shelf (and music on the ElevenLabs plan) |
+| `src/lib/buzzy/chat.nitro.ts` | Took main's `/api/buzzy/chat` body — streaming, asset cards, cancellation, draft telemetry — over the Oct-27 turn. `turn.ts` was a *move* of that same body; keeping both would have left two implementations and one of them stale, so `turn.ts` and its two one-off extraction scripts were removed (recoverable from 9b287d3; re-extracting is a pure refactor). The inline `recordVoiceMetrics` stays out — it lives in `voiceMetrics.ts`, which now writes `lane` + `speech_ms`. |
+| `src/lib/recipe-seal/recipes.nitro.ts` | Union of both import sets: local catalog (certs, cache) **and** cloud derive/ratings. |
 
-**Desktop-only (6):** local runtime, `beezilla` CLI, Settings screen + BYOK key store,
-connect-account (managed inference/search), local recipe fetch/verify/cache, installer.
+Plus: `settings` joins `PAGES` on the desktop line so the Settings window resolves through
+the router instead of a static `.html` fallback.
 
-## Port order (highest value first)
+### Proof (fresh PGlite runtime, no data)
 
-1. **`nav.canonical`** — copy `common.js` + the `#bzNav` block. Cheap, and it stops a whole
-   class of page-by-page drift.
-2. **`voice.input` + `listen.mode`** — one block of `talk.html` plus `asr.ts` and the
-   `/api/buzzy/transcribe` route. This is the gap a user notices first.
-3. **`assets.shelf`** — `0048` + two routes; the desktop runtime migrates at boot.
-4. **`graphs` + `frontier` + `pricing`** — `0049`/`0050`, `runner.ts`, `graph.html`; the desktop
-   can run the same resolver against local PGlite.
-5. **`generation.*`** — last: they need the asset shelf and, for music, a paid ElevenLabs plan.
+`node bin/beezilla.mjs serve` on an empty data dir:
 
-Porting means: land the change on `feat/local-runtime`, flip the entry to `both` in the same
-commit, run `npm run parity`, and prove it in the packaged app.
+- `/buzzy/talk` — **224,095 b**, `#bzNav` ×2, `startRecording` ×3, `bz_listen_mode` ×1 → nav, recorder and listen mode are the web's own files
+- `/buzzy/graph` 200 (24,650 b), `/buzzy/library` 200, `/buzzy/settings` **200** (was 404)
+- `/api/buzzy/pricing` 200 with per-MTok prices · `/api/buzzy/assets` 200 `{files:0}` · `/api/buzzy/graphs` 200 · `/api/buzzy/frontier` 200 · `/api/buzzy/voice-metrics` 200
+- `/api/buzzy/transcribe` POST with an empty clip → **400 `audio_too_short`** with a sentence, not a crash
+- migrations 0048/0049/0050 applied at boot; `tsc` clean; `vite build` "build complete"; inline `<script>` blocks parse in all 12 pages
+
+### What is left
+
+| Item | State |
+|---|---|
+| Installed app catching up | rebuilt with the merged tree; a **release** build still needs the production publisher key set (`BZ_RECIPE_PUBLISHER_FILE`) — the only pins on this host are dev-only |
+| Music | code at parity on both surfaces; ElevenLabs free plan still answers 402 |
+| `turn.ts` re-extraction | pure refactor, no behaviour change; do it when there is test coverage to prove the move |
+| Arena scraper | ranking is derived and refreshable by hand; no scraper |
 
 ## Rebase discipline
 
