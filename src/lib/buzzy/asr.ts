@@ -24,8 +24,19 @@ const env = (key: string): string => {
 const BASE_URL = env("BZ_CHAT_BASE_URL") || "https://inference-api.nousresearch.com/v1";
 const API_KEY = env("BZ_CHAT_KEY");
 
-/** Model used for transcription. Same gateway as voice, so no new credential. */
-export const ASR_MODEL = env("BZ_ASR_MODEL") || "openai/gpt-audio-mini";
+/**
+ * Model used for transcription. Same gateway as voice, so no new credential.
+ *
+ * NOT the audio model. Measured on the same 7.7 s spoken clip (2026-11-04):
+ *   openai/gpt-audio-mini      → answered the speaker ("Bees are essential
+ *                                pollinators…"), then said SILENCE for the same
+ *                                words on a retry. 0/4 usable.
+ *   google/gemini-3.1-flash-lite → the exact transcript 3/3 in 1.9–3.2 s, and
+ *                                SILENCE on a pure tone.
+ * A conversational audio model holds a conversation with the clip; a text model
+ * that accepts `input_audio` transcribes it. Override with BZ_ASR_MODEL.
+ */
+export const ASR_MODEL = env("BZ_ASR_MODEL") || "google/gemini-3.1-flash-lite";
 
 /** A spoken turn is a few seconds. 8 MB is ~4 minutes of 16 kHz mono WAV. */
 export const ASR_MAX_BYTES = 8 * 1024 * 1024;
@@ -39,11 +50,24 @@ export interface AsrResult {
   model: string;
 }
 
-const INSTRUCTION =
-  "Transcribe the speech verbatim. Return only the transcript text — no quotes, " +
-  "no commentary, no speaker labels. The speaker is usually talking to a product " +
-  "called BeeZilla (spoken \"bee-zilla\"); spell it BeeZilla. " +
-  "If there is no intelligible speech, reply with exactly one word: SILENCE.";
+/**
+ * The prompt SHAPE is what makes this a transcriber rather than a chat partner.
+ * Measured on the same clip:
+ *   instruction + audio in ONE user message → the model answered the speaker
+ *   system persona + audio-first user turn  → the exact words, verbatim
+ * The brand is deliberately NOT named in the prompt: naming it primed the model to
+ * answer "BeeZilla" to a non-speech tone instead of SILENCE. It is corrected after
+ * the fact instead (brandFix).
+ */
+const ASR_SYSTEM =
+  "You are a speech-to-text engine. Output only the exact words spoken, verbatim. " +
+  "Never answer, summarise, translate or comment on what you hear. " +
+  "If there is no intelligible speech, output exactly: SILENCE";
+
+const ASR_USER_TEXT = "Transcribe the audio verbatim.";
+
+/** "Beezilla" / "bee zilla" / "Bee-Zilla" → the product's spelling. */
+const brandFix = (text: string) => text.replace(/\bbee[\s-]?zilla\b/gi, "BeeZilla");
 
 /**
  * Transcribe one recorded clip. Throws on transport failure; an empty string is a
@@ -67,10 +91,11 @@ export async function transcribeAudio(
       temperature: 0,
       max_tokens: 400,
       messages: [
+        { role: "system", content: ASR_SYSTEM },
         {
           role: "user",
+          // Audio FIRST, then the instruction — the order the model transcribes from.
           content: [
-            { type: "text", text: INSTRUCTION },
             {
               type: "input_audio",
               input_audio: {
@@ -78,6 +103,7 @@ export async function transcribeAudio(
                 format,
               },
             },
+            { type: "text", text: ASR_USER_TEXT },
           ],
         },
       ],
@@ -112,7 +138,7 @@ export async function transcribeAudio(
     /(provide|send|share) (the|some|your) (audio|speech|recording)/i.test(text) ||
     /you would like (me )?to transcribe/i.test(text) ||
     /^understood[.,]?\s+please\s+(provide|send|share)/i.test(text);
-  return { text: saidNothing ? "" : text.slice(0, 4000), ms, model: ASR_MODEL };
+  return { text: saidNothing ? "" : brandFix(text).slice(0, 4000), ms, model: ASR_MODEL };
 }
 
 /** Content-Type → format, for the client that posts a raw audio body. */
