@@ -25,13 +25,21 @@ export const DEFAULT_TTL_SECONDS = 900; // 15 minutes
 export const MAX_TTL_SECONDS = 3600;
 
 /** What a token is allowed to be used for. Nothing else is mintable. */
-export type TokenScope = "inference" | "search";
+export type TokenScope = "inference" | "search" | "music";
 
 export interface InferenceClaims {
   /** the account the token was minted for */
   sub: string;
-  /** the one capability this token carries */
+  /** the first capability (kept for tokens minted before scopes[] existed) */
   scope: TokenScope;
+  /**
+   * Every capability this token carries. A desktop install keeps ONE credential, so
+   * the minted capsule covers inference and music; each gateway tail still demands
+   * the scope it needs and nothing else is reachable with it.
+   */
+  scopes?: TokenScope[];
+  /** the account's plan at mint time — observability only; quota reads the DB */
+  plan?: string;
   /** issued at, epoch seconds */
   iat: number;
   /** expires at, epoch seconds */
@@ -42,7 +50,7 @@ export interface InferenceClaims {
 
 export type VerifyFailure = "malformed" | "bad_signature" | "expired" | "scope" | "no_secret";
 
-const SCOPES: readonly TokenScope[] = ["inference", "search"];
+const SCOPES: readonly TokenScope[] = ["inference", "search", "music"];
 
 export interface VerifyResult {
   ok: boolean;
@@ -69,7 +77,9 @@ const sign = (secret: string, payload: string): string =>
 export interface MintOptions {
   userId: string;
   /** defaults to "inference" so existing callers keep their meaning */
-  scope?: TokenScope;
+  scope?: TokenScope | TokenScope[];
+  /** recorded in the claims so a log line says which plan was in force */
+  plan?: string;
   ttlSeconds?: number;
   secret?: string;
   now?: number;
@@ -98,12 +108,17 @@ export function mintInferenceToken(opts: MintOptions): MintedToken {
   const requested = Number.isFinite(opts.ttlSeconds) ? Math.floor(opts.ttlSeconds!) : DEFAULT_TTL_SECONDS;
   const ttl = Math.min(Math.max(requested, 60), MAX_TTL_SECONDS);
 
-  const scope = opts.scope ?? "inference";
-  if (!SCOPES.includes(scope)) return { ok: false, error: `unknown token scope: ${String(scope)}` };
+  const requestedScopes = Array.isArray(opts.scope) ? opts.scope : [opts.scope ?? "inference"];
+  const scopes = requestedScopes.filter((v, i) => requestedScopes.indexOf(v) === i);
+  if (scopes.length === 0) return { ok: false, error: "a token needs at least one scope" };
+  const unknown = scopes.find((v) => !SCOPES.includes(v));
+  if (unknown) return { ok: false, error: `unknown token scope: ${String(unknown)}` };
 
   const claims: InferenceClaims = {
     sub: userId,
-    scope,
+    scope: scopes[0],
+    scopes,
+    ...(opts.plan ? { plan: opts.plan } : {}),
     iat: now,
     exp: now + ttl,
     jti: randomBytes(12).toString("hex"),
@@ -138,10 +153,16 @@ export function verifyInferenceToken(
   } catch {
     return { ok: false, reason: "malformed" };
   }
-  // A token is only good for the capability it was minted for: an inference token
-  // must never unlock search quota, and vice versa.
+  // A token is only good for the capabilities it was minted for: nothing on this
+  // gateway answers a plain search token, and music needs its own claim.
   const required = opts.scope ?? "inference";
-  if (!claims?.sub || !SCOPES.includes(claims.scope) || claims.scope !== required || !Number.isFinite(claims.exp)) {
+  const held = Array.isArray(claims?.scopes) && claims.scopes.length > 0 ? claims.scopes : [claims?.scope];
+  if (
+    !claims?.sub ||
+    !held.every((v) => SCOPES.includes(v as TokenScope)) ||
+    !held.includes(required) ||
+    !Number.isFinite(claims.exp)
+  ) {
     return { ok: false, reason: "scope" };
   }
   const now = opts.now ?? Math.floor(Date.now() / 1000);

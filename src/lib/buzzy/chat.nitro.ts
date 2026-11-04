@@ -33,7 +33,6 @@ import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
-import { searchAvailable, searchNeedsReconnect, searchProvider } from "./search";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
@@ -44,22 +43,15 @@ import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
 import { buildRanking } from "./ranking";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
+import {
+  describeEntitlement,
+  revokeTokens,
+  setPlan,
+  type PlanName,
+} from "./entitlements";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
-import {
-  isCompanyId,
-  asMoneyBrief,
-  companyName,
-  linePayload,
-  companyPayload,
-  factValue,
-  confirmedCompanyContext,
-  companyFacts,
-  type CompanyRow,
-  type FactRow,
-} from "./companyContext";
-import { recordVoiceMetrics } from "./voiceMetrics";
 import { checkPromise } from "./promise";
 import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
 import { buildWeeklyDigest } from "./digest";
@@ -94,6 +86,47 @@ const ASSET_MAX_BYTES = 25 * 1024 * 1024;
  * turn end). Kept apart on purpose: a slow model and a slow client are
  * different bugs. Identity and timings only, never text or audio.
  */
+async function recordVoiceMetrics(
+  sql: Sql,
+  row: {
+    userId: string;
+    jobId?: string | null;
+    sessionId?: string | null;
+    source: "client" | "server";
+    mode?: string | null;
+    model?: string | null;
+    asrMs?: number | null;
+    ttftMs?: number | null;
+    ttfaMs?: number | null;
+    turnMs?: number | null;
+    extractMs?: number | null;
+    llmMs?: number | null;
+    honchoMs?: number | null;
+    replyChars?: number | null;
+    audioBytes?: number | null;
+    spoken?: boolean;
+    lane?: string | null;
+    speechMs?: number | null;
+  },
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO buzzy_voice_metrics
+        (user_id, job_id, session_id, source, mode, model, asr_ms, ttft_ms, ttfa_ms,
+         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane, speech_ms)
+      VALUES
+        (${row.userId}, ${row.jobId ?? null}, ${row.sessionId ?? null}, ${row.source},
+         ${row.mode ?? null}, ${row.model ?? null}, ${row.asrMs ?? null}, ${row.ttftMs ?? null},
+         ${row.ttfaMs ?? null}, ${row.turnMs ?? null}, ${row.extractMs ?? null},
+         ${row.llmMs ?? null}, ${row.honchoMs ?? null}, ${row.replyChars ?? null},
+         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null}, ${row.speechMs ?? null})
+    `;
+  } catch (err) {
+    // A lost metric must never break a turn.
+    console.warn("[buzzy/voice-metrics] insert failed:", err instanceof Error ? err.message : err);
+  }
+}
+
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
   try {
@@ -114,6 +147,138 @@ function queryValue(fullPath: string, key: string): string | null {
   return v;
 }
 
+function isCompanyId(id: string): boolean {
+  return /^co_[a-z0-9]{8,32}$/.test(id);
+}
+
+function asMoneyBrief(raw: unknown): MoneyBriefLine[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MoneyBriefLine[] = [];
+  for (const row of raw.slice(0, 12)) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    const status = rec.status === "confirmed" || rec.status === "skipped" || rec.status === "open" || rec.status === "proposed"
+      ? rec.status
+      : "open";
+    out.push({
+      label: typeof rec.label === "string" ? rec.label.slice(0, 80) : "",
+      value: typeof rec.value === "string" ? rec.value.slice(0, 500) : "",
+      status,
+    });
+  }
+  return out;
+}
+
+function companyName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const name = raw.trim().replace(/\s+/g, " ").slice(0, 80);
+  return name || null;
+}
+
+type CompanyRow = {
+  id: string;
+  name: string;
+  one_liner: string;
+  website: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type FactRow = {
+  id: string;
+  company_id: string;
+  fact_key: string;
+  label: string;
+  value: string;
+  status: string;
+  source_label: string;
+  source_page: string;
+  original_value: string;
+};
+
+const FACT_ORDER = ["name", "does", "serves", "locations", "voice"];
+
+function linePayload(row: FactRow) {
+  return {
+    id: row.id,
+    key: row.fact_key,
+    label: row.label,
+    value: row.value,
+    status: row.status,
+    source: row.source_label,
+    page: row.source_page,
+    edited: row.original_value !== "" && row.value !== row.original_value,
+  };
+}
+
+function companyPayload(row: CompanyRow, facts: FactRow[] = []) {
+  const lines = facts
+    .filter((f) => f.company_id === row.id && f.status !== "dropped")
+    .sort((a, b) => FACT_ORDER.indexOf(a.fact_key) - FACT_ORDER.indexOf(b.fact_key))
+    .map(linePayload);
+  return {
+    id: row.id,
+    name: row.name,
+    oneLiner: row.one_liner || "",
+    website: row.website || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lines,
+    facts: lines.filter((l) => l.status === "confirmed"),
+  };
+}
+
+function factValue(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
+  return v || null;
+}
+
+async function confirmedCompanyContext(
+  sql: Sql,
+  userId: string,
+  companyId: string,
+): Promise<{ name: string; facts: Array<{ label: string; value: string }> } | null> {
+  if (!isCompanyId(companyId)) return null;
+  const rows = await sql<CompanyRow>`
+    SELECT id, name, one_liner, website, created_at, updated_at
+    FROM buzzy_companies
+    WHERE id = ${companyId} AND user_id = ${userId}
+    LIMIT 1
+  `;
+  if (!rows.length) return null;
+  const facts = await sql<FactRow>`
+    SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+    FROM buzzy_company_facts
+    WHERE user_id = ${userId} AND company_id = ${companyId} AND status = 'confirmed'
+    ORDER BY created_at ASC
+    LIMIT 20
+  `;
+  return {
+    name: rows[0].name,
+    facts: facts
+      .filter((f) => typeof f.value === "string" && f.value.trim())
+      .map((f) => ({ label: f.label || f.fact_key, value: f.value })),
+  };
+}
+
+async function companyFacts(sql: Sql, userId: string, companyId?: string): Promise<FactRow[]> {
+  return companyId
+    ? await sql<FactRow>`
+        SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+        FROM buzzy_company_facts
+        WHERE user_id = ${userId} AND company_id = ${companyId} AND status <> 'dropped'
+        ORDER BY created_at ASC
+        LIMIT 20
+      `
+    : await sql<FactRow>`
+        SELECT id, company_id, fact_key, label, value, status, source_label, source_page, original_value
+        FROM buzzy_company_facts
+        WHERE user_id = ${userId} AND status <> 'dropped'
+        ORDER BY created_at ASC
+        LIMIT 250
+      `;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function headersFromEvent(event: any): Headers {
@@ -185,18 +350,6 @@ export default defineEventHandler(async (event) => {
   // instruction alone mints nothing beyond it.
   if (method === "GET" && path === "/api/buzzy/tools") {
     return { tools: TOOL_REGISTRY };
-  }
-
-  // ── GET /api/buzzy/search-status — is web search usable, and with what ──
-  // Availability only: never the key, never a prefix of it. The desktop app shows
-  // "search: on (our key)" / "on (your key)" / "off" from this.
-  if (method === "GET" && path === "/api/buzzy/search-status") {
-    return {
-      available: searchAvailable(),
-      provider: searchProvider(),
-      // Present only when the session lapsed, so a UI can tell "off" from "stale".
-      ...(searchNeedsReconnect() ? { needsReconnect: true } : {}),
-    };
   }
 
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──
@@ -1134,6 +1287,70 @@ export default defineEventHandler(async (event) => {
     });
     return { ok: true };
   }
+  // ── GET /api/buzzy/entitlement — the plan this account is actually on ────────
+  // A UI must be able to say "you are on X, Y left" without guessing, and support
+  // must be able to answer the same question for one user.
+  if (method === "GET" && path === "/api/buzzy/entitlement") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    return { ok: true, ...(await describeEntitlement(user.id)) };
+  }
+
+  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops only) ─────────
+  // The billing hook writes here. Stripe (or a manual grant) maps to one call, so
+  // entitlement logic has exactly one writer and cannot drift from the invoice.
+  if (method === "POST" && path === "/api/buzzy/admin/plan") {
+    if (!opsAuthorized(event)) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    const body = (await event.req.json().catch(() => ({}))) as {
+      user?: string;
+      userId?: string;
+      plan?: string;
+      planUntil?: string;
+      note?: string;
+    };
+    const userId = String(body.user ?? body.userId ?? "").trim();
+    const plan = String(body.plan ?? "").trim().toLowerCase();
+    if (!userId) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "which account? pass user=<id>", code: "no_user" };
+    }
+    if (plan !== "free" && plan !== "starter" && plan !== "pro") {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "plan must be free, starter or pro", code: "bad_plan" };
+    }
+    const until = body.planUntil ? new Date(String(body.planUntil)) : null;
+    if (until && Number.isNaN(until.getTime())) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "planUntil is not a date", code: "bad_date" };
+    }
+    await setPlan(userId, plan as PlanName, until, body.note);
+    return { ok: true, ...(await describeEntitlement(userId)) };
+  }
+
+  // ── POST /api/buzzy/admin/revoke-tokens — every token minted so far is stale ─
+  // Instant revocation without a deny list: the account's epoch moves, and the
+  // gateway refuses any claim whose iat is older. Next sign-in mints past it.
+  if (method === "POST" && path === "/api/buzzy/admin/revoke-tokens") {
+    if (!opsAuthorized(event)) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    const body = (await event.req.json().catch(() => ({}))) as { user?: string; userId?: string };
+    const userId = String(body.user ?? body.userId ?? "").trim();
+    if (!userId) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "which account? pass user=<id>", code: "no_user" };
+    }
+    const revokedAt = await revokeTokens(userId);
+    return { ok: true, user: userId, revokedAt: revokedAt.toISOString() };
+  }
+
   if (method === "GET" && path === "/api/buzzy/voice-metrics") {
     const ops = opsAuthorized(event);
     const user = ops ? null : await getSessionUserFromHeaders(headersFromEvent(event));

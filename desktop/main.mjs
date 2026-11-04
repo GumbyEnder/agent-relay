@@ -120,6 +120,7 @@ async function applyStoredInferenceToEnv() {
       delete process.env.BZ_CHAT_KEY;
       delete process.env.BZ_CHAT_BASE_URL;
       delete process.env.BZ_CHAT_MODEL;
+      delete process.env.BZ_MUSIC_VIA_GATEWAY;
       process.env.BZ_MANAGED_EXPIRED = "1";
       console.warn("[desktop] BeeZilla token expired — Settings will ask you to reconnect");
       return;
@@ -129,6 +130,11 @@ async function applyStoredInferenceToEnv() {
       process.env.BZ_CHAT_KEY = inf.key;
       if (inf.baseUrl) process.env.BZ_CHAT_BASE_URL = inf.baseUrl;
       if (inf.model) process.env.BZ_CHAT_MODEL = inf.model;
+      // Managed music rides the same short-lived gateway token as chat: the app holds
+      // no music key at all, and quota/plan are enforced on our side. BYOK installs
+      // (provider "byok") keep using their own ElevenLabs key from Settings.
+      if (inf.provider === "beezilla" && inf.baseUrl) process.env.BZ_MUSIC_VIA_GATEWAY = inf.baseUrl;
+      else delete process.env.BZ_MUSIC_VIA_GATEWAY;
       console.log(`[desktop] inference: ${inf.provider} (stored${inf.encrypted ? ", encrypted" : ""})`);
       return;
     }
@@ -139,6 +145,7 @@ async function applyStoredInferenceToEnv() {
   delete process.env.BZ_CHAT_KEY;
   delete process.env.BZ_CHAT_BASE_URL;
   delete process.env.BZ_CHAT_MODEL;
+  delete process.env.BZ_MUSIC_VIA_GATEWAY;
 }
 
 /**

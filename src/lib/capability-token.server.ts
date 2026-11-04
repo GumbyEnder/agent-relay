@@ -10,6 +10,7 @@
  */
 import { getSessionUserFromHeaders } from "./auth/verify.server";
 import { mintInferenceToken, type TokenScope } from "./buzzy/inferenceToken";
+import { getEntitlement } from "./buzzy/entitlements";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -17,6 +18,7 @@ const json = (status: number, body: unknown) =>
 export interface CapabilityResponse {
   ok: boolean;
   token?: string;
+  plan?: string;
   expiresAt?: string;
   expiresInSeconds?: number;
   /** where to send the credential — named `baseUrl` for inference, `endpoint` for search */
@@ -29,7 +31,7 @@ export interface CapabilityResponse {
 
 export async function handleCapabilityToken(
   req: Request,
-  scope: TokenScope,
+  scope: TokenScope | TokenScope[],
   endpoint: () => { url: string; model?: string },
   label: string,
 ): Promise<Response> {
@@ -46,7 +48,10 @@ export async function handleCapabilityToken(
   const body = (await req.json().catch(() => ({}))) as { ttlSeconds?: unknown };
   const ttlSeconds = typeof body?.ttlSeconds === "number" ? body.ttlSeconds : undefined;
 
-  const minted = mintInferenceToken({ userId: user.id, scope, ttlSeconds });
+  // The plan goes in the claims for observability only; the gateway re-reads it from
+  // the database, because a 15-minute-old claim must not outlive a downgrade.
+  const ent = await getEntitlement(user.id);
+  const minted = mintInferenceToken({ userId: user.id, scope, plan: ent.plan, ttlSeconds });
   if (!minted.ok || !minted.token || !minted.claims) {
     // Configuration, not a user error — say so plainly instead of "unauthorized".
     return json(503, { ok: false, error: minted.error ?? `could not mint a ${label} token`, code: "not_configured" });
@@ -56,6 +61,7 @@ export async function handleCapabilityToken(
   return json(200, {
     ok: true,
     token: minted.token,
+    plan: ent.plan,
     expiresAt: new Date(minted.claims.exp * 1000).toISOString(),
     expiresInSeconds: minted.claims.exp - minted.claims.iat,
     endpoint: target.url,
