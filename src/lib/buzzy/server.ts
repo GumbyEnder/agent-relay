@@ -1020,8 +1020,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // A reply may only point at an artifact this turn actually produced.
   const CLAIMS_DELIVERY =
     /\b(in your library|saved (it|that|this|the (file|document|track|song))|generated and saved|is ready for your approval|your (track|song|file|document) (is|has been) (ready|saved|generated)|i'?ve (saved|generated|created) (it|that|the))\b/i;
+  // Media claims are checked separately and always fail today: the chat has no
+  // music tool, so a "track/song/audio" was never produced by this turn no matter
+  // what the document says. Measured: "The track has been generated and is saved
+  // in your Library" with the Library holding no audio at all.
+  const CLAIMS_AUDIO =
+    /\b(track|song|audio|music|mp3)\b[^.]{0,40}\b(is|has been|was)\s+(generated|created|made|rendered|saved|ready)\b|\b(generated|created|rendered|saved)\b[^.]{0,40}\b(track|song|audio|mp3)\b/i;
   let finalReply = guardedReply;
-  if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn) {
+  if (CLAIMS_AUDIO.test(finalReply)) {
+    console.warn("[buzzy] reply claimed an audio deliverable the chat cannot produce");
+    finalReply =
+      "I did not produce any audio — that sentence was wrong, and nothing was saved to your Library. " +
+      "Chat has no music tool wired yet, so a track cannot come out of this conversation. " +
+      "The music endpoint itself works (ElevenLabs answered 200 when called directly), so this is a missing " +
+      "tool in the chat loop, not a plan problem. Tell me to stop and I will not pretend again.";
+  } else if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn) {
     const wantsMusic = /\b(song|track|music|audio|jingle|score)\b/i.test(
       [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" "),
     );
