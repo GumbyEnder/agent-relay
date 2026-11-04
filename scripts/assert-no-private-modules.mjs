@@ -12,7 +12,7 @@
  *      gitignores it.
  *
  * Case 1 is caught by path. Case 2 is caught by the sentinel every module in
- * beezilla-recipes carries (`// BZ-PRIVATE module: …`) and by the names of the
+ * beezilla-recipes carries (the sentinel comment every private module carries) and by the names of the
  * six files, which have no business existing anywhere but `src/lib/private/`.
  *
  * Run by `prebuild` (after the sync) and safe to run any time: read-only.
@@ -42,7 +42,9 @@ for (const f of tracked.filter((p) => GITIGNORED.test(p))) {
   problems.push(`${f} is tracked in git — a synced private module was committed to the public repo`);
 }
 
-const sentinel = /BZ-PRIVATE module:/;
+// Built by concatenation so this file does not match its own scan: the marker
+// has to appear in no tracked file, and the guard is a tracked file.
+const sentinel = new RegExp("BZ-" + "PRIVATE module:");
 for (const f of tracked) {
   if (!/\.(ts|tsx|mjs|cjs|js)$/.test(f)) continue;
   if (f.startsWith(".private-stub/")) continue;
