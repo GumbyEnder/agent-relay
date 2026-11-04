@@ -1233,10 +1233,17 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       lane,
     },
   };
+  // ── Audio-only turns ───────────────────────────────────────────────
+  // A track is the deliverable, not a draft of one. Materialising the reply as a
+  // document beside the mp3 gave the owner two artifacts for one request: a
+  // player and a note describing the player. When audio was produced and no
+  // document was explicitly rendered, the turn delivers audio and nothing else —
+  // no draft gate, no review lines, no approval step.
+  const audioOnly = Boolean(renderedAudio) && !renderedDocText;
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
   // draft — before the owner approves work, never after. It belongs to a turn
   // that is actually showing a draft, not to a question answered in chat.
-  if (deliversThisTurn) {
+  if (deliversThisTurn && !audioOnly) {
     try {
       response.estimate = await buildJobEstimate(sql, userId, draftGateOpen);
     } catch { /* estimate is additive — never block the reply */ }
@@ -1260,7 +1267,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // Draft only on a turn that actually delivers: see deliversThisTurn above
   // (a confirming turn on a full brief, an explicit ask, a render, a revision).
-  if (deliversThisTurn) {
+  // An audio-only turn delivers media, so it skips the draft/approval path
+  // entirely — the player in the reply IS the deliverable.
+  if (deliversThisTurn && !audioOnly) {
     response.draft = true;
     response.done = true;
     // Multi-step review (component #8): deterministic approval-time checks,
