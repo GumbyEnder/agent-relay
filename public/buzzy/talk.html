@@ -2970,7 +2970,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
       // (Chrome, and anything with a working speech service); "recorder" = record
       // locally and let the server transcribe (Firefox, Brave, blocked service).
-      asr: "sr",
+      //
+      // The desktop shell is ALWAYS "recorder": Electron exposes
+      // window.webkitSpeechRecognition because it is Chromium, but that API posts
+      // the clip to Google's speech service, which a packaged app cannot use —
+      // rec.start() throws (or answers `network`) and the mic dies silently with
+      // nothing in the dialogue tree. Measured: /api/buzzy/transcribe on the local
+      // runtime answers {ok:true,text,model:"openai/gpt-audio-mini"} in ~1.9 s.
+      asr: window.beezilla ? "recorder" : "sr",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
       // Timings
@@ -3220,8 +3227,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function startListening() {
       if (voice.rec || recState) return;
       // Firefox ships no SpeechRecognition and Brave's service is blocked, so
-      // those browsers record the clip and let the server transcribe it.
-      if (!srAvailable() || voice.asr === "recorder") { startRecording(); return; }
+      // those browsers record the clip and let the server transcribe it. The
+      // desktop shell is included by name: Electron HAS the API object but cannot
+      // reach the speech service, so taking the SR branch there means the mic
+      // never produces a transcript.
+      if (!srAvailable() || voice.asr === "recorder" || window.beezilla) { startRecording(); return; }
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       var rec = new SR();
       rec.lang = "en-US";
@@ -3286,7 +3296,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
         }
       };
-      try { rec.start(); } catch (_) { voice.rec = null; }
+      try {
+        rec.start();
+      } catch (_) {
+        // A recognizer that exists but cannot start is the worst case: the mic is
+        // on, nothing is recorded, and the owner gets no feedback. Record instead.
+        voice.rec = null;
+        voice.asr = "recorder";
+        startRecording();
+      }
       paintVoice();
     }
 

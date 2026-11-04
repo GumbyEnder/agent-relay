@@ -27,28 +27,43 @@ import type { VerifiedUser } from "./auth/verify.server";
 export const LOCAL_OWNER_ID = "local_owner";
 export const LOCAL_OWNER_EMAIL = "owner@beezilla.local";
 
+/**
+ * The identity the desktop should show. A connected BeeZilla account supplies its
+ * own name/email (the shell writes `identity.json` and exports these before the
+ * runtime starts), so the owner sees "Shane" instead of the synthetic "Owner" the
+ * moment they sign in. Falls back to the local defaults — a local install never
+ * requires an account.
+ */
+const ownerIdentity = () => ({
+  name: (process.env.BZ_LOCAL_OWNER_NAME ?? "").trim() || "Owner",
+  email: (process.env.BZ_LOCAL_OWNER_EMAIL ?? "").trim() || LOCAL_OWNER_EMAIL,
+});
+
 const globalRef = globalThis as typeof globalThis & {
   __bzLocalOwner__?: Promise<VerifiedUser>;
 };
 
 /**
  * Provision (once per process) and return the single local owner.
- * Idempotent across restarts: `on conflict (email) do nothing`, then read back.
+ * Idempotent across restarts: upsert by id, then read back. Upserting by id rather
+ * than email is what lets a connected account change the row's email without
+ * fighting the unique index.
  */
 export function ensureLocalOwner(): Promise<VerifiedUser> {
   globalRef.__bzLocalOwner__ ??= (async () => {
     const sql = await getSql();
+    const { name, email } = ownerIdentity();
     await sql`
       insert into "user" (id, name, email, "emailVerified")
-      values (${LOCAL_OWNER_ID}, 'Owner', ${LOCAL_OWNER_EMAIL}, true)
-      on conflict (email) do nothing
+      values (${LOCAL_OWNER_ID}, ${name}, ${email}, true)
+      on conflict (id) do update set name = excluded.name, email = excluded.email
     `;
-    const rows = await sql<{ id: string; email: string | null }>`
-      select id, email from "user" where email = ${LOCAL_OWNER_EMAIL} limit 1
+    const rows = await sql<{ id: string; name: string | null; email: string | null }>`
+      select id, name, email from "user" where id = ${LOCAL_OWNER_ID} limit 1
     `;
     const row = rows[0];
-    if (!row) throw new Error("local owner row missing after insert");
-    return { id: row.id, email: row.email };
+    if (!row) throw new Error("local owner row missing after upsert");
+    return { id: row.id, name: row.name, email: row.email };
   })().catch((err) => {
     globalRef.__bzLocalOwner__ = undefined;
     throw err;

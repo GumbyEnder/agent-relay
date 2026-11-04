@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
         user: {
           id: user.id,
           email: user.email,
-          name: "Owner",
+          name: user.name || "Owner",
           emailVerified: true,
           image: null,
           createdAt: now.toISOString(),

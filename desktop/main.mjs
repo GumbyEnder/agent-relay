@@ -11,6 +11,7 @@
  * produces a window where every API call 401s while the preload "looks right".
  */
 import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain } from "electron";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RuntimeSupervisor } from "./supervisor.mjs";
@@ -61,6 +62,43 @@ process.on("exit", (code) => console.log(`[desktop] exiting code=${code}`));
 let mainWindow = null;
 let settingsWindow = null;
 let runtimeBase = null;
+
+/**
+ * Identity for the local runtime.
+ *
+ * Without this the window shows the synthetic local row — name "Owner",
+ * `owner@beezilla.local` — even right after the user signed in with their real
+ * account, which reads as "the app doesn't know me". A connected account's
+ * name/email is written to `<dataDir>/identity.json` and exported into the
+ * runtime's environment before it starts, so the owner row adopts it.
+ */
+function identityFile() {
+  return join(supervisor.dataDir, "identity.json");
+}
+
+function applyIdentityToEnv() {
+  try {
+    if (!existsSync(identityFile())) return;
+    const id = JSON.parse(readFileSync(identityFile(), "utf8"));
+    if (id?.name) process.env.BZ_LOCAL_OWNER_NAME = String(id.name);
+    if (id?.email) process.env.BZ_LOCAL_OWNER_EMAIL = String(id.email);
+    console.log(`[desktop] identity: ${id.name || "(no name)"} <${id.email || "(no email)"}>`);
+  } catch (err) {
+    console.warn("[desktop] could not read identity.json:", err instanceof Error ? err.message : err);
+  }
+}
+
+function saveIdentity(account) {
+  if (!account?.email) return;
+  try {
+    mkdirSync(supervisor.dataDir, { recursive: true });
+    writeFileSync(identityFile(), JSON.stringify({ ...account, savedAt: new Date().toISOString() }, null, 2) + "\n");
+    applyIdentityToEnv();
+    console.log(`[desktop] identity saved: ${account.name || "(no name)"} <${account.email}>`);
+  } catch (err) {
+    console.warn("[desktop] could not save identity.json:", err instanceof Error ? err.message : err);
+  }
+}
 
 /**
  * Decrypt the stored inference key into the environment the runtime inherits.
@@ -122,7 +160,11 @@ function registerSettingsIpc() {
         encrypt: (s) => safeStorage.encryptString(s),
         decrypt: (b) => safeStorage.decryptString(Buffer.from(b)),
       },
-      beforeRestart: applyStoredInferenceToEnv,
+      beforeRestart: async () => {
+        // Identity first: the runtime reads BZ_LOCAL_OWNER_* at spawn.
+        applyIdentityToEnv();
+        await applyStoredInferenceToEnv();
+      },
     });
 
     const wrap = (fn) => async (_event, payload) => {
@@ -285,6 +327,10 @@ async function connectManagedAccount() {
     }
     return outcome;
   }
+
+  // Who signed in — saved before the credential so the restart that follows picks
+  // the name up in the same pass.
+  if (outcome.account) saveIdentity(outcome.account);
 
   const saved = await settingsHandlers.saveInference({
     provider: "beezilla",
@@ -524,6 +570,7 @@ app.whenReady().then(async () => {
   installMenu();
 
   try {
+    applyIdentityToEnv();
     await applyStoredInferenceToEnv();
     settingsHandlers = await registerSettingsIpc();
     await createWindow();

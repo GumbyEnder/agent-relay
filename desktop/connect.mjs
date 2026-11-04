@@ -45,6 +45,24 @@ export const MINT_SCRIPT = `(async () => {
 })()`;
 
 /**
+ * Who signed in. The desktop's own identity is a synthetic single row
+ * (`owner@beezilla.local`), which reads as "the app doesn't know me" right after a
+ * user signed in with their real account. The account is right there in the page
+ * we already have open, so read it and let the local owner adopt the name/email.
+ * Best-effort: a failure here must never fail the connect.
+ */
+export const PROFILE_SCRIPT = `(async () => {
+  try {
+    const res = await fetch("/api/auth/get-session", { credentials: "include" });
+    const body = await res.json().catch(() => ({}));
+    const user = body && body.user ? body.user : null;
+    return JSON.stringify({ status: res.status, user: user ? { name: user.name || "", email: user.email || "" } : null });
+  } catch (err) {
+    return JSON.stringify({ status: 0, user: null, error: String(err && err.message || err) });
+  }
+})()`;
+
+/**
  * The search half. Separate call because our search quota is a different capability
  * and the deployment may not have it yet — a 503 here must not fail the sign-in.
  */
@@ -226,6 +244,14 @@ export async function connectAccount(deps) {
         search = interpretSearchMintResult(await deps.evaluate(SEARCH_MINT_SCRIPT));
       } catch (err) {
         search = { ok: false, error: `search token: ${err instanceof Error ? err.message : err}` };
+      }
+      // Same window, same session: who is this? Adopted by the local owner row.
+      try {
+        const raw = await deps.evaluate(PROFILE_SCRIPT);
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (parsed?.user?.email) outcome.account = { name: parsed.user.name || "", email: parsed.user.email };
+      } catch {
+        /* identity is a nicety, not a requirement */
       }
     }
   } catch (err) {
