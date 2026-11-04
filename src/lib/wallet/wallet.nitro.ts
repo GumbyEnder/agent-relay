@@ -13,7 +13,7 @@
 import { defineEventHandler, getMethod, readBody, setResponseStatus } from "h3";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getSql } from "@/lib/db";
-import { getBundle } from "@/lib/recipe-seal/registry";
+import { getBundle } from "@/lib/private/registry";
 import type { RecipeManifest } from "@/lib/recipe-seal/bundle";
 import { grant, ledger, ownedHashes, purchase, salesSummary, walletSummary } from "./wallet";
 

@@ -25,6 +25,7 @@
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
     "build": "vite build",
+    "prebuild": "node scripts/sync-private.mjs && node scripts/assert-no-private-modules.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "vite build --mode development",
     "preview": "node .output/server/index.mjs",
@@ -59,7 +60,11 @@
     "tui:status": "npm --prefix apps/tui run status",
     "tui:build": "npm --prefix apps/tui run build",
     "test:openapi-sync": "node scripts/test-openapi-sync.mjs",
-    "test:tools": "npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-webpage-routing.ts && npx tsx scripts/test-voice-tools.ts && npx tsx scripts/test-file-intent.ts"
+    "test:tools": "npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-webpage-routing.ts && npx tsx scripts/test-voice-tools.ts && npx tsx scripts/test-file-intent.ts",
+    "pretypecheck": "node scripts/sync-private.mjs",
+    "private:sync": "node scripts/sync-private.mjs",
+    "private:check": "node scripts/sync-private.mjs --check",
+    "private:verify": "node scripts/sync-private.mjs --check --require-private"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",

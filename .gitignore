@@ -16,3 +16,9 @@ dist/
 playwright-report/
 test-results/
 brand-assets/
+
+# Private modules (github.com:GumbyEnder/beezilla-recipes) — populated by
+# scripts/sync-private.mjs before every build. Never track these.
+src/lib/private/
+scripts/private/
+.private/

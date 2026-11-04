@@ -454,11 +454,11 @@ export default defineConfig(({ command }) => ({
               },
               {
                 route: "/api/recipes",
-                handler: "./src/lib/recipe-seal/recipes.nitro.ts",
+                handler: "./src/lib/private/recipes.nitro.ts",
               },
               {
                 route: "/api/recipes/**",
-                handler: "./src/lib/recipe-seal/recipes.nitro.ts",
+                handler: "./src/lib/private/recipes.nitro.ts",
               },
               {
                 route: "/api/wallet",
