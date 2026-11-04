@@ -137,6 +137,24 @@ if (!existsSync(APP)) {
   check("the launcher is staged", existsSync(scripts));
   check("the parent watchdog is staged", existsSync(join(APP, "scripts", "lib", "parent-watchdog.cjs")));
   check("the CLI is staged", existsSync(join(APP, "bin", "beezilla.mjs")));
+
+  // The installer carries behaviour, not sources. `scripts/` was copied wholesale
+  // until desktop/dist.mjs grew a closure walk, so every install shipped the
+  // recipe-seal sources, the check corpus and the test harness as readable .ts.
+  const staged = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else staged.push(p);
+    }
+  };
+  if (existsSync(join(APP, "scripts"))) walk(join(APP, "scripts"));
+  const sources = staged.filter((p) => p.endsWith(".ts"));
+  const harness = staged.filter((p) => /(^|\/)(test-|seed-|give-)/.test(p));
+  check("no TypeScript sources ride along in the runtime tree", sources.length === 0, `${sources.length} .ts file(s)`);
+  check("no test/seed harness rides along", harness.length === 0, `${harness.length} file(s)`);
+  check("the runtime script closure is small", staged.length <= 12, `${staged.length} files`);
 }
 
 console.log(`\ninstaller verification: ${failures === 0 ? "passed" : `${failures} failed`}`);

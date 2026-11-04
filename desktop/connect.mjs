@@ -66,16 +66,22 @@ export const SEARCH_MINT_SCRIPT = `(async () => {
 /**
  * Where a shipped app looks for BeeZilla by default.
  *
- * Without a baked default the Connect menu item is disabled on every real install and
- * "our inference" can only be reached by a user who exports an env var — which is not
- * a product. Env override still wins for testing and staging.
+ * It has to be a deployment that can mint AND spend a token, and that a real
+ * account exists on:
  *
- * This points at the deployment that exists and answers today (verified: the mint
- * returns 401 without a session, search 503 without a key). beezilla.ai has no NS
- * record, so a branded host is a later one-line change — a default that does not
- * resolve would make Connect dead on arrival, which is the bug this replaced.
+ *  - the demo host (beezilla-demo-production-c069) minted 401 for everyone and
+ *    answered 503 `not_configured` for a signed-in owner — no signing key — and it
+ *    has no /api/inference gateway at all (404). That is the "could not connect —
+ *    not configured" popup a user hit.
+ *  - beezilla-production is a stale build: /api/inference-token is 404 there.
+ *  - app.devboards.ai has the mint, the gateway, and real accounts, which is where
+ *    the owner actually signs in.
+ *
+ * A branded BeeZilla host is a one-line change here once one exists and is
+ * configured (beezilla.ai still has no DNS record). BZ_CLOUD_URL overrides for
+ * staging and tests.
  */
-export const DEFAULT_CLOUD_URL = "https://beezilla-demo-production-c069.up.railway.app";
+export const DEFAULT_CLOUD_URL = "https://app.devboards.ai";
 
 /**
  * Network failures read very differently from credential failures, and the user-facing
