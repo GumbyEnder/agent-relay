@@ -61,6 +61,37 @@ function explain(status: number, body: string): { code: string; error: string } 
   return { code: "music_failed", error: detail.message || `ElevenLabs answered ${status}.` };
 }
 
+/** The tool the model calls to actually make a track. */
+export const GENERATE_MUSIC_TOOL = {
+  type: "function",
+  function: {
+    name: "generate_music",
+    description:
+      "Compose instrumental music and save it to the owner's Library as an audio file. " +
+      "Use when the owner asks for a song, track, score, jingle or background music. " +
+      "Put every musical instruction (tempo, key, instrumentation, structure, duration) in `prompt`: " +
+      "the provider reads style and structure from prose, not from separate fields. " +
+      "Call it once per request — never claim a track without calling it.",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: {
+          type: "string",
+          description:
+            "The production brief in prose: genre, instrumentation, tempo (BPM), key, and the section " +
+            "structure with timings. Example: 'Orchestral-electronic, 96 BPM, A minor, solo cello 0:00-0:12, " +
+            "strings enter 0:12, synth bass 0:30, full drop 0:55, strings outro to 2:00.'",
+        },
+        seconds: {
+          type: "number",
+          description: "Length in seconds (3-300). Defaults to the length implied by the brief, or 20.",
+        },
+      },
+      required: ["prompt"],
+    },
+  },
+} as const;
+
 export async function generateMusic(prompt: string, lengthMs = 20000): Promise<MusicResult> {
   if (!KEY) return { ok: false, code: "not_configured", error: "No music provider is configured (BZ_ELEVEN_KEY is unset)." };
   const text = prompt.trim().slice(0, 2000);

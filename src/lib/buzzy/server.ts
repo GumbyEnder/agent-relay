@@ -37,7 +37,7 @@ import {
   PLAN_FIRST_INSTRUCTION,
 } from "./info";
 import { calculate } from "./calc";
-import { musicConfigured } from "./music";
+import { generateMusic, storeAudio, musicConfigured } from "./music";
 import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
@@ -278,6 +278,8 @@ export interface ChatResponse {
   context?: ContextState;
   /** Per-turn latency breakdown (ms). */
   timings?: TurnTimings;
+  /** Audio this turn produced — the chat renders a player for it. */
+  audio?: { url: string; name: string; bytes: number; type: string };
   /** The file this turn produced, with links the chat can show inline. */
   document?: { filename: string; contentType: string; bytes: number | null; documentId?: string; downloadUrl: string; libraryUrl: string };
   error?: string;
@@ -620,6 +622,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const toolMax = 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
+  // Audio this turn actually produced. The reply may only claim a track when this
+  // is set — that is the difference between "here it is" and "the track is in
+  // your Library" said over an empty Library.
+  let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
   // True when this turn's reply was spoken by the audio model. False on a
   // tool/draft turn, which is why the owner used to hear the browser's robot
   // voice instead of BeeZilla's.
@@ -849,6 +855,42 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 errorCode: hits.length ? undefined : "no_results",
               };
             }
+            if (tc.name === "generate_music") {
+              const brief = String(content.prompt ?? "").trim();
+              // Length from the brief when it says one ("two-minute", "90 seconds").
+              const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
+              const implied = said
+                ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
+                : 20;
+              const seconds = Math.min(300, Math.max(3, Number(content.seconds) || implied));
+              const made = await generateMusic(brief, seconds * 1000);
+              if (!made.ok || !made.bytes) {
+                // Name the real reason. "music failed" teaches nobody anything, and a
+                // vague failure is what invites an invented success.
+                return {
+                  message:
+                    `generate_music failed (${made.code}): ${made.error} ` +
+                    "Report this exact reason to the owner. Do NOT claim any audio was produced.",
+                  errorCode: made.code ?? "music_failed",
+                };
+              }
+              const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+              const name = `music-${stamp}.mp3`;
+              const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
+              renderedAudio = {
+                url: `/api/buzzy/assets/${stored.id}`,
+                name,
+                bytes: stored.bytes,
+                type: made.contentType || "audio/mpeg",
+              };
+              return {
+                message:
+                  `generate_music succeeded: ${name}, ${stored.bytes} bytes, ${seconds}s. ` +
+                  "It is saved in the owner's Library. Tell them what you made in one or two sentences — " +
+                  "the player is attached to your reply automatically. Do not call the tool again.",
+                bytes: stored.bytes,
+              };
+            }
             if (["render_document", "render_presentation", "render_sheet"].includes(tc.name)) {
               const result =
                 tc.name === "render_document" ? await renderDocument(content)
@@ -1035,7 +1077,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       .split(/(?<=[.!?])\s+/)
       .some((sentence) => AUDIO_NOUN.test(sentence) && AUDIO_DELIVERY.test(sentence) && !AUDIO_DENIAL.test(sentence));
   let finalReply = guardedReply;
-  if (claimsAudio(finalReply)) {
+  if (!renderedAudio && claimsAudio(finalReply)) {
     console.warn("[buzzy] reply claimed an audio deliverable the chat cannot produce");
     finalReply =
       "I did not produce any audio — that sentence was wrong, and nothing was saved to your Library. " +
@@ -1325,6 +1367,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       };
     }
   }
+
+  // The player rides the reply that announces it: a link the owner has to hunt
+  // for is not "delivered".
+  if (renderedAudio) response.audio = renderedAudio;
 
   return response;
 }

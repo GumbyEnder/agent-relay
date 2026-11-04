@@ -4911,6 +4911,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           role: "assistant",
           content: data.reply,
           document: data.document || null,
+          // A track made this turn plays in the reply that announces it.
+          asset: data.audio || data.asset || null,
         });
 
         // Update slots if present

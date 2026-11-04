@@ -21,6 +21,7 @@ import { RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL } fro
 import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } from "./info";
 import { WEB_SEARCH_TOOL } from "./search";
 import { READ_WEB_PAGE_TOOL } from "./webpage";
+import { GENERATE_MUSIC_TOOL } from "./music";
 
 export type ToolGate = "always" | "draft";
 export type ToolCost = "free" | "metered";
@@ -107,6 +108,20 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     withheldReason: "read_web_page replaces it (it fetches first, then renders when the page needs JavaScript).",
   },
   // ── Draft-gated renderers ────────────────────────────────────────────
+  // Media is a deliverable: gated like render_* so a chat answer never silently
+  // spends money, but available the moment the brief is open (or the owner says
+  // "just do it"). It exists because a model with no music tool answered
+  // "The track is in your Library" while nothing had been generated.
+  {
+    name: "generate_music",
+    schema: GENERATE_MUSIC_TOOL,
+    gate: "draft",
+    offered: true,
+    timeoutMs: 130_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "render-to-memory",
+  },
   {
     name: "render_document",
     schema: RENDER_DOCUMENT_TOOL,

@@ -57,9 +57,14 @@ export function isDraftRequest(message: string): boolean {
   if (isFileRequest(message)) return true;
   // "stop asking, just do it" is a request to execute, not a question to answer.
   if (isExecuteCommand(message)) return true;
-  return /\b(write it up|just write|go ahead|draft it|that'?s enough|finalize|whenever you'?re ready)\b/i.test(
-    String(message || ""),
-  );
+  const m = String(message || "");
+  // A song is a thing to make, not a question to answer: without this the draft
+  // gate stayed shut, the music tool was never offered, and the model filled the
+  // silence with "the track is in your Library".
+  if (/\b(make|create|generate|produce|compose|write|build)\b[^.\n]{0,40}\b(song|track|music|jingle|score|beat|soundtrack|instrumental)\b/i.test(m)) {
+    return true;
+  }
+  return /\b(write it up|just write|go ahead|draft it|that'?s enough|finalize|whenever you'?re ready)\b/i.test(m);
 }
 
 /**
