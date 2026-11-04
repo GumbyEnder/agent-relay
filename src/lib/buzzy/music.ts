@@ -41,7 +41,11 @@ function explain(status: number, body: string): { code: string; error: string } 
   if (status === 402 || detail.code === "paid_plan_required") {
     return {
       code: "paid_plan_required",
-      error: "The ElevenLabs account is on a free plan — the Music API needs a paid plan. Upgrade the account and this works without a code change.",
+      error:
+        "The ElevenLabs account is on the free plan, which cannot use the Music API " +
+        "(ElevenLabs: 'Music API is not available for free users'). Starter is $6/month " +
+        "and includes music commercial use — upgrade at elevenlabs.io/app/subscription " +
+        "and this works with no code change.",
     };
   }
   if (status === 401 && detail.code === "unauthorized") {
@@ -66,7 +70,9 @@ export async function generateMusic(prompt: string, lengthMs = 20000): Promise<M
     const res = await fetch(`${BASE}/music`, {
       method: "POST",
       headers: { "xi-api-key": KEY, "content-type": "application/json", accept: "audio/mpeg" },
-      body: JSON.stringify({ prompt: text, music_length_ms: ms }),
+      // music_v2_5 is the current model; without model_id the API silently serves
+      // music_v1, which is older and 128 kbps. Verified against the compose docs.
+      body: JSON.stringify({ prompt: text, music_length_ms: ms, model_id: "music_v2_5" }),
       signal: AbortSignal.timeout(120000),
     });
     if (!res.ok) {
