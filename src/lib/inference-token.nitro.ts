@@ -13,7 +13,9 @@ import { handleCapabilityToken } from "./capability-token.server";
 import { inferenceEndpoint } from "./buzzy/inferenceToken";
 
 export default defineEventHandler((event) =>
-  handleCapabilityToken(event.req as Request, "inference", () => {
+  // One capsule for the desktop: inference (chat, ASR, voice) and music both spend
+  // OUR provider money, both are metered, and both are revoked the same way.
+  handleCapabilityToken(event.req as Request, ["inference", "music"], () => {
     const { baseUrl, model } = inferenceEndpoint();
     return { url: baseUrl, model };
   }, "inference"),

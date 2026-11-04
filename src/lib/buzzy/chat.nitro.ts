@@ -43,6 +43,12 @@ import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
 import { buildRanking } from "./ranking";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
+import {
+  describeEntitlement,
+  revokeTokens,
+  setPlan,
+  type PlanName,
+} from "./entitlements";
 import { contextWindowFor, contextState } from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
@@ -1281,6 +1287,70 @@ export default defineEventHandler(async (event) => {
     });
     return { ok: true };
   }
+  // ── GET /api/buzzy/entitlement — the plan this account is actually on ────────
+  // A UI must be able to say "you are on X, Y left" without guessing, and support
+  // must be able to answer the same question for one user.
+  if (method === "GET" && path === "/api/buzzy/entitlement") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    return { ok: true, ...(await describeEntitlement(user.id)) };
+  }
+
+  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops only) ─────────
+  // The billing hook writes here. Stripe (or a manual grant) maps to one call, so
+  // entitlement logic has exactly one writer and cannot drift from the invoice.
+  if (method === "POST" && path === "/api/buzzy/admin/plan") {
+    if (!opsAuthorized(event)) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    const body = (await event.req.json().catch(() => ({}))) as {
+      user?: string;
+      userId?: string;
+      plan?: string;
+      planUntil?: string;
+      note?: string;
+    };
+    const userId = String(body.user ?? body.userId ?? "").trim();
+    const plan = String(body.plan ?? "").trim().toLowerCase();
+    if (!userId) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "which account? pass user=<id>", code: "no_user" };
+    }
+    if (plan !== "free" && plan !== "starter" && plan !== "pro") {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "plan must be free, starter or pro", code: "bad_plan" };
+    }
+    const until = body.planUntil ? new Date(String(body.planUntil)) : null;
+    if (until && Number.isNaN(until.getTime())) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "planUntil is not a date", code: "bad_date" };
+    }
+    await setPlan(userId, plan as PlanName, until, body.note);
+    return { ok: true, ...(await describeEntitlement(userId)) };
+  }
+
+  // ── POST /api/buzzy/admin/revoke-tokens — every token minted so far is stale ─
+  // Instant revocation without a deny list: the account's epoch moves, and the
+  // gateway refuses any claim whose iat is older. Next sign-in mints past it.
+  if (method === "POST" && path === "/api/buzzy/admin/revoke-tokens") {
+    if (!opsAuthorized(event)) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Ops key required.", code: "forbidden" };
+    }
+    const body = (await event.req.json().catch(() => ({}))) as { user?: string; userId?: string };
+    const userId = String(body.user ?? body.userId ?? "").trim();
+    if (!userId) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "which account? pass user=<id>", code: "no_user" };
+    }
+    const revokedAt = await revokeTokens(userId);
+    return { ok: true, user: userId, revokedAt: revokedAt.toISOString() };
+  }
+
   if (method === "GET" && path === "/api/buzzy/voice-metrics") {
     const ops = opsAuthorized(event);
     const user = ops ? null : await getSessionUserFromHeaders(headersFromEvent(event));

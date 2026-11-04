@@ -92,11 +92,69 @@ export const GENERATE_MUSIC_TOOL = {
   },
 } as const;
 
+/**
+ * Managed mode: the local runtime has no provider key of its own, so music goes
+ * through OUR gateway with the same short-lived token that already carries chat.
+ * Set by the desktop shell (BZ_MUSIC_VIA_GATEWAY = the inference gateway base).
+ */
+const VIA_GATEWAY = () => (process.env.BZ_MUSIC_VIA_GATEWAY ?? "").trim().replace(/\/+$/, "");
+const GATEWAY_TOKEN = () => (process.env.BZ_CHAT_KEY ?? "").trim();
+
 export async function generateMusic(prompt: string, lengthMs = 20000): Promise<MusicResult> {
-  if (!KEY) return { ok: false, code: "not_configured", error: "No music provider is configured (BZ_ELEVEN_KEY is unset)." };
+  const via = VIA_GATEWAY();
+  if (!via && !KEY) {
+    return {
+      ok: false,
+      code: "not_configured",
+      error:
+        "No music provider is configured — either connect a BeeZilla account (managed music) or add your own ElevenLabs key in Settings.",
+    };
+  }
   const text = prompt.trim().slice(0, 2000);
   if (!text) return { ok: false, code: "no_prompt", error: "Describe the music you want." };
   const ms = Math.min(Math.max(lengthMs, 3000), 300000);
+
+  // Managed first: a connected account is the normal case, and it needs no key on
+  // this machine at all. Quota, plan and revocation are enforced by the gateway.
+  if (via) {
+    const token = GATEWAY_TOKEN();
+    if (!token) {
+      return { ok: false, code: "not_configured", error: "BeeZilla music needs a signed-in account — reconnect from Settings." };
+    }
+    try {
+      const res = await fetch(`${via}/music`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "audio/mpeg" },
+        body: JSON.stringify({ prompt: text, seconds: Math.round(ms / 1000) }),
+        signal: AbortSignal.timeout(180000),
+      });
+      if (!res.ok) {
+        let parsed: { code?: string; error?: string; plan?: string; limit?: number; used?: number } = {};
+        try {
+          parsed = (await res.json()) as typeof parsed;
+        } catch {
+          /* not JSON */
+        }
+        return {
+          ok: false,
+          code: parsed.code || `gateway_${res.status}`,
+          error:
+            parsed.error ||
+            (res.status === 402
+              ? "Music is not included in this plan."
+              : res.status === 429
+                ? "Music quota reached — it resets on a rolling 24 h window."
+                : `BeeZilla music answered ${res.status}.`),
+        };
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.length) return { ok: false, code: "empty_audio", error: "BeeZilla music returned no audio." };
+      return { ok: true, bytes: buf, contentType: res.headers.get("content-type") || "audio/mpeg" };
+    } catch (e) {
+      return { ok: false, code: "unreachable", error: `Could not reach BeeZilla music: ${(e as Error).message.slice(0, 120)}` };
+    }
+  }
+
   try {
     const res = await fetch(`${BASE}/music`, {
       method: "POST",
