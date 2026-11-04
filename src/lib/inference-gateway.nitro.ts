@@ -25,8 +25,19 @@
 import { defineEventHandler } from "h3";
 import { verifyInferenceToken } from "./buzzy/inferenceToken";
 
-/** A chat body is small. 256 KB is generous for text and still bounded. */
-const MAX_BODY_BYTES = 256 * 1024;
+/**
+ * Body cap.
+ *
+ * 256 KB was right for text and wrong for the thing that shares this route: the
+ * ASR half posts a 16 kHz mono WAV as base64 inside one chat message. A 15 s clip
+ * is ~480 KB of PCM and ~640 KB once base64-encoded, so every spoken sentence
+ * longer than ~2 s came back 413 body_too_large — the desktop mic recorded, posted,
+ * and the transcript never arrived (measured: 502 from /api/buzzy/transcribe with
+ * "transcription failed (413)").
+ *
+ * 8 MB covers a ~60 s clip with headroom and is still a bounded allocation.
+ */
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
