@@ -525,7 +525,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         ". Stay on this job."
       : "";
 
-  const persona = personaForMode(mode) + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
+  // Music is a tool call, not a description. Without this rule the model answered
+  // "Your ambient pad is done — the player is attached below" in 6.9 s without ever
+  // calling generate_music, because prose was cheaper than a tool call.
+  // Same three signals draftGateOpen is built from, which is declared further down.
+  const audioRule = (wereAllFilled || requestedDraft || hasExistingDraft)
+    ? "\n\nAUDIO: if the owner asks for music or audio — a song, track, pad, loop, score, jingle, " +
+      "soundtrack or soundscape — your FIRST action is to call generate_music with the full brief in " +
+      "`prompt` (style, instruments, BPM, key, section timings, length). Describe a track only after that " +
+      "tool returns success. Never say a track is done, that a player is attached, or that it is in the " +
+      "Library unless generate_music returned this turn; a description is not a deliverable."
+    : "";
+  const persona = personaForMode(mode) + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
   // Freshness: without a date the model cannot tell a superseded price from the
   // current one. It answered "78 cents" the day USPS's own page said 82.
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -1069,8 +1080,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Sentence-level, because the claim rarely uses the verb we expect: "The track
   // is in your Library." has no create/save verb at all, yet it is the exact
   // sentence a user saw while the Library held no audio.
-  const AUDIO_NOUN = /\b(track|song|audio|mp3|music|beat|instrumental)\b/i;
-  const AUDIO_DELIVERY = /\b(library|saved|ready|generated|created|made|rendered|attached|downloading)\b/i;
+  const AUDIO_NOUN = /\b(track|song|audio|mp3|music|beat|instrumental|pad|loop|melody|score|jingle|soundscape|soundtrack|composition|remix|stem)\b/i;
+  const AUDIO_DELIVERY = /\b(library|saved|ready|generated|created|made|rendered|attached|downloading|player)\b/i;
   const AUDIO_DENIAL = /\b(can'?t|cannot|unable|not configured|no music tool|did not|didn'?t|won'?t|no audio)\b/i;
   const claimsAudio = (text: string): boolean =>
     text
