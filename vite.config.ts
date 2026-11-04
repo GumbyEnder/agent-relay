@@ -441,6 +441,15 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/inference-gateway.nitro.ts",
               },
               {
+                // OpenAI-shaped clients ALWAYS append `/chat/completions` to the base
+                // URL the mint hands them (buzzy/llm.ts, voice.ts, asr.ts all do
+                // `BASE_URL + "/chat/completions"`). With only the exact route above,
+                // the minted baseUrl produced a 404 on the first message — connect
+                // succeeded, chat died. Same handler, both shapes.
+                route: "/api/inference/**",
+                handler: "./src/lib/inference-gateway.nitro.ts",
+              },
+              {
                 // Our search quota: a short-lived, search-scoped token pointed at our
                 // gateway, so the Brave key never reaches a client.
                 route: "/api/search-token",
