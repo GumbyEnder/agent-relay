@@ -1024,10 +1024,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // music tool, so a "track/song/audio" was never produced by this turn no matter
   // what the document says. Measured: "The track has been generated and is saved
   // in your Library" with the Library holding no audio at all.
-  const CLAIMS_AUDIO =
-    /\b(track|song|audio|music|mp3)\b[^.]{0,40}\b(is|has been|was)\s+(generated|created|made|rendered|saved|ready)\b|\b(generated|created|rendered|saved)\b[^.]{0,40}\b(track|song|audio|mp3)\b/i;
+  // Sentence-level, because the claim rarely uses the verb we expect: "The track
+  // is in your Library." has no create/save verb at all, yet it is the exact
+  // sentence a user saw while the Library held no audio.
+  const AUDIO_NOUN = /\b(track|song|audio|mp3|music|beat|instrumental)\b/i;
+  const AUDIO_DELIVERY = /\b(library|saved|ready|generated|created|made|rendered|attached|downloading)\b/i;
+  const AUDIO_DENIAL = /\b(can'?t|cannot|unable|not configured|no music tool|did not|didn'?t|won'?t|no audio)\b/i;
+  const claimsAudio = (text: string): boolean =>
+    text
+      .split(/(?<=[.!?])\s+/)
+      .some((sentence) => AUDIO_NOUN.test(sentence) && AUDIO_DELIVERY.test(sentence) && !AUDIO_DENIAL.test(sentence));
   let finalReply = guardedReply;
-  if (CLAIMS_AUDIO.test(finalReply)) {
+  if (claimsAudio(finalReply)) {
     console.warn("[buzzy] reply claimed an audio deliverable the chat cannot produce");
     finalReply =
       "I did not produce any audio — that sentence was wrong, and nothing was saved to your Library. " +
