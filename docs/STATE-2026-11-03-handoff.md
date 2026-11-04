@@ -48,25 +48,20 @@ Desktop branch is pushed to `github` as `feat/local-runtime` (it existed only on
 
 ## Open items — in priority order
 
-### 1. Desktop "Connect BeeZilla account" opens an empty box  ← reported 2026-11-03
-**Root cause found, not yet fixed.** `desktop/connect.mjs` opens `${cloud}/connect`, and **`/connect`
-404s on every deployment**:
+### 1. Desktop "Connect BeeZilla account" opened an empty box — **FIXED in 0.2.2** ✅
+Root cause: `desktop/connect.mjs` opened `${cloud}/connect`, and **`/connect` 404s on every
+deployment** (demo 404, beezilla-production 404, app.devboards.ai 404 — all returning the ~1.9 kB
+app shell, i.e. a blank window). `POST /api/inference-token` anonymously answers the correct
+401 `unauthenticated`, so the flow behind it was sound; only the page was missing.
 
-```
-https://beezilla-demo-production-c069.up.railway.app/connect   404  (1957 b, app shell)
-https://beezilla-production.up.railway.app/connect             404  (1957 b)
-https://app.devboards.ai/connect                               404  (1931 b)
-POST /api/inference-token  (anonymous)                          401 {"code":"unauthenticated"}  ← correct
-```
+Fix: `CONNECT_PATH = "/login"` — same-origin, real sign-in UI everywhere. The e2e test missed it
+because its fake cloud served `/connect`; added `scripts/test-connect-path-live.mjs`, which fetches
+the real path and fails on 404/blank shell (`PASS … /login 200 2608b 271ms`).
 
-So the window loads a 404 shell → white box. Nothing to do with the browser session; the desktop's
-window is its own cookie jar.
-**Fix**: point `CONNECT_PATH` at a real sign-in page (`/buzzy/landing`, or `/buzzy/talk` which
-redirects there when signed out) — the mint script only needs same-origin + a signed-in cookie.
-Better long-term: a real `/connect` page that says "sign in to connect this app", then shows the
-minted expiry.
-**Verify**: open Connect, sign in inside the window, poll succeeds (no 180 s blank wait), Settings
-shows the token expiry.
+Shipped as **0.2.2** (179,651,067 b, sha256 `5b4e74bf…`), mirrored to `K:\…\releases\0.2.2\`,
+installed on this machine, `CONNECT_PATH = "/login"` verified inside the packaged asar.
+**Needs one confirmation from the owner:** open Connect on Windows, sign in inside the window, and
+check Settings shows a token with an expiry.
 
 ### 2. Code signing — release blocker
 Every `signtool` step says "signing is skipped". SmartScreen warns on install. Needs a cert before
