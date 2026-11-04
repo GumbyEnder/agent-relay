@@ -109,6 +109,32 @@
       "status": "done",
       "title": "3D (Meshy) live; music (ElevenLabs) wired and waiting on the plan",
       "evidence": "BZ_MESHY_KEY and BZ_ELEVEN_KEY set on service agent-relay; keys never entered the repo."
+    },
+    {
+      "id": "desktop-parity",
+      "priority": "P0",
+      "status": "done",
+      "title": "Desktop line brought to parity with the web line",
+      "evidence": "Merged github/main into feat/local-runtime (7b94027): two conflicts (chat.nitro.ts took main's turn body; turn.ts removed as a stale duplicate move; recipe-seal kept both import sets). settings joined PAGES. Register now 26 both / 6 desktop-only / 0 web-only / 0 migrations apart; npm run parity PASS including the installed-bundle check. Proven on a fresh PGlite runtime: talk 224,095 b with #bzNav+recorder+listen, graph/library/settings 200, pricing/assets/graphs/frontier 200, transcribe 400 audio_too_short, 56 migrations at boot.",
+      "open": "Turn refactor (turn.ts) removed by the merge; re-extracting is a pure move."
+    },
+    {
+      "id": "desktop-release-pipeline",
+      "priority": "P1",
+      "status": "done",
+      "title": "Installer distribution \u2014 GitHub Releases + LAN mirror, one command",
+      "evidence": "desktop/release.mjs: build \u2192 tag desktop-v<version> \u2192 gh release \u2192 verify size+sha256. Refuses dirty tree, no pins, dev pin without --allow-dev-pin (forces prerelease), tag at a commit other than the built one. desktop-v0.2.0 published and found broken on launch (ERR_MODULE_NOT_FOUND resources\\scripts\\lib\\inference.mjs); desktop-v0.2.1 fixes it (paths.mjs absolute file URLs, logger.mjs \u2192 %APPDATA%\\BeeZilla\\logs\\main.log, PGLite staged at build, dist.mjs import gate), 179,649,563 b sha256 42bda1bf\u2026 verified against the GitHub download and the NAS mirror.",
+      "open": "Unsigned (SmartScreen) and dev publisher pin \u2014 both block a public release; no app icon."
+    },
+    {
+      "id": "desktop-connect-empty-window",
+      "priority": "P0",
+      "status": "open",
+      "title": "Desktop 'Connect BeeZilla account' opens an empty window",
+      "reported": "2026-11-03, owner: login from the app pops an empty box (browser session is irrelevant \u2014 the desktop window has its own cookie jar)",
+      "root_cause": "desktop/connect.mjs opens ${cloud}/connect. That path 404s on every deployment: demo 404 (1957 b), beezilla-production 404 (1957 b), app.devboards.ai 404 (1931 b). POST /api/inference-token anonymously returns the correct 401 unauthenticated. The window therefore renders a 404 shell \u2014 a white box \u2014 and then polls it for 180 s.",
+      "fix": "Point CONNECT_PATH at a real sign-in page (/buzzy/landing, or /buzzy/talk which redirects there signed-out); the mint script only needs same-origin + a session cookie. Longer term: a real /connect page that states what it is doing and shows the minted expiry.",
+      "verify": "Open Connect \u2192 sign-in inside the window \u2192 poll succeeds without the 180 s blank wait \u2192 Settings shows the token expiry."
     }
   ],
   "probes": {
@@ -267,6 +293,15 @@
       "change": "music.ts, models3d.ts, /api/buzzy/music, /api/buzzy/model3d (task API), composer Music/3D buttons",
       "gates": "tsc OK, build complete, inline blocks 4/0",
       "production_evidence": "3D card with 971,944-byte glTF download; music refusal shown as a sentence in the chat"
+    },
+    {
+      "n": 18,
+      "at": "2026-11-03",
+      "item": "desktop-parity, desktop-release-pipeline, desktop-connect-empty-window",
+      "found": "The desktop line was 156 commits behind and its 37 commits had never been pushed; the Enter-the-account flow loaded a URL that 404s everywhere.",
+      "change": "merge 7b94027 \u00b7 release.mjs + v0.2.0/v0.2.1 \u00b7 register 26/6/0",
+      "gates": "tsc clean both trees, vite build complete, inline scripts 12/0, npm run parity PASS, installer downloaded back from GitHub and hash-matched",
+      "production_evidence": "local runtime probes above; GitHub release assets verified by size+sha256; installed Wine copy reads 0.2.1"
     }
   ]
 }
