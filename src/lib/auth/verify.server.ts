@@ -77,7 +77,7 @@ export class ForbiddenError extends Error {
   }
 }
 
-export type VerifiedUser = { id: string; email: string | null };
+export type VerifiedUser = { id: string; email: string | null; name?: string | null };
 
 /**
  * Resolve session user from arbitrary request headers (agent API / Nitro path).
