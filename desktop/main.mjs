@@ -142,6 +142,32 @@ async function applyStoredInferenceToEnv() {
 }
 
 /**
+ * ElevenLabs key → BZ_ELEVEN_KEY before the runtime is spawned.
+ *
+ * The local runtime reads credentials from the environment at module load, and a
+ * desktop install has no environment of its own — so this is the only path by
+ * which the Music button can ever be configured (it answered `not_configured` on
+ * every install until this existed). Same rule as inference: a store we cannot
+ * read must not take the app down, it must refuse by name.
+ */
+async function applyStoredMusicToEnv() {
+  try {
+    const { resolveMusicKey } = await runtimeLib("scripts/lib/music-keys.mjs");
+    const found = resolveMusicKey(supervisor.dataDir, {
+      decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
+    });
+    if (found?.key) {
+      process.env.BZ_ELEVEN_KEY = found.key;
+      console.log(`[desktop] music: ${found.provider} (${found.source}${found.encrypted ? ", encrypted" : ""})`);
+      return;
+    }
+  } catch (err) {
+    console.warn("[desktop] could not read the stored music key:", err instanceof Error ? err.message : err);
+  }
+  delete process.env.BZ_ELEVEN_KEY;
+}
+
+/**
  * Settings IPC. `safeStorage` is only usable after `app.whenReady()`, so the
  * handlers are built there — but they are plain functions, so the contract can be
  * tested without a display (see scripts/test-desktop-settings.mjs).
@@ -164,6 +190,7 @@ function registerSettingsIpc() {
         // Identity first: the runtime reads BZ_LOCAL_OWNER_* at spawn.
         applyIdentityToEnv();
         await applyStoredInferenceToEnv();
+        await applyStoredMusicToEnv();
       },
     });
 
@@ -179,6 +206,7 @@ function registerSettingsIpc() {
     ipcMain.handle("beezilla:settings:get", wrap(() => handlers.status()));
     ipcMain.handle("beezilla:settings:saveInference", wrap((cfg) => handlers.saveInference(cfg)));
     ipcMain.handle("beezilla:settings:saveSearch", wrap((cfg) => handlers.saveSearch(cfg)));
+    ipcMain.handle("beezilla:settings:saveMusic", wrap((cfg) => handlers.saveMusic(cfg)));
     ipcMain.handle("beezilla:settings:clear", wrap((kind) => handlers.clear(kind)));
     ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion() })));
     // "Connect BeeZilla account" from the Settings screen: same flow as the menu item.
@@ -572,6 +600,7 @@ app.whenReady().then(async () => {
   try {
     applyIdentityToEnv();
     await applyStoredInferenceToEnv();
+    await applyStoredMusicToEnv();
     settingsHandlers = await registerSettingsIpc();
     await createWindow();
   } catch (err) {

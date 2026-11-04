@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("beezilla", {
     get: () => call("settings:get"),
     saveInference: (cfg) => call("settings:saveInference", cfg),
     saveSearch: (cfg) => call("settings:saveSearch", cfg),
+    /** ElevenLabs key for the Music button — the local runtime has no env of its own */
+    saveMusic: (cfg) => call("settings:saveMusic", cfg),
     clear: (kind) => call("settings:clear", kind),
     /** sign in on our site and store the short-lived inference token */
     connect: () => call("settings:connect"),

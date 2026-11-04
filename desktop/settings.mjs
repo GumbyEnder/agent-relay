@@ -32,6 +32,11 @@ const {
   saveManagedSearch: saveManagedSearchStore,
   loadManagedSearch,
 } = await runtimeLib("scripts/lib/search-keys.mjs");
+const {
+  resolveMusicKey,
+  saveMusicKey,
+  clearMusicKey,
+} = await runtimeLib("scripts/lib/music-keys.mjs");
 
 /**
  * @param {{ dataDir: () => string, supervisor?: any, cipher?: {encrypt?:Function, decrypt?:Function} }} deps
@@ -41,6 +46,7 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
     const dir = dataDir();
     const inf = resolveInference(dir, cipher);
     const search = resolveSearch(dir, cipher);
+    const music = resolveMusicKey(dir, cipher);
     return {
       inference: inf
         ? {
@@ -66,6 +72,9 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
       // Present only when we HAVE a BeeZilla search credential and it lapsed: the
       // difference between "off" and "reconnect", which the UI must not blur.
       searchNeedsReconnect: !search && Boolean(loadManagedSearch(dir, cipher)),
+      // Music is a separate account (ElevenLabs) with its own plan, so the app must
+      // be able to say "no key" and "key present, plan refuses" as different things.
+      music: music ? { provider: music.provider, source: music.source, key: redactKey(music.key) } : null,
     };
   };
 
@@ -106,6 +115,13 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
       return { saved: { provider: saved.provider, encrypted: saved.encrypted, key: redactKey(key) }, ...restartInfo, status: describe() };
     },
 
+    /** @param {{key: string}} cfg  ElevenLabs key for the Music button */
+    async saveMusic(cfg) {
+      const saved = saveMusicKey(dataDir(), { key: cfg?.key ?? "" }, cipher);
+      const restartInfo = await restart();
+      return { saved: { provider: saved.provider, encrypted: saved.encrypted, key: redactKey(cfg?.key ?? "") }, ...restartInfo, status: describe() };
+    },
+
     async saveSearch(cfg) {
       const key = (cfg?.key ?? "").trim();
       if (!key) throw new Error("a search key is required");
@@ -127,6 +143,7 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
     async clear(kind) {
       if (kind === "search") clearSearchKey(dataDir());
       else if (kind === "inference") clearInference(dataDir());
+      else if (kind === "music") clearMusicKey(dataDir());
       else throw new Error(`unknown credential kind: ${String(kind)}`);
       const restartInfo = await restart();
       return { cleared: kind, ...restartInfo, status: describe() };

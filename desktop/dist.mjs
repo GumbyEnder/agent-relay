@@ -159,6 +159,7 @@ const RUNTIME_SCRIPT_ENTRIES = [
   // Loaded at call time through runtimeLib() from the shell, never imported.
   "scripts/lib/inference.mjs",
   "scripts/lib/search-keys.mjs",
+  "scripts/lib/music-keys.mjs",
 ];
 
 /** Files that must never be staged, whatever the closure says. */
@@ -200,6 +201,7 @@ function stageRuntimeScripts() {
 const REQUIRED_RUNTIME_FILES = [
   "scripts/lib/inference.mjs",
   "scripts/lib/search-keys.mjs",
+  "scripts/lib/music-keys.mjs",
   "bin/beezilla.mjs",
 ];
 
