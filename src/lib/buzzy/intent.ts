@@ -52,6 +52,19 @@ export function isExecuteCommand(message: string): boolean {
   );
 }
 
+/**
+ * A request to actually MAKE audio — not to talk about it.
+ *
+ * Strict on purpose: the verb and the audio noun have to be in the same clause, so
+ * "what tempo should a pad be?" asks a question while "make me a pad at 60 BPM"
+ * asks for a file. The model cannot be trusted to notice the difference often
+ * enough: it answered "the player is attached below" twice with nothing generated.
+ */
+export function isMusicRequest(message: string): boolean {
+  const m = String(message || "");
+  return /\b(make|create|generate|produce|compose|write|build|give me)\b[^.\n]{0,60}\b(song|track|music|jingle|score|beat|soundtrack|instrumental|pad|loop|soundscape|melody)\b/i.test(m);
+}
+
 /** A deliverable request in the owner's own words (not only "file" phrasing). */
 export function isDraftRequest(message: string): boolean {
   if (isFileRequest(message)) return true;

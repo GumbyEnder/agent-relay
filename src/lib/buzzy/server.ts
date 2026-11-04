@@ -52,7 +52,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -556,6 +556,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock;
 
   // ── Build messages for LLM ─────────────────────────────────────────
+  // Audio this turn actually produced. The reply may only claim a track when this
+  // is set — that is the difference between "here it is" and "the track is in
+  // your Library" said over an empty Library.
+  let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
+
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
     ...history.map((h) => ({
@@ -564,6 +569,41 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     })),
     { role: "user", content: message },
   ];
+
+  // ── Music pre-pass ────────────────────────────────────────────────
+  // Twice the model answered "your pad is done — the player is attached below" in
+  // under 7 seconds without calling generate_music. A capability the product sells
+  // cannot depend on the model choosing to use it, so the harness performs it, the
+  // same way the research pre-pass performs a lookup. The model then narrates a
+  // result that actually exists.
+  if (isMusicRequest(message) && musicConfigured() && (wereAllFilled || requestedDraft || hasExistingDraft)) {
+    const brief = message.slice(0, 2000);
+    const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
+    const implied = said
+      ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
+      : 20;
+    const seconds = Math.min(300, Math.max(3, implied));
+    const made = await generateMusic(brief, seconds * 1000);
+    if (made.ok && made.bytes) {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const name = `music-${stamp}.mp3`;
+      const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
+      renderedAudio = {
+        url: `/api/buzzy/assets/${stored.id}`,
+        name,
+        bytes: stored.bytes,
+        type: made.contentType || "audio/mpeg",
+      };
+      messages[0]!.content +=
+        `\n\nThe track has ALREADY been generated this turn: ${name}, ${seconds}s, ${stored.bytes} bytes, ` +
+        "attached to your reply as a player. Do not call generate_music. Describe what you made in one or two " +
+        "sentences and stop.";
+    } else if (!made.ok) {
+      messages[0]!.content +=
+        `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
+        "Tell the owner this exact reason. Do not claim any audio exists.";
+    }
+  }
 
   // Research pre-pass. Two reasons, one mechanism:
   //   * the spoken lane runs an audio model with NO tools, so a spoken lookup
@@ -633,10 +673,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const toolMax = 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
-  // Audio this turn actually produced. The reply may only claim a track when this
-  // is set — that is the difference between "here it is" and "the track is in
-  // your Library" said over an empty Library.
-  let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
   // True when this turn's reply was spoken by the audio model. False on a
   // tool/draft turn, which is why the owner used to hear the browser's robot
   // voice instead of BeeZilla's.
