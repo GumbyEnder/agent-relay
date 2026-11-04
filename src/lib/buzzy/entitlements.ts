@@ -42,7 +42,9 @@ export const FREE_MODELS = (process.env.BZ_FREE_MODELS ?? "google/gemini-3.1-fla
   .filter(Boolean);
 
 export const PLANS: Record<PlanName, PlanRules> = {
-  free: { inferencePerDay: 100, musicSecondsPerDay: 120, musicMaxSeconds: 60, models: FREE_MODELS },
+  // Music is the most expensive unit we buy, so it is a paid perk: a free account
+  // gets chat on the cheap lane, not audio generation.
+  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, models: FREE_MODELS },
   starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, models: null },
   pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, models: null },
 };
