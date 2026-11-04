@@ -164,6 +164,29 @@
         <p class="current" id="search-current"></p>
       </section>
 
+      <!-- ── music ─────────────────────────────────────────────────── -->
+      <!-- The Music button talks to ElevenLabs directly from this machine, so the
+           app needs its own key: a desktop install has no service environment to
+           inherit one from. Paste it here and it is stored encrypted (DPAPI). -->
+      <section id="music">
+        <h2>Music</h2>
+        <p class="hint">
+          Lets BeeZilla make music from a description. Uses your own ElevenLabs key.
+          The Music API needs a paid ElevenLabs plan (Starter, $6/month) — a free
+          account answers <code>paid_plan_required</code> no matter how good the key is.
+        </p>
+        <div class="field">
+          <label for="music-key">ElevenLabs API key</label>
+          <input type="password" id="music-key" placeholder="sk_…" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <button id="save-music">Save music key</button>
+          <button id="clear-music" class="secondary">Remove key</button>
+          <span class="status" id="music-status"></span>
+        </div>
+        <p class="current" id="music-current"></p>
+      </section>
+
       <!-- ── troubleshooting ───────────────────────────────────────── -->
       <!-- A packaged app that fails must not be a dead end: every launch writes
            %APPDATA%\BeeZilla\logs\main.log, and this is the one-click path to it.
@@ -241,6 +264,13 @@
         } else {
           $("search-current").innerHTML = "Now: off — answers will not cite sources. Connect your account or paste a Brave key.";
         }
+
+        // Music is its own account: a key can be present and still be refused by the
+        // plan, so name the two cases separately instead of one "off".
+        var music = state?.music;
+        $("music-current").innerHTML = music
+          ? `Now: <strong>${music.provider}</strong> · your own key · from ${music.source}`
+          : "Now: off — press <strong>&#9835; Music</strong> and BeeZilla will ask for an ElevenLabs key.";
       }
 
       async function refresh() {
@@ -332,6 +362,26 @@
         const res = await bridge.clear("search");
         if (!res.ok) return say($("search-status"), res.error || "Could not remove.", "err");
         say($("search-status"), "Key removed.", "ok");
+        renderStatus(res.data.status);
+      });
+
+      $("save-music").addEventListener("click", async () => {
+        const status = $("music-status");
+        const key = $("music-key").value.trim();
+        if (!key) return say(status, "Paste your ElevenLabs key first (it starts with sk_).", "err");
+        await withBusy($("save-music"), "Saving…", async () => {
+          const res = await bridge.saveMusic({ key });
+          if (!res.ok) return say(status, res.error || "Could not save.", "err");
+          $("music-key").value = "";
+          say(status, res.data.started ? "Saved. BeeZilla started." : "Saved. BeeZilla restarted.", "ok");
+          renderStatus(res.data.status);
+        });
+      });
+
+      $("clear-music").addEventListener("click", async () => {
+        const res = await bridge.clear("music");
+        if (!res.ok) return say($("music-status"), res.error || "Could not remove.", "err");
+        say($("music-status"), "Key removed.", "ok");
         renderStatus(res.data.status);
       });
 
