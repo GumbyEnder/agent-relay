@@ -937,6 +937,28 @@
           "publishers.json"
         ]
       }
+    },
+    {
+      "id": "inference.gateway",
+      "state": "web-only",
+      "title": "Managed inference gateway (/api/inference)",
+      "why": "The desktop must never hold the provider key: it presents a short-lived bz1.* token minted by its account, and this route verifies it and spends OUR key on its behalf. Deliberately not on the desktop \u2014 a local copy would either need the provider key or have nothing to spend.",
+      "web": {
+        "evidence": [
+          "src/lib/inference-gateway.nitro.ts#verifyInferenceToken",
+          "src/lib/inference-token.nitro.ts#handleCapabilityToken"
+        ],
+        "routes": [
+          "/api/inference",
+          "/api/inference-token"
+        ],
+        "pages": []
+      },
+      "desktop": {
+        "evidence": [],
+        "routes": [],
+        "pages": []
+      }
     }
   ],
   "open": [

@@ -147,6 +147,16 @@
       "change": "New src/lib/inference-gateway.nitro.ts (POST /api/inference: verify bz1 scope=inference, forward the chat body to OUR provider with OUR key, stream back unchanged, 256 KB cap, fails closed 503 without a provider key). Set BZ_INFERENCE_SIGNING_KEY (48 chars) + BZ_INFERENCE_BASE_URL on the agent-relay service. Desktop 0.2.3 defaults to https://app.devboards.ai.",
       "evidence": "Production E2E: sign-in 200 \u2192 POST /api/inference-token 200 {token bz1\u2026, endpoint \u2026/api/inference} \u2192 POST /api/inference 200 in 2.93 s, reply 'gateway ok', usage cost 8.56e-06. Anonymous 401, wrong scope refused, /api/inference 404s on the demo and old beezilla-production hosts.",
       "open": "Owner retries Connect in 0.2.3 (reinstall from K:). The BeeZilla-branded prod service still needs main deployed + the same two env vars before a branded default is possible."
+    },
+    {
+      "id": "chat-music-tool",
+      "priority": "P0",
+      "status": "done",
+      "title": "Chat could claim music but never make it",
+      "root_cause": "The chat loop had no music tool. generateMusic + /api/buzzy/music worked (200, real mp3), but nothing offered the capability to the model, so every 'the track is in your Library' was fabricated.",
+      "change": "GENERATE_MUSIC_TOOL in music.ts; one TOOL_POLICIES entry (gate draft, metered, 130s budget); executor branch that generates, reads length from the brief, stores to the asset shelf and sets response.audio; intent.ts treats song/track/jingle requests as deliverables; talk.html renders the audio through the existing media card; claim guard now permits an audio claim only when an asset was produced.",
+      "evidence": "Production turn: 37.3s, reply 'Your 20-second track is done \u2014 96 BPM, A minor, cello opening into strings. The player is attached below.', response.audio=/api/buzzy/assets/8228, Library 1 \u2192 2. Asset re-fetched authenticated: 200 audio/mpeg 481,004 b, MPEG ADTS layer III 192 kbps. Deployed 02249979; parity gate PASS.",
+      "open": "Desktop line is behind main \u2014 merge + rebuild for parity."
     }
   ],
   "probes": {
