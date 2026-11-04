@@ -43,11 +43,17 @@ function stage() {
   // `migrations/` is not optional: the schema comes from those .sql files at
   // boot. A stage without them starts, listens, and fails every DB route with
   // 'relation "ar_missions" does not exist' — which looks like a data bug.
-  for (const dir of [".output", "scripts", "bin", "migrations", "public"]) {
+  for (const dir of [".output", "bin", "migrations", "public"]) {
     if (!existsSync(join(ROOT, dir))) continue;
     log(`copying ${dir}`);
     cpSync(join(ROOT, dir), join(APP, dir), { recursive: true });
   }
+  // `scripts/` used to be copied wholesale: 89 files of test probes, seeds and
+  // TypeScript sources rode along with the launcher, so every installer shipped
+  // the recipe-seal sources, the check corpus and the internal test harness in
+  // readable form. Stage the import closure of the three scripts the runtime
+  // actually starts instead, and refuse the build if anything else appears.
+  stageRuntimeScripts();
   cpSync(join(ROOT, "package.json"), join(APP, "package.json"));
 
   // Publisher pins travel with the app. A build that ships zero pins trusts no
@@ -129,6 +135,65 @@ function stage() {
     megabytes: Math.round(size / 1e6),
   }, null, 2) + "\n");
   log(`staged tree: ${Math.round(size / 1e6)} MB at ${APP}`);
+}
+
+/**
+ * Stage only the scripts the installed runtime starts, plus their relative
+ * import closure.
+ *
+ * The rule this enforces is "the installer carries behaviour, not sources".
+ * `scripts/` holds 89 files on the dev line: TypeScript test harnesses, seeds,
+ * probes and the whole recipe-seal test corpus. Copying the directory shipped
+ * all of it — readable `.ts` included — inside every 454 MB install.
+ *
+ * Entries are the three things that actually run in the installed tree
+ * (`scripts/beezilla-local.mjs` is spawned by supervisor.mjs, `scripts/migrate.mjs`
+ * by the start command, `bin/beezilla.mjs` is the CLI). `parent-watchdog.cjs` is
+ * named by a string in NODE_OPTIONS, so it cannot be found by following imports.
+ */
+const RUNTIME_SCRIPT_ENTRIES = [
+  "scripts/beezilla-local.mjs",
+  "scripts/migrate.mjs",
+  "bin/beezilla.mjs",
+  "scripts/lib/parent-watchdog.cjs",
+  // Loaded at call time through runtimeLib() from the shell, never imported.
+  "scripts/lib/inference.mjs",
+  "scripts/lib/search-keys.mjs",
+];
+
+/** Files that must never be staged, whatever the closure says. */
+const FORBIDDEN_STAGED = /(^|\/)(test-|seed-|give-|probe|purity-check|parity-check|run-local-suites|dev-fake-cloud|verify-installer|mcp-server)|\.ts$/;
+
+function stageRuntimeScripts() {
+  const seen = new Set();
+  const queue = [...RUNTIME_SCRIPT_ENTRIES];
+  while (queue.length > 0) {
+    const rel = queue.shift();
+    if (seen.has(rel)) continue;
+    const full = join(ROOT, rel);
+    if (!existsSync(full)) throw new Error(`runtime script entry is missing: ${rel}`);
+    seen.add(rel);
+    if (!/\.[mc]?js$/.test(rel)) continue;
+    const src = readFileSync(full, "utf8");
+    for (const m of src.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']*)["']/g)) {
+      const spec = m[1];
+      const resolved = posix.normalize(posix.join(posix.dirname(rel), spec));
+      if (resolved.startsWith("..")) continue;
+      if (existsSync(join(ROOT, resolved))) queue.push(resolved);
+    }
+  }
+
+  const staged = [...seen].sort();
+  const forbidden = staged.filter((f) => FORBIDDEN_STAGED.test(f));
+  if (forbidden.length > 0) {
+    throw new Error(`refusing to ship source/test files in the runtime tree: ${forbidden.join(", ")}`);
+  }
+  for (const rel of staged) {
+    const target = join(APP, rel);
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(join(ROOT, rel), target);
+  }
+  log(`staged ${staged.length} runtime scripts (was the whole scripts/ tree: 89 files)`);
 }
 
 /** Package files the shell loads out of the runtime tree at call time. */
