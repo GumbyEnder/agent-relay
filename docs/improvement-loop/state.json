@@ -129,12 +129,13 @@
     {
       "id": "desktop-connect-empty-window",
       "priority": "P0",
-      "status": "open",
+      "status": "done",
       "title": "Desktop 'Connect BeeZilla account' opens an empty window",
       "reported": "2026-11-03, owner: login from the app pops an empty box (browser session is irrelevant \u2014 the desktop window has its own cookie jar)",
-      "root_cause": "desktop/connect.mjs opens ${cloud}/connect. That path 404s on every deployment: demo 404 (1957 b), beezilla-production 404 (1957 b), app.devboards.ai 404 (1931 b). POST /api/inference-token anonymously returns the correct 401 unauthenticated. The window therefore renders a 404 shell \u2014 a white box \u2014 and then polls it for 180 s.",
-      "fix": "Point CONNECT_PATH at a real sign-in page (/buzzy/landing, or /buzzy/talk which redirects there signed-out); the mint script only needs same-origin + a session cookie. Longer term: a real /connect page that states what it is doing and shows the minted expiry.",
-      "verify": "Open Connect \u2192 sign-in inside the window \u2192 poll succeeds without the 180 s blank wait \u2192 Settings shows the token expiry."
+      "fixed_in": "BeeZilla Desktop 0.2.2",
+      "change": "CONNECT_PATH /connect \u2192 /login (same-origin sign-in on every deployment); added scripts/test-connect-path-live.mjs because the e2e fake served /connect and so was more capable than production",
+      "evidence": "0.2.2 published (179,651,067 b, sha256 5b4e74bf\u2026), mirrored to K:\\\u2026\\releases\\0.2.2, installed locally; CONNECT_PATH=/login verified inside the packaged asar; live probe PASS /login 200 2608b 271ms; connect e2e still passes (xvfb).",
+      "open": "Owner confirmation only: open Connect on Windows, sign in inside the window, Settings should show a token with an expiry."
     }
   ],
   "probes": {
@@ -302,6 +303,15 @@
       "change": "merge 7b94027 \u00b7 release.mjs + v0.2.0/v0.2.1 \u00b7 register 26/6/0",
       "gates": "tsc clean both trees, vite build complete, inline scripts 12/0, npm run parity PASS, installer downloaded back from GitHub and hash-matched",
       "production_evidence": "local runtime probes above; GitHub release assets verified by size+sha256; installed Wine copy reads 0.2.1"
+    },
+    {
+      "n": 19,
+      "at": "2026-11-03",
+      "item": "desktop-connect-empty-window",
+      "found": "connectAccount opened ${cloud}/connect and no deployment serves it: demo 404, beezilla-production 404, app.devboards.ai 404 \u2014 the window showed the 404 app shell (a blank box) and polled it for 180s. The e2e test passed because its fake cloud served /connect.",
+      "change": "CONNECT_PATH=/login + live path probe (test-connect-path-live.mjs) + v0.2.2",
+      "gates": "connect e2e PASS (xvfb), live probe PASS, tsc/build clean, installer hash matched on GitHub download and NAS mirror",
+      "production_evidence": "https://github.com/GumbyEnder/agent-relay/releases/tag/desktop-v0.2.2 \u2014 prerelease, 4 files staged, CONNECT_PATH=/login inside the asar"
     }
   ]
 }
