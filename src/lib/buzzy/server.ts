@@ -37,6 +37,7 @@ import {
   PLAN_FIRST_INSTRUCTION,
 } from "./info";
 import { calculate } from "./calc";
+import { musicConfigured } from "./music";
 import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
@@ -51,7 +52,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - Only use details from THIS conversation. Never mention or reuse problems from other jobs.
 - WORK MODE: the client may send a filled-in Work definition (task, people, end goal, how they'll check it). Treat every line as a stated decision — emit the matching [slot: …] markers for what it contains, ask only for what is still missing, one question. In ordinary chat, when the request is clearly a multi-step effort the client will come back to AND at least two decisions are captured, ask once — in one sentence — whether they want to set it up as work. Never ask twice, and never ask for a one-off question.
 - WEB: you can search the live web and read any public page. If the person asks "what's the current X", "look up Y", or gives you a link, that is your job — the tools exist. Never say you "can't browse", "can't search the web", "don't have internet access" or "can't check that online"; doing so is false. If a lookup genuinely fails, say the lookup failed, not that you lack the ability. Cite the page you actually read.
-- FILES AND THE LIBRARY: every deliverable you produce is saved automatically as a versioned document in the owner's Library, with Markdown, PDF and Word copies. You have no filesystem of your own, but that does not matter — never say you "can't save files", have "no file-storage tool", or ask the owner to copy text out of the chat. If the owner asks to save something to their Library, produce or revise the deliverable so it is saved there, and tell them it's in the Library.
+- FILES AND THE LIBRARY: every deliverable you produce is saved automatically as a versioned document in the owner's Library, with Markdown, PDF and Word copies. You have no filesystem of your own, but that does not matter — never say you "can't save files", have "no file-storage tool", or ask the owner to copy text out of the chat. If the owner asks to save something to their Library, produce or revise the deliverable so it is saved there — and only then say it is in the Library. A turn that produced no document has nothing to point at: say what you did not produce, never claim a file exists because the phrasing was requested.
 You never mention models, tokens, or technical internals.`;
 
 /** The persona is the only thing that differs between the two UI modes. */
@@ -486,7 +487,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     [message, ...history.filter((h) => h.role === "user").map((h) => h.content), ...Object.values(slotValues)].join(" "),
   );
   const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
-  const planFirst = shouldPlanFirst(message) ? PLAN_FIRST_INSTRUCTION : "";
+  // A plan-then-confirm round trip is exactly what "just do it" forbids.
+  const planFirst = shouldPlanFirst(message) && !isExecuteCommand(message) ? PLAN_FIRST_INSTRUCTION : "";
   const playbookBlock = playbookGuidance(jobType);
   const chatGuidance = hasExistingDraft
     ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
@@ -501,7 +503,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     : nextQ
     ? `\n\nYour next question should be: "${nextQ.prompt}"${knownCompany}`
     : nextS
-      ? `\n\nDISCOVERY — not all decisions are captured yet. Ask exactly this ONE question (nothing else): "${nextS.prompt}". If the client's reply already states any of the four statements, emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker(s) at the end of your reply. Do NOT write the final document, draft, or deliverable yet — keep discovering.${knownCompany}`
+      ? `\n\nDISCOVERY — one decision is still blank: "${nextS.prompt}" Read the conversation before asking: if the client already answered this, use their answer (emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker) and do NOT ask it again. Only ask when the answer is genuinely absent, and ask that single question. Never re-ask something they already said.${knownCompany}`
       : !wereAllFilled
         ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
         : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`)
@@ -966,6 +968,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     extractMs = Date.now() - extractStarted;
   }
 
+  // ── Does THIS turn deliver something? ──────────────────────────────
+  // `draftGateOpen` answers "may this conversation produce a document"; it
+  // stays open for every later turn. The materialise block below must key off
+  // "did this turn produce one" instead, or every reply in a draft-bearing
+  // conversation becomes a new version of one document (and a chat answer to
+  // "what is a fence quote?" grows a Download card). See producesDeliverable.
+  const deliversThisTurn = producesDeliverable({
+    renderedDocText,
+    requestedDraft,
+    mode,
+    draftGateOpen,
+    hasExistingDraft,
+    message,
+  });
+
   // ── Sanitize reply ─────────────────────────────────────────────────
   const sanitizedReply = sanitizeMemoryText(reply.content);
   // User-visible reply has decision markers removed; slots parse the raw
@@ -985,7 +1002,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       .join(" ")
       .trim();
     if (!guardedReply) {
-      guardedReply = "That's saved in your Library as a versioned document — you can open it as Markdown, PDF or Word.";
+      // Never substitute a success claim for stripped text: whether anything was
+      // saved is decided later by whether this turn produced a deliverable.
+      guardedReply = "I have nothing to hand you from that turn.";
     }
   }
   if (capabilityLieStripped) {
@@ -993,7 +1012,29 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // prompt/tool-wiring regression that should surface in the logs.
     console.warn("[buzzy] stripped false file-storage refusal from reply");
   }
-  const cleanReply = guardedReply;
+  // ── A claim of delivery must match a delivery ──────────────────────
+  // The prompt used to tell the model to say "it's in the Library", and the
+  // capability guard above substituted exactly that sentence — so a turn that
+  // produced nothing could still announce a file. Measured: a two-minute track
+  // request answered "The track is in your Library." with the Library empty.
+  // A reply may only point at an artifact this turn actually produced.
+  const CLAIMS_DELIVERY =
+    /\b(in your library|saved (it|that|this|the (file|document|track|song))|generated and saved|is ready for your approval|your (track|song|file|document) (is|has been) (ready|saved|generated)|i'?ve (saved|generated|created) (it|that|the))\b/i;
+  let finalReply = guardedReply;
+  if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn) {
+    const wantsMusic = /\b(song|track|music|audio|jingle|score)\b/i.test(
+      [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" "),
+    );
+    const reason = wantsMusic && !musicConfigured()
+      ? " Music generation is not configured on this deployment, so no track was produced."
+      : "";
+    console.warn("[buzzy] reply claimed a Library deliverable on a turn that produced none");
+    finalReply =
+      "I did not actually produce anything that turn, so nothing was saved to your Library." +
+      reason +
+      " Nothing on my side claims otherwise. Tell me to build it again and I will run the tool and report exactly what it returned.";
+  }
+  const cleanReply = finalReply;
 
   // ── Same voice, always ──────────────────────────────────────────────
   // Turns that need tools or produce a deliverable run on the text lane, which
@@ -1002,7 +1043,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // settled reply through the audio model instead, so the voice never changes.
   if (surface === "voice" && !spokeThisTurn && req.speech && voiceAvailable() && cleanReply.trim()) {
     try {
-      const spokenText = draftGateOpen
+      const spokenText = deliversThisTurn
         ? `Saved it — the document is ready for your approval. ${cleanReply}`.slice(0, 700)
         : cleanReply.slice(0, 900);
       await voiceCompletion(
@@ -1129,20 +1170,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       lane,
     },
   };
-  // ── Does THIS turn deliver something? ──────────────────────────────
-  // `draftGateOpen` answers "may this conversation produce a document"; it
-  // stays open for every later turn. The materialise block below must key off
-  // "did this turn produce one" instead, or every reply in a draft-bearing
-  // conversation becomes a new version of one document (and a chat answer to
-  // "what is a fence quote?" grows a Download card). See producesDeliverable.
-  const deliversThisTurn = producesDeliverable({
-    renderedDocText,
-    requestedDraft,
-    mode,
-    draftGateOpen,
-    hasExistingDraft,
-    message,
-  });
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
   // draft — before the owner approves work, never after. It belongs to a turn
   // that is actually showing a draft, not to a question answered in chat.
