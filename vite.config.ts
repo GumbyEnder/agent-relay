@@ -434,6 +434,13 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/inference-token.nitro.ts",
               },
               {
+                // The inference gateway itself: holds the provider key and spends it
+                // on a token's behalf. Minting without a place to spend the token is
+                // how a desktop "connected" and then 401'd on its first message.
+                route: "/api/inference",
+                handler: "./src/lib/inference-gateway.nitro.ts",
+              },
+              {
                 // Our search quota: a short-lived, search-scoped token pointed at our
                 // gateway, so the Brave key never reaches a client.
                 route: "/api/search-token",
