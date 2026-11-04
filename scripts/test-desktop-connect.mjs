@@ -34,6 +34,8 @@ const hasXvfb = (() => {
   }
 })();
 
+const { CONNECT_PATH } = await import("../desktop/connect.mjs");
+
 let failures = 0;
 const check = (name, ok, detail = "") => {
   if (!ok) failures++;
@@ -114,7 +116,7 @@ let mode = "signin"; // "signin" = 401 then 200 | "notconfigured" = 503
 let searchMode = "ok"; // "ok" | "notconfigured"
 const cloud = createServer((req, res) => {
   const url = req.url ?? "/";
-  if (url === "/connect") {
+  if (url === CONNECT_PATH) {
     // The real page needs nothing special: the mint script runs against it.
     res.writeHead(200, { "content-type": "text/html" }).end(
       "<!doctype html><title>Connect BeeZilla</title><h1>Sign in to BeeZilla</h1><p>test page</p>",

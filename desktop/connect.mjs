@@ -15,7 +15,18 @@
  *     display, and main.mjs stays a thin shell over it.
  */
 
-export const CONNECT_PATH = "/connect";
+/**
+ * Where the Connect window lands. It must be a page the DEPLOYMENT actually
+ * serves: `${cloud}/connect` 404s on demo, beezilla-production and
+ * app.devboards.ai, so the window rendered a blank 404 shell and then polled it
+ * for 180 s — the "empty box" a user sees instead of a sign-in form.
+ *
+ * /login is same-origin and is the real sign-in UI on every deployment, which is
+ * all the mint script needs (it fetches with credentials, so the cookie this page
+ * sets is the one that mints). `scripts/test-desktop-connect.mjs --live` now proves
+ * this path answers 200 instead of trusting a fake that served it.
+ */
+export const CONNECT_PATH = "/login";
 
 /** What we ask the cloud page to do. Kept as one string so it is auditable. */
 export const MINT_SCRIPT = `(async () => {
