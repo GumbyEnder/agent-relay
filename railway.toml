@@ -1,6 +1,12 @@
 [build]
 builder = "RAILPACK"
-buildCommand = "npm install && npm run build"
+# `git` and `ssh` are for scripts/sync-private.mjs: the private recipe modules are
+# cloned from github.com:GumbyEnder/beezilla-recipes with a read-only deploy key
+# during `prebuild`. The RAILPACK image is Debian slim and ships neither, so a
+# missing binary shows up as a failed build (it did: `spawnSync git ENOENT`).
+# Installing them here keeps the credential narrow — a deploy key instead of a
+# personal access token with write access to every repository on the account.
+buildCommand = "apt-get update -qq && apt-get install -y -qq --no-install-recommends git openssh-client >/dev/null && npm install && npm run build"
 
 [deploy]
 startCommand = "npm run start"

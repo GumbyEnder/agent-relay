@@ -35,6 +35,20 @@ const providerBase = () =>
   (process.env.BZ_CHAT_BASE_URL || "https://inference-api.nousresearch.com/v1").replace(/\/+$/, "");
 const providerKey = () => (process.env.BZ_CHAT_KEY ?? "").trim();
 
+/**
+ * The gateway is mounted at `/api/inference` and `/api/inference/**`, because the
+ * mint hands clients `baseUrl = …/api/inference` and every client appends its own
+ * OpenAI-style tail (`buzzy/llm.ts`, `voice.ts`, `asr.ts` → `/chat/completions`;
+ * `pricing.ts` → `/models`). A wildcard that ignored the tail would answer a
+ * /models request with a chat completion, so the tail is mapped explicitly and
+ * anything else is refused by name.
+ */
+const GATEWAY_PREFIX = "/api/inference";
+const ALLOWED: Record<string, readonly string[]> = {
+  "/chat/completions": ["POST"],
+  "/models": ["GET"],
+};
+
 export default defineEventHandler(async (event) => {
   const key = providerKey();
   if (!key) {
@@ -47,8 +61,21 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  if (event.method !== "POST") {
-    return json(405, { ok: false, code: "method_not_allowed", error: "use POST" });
+  const pathname = new URL(event.req.url).pathname;
+  const rest = pathname.startsWith(GATEWAY_PREFIX) ? pathname.slice(GATEWAY_PREFIX.length) : "";
+  // Exact mount (no tail) keeps its original meaning: a chat completion body posted
+  // straight at the gateway.
+  const tail = rest === "" || rest === "/" ? "/chat/completions" : rest.replace(/\/+$/, "");
+  const methods = ALLOWED[tail];
+  if (!methods) {
+    return json(404, {
+      ok: false,
+      code: "unknown_path",
+      error: `BeeZilla inference has no ${tail || "/"} — use /chat/completions or /models`,
+    });
+  }
+  if (!methods.includes(event.method)) {
+    return json(405, { ok: false, code: "method_not_allowed", error: `use ${methods.join(" or ")} for ${tail}` });
   }
 
   const auth = String(event.headers.get("authorization") ?? "");
@@ -64,28 +91,31 @@ export default defineEventHandler(async (event) => {
     return json(401, { ok: false, code: "invalid_token", error: "this inference token is not valid" });
   }
 
-  let body: string;
-  try {
-    body = await event.req.text();
-  } catch {
-    return json(400, { ok: false, code: "bad_request", error: "request body could not be read" });
-  }
-  if (body.length > MAX_BODY_BYTES) {
-    return json(413, { ok: false, code: "body_too_large", error: "request body is too large" });
-  }
-  try {
-    JSON.parse(body);
-  } catch {
-    return json(400, { ok: false, code: "bad_request", error: "request body must be JSON" });
+  // Only a chat completion carries a body. /models is a plain GET.
+  let body: string | undefined;
+  if (event.method === "POST") {
+    try {
+      body = await event.req.text();
+    } catch {
+      return json(400, { ok: false, code: "bad_request", error: "request body could not be read" });
+    }
+    if (body.length > MAX_BODY_BYTES) {
+      return json(413, { ok: false, code: "body_too_large", error: "request body is too large" });
+    }
+    try {
+      JSON.parse(body);
+    } catch {
+      return json(400, { ok: false, code: "bad_request", error: "request body must be JSON" });
+    }
   }
 
   const started = Date.now();
   try {
-    const upstream = await fetch(`${providerBase()}/chat/completions`, {
-      method: "POST",
+    const upstream = await fetch(`${providerBase()}${tail}`, {
+      method: event.method,
       headers: {
-        authorization: `Bearer ${key}`,
-        "content-type": String(event.headers.get("content-type") ?? "application/json"),
+        authorization: ["Bearer", key].join(" "),
+        ...(body === undefined ? {} : { "content-type": String(event.headers.get("content-type") ?? "application/json") }),
         accept: String(event.headers.get("accept") ?? "application/json"),
       },
       body,
