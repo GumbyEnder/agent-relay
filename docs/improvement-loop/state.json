@@ -136,6 +136,17 @@
       "change": "CONNECT_PATH /connect \u2192 /login (same-origin sign-in on every deployment); added scripts/test-connect-path-live.mjs because the e2e fake served /connect and so was more capable than production",
       "evidence": "0.2.2 published (179,651,067 b, sha256 5b4e74bf\u2026), mirrored to K:\\\u2026\\releases\\0.2.2, installed locally; CONNECT_PATH=/login verified inside the packaged asar; live probe PASS /login 200 2608b 271ms; connect e2e still passes (xvfb).",
       "open": "Owner confirmation only: open Connect on Windows, sign in inside the window, Settings should show a token with an expiry."
+    },
+    {
+      "id": "desktop-managed-inference-gateway",
+      "priority": "P0",
+      "status": "done",
+      "title": "Desktop Connect \u2192 'not configured (BZ inference signing keys)'",
+      "reported": "2026-11-04 \u2014 owner signed in from the app and got a connect popup 503 not_configured",
+      "root_cause": "Two gaps, not one. (1) BZ_INFERENCE_SIGNING_KEY was never set on the deployment, so /api/inference-token failed closed with 503. (2) There was no gateway to spend a minted token: /api/inference did not exist anywhere, and the token was being handed the provider base URL, which cannot verify our HMAC \u2014 so even a successful connect would have 401'd on the first message. The desktop also defaulted to the demo deployment, which has neither.",
+      "change": "New src/lib/inference-gateway.nitro.ts (POST /api/inference: verify bz1 scope=inference, forward the chat body to OUR provider with OUR key, stream back unchanged, 256 KB cap, fails closed 503 without a provider key). Set BZ_INFERENCE_SIGNING_KEY (48 chars) + BZ_INFERENCE_BASE_URL on the agent-relay service. Desktop 0.2.3 defaults to https://app.devboards.ai.",
+      "evidence": "Production E2E: sign-in 200 \u2192 POST /api/inference-token 200 {token bz1\u2026, endpoint \u2026/api/inference} \u2192 POST /api/inference 200 in 2.93 s, reply 'gateway ok', usage cost 8.56e-06. Anonymous 401, wrong scope refused, /api/inference 404s on the demo and old beezilla-production hosts.",
+      "open": "Owner retries Connect in 0.2.3 (reinstall from K:). The BeeZilla-branded prod service still needs main deployed + the same two env vars before a branded default is possible."
     }
   ],
   "probes": {
@@ -312,6 +323,15 @@
       "change": "CONNECT_PATH=/login + live path probe (test-connect-path-live.mjs) + v0.2.2",
       "gates": "connect e2e PASS (xvfb), live probe PASS, tsc/build clean, installer hash matched on GitHub download and NAS mirror",
       "production_evidence": "https://github.com/GumbyEnder/agent-relay/releases/tag/desktop-v0.2.2 \u2014 prerelease, 4 files staged, CONNECT_PATH=/login inside the asar"
+    },
+    {
+      "n": 20,
+      "at": "2026-11-04",
+      "item": "desktop-managed-inference-gateway",
+      "found": "Mint had no spending half and no signing secret; the desktop pointed at a host with neither.",
+      "change": "inference-gateway.nitro.ts + 2 env vars + desktop 0.2.3 default host",
+      "gates": "tsc clean, vite build complete, deploy verified by served route, E2E mint\u2192gateway chat 200",
+      "production_evidence": "app.devboards.ai /api/inference 200 with bz1 token; installer 0.2.3 sha256 c1d2cde5\u2026 verified on GitHub + NAS"
     }
   ]
 }
