@@ -140,6 +140,6 @@ if (problems.length > 0) {
 }
 console.log(
   `[guard] ok — no private module in the public tree (${scanned.length} source files scanned${
-    tracked ? `, ${tracked.length} tracked` : ", no git in this image"
+    tracked ? `, ${tracked.length} tracked` : ", no git checkout here"
   })`,
 );
