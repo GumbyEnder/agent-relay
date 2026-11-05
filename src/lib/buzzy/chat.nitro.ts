@@ -1125,7 +1125,11 @@ export default defineEventHandler(async (event) => {
     const turnStarted = Date.now();
     await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface } });
 
-    const runTurn = (opts?: { speech?: VoiceHandlers; onText?: (t: string) => void }) =>
+    const runTurn = (opts?: {
+      speech?: VoiceHandlers;
+      onText?: (t: string) => void;
+      onTool?: (e: { name: string; state: "running" | "done" | "failed"; ms?: number }) => void;
+    }) =>
       chatLoop({
         userId,
         jobId,
@@ -1143,6 +1147,9 @@ export default defineEventHandler(async (event) => {
         speech: opts?.speech,
         voiceName,
         onText: opts?.onText,
+        // Drop this and the SSE sink above is dead code: the loop fires, nothing
+        // reaches the client, and the voice lane stays silent mid-tool.
+        onTool: opts?.onTool,
       });
 
     // ── Voice lane: text + audio streamed as Server-Sent Events ────────
