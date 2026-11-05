@@ -1196,11 +1196,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       .split(/(?<=[.!?])\s+/)
       .some((sentence) => AUDIO_NOUN.test(sentence) && AUDIO_DELIVERY.test(sentence) && !AUDIO_DENIAL.test(sentence));
   let finalReply = guardedReply;
+  const DENIES_AUDIO_RE =
+    /\b(can(?:no|')t|cannot|unable to|not able to)\b[^.\n]{0,40}\b(save|create|generate|make|produce|render)\b[^.\n]{0,30}\b(audio|music|song|track|mp3)\b/i;
+  // A denied capability, while the audio sits attached to the same message: the
+  // model wrote "I cannot generate audio files on your current plan" on a turn where
+  // the pre-pass had already produced a 360 KB MP3. The artifact wins over the prose.
+  if (renderedAudio && DENIES_AUDIO_RE.test(finalReply)) {
+    const kb = Math.round((renderedAudio.bytes || 0) / 1024);
+    finalReply = `Here it is — your track is attached below (${kb} KB).`;
+  }
+
   // "I can't save audio files directly here" — said by a product with a music tool,
   // to a customer who had just asked for a lullaby. Denying a capability we have is
   // worse than failing at it, because it teaches the person not to ask again.
-  const DENIES_AUDIO =
-    /\b(can(?:no|')t|cannot|unable to|not able to)\b[^.\n]{0,40}\b(save|create|generate|make|produce|render)\b[^.\n]{0,30}\b(audio|music|song|track|mp3)\b/i;
+  const DENIES_AUDIO = DENIES_AUDIO_RE;
   // A music request that produced no audio must say why, even when the model
   // answers with a lyric instead: "just make me a lullaby" got four lines of verse
   // and no mention that no audio was made. Honesty first, then the words.
