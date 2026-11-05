@@ -17,7 +17,7 @@
  */
 import { defineEventHandler } from "h3";
 import { verifyInferenceToken } from "./buzzy/inferenceToken";
-import { generateMusic, musicConfigured } from "./buzzy/music";
+import { gatedMusic, musicConfigured } from "./buzzy/music";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -53,7 +53,9 @@ export default defineEventHandler(async (event) => {
   const seconds = Math.min(300, Math.max(3, Number(body.seconds) || 20));
 
   const started = Date.now();
-  const made = await generateMusic(prompt, seconds * 1000);
+  // A token must not be a way around the plan: the same quota check the web UI
+  // enforces runs here, keyed to the account the token was minted for.
+  const made = await gatedMusic(String(verified.claims?.sub ?? ""), prompt, seconds * 1000);
   if (!made.ok || !made.bytes) {
     const status = made.code === "paid_plan_required" ? 402 : made.code === "rate_limited" ? 429 : 502;
     return json(status, { ok: false, code: made.code, error: made.error });
