@@ -57,7 +57,12 @@ export default defineEventHandler(async (event) => {
   // enforces runs here, keyed to the account the token was minted for.
   const made = await gatedMusic(String(verified.claims?.sub ?? ""), prompt, seconds * 1000);
   if (!made.ok || !made.bytes) {
-    const status = made.code === "paid_plan_required" ? 402 : made.code === "rate_limited" ? 429 : 502;
+    // 402 is the provider telling us the plan is wrong; plan_required is US saying it.
+    // Both must read as "pay", never as "server broke".
+    const status =
+      made.code === "paid_plan_required" || made.code === "plan_required" ? 402
+      : made.code === "rate_limited" || made.code === "quota_exhausted" ? 429
+      : 502;
     return json(status, { ok: false, code: made.code, error: made.error });
   }
   console.log(`[buzzy/music] ${verified.claims?.sub ?? "?"} ok ms=${Date.now() - started} bytes=${made.bytes.length}`);
