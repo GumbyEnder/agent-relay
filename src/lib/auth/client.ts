@@ -1,4 +1,4 @@
-import { genericOAuthClient, magicLinkClient } from "better-auth/client/plugins";
+import { magicLinkClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { GROK_PROVIDERS } from "./providers";
 
@@ -13,7 +13,11 @@ import { GROK_PROVIDERS } from "./providers";
  * is stored, so nothing changes.
  */
 export const authClient = createAuthClient({
-  plugins: [genericOAuthClient(), magicLinkClient()],
+  // better-auth 1.7 dropped `genericOAuthClient`: generic OAuth providers are
+  // registered server-side into `socialProviders`, so the client calls the core
+  // `signIn.social` endpoint with the provider id. `magicLinkClient` still adds
+  // the client-side types for the magic-link plugin.
+  plugins: [magicLinkClient()],
   fetchOptions: {
     onRequest(ctx) {
       const token = getBearerToken();
@@ -160,8 +164,8 @@ export async function signIn(
     return;
   }
 
-  const { data, error } = await authClient.signIn.oauth2({
-    providerId,
+  const { data, error } = await authClient.signIn.social({
+    provider: providerId,
     callbackURL,
     errorCallbackURL,
   });
