@@ -62,7 +62,10 @@ export function isExecuteCommand(message: string): boolean {
  */
 export function isMusicRequest(message: string): boolean {
   const m = String(message || "");
-  return /\b(make|create|generate|produce|compose|write|build|give me)\b[^.\n]{0,60}\b(song|track|music|jingle|score|beat|soundtrack|instrumental|pad|loop|soundscape|melody)\b/i.test(m);
+  // The noun list is deliberately wide: "just make me a lullaby about ducks"
+  // matched nothing, so the music pre-pass never ran and the model answered
+  // "I can't save audio files directly here" — a denial of a capability we sell.
+  return /\b(make|create|generate|produce|compose|write|build|give me|sing)\b[^.\n]{0,60}\b(song|track|music|jingle|score|beat|soundtrack|instrumental|pad|loop|soundscape|melody|lullaby|tune|ballad|hymn|anthem|serenade|ditty|sting|underscore|theme|ambient|drone|remix|rap|chorus|riff)\b/i.test(m);
 }
 
 /** A deliverable request in the owner's own words (not only "file" phrasing). */

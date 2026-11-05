@@ -60,13 +60,16 @@ const shortExpect = expect.slice(0, 7);
 const deadline = Date.now() + waitSeconds * 1000;
 let state = live();
 
-while (state.commit !== shortExpect && Date.now() < deadline) {
-  console.log(`waiting: live ${state.commit || "(none)"} (${state.status}) != ${shortExpect}`);
+// A matching commit is not a served commit: the build can still be running, and
+// probing during BUILDING gave a 404 on a route that then existed.
+const ready = () => state.commit === shortExpect && /SUCCESS|RUNNING/i.test(state.status);
+while (!ready() && Date.now() < deadline) {
+  console.log(`waiting: live ${state.commit || "(none)"} (${state.status}) vs ${shortExpect}`);
   await new Promise((r) => setTimeout(r, 15000));
   state = live();
 }
 
-const match = state.commit === shortExpect;
+const match = ready();
 console.log(`${match ? "PASS" : "FAIL"}  live ${state.commit || "(none)"} · ${state.status} · ${state.createdAt}`);
 console.log(`      expected ${shortExpect} (${expect})`);
 

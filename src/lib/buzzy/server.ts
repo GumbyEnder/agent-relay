@@ -602,6 +602,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // is set — that is the difference between "here it is" and "the track is in
   // your Library" said over an empty Library.
   let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
+  // Why the last attempt to make audio failed, in the provider's or the plan's own
+  // words. Used to answer honestly instead of denying the capability exists.
+  let musicRefusal: { code: string; error: string } | null = null;
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
@@ -619,7 +622,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // same way the research pre-pass performs a lookup. The model then narrates a
   // result that actually exists.
 
-  if (isMusicRequest(message) && musicConfigured() && (wereAllFilled || requestedDraft || hasExistingDraft)) {
+  // No gate on mode: a person who types "just make me a lullaby" in Chat mode
+  // asked for a file, not a conversation about files. The quota check inside
+  // gatedMusic is what decides whether this account may spend, not the UI tab.
+  if (isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
@@ -642,6 +648,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "attached to your reply as a player. Do not call generate_music. Describe what you made in one or two " +
         "sentences and stop.";
     } else if (!made.ok) {
+      musicRefusal = { code: String(made.code ?? "music_failed"), error: String(made.error ?? "unknown error") };
       messages[0]!.content +=
         `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
         "Tell the owner this exact reason. Do not claim any audio exists.";
@@ -1177,6 +1184,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       .split(/(?<=[.!?])\s+/)
       .some((sentence) => AUDIO_NOUN.test(sentence) && AUDIO_DELIVERY.test(sentence) && !AUDIO_DENIAL.test(sentence));
   let finalReply = guardedReply;
+  // "I can't save audio files directly here" — said by a product with a music tool,
+  // to a customer who had just asked for a lullaby. Denying a capability we have is
+  // worse than failing at it, because it teaches the person not to ask again.
+  const DENIES_AUDIO =
+    /\b(can(?:no|')t|cannot|unable to|not able to)\b[^.\n]{0,40}\b(save|create|generate|make|produce|render)\b[^.\n]{0,30}\b(audio|music|song|track|mp3)\b/i;
+  if (!renderedAudio && musicConfigured() && DENIES_AUDIO.test(finalReply)) {
+    finalReply = musicRefusal
+      ? musicRefusal.code === "plan_required" || musicRefusal.code === "paid_plan_required"
+        ? "I can make music — but this account's plan does not include it. Music is part of the paid plans; " +
+          "upgrading is what unlocks generation. Nothing is missing from the tool itself."
+        : `I tried to make that audio and the provider refused: ${musicRefusal.error}. That is the real reason — not a missing capability.`
+      : "I can make music here. Ask for a track and I will generate the audio and attach it to my reply.";
+  }
   if (!renderedAudio && claimsAudio(finalReply)) {
     console.warn("[buzzy] reply claimed an audio deliverable the chat cannot produce");
     finalReply =
