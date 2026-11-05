@@ -5263,6 +5263,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         })
         .catch(function (e) {
           var name = (e && e.name) || "";
+          micLog("getUserMedia failed " + name + ": " + ((e && e.message) || ""));
           if (name === "NotAllowedError" || name === "SecurityError") {
             stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
             voice.mic = false;
@@ -5286,10 +5287,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // (releaseMic() closes them when the listen session ends.)
       // Nothing was said: re-arm instead of uploading a silent clip and paying
       // the model to tell us it heard nothing.
-      if (!r.speechSeen) { rearmListening(); return; }
+      if (!r.speechSeen) {
+        micLog("dropped: no speech above " + SPEECH_RMS + " (peak " + (r.peak || 0).toFixed(4) + ")");
+        stageNote("The microphone heard nothing above room noise (peak " + (r.peak || 0).toFixed(4) + "). Check Settings → Microphone.");
+        rearmListening();
+        return;
+      }
       var total = 0;
       for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
-      if (total < r.rate * 0.3) { rearmListening(); return; }
+      if (total < r.rate * 0.3) {
+        micLog("dropped: clip too short (" + total + " samples at " + r.rate + " Hz)");
+        rearmListening();
+        return;
+      }
+      micLog("clip " + (total / r.rate).toFixed(2) + " s peak=" + (r.peak || 0).toFixed(4) + " → transcribe");
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
