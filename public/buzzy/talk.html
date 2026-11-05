@@ -5020,6 +5020,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
+            if (recState) recState.frames = (recState.frames || 0) + 1;
             if (recState) recState.peak = Math.max(recState.peak || 0, rms);
             if (rms > SPEECH_RMS) { speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
