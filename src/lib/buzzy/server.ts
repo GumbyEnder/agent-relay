@@ -615,6 +615,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // cannot depend on the model choosing to use it, so the harness performs it, the
   // same way the research pre-pass performs a lookup. The model then narrates a
   // result that actually exists.
+  console.log(
+    `[buzzy/music] pre-pass check want=${isMusicRequest(message)} configured=${musicConfigured()} ` +
+    `gate=${wereAllFilled || requestedDraft || hasExistingDraft} (filled=${wereAllFilled} draft=${requestedDraft} existing=${hasExistingDraft})`,
+  );
   if (isMusicRequest(message) && musicConfigured() && (wereAllFilled || requestedDraft || hasExistingDraft)) {
     const brief = message.slice(0, 2000);
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
