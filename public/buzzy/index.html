@@ -301,6 +301,26 @@
       gap: 0.9rem;
       margin-top: 1rem;
     }
+    .artifact-shelf { margin: 0.9rem 0 1.4rem; }
+    .shelf-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.6rem; }
+    .shelf-title { font-weight: 600; font-size: 0.95rem; }
+    .shelf-meta { color: var(--bz-muted, #8d8d8d); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+    .shelf-grid {
+      display: grid; gap: 0.6rem;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    }
+    .shelf-card {
+      background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px; padding: 0.6rem; overflow: hidden;
+    }
+    .shelf-card audio, .shelf-card video, .shelf-card img { width: 100%; border-radius: 8px; display: block; }
+    .shelf-card img { max-height: 140px; object-fit: cover; }
+    .shelf-name {
+      font-size: 0.82rem; margin-top: 0.45rem; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .shelf-sub { font-size: 0.72rem; color: var(--bz-muted, #8d8d8d); font-variant-numeric: tabular-nums; }
+    .shelf-dl { font-size: 0.8rem; color: var(--bz-yellow, #ffd40d); text-decoration: none; }
     .docfolder {
       border: 1px solid #2A2A2A;
       background: var(--bz-panel);
@@ -1234,6 +1254,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+    // Attribute values need the quote escaping escHtml does not do: a filename with
+    // a double quote would otherwise close the attribute it sits in.
+    function escAttr(s) {
+      return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    }
 
     function goDocs() {
       setPhase("Library");
@@ -1337,6 +1362,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           : "Every job keeps its own folder. Documents are markdown — open them here, download, or print to PDF.") + "</p>" +
         (parked ? "<p class='muted'>" + parked + (parked === 1 ? " folder isn't" : " folders aren't") + " in a company, so " + (parked === 1 ? "it isn't" : "they aren't") + " in this library.</p>" : "") +
         "<div class='docs-back'><button id='docsBackJobs' class='secondary'>← Back to Jobs</button></div>" +
+        // Artifacts first: a track or an image is a outcome you can use right here,
+        // while a document is a thing you have to open. The shelf used to be a file
+        // list with no player, so a generated track could only be downloaded blind.
+        "<div id='artifactShelf' class='artifact-shelf'><p class='muted'>Loading artifacts…</p></div>" +
         "<div class='docs-folders'>" +
         (folders.length
           ? folders.map((f) =>
@@ -1353,6 +1382,67 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       const bj = document.getElementById("docsBackJobs");
       if (bj) bj.onclick = () => { docsOpenFolder = null; docsOpenDoc = null; state.screen = "jobs"; render(); };
+      loadArtifactShelf();
+    }
+
+    // ── Artifact shelf ───────────────────────────────────────────────
+    // Everything the account has actually produced, as usable things: audio with a
+    // player, images with a preview, anything else as a named download. Read from
+    // /api/buzzy/assets, which returns name/url/type aliases so a card needs no
+    // special-casing per kind.
+    function artifactKind(item) {
+      var t = String(item.type || item.content_type || "");
+      if (t.indexOf("audio/") === 0) return "audio";
+      if (t.indexOf("image/") === 0) return "image";
+      if (t.indexOf("video/") === 0) return "video";
+      return "file";
+    }
+    function humanBytes(n) {
+      var b = Number(n) || 0;
+      if (b < 1024) return b + " B";
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " kB";
+      return (b / (1024 * 1024)).toFixed(1) + " MB";
+    }
+    function loadArtifactShelf() {
+      var host = document.getElementById("artifactShelf");
+      if (!host) return; // navigated away before the fetch landed
+      fetch("/api/buzzy/assets?limit=60", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var host2 = document.getElementById("artifactShelf");
+          if (!host2) return;
+          var items = (d && (d.items || d.assets)) || [];
+          if (!items.length) {
+            host2.innerHTML = "";
+            return;
+          }
+          var audioCount = items.filter(function (i) { return artifactKind(i) === "audio"; }).length;
+          var total = items.reduce(function (a, i) { return a + (Number(i.bytes) || 0); }, 0);
+          host2.innerHTML =
+            "<div class='shelf-head'><span class='shelf-title'>Artifacts</span>" +
+            "<span class='shelf-meta'>" + items.length + " file" + (items.length === 1 ? "" : "s") +
+            (audioCount ? " · " + audioCount + " audio" : "") + " · " + humanBytes(total) + "</span></div>" +
+            "<div class='shelf-grid'>" +
+            items.map(function (i) {
+              var kind = artifactKind(i);
+              var name = escHtml(i.name || i.filename || "untitled");
+              var when = i.created_at ? new Date(i.created_at).toLocaleDateString() : "";
+              var body =
+                kind === "audio" ? "<audio controls preload='none' src='" + escAttr(i.url) + "'></audio>" :
+                kind === "image" ? "<img loading='lazy' src='" + escAttr(i.url) + "' alt='" + name + "' />" :
+                kind === "video" ? "<video controls preload='none' src='" + escAttr(i.url) + "'></video>" :
+                "<a class='shelf-dl' href='" + escAttr(i.url) + "' download>Download</a>";
+              return "<div class='shelf-card kind-" + kind + "'>" + body +
+                "<div class='shelf-name' title='" + name + "'>" + name + "</div>" +
+                "<div class='shelf-sub'>" + humanBytes(i.bytes) + (when ? " · " + when : "") + "</div>" +
+                "</div>";
+            }).join("") +
+            "</div>";
+        })
+        .catch(function () {
+          var host3 = document.getElementById("artifactShelf");
+          if (host3) host3.innerHTML = "<p class='muted'>Artifacts could not be loaded just now.</p>";
+        });
     }
 
     function goPick() {
