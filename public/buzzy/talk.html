@@ -4980,6 +4980,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.messages.push({
           role: "assistant",
           content: data.reply,
+          // A track this turn produced. The card is built from the response, never
+          // from the words — that is what stops "here is your song" with no song.
+          asset: data.audio || null,
           document: data.document || null,
         });
 

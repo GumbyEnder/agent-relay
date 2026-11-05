@@ -46,12 +46,13 @@ import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
+import { generateMusic, musicConfigured, storeAudio } from "./music";
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isMusicRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -277,6 +278,8 @@ export interface ChatResponse {
   context?: ContextState;
   /** Per-turn latency breakdown (ms). */
   timings?: TurnTimings;
+  /** A track this turn produced — the chat renders a player, never a claim. */
+  audio?: { url: string; name: string; bytes: number; type: string };
   /** The file this turn produced, with links the chat can show inline. */
   document?: { filename: string; contentType: string; bytes: number | null; documentId?: string; downloadUrl: string; libraryUrl: string };
   error?: string;
@@ -304,6 +307,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const { userId, jobId, sessionId, message, model, jobContext, companyName, companyFacts } = req;
   const mode: "chat" | "work" = req.mode === "work" ? "work" : "chat";
   const surface: "text" | "voice" = req.surface === "voice" ? "voice" : "text";
+  // Audio actually produced this turn. The reply may only claim a track when this
+  // is set — the whole reason a person hears "I don't produce audio" from a product
+  // that has a music tool is that nothing tracked the difference.
+  let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
+  let musicRefusal: { code: string; error: string } | null = null;
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
   let extractMs = 0;
@@ -562,6 +570,35 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     })),
     { role: "user", content: message },
   ];
+
+  // ── Music pre-pass ────────────────────────────────────────────────
+  // A capability the product sells cannot depend on the model choosing to use it.
+  // Chat mode offers no tools at all, so a typed "make me a lullaby" had nothing to
+  // call and the model denied the capability instead. The harness performs the work,
+  // then the model narrates a result that exists.
+  if (isMusicRequest(message) && musicConfigured()) {
+    const brief = message.slice(0, 2000);
+    const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
+    const implied = said ? (said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])) : 20;
+    const seconds = Math.min(300, Math.max(3, implied));
+    const made = await generateMusic(brief, seconds * 1000);
+    if (made.ok && made.bytes) {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const name = `music-${stamp}.mp3`;
+      const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
+      renderedAudio = { url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType || "audio/mpeg" };
+      messages[0]!.content +=
+        `\n\nThe track has ALREADY been generated this turn: ${name}, ${seconds}s, ${stored.bytes} bytes, ` +
+        "attached to your reply as a player. Do not claim you cannot produce audio. Describe what you made in one or two sentences and stop.";
+      console.log(`[buzzy] music pre-pass ok: ${name} ${stored.bytes} B ${seconds}s`);
+    } else if (!made.ok) {
+      musicRefusal = { code: String(made.code ?? "music_failed"), error: String(made.error ?? "unknown error") };
+      messages[0]!.content +=
+        `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
+        "Tell the owner this exact reason. Do not claim any audio exists.";
+      console.warn(`[buzzy] music pre-pass failed: ${made.code} ${made.error}`);
+    }
+  }
 
   // Research pre-pass. Two reasons, one mechanism:
   //   * the spoken lane runs an audio model with NO tools, so a spoken lookup
@@ -860,6 +897,31 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 errorCode: hits.length ? undefined : "no_results",
               };
             }
+            if (tc.name === "generate_music") {
+              const brief = String(content.prompt ?? "").trim();
+              const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
+              const implied = said ? (said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])) : 20;
+              const seconds = Math.min(300, Math.max(3, Number(content.seconds) || implied));
+              const made = await generateMusic(brief, seconds * 1000);
+              if (!made.ok || !made.bytes) {
+                return {
+                  message: `generate_music failed (${made.code}): ${made.error} ` +
+                    "Report this exact reason to the owner. Do NOT claim any audio was produced.",
+                  errorCode: made.code ?? "music_failed",
+                };
+              }
+              const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+              const name = `music-${stamp}.mp3`;
+              const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
+              renderedAudio = { url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType || "audio/mpeg" };
+              return {
+                message:
+                  `generate_music succeeded: ${name}, ${stored.bytes} bytes, ${seconds}s. ` +
+                  "It is saved in the owner's Library. Tell them what you made in one or two sentences — " +
+                  "the player is attached to your reply automatically. Do not call the tool again.",
+                bytes: stored.bytes,
+              };
+            }
             if (["render_document", "render_presentation", "render_sheet"].includes(tc.name)) {
               const result =
                 tc.name === "render_document" ? await renderDocument(content)
@@ -1142,6 +1204,24 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       lane,
     },
   };
+  // ── Audio claims are checked against audio that exists ─────────────
+  // "I can help with lyrics ... but I don't produce audio directly" was said by a
+  // build whose music tool was never offered. Denying a capability we have teaches
+  // the person not to ask again, so the sentence is allowed only when the turn
+  // really produced nothing and music really is unavailable.
+  const DENIES_AUDIO =
+    /\b(i (can'?t|cannot|don'?t|do not)\s+(directly\s+)?(produce|make|create|generate|save|output)\s+(audio|music|sound|mp3|files)|no way to (produce|make|generate)\s+(audio|music)|i don'?t produce audio)/i;
+  if (renderedAudio) {
+    response.audio = renderedAudio;
+    if (DENIES_AUDIO.test(response.reply)) {
+      response.reply = `Here it is — your track is attached below (${Math.round((renderedAudio.bytes || 0) / 1024)} KB).`;
+    }
+  } else if (musicConfigured() && DENIES_AUDIO.test(response.reply)) {
+    response.reply = musicRefusal
+      ? `I tried to make that audio and the provider refused: ${musicRefusal.error}. That is the real reason — not a missing capability.`
+      : "I can make music here. Ask for a track and I will generate the audio and attach it to my reply.";
+  }
+
   // ── Does THIS turn deliver something? ──────────────────────────────
   // `draftGateOpen` answers "may this conversation produce a document"; it
   // stays open for every later turn. The materialise block below must key off

@@ -17,6 +17,7 @@
  */
 
 import { CALCULATE_TOOL } from "./calc";
+import { GENERATE_MUSIC_TOOL } from "./music";
 import { RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL } from "./artifact";
 import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } from "./info";
 import { WEB_SEARCH_TOOL } from "./search";
@@ -107,6 +108,16 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     withheldReason: "read_web_page replaces it (it fetches first, then renders when the page needs JavaScript).",
   },
   // ── Draft-gated renderers ────────────────────────────────────────────
+  {
+    name: "generate_music",
+    schema: GENERATE_MUSIC_TOOL,
+    gate: "draft",
+    offered: true,
+    timeoutMs: 130_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "render-to-memory",
+  },
   {
     name: "render_document",
     schema: RENDER_DOCUMENT_TOOL,

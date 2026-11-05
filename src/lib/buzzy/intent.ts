@@ -113,3 +113,17 @@ export function isExplicitDocumentRequest(message: string): boolean {
     /\b(as|in)\s+(an?\s+)?\.?(md|markdown|pdf|docx?|word|csv|xlsx?)\b/i.test(m)
   );
 }
+
+/**
+ * A request to actually MAKE audio — not to talk about it.
+ *
+ * The noun list is deliberately wide: "just make me a lullaby about ducks"
+ * matched nothing, so no pre-pass ran and the model answered "I can't produce
+ * audio directly" — a denial of a capability this product sells. The desktop build
+ * carried that bug on its own branch for days while the web build was fixed,
+ * because the fix lived only on main.
+ */
+export function isMusicRequest(message: string): boolean {
+  const m = String(message || "");
+  return /\b(make|create|generate|produce|compose|write|build|give me|sing)\b[^.\n]{0,60}\b(song|track|music|jingle|score|beat|soundtrack|instrumental|pad|loop|soundscape|melody|lullaby|tune|ballad|hymn|anthem|serenade|ditty|sting|underscore|theme|ambient|drone|remix|rap|chorus|riff)\b/i.test(m);
+}
