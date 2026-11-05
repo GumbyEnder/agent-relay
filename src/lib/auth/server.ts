@@ -123,7 +123,11 @@ const baseURL = explicitBaseURL ?? {
   allowedHosts: [...allowedHostsEnv, ...previewAllowedHosts, "localhost", "127.0.0.1", "[::1]"],
   // `auto` → trust both http:// and https:// expansions of allowedHosts
   // (preview is https; local dev is http).
-  protocol: "auto" as const,
+  // With an explicit product-host list we force https: the request reaches the
+  // container over plain HTTP behind Railway's proxy, and `auto` derives
+  // `http://` from that — which produced `http://app.devboards.ai/...` as the
+  // OAuth redirect_uri and broke sign-in. Local dev never sets the list.
+  protocol: (allowedHostsEnv.length ? "https" : "auto") as "https" | "auto",
   fallback: "http://localhost:8090",
 };
 
