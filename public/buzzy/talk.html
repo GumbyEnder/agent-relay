@@ -680,6 +680,12 @@
       height: 28px;
       border-radius: 4px;
     }
+    .thinking-elapsed {
+      font-size: 0.72rem;
+      color: var(--bz-muted, #8d8d8d);
+      font-variant-numeric: tabular-nums;
+      margin-left: 0.4rem;
+    }
     .thinking-bubble .thinking-dots {
       display: inline-block;
       width: 14px;
@@ -4814,11 +4820,27 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const thinkingEl = document.createElement("div");
       thinkingEl.className = "thinking-bubble";
       thinkingEl.id = "thinkingIndicator";
+      // Elapsed time, not just dots. A tool turn is buffered server-side (a tool
+      // call needs the whole assistant message before it can run), so there is no
+      // mid-turn stream to show — an honest clock is the next best thing, and it
+      // tells the owner the difference between "working" and "hung".
+      var thinkingStart = Date.now();
       thinkingEl.innerHTML =
         '<img class="thinking-mascot" src="/buzzy/brand/revision6_expressions_08-thinking.png" alt="" />' +
-        '<span class="thinking-dots">...</span>';
+        '<span class="thinking-dots">...</span>' +
+        '<span class="thinking-elapsed" id="thinkingElapsed"></span>';
       messagesContainer.appendChild(thinkingEl);
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      var elapsedTimer = setInterval(function () {
+        var el = document.getElementById("thinkingElapsed");
+        if (!el) return;
+        var secs = Math.round((Date.now() - thinkingStart) / 1000);
+        // Say what is likely happening rather than a bare number.
+        el.textContent = secs < 3 ? "" : secs + "s" + (secs > 8 && (chatState.mode || "chat") === "work" ? " · working" : "");
+      }, 500);
+      // Cleared wherever the indicator is removed; a leaked interval would tick
+      // against a dead node forever.
+      window.__bzStopThinkingClock = function () { clearInterval(elapsedTimer); };
 
       // Disable input while waiting
       input.disabled = true;
