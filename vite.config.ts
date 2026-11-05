@@ -440,6 +440,10 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/inference-token.nitro.ts",
               },
               {
+                route: "/api/music-token",
+                handler: "./src/lib/music-token.nitro.ts",
+              },
+              {
                 // The inference gateway itself: holds the provider key and spends it
                 // on a token's behalf. Minting without a place to spend the token is
                 // how a desktop "connected" and then 401'd on its first message.
@@ -454,6 +458,12 @@ export default defineConfig(({ command }) => ({
                 // succeeded, chat died. Same handler, both shapes.
                 route: "/api/inference/**",
                 handler: "./src/lib/inference-gateway.nitro.ts",
+              },
+              {
+                // Our music quota, without our key: a music-scoped token is spent
+                // here so a client never holds BZ_ELEVEN_KEY.
+                route: "/api/inference/music",
+                handler: "./src/lib/music-gateway.nitro.ts",
               },
               {
                 // Our search quota: a short-lived, search-scoped token pointed at our
