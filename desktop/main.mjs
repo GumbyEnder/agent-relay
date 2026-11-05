@@ -16,7 +16,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RuntimeSupervisor } from "./supervisor.mjs";
 import { ROOT, runtimeLib } from "./paths.mjs";
-import { installLogging, logPaths } from "./logger.mjs";
+import { installLogging, logLine, logPaths } from "./logger.mjs";
 import { connectAccount } from "./connect.mjs";
 
 // FIRST, before anything that can throw. 0.2.0 died at module-link time and left
@@ -225,6 +225,15 @@ function registerSettingsIpc() {
       return { dir, file: logPaths().file };
     }));
     ipcMain.handle("beezilla:app:logPath", wrap(async () => logPaths()));
+    // The page knows things the shell cannot see: which device it got, what the
+    // recorder produced, what the transcriber answered. Those lines belong in
+    // main.log next to the launch breadcrumbs, not only in a DevTools console the
+    // user will never open.
+    ipcMain.handle("beezilla:app:log", wrap(async (message) => {
+      const text = String(message ?? "").slice(0, 600);
+      logLine("log", [`[ui] ${text}`]);
+      return { logged: true };
+    }));
 
     return handlers;
   });
@@ -601,8 +610,34 @@ async function createWindow() {
   }
 }
 
+/**
+ * Media permission, decided here instead of by a default.
+ *
+ * "It didn't hear me" has one silent cause above all others: getUserMedia rejects
+ * and nothing records why. Electron answers permission requests from a handler or
+ * from a default that has moved between versions; either way the renderer only
+ * sees a rejected promise. Decide explicitly, log the decision with the requesting
+ * origin, and the log then answers the question before the user has to describe it.
+ */
+function installMediaPermissions() {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((wc, permission, callback) => {
+    const allowed = permission === "media" || permission === "audioCapture";
+    logLine("log", [`[perm] request ${permission} ← ${wc?.getURL?.() ?? "?"} → ${allowed ? "allow" : "deny"}`]);
+    callback(allowed);
+  });
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+    const allowed = permission === "media" || permission === "audioCapture";
+    logLine("log", [
+      `[perm] check ${permission}${details?.mediaType ? `(${details.mediaType})` : ""} ← ${requestingOrigin} → ${allowed ? "allow" : "deny"}`,
+    ]);
+    return allowed;
+  });
+}
+
 app.whenReady().then(async () => {
   installMenu();
+  installMediaPermissions();
 
   try {
     applyIdentityToEnv();

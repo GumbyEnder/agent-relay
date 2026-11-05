@@ -89,6 +89,13 @@
     </style>
   </head>
   <body>
+    <style>
+      /* Disabled, not hidden: see the comment on #byok-fields. */
+      .locked { opacity: .45; }
+      .locked input, .locked button, .locked summary { pointer-events: none; }
+      .mic-meter { height: 8px; background: #1c2128; border-radius: 4px; margin: 10px 0; overflow: hidden; }
+      .mic-meter span { display: block; height: 100%; width: 0%; background: #3fb950; }
+    </style>
     <main>
       <h1>Settings</h1>
       <p class="sub">Choose how BeeZilla thinks and searches. Everything stays on this machine.</p>
@@ -122,7 +129,11 @@
           </span>
         </label>
 
-        <div id="byok-fields" hidden>
+        <!-- Shown, never hidden: a form that disappears when you pick "BeeZilla
+             inference" reads as a bug ("where did my key go?"). It is disabled and
+             dimmed instead, with one sentence saying who holds the key now. -->
+        <div id="byok-fields" class="locked">
+          <p class="hint" id="byok-locked-note">Managed by your BeeZilla account — no key is needed on this computer. Choose <strong>My own key</strong> to type one.</p>
           <div class="field">
             <label for="key">API key</label>
             <input type="password" id="key" placeholder="sk-…" autocomplete="off" spellcheck="false" />
@@ -187,6 +198,35 @@
         <p class="current" id="music-current"></p>
       </section>
 
+      <!-- ── microphone ────────────────────────────────────────────── -->
+      <!-- "It didn't hear me" is the hardest report to act on, because every layer
+           above the speaker (permission, device, level, transcriber) fails the same
+           way from the outside: silence. This section names the layer.
+           Desktop only: a browser tab has no main.log to write to. -->
+      <section id="microphone" hidden>
+        <h2>Microphone</h2>
+        <p class="hint">
+          BeeZilla records a short clip and has it transcribed — the browser's speech engine is
+          never used, so silence here is never a browser quirk. If it cannot hear you, this
+          page says which part failed.
+        </p>
+        <div class="field">
+          <label for="mic-device">Input device</label>
+          <select id="mic-device"><option value="">System default</option></select>
+        </div>
+        <div class="row">
+          <button id="mic-allow" class="secondary">Allow microphone</button>
+          <button id="mic-test">Record 3 s &amp; transcribe</button>
+          <span class="status" id="mic-status"></span>
+        </div>
+        <div id="mic-meter" class="mic-meter" hidden><span id="mic-fill"></span></div>
+        <p class="current" id="mic-result">Not tested yet.</p>
+        <div class="row">
+          <button id="mic-copy" class="secondary">Copy diagnostics</button>
+          <span class="status" id="mic-copy-status"></span>
+        </div>
+      </section>
+
       <!-- ── troubleshooting ───────────────────────────────────────── -->
       <!-- A packaged app that fails must not be a dead end: every launch writes
            %APPDATA%\BeeZilla\logs\main.log, and this is the one-click path to it.
@@ -246,7 +286,7 @@
           const radio = document.querySelector(`input[name="provider"][value="${inf.provider}"]`);
           if (radio) {
             radio.checked = true;
-            $("byok-fields").hidden = inf.provider !== "byok";
+            paintProvider();
           }
           if (inf.provider === "byok" && inf.baseUrl) $("baseUrl").value = inf.baseUrl;
           if (inf.provider === "byok" && inf.model) $("model").value = inf.model;
@@ -279,15 +319,39 @@
         return res;
       }
 
+      // Grey out, don't hide. A key field that vanishes when you pick "BeeZilla
+      // inference" looks like a bug; a dimmed field with one sentence explaining who
+      // holds the key reads as a decision. Every input inside is really disabled, so
+      // a stray paste cannot put a key on a managed install.
+      function paintProvider() {
+        const selected = document.querySelector('input[name="provider"]:checked')?.value ?? "beezilla";
+        const managed = selected === "beezilla";
+        $("byok-fields").classList.toggle("locked", managed);
+        $("byok-fields").querySelectorAll("input, button, summary").forEach((el) => {
+          el.disabled = managed;
+          if (managed) el.setAttribute("tabindex", "-1");
+          else el.removeAttribute("tabindex");
+        });
+        $("byok-locked-note").hidden = !managed;
+        $("managed-fields").hidden = !managed;
+        $("model-hint").textContent = managed ? "" : "(optional)";
+      }
+
+      // Only the sentence follows the selection. Calling renderStatus() here would
+      // re-tick the radio from the saved state one line later — picking "My own key"
+      // would flip straight back to "BeeZilla inference" and look like a broken click.
+      function renderSelectionNote() {
+        if (lastState?.inference) return;
+        $("inference-current").innerHTML = selectionNote(lastState);
+      }
+
       document.querySelectorAll('input[name="provider"]').forEach((radio) => {
         radio.addEventListener("change", () => {
-          $("byok-fields").hidden = radio.value !== "byok" || !radio.checked;
-          $("managed-fields").hidden = radio.value !== "beezilla" || !radio.checked;
-          $("model-hint").textContent =
-            document.querySelector('input[name="provider"]:checked')?.value === "byok" ? "(optional)" : "";
-          if (lastState) renderStatus(lastState);
+          paintProvider();
+          renderSelectionNote();
         });
       });
+      paintProvider();
 
       async function withBusy(button, label, fn) {
         const original = button.textContent;
@@ -408,6 +472,187 @@
           if (!res?.ok) say($("logs-status"), res?.error || "Could not open the folder.", "err");
           else say($("logs-status"), "Opened.", "ok");
         });
+      }
+
+      // ── microphone diagnostics ──────────────────────────────────────
+      // Four layers produce the same symptom — silence: permission, device, input
+      // level, transcriber. Each is inspected and named here, and every step goes
+      // into main.log, so "it didn't hear me" is answerable from disk instead of
+      // from memory.
+      const micLog = (msg) => { try { void appBridge?.log?.(`mic: ${msg}`); } catch (_) {} };
+      let micStream = null, micPeak = -100, micInfo = {}, lastMicResult = "not run";
+
+      const pct = (db) => Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
+      function dbfs(analyser, buf) {
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        return 10 * Math.log10(sum / buf.length || 1e-10);
+      }
+
+      async function fillDevices() {
+        if (!navigator.mediaDevices?.enumerateDevices) return;
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const inputs = devices.filter((d) => d.kind === "audioinput");
+          const sel = $("mic-device");
+          const chosen = sel.value;
+          sel.innerHTML = '<option value="">System default</option>' +
+            inputs.map((d, i) => `<option value="${d.deviceId}">${d.label || `Microphone ${i + 1}`}</option>`).join("");
+          if (chosen) sel.value = chosen;
+          micLog(`devices=${inputs.length} [${inputs.map((d) => d.label || "(unlabelled)").join(" | ")}]`);
+        } catch (err) {
+          micLog(`enumerateDevices failed ${err?.name}: ${err?.message}`);
+        }
+      }
+
+      function startMeter(stream) {
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          const ctx = new AC();
+          const src = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 1024;
+          src.connect(analyser);
+          const buf = new Float32Array(analyser.fftSize);
+          $("mic-meter").hidden = false;
+          const tick = () => {
+            if (!micStream) { ctx.close().catch(() => {}); return; }
+            const db = dbfs(analyser, buf);
+            micPeak = Math.max(micPeak, db);
+            $("mic-fill").style.width = pct(db) + "%";
+            $("mic-fill").style.background = db > -35 ? "#3fb950" : db > -50 ? "#d29922" : "#8b949e";
+            requestAnimationFrame(tick);
+          };
+          tick();
+        } catch (err) {
+          micLog(`meter failed ${err?.message}`);
+        }
+      }
+
+      async function micAllow() {
+        if (micStream) return micStream;
+        if (!navigator.mediaDevices?.getUserMedia) {
+          say($("mic-status"), "This build has no microphone API.", "err");
+          micLog("no mediaDevices.getUserMedia in this renderer");
+          return null;
+        }
+        try {
+          const audio = { channelCount: 1, echoCancellation: true, noiseSuppression: true };
+          if ($("mic-device").value) audio.deviceId = { exact: $("mic-device").value };
+          micLog(`getUserMedia device=${$("mic-device").value || "system default"}`);
+          micStream = await navigator.mediaDevices.getUserMedia({ audio });
+          const track = micStream.getAudioTracks()[0];
+          micInfo = { label: track?.label || "(unlabelled)", settings: track?.getSettings?.() || {} };
+          micLog(`stream ok label="${micInfo.label}" rate=${micInfo.settings.sampleRate || "?"} ch=${micInfo.settings.channelCount || "?"}`);
+          say($("mic-status"), "Microphone ready — speak and the bar should move.", "ok");
+          await fillDevices();
+          startMeter(micStream);
+          return micStream;
+        } catch (err) {
+          const name = err?.name || "Error";
+          const hint =
+            name === "NotAllowedError" ? " — permission was refused (Windows: Settings → Privacy → Microphone)"
+            : name === "NotFoundError" ? " — no input device is present"
+            : name === "NotReadableError" ? " — another app is holding the device"
+            : "";
+          micLog(`getUserMedia failed ${name}: ${err?.message}`);
+          say($("mic-status"), `${name}${hint}`, "err");
+          return null;
+        }
+      }
+
+      function toBlob(stream) {
+        return new Promise((resolve) => {
+          const type = window.MediaRecorder?.isTypeSupported?.("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
+            : window.MediaRecorder?.isTypeSupported?.("audio/webm") ? "audio/webm" : "";
+          const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+          const chunks = [];
+          rec.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+          rec.onstop = () => resolve(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+          rec.start();
+          setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 3000);
+        });
+      }
+
+      $("mic-allow")?.addEventListener("click", () => void micAllow());
+      $("mic-device")?.addEventListener("change", async () => {
+        micLog(`device changed → ${$("mic-device").value || "default"}`);
+        micStream?.getTracks().forEach((t) => t.stop());
+        micStream = null;
+        micPeak = -100;
+        await micAllow();
+      });
+
+      $("mic-test")?.addEventListener("click", async () => {
+        const status = $("mic-status");
+        const stream = await micAllow();
+        if (!stream) return;
+        micPeak = -100;
+        await withBusy($("mic-test"), "Recording 3 s…", async () => {
+          const started = Date.now();
+          try {
+            const blob = await toBlob(stream);
+            micLog(`recorded ${blob.size} B in ${Date.now() - started} ms`);
+            say(status, `Sending ${Math.round(blob.size / 1024)} KB…`, "");
+            const res = await fetch("/api/buzzy/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": blob.type || "audio/webm" },
+              body: blob,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) {
+              lastMicResult = `${res.status} ${data?.error || "transcription failed"}`;
+              micLog(`transcribe ${res.status} ${JSON.stringify(data).slice(0, 200)}`);
+              $("mic-result").textContent = `Failed: ${lastMicResult}`;
+              say(status, "The transcriber refused that clip.", "err");
+              return;
+            }
+            lastMicResult = data.text || "(empty transcript)";
+            micLog(`transcribe ok ms=${data.ms} model=${data.model} text="${(data.text || "").slice(0, 120)}"`);
+            $("mic-result").textContent = data.text
+              ? `Heard: “${data.text}”  ·  ${data.ms} ms  ·  ${data.model}`
+              : `Heard nothing. Peak ${micPeak.toFixed(0)} dBFS — ${
+                  micPeak < -50
+                    ? "the microphone is delivering near-silence; check the device or the Windows input level."
+                    : "audio arrived, so the clip may have been too short or too quiet."
+                }`;
+            say(status, data.text ? "Transcribed." : "No words in that clip.", data.text ? "ok" : "err");
+          } catch (err) {
+            lastMicResult = `${err?.name || "error"}: ${err?.message || ""}`;
+            micLog(`test threw ${lastMicResult}`);
+            say(status, lastMicResult, "err");
+          }
+        });
+      });
+
+      $("mic-copy")?.addEventListener("click", async () => {
+        const version = await appBridge?.version?.().catch(() => null);
+        const block = [
+          `BeeZilla ${version?.ok ? version.data.version : "?"}`,
+          `user agent: ${navigator.userAgent}`,
+          `device: ${micInfo.label || "(none)"} rate=${micInfo.settings.sampleRate || "?"} ch=${micInfo.settings.channelCount || "?"}`,
+          `peak: ${micPeak.toFixed(0)} dBFS`,
+          `last result: ${lastMicResult}`,
+          `log: ${$("logs-path").textContent || "(unknown)"}`,
+        ].join("\n");
+        try {
+          await navigator.clipboard.writeText(block);
+          say($("mic-copy-status"), "Copied.", "ok");
+        } catch (_) {
+          $("mic-result").textContent = block;
+          say($("mic-copy-status"), "Copy blocked — the block is shown above.", "err");
+        }
+        micLog(`diagnostics copied peak=${micPeak.toFixed(0)}`);
+      });
+
+      if (appBridge) {
+        $("microphone").hidden = false;
+        void fillDevices();
+        navigator.permissions?.query?.({ name: "microphone" }).then((p) => {
+          micLog(`permission state=${p.state}`);
+          if (p.state === "granted") say($("mic-status"), "Already allowed — press “Record 3 s & transcribe”.", "ok");
+        }).catch(() => { micLog("permission query unsupported"); });
       }
     </script>
   </body>
