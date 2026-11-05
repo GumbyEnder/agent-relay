@@ -90,7 +90,19 @@ export const authConfigured =
 // it derives the origin per-request from the (proxied) host, validated against the
 // preview allowlist, which makes the OAuth `redirect_uri` the concrete preview URL
 // the broker's preview client accepts.
-const explicitBaseURL = env("BETTER_AUTH_URL");
+// Hosts allowed to act as the auth origin (dynamic baseURL mode).
+// A single fixed BETTER_AUTH_URL cannot serve two product domains: the OAuth
+// `redirect_uri` and every magic link would point at that one host, so a
+// sign-in started on the other domain returns the browser to the wrong site
+// and its session cookie never lands where the user is. Setting
+// `BETTER_AUTH_ALLOWED_HOSTS=beezilla.net,www.beezilla.net,app.devboards.ai`
+// switches Better Auth to its dynamic baseURL mode — the origin is derived per
+// request from the (proxied) Host header and validated against this list.
+const allowedHostsEnv = (env("BETTER_AUTH_ALLOWED_HOSTS") ?? "")
+  .split(",")
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean);
+const explicitBaseURL = allowedHostsEnv.length ? undefined : env("BETTER_AUTH_URL");
 // Explicit `string[]` (not a readonly tuple) — Better Auth's DynamicBaseURLConfig
 // requires a mutable `allowedHosts: string[]`.
 const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
@@ -107,8 +119,8 @@ const LOCAL_DEV_ORIGINS: string[] = [
 ];
 const baseURL = explicitBaseURL ?? {
   // Include loopback hosts so dynamic baseURL resolves for local email/password
-  // (not only the preview wildcard).
-  allowedHosts: [...previewAllowedHosts, "localhost", "127.0.0.1", "[::1]"],
+  // (not only the preview wildcard), plus every configured product domain.
+  allowedHosts: [...allowedHostsEnv, ...previewAllowedHosts, "localhost", "127.0.0.1", "[::1]"],
   // `auto` → trust both http:// and https:// expansions of allowedHosts
   // (preview is https; local dev is http).
   protocol: "auto" as const,
@@ -135,6 +147,9 @@ const extraTrusted = (env("BETTER_AUTH_TRUSTED_ORIGINS") ?? "")
   .filter(Boolean);
 const trustedOrigins: string[] = [
   ...(explicitBaseURL ? [explicitBaseURL] : []),
+  // Every configured product domain is a first-class origin, so a credentialed
+  // POST from beezilla.net is not rejected as "Invalid origin".
+  ...allowedHostsEnv.flatMap((host) => [`https://${host}`, `http://${host}`]),
   ...railwayOrigins,
   ...extraTrusted,
   ...LOCAL_DEV_ORIGINS,
