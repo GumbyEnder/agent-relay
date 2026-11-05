@@ -106,7 +106,7 @@
     "exceljs": "+4.4.0",
     "kysely": "^0.28.5",
     "lucide-react": "^0.510.0",
-    "nodemailer": "^10.1.2",
+    "nodemailer": "^10.1.4",
     "pg": "^8.16.3",
     "pptxgenjs": "+4.0.1",
     "react": "^19.1.0",
