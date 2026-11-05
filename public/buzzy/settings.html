@@ -481,6 +481,7 @@
       // from memory.
       const micLog = (msg) => { try { void appBridge?.log?.(`mic: ${msg}`); } catch (_) {} };
       let micStream = null, micPeak = -100, micInfo = {}, lastMicResult = "not run";
+      let micFrames = 0, micCtxState = "(none)";
 
       const pct = (db) => Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
       function dbfs(analyser, buf) {
@@ -515,10 +516,14 @@
           analyser.fftSize = 1024;
           src.connect(analyser);
           const buf = new Float32Array(analyser.fftSize);
+          micCtxState = ctx.state;
+          if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} micCtxState = ctx.state + "→" + ctx.state; }
+          micLog(`meter ctx state=${ctx.state}`);
           $("mic-meter").hidden = false;
           const tick = () => {
             if (!micStream) { ctx.close().catch(() => {}); return; }
             const db = dbfs(analyser, buf);
+            micFrames += 1;
             micPeak = Math.max(micPeak, db);
             $("mic-fill").style.width = pct(db) + "%";
             $("mic-fill").style.background = db > -35 ? "#3fb950" : db > -50 ? "#d29922" : "#8b949e";
@@ -543,7 +548,9 @@
           micLog(`getUserMedia device=${$("mic-device").value || "system default"}`);
           micStream = await navigator.mediaDevices.getUserMedia({ audio });
           const track = micStream.getAudioTracks()[0];
-          micInfo = { label: track?.label || "(unlabelled)", settings: track?.getSettings?.() || {} };
+          micInfo = { label: track?.label || "(unlabelled)", settings: track?.getSettings?.() || {}, readyState: track?.readyState, muted: track?.muted };
+          micLog(`track readyState=${track?.readyState} muted=${track?.muted} enabled=${track?.enabled}`);
+          if (track?.muted) say($("mic-status"), "The device opened but is muted by the system.", "err");
           micLog(`stream ok label="${micInfo.label}" rate=${micInfo.settings.sampleRate || "?"} ch=${micInfo.settings.channelCount || "?"}`);
           say($("mic-status"), "Microphone ready — speak and the bar should move.", "ok");
           await fillDevices();
@@ -610,12 +617,15 @@
             }
             lastMicResult = data.text || "(empty transcript)";
             micLog(`transcribe ok ms=${data.ms} model=${data.model} text="${(data.text || "").slice(0, 120)}"`);
+            const facts = `peak ${micPeak.toFixed(0)} dBFS · frames ${micFrames} · ctx ${micCtxState} · track ${micInfo.readyState || "?"}`;
             $("mic-result").textContent = data.text
-              ? `Heard: “${data.text}”  ·  ${data.ms} ms  ·  ${data.model}`
-              : `Heard nothing. Peak ${micPeak.toFixed(0)} dBFS — ${
-                  micPeak < -50
-                    ? "the microphone is delivering near-silence; check the device or the Windows input level."
-                    : "audio arrived, so the clip may have been too short or too quiet."
+              ? `Heard: “${data.text}”  ·  ${data.ms} ms  ·  ${data.model}  ·  ${facts}`
+              : `Heard nothing. ${facts} — ${
+                  micFrames === 0
+                    ? "the audio graph never ran, which is a permission or device problem, not a level problem."
+                    : micPeak < -55
+                      ? "the stream is delivering near-silence. On Windows check Settings → Privacy → Microphone → “Let desktop apps access your microphone”; a browser tab has its own grant and can work while the app is refused."
+                      : "audio arrived, so the clip was too short or too quiet."
                 }`;
             say(status, data.text ? "Transcribed." : "No words in that clip.", data.text ? "ok" : "err");
           } catch (err) {
@@ -632,7 +642,8 @@
           `BeeZilla ${version?.ok ? version.data.version : "?"}`,
           `user agent: ${navigator.userAgent}`,
           `device: ${micInfo.label || "(none)"} rate=${micInfo.settings.sampleRate || "?"} ch=${micInfo.settings.channelCount || "?"}`,
-          `peak: ${micPeak.toFixed(0)} dBFS`,
+          `peak: ${micPeak.toFixed(0)} dBFS · frames ${micFrames} · ctx ${micCtxState}`,
+          `track: readyState=${micInfo.readyState || "?"} muted=${micInfo.muted ?? "?"}`,
           `last result: ${lastMicResult}`,
           `log: ${$("logs-path").textContent || "(unknown)"}`,
         ].join("\n");

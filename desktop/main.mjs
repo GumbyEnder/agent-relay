@@ -10,7 +10,7 @@
  * so patching `window.fetch` there does not touch the page's fetch — a trap that
  * produces a window where every API call 401s while the preload "looks right".
  */
-import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain, systemPreferences } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -626,6 +626,24 @@ function installMediaPermissions() {
     logLine("log", [`[perm] request ${permission} ← ${wc?.getURL?.() ?? "?"} → ${allowed ? "allow" : "deny"}`]);
     callback(allowed);
   });
+  // Chromium also asks about the DEVICE, not just the permission. Without this a
+  // page may be allowed "media" and still be handed nothing.
+  ses.setDevicePermissionHandler((details) => {
+    const ok = details?.deviceType === "audioinput" || details?.deviceType === "audiooutput";
+    logLine("log", [`[perm] device ${details?.deviceType ?? "?"} ${details?.origin ?? ""} → ${ok ? "allow" : "deny"}`]);
+    return ok;
+  });
+  // Windows/macOS can refuse microphone access to the executable itself, and that
+  // refusal shows up as a live stream delivering silence — no error anywhere.
+  setTimeout(() => {
+    try {
+      const status = systemPreferences.getMediaAccessStatus?.("microphone");
+      logLine("log", [`[perm] OS microphone access=${status ?? "unknown"}`]);
+    } catch (err) {
+      logLine("log", [`[perm] OS microphone access query failed: ${err?.message ?? err}`]);
+    }
+  }, 1500);
+
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
     const allowed = permission === "media" || permission === "audioCapture";
     logLine("log", [

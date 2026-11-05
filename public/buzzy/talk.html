@@ -3413,9 +3413,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
           var AC = window.AudioContext || window.webkitAudioContext;
           var ctx = new AC();
+          // A suspended context still opens the stream and still shows a device —
+          // it simply never fires onaudioprocess, so the recorder collects nothing
+          // and the clip never exists. Chrome in a tab resumes on the click; an
+          // Electron window can stay suspended, which is exactly the "works in the
+          // browser, deaf in the app" report. Resume, then say so if it did not take.
+          if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
           var src = ctx.createMediaStreamSource(stream);
           var proc = ctx.createScriptProcessor(2048, 1, 1);
           var chunks = [];
+          micLog("audio ctx state=" + ctx.state);
           var speechSeen = false;
           var quietSince = 0;
           var startedAt = Date.now();
@@ -3428,6 +3435,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
+            if (recState) recState.frames = (recState.frames || 0) + 1;
             if (recState) recState.peak = Math.max(recState.peak || 0, rms);
             if (rms > SPEECH_RMS) { speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
@@ -3444,7 +3452,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // nothing, so this is silent.
           src.connect(proc);
           proc.connect(ctx.destination);
-          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false, peak: 0 };
+          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false, peak: 0, frames: 0 };
+          setTimeout(function () {
+            if (!recState) return;
+            micLog("after 700ms: frames=" + (recState.frames || 0) + " state=" + ctx.state + " track=" + (stream.getAudioTracks()[0] || {}).readyState);
+            if (!recState.frames) {
+              stageNote("The microphone opened but is not delivering audio (Windows: Settings → Privacy → Microphone → let desktop apps use it).");
+            }
+          }, 700);
           micLog("recording at " + ctx.sampleRate + " Hz");
           voice.note = "";
           setAvatarState("listening");
