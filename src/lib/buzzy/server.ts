@@ -1234,11 +1234,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
   if (!renderedAudio && claimsAudio(finalReply)) {
     console.warn("[buzzy] reply claimed an audio deliverable the chat cannot produce");
+    // This copy has to stay true to the CURRENT build. It once said "chat has no
+    // music tool wired yet" long after music was wired, which is the same class of
+    // lie as the claim it replaces. Say only what is certain: nothing was made.
     finalReply =
-      "I did not produce any audio — that sentence was wrong, and nothing was saved to your Library. " +
-      "Chat has no music tool wired yet, so a track cannot come out of this conversation. " +
-      "The music endpoint itself works (ElevenLabs answered 200 when called directly), so this is a missing " +
-      "tool in the chat loop, not a plan problem. Tell me to stop and I will not pretend again.";
+      "I didn't produce audio on that turn — nothing was generated and nothing was saved. " +
+      (musicConfigured()
+        ? "Ask me to make the track and I'll generate it now."
+        : "Music isn't configured on this deployment, so no track can be produced here.");
   } else if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn) {
     const wantsMusic = /\b(song|track|music|audio|jingle|score)\b/i.test(
       [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" "),
