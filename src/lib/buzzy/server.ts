@@ -37,7 +37,7 @@ import {
   PLAN_FIRST_INSTRUCTION,
 } from "./info";
 import { calculate } from "./calc";
-import { generateMusic, storeAudio, musicConfigured } from "./music";
+import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
@@ -583,7 +583,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
       : 20;
     const seconds = Math.min(300, Math.max(3, implied));
-    const made = await generateMusic(brief, seconds * 1000);
+    const made = await gatedMusic(userId, brief, seconds * 1000);
     if (made.ok && made.bytes) {
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const name = `music-${stamp}.mp3`;
@@ -910,7 +910,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
                 : 20;
               const seconds = Math.min(300, Math.max(3, Number(content.seconds) || implied));
-              const made = await generateMusic(brief, seconds * 1000);
+              const made = await gatedMusic(userId, brief, seconds * 1000);
               if (!made.ok || !made.bytes) {
                 // Name the real reason. "music failed" teaches nobody anything, and a
                 // vague failure is what invites an invented success.

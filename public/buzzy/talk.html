@@ -1374,6 +1374,10 @@
               <button id="chatSend" disabled>Send</button>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
+            <!-- Plan + remaining quota, read from /api/buzzy/entitlement. A refusal
+                 ("music is part of the paid plans") belongs next to the button that
+                 took it, and a plan you cannot see is a plan nobody trusts. -->
+            <p id="planChip" class="voice-status hidden" role="status" title="Your plan and what is left today"></p>
             <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
@@ -2345,7 +2349,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       })
         .then(function (r) { return r.json(); })
         .then(function (j) {
-          if (!j.ok) { note.content = j.error || "Music did not come back."; renderChatMessages(); return; }
+          if (!j.ok) {
+            note.content = j.error || "Music did not come back.";
+            if (j.code === "plan_required" || j.code === "quota_exhausted") {
+              var chip = document.getElementById("planChip");
+              if (chip) { chip.textContent = j.error; chip.classList.remove("hidden"); }
+              if (window.bzRefreshPlan) window.bzRefreshPlan();
+            }
+            renderChatMessages();
+            return;
+          }
           note.content = "Here it is.";
           note.asset = j.asset;
           renderChatMessages();
@@ -5382,6 +5395,37 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       card.style.display = "block";
     })
     .catch(function () { /* never surface an error for the digest */ });
+})();
+</script>
+
+<script>
+/* ── Plan + remaining quota ────────────────────────────────────────────── */
+(function () {
+  function render(d) {
+    var chip = document.getElementById("planChip");
+    if (!chip || !d || !d.ok) return;
+    var name = String(d.plan || "free");
+    var bits = [name.charAt(0).toUpperCase() + name.slice(1) + " plan"];
+    var left = d.remaining || {};
+    bits.push(Number(left.inference || 0).toLocaleString() + " chats left");
+    var musicLeft = Number(left.musicSeconds || 0);
+    bits.push(musicLeft > 0 ? Math.floor(musicLeft / 60) + " min music left" : "no music on this plan");
+    if (name === "free") bits.push("upgrade for music");
+    chip.textContent = bits.join(" · ");
+    chip.classList.remove("hidden");
+  }
+  function refresh() {
+    fetch("/api/buzzy/entitlement", { credentials: "include" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(render)
+      .catch(function () { /* a plan chip is not worth an error toast */ });
+  }
+  refresh();
+  window.bzRefreshPlan = refresh;
+  var send = document.getElementById("chatSend");
+  if (send) send.addEventListener("click", function () { setTimeout(refresh, 2500); });
+  var music = document.getElementById("makeMusic");
+  if (music) music.addEventListener("click", function () { setTimeout(refresh, 6000); });
 })();
 </script>
 
