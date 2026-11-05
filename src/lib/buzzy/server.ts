@@ -52,6 +52,7 @@ import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
+import { generateMusic, musicConfigured, storeAudio } from "./music";
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
@@ -435,6 +436,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const { userId, jobId, sessionId, message, model, jobContext, companyName, companyFacts } = req;
   const mode: "chat" | "work" = req.mode === "work" ? "work" : "chat";
   const surface: "text" | "voice" = req.surface === "voice" ? "voice" : "text";
+  // Audio actually produced this turn. The reply may only claim a track when this
+  // is set — the whole reason a person hears "I don't produce audio" from a product
+  // that has a music tool is that nothing tracked the difference.
+  let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
+  let musicRefusal: { code: string; error: string } | null = null;
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
   let extractMs = 0;
