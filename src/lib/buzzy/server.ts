@@ -252,6 +252,9 @@ export interface ChatRequest {
   /** Tool progress. A tool call is buffered server-side, so without this the
    *  client can only show a clock — this says WHAT is running and for how long. */
   onTool?: (e: { name: string; state: "running" | "done" | "failed"; ms?: number }) => void;
+  /** Coarse progress: which part of the turn is running, and roughly how long it
+   *  should take. A clock without a stage cannot tell "thinking" from "hung". */
+  onStage?: (s: { phase: string; label: string; etaMs?: number }) => void;
   /** Preferred audio voice for the voice lane. */
   voiceName?: string;
   /** The composer's "Do it now" control. An explicit execute flag beats any
@@ -632,10 +635,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
       : 20;
     const seconds = Math.min(300, Math.max(3, implied));
+    // Music latency tracks the length of the piece: ~4s fixed plus ~150ms/second,
+    // measured on 15-20s tracks. Cap the estimate so a 5-minute ask does not claim
+    // five minutes of silence is normal.
+    req.onStage?.({
+      phase: "music",
+      label: `Composing ${seconds}s of audio`,
+      etaMs: Math.min(120_000, 4000 + seconds * 150),
+    });
     const made = await gatedMusic(userId, brief, seconds * 1000);
     if (made.ok && made.bytes) {
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const name = `music-${stamp}.mp3`;
+      req.onStage?.({ phase: "saving", label: "Saving the track", etaMs: 1500 });
       const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
       renderedAudio = {
         url: `/api/buzzy/assets/${stored.id}`,

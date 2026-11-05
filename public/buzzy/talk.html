@@ -688,6 +688,15 @@
       height: 28px;
       border-radius: 4px;
     }
+    /* A stage label plus a bar that fills toward the declared ETA. The bar is
+       capped at 96% because the estimate is an estimate: it must never sit at
+       100% while the work is still running. */
+    .stage-line { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .stage-label { font-size: 12px; opacity: .75; }
+    .stage-bar { position: relative; flex: 1; max-width: 180px; height: 3px; border-radius: 2px;
+                 background: rgba(255,255,255,.14); overflow: hidden; }
+    .stage-bar > i { position: absolute; inset: 0 auto 0 0; width: 0%; border-radius: 2px;
+                     background: linear-gradient(90deg,#f5b83d,#ffd97a); transition: width .4s ease; }
     .thinking-elapsed {
       font-size: 0.72rem;
       color: var(--bz-muted, #8d8d8d);
@@ -3753,7 +3762,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (!dataLines.length) return;
           var payload;
           try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
-          if (ev === "text") {
+          if (ev === "stage") {
+            if (window.__bzStage) window.__bzStage(payload);
+          } else if (ev === "text") {
             if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
             liveText += payload.t || "";
             if (!liveBubble) {
@@ -3763,6 +3774,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               if (c) c.insertBefore(liveBubble, c.firstChild);
             }
             liveBubble.textContent = liveText;
+          } else if (ev === "stage") {
+            if (window.__bzStage) window.__bzStage(payload);
           } else if (ev === "tool") {
             // Name the work instead of leaving a bare clock: "running
             // read_web_page" explains a 30-second silence; dots do not.
@@ -4873,13 +4886,34 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       thinkingEl.id = "thinkingIndicator";
       // Elapsed time, not just dots. A tool turn is buffered server-side (a tool
       // call needs the whole assistant message before it can run), so there is no
+      // Stage events: name the work, then fill a bar toward the declared ETA.
+      // Both lanes call this — voice and typed share one indicator.
+      window.__bzStage = function (payload) {
+        var label = document.getElementById("bzStageLabel");
+        var fill = document.querySelector("#bzStageBar > i");
+        if (!label || !fill) return;
+        label.textContent = payload && payload.label ? String(payload.label) : "";
+        var eta = (payload && payload.etaMs) || 0;
+        if (!eta) { fill.style.width = "0%"; return; }
+        var startedAt = Date.now();
+        if (window.__bzStageTimer) clearInterval(window.__bzStageTimer);
+        fill.style.width = "6%";
+        window.__bzStageTimer = setInterval(function () {
+          var pct = Math.min(96, ((Date.now() - startedAt) / eta) * 92 + 6);
+          fill.style.width = pct.toFixed(1) + "%";
+          if (pct >= 96) { clearInterval(window.__bzStageTimer); window.__bzStageTimer = null; }
+        }, 250);
+      };
+
       // mid-turn stream to show — an honest clock is the next best thing, and it
       // tells the owner the difference between "working" and "hung".
       var thinkingStart = Date.now();
       thinkingEl.innerHTML =
         '<img class="thinking-mascot" src="/buzzy/brand/revision6_expressions_08-thinking.png" alt="" />' +
         '<span class="thinking-dots">...</span>' +
-        '<span class="thinking-elapsed" id="thinkingElapsed"></span>';
+        '<span class="thinking-elapsed" id="thinkingElapsed"></span>' +
+        '<div class="stage-line"><span class="stage-label" id="bzStageLabel"></span>' +
+        '<span class="stage-bar" id="bzStageBar"><i></i></span></div>';
       messagesContainer.appendChild(thinkingEl);
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
       var elapsedTimer = setInterval(function () {
@@ -4887,6 +4921,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (!el) return;
         var secs = Math.round((Date.now() - thinkingStart) / 1000);
         // Say what is likely happening rather than a bare number.
+        var staged = document.getElementById("bzStageLabel");
+        if (staged && staged.textContent) { el.textContent = secs + "s"; return; }
         el.textContent = secs < 3 ? "" : secs + "s" + (secs > 8 && (chatState.mode || "chat") === "work" ? " · working" : "");
       }, 500);
       // Cleared wherever the indicator is removed; a leaked interval would tick

@@ -1129,6 +1129,7 @@ export default defineEventHandler(async (event) => {
       speech?: VoiceHandlers;
       onText?: (t: string) => void;
       onTool?: (e: { name: string; state: "running" | "done" | "failed"; ms?: number }) => void;
+      onStage?: (s: { phase: string; label: string; etaMs?: number }) => void;
     }) =>
       chatLoop({
         userId,
@@ -1150,6 +1151,7 @@ export default defineEventHandler(async (event) => {
         // Drop this and the SSE sink above is dead code: the loop fires, nothing
         // reaches the client, and the voice lane stays silent mid-tool.
         onTool: opts?.onTool,
+        onStage: opts?.onStage,
       });
 
     // ── Voice lane: text + audio streamed as Server-Sent Events ────────
@@ -1177,6 +1179,8 @@ export default defineEventHandler(async (event) => {
               },
               // Events: tool {name,state,ms} — so a long tool is named while it runs.
               onTool: (e) => send("tool", e),
+              // stage {phase,label,etaMs} — what the turn is doing, and how long it should take.
+              onStage: (st) => send("stage", st),
             });
             send("done", result);
             if (result.timings) {
@@ -1239,7 +1243,11 @@ export default defineEventHandler(async (event) => {
             }
           };
           try {
-            const result = await runTurn({ onText: (t) => send("text", { t }) });
+            const result = await runTurn({
+              onText: (t) => send("text", { t }),
+              onTool: (e) => send("tool", e),
+              onStage: (st) => send("stage", st),
+            });
             send("done", result);
           } catch (err) {
             console.error("[buzzy/text] turn failed:", err instanceof Error ? err.message : err);
