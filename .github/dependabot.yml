@@ -22,6 +22,14 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "nitropack"
         update-types: ["version-update:semver-major"]
+      # better-auth 1.7 removed `genericOAuthClient` and `auth.api.signInWithOAuth2`.
+      # The popup sign-in in src/lib/auth/{client,popup.server}.ts must move to
+      # `oauthPopupClient` + the core `signIn.social` endpoint first; until then a
+      # bot PR that bundles it in fails typecheck and blocks the other 48 updates.
+      - dependency-name: "better-auth"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@better-auth/*"
+        update-types: ["version-update:semver-major"]
 
   # Dependabot also scans this nested manifest — keep it explicit and grouped so
   # the adapter cannot open its own pile of PRs on top of the root queue.
@@ -39,6 +47,11 @@ updates:
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
       - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # vite major was NOT ignored here, so a "vitest is an ancestor" companion
+      # bump carried vite 5 -> 8 into the adapter as a routine patch PR. The
+      # adapter builds its own test config; a vite major belongs in deliberate work.
+      - dependency-name: "vite"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
