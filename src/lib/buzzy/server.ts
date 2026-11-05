@@ -1189,7 +1189,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // is in your Library." has no create/save verb at all, yet it is the exact
   // sentence a user saw while the Library held no audio.
   const AUDIO_NOUN = /\b(track|song|audio|mp3|music|beat|instrumental|pad|loop|melody|score|jingle|soundscape|soundtrack|composition|remix|stem)\b/i;
-  const AUDIO_DELIVERY = /\b(library|saved|ready|generated|created|made|rendered|attached|downloading|player)\b/i;
+  // Progress is a delivery claim too. "I'm generating the music now. Once it's
+  // done, I'll share the file." was said three times in a row while nothing was
+  // generating, and the owner sat waiting — the same lie in a friendlier tense.
+  const AUDIO_DELIVERY =
+    /\b(library|saved|ready|generated|created|made|rendered|attached|downloading|player|generating|composing|rendering|producing|working on|in progress|almost|shortly|on its way|coming up)\b/i;
   const AUDIO_DENIAL = /\b(can'?t|cannot|unable|not configured|no music tool|did not|didn'?t|won'?t|no audio)\b/i;
   const claimsAudio = (text: string): boolean =>
     text

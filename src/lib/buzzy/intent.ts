@@ -65,7 +65,13 @@ export function isMusicRequest(message: string): boolean {
   // The noun list is deliberately wide: "just make me a lullaby about ducks"
   // matched nothing, so the music pre-pass never ran and the model answered
   // "I can't save audio files directly here" — a denial of a capability we sell.
-  return /\b(make|create|generate|produce|compose|write|build|give me|sing)\b[^.\n]{0,60}\b(song|track|music|jingle|score|beat|soundtrack|instrumental|pad|loop|soundscape|melody|lullaby|tune|ballad|hymn|anthem|serenade|ditty|sting|underscore|theme|ambient|drone|remix|rap|chorus|riff)\b/i.test(m);
+  const NOUN = "(song|track|music|jingle|score|beat|soundtrack|instrumental|pad|loop|soundscape|melody|lullaby|tune|ballad|hymn|anthem|serenade|ditty|sting|underscore|theme|ambient|drone|remix|rap|chorus|riff)";
+  if (new RegExp(`\\b(make|create|generate|produce|compose|write|build|give me|sing)\\b[^.\\n]{0,60}\\b${NOUN}\\b`, "i").test(m)) return true;
+  // "let's start now the lyrics should be about a sad little duck" — the request was
+  // in the previous turn; this one only says "begin". A start verb plus a music noun
+  // in the same sentence is the same instruction in fewer words.
+  if (new RegExp(`\\b(let'?s (start|begin|do it|go)|start now|go ahead|do it now|make it now)\\b[^.\\n]{0,80}\\b${NOUN}\\b`, "i").test(m)) return true;
+  return false;
 }
 
 /** A deliverable request in the owner's own words (not only "file" phrasing). */
