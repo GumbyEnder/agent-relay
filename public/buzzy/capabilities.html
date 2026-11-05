@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeeZilla — Capabilities</title>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+<style>
+  :root {
+    --bz-bg: #0d0d0d;
+    --bz-card: #151515;
+    --bz-line: #242424;
+    --bz-yellow: #ffd40d;
+    --bz-text: #f2f2f2;
+    --bz-muted: #8d8d8d;
+    --bz-bad: #ff6b6b;
+    --bz-good: #6ee7a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bz-bg); color: var(--bz-text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    padding: 0 1.1rem 4rem;
+  }
+  header.top { max-width: 860px; margin: 0 auto; padding: 1.2rem 0 0.4rem; }
+  #bzNav { display: flex; flex-wrap: wrap; gap: 0.9rem; padding: 0 0 1rem; }
+  #bzNav a { color: var(--bz-muted); text-decoration: none; font-size: 0.86rem; }
+  #bzNav a[aria-current="page"], #bzNav a[data-nav="capabilities"] { color: var(--bz-yellow); }
+  h1 { font-size: 1.28rem; margin: 0.6rem 0 0.2rem; letter-spacing: -0.01em; }
+  .sub { color: var(--bz-muted); font-size: 0.88rem; margin: 0 0 1.4rem; }
+  main { max-width: 860px; margin: 0 auto; }
+  .card {
+    background: var(--bz-card); border: 1px solid var(--bz-line); border-radius: 14px;
+    padding: 0.85rem 1rem; margin-bottom: 0.7rem; display: flex; gap: 0.8rem; align-items: flex-start;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 0.45rem; flex: 0 0 auto; }
+  .ok .dot { background: var(--bz-good); }
+  .no .dot { background: var(--bz-bad); }
+  .cap-label { font-weight: 600; font-size: 0.95rem; }
+  .cap-detail { color: var(--bz-muted); font-size: 0.83rem; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+  h2 { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--bz-muted); margin: 1.7rem 0 0.6rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--bz-line); }
+  th { color: var(--bz-muted); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; color: var(--bz-muted); }
+  .stamp { color: var(--bz-muted); font-size: 0.75rem; margin-top: 1.4rem; }
+  code { background: #1d1d1d; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header class="top">
+  <nav id="bzNav">
+    <a href="/buzzy/talk" data-nav="talk">Talk</a>
+    <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+    <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+    <a href="/buzzy/memory" data-nav="memory">Memory</a>
+    <a href="/buzzy/experts" data-nav="experts">Experts</a>
+    <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+    <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+    <a href="/buzzy/upload" data-nav="publish">Publish</a>
+    <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+  </nav>
+  <h1>What BeeZilla can do here</h1>
+  <p class="sub">Read from the same registry the chat loop uses. A green line means the capability is configured on <em>this</em> deployment; red names the missing setting.</p>
+</header>
+<main>
+  <div id="caps"><p class="sub">Loading…</p></div>
+  <h2>Tools the model may call</h2>
+  <div id="tools"><p class="sub">Loading…</p></div>
+  <p class="stamp" id="stamp"></p>
+</main>
+<script>
+  function esc(v) { return String(v == null ? "" : v).replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+
+  fetch("/api/buzzy/capabilities", { credentials: "same-origin" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var caps = d.capabilities || [];
+      document.getElementById("caps").innerHTML = caps.map(function (c) {
+        return '<div class="card ' + (c.ok ? "ok" : "no") + '">' +
+          '<span class="dot"></span>' +
+          '<div><div class="cap-label">' + esc(c.label) + "</div>" +
+          '<div class="cap-detail">' + esc(c.detail) + "</div></div></div>";
+      }).join("");
+
+      var tools = d.tools || [];
+      document.getElementById("tools").innerHTML =
+        "<table><thead><tr><th>tool</th><th>gate</th><th>cost</th><th>budget</th><th>state</th></tr></thead><tbody>" +
+        tools.map(function (t) {
+          return "<tr><td><code>" + esc(t.name) + "</code></td>" +
+            "<td>" + esc(t.gate) + "</td>" +
+            "<td>" + esc(t.cost) + "</td>" +
+            '<td class="num">' + Math.round(t.timeoutMs / 1000) + "s</td>" +
+            "<td>" + (t.offered ? "offered" : "withheld — " + esc(t.withheld)) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+
+      document.getElementById("stamp").textContent = "Generated " + (d.generatedAt || "");
+    })
+    .catch(function (e) {
+      document.getElementById("caps").innerHTML = '<p class="sub">Could not read capabilities: ' + esc(e.message) + "</p>";
+    });
+</script>
+</body>
+</html>

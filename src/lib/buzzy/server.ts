@@ -144,7 +144,7 @@ function stripSlotMarkers(text: string): string {
 // JSON. Decoupled from the reply turn; a failed parse degrades to nothing
 // rather than inventing facts.
 function extractSystemPrompt(existing?: Record<string, string>): string {
-  const base = `Extract these four facts from the user's message, using their own words. Respond with ONLY a JSON object (no prose, no markdown fences):\n"challenge"    = the core problem (what's wrong),\n"difficulties" = what makes it hard or risky,\n"who_involved" = who is affected,\n"end_goal"     = the outcome they want.\nUse null for any fact the message does not state. Never invent a value, a business, or an amount.`;
+  const base = `Extract these four facts from the conversation, using the user's own words. Respond with ONLY a JSON object (no prose, no markdown fences):\n"challenge"    = the core problem (what's wrong),\n"difficulties" = what makes it hard or risky,\n"who_involved" = who is affected,\n"end_goal"     = the outcome they want.\nUse null for any fact the conversation does not state. Never invent a value, a business, or an amount. Earlier turns count: if the user already answered something three messages ago, extract it now rather than leaving it blank.`;
   const already =
     existing && Object.keys(existing).length
       ? `\n\nThese are already captured. Return null for any of them UNLESS this message corrects one or makes it clearly more specific. Never overwrite a captured decision with a vaguer restatement of the same idea:\n` +
@@ -171,10 +171,17 @@ async function extractDecisions(
   userMessage: string,
   model?: string,
   existing?: Record<string, string>,
+  /** Earlier owner turns. A fact said three messages ago used to be invisible to
+   *  the extractor, so the scripted question asked for it again — the exact
+   *  "ignored what I already said" complaint. */
+  transcript?: string,
 ): Promise<Record<string, string>> {
+  const body = transcript
+    ? `Conversation so far (owner's words only):\n${transcript.slice(-3500)}\n\nLatest message:\n${userMessage.slice(0, 2000)}`
+    : userMessage.slice(0, 3000);
   const messages = [
     { role: "system", content: extractSystemPrompt(existing) },
-    { role: "user", content: userMessage.slice(0, 3000) },
+    { role: "user", content: body },
   ];
   const candidates = [EXTRACT_MODEL, model].filter(
     (m, i, all): m is string => typeof m === "string" && m.length > 0 && all.indexOf(m) === i,
@@ -244,6 +251,9 @@ export interface ChatRequest {
   onText?: (delta: string) => void;
   /** Preferred audio voice for the voice lane. */
   voiceName?: string;
+  /** The composer's "Do it now" control. An explicit execute flag beats any
+   *  phrase-matching: the person pressed a button that means "produce it". */
+  execute?: boolean;
 }
 
 /** Per-turn latency breakdown. Product metric — surfaced to the client and
@@ -280,6 +290,23 @@ export interface ChatResponse {
   timings?: TurnTimings;
   /** Audio this turn produced — the chat renders a player for it. */
   audio?: { url: string; name: string; bytes: number; type: string };
+  /**
+   * Everything this turn actually produced. The renderer draws these cards and
+   * only these cards; a sentence claiming a file that is not in this list is a
+   * bug in the reply, not a product feature. `document`/`audio` are kept for the
+   * existing client and for compatibility.
+   */
+  artifacts?: Array<{
+    kind: "document" | "audio" | "image" | "sheet" | "presentation";
+    name: string;
+    url: string;
+    bytes: number | null;
+    contentType: string;
+    /** Where to find it later. */
+    libraryUrl?: string;
+  }>;
+  /** What ran this turn, in order — the "what happened" strip reads this. */
+  tools?: Array<{ name: string; ms: number; ok: boolean; code?: string }>;
   /** The file this turn produced, with links the chat can show inline. */
   document?: { filename: string; contentType: string; bytes: number | null; documentId?: string; downloadUrl: string; libraryUrl: string };
   error?: string;
@@ -337,6 +364,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const sql = await getSql();
   // A Talk with no job still needs its own brief. Key memory by the session
   // so another chat's decisions are not already "known".
+  // What ran this turn, in order. The "what happened" strip is built from this,
+  // so latency and tool activity are visible to the owner, not just to us.
+  const toolLog: Array<{ name: string; ms: number; ok: boolean; code?: string }> = [];
+
   const memory = new DbMemory(sql, userId, jobId || sessionId);
 
   // ── Ensure Honcho peer ──────────────────────────────────────────────
@@ -430,7 +461,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ("research X and save it in the file") fell through the gate and the product
   // answered without producing anything.
   const wantsLibraryFile = isFileRequest(message);
-  const requestedDraft = isDraftRequest(message);
+  // A pressed button outranks a matched phrase: "Do it now" is an instruction,
+  // and the regex behind isDraftRequest is only ever an approximation of one.
+  const requestedDraft = isDraftRequest(message) || req.execute === true;
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -442,7 +475,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // TEXT turns await it (the brief must be right in the same render), but on
   // a fast model rather than the reply model.
   const extractStarted = Date.now();
-  const extractPromise = extractDecisions(message, resolvedModel, slotValues);
+  // Owner's own turns, newest last. Bounded so the extractor stays a small task.
+  const ownerTurns = history
+    .filter((h) => h.role === "user" && typeof h.content === "string")
+    .slice(-6)
+    .map((h) => String(h.content).slice(0, 400))
+    .join("\n");
+  const extractPromise = extractDecisions(message, resolvedModel, slotValues, ownerTurns);
   let newlyExtracted: Record<string, string> = {};
   const mergeExtracted = async (found: Record<string, string>) => {
     for (const [slotId, val] of Object.entries(found)) {
@@ -967,6 +1006,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           },
         );
 
+        toolLog.push({ name: tc.name, ms: run.ms ?? 0, ok: run.ok, code: run.ok ? undefined : "failed" });
         if (!run.ok) {
           followUpMessages.push({
             role: "user",
@@ -980,6 +1020,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           continue;
         }
         const out = run.value as { message: string; bytes?: number; path?: string; errorCode?: string };
+        // Replace the coarse entry with the real outcome: "ok" with a code is a
+        // tool that ran and reported its own failure (a 402 is not a success).
+        const last = toolLog[toolLog.length - 1];
+        if (last && last.name === tc.name) {
+          last.ok = !out.errorCode;
+          last.code = out.errorCode;
+        }
         followUpMessages.push({ role: "user", content: out.message });
         await recordToolCall(sql, {
           userId, jobId, sessionId, turnId: req.attemptId ?? null,
@@ -1427,6 +1474,46 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The player rides the reply that announces it: a link the owner has to hunt
   // for is not "delivered".
   if (renderedAudio) response.audio = renderedAudio;
+
+  // ── The artifact envelope ──────────────────────────────────────────
+  // One list of what this turn actually produced. The client renders these and
+  // nothing else, so a sentence claiming a file that is not here is a visible
+  // bug rather than a convincing lie.
+  const artifacts: NonNullable<ChatResponse["artifacts"]> = [];
+  if (response.document) {
+    artifacts.push({
+      kind: "document",
+      name: response.document.filename,
+      url: response.document.downloadUrl,
+      bytes: response.document.bytes,
+      contentType: response.document.contentType,
+      ...(response.document.libraryUrl ? { libraryUrl: response.document.libraryUrl } : {}),
+    });
+  }
+  if (renderedAudio) {
+    artifacts.push({
+      kind: "audio",
+      name: renderedAudio.name,
+      url: renderedAudio.url,
+      bytes: renderedAudio.bytes,
+      contentType: renderedAudio.type,
+    });
+  }
+  if (artifacts.length) response.artifacts = artifacts;
+
+  if (toolLog.length) {
+    response.tools = toolLog;
+    // Honest empty state: when the reason a capability did not run is OUR
+    // configuration, say so in one line the owner can act on instead of letting
+    // the model phrase it vaguely.
+    const blocked = toolLog.find((t) => !t.ok && /not_configured|paid_plan_required|quota/.test(t.code ?? ""));
+    if (blocked && !response.warning) {
+      response.warning =
+        blocked.code === "paid_plan_required"
+          ? `${blocked.name} needs a paid provider plan on this deployment — the key exists but the plan does not cover it.`
+          : `${blocked.name} is not configured on this deployment.`;
+    }
+  }
 
   return response;
 }

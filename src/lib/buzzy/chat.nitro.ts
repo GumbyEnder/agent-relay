@@ -1005,6 +1005,9 @@ export default defineEventHandler(async (event) => {
     // UI mode: "work" steers toward a work effort, "chat" is ordinary
     // conversation. Unknown values fall back to chat inside chatLoop.
     const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
+    // The composer's "Do it now": an instruction the person pressed, so it does
+    // not depend on the model reading intent out of phrasing.
+    const execute = body.execute === true;
     // Voice lane: stream text + audio back over SSE so speech starts on the
     // first audio chunk instead of after the whole buffered reply.
     const voice = body.voice === true;
@@ -1132,6 +1135,7 @@ export default defineEventHandler(async (event) => {
         attemptId,
         jobContext,
         mode,
+        execute,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,
