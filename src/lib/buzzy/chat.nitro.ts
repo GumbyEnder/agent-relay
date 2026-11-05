@@ -4312,6 +4312,29 @@ export default defineEventHandler(async (event) => {
     }
     const id = `sess_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     const sql = await getSql();
+    // Resume, don't multiply. Every POST used to mint a new session, and a new
+    // session mints its own job: one lullaby request left 56 identical work items
+    // in the list. An open thread for this account (same company scope, touched in
+    // the last 12 hours) IS the thread the next turn belongs to. `fresh: true`
+    // is the explicit opt-out, which is what the New chat button sends.
+    if (body.fresh !== true) {
+      const recent = companyId
+        ? await sql<{ id: string; job_id: string | null; title: string; company_id: string | null }>`
+            SELECT id, job_id, title, company_id FROM buzzy_sessions
+            WHERE user_id = ${user.id} AND company_id = ${companyId}
+              AND updated_at > now() - interval '12 hours'
+            ORDER BY updated_at DESC LIMIT 1
+          `
+        : await sql<{ id: string; job_id: string | null; title: string; company_id: string | null }>`
+            SELECT id, job_id, title, company_id FROM buzzy_sessions
+            WHERE user_id = ${user.id} AND company_id IS NULL
+              AND updated_at > now() - interval '12 hours'
+            ORDER BY updated_at DESC LIMIT 1
+          `;
+      if (recent.length) {
+        return { ok: true, resumed: true, session: { id: recent[0]!.id, jobId: recent[0]!.job_id, title: recent[0]!.title, companyId: recent[0]!.company_id } };
+      }
+    }
     if (companyId) {
       const owned = await sql`
         SELECT id FROM buzzy_companies WHERE id = ${companyId} AND user_id = ${user.id}

@@ -2075,7 +2075,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // ── Intake mode tabs: chat (default) / form ────────────────────────
     let chatState = {
       jobId: null,
-      sessionId: null,
+      // Resumed on load: without this every reload started a NEW session, and a
+      // new session means a new job — 56 copies of one lullaby in Work.
+      sessionId: (function () { try { return localStorage.getItem("bz_session_id") || null; } catch (_) { return null; } })(),
       slots: {},
       messages: [],
       draftReady: false,
@@ -4455,6 +4457,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function goBackToRecent() {
       chatState.sessionId = null;
+      try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+      try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+      try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+      try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+      try { localStorage.removeItem("bz_session_id"); } catch (_) {}
       chatState.jobId = null;
       chatState.jobContext = null;
       chatState.slots = {};
@@ -4834,6 +4841,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var s = data && data.session;
         if (s && s.id) {
           chatState.sessionId = s.id;
+          try { localStorage.setItem("bz_session_id", s.id); } catch (_) {}
           if (s.companyId) chatState.boundCompanyId = s.companyId;
         }
         return chatState.sessionId;
