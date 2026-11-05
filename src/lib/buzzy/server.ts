@@ -1189,6 +1189,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // worse than failing at it, because it teaches the person not to ask again.
   const DENIES_AUDIO =
     /\b(can(?:no|')t|cannot|unable to|not able to)\b[^.\n]{0,40}\b(save|create|generate|make|produce|render)\b[^.\n]{0,30}\b(audio|music|song|track|mp3)\b/i;
+  // A music request that produced no audio must say why, even when the model
+  // answers with a lyric instead: "just make me a lullaby" got four lines of verse
+  // and no mention that no audio was made. Honesty first, then the words.
+  if (musicRefusal && !renderedAudio && isMusicRequest(message) && !/\bplan\b|upgrade|paid plan/i.test(finalReply)) {
+    const why =
+      musicRefusal.code === "plan_required" || musicRefusal.code === "paid_plan_required"
+        ? "I can't produce audio on this account: music is part of BeeZilla's paid plans, and this one is free."
+        : `I couldn't produce that audio — the provider refused: ${musicRefusal.error}.`;
+    finalReply = why + "\n\n" + finalReply;
+  }
   if (!renderedAudio && musicConfigured() && DENIES_AUDIO.test(finalReply)) {
     finalReply = musicRefusal
       ? musicRefusal.code === "plan_required" || musicRefusal.code === "paid_plan_required"
