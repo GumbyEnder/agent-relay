@@ -88,6 +88,14 @@
     }
 
     /* ── Buttons ────────────────────────────────────────── */
+    .bz-what {
+      font-size: 0.68rem;
+      letter-spacing: 0.02em;
+      color: var(--bz-muted, #7a7a7a);
+      margin: -0.25rem 0 0.9rem 0.35rem;
+      font-variant-numeric: tabular-nums;
+      user-select: none;
+    }
     button {
       font: inherit;
       padding: 0.6rem 1.2rem;
@@ -1288,6 +1296,7 @@
     <nav id="bzNav">
       <a href="/buzzy/talk" data-nav="talk">Talk</a>
       <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+      <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
       <a href="/buzzy/memory" data-nav="memory">Memory</a>
       <a href="/buzzy/experts" data-nav="experts">Experts</a>
       <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
@@ -1371,9 +1380,16 @@
             <div class="chat-input-row">
               <textarea id="chatInput" rows="2" placeholder="What do you want to talk about" aria-label="Describe the job for BeeZilla" disabled></textarea>
               <button id="micBtn" class="mic-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">&#127908;</button>
+              <button id="chatDoIt" class="secondary" type="button" disabled
+                      title="Stop asking — produce it now">Do it</button>
               <button id="chatSend" disabled>Send</button>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
+            <!-- Plan + remaining quota, read from /api/buzzy/entitlement. A user must
+                 be able to see what their plan actually gives them before hitting a
+                 wall — and a refusal ("music is part of the paid plans") belongs
+                 next to the button that took it, not in a log. -->
+            <p id="planChip" class="voice-status hidden" role="status" title="Your plan and what is left today"></p>
             <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
@@ -2345,7 +2361,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       })
         .then(function (r) { return r.json(); })
         .then(function (j) {
-          if (!j.ok) { note.content = j.error || "Music did not come back."; renderChatMessages(); return; }
+          if (!j.ok) {
+            note.content = j.error || "Music did not come back.";
+            if (j.code === "plan_required" || j.code === "quota_exhausted") {
+              var chip = document.getElementById("planChip");
+              if (chip) { chip.textContent = j.error; chip.classList.remove("hidden"); }
+              if (window.bzRefreshPlan) window.bzRefreshPlan();
+            }
+            renderChatMessages();
+            return;
+          }
           note.content = "Here it is.";
           note.asset = j.asset;
           renderChatMessages();
@@ -2401,6 +2426,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var _m3 = document.getElementById("make3d");
     if (_m3) _m3.addEventListener("click", make3d);
 
+    // ── What happened ────────────────────────────────────────────────
+    // The product judges itself on numbers; the person paying should be able to
+    // see them without asking. One muted line per reply: model, wall clock, what
+    // ran. No adjectives, no summary of the answer.
+    function renderWhatHappened(m) {
+      var t = m.timings || {};
+      var bits = [];
+      if (t.model) bits.push(String(t.model).replace(/^[^\/]+\//, ""));
+      if (t.totalMs) bits.push((t.totalMs / 1000).toFixed(1) + "s");
+      if (t.lane === "audio") bits.push("voice");
+      var tools = m.tools || [];
+      if (tools.length) {
+        bits.push(tools.map(function (x) { return x.name + (x.ok ? "" : " ✕"); }).join(", "));
+      }
+      if (!bits.length) return "";
+      var esc = function (v) { return String(v == null ? "" : v).replace(/</g, "&lt;"); };
+      return '<div class="bz-what" title="' + esc(JSON.stringify(t)) + '">' + esc(bits.join(" · ")) + "</div>";
+    }
+
     function renderFileCard(doc) {
       var name = String(doc.filename || "document");
       var size = doc.bytes ? " · " + Math.max(1, Math.round(doc.bytes / 1024)) + " KB" : "";
@@ -2448,6 +2492,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (m.asset && m.asset.url) {
           bubble += renderMediaCard(m.asset);
         }
+        if (m.timings) bubble += renderWhatHappened(m);
         return bubble;
       }).join("");
       container.innerHTML = html;
@@ -4766,6 +4811,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
 
+    // The composer's "Do it" control. A pressed button is a clearer instruction
+    // than any phrasing the regexes have to guess at, so it sets execute: true and
+    // the server skips the interview and plan-then-confirm entirely.
+    var pendingExecute = false;
     async function sendChatMessage() {
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
@@ -4790,6 +4839,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
 
       input.value = "";
+      const sentExecute = pendingExecute === true;
+      pendingExecute = false;
       setChatMascot("08-thinking");
 
       // Add user message
@@ -4825,6 +4876,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           model: selectedModel(),
           jobContext: chatState.jobContext || undefined,
           mode: chatState.mode || "chat",
+          execute: pendingExecute === true,
           attemptId: attemptId,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
@@ -4913,6 +4965,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           document: data.document || null,
           // A track made this turn plays in the reply that announces it.
           asset: data.audio || data.asset || null,
+          artifacts: data.artifacts || null,
+          timings: data.timings || null,
+          tools: data.tools || null,
         });
 
         // Update slots if present
@@ -5013,6 +5068,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     // Wire up chat events
     document.getElementById("chatSend").onclick = sendChatMessage;
+    var doItBtn = document.getElementById("chatDoIt");
+    doItBtn.onclick = function () {
+      var el = document.getElementById("chatInput");
+      if (!el.value.trim()) { el.focus(); return; }
+      pendingExecute = true;
+      sendChatMessage();
+    };
+    // The button lives and dies with Send: same disabled state, no dead control.
+    var sendObserver = new MutationObserver(function () {
+      var send = document.getElementById("chatSend");
+      var it = document.getElementById("chatDoIt");
+      if (send && it) it.disabled = send.disabled;
+    });
+    sendObserver.observe(document.getElementById("chatSend"), { attributes: true, attributeFilter: ["disabled"] });
 
     // ── Chat / Work mode wiring ─────────────────────────────────────
     (function initModes() {
@@ -5382,6 +5451,41 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       card.style.display = "block";
     })
     .catch(function () { /* never surface an error for the digest */ });
+})();
+</script>
+
+<script>
+/* ── Plan + remaining quota ──────────────────────────────────────────────
+   The refusal sentences ("music is part of the paid plans", "quota resets on a
+   rolling 24 h window") only make sense if the person can see the plan they are
+   on. One fetch, one line, no new page and no nav change. */
+(function () {
+  function render(d) {
+    var chip = document.getElementById("planChip");
+    if (!chip || !d || !d.ok) return;
+    var name = String(d.plan || "free");
+    var bits = [name.charAt(0).toUpperCase() + name.slice(1) + " plan"];
+    var left = d.remaining || {};
+    bits.push(Number(left.inference || 0).toLocaleString() + " chats left");
+    var musicLeft = Number(left.musicSeconds || 0);
+    bits.push(musicLeft > 0 ? Math.floor(musicLeft / 60) + " min music left" : "no music on this plan");
+    if (name === "free") bits.push("upgrade for music");
+    chip.textContent = bits.join(" · ");
+    chip.classList.remove("hidden");
+  }
+  function refresh() {
+    fetch("/api/buzzy/entitlement", { credentials: "include" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(render)
+      .catch(function () { /* a plan chip is not worth an error toast */ });
+  }
+  refresh();
+  // A refused turn changes the numbers; refresh after any send.
+  window.bzRefreshPlan = refresh;
+  var send = document.getElementById("chatSend");
+  if (send) send.addEventListener("click", function () { setTimeout(refresh, 2500); });
+  var music = document.getElementById("makeMusic");
+  if (music) music.addEventListener("click", function () { setTimeout(refresh, 6000); });
 })();
 </script>
 

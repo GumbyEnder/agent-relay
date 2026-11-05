@@ -36,7 +36,7 @@ import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
-import { generateMusic, storeAudio, musicConfigured } from "./music";
+import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
@@ -44,7 +44,9 @@ import { priceTable, frontierModels } from "./pricing";
 import { buildRanking } from "./ranking";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
 import {
+  checkQuota,
   describeEntitlement,
+  recordUsage,
   revokeTokens,
   setPlan,
   type PlanName,
@@ -598,10 +600,20 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { ok: false, error: "Send JSON: { prompt, seconds }.", code: "bad_json" };
     }
-    const r = await generateMusic(String(body.prompt || ""), (Number(body.seconds) || 20) * 1000);
+    const r = await gatedMusic(user.id, String(body.prompt || ""), (Number(body.seconds) || 20) * 1000);
     if (!r.ok) {
-      // 402 is the account's plan, not the caller's mistake — keep that status.
-      setResponseStatus(event, r.code === "paid_plan_required" ? 402 : r.code === "not_configured" ? 503 : 502);
+      // 402/429 are the account's plan and quota, not the caller's mistake — keep
+      // those statuses so the UI can show the real sentence.
+      setResponseStatus(
+        event,
+        r.code === "plan_required" || r.code === "paid_plan_required"
+          ? 402
+          : r.code === "quota_exhausted"
+            ? 429
+            : r.code === "not_configured"
+              ? 503
+              : 502,
+      );
       return { ok: false, error: r.error, code: r.code };
     }
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
@@ -734,7 +746,14 @@ export default defineEventHandler(async (event) => {
       totalBytes: Number(totals[0]?.total_bytes ?? 0),
       limit: want,
       offset,
-      items: rows,
+      // Aliases so the shelf and the chat render the same object shape. `filename`
+      // stays the storage truth; `name`/`url`/`type` are what a card needs.
+      items: rows.map((r) => ({
+        ...r,
+        name: r.filename,
+        url: `/api/buzzy/assets/${r.id}`,
+        type: r.content_type ?? "application/octet-stream",
+      })),
     };
   }
 
@@ -994,6 +1013,9 @@ export default defineEventHandler(async (event) => {
     // UI mode: "work" steers toward a work effort, "chat" is ordinary
     // conversation. Unknown values fall back to chat inside chatLoop.
     const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
+    // The composer's "Do it now": an instruction the person pressed, so it does
+    // not depend on the model reading intent out of phrasing.
+    const execute = body.execute === true;
     // Voice lane: stream text + audio back over SSE so speech starts on the
     // first audio chunk instead of after the whole buffered reply.
     const voice = body.voice === true;
@@ -1001,6 +1023,48 @@ export default defineEventHandler(async (event) => {
     const surface: "text" | "voice" = voice ? "voice" : "text";
 
     const sql = await getSql();
+
+    // ── Plan + quota, before any provider call ───────────────────────────────
+    // The web app calls the provider from OUR server, not through /api/inference,
+    // so a session turn is metered and refused here. Without this a free account
+    // could spend our chat quota from the web while the gateway refused the same
+    // account (measured for music: plan=free, POST /api/buzzy/music → 200).
+    // A label (the composer sends display names) is not a model id, so the
+    // allowlist is only applied when the caller named an id.
+    const modelId = model && model.includes("/") ? model : undefined;
+    const quota = await checkQuota({ userId, scope: "inference", units: 1, model: modelId });
+    if (!quota.ok) {
+      await recordUsage({
+        userId,
+        scope: "inference",
+        units: 0,
+        ms: 0,
+        status: "refused",
+        code: quota.code ?? "quota",
+        model: modelId ?? null,
+      });
+      setResponseStatus(
+        event,
+        quota.code === "model_not_allowed" ? 403 : quota.code === "plan_required" ? 402 : 429,
+      );
+      return {
+        ok: false,
+        error: quota.error,
+        code: quota.code,
+        plan: quota.plan,
+        limit: quota.limit,
+        used: quota.used,
+      };
+    }
+    // A turn is charged when it runs: the provider cost is incurred by starting it.
+    await recordUsage({
+      userId,
+      scope: "inference",
+      units: 1,
+      ms: 0,
+      status: "ok",
+      model: modelId ?? null,
+    });
 
     // ── BZ-F024: pause/cancel stops future work (QA-15) ───────────────
     // A cancelled or paused job takes no new turns — no further model calls
@@ -1098,6 +1162,7 @@ export default defineEventHandler(async (event) => {
         attemptId,
         jobContext,
         mode,
+        execute,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,

@@ -428,6 +428,12 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/auth-api.nitro.ts",
               },
               {
+                // What this deployment can actually do, answered from the same
+                // registry the chat loop uses.
+                route: "/api/buzzy/capabilities",
+                handler: "./src/lib/buzzy/capabilities.nitro.ts",
+              },
+              {
                 // Our inference: the signed-in owner mints a short-lived token
                 // (no shared provider key ever reaches the desktop app).
                 route: "/api/inference-token",
