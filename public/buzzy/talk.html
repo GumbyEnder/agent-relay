@@ -3373,6 +3373,24 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return new Blob([buf], { type: "audio/wav" });
     }
 
+    // A mic that hears nothing and a mic that is broken are indistinguishable from
+    // the outside: both are silence with no message. Every step below writes a line
+    // to main.log (desktop) or the console (web), so the failure names itself.
+    function micLog(msg) {
+      try {
+        if (window.beezilla && window.beezilla.app && window.beezilla.app.log) {
+          window.beezilla.app.log("voice: " + msg);
+          return;
+        }
+      } catch (_) {}
+      try { console.log("[voice] " + msg); } catch (_) {}
+    }
+
+    // 0.02 RMS was a shout on a good headset and silence on a laptop array: the
+    // clip never reached the transcriber, so the user saw "didn't catch that" with
+    // nothing in any log. 0.008 still ignores room noise but hears a normal voice.
+    var SPEECH_RMS = 0.008;
+
     function startRecording() {
       if (recState || voice.sending) return;
       var md = navigator.mediaDevices;
@@ -3383,8 +3401,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         paintVoice();
         return;
       }
+      micLog("getUserMedia request");
       md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
         .then(function (stream) {
+          var tr = stream.getAudioTracks()[0];
+          var st = (tr && tr.getSettings && tr.getSettings()) || {};
+          micLog('stream ok label="' + ((tr && tr.label) || "") + '" rate=' + (st.sampleRate || "?") + " ch=" + (st.channelCount || "?"));
           if (!voice.mic) {
             stream.getTracks().forEach(function (t) { t.stop(); });
             return;
@@ -3406,7 +3428,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { speechSeen = true; quietSince = 0; }
+            if (recState) recState.peak = Math.max(recState.peak || 0, rms);
+            if (rms > SPEECH_RMS) { speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
             var elapsed = Date.now() - startedAt;
@@ -3421,13 +3444,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // nothing, so this is silent.
           src.connect(proc);
           proc.connect(ctx.destination);
-          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false };
+          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false, peak: 0 };
+          micLog("recording at " + ctx.sampleRate + " Hz");
           voice.note = "";
           setAvatarState("listening");
           paintVoice();
         })
         .catch(function (e) {
           var name = (e && e.name) || "";
+          micLog("getUserMedia failed " + name + ": " + ((e && e.message) || ""));
           if (name === "NotAllowedError" || name === "SecurityError") {
             stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
             voice.mic = false;
@@ -3449,10 +3474,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { r.ctx.close(); } catch (_) {}
       // Nothing was said: re-arm instead of uploading a silent clip and paying
       // the model to tell us it heard nothing.
-      if (!r.speechSeen) { rearmListening(); return; }
+      if (!r.speechSeen) {
+        micLog("dropped: no speech above " + SPEECH_RMS + " (peak " + (r.peak || 0).toFixed(4) + ")");
+        stageNote("The microphone heard nothing above room noise (peak " + (r.peak || 0).toFixed(4) + "). Check Settings → Microphone.");
+        rearmListening();
+        return;
+      }
       var total = 0;
       for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
-      if (total < r.rate * 0.3) { rearmListening(); return; }
+      if (total < r.rate * 0.3) {
+        micLog("dropped: clip too short (" + total + " samples at " + r.rate + " Hz)");
+        rearmListening();
+        return;
+      }
+      micLog("clip " + (total / r.rate).toFixed(2) + " s peak=" + (r.peak || 0).toFixed(4) + " → transcribe");
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
@@ -3481,11 +3516,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         .then(function (data) {
           voice.sending = false;
           if (!data || !data.ok) {
+            micLog("transcribe refused: " + JSON.stringify(data || {}).slice(0, 200));
             stageNote((data && data.error) || "Couldn't transcribe that — try again.");
             rearmListening();
             return;
           }
           var text = String(data.text || "").trim();
+          micLog("transcribe ok ms=" + data.ms + " model=" + data.model + ' text="' + text.slice(0, 80) + '"');
           if (!text) {
             stageNote("Didn't catch that — try again.");
             rearmListening();
