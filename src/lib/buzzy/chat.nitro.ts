@@ -1168,6 +1168,8 @@ export default defineEventHandler(async (event) => {
                 onText: (t) => send("text", { t }),
                 onAudio: (b64, format) => send("audio", { b64, format }),
               },
+              // Events: tool {name,state,ms} — so a long tool is named while it runs.
+              onTool: (e) => send("tool", e),
             });
             send("done", result);
             if (result.timings) {

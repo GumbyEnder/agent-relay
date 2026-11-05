@@ -249,6 +249,9 @@ export interface ChatRequest {
   speech?: VoiceHandlers;
   /** Text deltas for the typed lane, so words appear at TTFT not at the end. */
   onText?: (delta: string) => void;
+  /** Tool progress. A tool call is buffered server-side, so without this the
+   *  client can only show a clock — this says WHAT is running and for how long. */
+  onTool?: (e: { name: string; state: "running" | "done" | "failed"; ms?: number }) => void;
   /** Preferred audio voice for the voice lane. */
   voiceName?: string;
   /** The composer's "Do it now" control. An explicit execute flag beats any
@@ -866,6 +869,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           continue;
         }
 
+        req.onTool?.({ name: tc.name, state: "running" });
         // Every tool runs inside its declared wall clock (toolRegistry).
         // A slow tool becomes a named failure instead of a stalled turn.
         const run = await withToolBudget(
@@ -1008,6 +1012,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         );
 
         toolLog.push({ name: tc.name, ms: run.ms ?? 0, ok: run.ok, code: run.ok ? undefined : "failed" });
+        req.onTool?.({ name: tc.name, state: run.ok ? "done" : "failed", ms: run.ms ?? 0 });
         if (!run.ok) {
           followUpMessages.push({
             role: "user",

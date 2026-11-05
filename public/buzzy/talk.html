@@ -3763,6 +3763,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               if (c) c.insertBefore(liveBubble, c.firstChild);
             }
             liveBubble.textContent = liveText;
+          } else if (ev === "tool") {
+            // Name the work instead of leaving a bare clock: "running
+            // read_web_page" explains a 30-second silence; dots do not.
+            var status = document.getElementById("voiceStatus");
+            if (status) {
+              status.classList.remove("hidden");
+              status.textContent = payload.state === "running"
+                ? "Working — " + String(payload.name || "a tool").replace(/_/g, " ") + "…"
+                : (payload.state === "failed"
+                    ? "That step failed — answering without it."
+                    : "Done — " + Math.round((payload.ms || 0) / 100) / 10 + "s. Writing the reply…");
+            }
+            var clock = document.getElementById("thinkingElapsed");
+            if (clock && payload.state !== "running") clock.textContent = "";
           } else if (ev === "audio") {
             if (metrics.ttfaMs == null) {
               metrics.ttfaMs = Math.round(performance.now() - sendStarted);
