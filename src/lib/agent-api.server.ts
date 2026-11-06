@@ -41,7 +41,7 @@ import {
   resolveOperatorContext,
   type OperatorContext,
 } from "./auth/verify.server";
-import { canManageBoardKeys, type OperatorCapability } from "./auth/roles";
+import { canManageBoardKeys, parseEmailList, type OperatorCapability } from "./auth/roles";
 import { policyFromEnv, staleSummary } from "./stale-heartbeat";
 import { isDevMailInboxEnabled, latestDevMailFor, listDevMail } from "./mailer";
 import { clientAgentGuideMarkdown, DEFAULT_PUBLIC_BASE } from "./agent-client-guide";
@@ -52,6 +52,7 @@ import { renderDocsHtmlPage, wantsHtmlDocs } from "./docs-html";
 import { DEFAULT_PROJECT_ID } from "./seed";
 import { validateModelPrefsPatch } from "./buzzy/modelPrefs";
 import {
+  CLOSED_AUTHORITY,
   lanesEnforceEnvEnabled as lanesEnforceEnvEnabledShared,
 } from "./lane-rules";
 
@@ -1109,6 +1110,8 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           if (ctx.authRequired && !ctx.user) {
             return err(401, "Sign in required", "signed_out");
           }
+          const cap = checkOperatorCapability(ctx, "write_board");
+          if (!cap.ok) return err(cap.status, cap.error, cap.code);
           if (!(await operatorCanAccessProject(ctx, mission.projectId))) {
             return err(404, "mission not found", "mission_not_found");
           }
@@ -1119,12 +1122,47 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
           };
         }
 
+        // Authority is a property of the principal, never of the request body: a
+        // caller cannot claim `shane` by typing it. `closed` is Shane-only, so a
+        // non-authority principal is refused on every board — the DB CHECK would
+        // otherwise turn a bogus authority into a 500.
+        const isLaneAuthority =
+          actor.kind === "human" &&
+          actor.name != null &&
+          parseEmailList(process.env.AGENT_RELAY_LANE_AUTHORITY_EMAILS).has(
+            actor.name.trim().toLowerCase(),
+          );
+        if (lane === "closed" && !isLaneAuthority) {
+          return json(
+            {
+              ok: false,
+              error:
+                "lane_violation: closed_no_authority: closed is Shane-only (decided server-side, never from a body field)",
+              code: "lane_violation",
+              actor_kind: actor.kind,
+              enforce_active: lanesEnforceEnvEnabled(),
+              violations: [
+                {
+                  rule_code: "closed_no_authority",
+                  detail: `actor_kind=${actor.kind} may not write the closed lane`,
+                },
+              ],
+            },
+            422,
+          );
+        }
+
         try {
           const result = await boardOps.setMissionLane(
             id,
             {
               lane,
-              lane_authority: str(body.lane_authority) ?? str(body.authority) ?? null,
+              lane_authority:
+                lane === "closed"
+                  ? CLOSED_AUTHORITY
+                  : lane === "blocked_evidence"
+                    ? actor.id
+                    : null,
               evidence_type: str(body.evidence_type) ?? null,
               evidence_ref: str(body.evidence_ref) ?? null,
               check_result: str(body.check_result) ?? null,

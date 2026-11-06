@@ -730,12 +730,15 @@ async function writeLane(
   const current = laneRowOf(row);
   const next = applyLaneWrite(current, input, actor);
   const violations = laneWriteViolations({ current, next, actorKind: actor.kind });
-  // Humans are exempt from enforcement (recorded, not rejected); only the
-  // rules the database itself cannot represent still bind them.
+  // Humans are exempt from enforcement (recorded, not rejected): a human
+  // transition that would breach a rule is written and disclosed. Only the
+  // rules the database itself cannot represent still bind them, because those
+  // would be a 500 instead of a recorded transition.
   const blocking = violationsForActor(violations, actor.kind);
+  const exempt = actor.kind === "human";
   const enforceActive = laneEnforceActive(row.lanes_enforce as boolean, process.env);
 
-  if (blocking.length > 0 && enforceActive) {
+  if (blocking.length > 0 && enforceActive && !exempt) {
     return {
       ok: false as const,
       status: 422,
@@ -746,6 +749,23 @@ async function writeLane(
         lane: current.lane,
         requested_lane: next.lane,
         violations: blocking,
+      },
+    };
+  }
+  // A human write that the CHECK constraints cannot represent is refused with
+  // the same 422 shape rather than surfacing a Postgres error.
+  if (blocking.length > 0 && exempt) {
+    return {
+      ok: false as const,
+      status: 422,
+      error: `lane_violation: ${describeViolations(blocking)}`,
+      code: "lane_violation",
+      data: {
+        enforce_active: enforceActive,
+        lane: current.lane,
+        requested_lane: next.lane,
+        violations: blocking,
+        actor_kind: actor.kind,
       },
     };
   }
@@ -775,7 +795,13 @@ async function writeLane(
         ${uid("lanehist")}, ${missionId}, ${(row.project_id as string | null) ?? null},
         ${current.lane}, ${next.lane}, ${next.lane_authority},
         ${next.evidence_type}, ${next.evidence_ref}, ${next.check_result},
-        ${actor.id}, ${actor.kind}, ${opts?.note ?? null}
+        ${actor.id}, ${actor.kind},
+        ${
+          opts?.note ??
+          (exempt && violations.length > 0
+            ? `exempt (human): ${violations.map((v) => v.rule_code).join(",")}`
+            : null)
+        }
       )
     `;
   }
@@ -814,6 +840,7 @@ async function writeLane(
       enforce_active: enforceActive,
       recorded: laneChanged,
       discarded_violations: enforceActive ? [] : violations,
+      exempt_violations: exempt && enforceActive ? violations : [],
     },
   };
 }

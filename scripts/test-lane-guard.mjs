@@ -360,9 +360,9 @@ async function main() {
       PROBE_HTTP,
       {
         ...envFor(scratchUrl, "1", false),
-        // No machine key → the operator path. In open local mode that principal
-        // is a human operator (`local-operator`); in prod it is the signed-in
-        // session user. Nothing in the body decides the actor kind.
+        // The Shane principal is configured server-side; the request body never
+        // decides it. In open local mode the operator is dev@example.com.
+        AGENT_RELAY_LANE_AUTHORITY_EMAILS: "dev@example.com",
         PROBE_KEY: "",
         PROBE_STEPS: JSON.stringify(humanSteps),
       },

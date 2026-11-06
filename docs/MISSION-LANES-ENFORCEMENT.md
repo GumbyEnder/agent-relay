@@ -59,6 +59,37 @@ Rules that a gate must refuse, in lane-gate vocabulary (all already encoded as
 Success for P2: endpoint and CLI agree row-for-row on the same DB snapshot; suites green;
 no write path touched.
 
+## Wire path (P3) — live on one board
+
+`enforce_active = projects.lanes_enforce AND LANES_ENFORCE` (env read per call). When
+false the write path behaves as before.
+
+* `POST /api/agent/missions/:id/lane { lane, evidence_type?, evidence_ref?, check_result?,
+  check_output?, evidence_missing?, note? }` is the only lane write path. The actor kind
+  comes from the **server-side principal** (session → `human`, agent key → `agent`), never
+  from a body field. A transition that would produce a rule code is refused **422
+  `lane_violation`** with the codes in `violations[]`; nothing is written and no lane
+  history row is minted.
+* `POST /api/agent/missions/:id/move` refuses a move that would leave the card breaching a
+  rule (e.g. a `blocked_evidence` card dragged to `running`). `→ done` without an
+  evidence/closed lane is **coerced** to `evidence / unverified` with a history row — never
+  to `closed`.
+* **Humans are exempt** by the principal: their transition is written and recorded
+  (`ar_mission_lane_history.actor_kind='human'`), with the exempted codes disclosed in the
+  response (`exempt_violations[]`) and in the history note. The only rules a human must
+  still satisfy are the two the 0052 CHECK constraints cannot represent (`closed` needs
+  `pass` + `evidence_ref`; `blocked_evidence` needs `evidence_missing`) — refused with the
+  same 422 shape instead of a Postgres error.
+* **`closed` is Shane-only**: authority is resolved server-side from
+  `AGENT_RELAY_LANE_AUTHORITY_EMAILS`; a body claiming `lane_authority:"shane"` is ignored.
+  A non-authority principal gets 422 `closed_no_authority` on every board.
+* Rejected writes are never partial: validation runs before the write, and lane + history +
+  event are written together after it.
+
+Rollback without a deploy: `LANES_ENFORCE=0` (or remove the var) — the guard stops
+rejecting and the per-board flags stay set. Full rollback: `update ar_projects set
+lanes_enforce=false where id=<id>;` plus removing the var.
+
 ## P3 — per-board flip runbook
 
 Legs 0–2 run once; leg 3 runs **once per board**; leg 4 runs last.
