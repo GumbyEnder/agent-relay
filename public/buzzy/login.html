@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeeZilla — Sign in</title>
+  <link rel="icon" href="/buzzy/brand/bz-favicon-180.png" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      background: #0A0A0A;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #222;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header .brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+    header .brand img { width: 28px; height: 28px; border-radius: 4px; }
+    header .brand strong {
+      letter-spacing: 0.06em; font-size: 1.15rem; color: #ffc107;
+      text-transform: uppercase; font-weight: 800;
+    }
+    main { flex: 1; display: grid; place-items: center; padding: 2rem 1.5rem; }
+    .card { width: 100%; max-width: 420px; }
+    .mascot { width: 84px; height: 84px; object-fit: contain; display: block; margin: 0 auto 1rem; }
+    h1 { font-size: 1.5rem; font-weight: 800; margin: 0 0 0.35rem; text-align: center; }
+    .sub { color: #9a9a9a; font-size: 0.92rem; text-align: center; margin: 0 0 1.5rem; }
+    .tabs { display: flex; background: #141414; border: 1px solid #242424; border-radius: 10px; padding: 4px; margin-bottom: 1.25rem; }
+    .tab {
+      flex: 1; padding: 0.6rem; border-radius: 7px; border: 0; cursor: pointer;
+      background: transparent; color: #9a9a9a; font-size: 0.9rem; font-weight: 700;
+    }
+    .tab[aria-selected="true"] { background: #ffc107; color: #0A0A0A; }
+    label { display: block; font-size: 0.8rem; color: #9a9a9a; margin: 0 0 0.35rem; font-weight: 600; }
+    input {
+      width: 100%; padding: 0.75rem 0.85rem; border-radius: 8px; margin-bottom: 0.9rem;
+      background: #141414; border: 1px solid #2a2a2a; color: #fff; font-size: 1rem;
+    }
+    input:focus { outline: none; border-color: #ffc107; }
+    button.primary, button.secondary {
+      width: 100%; padding: 0.8rem 1rem; border-radius: 8px; font-size: 1rem;
+      font-weight: 700; cursor: pointer; margin-bottom: 0.7rem;
+    }
+    button.primary { background: #ffc107; color: #0A0A0A; border: 1px solid #ffc107; }
+    button.primary:disabled { opacity: 0.6; cursor: default; }
+    button.secondary { background: transparent; color: #fff; border: 1px solid #3a3a3a; }
+    button.secondary:hover { border-color: #ffc107; color: #ffc107; }
+    .note { font-size: 0.82rem; color: #777; text-align: center; margin: 0.4rem 0 0; line-height: 1.5; }
+    .msg { display: none; padding: 0.75rem 0.85rem; border-radius: 8px; font-size: 0.88rem; margin-bottom: 1rem; line-height: 1.45; }
+    .msg.show { display: block; }
+    .msg.error { background: #2a1214; border: 1px solid #5b1f24; color: #ffb4b4; }
+    .msg.ok { background: #10251a; border: 1px solid #1f5b3a; color: #a9f0c4; }
+    footer { padding: 1rem 1.5rem; text-align: center; color: #666; font-size: 0.8rem; border-top: 1px solid #222; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="/buzzy/talk">
+      <img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="" />
+      <strong>BeeZilla</strong>
+    </a>
+  </header>
+
+  <main>
+    <div class="card">
+      <img class="mascot" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla mascot" />
+      <h1 id="title">Welcome back</h1>
+      <p class="sub" id="subtitle">Sign in and pick up where you left off.</p>
+
+      <div class="msg" id="msg" role="status" aria-live="polite"></div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" id="tab-signin" role="tab" aria-selected="true">Sign in</button>
+        <button class="tab" id="tab-register" role="tab" aria-selected="false">Create account</button>
+      </div>
+
+      <form id="form" autocomplete="on" novalidate>
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters" />
+
+        <div id="nameRow" class="hidden">
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" autocomplete="name" placeholder="Your name" />
+        </div>
+
+        <button class="primary" id="submit" type="submit">Sign in</button>
+        <button class="secondary" id="magic" type="button">Email me a sign-in link</button>
+      </form>
+
+      <p class="note" id="note">
+        No password needed if you use the email link — it signs you in on this device.
+      </p>
+    </div>
+  </main>
+
+  <footer>BeeZilla helps you get the work done — this is not legal or financial advice.</footer>
+
+  <script>
+    (function () {
+      var mode = "signin";
+      var busy = false;
+      var params = new URLSearchParams(window.location.search);
+
+      var tabSignin = document.getElementById("tab-signin");
+      var tabRegister = document.getElementById("tab-register");
+      var form = document.getElementById("form");
+      var email = document.getElementById("email");
+      var password = document.getElementById("password");
+      var nameInput = document.getElementById("name");
+      var nameRow = document.getElementById("nameRow");
+      var submit = document.getElementById("submit");
+      var magic = document.getElementById("magic");
+      var msg = document.getElementById("msg");
+      var title = document.getElementById("title");
+      var subtitle = document.getElementById("subtitle");
+      var note = document.getElementById("note");
+
+      function show(kind, text) {
+        msg.className = "msg show " + kind;
+        msg.textContent = text;
+      }
+      function clearMsg() {
+        msg.className = "msg";
+        msg.textContent = "";
+      }
+      function setBusy(on, label) {
+        busy = on;
+        submit.disabled = on;
+        magic.disabled = on;
+        submit.textContent = on ? label : mode === "register" ? "Create account" : "Sign in";
+      }
+      function api(path, body) {
+        return fetch(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body),
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (data) {
+            return { ok: r.ok, status: r.status, data: data };
+          });
+        });
+      }
+      function signedIn() {
+        return fetch("/api/auth/get-session", { credentials: "same-origin" })
+          .then(function (r) { return r.json().catch(function () { return null; }); })
+          .then(function (d) { return Boolean(d && d.session); })
+          .catch(function () { return false; });
+      }
+      function destination() {
+        var next = params.get("next");
+        // Only same-origin paths; a login page must never be an open redirect.
+        if (next && next.charAt(0) === "/" && next.charAt(1) !== "/") return next;
+        return "/buzzy/talk";
+      }
+      function enter() { window.location.replace(destination()); }
+
+      function setMode(next) {
+        mode = next;
+        var registering = next === "register";
+        tabSignin.setAttribute("aria-selected", registering ? "false" : "true");
+        tabRegister.setAttribute("aria-selected", registering ? "true" : "false");
+        nameRow.classList.toggle("hidden", !registering);
+        password.setAttribute("autocomplete", registering ? "new-password" : "current-password");
+        title.textContent = registering ? "Create your account" : "Welcome back";
+        subtitle.textContent = registering
+          ? "One account, on any device — the same work follows you."
+          : "Sign in and pick up where you left off.";
+        note.textContent = registering
+          ? "We'll email you a verification link. Click it, then sign in."
+          : "No password needed if you use the email link — it signs you in on this device.";
+        submit.textContent = registering ? "Create account" : "Sign in";
+        clearMsg();
+      }
+
+      tabSignin.addEventListener("click", function () { setMode("signin"); });
+      tabRegister.addEventListener("click", function () {
+        setMode("register");
+        try { history.replaceState(null, "", "/buzzy/login?mode=register"); } catch (e) {}
+      });
+
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (busy) return;
+        clearMsg();
+        var addr = (email.value || "").trim();
+        var pass = password.value || "";
+        if (!addr || addr.indexOf("@") < 1) { show("error", "Enter your email address."); return; }
+        if (password.validity.tooShort) { show("error", "Passwords need at least 8 characters."); return; }
+        if (!pass) { show("error", "Enter your password."); return; }
+
+        if (mode === "register") {
+          setBusy(true, "Creating…");
+          api("/api/auth/sign-up/email", {
+            email: addr,
+            password: pass,
+            name: (nameInput.value || "").trim() || addr.split("@")[0],
+          }).then(function (res) {
+            if (!res.ok) {
+              var m = (res.data && (res.data.message || res.data.code)) || "";
+              show("error", m || "Could not create that account.");
+              return;
+            }
+            return signedIn().then(function (ok) {
+              if (ok) return enter();
+              show("ok", "Account created. Check " + addr + " for the verification link, then sign in.");
+              setMode("signin");
+            });
+          }).catch(function () {
+            show("error", "Network error — try again.");
+          }).then(function () { setBusy(false); });
+          return;
+        }
+
+        setBusy(true, "Signing in…");
+        api("/api/auth/sign-in/email", { email: addr, password: pass })
+          .then(function (res) {
+            if (res.ok) return enter();
+            var code = (res.data && res.data.code) || "";
+            if (code === "EMAIL_NOT_VERIFIED") {
+              show("error", "Verify your email first — check your inbox for the link.");
+              return;
+            }
+            show("error", (res.data && res.data.message) || "That email and password do not match.");
+          })
+          .catch(function () { show("error", "Network error — try again."); })
+          .then(function () { setBusy(false); });
+      });
+
+      magic.addEventListener("click", function () {
+        if (busy) return;
+        var addr = (email.value || "").trim();
+        if (!addr || addr.indexOf("@") < 1) { show("error", "Enter your email address first."); return; }
+        clearMsg();
+        setBusy(true, "Sending…");
+        api("/api/auth/sign-in/magic-link", { email: addr, callbackURL: destination() })
+          .then(function (res) {
+            if (res.ok) show("ok", "Link sent to " + addr + ". Open it on this device to sign in.");
+            else show("error", (res.data && res.data.message) || "Could not send the link.");
+          })
+          .catch(function () { show("error", "Network error — try again."); })
+          .then(function () { setBusy(false); });
+      });
+
+      if (params.get("verified") === "1") show("ok", "Email verified. Sign in to continue.");
+      if (params.get("mode") === "register") setMode("register");
+      if (email.value === "") { try { email.focus(); } catch (e) {} }
+    })();
+  </script>
+</body>
+</html>

@@ -71,24 +71,8 @@ function Console({ search, surface }: { search: Search; surface: "app" | "admin"
  * the console. BeeZilla-branded builds keep sending their people to /buzzy/,
  * because that deployment is civilian-facing and has no operator board.
  */
-/**
- * `beezilla.net` is the consumer front door, `app.devboards.ai` is the operator
- * console. A visitor who types the consumer domain must land in BeeZilla — the
- * operator landing (board sign-in, Dev Boards copy) has no meaning for them.
- * Both domains are served by this same deployment, so the split is by host.
- */
-function onConsumerDomain(): boolean {
-  if (typeof window === "undefined") return false;
-  const h = window.location.hostname.toLowerCase();
-  return h === "beezilla.net" || h.endsWith(".beezilla.net");
-}
-
 function SessionEntry({ search, surface }: { search: Search; surface: "app" | "admin" }) {
   const { user, isPending } = useCurrentUserState();
-  if (onConsumerDomain()) {
-    if (typeof window !== "undefined") window.location.replace("/buzzy/talk");
-    return null;
-  }
   if (isPending) return null;
   if (!user) return <SignedOutLanding />;
   if (BZ_BRAND) {

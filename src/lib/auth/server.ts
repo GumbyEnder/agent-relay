@@ -38,6 +38,7 @@ import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
+import { isConsumerHost } from "../product-hosts";
 import { sendVerificationMail, sendMagicLinkMail } from "../mailer";
 import {
   GROK_ISSUER_DEFAULT,
@@ -284,12 +285,18 @@ export const auth = betterAuth({
           // Traditional: verify first, then explicit sign-in on /login.
           autoSignInAfterVerification: false,
           expiresIn: 60 * 60,
-          sendVerificationEmail: async ({ user, url }) => {
-            // Always land on /login after verify (never raw JSON from /api/auth/verify-email).
+          sendVerificationEmail: async ({ user, url }, request) => {
+            // Never land on raw JSON from /api/auth/verify-email. The landing
+            // page follows the host: beezilla.net is the BeeZilla product and
+            // has its own sign-in page, everything else is the Dev Boards app.
             let finalUrl = url;
             try {
               const u = new URL(url);
-              u.searchParams.set("callbackURL", "/login?verified=1");
+              const host = request ? new URL(request.url).hostname : "";
+              u.searchParams.set(
+                "callbackURL",
+                isConsumerHost(host) ? "/buzzy/login?verified=1" : "/login?verified=1",
+              );
               finalUrl = u.toString();
             } catch {
               /* keep original url */

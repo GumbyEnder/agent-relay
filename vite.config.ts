@@ -412,6 +412,14 @@ export default defineConfig(({ command }) => ({
             // Agent REST + Better Auth on the production Node server
             handlers: [
               {
+                // Host split first: beezilla.net is the consumer product,
+                // app.devboards.ai is the console. Everything below assumes the
+                // request has already been classified.
+                route: "/**",
+                middleware: true,
+                handler: "./src/lib/host-router.nitro.ts",
+              },
+              {
                 route: "/api/agent",
                 handler: "./src/lib/agent-api.nitro.ts",
               },
