@@ -3,6 +3,7 @@
  *
  * Routes (all under /api/agent):
  *   GET  /health
+ *   GET  /lane-gate[?project_id=<id>]  — read-only mission-lane violation report
  *   GET  /missions?column=ready&limit=5&agent=forge&tags=docs,ops
  *   GET  /missions/:id
  *   POST /missions/:id/claim      { agent }
@@ -26,6 +27,7 @@
 import type { HarnessKind, MissionColumn, Priority } from "./types";
 import { COLUMNS, HARNESS_IDS } from "./types";
 import { boardOps, ensureBoardReady } from "./board-server";
+import { getSql } from "./db";
 import type { EngineResult } from "./board-engine";
 import { verifyGitHubSignature } from "./github-webhook";
 import { openApiSpec } from "./openapi";
@@ -676,6 +678,96 @@ function parseUsage(raw: unknown): import("./types").MissionUsage | null {
 }
 
 /**
+ * Mission-lane gate read surface (P2) — the same report as
+ * scripts/lane-gate.mjs, read straight from `ar_mission_lane_violations` (0052).
+ *
+ * Strictly read-only: no writes, no lane history rows, no audit side effects.
+ * `enforce_active` is informational here and is the P3 predicate:
+ *   ar_projects.lanes_enforce AND LANES_ENFORCE (truthy)
+ * An unset/empty LANES_ENFORCE is 0; a database that has not yet seen 0053
+ * reports false rather than guessing.
+ */
+export interface LaneGateViolation {
+  mission_id: string;
+  project_id: string | null;
+  rule_code: string;
+  detail: string;
+}
+
+export interface LaneGateReport {
+  ok: boolean;
+  project_id: string | null;
+  counts: { scoped: number; null_project_id: number; global: number };
+  enforce_active: boolean;
+  violations: LaneGateViolation[];
+}
+
+const LANES_ENFORCE_FALSE = new Set(["0", "false", "off", "no", "none", "disabled"]);
+
+/** Unset/empty -> false. An absent env var is not consent. */
+function lanesEnforceEnvEnabled(): boolean {
+  const raw = (process.env.LANES_ENFORCE ?? "").trim().toLowerCase();
+  if (!raw) return false;
+  return !LANES_ENFORCE_FALSE.has(raw);
+}
+
+/** `projectId === null` means every board (scoped then equals global). */
+export async function laneGateReport(projectId: string | null): Promise<LaneGateReport> {
+  const sql = await getSql();
+
+  const counts = (
+    await sql.query<{ global: number; null_project_id: number; scoped: number }>(
+      `SELECT count(*)::int AS global,
+              count(*) FILTER (WHERE project_id IS NULL)::int AS null_project_id,
+              count(*) FILTER (WHERE project_id = $1)::int AS scoped
+         FROM ar_mission_lane_violations`,
+      [projectId],
+    )
+  )[0] ?? { global: 0, null_project_id: 0, scoped: 0 };
+
+  const violations = await sql.query<LaneGateViolation>(
+    `SELECT mission_id, project_id, rule_code, detail
+       FROM ar_mission_lane_violations
+      WHERE ($1::text IS NULL OR project_id = $1)
+      ORDER BY project_id NULLS FIRST, mission_id, rule_code`,
+    [projectId],
+  );
+
+  let perBoard = false;
+  try {
+    const rows = await sql.query<{ enforce: boolean }>(
+      `SELECT COALESCE(bool_or(lanes_enforce), false) AS enforce
+         FROM ar_projects
+        WHERE ($1::text IS NULL OR id = $1)`,
+      [projectId],
+    );
+    perBoard = rows[0]?.enforce === true;
+  } catch (error) {
+    // 42703 = undefined_column: 0053 not applied here. Degrade to false.
+    if ((error as { code?: string })?.code !== "42703") throw error;
+    perBoard = false;
+  }
+
+  const scoped = projectId ? counts.scoped : counts.global;
+  return {
+    ok: projectId ? scoped === 0 && counts.null_project_id === 0 : counts.global === 0,
+    project_id: projectId,
+    counts: {
+      scoped,
+      null_project_id: counts.null_project_id,
+      global: counts.global,
+    },
+    enforce_active: perBoard && lanesEnforceEnvEnabled(),
+    violations: violations.map((v) => ({
+      mission_id: v.mission_id,
+      project_id: v.project_id,
+      rule_code: v.rule_code,
+      detail: v.detail,
+    })),
+  };
+}
+
+/**
  * Handle a full Request whose pathname starts with /api/agent.
  */
 export async function handleAgentApiRequest(req: Request): Promise<Response> {
@@ -753,6 +845,14 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         store: "durable",
         stale,
       });
+    }
+
+    // GET /lane-gate[?project_id=<id>] — read-only mission-lane violation report (P2).
+    // Same shape as `node scripts/lane-gate.mjs --json`; no project_id = all boards.
+    // No writes, no lane history, no audit rows: this surface only reports.
+    if (parts.length === 1 && parts[0] === "lane-gate" && req.method === "GET") {
+      const projectId = url.searchParams.get("project_id")?.trim() || null;
+      return json(await laneGateReport(projectId), 200, req.headers.get("origin"));
     }
 
     // GET /client-guide | /docs | /docs/guide — humans get HTML; agents get markdown
