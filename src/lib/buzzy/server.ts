@@ -649,6 +649,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       const name = `music-${stamp}.mp3`;
       req.onStage?.({ phase: "saving", label: "Saving the track", etaMs: 1500 });
       const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
+      // Name the project the deliverable belongs to. Null job_id meant the Library
+      // could show a file that no work item claimed, and a work item could offer a
+      // download that did not exist.
+      try {
+        await sql`UPDATE buzzy_assets SET job_id = ${jobId}, session_id = ${sessionId}
+                  WHERE user_id = ${userId} AND id = ${stored.id}`;
+      } catch (_) { /* older schema in a local runtime: the link is an improvement, not a gate */ }
       renderedAudio = {
         url: `/api/buzzy/assets/${stored.id}`,
         name,
@@ -1472,7 +1479,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     await sql`
       INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
       VALUES (
-        ${recordId}, ${userId}, null, ${baseTitle.slice(0, 80)}, 'Draft ready', null,
+        ${recordId}, ${userId}, null, ${baseTitle.slice(0, 80)},
+        ${renderedDocument ? "Draft ready" : (renderedAudio ? "Audio ready" : "In progress")}, null,
         ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false, previous_draft: previousDraft, artifact: renderedDocument })}::jsonb, now()
       )
       ON CONFLICT (id) DO UPDATE SET

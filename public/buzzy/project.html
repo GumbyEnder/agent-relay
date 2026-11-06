@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeeZilla — Project</title>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+<style>
+  :root {
+    --bz-bg: #0d0d0d; --bz-card: #151515; --bz-line: #242424; --bz-yellow: #ffd40d;
+    --bz-text: #f2f2f2; --bz-muted: #8d8d8d; --bz-bad: #ff6b6b; --bz-good: #6ee7a8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bz-bg); color: var(--bz-text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    padding: 0 1.1rem 4rem; }
+  header.top { max-width: 920px; margin: 0 auto; padding: 1.2rem 0 0.4rem; }
+  h1 { font-size: 1.22rem; margin: 0.5rem 0 0.3rem; letter-spacing: -0.01em; }
+  .meta { color: var(--bz-muted); font-size: 0.83rem; font-variant-numeric: tabular-nums; }
+  main { max-width: 920px; margin: 0 auto; }
+  h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+       color: var(--bz-muted); margin: 1.8rem 0 0.6rem; }
+  .chip { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
+          font-size: 0.74rem; border: 1px solid var(--bz-line); margin-left: 0.5rem; }
+  .chip.ready { color: var(--bz-good); border-color: #235c3f; }
+  .chip.prog { color: var(--bz-yellow); border-color: #5c4a10; }
+  .chip.empty { color: var(--bz-muted); }
+  .grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .card { background: var(--bz-card); border: 1px solid var(--bz-line); border-radius: 14px;
+          padding: 0.8rem 0.9rem; }
+  .card h3 { font-size: 0.92rem; margin: 0 0 0.35rem; word-break: break-word; }
+  .card .sub { color: var(--bz-muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+  .card a.dl { display: inline-block; margin-top: 0.5rem; color: var(--bz-yellow);
+               text-decoration: none; font-size: 0.84rem; }
+  audio { width: 100%; margin-top: 0.5rem; }
+  .empty-note { color: var(--bz-muted); font-size: 0.86rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--bz-line); vertical-align: top; }
+  th { color: var(--bz-muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  .turn { border-left: 2px solid var(--bz-line); padding: 0.1rem 0 0.1rem 0.7rem; margin-bottom: 0.6rem; }
+  .turn .who { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--bz-muted); }
+  .turn p { margin: 0.2rem 0 0; white-space: pre-wrap; }
+  details summary { cursor: pointer; color: var(--bz-muted); font-size: 0.84rem; }
+  .back { color: var(--bz-muted); text-decoration: none; font-size: 0.84rem; }
+</style>
+</head>
+<body>
+<header class="top">
+  <nav id="bzNav">
+    <a href="/buzzy/talk" data-nav="talk">Talk</a>
+    <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+    <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+    <a href="/buzzy/memory" data-nav="memory">Memory</a>
+    <a href="/buzzy/experts" data-nav="experts">Experts</a>
+    <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+    <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+    <a href="/buzzy/upload" data-nav="publish">Publish</a>
+    <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+  </nav>
+  <a class="back" href="/buzzy/talk" id="backLink">← Talk</a>
+  <h1 id="title">Project</h1>
+  <div class="meta" id="meta"></div>
+</header>
+<main>
+  <h2>Deliverables</h2>
+  <div class="grid" id="deliverables"><p class="empty-note">Loading…</p></div>
+
+  <h2>Activity</h2>
+  <div id="activity"><p class="empty-note">Loading…</p></div>
+
+  <h2>Conversation</h2>
+  <div id="conversation"><p class="empty-note">Loading…</p></div>
+</main>
+<script>
+  // A project page answers three questions in one place: what was asked, what
+  // exists because of it, and what actually happened while it ran. Status is
+  // derived from the deliverables, never from what a reply claimed.
+  (function () {
+    var jobId = new URLSearchParams(location.search).get("job");
+    var titleEl = document.getElementById("title");
+    var metaEl = document.getElementById("meta");
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    function kb(n) { return n ? Math.round(n / 1024) + " KB" : ""; }
+    if (!jobId) {
+      titleEl.textContent = "No project selected";
+      metaEl.textContent = "Open a work item from Talk → Recent work.";
+      document.getElementById("deliverables").innerHTML = '<p class="empty-note">Nothing to show.</p>';
+      return;
+    }
+    fetch("/api/buzzy/projects/" + encodeURIComponent(jobId), { credentials: "same-origin" })
+      .then(function (r) { if (r.status === 401) { location.href = "/buzzy/landing"; throw new Error("signed_out"); } return r.json(); })
+      .then(function (data) {
+        if (!data || !data.project) throw new Error("missing project");
+        var p = data.project;
+        titleEl.textContent = p.title || "Untitled project";
+        var chipClass = p.status === "Deliverable ready" ? "ready" : (p.status === "In progress" ? "prog" : "empty");
+        metaEl.innerHTML = esc(String(p.id)) + " · updated " + esc(new Date(p.updatedAt || p.updated_at || Date.now()).toLocaleString()) +
+          '<span class="chip ' + chipClass + '">' + esc(p.status) + "</span>" +
+          ' <a class="back" style="margin-left:.6rem" href="/buzzy/talk?job=' + encodeURIComponent(p.id) + '">Open conversation →</a>';
+
+        var box = document.getElementById("deliverables");
+        if (!data.deliverables || !data.deliverables.length) {
+          box.innerHTML = '<p class="empty-note">No file behind this project yet. A project is only ready when it holds a deliverable.</p>';
+        } else {
+          box.innerHTML = data.deliverables.map(function (d) {
+            var media = d.type && String(d.type).indexOf("audio/") === 0
+              ? '<audio controls preload="none" src="' + esc(d.url) + '"></audio>'
+              : "";
+            return '<div class="card"><h3>' + esc(d.name || d.kind) + "</h3>" +
+              '<div class="sub">' + esc(d.kind || "") + " · " + esc(d.type || "") + " · " + kb(d.bytes) + "</div>" +
+              media + '<a class="dl" href="' + esc(d.url) + '" download>Download</a></div>';
+          }).join("");
+        }
+
+        var act = document.getElementById("activity");
+        if (!data.turns || !data.turns.length) {
+          act.innerHTML = '<p class="empty-note">No turn log recorded for this project yet.</p>';
+        } else {
+          act.innerHTML = "<table><thead><tr><th>When</th><th>Lane</th><th>ms</th><th>Stages</th><th>Tools</th></tr></thead><tbody>" +
+            data.turns.map(function (t) {
+              var stages = (t.stages || []).map(function (s) { return esc(s.label || s.phase) + " @" + s.atMs + "ms"; }).join("<br>");
+              var tools = (t.tools || []).map(function (x) { return esc(x.name) + " " + esc(x.state) + (x.ms != null ? " " + x.ms + "ms" : ""); }).join("<br>");
+              return "<tr><td class='mono'>" + esc(new Date(t.created_at).toLocaleTimeString()) + "</td><td>" + esc(t.surface || "") +
+                "</td><td class='mono'>" + esc(t.latency_ms == null ? "" : t.latency_ms) + "</td><td class='mono'>" + (stages || "—") +
+                "</td><td class='mono'>" + (tools || "—") + "</td></tr>";
+            }).join("") + "</tbody></table>";
+        }
+
+        var conv = document.getElementById("conversation");
+        if (!data.messages || !data.messages.length) {
+          conv.innerHTML = '<p class="empty-note">No transcript linked to this project.</p>';
+        } else {
+          conv.innerHTML = "<details open><summary>" + data.messages.length + " messages</summary>" +
+            data.messages.map(function (m) {
+              return '<div class="turn"><div class="who">' + esc(m.role) + " · " + esc(new Date(m.created_at).toLocaleTimeString()) +
+                "</div><p>" + esc(m.content) + "</p></div>";
+            }).join("") + "</details>";
+        }
+      })
+      .catch(function (e) {
+        titleEl.textContent = "Could not load project";
+        metaEl.textContent = e.message;
+      });
+  })();
+</script>
+</body>
+</html>

@@ -1125,6 +1125,8 @@ export default defineEventHandler(async (event) => {
     const turnStarted = Date.now();
     await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface } });
 
+    const turnStages: Array<{ phase: string; label: string; etaMs?: number; atMs: number }> = [];
+    const turnTools: Array<{ name: string; state: string; ms?: number }> = [];
     const runTurn = (opts?: {
       speech?: VoiceHandlers;
       onText?: (t: string) => void;
@@ -1150,8 +1152,24 @@ export default defineEventHandler(async (event) => {
         onText: opts?.onText,
         // Drop this and the SSE sink above is dead code: the loop fires, nothing
         // reaches the client, and the voice lane stays silent mid-tool.
-        onTool: opts?.onTool,
-        onStage: opts?.onStage,
+        // The same events are recorded, so a turn leaves a log behind it and not
+        // only a stream of events the page throws away.
+        onTool: (e) => { turnTools.push(e); opts?.onTool?.(e); },
+        onStage: (st) => { turnStages.push({ ...st, atMs: Date.now() - turnStarted }); opts?.onStage?.(st); },
+      }).then(async (result) => {
+        try {
+          await sql`
+            INSERT INTO buzzy_turn_log (user_id, session_id, job_id, surface, model, latency_ms, stages, tools, artifacts)
+            VALUES (${userId}, ${sessionId}, ${(result as { jobId?: string }).jobId ?? jobId ?? null},
+                    ${surface}, ${(result as { model?: string }).model ?? null},
+                    ${(result as { timings?: { totalMs?: number } }).timings?.totalMs ?? null},
+                    ${JSON.stringify(turnStages)}::jsonb, ${JSON.stringify(turnTools)}::jsonb,
+                    ${JSON.stringify((result as { artifacts?: unknown[] }).artifacts ?? [])}::jsonb)
+          `;
+        } catch (err) {
+          console.warn("[buzzy/turn-log] insert failed:", err instanceof Error ? err.message : err);
+        }
+        return result;
       });
 
     // ── Voice lane: text + audio streamed as Server-Sent Events ────────
@@ -4219,6 +4237,71 @@ export default defineEventHandler(async (event) => {
       due: due.map((j) => ({ ...j, href: `/buzzy/talk?job=${j.id}` })),
       note: "Everything here is real state — drafts waiting on you, documents ready for review, and due dates you set. Nothing is generated to fill the page.",
     };
+  }
+
+  // ── GET /api/buzzy/sessions/:id/log — a session's real log ───────────
+  // The transcript answers "what was said". This answers "what happened": each
+  // turn's stages, tool calls, artifacts and wall clock, in order.
+  if (method === "GET" && /^\/api\/buzzy\/sessions\/[^/]+\/log$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) { setResponseStatus(event, 401); return { error: "Sign in required", code: "signed_out" }; }
+    const sessionId = path.split("/")[4]!;
+    const sql = await getSql();
+    const owned = await sql`SELECT id, title, job_id FROM buzzy_sessions WHERE id = ${sessionId} AND user_id = ${user.id}`;
+    if (!owned.length) { setResponseStatus(event, 404); return { error: "No such session", code: "not_found" }; }
+    const turns = await sql`
+      SELECT surface, model, latency_ms, stages, tools, artifacts, error, created_at
+      FROM buzzy_turn_log WHERE user_id = ${user.id} AND session_id = ${sessionId}
+      ORDER BY created_at ASC LIMIT 200`;
+    const messages = await sql`
+      SELECT role, content, created_at FROM buzzy_chat_messages
+      WHERE user_id = ${user.id} AND session_id = ${sessionId} ORDER BY created_at ASC LIMIT 200`;
+    return { ok: true, session: owned[0], turns, messages };
+  }
+
+  // ── GET /api/buzzy/projects/:id — one project, its deliverables, its log ──
+  if (method === "GET" && /^\/api\/buzzy\/projects\/[^/]+$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) { setResponseStatus(event, 401); return { error: "Sign in required", code: "signed_out" }; }
+    const jobId = decodeURIComponent(path.split("/")[4]!);
+    const sql = await getSql();
+    const rows = await sql`
+      SELECT id, title, status, data, created_at, updated_at FROM buzzy_jobs
+      WHERE id = ${jobId} AND user_id = ${user.id} LIMIT 1`;
+    if (!rows.length) { setResponseStatus(event, 404); return { error: "No such project", code: "not_found" }; }
+    const job = rows[0] as { id: string; title: string; status: string | null; data: Record<string, unknown> };
+    const assets = await sql`
+      SELECT id, filename, content_type, bytes, created_at FROM buzzy_assets
+      WHERE user_id = ${user.id} AND job_id = ${jobId} ORDER BY created_at ASC`;
+    const artifacts = (job.data?.artifact ?? null) as unknown;
+    const session = await sql`
+      SELECT id, title FROM buzzy_sessions WHERE user_id = ${user.id} AND job_id = ${jobId}
+      ORDER BY updated_at DESC LIMIT 1`;
+    const turns = session.length
+      ? await sql`
+          SELECT surface, model, latency_ms, stages, tools, artifacts, created_at FROM buzzy_turn_log
+          WHERE user_id = ${user.id} AND session_id = ${session[0]!.id} ORDER BY created_at ASC LIMIT 200`
+      : [];
+    const messages = session.length
+      ? await sql`
+          SELECT role, content, created_at FROM buzzy_chat_messages
+          WHERE user_id = ${user.id} AND session_id = ${session[0]!.id} ORDER BY created_at ASC LIMIT 200`
+      : [];
+    // Status is derived, never asserted by a chat reply: a project is as ready as
+    // the files it actually holds.
+    const deliverables = [
+      ...(Array.isArray(artifacts) ? artifacts : artifacts ? [artifacts] : []),
+      ...assets.map((a: Record<string, unknown>) => ({
+        kind: String(a.content_type ?? "").startsWith("audio/") ? "audio" : "file",
+        id: String(a.id),
+        url: `/api/buzzy/assets/${a.id}`,
+        name: a.filename,
+        bytes: a.bytes,
+        type: a.content_type,
+      })),
+    ];
+    const status = deliverables.length ? "Deliverable ready" : messages.length ? "In progress" : "Empty";
+    return { ok: true, project: { ...job, status }, deliverables, session: session[0] ?? null, turns, messages };
   }
 
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
