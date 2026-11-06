@@ -1405,6 +1405,35 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // document was explicitly rendered, the turn delivers audio and nothing else —
   // no draft gate, no review lines, no approval step.
   const audioOnly = Boolean(renderedAudio) && !renderedDocText;
+  // Audio-only turns skip the draft path, but they are still work: without a
+  // project the MP3 belongs to nobody, so the Library can show it while no work
+  // item claims it. Record the project and attach the file to it.
+  if (audioOnly && renderedAudio) {
+    const audioJobId = jobId || sessionId || `job_${Date.now()}`;
+    const audioTitle = message.slice(0, 80);
+    try {
+      await sql`
+        INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+        VALUES (${audioJobId}, ${userId}, null, ${audioTitle}, 'Audio ready', null,
+          ${JSON.stringify({ audio: renderedAudio, slots: slotValues, approved: false })}::jsonb, now())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title, status = 'Audio ready',
+          data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()
+      `;
+      const assetUrl = String(renderedAudio.url || "");
+      const assetId = Number(assetUrl.split("/").pop());
+      if (Number.isFinite(assetId) && assetId > 0) {
+        await sql`UPDATE buzzy_assets SET job_id = ${audioJobId}, session_id = ${sessionId}
+                  WHERE user_id = ${userId} AND id = ${assetId}`;
+      }
+      if (sessionId && !jobId) {
+        await sql`UPDATE buzzy_sessions SET job_id = ${audioJobId} WHERE id = ${sessionId} AND user_id = ${userId}`;
+      }
+      response.jobId = audioJobId;
+    } catch (err) {
+      console.warn("[buzzy/audio-project] link failed:", err instanceof Error ? err.message : err);
+    }
+  }
   // Pricing surface (stack item 12): the per-job estimate disclosed with the
   // draft — before the owner approves work, never after. It belongs to a turn
   // that is actually showing a draft, not to a question answered in chat.
