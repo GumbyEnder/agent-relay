@@ -1,8 +1,12 @@
 # Mission lanes — enforcement plan (P2 + P3)
 
-Status: P1 live (`0052_mission_lanes.sql`, `LANES_ENFORCE=0`, inert).
-This document is the P2/P3 execution plan. Nothing here flips a board until the
-preconditions in "Flip gate" are printed and pasted into the evidence record.
+Status: P1 live (`0052_mission_lanes.sql`). P2 live (`0053`, `GET /lane-gate`).
+P3 **shipped** — the write-path guard lives in `src/lib/lane-rules.ts` +
+`durableBoard.setMissionLane` / `moveMission`, exposed as `POST /missions/:id/lane`.
+One board (DevBoard APP `board_i80oou4gp0ri`) has `lanes_enforce=true`; whether it
+rejects writes is decided by the global `LANES_ENFORCE` env, flipped only on
+Shane's go.
+This document is the execution plan and the evidence contract for every flip.
 
 Authority: Shane, 2026-11-05 (via grokbot, topic `work`):
 * "One at a time is fine" — enforcement is turned on **board by board**, never fleet-wide.
@@ -103,15 +107,28 @@ no gate to read is a blind flip.
 violations, leave it at 0 and report which rule is failing rather than enforcing a board that
 would fail closed on real traffic.
 
-## Wire path (P3 code, only after P2 ships)
+## Wire path (P3, shipped)
 
-`enforce_active = projects.lanes_enforce AND LANES_ENFORCE` (env read once per process).
-When false, the write path is byte-identical to today. When true:
-* reject a transition that would produce any of the eight rule codes, with the rule code in
-  the error body;
-* exempt the authenticated human principal (`actor_kind='human'`) — decide it from the
-  session, never from a request body field — but still insert the lane history row;
+`enforce_active = projects.lanes_enforce AND LANES_ENFORCE` (env read per call, so a
+flip needs only a restart). When false the write path accepts the lane write and records
+it — the guard never rejects unless the env veto and the per-board flag are both on.
+
+When true:
+* `POST /missions/:id/lane` rejects a transition that would produce any of the eight rule
+  codes, with the rule code(s) in the 422 body (`{code:"lane_violation", violations:[…]}`);
+* a column move on an enforced board is refused with the same 422 when it would leave the
+  card in `column_lane_mismatch` (e.g. a `blocked_evidence` card dragged into `running`);
+  `→ done` is the exception — it coerces the lane to `evidence`/`unverified` with a
+  history row, never to `closed`;
+* the authenticated human principal (`actor_kind='human'`) is exempt — decided from the
+  session server-side, never from a request body field — and still gets a lane history
+  row. The only rules a human still has to satisfy are the two the 0052 CHECK constraints
+  cannot represent: `closed` needs `check_result='pass'` + `evidence_ref`,
+  `blocked_evidence` needs `evidence_missing`;
 * agents and system actors get no exemption.
+
+Rollback while this is live: `LANES_ENFORCE=0` (global veto, one restart, no data loss),
+then per board `update ar_projects set lanes_enforce=false where id=<id>;`.
 
 ## Open items
 

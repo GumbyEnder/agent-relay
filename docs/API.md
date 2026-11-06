@@ -120,6 +120,38 @@ Creates a human call; column → `needs_human`.
 
 Column → `review`; agent freed.
 
+### `POST /missions/:id/lane`
+
+Mission-lane write (P3). The four lanes are `open | evidence | closed |
+blocked-evidence` (DB: `blocked_evidence`).
+
+```json
+{
+  "lane": "evidence",
+  "evidence_type": "file",
+  "evidence_ref": "file:src/auth/cookies.ts",
+  "check_result": "pass"
+}
+```
+
+* The actor kind is decided **server-side**: a signed-in operator session is
+  `human`, an agent/global key is `agent`. A body field can never claim to be a
+  human.
+* `enforce_active = ar_projects.lanes_enforce AND LANES_ENFORCE` (env). When it
+  is true the write is refused with HTTP 422 `{ code: "lane_violation",
+  violations: [{ rule_code, detail }] }` if the resulting row would breach one of
+  the eight rule codes (`lane_missing`, `lane_ambiguous`, `closed_no_authority`,
+  `closed_no_evidence`, `pass_no_ref`, `blocked_no_reason`,
+  `column_lane_mismatch`, `no_lane_history`).
+* Humans are exempt — their transitions are accepted and recorded in
+  `ar_mission_lane_history` (`actor_kind='human'`), except the two rules the
+  database cannot represent (`closed` needs `check_result=pass` + `evidence_ref`;
+  `blocked_evidence` needs `evidence_missing`).
+* `closed` is Shane-only: an agent gets `closed_no_authority`.
+* Every accepted write appends an `ar_mission_lane_history` row and an event.
+
+`GET /lane-gate?project_id=<id>` reports the same rule codes read-only.
+
 ### `POST /v1`
 
 Action bus matching `PROTOCOL.md`:

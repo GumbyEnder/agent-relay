@@ -45,6 +45,14 @@ import {
 import { historyToCsv, historyToJson } from "./audit-export";
 import { buildReplyWebhookPayload, dispatchReplyWebhook } from "./reply-webhook";
 import { resolveProjectRef } from "./project-ref";
+import {
+  applyLaneWrite,
+  describeViolations,
+  laneEnforceActive,
+  laneWriteViolations,
+  violationsForActor,
+  type LaneActorKind,
+} from "./lane-rules";
 
 const globalRef = globalThis as typeof globalThis & {
   __arBoardReady__?: Promise<void>;
@@ -674,6 +682,172 @@ async function applyEngine<T>(
     const hist = collectHistory(before, result.board, { ...actor, kind: actorKind }, note);
     await persistBoard(sql, result.board, hist);
     return result;
+  });
+}
+
+/**
+ * P3 lane write path — the only place a lane changes.
+ *
+ * Reads the mission plus its board's `lanes_enforce`, evaluates the resulting
+ * row against the eight rule codes (src/lib/lane-rules.ts), refuses with 422
+ * when enforcement is active for this board, and writes lane + history + event
+ * in one transaction either way (a recorded transition is never a lie).
+ */
+async function laneTargetRow(sql: Sql, missionId: string) {
+  const rows = await sql`
+    select m.id, m.project_id, m.column_id, m.lane, m.lane_authority,
+           m.evidence_type, m.evidence_ref, m.check_result, m.evidence_missing, m.title,
+           coalesce(p.lanes_enforce, false) as lanes_enforce
+      from ar_missions m
+      left join ar_projects p on p.id = m.project_id
+     where m.id = ${missionId}
+     limit 1
+  `;
+  return rows[0] as Record<string, unknown> | undefined;
+}
+
+function laneRowOf(row: Record<string, unknown>) {
+  return {
+    lane: (row.lane as string | null) ?? null,
+    column_id: String(row.column_id ?? ""),
+    lane_authority: (row.lane_authority as string | null) ?? null,
+    evidence_type: (row.evidence_type as string | null) ?? null,
+    evidence_ref: (row.evidence_ref as string | null) ?? null,
+    check_result: (row.check_result as string | null) ?? null,
+    evidence_missing: (row.evidence_missing as string | null) ?? null,
+  };
+}
+
+/** One lane write. Never touches column_id — columns stay the work axis. */
+async function writeLane(
+  sql: Sql,
+  row: Record<string, unknown>,
+  input: Parameters<typeof applyLaneWrite>[1],
+  actor: { id: string; kind: import("./lane-rules").LaneActorKind; name?: string },
+  opts?: { note?: string; event_kind?: string },
+) {
+  const missionId = String(row.id);
+  const current = laneRowOf(row);
+  const next = applyLaneWrite(current, input, actor);
+  const violations = laneWriteViolations({ current, next, actorKind: actor.kind });
+  // Humans are exempt from enforcement (recorded, not rejected); only the
+  // rules the database itself cannot represent still bind them.
+  const blocking = violationsForActor(violations, actor.kind);
+  const enforceActive = laneEnforceActive(row.lanes_enforce as boolean, process.env);
+
+  if (blocking.length > 0 && enforceActive) {
+    return {
+      ok: false as const,
+      status: 422,
+      error: `lane_violation: ${describeViolations(blocking)}`,
+      code: "lane_violation",
+      data: {
+        enforce_active: true,
+        lane: current.lane,
+        requested_lane: next.lane,
+        violations: blocking,
+      },
+    };
+  }
+
+  const laneChanged = current.lane !== next.lane;
+  await sql`
+    update ar_missions set
+      lane = ${next.lane},
+      lane_authority = ${next.lane_authority},
+      lane_changed_at = now(),
+      lane_changed_by = ${`${actor.kind}:${actor.id}`},
+      evidence_type = ${next.evidence_type},
+      evidence_ref = ${next.evidence_ref},
+      check_result = ${next.check_result},
+      check_output = ${next.check_output ?? null},
+      evidence_missing = ${next.evidence_missing},
+      updated_at = ${ts(Date.now())}
+    where id = ${missionId}
+  `;
+
+  if (laneChanged) {
+    await sql`
+      insert into ar_mission_lane_history (
+        id, mission_id, project_id, from_lane, to_lane, authority,
+        evidence_type, evidence_ref, check_result, actor_id, actor_kind, note
+      ) values (
+        ${uid("lanehist")}, ${missionId}, ${(row.project_id as string | null) ?? null},
+        ${current.lane}, ${next.lane}, ${next.lane_authority},
+        ${next.evidence_type}, ${next.evidence_ref}, ${next.check_result},
+        ${actor.id}, ${actor.kind}, ${opts?.note ?? null}
+      )
+    `;
+  }
+
+  await insertEvent(sql, {
+    id: uid("ev"),
+    missionId,
+    agentId: null,
+    projectId: (row.project_id as string | null) ?? null,
+    kind: "note",
+    message: laneChanged
+      ? `Lane ${current.lane ?? "null"} → ${next.lane} (${actor.kind}:${actor.id})`
+      : `Lane write ${next.lane} (${actor.kind}:${actor.id})`,
+    at: Date.now(),
+    meta: {
+      lane_from: String(current.lane),
+      lane_to: String(next.lane),
+      actor_kind: actor.kind,
+      actor_id: actor.id,
+      enforce_active: String(enforceActive),
+      violations: String(violations.map((v) => v.rule_code).join(",")),
+    },
+  });
+
+  return {
+    ok: true as const,
+    data: {
+      mission_id: missionId,
+      lane: next.lane,
+      lane_authority: next.lane_authority,
+      evidence_type: next.evidence_type,
+      evidence_ref: next.evidence_ref,
+      check_result: next.check_result,
+      evidence_missing: next.evidence_missing,
+      lane_changed: laneChanged,
+      enforce_active: enforceActive,
+      recorded: laneChanged,
+      discarded_violations: enforceActive ? [] : violations,
+    },
+  };
+}
+
+/**
+ * `→ done` coercion (plan §5): a mission that lands in done without an
+ * evidence/closed lane would report `column_lane_mismatch`. Coerce it to
+ * evidence/unverified with a history row and an event — never to `closed`.
+ * Only runs when enforcement is active for that board; a no-op otherwise.
+ */
+async function coerceDoneLane(
+  missionId: string,
+  actor: { id: string; kind: import("./lane-rules").LaneActorKind; name?: string },
+) {
+  return withLock(async () => {
+    const sql = await getSql();
+    const row = await laneTargetRow(sql, missionId);
+    if (!row) return { ok: false as const, code: "mission_not_found" };
+    const current = laneRowOf(row);
+    if (current.column_id !== "done") return { ok: true as const, coerced: false };
+    if (current.lane === "evidence" || current.lane === "closed") {
+      return { ok: true as const, coerced: false };
+    }
+    if (!laneEnforceActive(row.lanes_enforce as boolean, process.env)) {
+      return { ok: true as const, coerced: false };
+    }
+    const result = await writeLane(
+      sql,
+      row,
+      { lane: "evidence", evidence_type: "none", check_result: "unverified" },
+      { id: actor.id, kind: "system", name: actor.name },
+      { note: `coerced →done from lane ${current.lane ?? "null"}` },
+    );
+    return { ok: true as const, coerced: result.ok };
   });
 }
 
@@ -2005,8 +2179,102 @@ export const durableBoard = {
       return result;
     }),
 
-  moveMission: (missionId: string, column: MissionColumn, actor = "operator") =>
-    applyEngine(
+  /**
+   * POST /missions/:id/lane — the P3 write path.
+   * `actor` is resolved server-side (session → human, agent key → agent); it is
+   * never read from the request body.
+   */
+  setMissionLane: (
+    missionId: string,
+    input: {
+      lane: string;
+      lane_authority?: string | null;
+      evidence_type?: string | null;
+      evidence_ref?: string | null;
+      check_result?: string | null;
+      check_output?: string | null;
+      evidence_missing?: string | null;
+      note?: string;
+    },
+    actor: { id: string; kind: LaneActorKind; name?: string },
+  ) =>
+    withLock(async () => {
+      const sql = await getSql();
+      const row = await laneTargetRow(sql, missionId);
+      if (!row) {
+        return {
+          ok: false as const,
+          status: 404,
+          error: "mission not found",
+          code: "mission_not_found",
+        };
+      }
+      return writeLane(
+        sql,
+        row,
+        {
+          lane: input.lane,
+          lane_authority: input.lane_authority,
+          evidence_type: input.evidence_type,
+          evidence_ref: input.evidence_ref,
+          check_result: input.check_result,
+          check_output: input.check_output,
+          evidence_missing: input.evidence_missing,
+        },
+        actor,
+        { note: input.note },
+      );
+    }),
+
+  moveMission: async (
+    missionId: string,
+    column: MissionColumn,
+    actor = "operator",
+    actorKind: LaneActorKind = "human",
+  ) => {
+    // P3 pre-check — a move may not create a lane violation on an enforced
+    // board. Evaluated on the row this move would produce, before the engine
+    // runs, so a bad agent move is a 422 instead of a board that reads dirty
+    // afterwards. Humans are exempt (server-side principal) and instead get
+    // the transition recorded; `→ done` is coerced below, never closed.
+    if (actorKind !== "human" || column === "done") {
+      const verdict = await withLock(async () => {
+        const sql = await getSql();
+        const row = await laneTargetRow(sql, missionId);
+        if (!row) return { ok: true as const };
+        if (!laneEnforceActive(row.lanes_enforce as boolean, process.env)) {
+          return { ok: true as const };
+        }
+        const current = laneRowOf(row);
+        // `→ done` without an evidence/closed lane is the coercion case, not a
+        // rejection: coerceDoneLane stamps evidence/unverified after the move.
+        if (column === "done" && current.lane !== "evidence" && current.lane !== "closed") {
+          return { ok: true as const };
+        }
+        const violations = laneWriteViolations({
+          current,
+          next: { ...current, column_id: column },
+          actorKind,
+        });
+        if (violations.length === 0 || actorKind === "human") return { ok: true as const };
+        return {
+          ok: false as const,
+          status: 422,
+          error: `lane_violation: ${describeViolations(violations)}`,
+          code: "lane_violation",
+          data: {
+            enforce_active: true,
+            lane: current.lane,
+            requested_column: column,
+            violations,
+          },
+        };
+      });
+      if (!verdict.ok) {
+        return verdict as unknown as EngineResult<{ mission: ReturnType<typeof engine.missionSummary> }>;
+      }
+    }
+    const result = await applyEngine(
       (b) => {
         const mission = b.missions.find((m) => m.id === missionId);
         if (!mission) {
@@ -2042,9 +2310,20 @@ export const durableBoard = {
         return { ok: true, board, data: { mission: engine.missionSummary(updated) } };
       },
       actor,
-      "operator",
+      actorKind === "human" ? "operator" : "agent",
       `move → ${column}`,
-    ),
+    );
+    // P3: done requires an evidence/closed lane. Coerce (never close) when this
+    // board is enforced; a coercion failure must not undo the move.
+    if (result.ok && column === "done") {
+      try {
+        await coerceDoneLane(missionId, { id: actor, kind: actorKind, name: actor });
+      } catch (e) {
+        console.error("[lane] done-coercion failed", missionId, e);
+      }
+    }
+    return result;
+  },
 
   createMission: (input: {
     title: string;

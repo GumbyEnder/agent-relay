@@ -51,6 +51,9 @@ import { summarizeTickets } from "./ticket-summary";
 import { renderDocsHtmlPage, wantsHtmlDocs } from "./docs-html";
 import { DEFAULT_PROJECT_ID } from "./seed";
 import { validateModelPrefsPatch } from "./buzzy/modelPrefs";
+import {
+  lanesEnforceEnvEnabled as lanesEnforceEnvEnabledShared,
+} from "./lane-rules";
 
 const KNOWN_COLUMNS = new Set<string>(COLUMNS.map((c) => c.id));
 
@@ -560,7 +563,9 @@ async function agentReviewMove(
   column: import("./types").MissionColumn,
   agentName: string,
 ): Promise<Response> {
-  return fromEngine(await boardOps.moveMission(missionId, column, `agent:${agentName}`));
+  return fromEngine(
+    await boardOps.moveMission(missionId, column, `agent:${agentName}`, "agent"),
+  );
 }
 
 /**
@@ -702,13 +707,13 @@ export interface LaneGateReport {
   violations: LaneGateViolation[];
 }
 
-const LANES_ENFORCE_FALSE = new Set(["0", "false", "off", "no", "none", "disabled"]);
-
-/** Unset/empty -> false. An absent env var is not consent. */
+/**
+ * Global veto — the same predicate the P3 write guard uses (lane-rules.ts), so
+ * the report and the rejection can never disagree about what "enforced" means.
+ * Unset/empty -> false. An absent env var is not consent.
+ */
 function lanesEnforceEnvEnabled(): boolean {
-  const raw = (process.env.LANES_ENFORCE ?? "").trim().toLowerCase();
-  if (!raw) return false;
-  return !LANES_ENFORCE_FALSE.has(raw);
+  return lanesEnforceEnvEnabledShared();
 }
 
 /** `projectId === null` means every board (scoped then equals global). */
@@ -1075,6 +1080,78 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     if (parts.length === 3 && parts[0] === "missions" && req.method === "POST") {
       const id = parts[1]!;
       const verb = parts[2]!;
+
+      // POST /missions/:id/lane — P3 write path.
+      // { lane, evidence_type?, evidence_ref?, check_result?, check_output?,
+      //   evidence_missing?, lane_authority?, note? }
+      // The actor kind comes from the SERVER-SIDE principal (session cookie →
+      // human, agent key → agent), never from a body field. 422 `lane_violation`
+      // when the mission's board is enforced and the transition would breach a
+      // rule code; humans are exempt but still recorded.
+      if (verb === "lane") {
+        const mission = await boardOps.getMission(id);
+        if (!mission) return err(404, "mission not found", "mission_not_found");
+        const denied = await assertCanReadMission(req, machineAuth, mission);
+        if (denied) return denied;
+        const lane = str(body.lane) ?? str(body.lane_id);
+        if (!lane) return err(400, "lane is required", "bad_request");
+
+        let actor: { id: string; kind: "human" | "agent" | "system"; name?: string };
+        if (machineAuth.type === "ark") {
+          const agentName = await resolveVerbAgent({}, machineAuth);
+          if (agentName instanceof Response) return agentName;
+          actor = { id: machineAuth.agentId ?? "ark", kind: "agent", name: agentName };
+        } else if (machineAuth.type === "global") {
+          // The server-wide key is an automation credential, not a person.
+          actor = { id: "api-key", kind: "agent", name: "api-key" };
+        } else {
+          const ctx = await loadOperatorContext(req);
+          if (ctx.authRequired && !ctx.user) {
+            return err(401, "Sign in required", "signed_out");
+          }
+          if (!(await operatorCanAccessProject(ctx, mission.projectId))) {
+            return err(404, "mission not found", "mission_not_found");
+          }
+          actor = {
+            id: ctx.user?.id ?? "local-operator",
+            kind: "human",
+            name: ctx.user?.email ?? "operator",
+          };
+        }
+
+        try {
+          const result = await boardOps.setMissionLane(
+            id,
+            {
+              lane,
+              lane_authority: str(body.lane_authority) ?? str(body.authority) ?? null,
+              evidence_type: str(body.evidence_type) ?? null,
+              evidence_ref: str(body.evidence_ref) ?? null,
+              check_result: str(body.check_result) ?? null,
+              check_output: str(body.check_output) ?? null,
+              evidence_missing: str(body.evidence_missing) ?? null,
+              note: str(body.note),
+            },
+            actor,
+          );
+          if (!result.ok) {
+            const detail = "data" in result ? result.data : {};
+            return json(
+              { ok: false, error: result.error, code: result.code, actor_kind: actor.kind, ...detail },
+              result.status,
+            );
+          }
+          return json({ ok: true, actor_kind: actor.kind, ...result.data });
+        } catch (e) {
+          // A DB CHECK violation means the guard let an unrepresentable row
+          // through: report it as a lane violation, not a 500.
+          return err(
+            422,
+            e instanceof Error ? e.message : "lane write rejected",
+            "lane_violation",
+          );
+        }
+      }
 
       if (verb === "artifacts") {
         const urlA = str(body.url) ?? str(body.html_url);
