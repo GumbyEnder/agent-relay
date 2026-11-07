@@ -1046,6 +1046,49 @@
         "evidence": [],
         "note": "desktop opens the host's /login in a window; it has no page of its own"
       }
+    },
+    {
+      "id": "projects.schema",
+      "name": "Project -> deliverable link + per-turn log",
+      "owner": "buzzy",
+      "state": "web-only",
+      "web": {
+        "evidence": [
+          "migrations/0052_buzzy_project_deliverables.sql",
+          "src/lib/buzzy/server.ts",
+          "src/lib/buzzy/chat.nitro.ts"
+        ],
+        "routes": [
+          "/api/buzzy/projects"
+        ],
+        "migrations": [
+          "0052_buzzy_project_deliverables.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [],
+        "note": "desktop assets have no job_id/session_id and no turn log yet — phase 5"
+      }
+    },
+    {
+      "id": "mission.lanes",
+      "name": "Mission lanes + project lane enforcement",
+      "owner": "buzzy",
+      "state": "web-only",
+      "web": {
+        "evidence": [
+          "migrations/0052_mission_lanes.sql",
+          "migrations/0053_project_lanes_enforce.sql"
+        ],
+        "migrations": [
+          "0052_mission_lanes.sql",
+          "0053_project_lanes_enforce.sql"
+        ]
+      },
+      "desktop": {
+        "evidence": [],
+        "note": "not yet in the desktop bundle (reported by the parity gate as bundle drift)"
+      }
     }
   ],
   "open": [

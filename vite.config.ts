@@ -510,6 +510,12 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
               {
+                // Explicit, not only regex-matched inside chat.nitro: the parity
+                // gate reads this table, and a route it cannot see reads as missing.
+                route: "/api/buzzy/projects",
+                handler: "./src/lib/buzzy/chat.nitro.ts",
+              },
+              {
                 // Before the wildcard: the canvas needs its own handler.
                 route: "/api/buzzy/art",
                 handler: "./src/lib/buzzy/art.nitro.ts",
