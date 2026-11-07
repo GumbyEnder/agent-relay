@@ -101,5 +101,25 @@
       document.getElementById("caps").innerHTML = '<p class="sub">Could not read capabilities: ' + esc(e.message) + "</p>";
     });
 </script>
+<script id="caps-account">
+  /* The header ships a Sign in link as the no-JS fallback. This page never
+   * replaced it, so a signed-in owner read "Sign in" next to their own
+   * capabilities. Deliberately not common.js: that script also gates signed-out
+   * visitors off the page, and this page must stay readable by anyone — it just
+   * must not lie about who is looking at it. */
+  (function () {
+    fetch("/api/auth/get-session", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        var u = s && s.user;
+        var link = document.getElementById("accountLink");
+        if (!u || !u.name || !link) return;
+        link.textContent = u.name;
+        link.removeAttribute("href");
+        link.style.cursor = "default";
+      })
+      .catch(function () { /* stay as the fallback */ });
+  })();
+</script>
 </body>
 </html>

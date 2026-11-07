@@ -1377,9 +1377,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               "</div>").join("")
           : "<p class='muted'>No documents yet. Documents appear here as your jobs produce drafts and deliverables.</p>") +
         "</div>";
-      app.querySelectorAll(".docfolder").forEach((el) => {
+      app.querySelectorAll(".docfolder[data-folder]").forEach((el) => {
         el.onclick = () => { docsOpenFolder = el.getAttribute("data-folder"); goDocs(); };
       });
+      // Server-side deliverables belong in the Library too: a track made in chat
+      // is a deliverable, and this page is where the owner looks for it.
+      renderServerFiles(app);
       const bj = document.getElementById("docsBackJobs");
       if (bj) bj.onclick = () => { docsOpenFolder = null; docsOpenDoc = null; state.screen = "jobs"; render(); };
       loadArtifactShelf();
@@ -1443,6 +1446,42 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var host3 = document.getElementById("artifactShelf");
           if (host3) host3.innerHTML = "<p class='muted'>Artifacts could not be loaded just now.</p>";
         });
+    }
+
+    /* ── Server deliverables ────────────────────────────────────────
+     * The folder grid below lists documents that only ever existed in this
+     * browser (localStorage DOCS_KEY). Anything the server produced — a music
+     * track, a rendered file — was invisible: making a track in chat and opening
+     * the Library showed "No documents yet". Files that live on the server are
+     * listed from the server: name, size, date, link. */
+    function renderServerFiles(app) {
+      const holder = document.createElement("div");
+      holder.className = "docs-folders";
+      holder.id = "serverFiles";
+      holder.innerHTML = "<p class='muted'>Looking for files your sessions produced…</p>";
+      app.appendChild(holder);
+
+      fetch("/api/buzzy/assets", { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          const items = (data && data.items) || [];
+          if (!items.length) { holder.innerHTML = ""; return; }
+          const kb = (b) => (b > 1024 * 1024 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB");
+          const icon = (t) => (/audio/.test(t) ? "🎵" : /image/.test(t) ? "🖼" : /pdf/.test(t) ? "📕" : "📄");
+          const empty = app.querySelector(".docs-folders > p.muted");
+          if (empty && /No documents yet/i.test(empty.textContent)) empty.remove();
+          holder.style.display = "grid";
+          holder.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
+          holder.style.gap = "10px";
+          holder.innerHTML =
+            "<h2 style='font-size:15px;margin:18px 0 8px;grid-column:1/-1'>Files from your sessions</h2>" +
+            items.map((f) =>
+              "<a class='docfolder' style='display:block;text-decoration:none' href='" + escHtml(f.url || ("/api/buzzy/assets/" + f.id)) + "' target='_blank' rel='noopener'>" +
+                "<div class='df-name'>" + icon(f.content_type || "") + " " + escHtml(f.filename || ("asset " + f.id)) + "</div>" +
+                "<div class='df-meta'>" + kb(Number(f.bytes) || 0) + " · " + new Date(f.created_at || f.createdAt || Date.now()).toLocaleDateString() + " · open</div>" +
+              "</a>").join("");
+        })
+        .catch(() => { holder.innerHTML = ""; });
     }
 
     function goPick() {
