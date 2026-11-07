@@ -7,6 +7,7 @@
  * window. Anything Electron-specific lives in main.mjs.
  */
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, platform } from "node:os";
@@ -133,6 +134,21 @@ export class RuntimeSupervisor {
     throw new Error(message);
   }
 
+  /** A listening socket, asked without DNS (see probe()). */
+  tcpReachable(port, host = "127.0.0.1") {
+    return new Promise((done) => {
+      const sock = connect(port, host);
+      const finish = (ok) => {
+        try { sock.destroy(); } catch { /* closed */ }
+        done(ok);
+      };
+      sock.setTimeout(1200);
+      sock.once("connect", () => finish(true));
+      sock.once("timeout", () => finish(false));
+      sock.once("error", () => finish(false));
+    });
+  }
+
   /** One readiness attempt, with the failure kept instead of discarded. */
   async probe(rt) {
     const started = Date.now();
@@ -143,6 +159,13 @@ export class RuntimeSupervisor {
       if (res.ok) return { ok: true, error: null, code: null, ms: Date.now() - started, rt };
       return { ok: false, error: `HTTP ${res.status}`, code: String(res.status), ms: Date.now() - started, rt };
     } catch (err) {
+      // undici can fail before sending a packet (name resolution on Wine/Windows
+      // answers an opaque UNKNOWN). Ask the same question with a raw TCP connect to
+      // the literal — a listening port must never be reported unreachable.
+      const tcp = await this.tcpReachable(rt.port, rt.host);
+      if (tcp) {
+        return { ok: true, error: null, code: "tcp-only", ms: Date.now() - started, rt };
+      }
       // fetch wraps the useful part: "fetch failed" alone hides ECONNREFUSED,
       // EHOSTUNREACH, a TLS problem, or a timeout.
       const cause = err?.cause ?? err;
