@@ -38,6 +38,8 @@ import {
 } from "./info";
 import { calculate } from "./calc";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
+import { generateImage, storeImage, artConfigured, imageModel } from "./art";
+import { checkQuota, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
@@ -52,7 +54,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -608,6 +610,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Why the last attempt to make audio failed, in the provider's or the plan's own
   // words. Used to answer honestly instead of denying the capability exists.
   let musicRefusal: { code: string; error: string } | null = null;
+  let renderedImage: { url: string; name: string; bytes: number; type: string } | null = null;
+  let artRefusal: { code: string; error: string } | null = null;
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
@@ -671,6 +675,44 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       messages[0]!.content +=
         `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
         "Tell the owner this exact reason. Do not claim any audio exists.";
+    }
+  }
+
+  // ── Art pre-pass ───────────────────────────────────────────────────
+  // "draw me a duck" is a request for a file, and the canvas is not the only way in.
+  // Same rule as music: the harness renders, the model narrates what exists.
+  if (!renderedImage && isImageRequest(message) && artConfigured()) {
+    const prompt = message.slice(0, 1000);
+    const verdict = await checkQuota({ userId, scope: "image", units: 1 });
+    if (!verdict.ok) {
+      artRefusal = { code: verdict.code ?? "refused", error: verdict.error ?? "quota refused" };
+      messages[0]!.content +=
+        `\n\nAn image was requested and REFUSED by the plan: ${verdict.error}. ` +
+        "Say exactly that. Do not claim any picture exists and do not offer to draw it later.";
+    } else {
+      req.onStage?.({ phase: "art", label: "Drawing your image", etaMs: 20_000 });
+      const made = await generateImage(prompt);
+      await recordUsage({
+        userId, scope: "image", units: made.ok ? 1 : 0, ms: made.ms ?? 0,
+        status: made.ok ? "ok" : "failed", code: made.ok ? null : made.code ?? "failed", model: imageModel(),
+      }).catch(() => {});
+      if (made.ok && made.bytes) {
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+        const name = `art-${stamp}.png`;
+        const stored = await storeImage(userId, made.bytes, name, made.contentType || "image/png");
+        renderedImage = { url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType || "image/png" };
+        try {
+          await sql`UPDATE buzzy_assets SET job_id = ${jobId}, session_id = ${sessionId}
+                    WHERE user_id = ${userId} AND id = ${stored.id}`;
+        } catch (_) { /* the link is an improvement, not a gate */ }
+        messages[0]!.content +=
+          `\n\nThe image has ALREADY been rendered this turn: ${name}, ${stored.bytes} bytes, ` +
+          "attached to your reply. Do not describe it as something you will make later; say what is in it and stop.";
+      } else {
+        artRefusal = { code: made.code ?? "image_failed", error: made.error ?? "the provider refused" };
+        messages[0]!.content +=
+          `\n\nImage generation was attempted and FAILED (${made.code}): ${made.error}. Tell the owner that exact reason.`;
+      }
     }
   }
 
@@ -1239,6 +1281,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         : `I tried to make that audio and the provider refused: ${musicRefusal.error}. That is the real reason — not a missing capability.`
       : "I can make music here. Ask for a track and I will generate the audio and attach it to my reply.";
   }
+  // The same lie, one medium over: "I have created an image and attached it below"
+  // with no image in the envelope. Image nouns are stricter than audio ones because
+  // "art" and "picture" appear in ordinary sentences.
+  const IMAGE_NOUN = /\b(image|picture|illustration|drawing|poster|logo|artwork|thumbnail|banner|mockup)\b/i;
+  const IMAGE_CLAIM = /\b(created|made|generated|drew|drawn|attached|rendered|here is|here's|ready|saved)\b/i;
+  const claimsImage = (text: string): boolean =>
+    text.split(/(?<=[.!?])\s+/).some((sentence) =>
+      IMAGE_NOUN.test(sentence) && IMAGE_CLAIM.test(sentence) && !/\b(can'?t|cannot|unable|failed|didn'?t)\b/i.test(sentence));
+  if (!renderedImage && claimsImage(finalReply)) {
+    finalReply = artRefusal
+      ? `I tried to draw that and it failed: ${artRefusal.error}.`
+      : "I did not produce an image on that turn — nothing was rendered and nothing was saved. " +
+        "Ask me to draw it and I will.";
+  }
+
   if (!renderedAudio && claimsAudio(finalReply)) {
     console.warn("[buzzy] reply claimed an audio deliverable the chat cannot produce");
     // This copy has to stay true to the CURRENT build. It once said "chat has no
@@ -1575,6 +1632,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The player rides the reply that announces it: a link the owner has to hunt
   // for is not "delivered".
   if (renderedAudio) response.audio = renderedAudio;
+  // A picture rides its reply the same way a track does: the card and the sentence
+  // must not be able to disagree about whether a file exists.
+  if (renderedImage) (response as { image?: typeof renderedImage }).image = renderedImage;
 
   // ── The artifact envelope ──────────────────────────────────────────
   // One list of what this turn actually produced. The client renders these and
@@ -1589,6 +1649,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       bytes: response.document.bytes,
       contentType: response.document.contentType,
       ...(response.document.libraryUrl ? { libraryUrl: response.document.libraryUrl } : {}),
+    });
+  }
+  if (renderedImage) {
+    artifacts.push({
+      kind: "image",
+      name: renderedImage.name,
+      url: renderedImage.url,
+      bytes: renderedImage.bytes,
+      contentType: renderedImage.type,
     });
   }
   if (renderedAudio) {

@@ -166,3 +166,19 @@ export function isExplicitDocumentRequest(message: string): boolean {
     /\b(as|in)\s+(an?\s+)?\.?(md|markdown|pdf|docx?|word|csv|xlsx?)\b/i.test(m)
   );
 }
+
+/**
+ * Is this a request to DRAW something?
+ *
+ * Same discipline as music: a verb of making plus an image noun in the same clause.
+ * "how do I draw a circle in CSS" asks a question; "draw me a duck in a pond" asks
+ * for a file. The harness performs the render — the model cannot be relied on to
+ * choose a tool, which is how the music lane produced four turns of promises.
+ */
+export function isImageRequest(message: string): boolean {
+  const m = String(message || "");
+  const NOUN = "(image|picture|illustration|drawing|logo|poster|artwork|art|thumbnail|icon|banner|mockup|render|scene)";
+  if (new RegExp(`\\b(draw|paint|sketch|illustrate|render|generate|make|create|design)\\b[^.\\n]{0,40}\\b${NOUN}\\b`, "i").test(m)) return true;
+  // "draw me a duck" — the noun is the subject, not the object of "of".
+  return /\b(draw|paint|sketch|illustrate)\s+(me\s+)?(a|an|the|some)\b[^.\n]{0,60}/i.test(m);
+}
