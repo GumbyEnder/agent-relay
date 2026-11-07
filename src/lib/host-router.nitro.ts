@@ -76,6 +76,13 @@ export default defineEventHandler((event) => {
   const host = requestHost(event);
 
   if (isConsumerHost(host)) {
+    // One consumer origin, not two. www and the apex are separate cookie jars, so a
+    // sign-in on www leaves the apex signed out (measured: sessions 200 on www, 401
+    // on apex in the same browser). www exists to catch typos and old links, so it
+    // 301s to the canonical origin before anything else reads the request.
+    if (host.startsWith("www.") && CONSUMER_ORIGIN.startsWith("https://")) {
+      return sendRedirect(event, `${CONSUMER_ORIGIN}${pathname}${url.search}`, 301);
+    }
     if (isConsumerPath(pathname)) return; // BeeZilla surface — let it through.
     // `/` and everything that is not a BeeZilla surface: the consumer front door.
     return sendRedirect(event, "/buzzy/talk", 302);
