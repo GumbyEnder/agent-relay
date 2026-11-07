@@ -1321,7 +1321,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       reason +
       " Nothing on my side claims otherwise. Tell me to build it again and I will run the tool and report exactly what it returned.";
   }
-  const cleanReply = finalReply;
+  // Strip a leading machine token before the reply becomes the answer. The model
+  // learned the filename from project memory, so it survived removing it from the
+  // prompt; and cleanReply is copied here, so stripping afterwards changed nothing.
+  const cleanReply = renderedImage
+    ? finalReply.replace(/^\s*(?:\/api\/buzzy\/assets\/\d+|art-[\w.\-]+\.png)\s*/i, "")
+    : finalReply;
 
   // ── Same voice, always ──────────────────────────────────────────────
   // Turns that need tools or produce a deliverable run on the text lane, which
@@ -1660,7 +1665,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // for is not "delivered".
   // The model sometimes opens with the file's own name. Strip that token: it is
   // machine noise where a sentence belongs, and it is not content.
-  if (renderedImage) finalReply = finalReply.replace(/^\s*(?:\/api\/buzzy\/assets\/\d+|art-[\w.\-]+\.png)\s*/i, "");
   if (renderedAudio) response.audio = renderedAudio;
   // A picture rides its reply the same way a track does: the card and the sentence
   // must not be able to disagree about whether a file exists.
