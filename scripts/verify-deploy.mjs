@@ -15,6 +15,69 @@
  * Exit 0 = live commit matches. Exit 1 = it does not (and says both hashes).
  */
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+
+/**
+ * The railway binary.
+ *
+ * A background/cron wrapper runs with a different PATH than an interactive shell,
+ * and `execFileSync("railway")` then throws ENOENT. That used to surface as a bare
+ * "Node.js v25.x" stack tail with no PASS/FAIL line — which reads as a failed
+ * deploy when in truth nothing was ever checked. Resolve the binary, and if it is
+ * genuinely absent say so and exit 2 ("could not verify"), never 1 ("does not match").
+ */
+function resolveRailway() {
+  const candidates = [
+    process.env.RAILWAY_BIN,
+    `${process.env.HOME}/.railway/bin/railway`,
+    "/usr/local/bin/railway",
+    "/opt/homebrew/bin/railway",
+    "railway",
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (c === "railway") {
+      try {
+        execFileSync("railway", ["--version"], { stdio: "ignore", cwd: process.env.HOME || "." });
+        return "railway";
+      } catch { /* not on PATH */ }
+    } else if (existsSync(c)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+/**
+ * Where to run the CLI from.
+ *
+ * ~/.railway/config.json keys the linked project by PATH, not by repo. Invoked from
+ * a scratch worktree (/tmp/bz-*), no ancestor is linked and the CLI answers
+ * "Service 'agent-relay' not found" — which used to look like a failed deploy. Run
+ * from a linked ancestor instead; --cwd / RAILWAY_CWD overrides.
+ */
+const RAILWAY_CWD = (() => {
+  const explicit = (() => {
+    const i = process.argv.indexOf("--cwd");
+    return i >= 0 ? process.argv[i + 1] : null;
+  })();
+  if (explicit) return explicit;
+  if (process.env.RAILWAY_CWD) return process.env.RAILWAY_CWD;
+  // The link is per PATH PREFIX and /tmp is linked to a DIFFERENT project, so a
+  // scratch worktree silently resolves to the wrong Railway project ("Service
+  // 'agent-relay' not found"). Prefer a known Agent Relay checkout.
+  const known = [`${process.env.HOME}/agents/agent-relay-recipes`, `${process.env.HOME}/agents/agent-relay`];
+  for (const k of known) if (existsSync(`${k}/railway.toml`)) return k;
+  return process.cwd();
+})();
+
+const RAILWAY = resolveRailway();
+if (!RAILWAY) {
+  console.error("verify-deploy: CANNOT VERIFY — the `railway` CLI was not found.");
+  console.error(`  PATH=${process.env.PATH ?? "(unset)"}`);
+  console.error("  set RAILWAY_BIN=/path/to/railway, or run this from a shell where it is on PATH.");
+  console.error("  This is not a failed deploy: nothing was checked.");
+  process.exit(2);
+}
 
 const args = process.argv.slice(2);
 const flag = (name, fallback = null) => {
@@ -41,11 +104,26 @@ if (!expect) {
 }
 
 const live = () => {
-  const raw = execFileSync("railway", ["deployment", "list", "--service", service, "--json"], {
-    encoding: "utf8",
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  const parsed = JSON.parse(raw);
+  let raw;
+  try {
+    raw = execFileSync(RAILWAY, ["deployment", "list", "--service", service, "--json"], {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      cwd: RAILWAY_CWD,
+    });
+  } catch (err) {
+    // CLI present but the call failed (network, auth, service name). Say which.
+    console.error(`verify-deploy: CANNOT VERIFY — \`railway deployment list\` failed: ${err.stderr?.toString().trim() || err.message}`);
+    process.exit(2);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.error("verify-deploy: CANNOT VERIFY — railway returned non-JSON:");
+    console.error(String(raw).slice(0, 300));
+    process.exit(2);
+  }
   const rows = Array.isArray(parsed) ? parsed : (parsed.deployments ?? []);
   // Newest first as the CLI returns them; take the first that is not REMOVED.
   const active = rows.find((r) => String(r.status ?? "").toUpperCase() !== "REMOVED") ?? rows[0];
