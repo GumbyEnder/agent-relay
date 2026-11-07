@@ -153,6 +153,60 @@
       redraw();
     }
 
+    function newId() { return "s_" + Math.random().toString(36).slice(2, 9); }
+
+    // A note belongs to a mark, not to a coordinate: "this road is too narrow" must
+    // stay attached to the road when the drawing around it moves. Anchor = stroke id;
+    // the note's own x1/y1 is only a fallback for marks that no longer exist.
+    function anchorPoint(id) {
+      var st = null;
+      for (var i = 0; i < strokes.length; i++) if (strokes[i].id === id) { st = strokes[i]; break; }
+      if (!st) return null;
+      if (st.tool === "pen" && st.points && st.points.length) {
+        var p = st.points[Math.floor(st.points.length / 2)];
+        return { x: p.x, y: p.y - 12 };
+      }
+      if (st.tool === "text") return null;
+      return { x: (st.x1 + st.x2) / 2, y: (st.y1 + st.y2) / 2 - 12 };
+    }
+
+    // Which mark is under the cursor? Cheap segment distance is enough for selecting.
+    function hitTest(p) {
+      var best = null, bestD = 9;
+      strokes.forEach(function (st) {
+        if (st.tool === "text") {
+          if (Math.abs(p.x - st.x1) < 80 && Math.abs(p.y - st.y1) < 14) { best = st; bestD = 0; }
+          return;
+        }
+        if (st.tool === "pen" && st.points) {
+          for (var i = 1; i < st.points.length; i++) {
+            var d = segDist(p, st.points[i - 1], st.points[i]);
+            if (d < bestD) { bestD = d; best = st; }
+          }
+        } else {
+          var d2 = segDist(p, { x: st.x1, y: st.y1 }, { x: st.x2, y: st.y2 });
+          if (d2 < bestD) { bestD = d2; best = st; }
+          if (st.tool === "rect") {
+            var corners = [[st.x1, st.y1, st.x2, st.y1], [st.x2, st.y1, st.x2, st.y2],
+                           [st.x2, st.y2, st.x1, st.y2], [st.x1, st.y2, st.x1, st.y1]];
+            corners.forEach(function (c) {
+              var dd = segDist(p, { x: c[0], y: c[1] }, { x: c[2], y: c[3] });
+              if (dd < bestD) { bestD = dd; best = st; }
+            });
+          }
+        }
+      });
+      return best;
+    }
+    function segDist(p, a, b) {
+      var vx = b.x - a.x, vy = b.y - a.y;
+      var wx = p.x - a.x, wy = p.y - a.y;
+      var len2 = vx * vx + vy * vy;
+      var t = len2 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2)) : 0;
+      var dx = p.x - (a.x + t * vx), dy = p.y - (a.y + t * vy);
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
     function redraw() {
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -167,6 +221,16 @@
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.setLineDash(isDraft ? [6, 4] : []);
+      if (s.id && s.id === selectedStroke) {
+        ctx.lineWidth = (s.width || 3) + 6;
+        ctx.strokeStyle = "rgba(255,212,13,0.25)";
+        ctx.beginPath();
+        if (s.tool === "pen" && s.points) { ctx.moveTo(s.points[0].x, s.points[0].y);
+          for (var i = 1; i < s.points.length; i++) ctx.lineTo(s.points[i].x, s.points[i].y); }
+        else if (s.tool !== "text") { ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); }
+        ctx.stroke();
+        ctx.lineWidth = s.width || 3;
+      }
       if (s.tool === "pen") {
         if (!s.points.length) return;
         ctx.beginPath();
@@ -192,8 +256,10 @@
       } else if (s.tool === "rect") {
         ctx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
       } else if (s.tool === "text") {
+        var at = (s.anchor && anchorPoint(s.anchor)) || { x: s.x1, y: s.y1 };
         ctx.font = "600 15px -apple-system, Segoe UI, Inter, sans-serif";
-        ctx.fillText(s.text || "", s.x1, s.y1);
+        ctx.fillText(s.text || "", at.x, at.y);
+        if (s.anchor) { ctx.beginPath(); ctx.arc(at.x - 6, at.y - 4, 2.5, 0, Math.PI * 2); ctx.fill(); }
       }
       ctx.setLineDash([]);
     }
@@ -203,13 +269,26 @@
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     }
 
+    var selectedStroke = null;
     canvas.addEventListener("pointerdown", function (e) {
-      if (tool === "select") return;
+      if (tool === "select") {
+        selectedStroke = hitTest(pt(e));
+        redraw();
+        return;
+      }
       canvas.setPointerCapture(e.pointerId);
       var p = pt(e);
       if (tool === "text") {
         var t = window.prompt("Note:");
-        if (t) { snapshot(); strokes.push({ tool: "text", color: color, x1: p.x, y1: p.y, text: t }); redraw(); }
+        if (t) {
+          snapshot();
+          // Clicking a mark anchors the note to it; clicking empty space leaves it free.
+          var hit = hitTest(p);
+          strokes.push({ id: newId(), tool: "text", color: color, x1: p.x, y1: p.y, text: t,
+                         anchor: hit ? hit.id : null });
+          redraw();
+          setStatus(hit ? "Note attached to that mark." : "Note added.");
+        }
         return;
       }
       snapshot();
@@ -227,6 +306,7 @@
     });
     canvas.addEventListener("pointerup", function () {
       if (!draft) return;
+      draft.id = newId();
       strokes.push(draft);
       draft = null;
       redraw();
@@ -323,6 +403,20 @@
     window.addEventListener("keydown", function (e) {
       var meta = e.metaKey || e.ctrlKey;
       if (!meta) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (tool === "select" && selectedStroke) {
+          e.preventDefault();
+          snapshot();
+          strokes = strokes.filter(function (x) { return x.id !== selectedStroke; });
+          // Notes anchored to a deleted mark keep their fallback position, so the
+          // comment survives the mark it described.
+          strokes.forEach(function (x) { if (x.anchor === selectedStroke) x.anchor = null; });
+          selectedStroke = null;
+          redraw();
+          setStatus("Deleted.");
+        }
+        return;
+      }
       if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); redo(); }
     });
