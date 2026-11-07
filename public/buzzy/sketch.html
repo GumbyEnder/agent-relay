@@ -401,8 +401,6 @@
     document.getElementById("undo").addEventListener("click", undo);
     document.getElementById("redo").addEventListener("click", redo);
     window.addEventListener("keydown", function (e) {
-      var meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
       if (e.key === "Delete" || e.key === "Backspace") {
         if (tool === "select" && selectedStroke) {
           e.preventDefault();
@@ -417,6 +415,8 @@
         }
         return;
       }
+      var meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
       if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); redo(); }
     });
