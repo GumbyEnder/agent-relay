@@ -294,7 +294,10 @@
       loadCompanies();
       companyControl(chrome);
       accountControl(chrome);
-      askControl(chrome);
+      // On Talk the composer is already in front of you; a second chat button there
+      // is noise. Everywhere else the panel is the only way to talk, so it is always
+      // present.
+      if (section() !== "talk") askControl(chrome);
     }
   }
 
