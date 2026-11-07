@@ -705,9 +705,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           await sql`UPDATE buzzy_assets SET job_id = ${jobId}, session_id = ${sessionId}
                     WHERE user_id = ${userId} AND id = ${stored.id}`;
         } catch (_) { /* the link is an improvement, not a gate */ }
+        // No filename in the note: the model copies whatever identifier it is handed
+        // and the reply opened with "art-2026-11-07-06-11-32.png The image depicts…".
         messages[0]!.content +=
-          `\n\nThe image has ALREADY been rendered this turn: ${name}, ${stored.bytes} bytes, ` +
-          "attached to your reply. Do not describe it as something you will make later; say what is in it and stop.";
+          "\n\nAn image has ALREADY been rendered this turn and is attached to your reply. " +
+          "Do not name a file and do not say you will make one later; describe what is in the picture in two sentences and stop.";
       } else {
         artRefusal = { code: made.code ?? "image_failed", error: made.error ?? "the provider refused" };
         messages[0]!.content +=
@@ -1461,6 +1463,26 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // player and a note describing the player. When audio was produced and no
   // document was explicitly rendered, the turn delivers audio and nothing else —
   // no draft gate, no review lines, no approval step.
+  const imageOnly = Boolean(renderedImage) && !renderedDocText && !renderedAudio;
+  // A rendered picture is work too: without a project the PNG is an orphan and the
+  // project list cannot show what produced it.
+  if (imageOnly && renderedImage) {
+    const artJobId = jobId || sessionId || `job_${Date.now()}`;
+    const artTitle = message.slice(0, 80);
+    try {
+      await sql`
+        INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+        VALUES (${artJobId}, ${userId}, null, ${artTitle}, 'Deliverable ready', null,
+          ${JSON.stringify({ image: renderedImage, slots: slotValues, approved: false })}::jsonb, now())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title, status = 'Deliverable ready',
+          data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()`;
+      await sql`UPDATE buzzy_assets SET job_id = ${artJobId}, session_id = ${sessionId}
+                WHERE user_id = ${userId} AND url = ${renderedImage.url}`.catch(() => {});
+    } catch (e) {
+      console.error("art project record failed", (e as Error).message);
+    }
+  }
   const audioOnly = Boolean(renderedAudio) && !renderedDocText;
   // Audio-only turns skip the draft path, but they are still work: without a
   // project the MP3 belongs to nobody, so the Library can show it while no work
