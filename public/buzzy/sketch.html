@@ -272,7 +272,8 @@
     var selectedStroke = null;
     canvas.addEventListener("pointerdown", function (e) {
       if (tool === "select") {
-        selectedStroke = hitTest(pt(e));
+        var hit = hitTest(pt(e));
+        selectedStroke = hit ? hit.id : null;
         redraw();
         return;
       }
