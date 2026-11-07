@@ -1216,6 +1216,33 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     /\b(i (can'?t|cannot|don'?t|do not)\s+(directly\s+)?(produce|make|create|generate|save|output)\s+(audio|music|sound|mp3|files)|no way to (produce|make|generate)\s+(audio|music)|i don'?t produce audio)/i;
   if (renderedAudio) {
     response.audio = renderedAudio;
+    // An audio-only turn is still work. Without a project row the MP3 belongs to
+    // nobody: measured on the packaged build, chat returned 193,004 B of audio and
+    // the Library still said "No documents yet". Ported from web 9126c75.
+    if (!renderedDocText) {
+      const audioJobId = jobId || sessionId || `job_${Date.now()}`;
+      try {
+        await sql`
+          INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+          VALUES (${audioJobId}, ${userId}, null, ${message.slice(0, 80)}, 'Audio ready', null,
+            ${JSON.stringify({ audio: renderedAudio, approved: false })}::jsonb, now())
+          ON CONFLICT (id) DO UPDATE SET
+            status = 'Audio ready',
+            data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()
+        `;
+        const assetId = Number(String(renderedAudio.url || "").split("/").pop());
+        if (Number.isFinite(assetId) && assetId > 0) {
+          await sql`UPDATE buzzy_assets SET job_id = ${audioJobId}, session_id = ${sessionId}
+                    WHERE user_id = ${userId} AND id = ${assetId}`;
+        }
+        if (sessionId && !jobId) {
+          await sql`UPDATE buzzy_sessions SET job_id = ${audioJobId} WHERE id = ${sessionId} AND user_id = ${userId}`;
+        }
+        response.jobId = audioJobId;
+      } catch (err) {
+        console.warn("[buzzy/audio-project] link failed:", err instanceof Error ? err.message : err);
+      }
+    }
     if (DENIES_AUDIO.test(response.reply)) {
       response.reply = `Here it is — your track is attached below (${Math.round((renderedAudio.bytes || 0) / 1024)} KB).`;
     }
