@@ -63,6 +63,8 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
+      ".bz-navbar{display:flex;align-items:center;gap:.9rem;height:48px;min-height:48px;border-bottom:1px solid #242424;background:#0d0d0d;overflow-x:auto;scrollbar-width:none}",
+      ".bz-navbar::-webkit-scrollbar{display:none}",
       "#bzNav a{white-space:nowrap}",
       "#bzNav a.active{color:#ffd40d}",
       ".bz-chrome-scroll{overflow-x:auto;scrollbar-width:none}",
@@ -89,6 +91,13 @@
       header.appendChild(row);
     }
     nav.style.flexWrap = "nowrap";
+    // One strip, same height everywhere; page-specific header content stays below it.
+    if (!nav.closest(".bz-navbar")) {
+      var bar = document.createElement("div");
+      bar.className = "bz-navbar";
+      nav.parentNode.insertBefore(bar, nav);
+      bar.appendChild(nav);
+    }
 
     // Add any missing link, in canonical order, without disturbing existing ones.
     LINKS.forEach(function (l) {
