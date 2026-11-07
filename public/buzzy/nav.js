@@ -63,7 +63,11 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
+      "#bzNav a{white-space:nowrap}",
+      "#bzNav a.active{color:#ffd40d}",
       ".bz-chrome-scroll{overflow-x:auto;scrollbar-width:none}",
+      "#bzChrome .bz-account{color:#8d8d8d;font-size:.82rem;text-decoration:none;white-space:nowrap}",
+      "#bzChrome .bz-account:hover{color:#ffd40d}",
       ".bz-chrome-scroll::-webkit-scrollbar{display:none}",
     ].join("");
     document.head.appendChild(s);
@@ -179,6 +183,22 @@
     fill();
   }
 
+  /** Who is signed in? The nav shows it once, instead of each page guessing. */
+  function accountControl(chrome) {
+    var a = document.createElement("a");
+    a.className = "bz-account";
+    a.href = "/buzzy/landing";
+    a.textContent = "…";
+    chrome.appendChild(a);
+    fetch("/api/buzzy/sessions", { credentials: "same-origin" })
+      .then(function (r) { return { ok: r.ok, body: r.ok ? null : null }; })
+      .then(function (res) {
+        if (res.ok) { a.textContent = "Account"; a.href = "/buzzy/profile"; a.title = "Your account"; }
+        else { a.textContent = "Sign in"; a.href = "/buzzy/landing"; }
+      })
+      .catch(function () { a.textContent = "Sign in"; });
+  }
+
   /** Ask: the chat, on every page, in a panel anchored to the nav. */
   function askControl(nav) {
     var btn = document.createElement("button");
@@ -264,6 +284,7 @@
       nav.appendChild(chrome);
       loadCompanies();
       companyControl(chrome);
+      accountControl(chrome);
       askControl(chrome);
     }
   }

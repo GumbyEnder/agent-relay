@@ -121,9 +121,16 @@ export default defineEventHandler(async (event) => {
   // One chrome for every page: the shared nav (company dropdown + Ask panel) is
   // injected at serve time, so a new page inherits it and no page can drift.
   // Idempotent — a page that already includes it is left alone.
+  // LAST "</body>", not the first: talk.html builds a Word export by concatenating
+  // an HTML string that itself contains "</body>", and replacing the first match
+  // injected a <script> tag into JavaScript source — "Invalid or unexpected token",
+  // a dead page, and the bug was invisible until the browser ran it.
   let page = body.toString("utf8");
-  if (page.includes("</body>") && !page.includes("/buzzy/nav.js")) {
-    page = page.replace("</body>", '<script src="/buzzy/nav.js" defer></script>\n</body>');
+  if (!page.includes("/buzzy/nav.js")) {
+    const at = page.lastIndexOf("</body>");
+    if (at > 0) {
+      page = page.slice(0, at) + '<script src="/buzzy/nav.js" defer></script>' + page.slice(at);
+    }
   }
   return html(page);
 });
