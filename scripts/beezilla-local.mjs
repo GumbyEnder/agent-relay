@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync, copyFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,26 @@ async function pickPort(preferred) {
     if (await portFree(p)) return p;
   }
   throw new Error(`no free loopback port in ${preferred}..${preferred + 25}`);
+}
+
+/**
+ * Is anything accepting connections on this loopback port?
+ *
+ * Deliberately dumb: a TCP handshake with the IP literal, 1.2 s, no DNS, no HTTP.
+ * It answers "is the server up", which is the only question the handshake needs.
+ */
+function tcpReachable(port) {
+  return new Promise((done) => {
+    const sock = connect(port, HOST);
+    const finish = (ok) => {
+      try { sock.destroy(); } catch {}
+      done({ ok });
+    };
+    sock.setTimeout(1200);
+    sock.once("connect", () => finish(true));
+    sock.once("timeout", () => finish(false));
+    sock.once("error", () => finish(false));
+  });
 }
 
 function argPort() {
@@ -223,8 +243,19 @@ for (;;) {
     break;
   }
   try {
+    // Two checks, because they fail differently. `fetch` (undici) resolves the
+    // host name even for a literal, and on Windows/Wine that path can fail with an
+    // opaque error before a packet is sent — measured here: the server logs
+    // "Listening", the host curls the port fine, and undici answers UNKNOWN. A raw
+    // TCP connect to the literal address is the same question asked in a way that
+    // cannot involve name resolution, so a listening port is never reported dead.
     const res = await fetch(`http://${HOST}:${port}/api/agent/health`, {
       signal: AbortSignal.timeout(1500),
+    }).catch(async (err) => {
+      const tcp = await tcpReachable(port);
+      if (!tcp.ok) throw err;
+      lastProbe = `tcp ${HOST}:${port} reachable (fetch failed: ${err?.cause?.code ?? err?.message})`;
+      return { ok: true, status: "tcp" };
     });
     lastProbe = `HTTP ${res.status}`;
     if (res.ok) {
