@@ -451,6 +451,31 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const t = jrows[0] && typeof jrows[0].title === "string" ? jrows[0].title.trim() : "";
     if (t) previousTitle = t;
   }
+  // Hydrate the project for a turn that names one. The component on a project page
+  // passes jobId and nothing else, so "what is this project?" was answered with "I
+  // do not have access to information about a specific project" — technically true,
+  // uselessly so. The server owns this data; it should hand it over.
+  let effectiveContext = jobContext;
+  if (!effectiveContext && jobId) {
+    try {
+      const rows = await sql`
+        SELECT title, status, data FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${userId}`;
+      if (rows[0]) {
+        const assets = await sql`
+          SELECT filename, content_type, bytes FROM buzzy_assets
+          WHERE user_id = ${userId} AND job_id = ${jobId} ORDER BY id DESC LIMIT 12`;
+        effectiveContext = {
+          title: rows[0].title ?? null,
+          status: rows[0].status ?? null,
+          data: rows[0].data ?? null,
+          deliverables: assets.map((a: any) => ({
+            name: a.filename, type: a.content_type, bytes: a.bytes,
+          })),
+        };
+      }
+    } catch (_) { /* context is an improvement, never a gate */ }
+  }
+
   // Were all four decisions already captured before this turn's message?
   // That's the signal the owner has now confirmed — the draft is gated on it.
   const wereAllFilled = [...REQUIRED_SLOTS, ...DEEPENING_IDS].every(id => slotValues[id]);
@@ -560,14 +585,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
-    jobContext && typeof jobContext.title === "string"
+    effectiveContext && typeof effectiveContext.title === "string"
       ? "\n\nYou are working inside the client's existing job \"" +
-        String(jobContext.title) +
+        String(effectiveContext.title) +
         "\"" +
-        (typeof jobContext.template === "string" ? " (" + jobContext.template + ")" : "") +
-        (typeof jobContext.status === "string" ? " — currently " + jobContext.status : "") +
-        (typeof jobContext.problem === "string" && jobContext.problem
-          ? ". Problem on file: " + String(jobContext.problem).slice(0, 300)
+        (typeof effectiveContext.template === "string" ? " (" + effectiveContext.template + ")" : "") +
+        (typeof effectiveContext.status === "string" ? " — currently " + effectiveContext.status : "") +
+        (typeof effectiveContext.problem === "string" && effectiveContext.problem
+          ? ". Problem on file: " + String(effectiveContext.problem).slice(0, 300)
+          : "") +
+        (Array.isArray((effectiveContext as any).deliverables) && (effectiveContext as any).deliverables.length
+          ? ". Deliverables on file: " + (effectiveContext as any).deliverables
+              .map((d: any) => `${d.name} (${d.type}, ${Math.round((d.bytes || 0) / 1024)} KB)`).join(", ")
           : "") +
         ". Stay on this job."
       : "";
