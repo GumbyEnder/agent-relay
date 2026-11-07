@@ -65,7 +65,8 @@
     <button data-tool="rect">Box</button>
     <button data-tool="text">Note</button>
     <input id="color" type="color" value="#ffd40d" title="Colour" style="width:34px;height:30px;background:none;border:1px solid var(--bz-line);border-radius:8px" />
-    <button id="undo" title="Undo last stroke">Undo</button>
+    <button id="undo" title="Undo (Ctrl/Cmd+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
     <button id="clear">Clear drawing</button>
     <button id="save">Save</button>
     <button id="shot" title="Download a PNG of the board">Export PNG</button>
@@ -104,6 +105,34 @@
     var strokes = [];        // {tool, color, width, points:[{x,y}] | x,y,w,h | text}
     var images = [];         // {id,url,x,y,w,h}
     var selected = null;
+    // Undo is a stack of board snapshots, not a pile of per-tool inverses: strokes,
+    // images and their positions are one document, so one snapshot restores all of it.
+    var undoStack = [];
+    var redoStack = [];
+    function snapshot() {
+      undoStack.push(JSON.stringify({ strokes: strokes, images: images }));
+      if (undoStack.length > 50) undoStack.shift();
+      redoStack.length = 0;
+    }
+    function applySnapshot(json) {
+      var d = JSON.parse(json);
+      strokes = d.strokes || [];
+      images = d.images || [];
+      renderImages();
+      redraw();
+    }
+    function undo() {
+      if (!undoStack.length) { setStatus("Nothing to undo."); return; }
+      redoStack.push(JSON.stringify({ strokes: strokes, images: images }));
+      applySnapshot(undoStack.pop());
+      setStatus("Undone.");
+    }
+    function redo() {
+      if (!redoStack.length) { setStatus("Nothing to redo."); return; }
+      undoStack.push(JSON.stringify({ strokes: strokes, images: images }));
+      applySnapshot(redoStack.pop());
+      setStatus("Redone.");
+    }
     var drag = null;
     var draft = null;
     var scale = 1;           // canvas pixels per CSS pixel
@@ -175,9 +204,10 @@
       var p = pt(e);
       if (tool === "text") {
         var t = window.prompt("Note:");
-        if (t) { strokes.push({ tool: "text", color: color, x1: p.x, y1: p.y, text: t }); redraw(); }
+        if (t) { snapshot(); strokes.push({ tool: "text", color: color, x1: p.x, y1: p.y, text: t }); redraw(); }
         return;
       }
+      snapshot();
       draft = tool === "pen"
         ? { tool: "pen", color: color, width: 3, points: [p] }
         : { tool: tool, color: color, width: 3, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
@@ -211,6 +241,7 @@
       img.src = url;
     }
     function place(url, at, w, h) {
+      snapshot();
       var item = { id: "im_" + Math.random().toString(36).slice(2, 9), url: url, x: at.x, y: at.y, w: w, h: h };
       images.push(item);
       renderImages();
@@ -282,9 +313,17 @@
       });
     });
     document.getElementById("color").addEventListener("input", function (e) { color = e.target.value; });
-    document.getElementById("undo").addEventListener("click", function () { strokes.pop(); redraw(); });
+    document.getElementById("undo").addEventListener("click", undo);
+    document.getElementById("redo").addEventListener("click", redo);
+    window.addEventListener("keydown", function (e) {
+      var meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); redo(); }
+    });
     document.getElementById("clear").addEventListener("click", function () {
       if (!confirm("Clear every mark you drew? (images stay)")) return;
+      snapshot();
       strokes = []; redraw();
     });
 
@@ -388,6 +427,17 @@
     // ── load the saved board ──────────────────────────────────────────
     function load() {
       if (!jobId) { resize(); return; }
+      // The board belongs to a project; show the project's name, not "New board".
+      fetch("/api/buzzy/projects/" + encodeURIComponent(jobId), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (p) {
+          var t = p && p.project && p.project.title ? String(p.project.title) : "";
+          if (t) {
+            titleEl.textContent = t;
+            document.title = t + " — BeeZilla Sketch";
+          }
+        })
+        .catch(function () {});
       fetch("/api/buzzy/art?job=" + encodeURIComponent(jobId), { credentials: "same-origin" })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -423,7 +473,7 @@
         setStatus("New board ready. Drop images, draw, then Create.");
       });
     }
-    titleEl.textContent = jobId ? "Sketch board" : "New board";
+    if (!jobId) titleEl.textContent = "New board";
     window.addEventListener("resize", resize);
     load();
   })();
