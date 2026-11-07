@@ -702,7 +702,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         const stored = await storeImage(userId, made.bytes, name, made.contentType || "image/png");
         renderedImage = { url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType || "image/png" };
         try {
-          await sql`UPDATE buzzy_assets SET job_id = ${jobId}, session_id = ${sessionId}
+          await sql`UPDATE buzzy_assets SET session_id = ${sessionId}
                     WHERE user_id = ${userId} AND id = ${stored.id}`;
         } catch (_) { /* the link is an improvement, not a gate */ }
         // No filename in the note: the model copies whatever identifier it is handed
@@ -1477,8 +1477,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title, status = 'Deliverable ready',
           data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()`;
-      await sql`UPDATE buzzy_assets SET job_id = ${artJobId}, session_id = ${sessionId}
-                WHERE user_id = ${userId} AND url = ${renderedImage.url}`.catch(() => {});
+      // buzzy_assets has no url column (0048): id, filename, rel_path. Matching on a
+      // url column silently updated nothing, so the project showed no deliverables.
+      const assetId = Number((renderedImage.url.match(/\/(\d+)$/) || [])[1] || 0);
+      if (assetId) {
+        await sql`UPDATE buzzy_assets SET job_id = ${artJobId}, session_id = ${sessionId}
+                  WHERE user_id = ${userId} AND id = ${assetId}`;
+      }
     } catch (e) {
       console.error("art project record failed", (e as Error).message);
     }
@@ -1653,6 +1658,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // The player rides the reply that announces it: a link the owner has to hunt
   // for is not "delivered".
+  // The model sometimes opens with the file's own name. Strip that token: it is
+  // machine noise where a sentence belongs, and it is not content.
+  if (renderedImage) finalReply = finalReply.replace(/^\s*(?:\/api\/buzzy\/assets\/\d+|art-[\w.\-]+\.png)\s*/i, "");
   if (renderedAudio) response.audio = renderedAudio;
   // A picture rides its reply the same way a track does: the card and the sentence
   // must not be able to disagree about whether a file exists.
