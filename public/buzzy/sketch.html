@@ -411,9 +411,11 @@
     // A board with no project: make one, so the first Create has somewhere to land.
     if (!jobId) {
       var id = "job_art_" + Date.now().toString(36);
-      fetch("/api/buzzy/jobs/" + encodeURIComponent(id), {
-        method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "Sketch board", status: "In progress", data: {} }),
+      // POST /api/buzzy/jobs is the upsert (a PUT to /jobs/<id> is a 404 — the
+      // route does not exist, and a board with nowhere to land orphans its render).
+      fetch("/api/buzzy/jobs", {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: id, title: "Sketch board", status: "In progress", data: {} }),
       }).then(function (r) {
         if (!r.ok) return;
         jobId = id;
