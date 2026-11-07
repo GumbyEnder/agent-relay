@@ -80,16 +80,80 @@ export class RuntimeSupervisor {
       this.child = null;
     });
 
+    // The old failure said only "did not become ready", then the exit handler
+    // appended "runtime exited unexpectedly (code 0)" — while the server was
+    // demonstrably listening. Two contradictory sentences and no port, error code or
+    // distinction between "dead" and "alive but unreachable" is what a firewall,
+    // an antivirus, or a Wine loopback limitation all look like from here. Collect
+    // the facts while waiting instead of guessing at the end.
     const deadline = Date.now() + timeoutMs;
+    let lastProbe = { ok: false, error: "not attempted", code: null, ms: 0, rt: null };
+    let sawRuntimeFile = false;
     while (Date.now() < deadline) {
       const rt = this.readRuntimeFile();
-      if (rt && (await this.isHealthy(rt))) {
-        this.runtime = rt;
-        return rt;
+      if (rt) sawRuntimeFile = true;
+      if (rt) {
+        const probe = await this.probe(rt);
+        if (probe.ok) {
+          this.runtime = rt;
+          return rt;
+        }
+        lastProbe = probe;
       }
       await new Promise((r) => setTimeout(r, 400));
     }
-    throw new Error(`local runtime did not become ready within ${timeoutMs}ms`);
+
+    const alive = Boolean(this.child && this.child.exitCode === null);
+    const where = lastProbe.rt ? `http://${lastProbe.rt.host}:${lastProbe.rt.port}` : "(no runtime.json written)";
+    const hint = alive
+      ? "The runtime process is still running, so this is a reachability problem, not a crash: " +
+        "something is blocking this app's connection to its own loopback port (firewall, antivirus, " +
+        "VPN/proxy, or a Wine/VM network stack). Allow BeeZilla in the firewall, or set " +
+        "BZ_SKIP_READY_PROBE=1 to open the window anyway and let the UI report what it can reach."
+      : "The runtime process exited before answering, so this is a start-up failure: read the lines above " +
+        "it for the reason (a missing data directory, a port already in use, or a module that failed to load).";
+    const message =
+      `local runtime did not answer within ${timeoutMs}ms. ` +
+      `Probe: ${where} · ${lastProbe.error}${lastProbe.code ? ` (${lastProbe.code})` : ""} · ` +
+      `last attempt ${lastProbe.ms}ms · runtime.json ${sawRuntimeFile ? "present" : "absent"} · ` +
+      `process ${alive ? "alive" : "exited"}. ${hint}`;
+
+    // Escape hatch for environments where loopback from the shell is broken but the
+    // port is genuinely serving (observed under Wine: the server logs "Listening"
+    // and the host curls it fine, while the shell's fetch fails). Explicit, never
+    // automatic, and never quiet.
+    if (alive && process.env.BZ_SKIP_READY_PROBE === "1") {
+      const rt = this.readRuntimeFile();
+      if (rt) {
+        this.onLog(`[supervisor] BZ_SKIP_READY_PROBE=1 — opening the window without a healthy probe. ${message}`);
+        this.runtime = rt;
+        return rt;
+      }
+    }
+    throw new Error(message);
+  }
+
+  /** One readiness attempt, with the failure kept instead of discarded. */
+  async probe(rt) {
+    const started = Date.now();
+    try {
+      const res = await fetch(`http://${rt.host}:${rt.port}/api/agent/health`, {
+        signal: AbortSignal.timeout(1500),
+      });
+      if (res.ok) return { ok: true, error: null, code: null, ms: Date.now() - started, rt };
+      return { ok: false, error: `HTTP ${res.status}`, code: String(res.status), ms: Date.now() - started, rt };
+    } catch (err) {
+      // fetch wraps the useful part: "fetch failed" alone hides ECONNREFUSED,
+      // EHOSTUNREACH, a TLS problem, or a timeout.
+      const cause = err?.cause ?? err;
+      return {
+        ok: false,
+        error: String(err?.message ?? err),
+        code: cause?.code ?? cause?.name ?? null,
+        ms: Date.now() - started,
+        rt,
+      };
+    }
   }
 
   readRuntimeFile() {
