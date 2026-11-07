@@ -81,6 +81,9 @@
 
 <footer>
   <input id="prompt" type="text" style="flex:1" placeholder="Describe what to create — e.g. 'a red car driving along the road I drew, evening light'" />
+  <label class="hint" style="display:flex;align-items:center;gap:0.35rem" title="Send the last rendered picture as the reference instead of the board">
+    <input type="checkbox" id="iterate" /> Iterate from last render
+  </label>
   <button class="primary" id="create">Create</button>
   <span id="status">Drop or paste images, draw between them, then Create.</span>
 </footer>
@@ -107,6 +110,7 @@
     var selected = null;
     // Undo is a stack of board snapshots, not a pile of per-tool inverses: strokes,
     // images and their positions are one document, so one snapshot restores all of it.
+    var lastRenderUrl = null;   // the newest rendered picture on this board
     var undoStack = [];
     var redoStack = [];
     function snapshot() {
@@ -367,6 +371,21 @@
       });
     }
 
+    // The provider only accepts inline images, so an existing render has to be read
+    // back and inlined before it can be the reference for the next one.
+    function toDataUrl(url) {
+      return fetch(url, { credentials: "same-origin" })
+        .then(function (r) { return r.blob(); })
+        .then(function (b) {
+          return new Promise(function (resolve, reject) {
+            var fr = new FileReader();
+            fr.onload = function () { resolve(String(fr.result)); };
+            fr.onerror = reject;
+            fr.readAsDataURL(b);
+          });
+        });
+    }
+
     function boardJson() {
       return { version: 1, strokes: strokes, images: images.map(function (i) { return { x: i.x, y: i.y, w: i.w, h: i.h, url: i.url }; }) };
     }
@@ -392,12 +411,15 @@
       if (!prompt) { setStatus("Describe what to create first."); promptEl.focus(); return; }
       var btn = document.getElementById("create");
       btn.disabled = true;
-      setStatus("Creating — flattening the board…");
-      flatten().then(function (composite) {
+      var iterate = document.getElementById("iterate").checked && !!lastRenderUrl;
+      setStatus(iterate ? "Creating — using the last render as the reference…" : "Creating — flattening the board…");
+      (iterate ? toDataUrl(lastRenderUrl) : flatten()).then(function (composite) {
         setStatus("Creating — the model is working…");
         var body = {
           action: "render",
-          prompt: prompt + "\n\nThe attached image is the owner's board: placed images plus hand-drawn marks, arrows and notes showing what belongs where and how it moves. Honour the layout, the connections and the annotations.",
+          prompt: prompt + (iterate
+            ? "\n\nThe attached image is the PREVIOUS render of this board. Change it as instructed and keep everything the instruction does not mention."
+            : "\n\nThe attached image is the owner's board: placed images plus hand-drawn marks, arrows and notes showing what belongs where and how it moves. Honour the layout, the connections and the annotations."),
           refs: [composite],
           jobId: jobId || undefined,
         };
@@ -412,6 +434,7 @@
           return;
         }
         var img = res.d.image;
+        lastRenderUrl = img.url;
         setStatus("Done in " + Math.round((res.d.ms || 0) / 100) / 10 + "s — added to the board and to the project.");
         var box = document.getElementById("result");
         box.style.display = "block";
@@ -447,6 +470,7 @@
           }
           if (d && d.images && d.images.length) {
             var last = d.images[d.images.length - 1];
+            lastRenderUrl = last.url;
             var box = document.getElementById("result");
             box.style.display = "block";
             document.getElementById("resultImg").src = last.url;
