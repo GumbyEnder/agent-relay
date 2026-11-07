@@ -70,6 +70,7 @@
     <button id="clear">Clear drawing</button>
     <button id="save">Save</button>
     <button id="shot" title="Download a PNG of the board">Export PNG</button>
+    <button id="svg" title="Download the drawing as vector SVG (images are not included)">Export SVG</button>
   </div>
 </header>
 
@@ -397,6 +398,60 @@
         body: JSON.stringify({ action: "save", jobId: jobId, board: boardJson() }),
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (x) { setStatus(x.ok ? "Board saved." : (x.d.error || "Could not save.")); });
+    });
+
+    // The drawing is already vectors — {tool, colour, width, points} — so an SVG
+    // export is a serialiser, not a re-render. Images stay out on purpose: they are
+    // bitmaps, and inlining them would produce a big file that is not scalable anyway.
+    function svgText() {
+      var r = stage.getBoundingClientRect();
+      var pad = 2;
+      var parts = [];
+      function esc(t) {
+        return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      strokes.forEach(function (st) {
+        var c = st.color || "#ffd40d";
+        var w = st.width || 3;
+        if (st.tool === "pen" && st.points && st.points.length) {
+          var d = st.points.map(function (p, i) { return (i ? "L" : "M") + p.x + " " + p.y; }).join(" ");
+          parts.push('<path d="' + d + '" fill="none" stroke="' + c + '" stroke-width="' + w +
+            '" stroke-linecap="round" stroke-linejoin="round"/>');
+        } else if (st.tool === "line" || st.tool === "arrow") {
+          parts.push('<line x1="' + st.x1 + '" y1="' + st.y1 + '" x2="' + st.x2 + '" y2="' + st.y2 +
+            '" stroke="' + c + '" stroke-width="' + w + '" stroke-linecap="round"/>');
+          if (st.tool === "arrow") {
+            var a = Math.atan2(st.y2 - st.y1, st.x2 - st.x1), h = 12;
+            var p1 = [st.x2 - h * Math.cos(a - 0.4), st.y2 - h * Math.sin(a - 0.4)];
+            var p2 = [st.x2 - h * Math.cos(a + 0.4), st.y2 - h * Math.sin(a + 0.4)];
+            parts.push('<polygon points="' + st.x2 + ',' + st.y2 + ' ' + p1[0] + ',' + p1[1] + ' ' +
+              p2[0] + ',' + p2[1] + '" fill="' + c + '"/>');
+          }
+        } else if (st.tool === "rect") {
+          parts.push('<rect x="' + Math.min(st.x1, st.x2) + '" y="' + Math.min(st.y1, st.y2) +
+            '" width="' + Math.abs(st.x2 - st.x1) + '" height="' + Math.abs(st.y2 - st.y1) +
+            '" fill="none" stroke="' + c + '" stroke-width="' + w + '"/>');
+        } else if (st.tool === "text") {
+          parts.push('<text x="' + st.x1 + '" y="' + st.y1 + '" fill="' + c +
+            '" font-family="Inter, Segoe UI, sans-serif" font-size="15" font-weight="600">' +
+            esc(st.text || "") + "</text>");
+        }
+      });
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="' + Math.round(r.width + pad * 2) +
+        '" height="' + Math.round(r.height + pad * 2) + '" viewBox="0 0 ' + Math.round(r.width + pad * 2) +
+        " " + Math.round(r.height + pad * 2) + '">' +
+        '<rect width="100%" height="100%" fill="#141414"/>' + parts.join("") + "</svg>";
+    }
+
+    document.getElementById("svg").addEventListener("click", function () {
+      if (!strokes.length) { setStatus("Nothing drawn yet."); return; }
+      var blob = new Blob([svgText()], { type: "image/svg+xml" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "sketch-" + Date.now() + ".svg";
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      setStatus("SVG exported — " + strokes.length + " vector marks (images excluded).");
     });
 
     document.getElementById("shot").addEventListener("click", function () {
