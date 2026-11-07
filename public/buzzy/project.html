@@ -72,8 +72,26 @@
 
   <h2>Conversation</h2>
   <div id="conversation"><p class="empty-note">Loading…</p></div>
+  <section class="card" style="margin-top:1rem">
+    <h2>Ask about this project</h2>
+    <div id="chatSlot" style="height:340px"></div>
+  </section>
 </main>
+<script src="/buzzy/chat.js"></script>
 <script>
+  // The conversation is not a page. This is the same component Talk uses, mounted
+  // here with the project's job id so the turn is recorded against the work.
+  (function () {
+    var slot = document.getElementById("chatSlot");
+    var job = new URLSearchParams(location.search).get("job");
+    if (slot && window.BeeZillaChat) {
+      window.BeeZillaChat.mount(slot, {
+        title: "BeeZilla",
+        jobId: job || undefined,
+        placeholder: "What should change about this?",
+      });
+    }
+  })();
   // A project page answers three questions in one place: what was asked, what
   // exists because of it, and what actually happened while it ran. Status is
   // derived from the deliverables, never from what a reply claimed.
