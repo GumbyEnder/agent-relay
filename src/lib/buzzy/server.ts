@@ -468,9 +468,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           title: rows[0].title ?? null,
           status: rows[0].status ?? null,
           data: rows[0].data ?? null,
-          deliverables: assets.map((a: any) => ({
-            name: a.filename, type: a.content_type, bytes: a.bytes,
-          })),
+          // Never hand the model a machine filename: it answers "one deliverable is
+          // art-2026-11-07-06-20-01.png", which means nothing to the owner.
+          deliverables: assets.map((a: any) => {
+            const type = String(a.content_type ?? "");
+            const label = type.startsWith("image/") ? "an image"
+              : type.startsWith("audio/") ? "a track"
+              : type.includes("pdf") ? "a PDF"
+              : "a document";
+            return { label, type, kb: Math.round((a.bytes || 0) / 1024) };
+          }),
         };
       }
     } catch (_) { /* context is an improvement, never a gate */ }
@@ -596,7 +603,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           : "") +
         (Array.isArray((effectiveContext as any).deliverables) && (effectiveContext as any).deliverables.length
           ? ". Deliverables on file: " + (effectiveContext as any).deliverables
-              .map((d: any) => `${d.name} (${d.type}, ${Math.round((d.bytes || 0) / 1024)} KB)`).join(", ")
+              .map((d: any) => `${d.label} (${d.kb} KB)`).join(", ")
           : "") +
         ". Stay on this job."
       : "";

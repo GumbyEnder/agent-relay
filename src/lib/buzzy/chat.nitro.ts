@@ -4292,7 +4292,13 @@ export default defineEventHandler(async (event) => {
     const deliverables = [
       ...(Array.isArray(artifacts) ? artifacts : artifacts ? [artifacts] : []),
       ...assets.map((a: Record<string, unknown>) => ({
-        kind: String(a.content_type ?? "").startsWith("audio/") ? "audio" : "file",
+        // An image is a first-class deliverable, not a stray file: the project page
+        // renders players and previews off this label.
+        kind: String(a.content_type ?? "").startsWith("audio/")
+          ? "audio"
+          : String(a.content_type ?? "").startsWith("image/")
+            ? "image"
+            : "file",
         id: String(a.id),
         url: `/api/buzzy/assets/${a.id}`,
         name: a.filename,
