@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
   // to serve it.
-const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project"]);
+const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {

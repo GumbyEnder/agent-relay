@@ -510,6 +510,11 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
               {
+                // Before the wildcard: the canvas needs its own handler.
+                route: "/api/buzzy/art",
+                handler: "./src/lib/buzzy/art.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/**",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },

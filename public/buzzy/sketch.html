@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeeZilla — Sketch</title>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+<style>
+  :root { --bz-bg:#0d0d0d; --bz-card:#151515; --bz-line:#242424; --bz-yellow:#ffd40d;
+          --bz-text:#f2f2f2; --bz-muted:#8d8d8d; --bz-good:#6ee7a8; --bz-bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bz-bg); color:var(--bz-text); height:100vh; display:flex; flex-direction:column;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; overflow:hidden; }
+  header { padding: 0.7rem 1rem 0.4rem; border-bottom: 1px solid var(--bz-line); }
+  #bzNav { display:flex; flex-wrap:wrap; gap:0.9rem; padding-bottom:0.5rem; }
+  #bzNav a { color:var(--bz-muted); text-decoration:none; font-size:0.84rem; }
+  #bzNav a[data-nav="sketch"] { color: var(--bz-yellow); }
+  .row { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+  .title { font-weight:600; font-size:0.95rem; margin-right:auto; }
+  input[type="text"] { background:#101010; border:1px solid var(--bz-line); color:var(--bz-text);
+                       border-radius:8px; padding:0.35rem 0.55rem; font-size:0.86rem; }
+  button { background:#1b1b1b; color:var(--bz-text); border:1px solid var(--bz-line); border-radius:8px;
+           padding:0.35rem 0.65rem; font-size:0.82rem; cursor:pointer; }
+  button:hover { border-color:#3a3a3a; }
+  button.on { background:var(--bz-yellow); color:#111; border-color:var(--bz-yellow); font-weight:600; }
+  button.primary { background:var(--bz-yellow); color:#111; font-weight:600; border-color:var(--bz-yellow); }
+  button:disabled { opacity:0.5; cursor:default; }
+  #stage { position:relative; flex:1; overflow:hidden; background:#141414; }
+  #board { position:absolute; inset:0; touch-action:none; }
+  #layers { position:absolute; inset:0; pointer-events:none; }
+  .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
+  .img-wrap.selected { border-color: var(--bz-yellow); }
+  .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none; }
+  .img-wrap .handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--bz-yellow);
+                      border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
+  footer { border-top:1px solid var(--bz-line); padding:0.6rem 1rem; display:flex; gap:0.6rem; align-items:center; }
+  #status { color:var(--bz-muted); font-size:0.8rem; }
+  #result { position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
+            border-radius:12px; padding:0.6rem; display:none; }
+  #result img { width:100%; border-radius:8px; display:block; }
+  #result a { color:var(--bz-yellow); font-size:0.8rem; text-decoration:none; display:inline-block; margin-top:0.4rem; }
+  .hint { color:var(--bz-muted); font-size:0.78rem; }
+  .drop { outline:2px dashed var(--bz-yellow); outline-offset:-8px; }
+</style>
+</head>
+<body>
+<header>
+  <nav id="bzNav">
+    <a href="/buzzy/talk" data-nav="talk">Talk</a>
+    <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+    <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+    <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+    <a href="/buzzy/memory" data-nav="memory">Memory</a>
+    <a href="/buzzy/experts" data-nav="experts">Experts</a>
+    <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+    <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+    <a href="/buzzy/upload" data-nav="publish">Publish</a>
+  </nav>
+  <div class="row">
+    <span class="title" id="pTitle">Untitled board</span>
+    <button data-tool="select" class="on">Select</button>
+    <button data-tool="pen">Brush</button>
+    <button data-tool="line">Line</button>
+    <button data-tool="arrow">Arrow</button>
+    <button data-tool="rect">Box</button>
+    <button data-tool="text">Note</button>
+    <input id="color" type="color" value="#ffd40d" title="Colour" style="width:34px;height:30px;background:none;border:1px solid var(--bz-line);border-radius:8px" />
+    <button id="undo" title="Undo last stroke">Undo</button>
+    <button id="clear">Clear drawing</button>
+    <button id="save">Save</button>
+    <button id="shot" title="Download a PNG of the board">Export PNG</button>
+  </div>
+</header>
+
+<div id="stage">
+  <canvas id="board"></canvas>
+  <div id="layers"></div>
+  <div id="result"><img id="resultImg" alt="" /><a id="resultLink" href="#" download>Download</a></div>
+</div>
+
+<footer>
+  <input id="prompt" type="text" style="flex:1" placeholder="Describe what to create — e.g. 'a red car driving along the road I drew, evening light'" />
+  <button class="primary" id="create">Create</button>
+  <span id="status">Drop or paste images, draw between them, then Create.</span>
+</footer>
+
+<script>
+  // The board is an ordered set of things the owner placed: images they dropped,
+  // strokes they drew, and notes. "Create" flattens the whole thing into one
+  // reference image and asks the model to produce the result — so connecting a car
+  // to a road IS the instruction, not a description of one.
+  (function () {
+    var jobId = new URLSearchParams(location.search).get("job");
+    var stage = document.getElementById("stage");
+    var canvas = document.getElementById("board");
+    var layers = document.getElementById("layers");
+    var ctx = canvas.getContext("2d");
+    var statusEl = document.getElementById("status");
+    var promptEl = document.getElementById("prompt");
+    var titleEl = document.getElementById("pTitle");
+
+    var tool = "select";
+    var color = "#ffd40d";
+    var strokes = [];        // {tool, color, width, points:[{x,y}] | x,y,w,h | text}
+    var images = [];         // {id,url,x,y,w,h}
+    var selected = null;
+    var drag = null;
+    var draft = null;
+    var scale = 1;           // canvas pixels per CSS pixel
+
+    function resize() {
+      var r = stage.getBoundingClientRect();
+      var dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(r.width * dpr);
+      canvas.height = Math.round(r.height * dpr);
+      canvas.style.width = r.width + "px";
+      canvas.style.height = r.height + "px";
+      scale = dpr;
+      redraw();
+    }
+
+    function redraw() {
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      strokes.forEach(function (s) { drawStroke(s, false); });
+      if (draft) drawStroke(draft, true);
+    }
+
+    function drawStroke(s, isDraft) {
+      ctx.strokeStyle = s.color || color;
+      ctx.fillStyle = s.color || color;
+      ctx.lineWidth = s.width || 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.setLineDash(isDraft ? [6, 4] : []);
+      if (s.tool === "pen") {
+        if (!s.points.length) return;
+        ctx.beginPath();
+        ctx.moveTo(s.points[0].x, s.points[0].y);
+        for (var i = 1; i < s.points.length; i++) ctx.lineTo(s.points[i].x, s.points[i].y);
+        ctx.stroke();
+      } else if (s.tool === "line" || s.tool === "arrow") {
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+        if (s.tool === "arrow") {
+          var a = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+          var head = 12;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(s.x2, s.y2);
+          ctx.lineTo(s.x2 - head * Math.cos(a - 0.4), s.y2 - head * Math.sin(a - 0.4));
+          ctx.lineTo(s.x2 - head * Math.cos(a + 0.4), s.y2 - head * Math.sin(a + 0.4));
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else if (s.tool === "rect") {
+        ctx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+      } else if (s.tool === "text") {
+        ctx.font = "600 15px -apple-system, Segoe UI, Inter, sans-serif";
+        ctx.fillText(s.text || "", s.x1, s.y1);
+      }
+      ctx.setLineDash([]);
+    }
+
+    function pt(e) {
+      var r = canvas.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    canvas.addEventListener("pointerdown", function (e) {
+      if (tool === "select") return;
+      canvas.setPointerCapture(e.pointerId);
+      var p = pt(e);
+      if (tool === "text") {
+        var t = window.prompt("Note:");
+        if (t) { strokes.push({ tool: "text", color: color, x1: p.x, y1: p.y, text: t }); redraw(); }
+        return;
+      }
+      draft = tool === "pen"
+        ? { tool: "pen", color: color, width: 3, points: [p] }
+        : { tool: tool, color: color, width: 3, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+      redraw();
+    });
+    canvas.addEventListener("pointermove", function (e) {
+      if (!draft) return;
+      var p = pt(e);
+      if (draft.tool === "pen") draft.points.push(p);
+      else { draft.x2 = p.x; draft.y2 = p.y; }
+      redraw();
+    });
+    canvas.addEventListener("pointerup", function () {
+      if (!draft) return;
+      strokes.push(draft);
+      draft = null;
+      redraw();
+      setStatus(strokes.length + " marks on the board");
+    });
+
+    // ── images: drop, paste, move, resize ─────────────────────────────
+    function addImage(url, at) {
+      var w = 240, h = 160;
+      var img = new Image();
+      img.onload = function () {
+        var ratio = img.naturalHeight / img.naturalWidth || 0.66;
+        h = Math.round(w * ratio);
+        place(url, at, w, h);
+      };
+      img.onerror = function () { place(url, at, w, h); };
+      img.src = url;
+    }
+    function place(url, at, w, h) {
+      var item = { id: "im_" + Math.random().toString(36).slice(2, 9), url: url, x: at.x, y: at.y, w: w, h: h };
+      images.push(item);
+      renderImages();
+    }
+    function renderImages() {
+      layers.innerHTML = "";
+      images.forEach(function (im) {
+        var wrap = document.createElement("div");
+        wrap.className = "img-wrap" + (selected === im.id ? " selected" : "");
+        wrap.style.left = im.x + "px";
+        wrap.style.top = im.y + "px";
+        wrap.style.width = im.w + "px";
+        wrap.style.height = im.h + "px";
+        wrap.setAttribute("data-id", im.id);
+        var img = document.createElement("img");
+        img.src = im.url;
+        img.alt = "";
+        var handle = document.createElement("div");
+        handle.className = "handle";
+        wrap.appendChild(img);
+        wrap.appendChild(handle);
+        wrap.addEventListener("pointerdown", function (e) {
+          if (tool !== "select") return;
+          e.stopPropagation();
+          selected = im.id;
+          drag = { id: im.id, mode: e.target === handle ? "resize" : "move", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h };
+          renderImages();
+        });
+        layers.appendChild(wrap);
+      });
+    }
+    window.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var im = images.find(function (x) { return x.id === drag.id; });
+      if (!im) return;
+      var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+      if (drag.mode === "move") { im.x = drag.ox + dx; im.y = drag.oy + dy; }
+      else { im.w = Math.max(40, drag.ow + dx); im.h = Math.max(40, drag.oh + dy); }
+      renderImages();
+    });
+    window.addEventListener("pointerup", function () { drag = null; });
+
+    stage.addEventListener("dragover", function (e) { e.preventDefault(); stage.classList.add("drop"); });
+    stage.addEventListener("dragleave", function () { stage.classList.remove("drop"); });
+    stage.addEventListener("drop", function (e) {
+      e.preventDefault();
+      stage.classList.remove("drop");
+      var at = pt(e);
+      for (const f of e.dataTransfer.files) {
+        if (!f.type.startsWith("image/")) continue;
+        var url = URL.createObjectURL(f);
+        addImage(url, at);
+      }
+    });
+    window.addEventListener("paste", function (e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.type.indexOf("image") === 0) {
+          var f = it.getAsFile();
+          if (f) addImage(URL.createObjectURL(f), { x: 40 + images.length * 20, y: 40 + images.length * 20 });
+        }
+      }
+    });
+
+    document.querySelectorAll("[data-tool]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        tool = btn.getAttribute("data-tool");
+        document.querySelectorAll("[data-tool]").forEach(function (b) { b.classList.toggle("on", b === btn); });
+      });
+    });
+    document.getElementById("color").addEventListener("input", function (e) { color = e.target.value; });
+    document.getElementById("undo").addEventListener("click", function () { strokes.pop(); redraw(); });
+    document.getElementById("clear").addEventListener("click", function () {
+      if (!confirm("Clear every mark you drew? (images stay)")) return;
+      strokes = []; redraw();
+    });
+
+    function setStatus(t) { statusEl.textContent = t; }
+
+    // ── flatten the board for the model ───────────────────────────────
+    function flatten() {
+      var r = stage.getBoundingClientRect();
+      var out = document.createElement("canvas");
+      var s = Math.min(1, 1280 / Math.max(r.width, 1));
+      out.width = Math.round(r.width * s);
+      out.height = Math.round(r.height * s);
+      var c = out.getContext("2d");
+      c.fillStyle = "#ffffff";
+      c.fillRect(0, 0, out.width, out.height);
+      var pending = images.map(function (im) {
+        return new Promise(function (resolve) {
+          var img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = function () { c.drawImage(img, im.x * s, im.y * s, im.w * s, im.h * s); resolve(); };
+          img.onerror = function () { resolve(); };
+          img.src = im.url;
+        });
+      });
+      return Promise.all(pending).then(function () {
+        c.setTransform(s, 0, 0, s, 0, 0);
+        strokes.forEach(function (st) {
+          c.strokeStyle = st.color || color; c.fillStyle = st.color || color;
+          c.lineWidth = st.width || 3; c.lineCap = "round"; c.lineJoin = "round";
+          if (st.tool === "pen") { c.beginPath(); c.moveTo(st.points[0].x, st.points[0].y);
+            for (var i = 1; i < st.points.length; i++) c.lineTo(st.points[i].x, st.points[i].y); c.stroke(); }
+          else if (st.tool === "line" || st.tool === "arrow") { c.beginPath(); c.moveTo(st.x1, st.y1); c.lineTo(st.x2, st.y2); c.stroke();
+            if (st.tool === "arrow") { var a = Math.atan2(st.y2 - st.y1, st.x2 - st.x1), h = 12;
+              c.beginPath(); c.moveTo(st.x2, st.y2);
+              c.lineTo(st.x2 - h * Math.cos(a - 0.4), st.y2 - h * Math.sin(a - 0.4));
+              c.lineTo(st.x2 - h * Math.cos(a + 0.4), st.y2 - h * Math.sin(a + 0.4)); c.closePath(); c.fill(); } }
+          else if (st.tool === "rect") { c.strokeRect(st.x1, st.y1, st.x2 - st.x1, st.y2 - st.y1); }
+          else if (st.tool === "text") { c.font = "600 15px -apple-system, Segoe UI, Inter, sans-serif"; c.fillText(st.text || "", st.x1, st.y1); }
+        });
+        return out.toDataURL("image/png");
+      });
+    }
+
+    function boardJson() {
+      return { version: 1, strokes: strokes, images: images.map(function (i) { return { x: i.x, y: i.y, w: i.w, h: i.h, url: i.url }; }) };
+    }
+
+    document.getElementById("save").addEventListener("click", function () {
+      if (!jobId) { setStatus("This board is not attached to a project yet — Create once and it will be."); return; }
+      fetch("/api/buzzy/art", {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "save", jobId: jobId, board: boardJson() }),
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (x) { setStatus(x.ok ? "Board saved." : (x.d.error || "Could not save.")); });
+    });
+
+    document.getElementById("shot").addEventListener("click", function () {
+      flatten().then(function (url) {
+        var a = document.createElement("a");
+        a.href = url; a.download = "sketch-" + Date.now() + ".png"; a.click();
+      });
+    });
+
+    document.getElementById("create").addEventListener("click", function () {
+      var prompt = (promptEl.value || "").trim();
+      if (!prompt) { setStatus("Describe what to create first."); promptEl.focus(); return; }
+      var btn = document.getElementById("create");
+      btn.disabled = true;
+      setStatus("Creating — flattening the board…");
+      flatten().then(function (composite) {
+        setStatus("Creating — the model is working…");
+        var body = {
+          action: "render",
+          prompt: prompt + "\n\nThe attached image is the owner's board: placed images plus hand-drawn marks, arrows and notes showing what belongs where and how it moves. Honour the layout, the connections and the annotations.",
+          refs: [composite],
+          jobId: jobId || undefined,
+        };
+        return fetch("/api/buzzy/art", {
+          method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); });
+      }).then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) {
+          setStatus(res.status === 402 ? "Art is part of the paid plans — " + (res.d.error || "") : (res.d.error || "Could not create."));
+          return;
+        }
+        var img = res.d.image;
+        setStatus("Done in " + Math.round((res.d.ms || 0) / 100) / 10 + "s — added to the board and to the project.");
+        var box = document.getElementById("result");
+        box.style.display = "block";
+        document.getElementById("resultImg").src = img.url;
+        document.getElementById("resultLink").href = img.url;
+        addImage(img.url, { x: 60 + images.length * 18, y: 60 + images.length * 18 });
+      }).catch(function (e) {
+        btn.disabled = false;
+        setStatus("Failed: " + e.message);
+      });
+    });
+
+    // ── load the saved board ──────────────────────────────────────────
+    function load() {
+      if (!jobId) { resize(); return; }
+      fetch("/api/buzzy/art?job=" + encodeURIComponent(jobId), { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.board) {
+            strokes = d.board.strokes || [];
+            images = d.board.images || [];
+          }
+          if (d && d.images && d.images.length) {
+            var last = d.images[d.images.length - 1];
+            var box = document.getElementById("result");
+            box.style.display = "block";
+            document.getElementById("resultImg").src = last.url;
+            document.getElementById("resultLink").href = last.url;
+          }
+          resize();
+          renderImages();
+        })
+        .catch(function () { resize(); });
+    }
+
+    // A board with no project: make one, so the first Create has somewhere to land.
+    if (!jobId) {
+      var id = "job_art_" + Date.now().toString(36);
+      fetch("/api/buzzy/jobs/" + encodeURIComponent(id), {
+        method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Sketch board", status: "In progress", data: {} }),
+      }).then(function (r) {
+        if (!r.ok) return;
+        jobId = id;
+        history.replaceState({}, "", "/buzzy/sketch?job=" + encodeURIComponent(id));
+        setStatus("New board ready. Drop images, draw, then Create.");
+      });
+    }
+    titleEl.textContent = jobId ? "Sketch board" : "New board";
+    window.addEventListener("resize", resize);
+    load();
+  })();
+</script>
+</body>
+</html>
