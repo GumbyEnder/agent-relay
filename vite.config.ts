@@ -510,6 +510,11 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
               {
+                // The music studio: plan, renders and the edit log.
+                route: "/api/buzzy/studio",
+                handler: "./src/lib/buzzy/studio.nitro.ts",
+              },
+              {
                 // Explicit, not only regex-matched inside chat.nitro: the parity
                 // gate reads this table, and a route it cannot see reads as missing.
                 route: "/api/buzzy/projects",

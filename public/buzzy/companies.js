@@ -444,6 +444,8 @@
     list: function () { return state.companies.slice(); },
     active: active,
     activeId: function () { return state.activeId; },
+    // The chrome's dropdown needs to switch companies without rendering tabs.
+    select: select,
     onChange: function (fn) {
       listeners.push(fn);
       if (state.ready) {

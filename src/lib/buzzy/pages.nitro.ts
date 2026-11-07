@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
   // to serve it.
-const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch"]);
+const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {
@@ -118,5 +118,12 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     return html("<h1>Not found</h1>", 404);
   }
-  return html(body.toString("utf8"));
+  // One chrome for every page: the shared nav (company dropdown + Ask panel) is
+  // injected at serve time, so a new page inherits it and no page can drift.
+  // Idempotent — a page that already includes it is left alone.
+  let page = body.toString("utf8");
+  if (page.includes("</body>") && !page.includes("/buzzy/nav.js")) {
+    page = page.replace("</body>", '<script src="/buzzy/nav.js" defer></script>\n</body>');
+  }
+  return html(page);
 });

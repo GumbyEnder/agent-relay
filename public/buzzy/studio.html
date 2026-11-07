@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeeZilla — Studio</title>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+<style>
+  :root { --bz-bg:#0d0d0d; --bz-card:#151515; --bz-line:#242424; --bz-yellow:#ffd40d;
+          --bz-text:#f2f2f2; --bz-muted:#8d8d8d; --bz-good:#6ee7a8; --bz-bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bz-bg); color:var(--bz-text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
+  header { padding:.7rem 1rem .4rem; border-bottom:1px solid var(--bz-line); position:sticky; top:0; background:var(--bz-bg); z-index:5; }
+  #bzNav { display:flex; flex-wrap:wrap; gap:.9rem; padding-bottom:.5rem; }
+  #bzNav a { color:var(--bz-muted); text-decoration:none; font-size:.84rem; }
+  #bzNav a[data-nav="studio"] { color:var(--bz-yellow); }
+  main { display:grid; grid-template-columns: minmax(0,1.6fr) minmax(280px,1fr); gap:1rem; padding:1rem; align-items:start; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--bz-card); border:1px solid var(--bz-line); border-radius:14px; padding:1rem; }
+  h1 { font-size:1.05rem; margin:0; }
+  h2 { font-size:.82rem; text-transform:uppercase; letter-spacing:.08em; color:var(--bz-muted); margin:0 0 .6rem; }
+  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  button { background:#1b1b1b; color:var(--bz-text); border:1px solid var(--bz-line); border-radius:9px; padding:.4rem .7rem; font:inherit; font-size:.84rem; cursor:pointer; }
+  button:hover { border-color:#3a3a3a; }
+  button.primary { background:var(--bz-yellow); color:#111; border-color:var(--bz-yellow); font-weight:600; }
+  button:disabled { opacity:.5; cursor:default; }
+  input[type=text], textarea, input[type=number] { background:#101010; border:1px solid var(--bz-line); color:var(--bz-text); border-radius:9px; padding:.45rem .6rem; font:inherit; width:100%; }
+  textarea { resize:vertical; }
+  #waveWrap { position:relative; margin:.6rem 0 .4rem; }
+  #wave { width:100%; height:120px; display:block; background:#101010; border:1px solid var(--bz-line); border-radius:10px; cursor:crosshair; }
+  #selLabel { color:var(--bz-yellow); font-size:.8rem; min-height:1.2rem; }
+  .chip { display:inline-flex; gap:.35rem; align-items:center; background:#101010; border:1px solid var(--bz-line); border-radius:999px; padding:.2rem .55rem; font-size:.8rem; margin:.15rem .25rem .15rem 0; }
+  .chip button { border:0; background:none; padding:0 0 0 .2rem; color:var(--bz-muted); cursor:pointer; }
+  .muted { color:var(--bz-muted); font-size:.8rem; }
+  .log { display:flex; flex-direction:column; gap:.4rem; max-height:320px; overflow:auto; }
+  .entry { border-left:2px solid var(--bz-line); padding:.15rem 0 .15rem .6rem; font-size:.82rem; }
+  .entry.user { border-color:var(--bz-yellow); }
+  .entry.agent { border-color:#7aa2ff; }
+  .entry .meta { color:var(--bz-muted); font-size:.75rem; }
+  .versions { display:flex; flex-direction:column; gap:.25rem; }
+  .versions button { text-align:left; }
+  .versions button.on { border-color:var(--bz-yellow); color:var(--bz-yellow); }
+  audio { width:100%; margin-top:.5rem; }
+  .status { font-size:.8rem; color:var(--bz-muted); min-height:1.2rem; }
+  .status.bad { color:var(--bz-bad); }
+  .status.good { color:var(--bz-good); }
+</style>
+</head>
+<body>
+<header>
+  <nav id="bzNav">
+    <a href="/buzzy/talk" data-nav="talk">Talk</a>
+    <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+    <a href="/buzzy/studio" data-nav="studio">Studio</a>
+    <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+    <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+    <a href="/buzzy/memory" data-nav="memory">Memory</a>
+    <a href="/buzzy/experts" data-nav="experts">Experts</a>
+    <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+    <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+    <a href="/buzzy/upload" data-nav="publish">Publish</a>
+  </nav>
+  <div class="row" style="justify-content:space-between">
+    <h1 id="title">Studio</h1>
+    <span class="muted" id="planLine"></span>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>The track</h2>
+    <div id="waveWrap">
+      <canvas id="wave" height="120"></canvas>
+    </div>
+    <div class="row" style="justify-content:space-between">
+      <span id="selLabel" class="muted">Drag on the waveform to select a passage.</span>
+      <span class="row">
+        <button id="clearSel">Clear selection</button>
+        <button id="playSel" disabled>Play selection</button>
+      </span>
+    </div>
+    <audio id="player" controls preload="metadata"></audio>
+
+    <div class="row" style="margin-top:.8rem">
+      <input type="text" id="instruction" placeholder="Tell BeeZilla what to change in the selected passage — e.g. 'bring the cello forward, drop the synth bass'" />
+      <button class="primary" id="editBtn" disabled>Change this passage</button>
+    </div>
+    <div class="status" id="status"></div>
+
+    <h2 style="margin-top:1rem">Versions</h2>
+    <div class="versions" id="versions"></div>
+  </section>
+
+  <div style="display:flex; flex-direction:column; gap:1rem">
+    <section class="card">
+      <h2>Brief</h2>
+      <textarea id="prompt" rows="3" placeholder="Orchestral-electronic, 96 BPM, A minor…"></textarea>
+      <div class="row" style="margin-top:.5rem">
+        <input type="text" id="tempo" placeholder="Tempo (96 BPM)" style="flex:1;min-width:120px" />
+        <input type="text" id="key" placeholder="Key (A minor)" style="flex:1;min-width:120px" />
+        <input type="number" id="seconds" min="3" max="300" step="1" style="width:90px" />
+      </div>
+      <div class="row" style="margin-top:.5rem">
+        <input type="text" id="instInput" placeholder="Add an instrument and press Enter" />
+      </div>
+      <div id="instList" style="margin-top:.3rem"></div>
+      <div class="row" style="margin-top:.6rem">
+        <button id="savePlan">Save brief</button>
+        <button class="primary" id="renderBtn">Create track</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Lyrics</h2>
+      <textarea id="lyrics" rows="6" placeholder="Words to be sung (leave empty for instrumental)"></textarea>
+      <div class="row" style="margin-top:.5rem">
+        <button id="saveLyrics">Save lyrics</button>
+        <span class="muted">Saved lyrics go into the next render.</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Changes</h2>
+      <div class="log" id="log"><p class="muted">No changes yet.</p></div>
+    </section>
+  </div>
+</main>
+
+<script src="/buzzy/chat.js"></script>
+<script>
+  // The studio is the interface behind "make me a track": the plan (brief, lyrics,
+  // instruments), the renders, and every change with who made it and where. A region
+  // selected on the waveform is what an edit is scoped to; the same row is what the
+  // agent is told about when you ask it what changed.
+  (function () {
+    var jobId = new URLSearchParams(location.search).get("job");
+    var state = null;
+    var selection = null; // {fromMs,toMs}
+    var audioCtx = null;
+
+    var $ = function (id) { return document.getElementById(id); };
+    var player = $("player");
+    var wave = $("wave");
+    var statusEl = $("status");
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text || "";
+      statusEl.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function fmt(ms) {
+      if (ms == null) return "";
+      var s = Math.max(0, ms / 1000);
+      return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+    }
+
+    function api(method, body) {
+      return fetch("/api/buzzy/studio" + (method === "GET" ? "?job=" + encodeURIComponent(jobId) : ""), {
+        method: method,
+        credentials: "same-origin",
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); });
+    }
+
+    // ── waveform ────────────────────────────────────────────────────────
+    function drawWave(peaks) {
+      var dpr = window.devicePixelRatio || 1;
+      var w = wave.clientWidth;
+      wave.width = Math.round(w * dpr);
+      wave.height = Math.round(120 * dpr);
+      var c = wave.getContext("2d");
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, w, 120);
+      c.fillStyle = "#0f0f0f";
+      c.fillRect(0, 0, w, 120);
+      if (!peaks || !peaks.length) {
+        c.fillStyle = "#3a3a3a";
+        c.font = "12px Inter, sans-serif";
+        c.fillText("No track yet — create one from the brief on the right.", 12, 64);
+        return;
+      }
+      var mid = 60, n = peaks.length;
+      c.fillStyle = "#5b5b5b";
+      for (var i = 0; i < n; i++) {
+        var x = (i / n) * w;
+        var h = Math.max(1, peaks[i] * 54);
+        c.fillRect(x, mid - h, Math.max(1, w / n - 0.6), h * 2);
+      }
+      // selected region
+      if (selection) {
+        var dur = player.duration ? player.duration * 1000 : null;
+        if (dur) {
+          var x1 = (selection.fromMs / dur) * w, x2 = (selection.toMs / dur) * w;
+          c.fillStyle = "rgba(255,212,13,0.18)";
+          c.fillRect(x1, 0, Math.max(2, x2 - x1), 120);
+          c.strokeStyle = "rgba(255,212,13,0.9)";
+          c.beginPath(); c.moveTo(x1, 0); c.lineTo(x1, 120); c.moveTo(x2, 0); c.lineTo(x2, 120); c.stroke();
+        }
+      }
+      // playhead
+      if (player.duration) {
+        var px = (player.currentTime / player.duration) * w;
+        c.strokeStyle = "#ffd40d";
+        c.beginPath(); c.moveTo(px, 0); c.lineTo(px, 120); c.stroke();
+      }
+    }
+
+    var peaksCache = null;
+    function decodePeaks(url) {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return fetch(url, { credentials: "same-origin" })
+        .then(function (r) { return r.arrayBuffer(); })
+        .then(function (buf) { return audioCtx.decodeAudioData(buf); })
+        .then(function (audio) {
+          var ch = audio.getChannelData(0);
+          var buckets = 320, step = Math.floor(ch.length / buckets) || 1;
+          var peaks = [];
+          for (var i = 0; i < buckets; i++) {
+            var max = 0;
+            for (var j = 0; j < step; j++) {
+              var v = Math.abs(ch[i * step + j] || 0);
+              if (v > max) max = v;
+            }
+            peaks.push(Math.min(1, max * 1.8));
+          }
+          peaksCache = peaks;
+          drawWave(peaks);
+          return audio.duration;
+        })
+        .catch(function () { drawWave(null); return null; });
+    }
+
+    // Drag to select a passage: pointer x → time, clamped and ordered.
+    var dragging = null;
+    wave.addEventListener("pointerdown", function (e) {
+      if (!player.duration) return;
+      var r = wave.getBoundingClientRect();
+      dragging = { x: e.clientX - r.left, left: r.left, width: r.width };
+      wave.setPointerCapture(e.pointerId);
+    });
+    wave.addEventListener("pointermove", function (e) {
+      if (!dragging || !player.duration) return;
+      var r = wave.getBoundingClientRect();
+      var x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+      var t1 = (Math.min(dragging.x, x) / r.width) * player.duration * 1000;
+      var t2 = (Math.max(dragging.x, x) / r.width) * player.duration * 1000;
+      if (t2 - t1 < 250) { selection = null; }
+      else selection = { fromMs: Math.round(t1), toMs: Math.round(t2) };
+      $("selLabel").textContent = selection
+        ? "Selected " + fmt(selection.fromMs) + " – " + fmt(selection.toMs) + " (" + ((selection.toMs - selection.fromMs) / 1000).toFixed(1) + "s)"
+        : "Selection too short — drag a longer passage.";
+      $("editBtn").disabled = !selection;
+      $("playSel").disabled = !selection;
+      drawWave(peaksCache);
+    });
+    wave.addEventListener("pointerup", function () { dragging = null; });
+
+    $("clearSel").addEventListener("click", function () {
+      selection = null;
+      $("selLabel").textContent = "Drag on the waveform to select a passage.";
+      $("editBtn").disabled = true;
+      $("playSel").disabled = true;
+      drawWave(peaksCache);
+    });
+    $("playSel").addEventListener("click", function () {
+      if (!selection) return;
+      player.currentTime = selection.fromMs / 1000;
+      player.play();
+      var stopAt = selection.toMs / 1000;
+      var tick = setInterval(function () {
+        if (player.paused || player.currentTime >= stopAt) { player.pause(); clearInterval(tick); }
+      }, 60);
+    });
+    player.addEventListener("timeupdate", function () { drawWave(peaksCache); });
+    player.addEventListener("loadedmetadata", function () { drawWave(peaksCache); });
+    window.addEventListener("resize", function () { drawWave(peaksCache); });
+
+    // ── render ──────────────────────────────────────────────────────────
+    function renderRows() {
+      if (!state) return;
+      $("title").textContent = state.title || "Studio";
+      $("prompt").value = state.plan.prompt || "";
+      $("lyrics").value = state.plan.lyrics || "";
+      $("tempo").value = state.plan.tempo || "";
+      $("key").value = state.plan.key || "";
+      $("seconds").value = state.plan.seconds || 30;
+      $("planLine").textContent = state.musicConfigured === false ? "music provider not configured" : "";
+
+      var inst = state.plan.instruments || [];
+      var list = $("instList");
+      list.innerHTML = "";
+      inst.forEach(function (name) {
+        var chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = name;
+        var x = document.createElement("button");
+        x.textContent = "×";
+        x.title = "Remove";
+        x.addEventListener("click", function () {
+          state.plan.instruments = inst.filter(function (n) { return n !== name; });
+          renderRows();
+        });
+        chip.appendChild(x);
+        list.appendChild(chip);
+      });
+
+      var versions = $("versions");
+      versions.innerHTML = "";
+      (state.versions || []).slice().reverse().forEach(function (v) {
+        var b = document.createElement("button");
+        b.textContent = fmt(0) + " " + v.label + " · " + Math.round(v.bytes / 1024) + " KB";
+        b.textContent = v.label + " · " + Math.round(v.bytes / 1024) + " KB";
+        if (state.asset && state.asset.id === v.id) b.classList.add("on");
+        b.addEventListener("click", function () {
+          player.src = v.url;
+          player.load();
+          decodePeaks(v.url);
+          Array.prototype.forEach.call(versions.children, function (c) { c.classList.remove("on"); });
+          b.classList.add("on");
+        });
+        versions.appendChild(b);
+      });
+
+      var log = $("log");
+      log.innerHTML = "";
+      var edits = state.edits || [];
+      if (!edits.length) {
+        var p = document.createElement("p");
+        p.className = "muted";
+        p.textContent = "No changes yet.";
+        log.appendChild(p);
+      }
+      edits.forEach(function (e) {
+        var row = document.createElement("div");
+        row.className = "entry " + e.actor;
+        var meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = (e.actor === "agent" ? "BeeZilla" : "You") +
+          (e.fromMs != null ? " · " + fmt(e.fromMs) + "–" + fmt(e.toMs) : "") +
+          " · " + new Date(e.createdAt).toLocaleString();
+        var what = document.createElement("div");
+        what.textContent = e.instruction || "(no instruction)";
+        row.appendChild(meta);
+        row.appendChild(what);
+        if (e.note) {
+          var note = document.createElement("div");
+          note.className = "meta";
+          note.textContent = e.note;
+          row.appendChild(note);
+        }
+        log.appendChild(row);
+      });
+
+      if (state.asset) {
+        if (player.getAttribute("src") !== state.asset.url) {
+          player.src = state.asset.url;
+          decodePeaks(state.asset.url);
+        }
+      }
+    }
+
+    function load() {
+      if (!jobId) {
+        // A studio with no track still needs a project for the render to land in.
+        fetch("/api/buzzy/jobs", {
+          method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: "job_music_" + Date.now().toString(36), title: "Untitled track", status: "In progress", data: {} }),
+        }).then(function (r) { return r.ok ? true : false; }).then(function (ok) {
+          if (!ok) return;
+          jobId = null;
+        });
+        setStatus("Open a track from a chat, or create one from the brief on the right.", "bad");
+        return;
+      }
+      api("GET").then(function (res) {
+        if (!res.ok) { setStatus(res.body.error || "Could not load this track.", "bad"); return; }
+        state = res.body;
+        renderRows();
+        if (state.asset) setStatus("Loaded " + (state.versions || []).length + " version(s).", "good");
+        else setStatus("No track yet — fill in the brief and press Create track.");
+      });
+    }
+
+    function planFromForm() {
+      return {
+        prompt: $("prompt").value.trim(),
+        lyrics: $("lyrics").value,
+        tempo: $("tempo").value.trim() || undefined,
+        key: $("key").value.trim() || undefined,
+        seconds: Number($("seconds").value || 30),
+        instruments: (state && state.plan.instruments) || [],
+      };
+    }
+
+    $("instInput").addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      var v = e.target.value.trim();
+      if (!v) return;
+      if (!state) state = { plan: { instruments: [] } };
+      state.plan.instruments = (state.plan.instruments || []).concat([v]);
+      e.target.value = "";
+      renderRows();
+    });
+
+    function busy(btn, label) {
+      btn.disabled = true;
+      var old = btn.textContent;
+      btn.textContent = label;
+      return function () { btn.disabled = false; btn.textContent = old; };
+    }
+
+    $("savePlan").addEventListener("click", function () {
+      var done = busy(this, "Saving…");
+      api("POST", { action: "save", jobId: jobId, plan: planFromForm() }).then(function (r) {
+        done();
+        setStatus(r.ok ? "Brief saved." : (r.body.error || "Could not save."), r.ok ? "good" : "bad");
+      });
+    });
+
+    $("saveLyrics").addEventListener("click", function () {
+      var done = busy(this, "Saving…");
+      api("POST", { action: "save", jobId: jobId, plan: { lyrics: $("lyrics").value } }).then(function (r) {
+        done();
+        setStatus(r.ok ? "Lyrics saved." : (r.body.error || "Could not save lyrics."), r.ok ? "good" : "bad");
+      });
+    });
+
+    $("renderBtn").addEventListener("click", function () {
+      var btn = this;
+      var done = busy(btn, "Composing…");
+      setStatus("Composing the track — this takes as long as the track is long…");
+      api("POST", { action: "render", jobId: jobId, plan: planFromForm(), actor: "user" }).then(function (r) {
+        done();
+        if (!r.ok) { setStatus(r.body.error || "Could not create the track.", "bad"); return; }
+        state = r.body.state;
+        renderRows();
+        setStatus("Track created — " + Math.round((r.body.bytes || 0) / 1024) + " KB.", "good");
+      });
+    });
+
+    $("editBtn").addEventListener("click", function () {
+      var instruction = $("instruction").value.trim();
+      if (!instruction) { setStatus("Say what should change in the selection.", "bad"); return; }
+      if (!selection) { setStatus("Select a passage on the waveform first.", "bad"); return; }
+      var btn = this;
+      var done = busy(btn, "Re-rendering…");
+      setStatus("Applying \u201c" + instruction + "\u201d to " + fmt(selection.fromMs) + "–" + fmt(selection.toMs) + "…");
+      api("POST", {
+        action: "edit", jobId: jobId, plan: planFromForm(), actor: "user",
+        instruction: instruction, fromMs: selection.fromMs, toMs: selection.toMs,
+      }).then(function (r) {
+        done();
+        if (!r.ok) { setStatus(r.body.error || "Could not change that passage.", "bad"); return; }
+        state = r.body.state;
+        renderRows();
+        selection = null;
+        $("editBtn").disabled = true;
+        $("playSel").disabled = true;
+        $("selLabel").textContent = "Drag on the waveform to select a passage.";
+        setStatus("Changed " + fmt(r.body.state && r.body.state.edits && r.body.state.edits[0] ? r.body.state.edits[0].fromMs : null) + " — new version created.", "good");
+      });
+    });
+
+    load();
+  })();
+</script>
+</body>
+</html>
