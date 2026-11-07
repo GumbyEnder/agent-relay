@@ -17,7 +17,7 @@ import { join, resolve } from "node:path";
   // to serve it.
 // "settings" is desktop-only: the Electron shell lowers the Settings window
 // through this route so it stops depending on a static .html fallback.
-const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "recipes", "wallet", "upload", "graph", "settings"]);
+const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "recipes", "wallet", "upload", "graph", "settings", "capabilities"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {

@@ -28,9 +28,30 @@ export function isFileRequest(message: string): boolean {
   );
 }
 
+/**
+ * "Stop asking and do it."
+ *
+ * A person who has to say this twice has already lost an argument with the
+ * product: the scripted question and the plan-then-confirm step both outranked
+ * the owner's own instruction, so a complete brief still produced "got a budget
+ * in mind?" and "does this plan look right?". Its own signal rather than more
+ * regex in isDraftRequest, because it must ALSO suppress the plan-first step.
+ */
+export function isExecuteCommand(message: string): boolean {
+  const m = String(message || "");
+  return (
+    /\b(no more (questions|confirmations?)|stop asking|quit asking|don'?t ask (me )?(any ?more|again)|no (further )?questions)\b/i.test(m) ||
+    /\b(just do it|just do the work|do the work|get on with it|start (now|working|generating|building)|begin (now|working)|go ahead and (do|start|build|make))\b/i.test(m) ||
+    /\b(i (already )?(told|gave|answered)|already (answered|provided|gave|done the planning)|as i (said|mentioned))\b/i.test(m) ||
+    /\b(skip the (questions|interview|plan)|enough (questions|planning)|stop (planning|confirming))\b/i.test(m)
+  );
+}
+
 /** A deliverable request in the owner's own words (not only "file" phrasing). */
 export function isDraftRequest(message: string): boolean {
   if (isFileRequest(message)) return true;
+  // "stop asking, just do it" is a request to execute, not a question to answer.
+  if (isExecuteCommand(message)) return true;
   return /\b(write it up|just write|go ahead|draft it|that'?s enough|finalize|whenever you'?re ready)\b/i.test(
     String(message || ""),
   );

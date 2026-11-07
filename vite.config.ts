@@ -428,6 +428,13 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/auth-api.nitro.ts",
               },
               {
+                // What this build can actually do, answered from the same registry
+                // the chat loop uses — ported from web so the desktop can answer
+                // "why can't you …" with a fact instead of a guess.
+                route: "/api/buzzy/capabilities",
+                handler: "./src/lib/buzzy/capabilities.nitro.ts",
+              },
+              {
                 // Our inference: the signed-in owner mints a short-lived token
                 // (no shared provider key ever reaches the desktop app).
                 route: "/api/inference-token",

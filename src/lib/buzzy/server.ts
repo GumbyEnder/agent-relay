@@ -52,7 +52,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isMusicRequest, producesDeliverable } from "./intent";
+import { isDraftRequest, isExecuteCommand, isExplicitDocumentRequest, isFileRequest, isMusicRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -507,7 +507,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     [message, ...history.filter((h) => h.role === "user").map((h) => h.content), ...Object.values(slotValues)].join(" "),
   );
   const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
-  const planFirst = shouldPlanFirst(message) ? PLAN_FIRST_INSTRUCTION : "";
+  // An explicit "just do it" outranks the plan-then-confirm step: the owner has
+  // already said they do not want the interview, and refusing to act is never the
+  // safer choice.
+  const planFirst = shouldPlanFirst(message) && !isExecuteCommand(message) ? PLAN_FIRST_INSTRUCTION : "";
   const playbookBlock = playbookGuidance(jobType);
   const chatGuidance = hasExistingDraft
     ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
