@@ -68,7 +68,11 @@
       ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
       ".bz-brandrow .bz-brand strong{font-size:.98rem;letter-spacing:.01em}",
       ".bz-brandrow .bz-cluster{margin-left:auto;display:flex;align-items:center;gap:.7rem;min-width:0}",
-      ".bz-navbar{display:flex;align-items:center;gap:.9rem;height:48px;min-height:48px;border-bottom:1px solid #242424;background:#0d0d0d;overflow-x:auto;scrollbar-width:none}",
+      // The link row is centred, not left-anchored: the brand owns the left edge and the
+      // identity cluster owns the right, so a left-hugging link row reads as a mistake.
+      // 'safe center' falls back to start the moment the row is wider than the bar, so
+      // centring can never clip the first link on a narrow window.
+      ".bz-navbar{display:flex;align-items:center;justify-content:safe center;gap:.9rem;height:48px;min-height:48px;border-bottom:1px solid #242424;background:#0d0d0d;overflow-x:auto;scrollbar-width:none;padding:0 8px}",
       ".bz-navbar::-webkit-scrollbar{display:none}",
       // The chrome must style itself: /buzzy/landing has no nav CSS of its own, so
       // links fell back to the browser default (blue, underlined) on the one page
