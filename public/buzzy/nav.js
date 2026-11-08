@@ -234,6 +234,19 @@
         }
       })
       .catch(function () { a.textContent = "Sign in"; });
+
+    // The page may build its own account menu after us (Talk does). Watch briefly and
+    // hand over to it, so the logo line never reads 'Shane  Shane  shane@…  Log out'.
+    var tries = 0;
+    var watch = setInterval(function () {
+      tries++;
+      var later = document.querySelector("header .account-menu");
+      if (later) {
+        if (a.parentNode) a.remove();
+        chrome.appendChild(later);
+        clearInterval(watch);
+      } else if (tries > 24) clearInterval(watch);
+    }, 250);
   }
 
   /** Ask: the chat, on every page, in a panel anchored to the nav. */
