@@ -204,6 +204,15 @@
 
   /** Who is signed in? One place, right beside the logo. */
   function accountControl(chrome) {
+    // Pages that already render a full account menu (name, email, Log out) keep it;
+    // adding our own link beside it produced 'Shane' twice on Talk.
+    var menu = document.querySelector("header .account-menu");
+    if (menu) {
+      var stray = chrome.querySelector("a.bz-account");
+      if (stray) stray.remove();
+      chrome.appendChild(menu);
+      return;
+    }
     var existing = document.getElementById("accountLink");
     var a = existing || document.createElement("a");
     a.className = "bz-account";
