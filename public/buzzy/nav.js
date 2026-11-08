@@ -65,8 +65,13 @@
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
       ".bz-navbar{display:flex;align-items:center;gap:.9rem;height:48px;min-height:48px;border-bottom:1px solid #242424;background:#0d0d0d;overflow-x:auto;scrollbar-width:none}",
       ".bz-navbar::-webkit-scrollbar{display:none}",
-      "#bzNav a{white-space:nowrap}",
-      "#bzNav a.active{color:#ffd40d}",
+      // The chrome must style itself: /buzzy/landing has no nav CSS of its own, so
+      // links fell back to the browser default (blue, underlined) on the one page
+      // every visitor sees first. Page styles that are more specific still win.
+      "#bzNav a{color:#9a9a9a;text-decoration:none;font-size:.86rem;font-weight:500;white-space:nowrap;padding:.15rem 0;border:0}",
+      "#bzNav a:hover{color:#f2f2f2}",
+      "#bzNav a:focus-visible{outline:2px solid #ffd40d;outline-offset:3px;border-radius:4px}",
+      "#bzNav a.active{color:#ffd40d;font-weight:700}",
       ".bz-chrome-scroll{overflow-x:auto;scrollbar-width:none}",
       "#bzChrome .bz-account{color:#8d8d8d;font-size:.82rem;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-account:hover{color:#ffd40d}",
