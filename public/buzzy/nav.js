@@ -63,6 +63,11 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
+      ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem}",
+      ".bz-brandrow .bz-brand{display:flex;align-items:center;gap:.5rem;text-decoration:none;color:#f2f2f2}",
+      ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
+      ".bz-brandrow .bz-brand strong{font-size:.98rem;letter-spacing:.01em}",
+      ".bz-brandrow .bz-cluster{margin-left:auto;display:flex;align-items:center;gap:.7rem;min-width:0}",
       ".bz-navbar{display:flex;align-items:center;gap:.9rem;height:48px;min-height:48px;border-bottom:1px solid #242424;background:#0d0d0d;overflow-x:auto;scrollbar-width:none}",
       ".bz-navbar::-webkit-scrollbar{display:none}",
       // The chrome must style itself: /buzzy/landing has no nav CSS of its own, so
@@ -197,18 +202,27 @@
     fill();
   }
 
-  /** Who is signed in? The nav shows it once, instead of each page guessing. */
+  /** Who is signed in? One place, right beside the logo. */
   function accountControl(chrome) {
-    var a = document.createElement("a");
+    var existing = document.getElementById("accountLink");
+    var a = existing || document.createElement("a");
     a.className = "bz-account";
     a.href = "/buzzy/landing";
-    a.textContent = "…";
-    chrome.appendChild(a);
-    fetch("/api/buzzy/sessions", { credentials: "same-origin" })
-      .then(function (r) { return { ok: r.ok, body: r.ok ? null : null }; })
+    if (!existing) chrome.appendChild(a);
+    a.textContent = "\u2026";
+    fetch("/api/auth/get-session", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {
-        if (res.ok) { a.textContent = "Account"; a.href = "/buzzy/profile"; a.title = "Your account"; }
-        else { a.textContent = "Sign in"; a.href = "/buzzy/landing"; }
+        var user = res && res.user;
+        if (user && (user.name || user.email)) {
+          a.textContent = user.name || user.email;
+          a.href = "/buzzy/profile";
+          a.title = user.email || "Your account";
+        } else {
+          a.textContent = "Sign in";
+          a.href = "/buzzy/landing";
+          a.title = "Sign in";
+        }
       })
       .catch(function () { a.textContent = "Sign in"; });
   }
@@ -288,22 +302,62 @@
     document.head.appendChild(s);
   }
 
+  /** The brand for row one: whatever the page has, or a plain BeeZilla mark. */
+  function findBrand(header) {
+    var existing = header.querySelector(".brand-link, .brand, .bz-brand");
+    if (existing) return existing;
+    var a = document.createElement("a");
+    a.className = "bz-brand";
+    a.href = "/buzzy/talk";
+    a.innerHTML =
+      '<img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="" /><strong>BeeZilla</strong>';
+    return a;
+  }
+
   function boot() {
     style();
     var nav = ensureNav();
-    if (!document.getElementById("bzChrome")) {
-      var chrome = document.createElement("span");
-      chrome.id = "bzChrome";
-      // sit the controls at the end of the nav row, after the links
-      nav.appendChild(chrome);
-      loadCompanies();
-      companyControl(chrome);
-      accountControl(chrome);
-      // On Talk the composer is already in front of you; a second chat button there
-      // is noise. Everywhere else the panel is the only way to talk, so it is always
-      // present.
-      if (section() !== "talk") askControl(chrome);
-    }
+    if (document.getElementById("bzChrome")) return;
+    var header = nav.closest("header") || document.querySelector("header") || document.body;
+
+    // Row one: brand on the left, identity cluster on the right. Row two: the links.
+    // This is the line the owner asked for — name, company and account belong beside
+    // the logo, not below it eating the first line of every page.
+    var brandRow = document.createElement("div");
+    brandRow.className = "bz-brandrow";
+    var brand = findBrand(header);
+    brandRow.appendChild(brand);
+
+    var chrome = document.createElement("span");
+    chrome.id = "bzChrome";
+    chrome.className = "bz-cluster";
+    brandRow.appendChild(chrome);
+
+    var bar = nav.closest(".bz-navbar") || nav.parentNode;
+    var extras = [];
+    Array.prototype.forEach.call(header.children, function (child) {
+      if (child === brandRow || child === bar) return;
+      if (child === nav || child.contains(nav)) return;
+      if (child.classList.contains("header-inner")) {
+        Array.prototype.forEach.call(child.children, function (c) {
+          if (c !== nav && !c.contains(nav) && !c.contains(brand) && !c.contains(chrome)) extras.push(c);
+        });
+        return;
+      }
+      if (!child.contains(brand) && !child.contains(chrome)) extras.push(child);
+    });
+
+    // Keep the page's own header content (titles, toolbars) below the two chrome rows.
+    header.innerHTML = "";
+    header.appendChild(brandRow);
+    header.appendChild(bar);
+    extras.forEach(function (el) { header.appendChild(el); });
+
+    loadCompanies();
+    companyControl(chrome);
+    accountControl(chrome);
+    // On Talk the composer is already in front of you; a second chat button is noise.
+    if (section() !== "talk") askControl(chrome);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
