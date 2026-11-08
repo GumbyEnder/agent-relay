@@ -2347,6 +2347,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           body +
         "</span>" +
         '<a href="' + url + '" download="' + name + '">Download</a>' +
+        // A track is not finished when it plays: it opens in the studio, where the
+        // owner can see the plan, select a passage and tell BeeZilla what to change.
+        (isAudio
+          ? '<a class="studio-link" href="/buzzy/studio?job=' +
+            encodeURIComponent(chatState.jobId || "") +
+            '">Open studio →</a>'
+          : "") +
       "</div>";
     }
 

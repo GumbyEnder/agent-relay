@@ -39,6 +39,7 @@ import {
 import { calculate } from "./calc";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
+import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
@@ -455,6 +456,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // passes jobId and nothing else, so "what is this project?" was answered with "I
   // do not have access to information about a specific project" — technically true,
   // uselessly so. The server owns this data; it should hand it over.
+  let musicLines = "";
+  if (jobId) {
+    try { musicLines = await musicContextForAgent(userId, jobId); } catch (_) { /* optional */ }
+  }
   let effectiveContext = jobContext;
   if (!effectiveContext && jobId) {
     try {
@@ -601,6 +606,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         (typeof effectiveContext.problem === "string" && effectiveContext.problem
           ? ". Problem on file: " + String(effectiveContext.problem).slice(0, 300)
           : "") +
+        (musicLines ? "\n\n" + musicLines : "") +
         (Array.isArray((effectiveContext as any).deliverables) && (effectiveContext as any).deliverables.length
           ? ". Deliverables on file: " + (effectiveContext as any).deliverables
               .map((d: any) => `${d.label} (${d.kb} KB)`).join(", ")
@@ -702,6 +708,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         bytes: stored.bytes,
         type: made.contentType || "audio/mpeg",
       };
+      // A track born in chat is a studio track: register the plan and the first
+      // change so /buzzy/studio?job=… opens on it instead of an empty page.
+      try {
+        await registerChatTrack(userId, jobId || sessionId || "", {
+          brief, seconds, assetId: stored.id, bytes: stored.bytes,
+        });
+      } catch (e) {
+        console.error("music plan registration failed", (e as Error).message);
+      }
       messages[0]!.content +=
         `\n\nThe track has ALREADY been generated this turn: ${name}, ${seconds}s, ${stored.bytes} bytes, ` +
         "attached to your reply as a player. Do not call generate_music. Describe what you made in one or two " +
@@ -1080,6 +1095,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 bytes: stored.bytes,
                 type: made.contentType || "audio/mpeg",
               };
+              try {
+                await registerChatTrack(userId, jobId || sessionId || "", {
+                  brief, seconds, assetId: stored.id, bytes: stored.bytes,
+                });
+              } catch (e) {
+                console.error("music plan registration failed", (e as Error).message);
+              }
               return {
                 message:
                   `generate_music succeeded: ${name}, ${stored.bytes} bytes, ${seconds}s. ` +
@@ -1701,7 +1723,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // for is not "delivered".
   // The model sometimes opens with the file's own name. Strip that token: it is
   // machine noise where a sentence belongs, and it is not content.
-  if (renderedAudio) response.audio = renderedAudio;
+  if (renderedAudio) {
+    response.audio = renderedAudio;
+    // The interface, not just the player: every track opens in the studio.
+    (response as { studioUrl?: string }).studioUrl = `/buzzy/studio?job=${encodeURIComponent(jobId || sessionId || "")}`;
+  }
   // A picture rides its reply the same way a track does: the card and the sentence
   // must not be able to disagree about whether a file exists.
   if (renderedImage) (response as { image?: typeof renderedImage }).image = renderedImage;

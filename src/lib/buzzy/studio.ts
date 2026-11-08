@@ -202,6 +202,41 @@ export async function savePlan(userId: string, jobId: string, plan: Partial<Musi
   return merged;
 }
 
+/**
+ * Register a track that was born in chat.
+ *
+ * A track made by "write me a 90 second lullaby" is the same object as one made in
+ * the studio: it needs a plan (so the studio can show and edit it), an asset pointer,
+ * and an edit row (so the agent can be told how it came to exist). Without this the
+ * audio existed and the studio had never heard of it.
+ */
+export async function registerChatTrack(
+  userId: string,
+  jobId: string,
+  opts: { brief: string; seconds: number; assetId: number; bytes: number },
+): Promise<void> {
+  const sql = await getSql();
+  const existing = await getStudio(userId, jobId);
+  const plan: MusicPlan = {
+    ...(existing?.plan ?? EMPTY_PLAN),
+    prompt: (existing?.plan.prompt || opts.brief).slice(0, 1200),
+    seconds: opts.seconds,
+    currentAssetId: opts.assetId,
+  };
+  await sql`
+    UPDATE buzzy_jobs
+       SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{music}', ${JSON.stringify(plan)}::jsonb, true),
+           status = 'Audio ready', updated_at = now()
+     WHERE id = ${jobId} AND user_id = ${userId}
+  `;
+  await sql`
+    INSERT INTO buzzy_music_edits
+      (user_id, job_id, actor, instruction, before_asset_id, after_asset_id, note)
+    VALUES (${userId}, ${jobId}, 'agent', ${"created from chat: " + opts.brief.slice(0, 200)},
+            NULL, ${opts.assetId}, ${`First render, ${opts.seconds}s, ${opts.bytes} bytes.`})
+  `;
+}
+
 export interface RenderOutcome {
   ok: boolean;
   code?: string;

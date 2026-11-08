@@ -120,6 +120,12 @@
     </section>
 
     <section class="card">
+      <h2>Ask BeeZilla about this track</h2>
+      <div id="aiSlot" style="height:300px"></div>
+      <p class="muted" style="margin:.4rem 0 0">It sees the brief, the lyrics, the instruments and every change below.</p>
+    </section>
+
+    <section class="card">
       <h2>Changes</h2>
       <div class="log" id="log"><p class="muted">No changes yet.</p></div>
     </section>
@@ -379,6 +385,8 @@
         if (!res.ok) { setStatus(res.body.error || "Could not load this track.", "bad"); return; }
         state = res.body;
         renderRows();
+        if (window.BeeZillaChat) mountAI();
+        else { var s2 = document.createElement("script"); s2.src = "/buzzy/chat.js"; s2.onload = mountAI; document.head.appendChild(s2); }
         if (state.asset) setStatus("Loaded " + (state.versions || []).length + " version(s).", "good");
         else setStatus("No track yet — fill in the brief and press Create track.");
       });
@@ -464,6 +472,26 @@
         setStatus("Changed " + fmt(r.body.state && r.body.state.edits && r.body.state.edits[0] ? r.body.state.edits[0].fromMs : null) + " — new version created.", "good");
       });
     });
+
+    var aiMounted = false;
+    function mountAI() {
+      if (aiMounted || !jobId || !window.BeeZillaChat) return;
+      aiMounted = true;
+      window.BeeZillaChat.mount(document.getElementById("aiSlot"), {
+        title: "BeeZilla",
+        jobId: jobId,
+        placeholder: "e.g. make the second verse darker, or add a cello line",
+      });
+      // The agent edits the track server-side; refresh so its change shows up here.
+      setInterval(function () {
+        api("GET").then(function (res) {
+          if (!res.ok) return;
+          var before = (state && state.edits || []).length;
+          state = res.body;
+          if ((state.edits || []).length !== before) renderRows();
+        });
+      }, 5000);
+    }
 
     load();
   })();
