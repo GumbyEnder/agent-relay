@@ -223,11 +223,15 @@ export async function registerChatTrack(
     seconds: opts.seconds,
     currentAssetId: opts.assetId,
   };
+  // Upsert, not update: a track can be the first thing in a conversation, and then
+  // there is no project row yet. The studio needs one to open on.
   await sql`
-    UPDATE buzzy_jobs
-       SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{music}', ${JSON.stringify(plan)}::jsonb, true),
-           status = 'Audio ready', updated_at = now()
-     WHERE id = ${jobId} AND user_id = ${userId}
+    INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+    VALUES (${jobId}, ${userId}, null, ${opts.brief.slice(0, 80) || "Untitled track"}, 'Audio ready', null,
+            ${JSON.stringify({ ...(existing?.plan ? {} : {}), music: plan, approved: false })}::jsonb, now())
+    ON CONFLICT (id) DO UPDATE SET
+      data = jsonb_set(COALESCE(buzzy_jobs.data, '{}'::jsonb), '{music}', ${JSON.stringify(plan)}::jsonb, true),
+      status = 'Audio ready', updated_at = now()
   `;
   await sql`
     INSERT INTO buzzy_music_edits

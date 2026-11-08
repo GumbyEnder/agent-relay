@@ -649,6 +649,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // is set — that is the difference between "here it is" and "the track is in
   // your Library" said over an empty Library.
   let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
+  // A music turn can be the first thing in a conversation: no jobId, session still
+  // being minted. Fix the id once so the registration, the project row and the
+  // studio link all point at the same project.
+  let musicProjectId: string | null = null;
+  const musicProject = () => (musicProjectId ??= (jobId || sessionId || `job_music_${Date.now().toString(36)}`));
   // Why the last attempt to make audio failed, in the provider's or the plan's own
   // words. Used to answer honestly instead of denying the capability exists.
   let musicRefusal: { code: string; error: string } | null = null;
@@ -711,7 +716,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       // A track born in chat is a studio track: register the plan and the first
       // change so /buzzy/studio?job=… opens on it instead of an empty page.
       try {
-        await registerChatTrack(userId, jobId || sessionId || "", {
+        await registerChatTrack(userId, musicProject(), {
           brief, seconds, assetId: stored.id, bytes: stored.bytes,
         });
       } catch (e) {
@@ -1096,7 +1101,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 type: made.contentType || "audio/mpeg",
               };
               try {
-                await registerChatTrack(userId, jobId || sessionId || "", {
+                await registerChatTrack(userId, musicProject(), {
                   brief, seconds, assetId: stored.id, bytes: stored.bytes,
                 });
               } catch (e) {
@@ -1556,7 +1561,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // project the MP3 belongs to nobody, so the Library can show it while no work
   // item claims it. Record the project and attach the file to it.
   if (audioOnly && renderedAudio) {
-    const audioJobId = jobId || sessionId || `job_${Date.now()}`;
+    const audioJobId = musicProjectId || jobId || sessionId || `job_${Date.now()}`;
     const audioTitle = message.slice(0, 80);
     try {
       await sql`
@@ -1726,7 +1731,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (renderedAudio) {
     response.audio = renderedAudio;
     // The interface, not just the player: every track opens in the studio.
-    (response as { studioUrl?: string }).studioUrl = `/buzzy/studio?job=${encodeURIComponent(jobId || sessionId || "")}`;
+    (response as { studioUrl?: string }).studioUrl = `/buzzy/studio?job=${encodeURIComponent(musicProject())}`;
   }
   // A picture rides its reply the same way a track does: the card and the sentence
   // must not be able to disagree about whether a file exists.
