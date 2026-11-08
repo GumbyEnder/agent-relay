@@ -208,7 +208,7 @@
     var a = existing || document.createElement("a");
     a.className = "bz-account";
     a.href = "/buzzy/landing";
-    if (!existing) chrome.appendChild(a);
+    chrome.appendChild(a); // moves it out of the nav when the page shipped one there
     a.textContent = "\u2026";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -320,35 +320,42 @@
     if (document.getElementById("bzChrome")) return;
     var header = nav.closest("header") || document.querySelector("header") || document.body;
 
-    // Row one: brand on the left, identity cluster on the right. Row two: the links.
-    // This is the line the owner asked for — name, company and account belong beside
-    // the logo, not below it eating the first line of every page.
+    var brand = findBrand(header);
+    var account = document.getElementById("accountLink");
+
+    // Flatten one level of wrapper (.header-inner) so extras and the nav are seen.
+    var flat = [];
+    Array.prototype.forEach.call(header.children, function (child) {
+      if (child.classList && child.classList.contains("header-inner")) {
+        Array.prototype.forEach.call(child.children, function (c) { flat.push(c); });
+      } else flat.push(child);
+    });
+
+    var extras = flat.filter(function (el) {
+      if (el.tagName === "SCRIPT") return false;
+      if (el === nav || el.contains(nav)) return false;
+      if (el === brand || el.contains(brand)) return false;
+      if (el === account) return false;
+      return true;
+    });
+
+    // Row one: brand, then the identity cluster. Row two: the links. The rows must
+    // STACK — a header that is itself a flex row put them side by side.
+    header.style.display = "block";
+    header.innerHTML = "";
+
     var brandRow = document.createElement("div");
     brandRow.className = "bz-brandrow";
-    var brand = findBrand(header);
     brandRow.appendChild(brand);
-
     var chrome = document.createElement("span");
     chrome.id = "bzChrome";
     chrome.className = "bz-cluster";
     brandRow.appendChild(chrome);
 
-    var bar = nav.closest(".bz-navbar") || nav.parentNode;
-    var extras = [];
-    Array.prototype.forEach.call(header.children, function (child) {
-      if (child === brandRow || child === bar) return;
-      if (child === nav || child.contains(nav)) return;
-      if (child.classList.contains("header-inner")) {
-        Array.prototype.forEach.call(child.children, function (c) {
-          if (c !== nav && !c.contains(nav) && !c.contains(brand) && !c.contains(chrome)) extras.push(c);
-        });
-        return;
-      }
-      if (!child.contains(brand) && !child.contains(chrome)) extras.push(child);
-    });
+    var bar = document.createElement("div");
+    bar.className = "bz-navbar";
+    bar.appendChild(nav);
 
-    // Keep the page's own header content (titles, toolbars) below the two chrome rows.
-    header.innerHTML = "";
     header.appendChild(brandRow);
     header.appendChild(bar);
     extras.forEach(function (el) { header.appendChild(el); });
@@ -356,7 +363,6 @@
     loadCompanies();
     companyControl(chrome);
     accountControl(chrome);
-    // On Talk the composer is already in front of you; a second chat button is noise.
     if (section() !== "talk") askControl(chrome);
   }
 
