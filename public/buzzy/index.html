@@ -1478,7 +1478,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             items.map((f) =>
               "<a class='docfolder' style='display:block;text-decoration:none' href='" + escHtml(f.url || ("/api/buzzy/assets/" + f.id)) + "' target='_blank' rel='noopener'>" +
                 "<div class='df-name'>" + icon(f.content_type || "") + " " + escHtml(f.filename || ("asset " + f.id)) + "</div>" +
-                "<div class='df-meta'>" + kb(Number(f.bytes) || 0) + " · " + new Date(f.created_at || f.createdAt || Date.now()).toLocaleDateString() + " · open</div>" +
+                "<div class='df-meta'>" +
+                  (f.job_title ? "from " + escHtml(String(f.job_title)).slice(0, 60) + " · " : "") +
+                  kb(Number(f.bytes) || 0) + " · " + new Date(f.created_at || f.createdAt || Date.now()).toLocaleDateString() + " · open</div>" +
               "</a>").join("");
         })
         .catch(() => { holder.innerHTML = ""; });

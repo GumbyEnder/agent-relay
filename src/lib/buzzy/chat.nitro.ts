@@ -728,15 +728,21 @@ export default defineEventHandler(async (event) => {
       FROM buzzy_assets WHERE user_id = ${user.id}
         AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
     `;
+    // The Library must name the work, not the file. A list of "music-2026-11-07-
+    // 06-20-07.mp3" tells the owner nothing about which conversation produced it,
+    // so join the job and carry its title alongside the row (same defect class as
+    // the desktop issue where the column itself was missing).
     const rows = await sql<{
       id: number; filename: string; rel_path: string; content_type: string | null;
-      bytes: number; created_at: string;
+      bytes: number; created_at: string; job_id: string | null; job_title: string | null;
     }>`
-      SELECT id, filename, rel_path, content_type, bytes, created_at
-      FROM buzzy_assets
-      WHERE user_id = ${user.id}
-        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
-      ORDER BY rel_path ASC
+      SELECT a.id, a.filename, a.rel_path, a.content_type, a.bytes, a.created_at,
+             a.job_id, j.title AS job_title
+      FROM buzzy_assets a
+      LEFT JOIN buzzy_jobs j ON j.id = a.job_id
+      WHERE a.user_id = ${user.id}
+        AND (${prefix} = '' OR a.rel_path LIKE ${prefix + "%"})
+      ORDER BY a.rel_path ASC
       LIMIT ${want} OFFSET ${offset}
     `;
     return {
