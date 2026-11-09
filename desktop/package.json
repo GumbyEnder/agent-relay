@@ -1,7 +1,7 @@
 {
   "name": "beezilla-desktop",
   "productName": "BeeZilla",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": true,
   "description": "BeeZilla desktop \u2014 the local runtime in a window",
   "type": "module",
