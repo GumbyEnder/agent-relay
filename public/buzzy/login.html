@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BeeZilla — Sign in</title>
+  <title>BeeZilla — Sign in / Register</title>
   <link rel="icon" href="/buzzy/brand/bz-favicon-180.png" />
   <style>
     * { box-sizing: border-box; }
@@ -33,28 +33,37 @@
     .card { width: 100%; max-width: 420px; }
     .mascot { width: 84px; height: 84px; object-fit: contain; display: block; margin: 0 auto 1rem; }
     h1 { font-size: 1.5rem; font-weight: 800; margin: 0 0 0.35rem; text-align: center; }
-    .sub { color: #9a9a9a; font-size: 0.92rem; text-align: center; margin: 0 0 1.5rem; }
-    .tabs { display: flex; background: #141414; border: 1px solid #242424; border-radius: 10px; padding: 4px; margin-bottom: 1.25rem; }
-    .tab {
-      flex: 1; padding: 0.6rem; border-radius: 7px; border: 0; cursor: pointer;
-      background: transparent; color: #9a9a9a; font-size: 0.9rem; font-weight: 700;
-    }
-    .tab[aria-selected="true"] { background: #ffc107; color: #0A0A0A; }
+    .sub { color: #9a9a9a; font-size: 0.92rem; text-align: center; margin: 0 0 1.5rem; line-height: 1.5; }
+    .sub strong { color: #fff; font-weight: 600; word-break: break-all; }
+    .label-row { display: flex; justify-content: space-between; align-items: baseline; }
     label { display: block; font-size: 0.8rem; color: #9a9a9a; margin: 0 0 0.35rem; font-weight: 600; }
     input {
       width: 100%; padding: 0.75rem 0.85rem; border-radius: 8px; margin-bottom: 0.9rem;
       background: #141414; border: 1px solid #2a2a2a; color: #fff; font-size: 1rem;
     }
     input:focus { outline: none; border-color: #ffc107; }
+    input[aria-invalid="true"] { border-color: #b3424c; }
+    .field-error { color: #ffb4b4; font-size: 0.85rem; margin: -0.5rem 0 0.9rem; min-height: 0; }
+    .field-error:empty { display: none; }
     button.primary, button.secondary {
       width: 100%; padding: 0.8rem 1rem; border-radius: 8px; font-size: 1rem;
       font-weight: 700; cursor: pointer; margin-bottom: 0.7rem;
     }
     button.primary { background: #ffc107; color: #0A0A0A; border: 1px solid #ffc107; }
-    button.primary:disabled { opacity: 0.6; cursor: default; }
+    button.primary:disabled, button.secondary:disabled { opacity: 0.6; cursor: default; }
     button.secondary { background: transparent; color: #fff; border: 1px solid #3a3a3a; }
     button.secondary:hover { border-color: #ffc107; color: #ffc107; }
-    .note { font-size: 0.82rem; color: #777; text-align: center; margin: 0.4rem 0 0; line-height: 1.5; }
+    button.link {
+      display: block; margin: 0.2rem auto 0; padding: 0.4rem; border: 0; background: none;
+      color: #9a9a9a; font-size: 0.88rem; cursor: pointer; text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    button.link:hover { color: #ffc107; }
+    button.toggle {
+      border: 0; background: none; color: #9a9a9a; font-size: 0.8rem; font-weight: 600;
+      cursor: pointer; padding: 0 0 0.35rem;
+    }
+    button.toggle:hover { color: #ffc107; }
     .msg { display: none; padding: 0.75rem 0.85rem; border-radius: 8px; font-size: 0.88rem; margin-bottom: 1rem; line-height: 1.45; }
     .msg.show { display: block; }
     .msg.error { background: #2a1214; border: 1px solid #5b1f24; color: #ffb4b4; }
@@ -74,35 +83,44 @@
   <main>
     <div class="card">
       <img class="mascot" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla mascot" />
-      <h1 id="title">Welcome back</h1>
-      <p class="sub" id="subtitle">Sign in and pick up where you left off.</p>
+      <h1 id="title">Sign in / Register</h1>
+      <p class="sub" id="subtitle">Put in your email to continue.</p>
 
       <div class="msg" id="msg" role="status" aria-live="polite"></div>
 
-      <div class="tabs" role="tablist">
-        <button class="tab" id="tab-signin" role="tab" aria-selected="true">Sign in</button>
-        <button class="tab" id="tab-register" role="tab" aria-selected="false">Create account</button>
-      </div>
-
+      <!-- Step 1–2: email, then (for a known email) the password appears below it. -->
       <form id="form" autocomplete="on" novalidate>
         <label for="email">Email</label>
-        <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" />
+        <input id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com" />
 
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters" />
-
-        <div id="nameRow" class="hidden">
-          <label for="name">Name</label>
-          <input id="name" name="name" type="text" autocomplete="name" placeholder="Your name" />
+        <div id="passwordRow" class="hidden">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" aria-describedby="passwordError" />
+          <div class="field-error" id="passwordError" aria-live="polite"></div>
         </div>
 
-        <button class="primary" id="submit" type="submit">Sign in</button>
-        <button class="secondary" id="magic" type="button">Email me a sign-in link</button>
+        <button class="primary" id="submit" type="submit">Next</button>
+        <button class="link hidden" id="forgot" type="button">Forgot password? Email me a sign-in link</button>
       </form>
 
-      <p class="note" id="note">
-        No password needed if you use the email link — it signs you in on this device.
-      </p>
+      <!-- After a sign-in link was emailed. -->
+      <div id="sent" class="hidden">
+        <button class="secondary" id="resend" type="button">Resend link</button>
+        <button class="link" id="changeEmail" type="button">Use a different email</button>
+      </div>
+
+      <!-- After a link sign-in: choose a password. -->
+      <form id="setForm" class="hidden" autocomplete="on" novalidate>
+        <input id="setEmail" name="username" type="email" autocomplete="username" class="hidden" tabindex="-1" aria-hidden="true" />
+        <div class="label-row">
+          <label for="newPassword">Password</label>
+          <button class="toggle" id="showNew" type="button" aria-controls="newPassword">Show</button>
+        </div>
+        <input id="newPassword" name="new-password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" aria-describedby="newPasswordError" />
+        <div class="field-error" id="newPasswordError" aria-live="polite"></div>
+        <button class="primary" id="save" type="submit">Save password</button>
+        <button class="link hidden" id="notNow" type="button">Not now</button>
+      </form>
     </div>
   </main>
 
@@ -110,56 +128,65 @@
 
   <script>
     (function () {
-      var mode = "signin";
-      var busy = false;
+      var MIN_PASSWORD = 8;
+      // "Wrong password" waits until the visitor stops typing for this long.
+      var CHECK_AFTER_MS = 2000;
+
       var params = new URLSearchParams(window.location.search);
+      var $ = function (id) { return document.getElementById(id); };
+      var title = $("title"), subtitle = $("subtitle"), msg = $("msg");
+      var form = $("form"), email = $("email"), passwordRow = $("passwordRow");
+      var password = $("password"), passwordError = $("passwordError");
+      var submit = $("submit"), forgot = $("forgot");
+      var sent = $("sent"), resend = $("resend"), changeEmail = $("changeEmail");
+      var setForm = $("setForm"), setEmail = $("setEmail"), newPassword = $("newPassword");
+      var newPasswordError = $("newPasswordError"), save = $("save"), notNow = $("notNow"), showNew = $("showNew");
 
-      var tabSignin = document.getElementById("tab-signin");
-      var tabRegister = document.getElementById("tab-register");
-      var form = document.getElementById("form");
-      var email = document.getElementById("email");
-      var password = document.getElementById("password");
-      var nameInput = document.getElementById("name");
-      var nameRow = document.getElementById("nameRow");
-      var submit = document.getElementById("submit");
-      var magic = document.getElementById("magic");
-      var msg = document.getElementById("msg");
-      var title = document.getElementById("title");
-      var subtitle = document.getElementById("subtitle");
-      var note = document.getElementById("note");
+      var step = "email";        // email | password | sent | set
+      var busy = false;
+      var checkTimer = null;
+      var lastWrong = null;      // the password value already known to be wrong
+      var attemptSeq = 0;
+      var linkEmail = "";        // where the last sign-in link went
 
-      function show(kind, text) {
-        msg.className = "msg show " + kind;
-        msg.textContent = text;
+      // ── helpers ──────────────────────────────────────────────────────
+      function show(kind, text) { msg.className = "msg show " + kind; msg.textContent = text; }
+      function clearMsg() { msg.className = "msg"; msg.textContent = ""; }
+      function setText(el, text) { el.textContent = text; }
+      function setSubtitle(before, bold, after) {
+        subtitle.textContent = "";
+        subtitle.appendChild(document.createTextNode(before));
+        if (bold) {
+          var b = document.createElement("strong");
+          b.textContent = bold;
+          subtitle.appendChild(b);
+          subtitle.appendChild(document.createTextNode(after || ""));
+        }
       }
-      function clearMsg() {
-        msg.className = "msg";
-        msg.textContent = "";
+      function wrongPassword(on, text) {
+        passwordError.textContent = on ? (text || "Wrong password") : "";
+        password.setAttribute("aria-invalid", on ? "true" : "false");
       }
-      function setBusy(on, label) {
-        busy = on;
-        submit.disabled = on;
-        magic.disabled = on;
-        submit.textContent = on ? label : mode === "register" ? "Create account" : "Sign in";
-      }
-      function api(path, body) {
+      function api(method, path, body) {
         return fetch(path, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
+          method: method,
+          headers: body ? { "content-type": "application/json" } : {},
           credentials: "same-origin",
-          body: JSON.stringify(body),
+          body: body ? JSON.stringify(body) : undefined,
         }).then(function (r) {
           return r.json().catch(function () { return {}; }).then(function (data) {
-            return { ok: r.ok, status: r.status, data: data };
+            return { ok: r.ok, status: r.status, data: data || {} };
           });
         });
       }
-      function signedIn() {
-        return fetch("/api/auth/get-session", { credentials: "same-origin" })
-          .then(function (r) { return r.json().catch(function () { return null; }); })
-          .then(function (d) { return Boolean(d && d.session); })
-          .catch(function () { return false; });
+      function codeOf(res) { return (res.data && res.data.code) || ""; }
+      function tooMany(res) {
+        if (res.status !== 429) return false;
+        show("error", "Too many tries. Wait a few seconds, then try again.");
+        return true;
       }
+      function currentEmail() { return (email.value || "").trim().toLowerCase(); }
+      function validEmail(addr) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr); }
       function destination() {
         var next = params.get("next");
         // Only same-origin paths; a login page must never be an open redirect.
@@ -167,97 +194,264 @@
         return "/buzzy/talk";
       }
       function enter() { window.location.replace(destination()); }
-
-      function setMode(next) {
-        mode = next;
-        var registering = next === "register";
-        tabSignin.setAttribute("aria-selected", registering ? "false" : "true");
-        tabRegister.setAttribute("aria-selected", registering ? "true" : "false");
-        nameRow.classList.toggle("hidden", !registering);
-        password.setAttribute("autocomplete", registering ? "new-password" : "current-password");
-        title.textContent = registering ? "Create your account" : "Welcome back";
-        subtitle.textContent = registering
-          ? "One account, on any device — the same work follows you."
-          : "Sign in and pick up where you left off.";
-        note.textContent = registering
-          ? "We'll email you a verification link. Click it, then sign in."
-          : "No password needed if you use the email link — it signs you in on this device.";
-        submit.textContent = registering ? "Create account" : "Sign in";
-        clearMsg();
+      function afterLinkURL() {
+        var next = params.get("next");
+        var url = "/buzzy/login?step=password";
+        if (next && next.charAt(0) === "/" && next.charAt(1) !== "/") url += "&next=" + encodeURIComponent(next);
+        return url;
       }
 
-      tabSignin.addEventListener("click", function () { setMode("signin"); });
-      tabRegister.addEventListener("click", function () {
-        setMode("register");
-        try { history.replaceState(null, "", "/buzzy/login?mode=register"); } catch (e) {}
+      // ── steps ────────────────────────────────────────────────────────
+      function toEmailStep() {
+        step = "email";
+        clearTimeout(checkTimer);
+        form.classList.remove("hidden");
+        sent.classList.add("hidden");
+        setForm.classList.add("hidden");
+        passwordRow.classList.add("hidden");
+        forgot.classList.add("hidden");
+        password.value = "";
+        lastWrong = null;
+        wrongPassword(false);
+        setText(title, "Sign in / Register");
+        setSubtitle("Put in your email to continue.");
+        submit.textContent = "Next";
+        submit.disabled = false;
+      }
+      function toPasswordStep() {
+        step = "password";
+        passwordRow.classList.remove("hidden");
+        forgot.classList.remove("hidden");
+        submit.textContent = "Log in";
+        setSubtitle("Welcome back. Put in your password.");
+        try { password.focus(); } catch (e) {}
+      }
+      function toSentStep(addr, kind) {
+        step = "sent";
+        linkEmail = addr;
+        form.classList.add("hidden");
+        setForm.classList.add("hidden");
+        sent.classList.remove("hidden");
+        setText(title, "Check your email");
+        var after = kind === "new"
+          ? ". Open it on this device to finish creating your account."
+          : kind === "forgot"
+            ? ". Open it on this device, then set a new password."
+            : ". Open it on this device to sign in.";
+        setSubtitle("We sent a link to ", addr, after);
+      }
+      function toSetStep(user, replacing) {
+        step = "set";
+        form.classList.add("hidden");
+        sent.classList.add("hidden");
+        setForm.classList.remove("hidden");
+        setEmail.value = (user && user.email) || "";
+        setText(title, replacing ? "Set a new password" : "Set a password");
+        setSubtitle(replacing
+          ? "You're signed in. Choose a new password. Your other devices will be signed out."
+          : "You're signed in. Choose a password for next time.");
+        notNow.classList.toggle("hidden", !replacing);
+        try { newPassword.focus(); } catch (e) {}
+      }
+
+      // ── step 1: email → Next ─────────────────────────────────────────
+      function lookup() {
+        var addr = currentEmail();
+        if (!validEmail(addr)) { show("error", "Enter your email address."); return; }
+        busy = true; submit.disabled = true; submit.textContent = "Checking…";
+        api("POST", "/api/auth/email-first/lookup", { email: addr })
+          .then(function (res) {
+            if (tooMany(res)) return toEmailStep();
+            if (!res.ok) {
+              toEmailStep();
+              show("error", codeOf(res) === "INVALID_EMAIL" ? "Enter a valid email address." : "Something went wrong. Try again.");
+              return;
+            }
+            submit.disabled = false;
+            if (res.data.hasPassword) return toPasswordStep();
+            // Known email without a password, or a new email: send a link.
+            return sendLink(addr, res.data.exists ? "signin" : "new");
+          })
+          .catch(function () { toEmailStep(); show("error", "Network problem. Try again."); })
+          .then(function () {
+            busy = false;
+            submit.disabled = false;
+            if (step === "email") submit.textContent = "Next";
+          });
+      }
+
+      function sendLink(addr, kind) {
+        busy = true;
+        return api("POST", "/api/auth/sign-in/magic-link", {
+          email: addr,
+          callbackURL: afterLinkURL(),
+          newUserCallbackURL: afterLinkURL(),
+          errorCallbackURL: "/buzzy/login?link=expired",
+        }).then(function (res) {
+          if (tooMany(res)) return;
+          if (!res.ok) { show("error", "We couldn't send the email. Try again."); return; }
+          clearMsg();
+          toSentStep(addr, kind);
+        }).catch(function () {
+          show("error", "Network problem. Try again.");
+        }).then(function () { busy = false; });
+      }
+
+      // ── step 2: password (checked 2 s after typing stops, or on Log in) ─
+      function attemptPassword(fromTimer) {
+        clearTimeout(checkTimer);
+        if (step !== "password") return;
+        var addr = currentEmail();
+        var pass = password.value || "";
+        if (!pass) { if (!fromTimer) wrongPassword(true, "Put in your password."); return; }
+        if (pass === lastWrong) { wrongPassword(true); return; }
+        if (pass.length < MIN_PASSWORD) { lastWrong = pass; wrongPassword(true); return; }
+        if (busy) {
+          // A check is still running; look at this value as soon as it's done.
+          checkTimer = setTimeout(function () { attemptPassword(fromTimer); }, 300);
+          return;
+        }
+        busy = true;
+        var seq = ++attemptSeq;
+        submit.disabled = true; submit.textContent = "Logging in…";
+        api("POST", "/api/auth/sign-in/email", { email: addr, password: pass, rememberMe: true })
+          .then(function (res) {
+            if (res.ok) { enter(); return; }
+            if (seq !== attemptSeq || password.value !== pass) return; // typed on meanwhile
+            if (tooMany(res)) return;
+            var code = codeOf(res);
+            if (code === "EMAIL_NOT_VERIFIED") {
+              show("ok", "Confirm your email first. We just sent a link to " + addr + ".");
+              return;
+            }
+            lastWrong = pass;
+            wrongPassword(true);
+          })
+          .catch(function () { show("error", "Network problem. Try again."); })
+          .then(function () {
+            busy = false;
+            if (step === "password") { submit.disabled = false; submit.textContent = "Log in"; }
+          });
+      }
+
+      password.addEventListener("input", function () {
+        clearTimeout(checkTimer);
+        wrongPassword(false);
+        clearMsg();
+        if (!password.value) return;
+        checkTimer = setTimeout(function () { attemptPassword(true); }, CHECK_AFTER_MS);
+      });
+
+      email.addEventListener("input", function () {
+        clearMsg();
+        if (step === "password") toEmailStep();
       });
 
       form.addEventListener("submit", function (e) {
         e.preventDefault();
+        clearMsg();
+        if (step === "email") { if (!busy) lookup(); return; }
+        if (step === "password") attemptPassword(false);
+      });
+
+      forgot.addEventListener("click", function () {
+        if (busy) return;
+        clearTimeout(checkTimer);
+        clearMsg();
+        sendLink(currentEmail(), "forgot");
+      });
+
+      resend.addEventListener("click", function () {
+        if (busy || !linkEmail) return;
+        resend.disabled = true;
+        api("POST", "/api/auth/sign-in/magic-link", {
+          email: linkEmail,
+          callbackURL: afterLinkURL(),
+          newUserCallbackURL: afterLinkURL(),
+          errorCallbackURL: "/buzzy/login?link=expired",
+        }).then(function (res) {
+          if (tooMany(res)) return;
+          if (res.ok) show("ok", "Sent again. Check your inbox (and spam folder).");
+          else show("error", "We couldn't send the email. Try again.");
+        }).catch(function () {
+          show("error", "Network problem. Try again.");
+        }).then(function () { resend.disabled = false; });
+      });
+
+      changeEmail.addEventListener("click", function () {
+        clearMsg();
+        toEmailStep();
+        email.value = "";
+        try { email.focus(); } catch (e) {}
+      });
+
+      // ── step 3: after a link sign-in, set a password ─────────────────
+      showNew.addEventListener("click", function () {
+        var showing = newPassword.type === "text";
+        newPassword.type = showing ? "password" : "text";
+        showNew.textContent = showing ? "Show" : "Hide";
+      });
+      newPassword.addEventListener("input", function () {
+        newPasswordError.textContent = "";
+        newPassword.setAttribute("aria-invalid", "false");
+      });
+      notNow.addEventListener("click", enter);
+
+      setForm.addEventListener("submit", function (e) {
+        e.preventDefault();
         if (busy) return;
         clearMsg();
-        var addr = (email.value || "").trim();
-        var pass = password.value || "";
-        if (!addr || addr.indexOf("@") < 1) { show("error", "Enter your email address."); return; }
-        if (password.validity.tooShort) { show("error", "Passwords need at least 8 characters."); return; }
-        if (!pass) { show("error", "Enter your password."); return; }
-
-        if (mode === "register") {
-          setBusy(true, "Creating…");
-          api("/api/auth/sign-up/email", {
-            email: addr,
-            password: pass,
-            name: (nameInput.value || "").trim() || addr.split("@")[0],
-          }).then(function (res) {
-            if (!res.ok) {
-              var m = (res.data && (res.data.message || res.data.code)) || "";
-              show("error", m || "Could not create that account.");
-              return;
-            }
-            return signedIn().then(function (ok) {
-              if (ok) return enter();
-              show("ok", "Account created. Check " + addr + " for the verification link, then sign in.");
-              setMode("signin");
-            });
-          }).catch(function () {
-            show("error", "Network error — try again.");
-          }).then(function () { setBusy(false); });
+        var pass = newPassword.value || "";
+        if (pass.length < MIN_PASSWORD) {
+          newPasswordError.textContent = "Use at least " + MIN_PASSWORD + " characters.";
+          newPassword.setAttribute("aria-invalid", "true");
           return;
         }
-
-        setBusy(true, "Signing in…");
-        api("/api/auth/sign-in/email", { email: addr, password: pass })
+        busy = true; save.disabled = true; save.textContent = "Saving…";
+        api("POST", "/api/auth/email-first/set-password", { newPassword: pass })
           .then(function (res) {
-            if (res.ok) return enter();
-            var code = (res.data && res.data.code) || "";
-            if (code === "EMAIL_NOT_VERIFIED") {
-              show("error", "Verify your email first — check your inbox for the link.");
-              return;
-            }
-            show("error", (res.data && res.data.message) || "That email and password do not match.");
+            if (res.ok) { enter(); return; }
+            if (tooMany(res)) return;
+            if (res.status === 401) { toEmailStep(); show("error", "Your sign-in ended. Put in your email to continue."); return; }
+            var message = (res.data && res.data.message) || "We couldn't save that password. Try again.";
+            newPasswordError.textContent = message;
+            newPassword.setAttribute("aria-invalid", "true");
           })
-          .catch(function () { show("error", "Network error — try again."); })
-          .then(function () { setBusy(false); });
+          .catch(function () { show("error", "Network problem. Try again."); })
+          .then(function () { busy = false; save.disabled = false; save.textContent = "Save password"; });
       });
 
-      magic.addEventListener("click", function () {
-        if (busy) return;
-        var addr = (email.value || "").trim();
-        if (!addr || addr.indexOf("@") < 1) { show("error", "Enter your email address first."); return; }
-        clearMsg();
-        setBusy(true, "Sending…");
-        api("/api/auth/sign-in/magic-link", { email: addr, callbackURL: destination() })
-          .then(function (res) {
-            if (res.ok) show("ok", "Link sent to " + addr + ". Open it on this device to sign in.");
-            else show("error", (res.data && res.data.message) || "Could not send the link.");
-          })
-          .catch(function () { show("error", "Network error — try again."); })
-          .then(function () { setBusy(false); });
-      });
+      // ── start ────────────────────────────────────────────────────────
+      function getSession() {
+        return fetch("/api/auth/get-session", { credentials: "same-origin" })
+          .then(function (r) { return r.json().catch(function () { return null; }); })
+          .catch(function () { return null; });
+      }
 
-      if (params.get("verified") === "1") show("ok", "Email verified. Sign in to continue.");
-      if (params.get("mode") === "register") setMode("register");
-      if (email.value === "") { try { email.focus(); } catch (e) {} }
+      if (params.get("link") === "expired" || params.get("error")) {
+        show("error", "That link has expired or was already used. Put in your email to get a new one.");
+      } else if (params.get("verified") === "1") {
+        show("ok", "Email confirmed. Put in your email to sign in.");
+      }
+
+      if (params.get("step") === "password") {
+        // Arrived from a sign-in link: set a password (or skip ahead if one is set).
+        Promise.all([api("GET", "/api/auth/email-first/status"), getSession()])
+          .then(function (out) {
+            var status = out[0], session = out[1];
+            if (!status.ok || !session || !session.user) { toEmailStep(); try { email.focus(); } catch (e) {} return; }
+            if (!status.data.hasPassword) return toSetStep(session.user, false);
+            if (status.data.canReplace) return toSetStep(session.user, true);
+            enter();
+          })
+          .catch(function () { toEmailStep(); });
+      } else {
+        // Already signed in (sessions last for good): go straight in.
+        getSession().then(function (s) {
+          if (s && s.session && step === "email" && !email.value) enter();
+        });
+        try { email.focus(); } catch (e) {}
+      }
     })();
   </script>
 </body>
