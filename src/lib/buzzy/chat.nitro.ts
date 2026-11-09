@@ -4322,9 +4322,16 @@ export default defineEventHandler(async (event) => {
     if (data.music && !recorded.some((r) => r.kind === "brief")) {
       inputs.push({ kind: "brief", label: "Music brief, lyrics and instruments", url: `/buzzy/studio?job=${job.id}` });
     }
-    const status = deliverables.length ? "Deliverable ready" : messages.length || inputs.length ? "In progress" : "Empty";
+    // A reference image is an INPUT. It is stored as an asset so it can be shown and
+    // re-used, but listing it as a deliverable would let the project claim two outputs
+    // when it produced one.
+    const sourceIds = new Set(
+      inputs.filter((i) => i.kind === "reference").map((i) => String(i.url ?? "").split("/").pop() || ""),
+    );
+    const outputs = deliverables.filter((d) => !(d.kind === "image" && sourceIds.has(String(d.id))));
+    const status = outputs.length ? "Deliverable ready" : messages.length || inputs.length ? "In progress" : "Empty";
     return {
-      ok: true, project: { ...job, status }, deliverables, sources: inputs,
+      ok: true, project: { ...job, status }, deliverables: outputs, sources: inputs,
       session: session[0] ?? null, turns, messages,
     };
   }
