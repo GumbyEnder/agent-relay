@@ -58,8 +58,24 @@ function rotate() {
   }
 }
 
-/** One line, timestamped, level-tagged. Never throws. */
-export function logLine(level, args) {
+/**
+ * One line, timestamped, level-tagged. Never throws.
+ *
+ * Two call shapes, both legal: `logLine("info", [msg])` and `logLine(msg)`. The
+ * second used to throw — `args.map` on undefined — and because a throw inside a
+ * promise chain is an unhandledRejection, the updater died silently and every
+ * release shipped with no update log at all. A logger is the last component that
+ * may fail like that, so it accepts both and never assumes.
+ */
+export function logLine(levelOrText, maybeArgs) {
+  let level = "INFO";
+  let args;
+  if (Array.isArray(maybeArgs)) {
+    level = String(levelOrText);
+    args = maybeArgs;
+  } else {
+    args = [levelOrText, maybeArgs].filter((v) => v !== undefined);
+  }
   const text = args
     .map((a) => (a instanceof Error ? a.stack || a.message : typeof a === "string" ? a : safeJson(a)))
     .join(" ");
