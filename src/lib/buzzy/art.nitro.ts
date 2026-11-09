@@ -4,6 +4,7 @@
  *   GET  /api/buzzy/art?job=<id>   → the saved board and the images on it
  *   POST /api/buzzy/art            → { action: "save", jobId, board }
  *                                  → { action: "render", prompt, jobId, refs[] }
+ *                                  → { action: "edit", jobId, imageId, mask, instruction }
  *
  * A rendered image is a deliverable of the project, exactly like a track: it lands
  * in buzzy_assets with job_id set, so the project page and the Library show the same
@@ -105,6 +106,31 @@ export default defineEventHandler(async (event) => {
         updated_at = now()
       WHERE id = ${jobId} AND user_id = ${user.id}`;
     return json(200, { ok: true, saved: true });
+  }
+
+  // Region edit. "Make the coat red" on a finished picture used to mean re-rolling
+  // the whole image and hoping the rest survived. A mask turns it into a change to
+  // one part of the picture the owner actually chose, and the reference is the
+  // existing render rather than the board — so nothing outside the mask is invented.
+  if (action === "edit") {
+    if (!jobId) return json(400, { error: "jobId is required to edit a picture", code: "bad_request" });
+    const imageId = Number(body.imageId);
+    const mask = typeof body.mask === "string" && body.mask.startsWith("data:image/") ? body.mask : "";
+    const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 1000) : "";
+    if (!Number.isFinite(imageId) || imageId <= 0) return json(400, { error: "imageId is required", code: "bad_request" });
+    if (!mask) return json(400, { error: "Draw the area to change first.", code: "bad_request" });
+    if (!instruction) return json(400, { error: "Say what to change in that area.", code: "bad_request" });
+    const rows = await sql`
+      SELECT body, content_type FROM buzzy_assets
+      WHERE id = ${imageId} AND user_id = ${user.id} AND job_id = ${jobId} LIMIT 1`;
+    if (!rows.length) return json(404, { error: "No such picture on this project", code: "not_found" });
+    const row = rows[0] as { body: Uint8Array | Buffer; content_type: string | null };
+    const base = `data:${row.content_type || "image/png"};base64,${Buffer.from(row.body).toString("base64")}`;
+    body.prompt =
+      `${instruction}\n\nThe FIRST attached image is the current picture. The SECOND is a mask: ` +
+      "white marks the ONLY area you may change. Change that area as instructed. Keep every pixel " +
+      "outside the white area as it is — same colours, same shapes, same position.";
+    body.refs = [base, mask];
   }
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 4000) : "";

@@ -35,12 +35,18 @@
                       border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
   footer { border-top:1px solid var(--bz-line); padding:0.6rem 1rem; display:flex; gap:0.6rem; align-items:center; }
   #status { color:var(--bz-muted); font-size:0.8rem; }
-  #result { position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
+  #result { position: relative; } position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
             border-radius:12px; padding:0.6rem; display:none; }
   #result img { width:100%; border-radius:8px; display:block; }
   #result a { color:var(--bz-yellow); font-size:0.8rem; text-decoration:none; display:inline-block; margin-top:0.4rem; }
   .hint { color:var(--bz-muted); font-size:0.78rem; }
   .drop { outline:2px dashed var(--bz-yellow); outline-offset:-8px; }
+
+  #regionOverlay { position: absolute; inset: 0; cursor: crosshair; display: none; }
+  #regionOverlay.on { display: block; }
+  #regionRect { position: absolute; border: 2px dashed #ffd40d; background: rgba(255,212,13,0.16); display: none; }
+  #regionPanel { display: flex; gap: 0.45rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap; }
+  #regionPanel input { flex: 1; min-width: 220px; }
 </style>
 </head>
 <body>
@@ -79,7 +85,19 @@
 <div id="stage">
   <canvas id="board"></canvas>
   <div id="layers"></div>
-  <div id="result"><img id="resultImg" alt="" /><a id="resultLink" href="#" download>Download</a></div>
+  <div id="result">
+    <img id="resultImg" alt="" />
+    <!-- Region edit: drag a box on the picture, say what should change inside it.
+         The mask is drawn here, at the picture's own size, so the server never has
+         to guess which pixels the owner meant. -->
+    <div id="regionOverlay" title="Drag to mark the area to change"><div id="regionRect"></div></div>
+    <div id="regionPanel">
+      <input id="regionPrompt" type="text" placeholder="What should change inside the box? e.g. 'make the coat red'" />
+      <button class="primary" id="regionApply">Change this area</button>
+      <span class="hint" id="regionStatus">Drag a box on the picture, then describe the change.</span>
+    </div>
+    <a id="resultLink" href="#" download>Download</a>
+  </div>
 </div>
 
 <footer>
@@ -631,6 +649,115 @@
         setStatus("Failed: " + e.message);
       });
     });
+
+    // ── region edit ───────────────────────────────────────────────────
+    // A change to one part of a finished picture. The mask is a PNG at the picture's
+    // natural size: black everywhere, white where the owner dragged. Sending the
+    // picture + mask + instruction is what keeps the rest of the frame from being
+    // re-rolled, which is the difference between an edit and a fresh guess.
+    (function initRegionEdit() {
+      var overlay = document.getElementById("regionOverlay");
+      var rectEl = document.getElementById("regionRect");
+      var img = document.getElementById("resultImg");
+      var box = document.getElementById("result");
+      var input = document.getElementById("regionPrompt");
+      var btn = document.getElementById("regionApply");
+      var note = document.getElementById("regionStatus");
+      var dragStart = null;
+      var picked = null;   // {x,y,w,h} in CSS pixels relative to the picture
+
+      function syncOverlay() {
+        if (!lastRenderUrl) { overlay.classList.remove("on"); return; }
+        var r = img.getBoundingClientRect();
+        var b = box.getBoundingClientRect();
+        overlay.style.left = (r.left - b.left) + "px";
+        overlay.style.top = (r.top - b.top) + "px";
+        overlay.style.width = r.width + "px";
+        overlay.style.height = r.height + "px";
+        overlay.classList.add("on");
+      }
+
+      overlay.addEventListener("mousedown", function (e) {
+        var r = overlay.getBoundingClientRect();
+        dragStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+        rectEl.style.display = "block";
+        rectEl.style.left = dragStart.x + "px";
+        rectEl.style.top = dragStart.y + "px";
+        rectEl.style.width = "0px";
+        rectEl.style.height = "0px";
+        e.preventDefault();
+      });
+      overlay.addEventListener("mousemove", function (e) {
+        if (!dragStart) return;
+        var r = overlay.getBoundingClientRect();
+        var x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+        var y = Math.max(0, Math.min(r.height, e.clientY - r.top));
+        var x0 = Math.min(x, dragStart.x), y0 = Math.min(y, dragStart.y);
+        rectEl.style.left = x0 + "px"; rectEl.style.top = y0 + "px";
+        rectEl.style.width = Math.abs(x - dragStart.x) + "px";
+        rectEl.style.height = Math.abs(y - dragStart.y) + "px";
+      });
+      overlay.addEventListener("mouseup", function (e) {
+        if (!dragStart) return;
+        var r = overlay.getBoundingClientRect();
+        var x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+        var y = Math.max(0, Math.min(r.height, e.clientY - r.top));
+        picked = {
+          x: Math.min(x, dragStart.x), y: Math.min(y, dragStart.y),
+          w: Math.abs(x - dragStart.x), h: Math.abs(y - dragStart.y),
+          scaleX: img.naturalWidth / r.width, scaleY: img.naturalHeight / r.height,
+        };
+        dragStart = null;
+        if (picked.w < 8 || picked.h < 8) { picked = null; note.textContent = "That box is too small — drag a wider area."; return; }
+        note.textContent = Math.round(picked.w) + "×" + Math.round(picked.h) + " selected. Describe the change.";
+        input.focus();
+      });
+
+      window.addEventListener("resize", syncOverlay);
+      img.addEventListener("load", syncOverlay);
+
+      function maskDataUrl() {
+        var w = img.naturalWidth, h = img.naturalHeight;
+        var c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        var g = c.getContext("2d");
+        g.fillStyle = "#000"; g.fillRect(0, 0, w, h);
+        g.fillStyle = "#fff";
+        g.fillRect(picked.x * picked.scaleX, picked.y * picked.scaleY, picked.w * picked.scaleX, picked.h * picked.scaleY);
+        return c.toDataURL("image/png");
+      }
+
+      btn.addEventListener("click", function () {
+        var instruction = (input.value || "").trim();
+        if (!lastRenderUrl) { note.textContent = "Create a picture first, then change part of it."; return; }
+        if (!picked) { note.textContent = "Drag a box on the picture first."; return; }
+        if (!instruction) { input.focus(); note.textContent = "Say what should change inside the box."; return; }
+        var imageId = Number(String(lastRenderUrl).split("/").pop());
+        btn.disabled = true;
+        note.textContent = "Changing that area…";
+        fetch("/api/buzzy/art", {
+          method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "edit", jobId: jobId || undefined, imageId: imageId, mask: maskDataUrl(), instruction: instruction }),
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); })
+          .then(function (res) {
+            btn.disabled = false;
+            if (!res.ok) {
+              note.textContent = res.status === 402 ? "Art is part of the paid plans — " + (res.d.error || "")
+                : "Could not change it: " + (res.d.error || "unknown");
+              return;
+            }
+            lastRenderUrl = res.d.image.url;
+            img.src = res.d.image.url;
+            document.getElementById("resultLink").href = res.d.image.url;
+            addImage(res.d.image.url, { x: 60 + images.length * 18, y: 60 + images.length * 18 });
+            picked = null;
+            rectEl.style.display = "none";
+            note.textContent = "Changed in " + Math.round((res.d.ms || 0) / 100) / 10 + "s — saved to this project.";
+            flushSave();
+          })
+          .catch(function (e) { btn.disabled = false; note.textContent = "Failed: " + e.message; });
+      });
+    })();
 
     // ── load the saved board ──────────────────────────────────────────
     function load() {
