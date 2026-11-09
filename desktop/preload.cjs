@@ -30,6 +30,14 @@ contextBridge.exposeInMainWorld("beezilla", {
     /** sign in on our site and store the short-lived inference token */
     connect: () => call("settings:connect"),
   },
+  updates: {
+    /** installed version, what is available, download progress, last error */
+    status: () => call("update:status"),
+    check: () => call("update:check"),
+    download: () => call("update:download"),
+    /** only ever called from a button — never a surprise restart */
+    install: () => call("update:install"),
+  },
   app: {
     version: () => call("app:version"),
     /** where main.log lives — so a bug report can name a file instead of a symptom */

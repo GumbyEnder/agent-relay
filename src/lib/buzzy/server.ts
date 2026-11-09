@@ -409,6 +409,8 @@ export interface ChatResponse {
   done?: boolean;
   warning?: string;
   jobId?: string;
+  /** a picture this turn rendered — the card is built from this, never from prose */
+  image?: { url: string; name: string; bytes: number; type: string };
   previousDraft?: string;
   review?: Array<{ label: string; verdict: "verified" | "stated" | "warning"; detail?: string }>;
   estimate?: { estimateLow: number; estimateHigh: number; civilian: string; free: boolean };
@@ -494,6 +496,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // that has a music tool is that nothing tracked the difference.
   let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
   let musicRefusal: { code: string; error: string } | null = null;
+  let renderedImage: { url: string; name: string; bytes: number; type: string } | null = null;
+  let artRefusal: { code: string; error: string } | null = null;
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
   let extractMs = 0;
