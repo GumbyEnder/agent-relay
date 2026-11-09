@@ -22,6 +22,7 @@ const DESKTOP = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(DESKTOP, "..");
 const STAGE = join(DESKTOP, "stage");
 const APP = join(STAGE, "app");
+const DIST = join(ROOT, "dist-desktop");
 
 const log = (msg) => console.log(`[dist] ${msg}`);
 
@@ -325,9 +326,31 @@ function du(dir) {
 const mode = process.argv[2] ?? "stage";
 if (mode === "stage" || mode === "all") stage();
 if (mode === "all") {
+  // Signing is a key, not a code change: without a certificate the build must still
+  // succeed (and say so), because a developer machine has no cert. With one set,
+  // electron-builder signs and SmartScreen stops calling the installer unknown.
+  const certFile = (process.env.BZ_WIN_CERT_FILE || "").trim();
+  const certPassword = (process.env.BZ_WIN_CERT_PASSWORD || "").trim();
+  const signConfigured = Boolean(certFile && certPassword);
+  log(
+    signConfigured
+      ? "code signing: enabled (certificate from BZ_WIN_CERT_FILE)"
+      : "code signing: DISABLED — this installer will trigger SmartScreen (set BZ_WIN_CERT_FILE + BZ_WIN_CERT_PASSWORD to sign)",
+  );
+  if (certFile && !existsSync(certFile)) throw new Error(`BZ_WIN_CERT_FILE does not exist: ${certFile}`);
+
   log("running electron-builder…");
-  execFileSync("npx", ["electron-builder", "--win", "nsis", "--publish", "never"], {
+  const builderArgs = ["electron-builder", "--win", "nsis", "--publish", "never"];
+  if (signConfigured) {
+    builderArgs.push("-c.win.certificateFile=" + certFile, "-c.win.certificatePassword=" + certPassword);
+  }
+  execFileSync("npx", builderArgs, {
     cwd: DESKTOP, stdio: "inherit",
   });
   log("installer written to dist-desktop/");
+  // electron-updater reads latest.yml beside the exe. It is generated only when a
+  // publish provider is configured; if it is missing, auto-update silently does
+  // nothing, so say it out loud rather than discovering it from a user.
+  const latest = join(DIST, "latest.yml");
+  log(existsSync(latest) ? `update manifest: latest.yml (${readFileSync(latest, "utf8").split("\n")[1] || ""})` : "update manifest: MISSING — auto-update will not work for this build");
 }
