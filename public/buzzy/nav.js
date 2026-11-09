@@ -58,6 +58,9 @@
       "#bzChrome select.bz-co-select{appearance:none;background:#101010;color:#f2f2f2;border:1px solid #2c2c2c;border-radius:8px;padding:.28rem 1.5rem .28rem .5rem;font:inherit;font-size:.82rem;max-width:15rem;text-overflow:ellipsis;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,#8d8d8d 50%),linear-gradient(135deg,#8d8d8d 50%,transparent 50%);background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}",
       "#bzChrome button.bz-ask{display:inline-flex;align-items:center;gap:.35rem;background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-ask[aria-expanded='true']{background:#fff0a8}",
+      "#bzChrome button.bz-voice{display:inline-flex;align-items:center;gap:.35rem;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}",
+      "#bzChrome button.bz-voice[aria-pressed='true']{background:#ffd40d;color:#111;border-color:#ffd40d}",
+      "#bzChrome button.bz-voice:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
       "#bzPanel{position:fixed;right:1rem;top:64px;width:min(420px,calc(100vw - 2rem));height:min(560px,calc(100vh - 88px));background:#101010;border:1px solid #2c2c2c;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;z-index:900;padding:.6rem}",
       "#bzPanel.open{display:flex}",
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
@@ -113,16 +116,29 @@
       bar.appendChild(nav);
     }
 
-    // Add any missing link, in canonical order, without disturbing existing ones.
-    LINKS.forEach(function (l) {
-      if (nav.querySelector('a[data-nav="' + l.id + '"]')) return;
-      var a = document.createElement("a");
-      a.href = l.href;
-      a.textContent = l.label;
-      a.setAttribute("data-nav", l.id);
-      if (l.blank) { a.target = "_blank"; a.rel = "noopener"; }
-      nav.appendChild(a);
+    // REBUILD, don't append. Pages still hand-write their own <nav>, and they had
+    // drifted into different orders (Library and Wallet shipped Talk, Library,
+    // Capabilities… while Talk shipped Talk, Sketch, Studio…). Appending only what
+    // was missing preserved whatever order the page happened to ship. One list
+    // means one order, identical on every page and on every future page.
+    var wanted = {};
+    LINKS.forEach(function (l) { wanted[l.id] = true; });
+    Array.prototype.forEach.call(nav.querySelectorAll("a[data-nav]"), function (a) {
+      if (!wanted[a.getAttribute("data-nav")]) a.parentNode.removeChild(a);
     });
+    var ordered = [];
+    LINKS.forEach(function (l) {
+      var a = nav.querySelector('a[data-nav="' + l.id + '"]');
+      if (!a) {
+        a = document.createElement("a");
+        a.textContent = l.label;
+        a.setAttribute("data-nav", l.id);
+      }
+      a.href = l.href;
+      if (l.blank) { a.target = "_blank"; a.rel = "noopener"; }
+      ordered.push(a);
+    });
+    ordered.forEach(function (a) { nav.appendChild(a); });
 
     // Active state from the path — the single implementation.
     var active = section();
@@ -219,10 +235,14 @@
     }
     var existing = document.getElementById("accountLink");
     var a = existing || document.createElement("a");
-    a.className = "bz-account";
+    a.id = "accountLink";
+    a.className = "bz-account account-link";
     a.href = "/buzzy/landing";
     chrome.appendChild(a); // moves it out of the nav when the page shipped one there
-    a.textContent = "\u2026";
+    // No "…" placeholder: an empty label with a reserved width cannot be mistaken
+    // for a name, and it does not flash "Sign in" at a signed-in user.
+    a.textContent = "";
+    a.style.minWidth = "5.5rem";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {
@@ -253,6 +273,93 @@
     }, 250);
   }
 
+  /** Honey Drops: the balance, in the chrome, on every page. */
+  function honeyControl(chrome) {
+    // pages that still ship wallet-chip.js inserted a chip beside the nav; one chip only
+    Array.prototype.forEach.call(document.querySelectorAll("header .hd-chip"), function (c) { c.remove(); });
+    var chip = document.createElement("a");
+    chip.id = "bzHoneyChip";
+    chip.className = "hd-chip";
+    chip.href = "/buzzy/wallet";
+    chip.setAttribute("aria-label", "Your Honey Drops wallet");
+    chip.textContent = "\u25c8";           // mark only, no "…" placeholder
+    chip.style.minWidth = "3.6rem";
+    chrome.appendChild(chip);
+    fetch("/api/wallet", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && typeof d.balance === "number") {
+          chip.textContent = "\u25c8 " + Number(d.balance).toLocaleString();
+          chip.title = Number(d.balance).toLocaleString() + " Honey Drops";
+        }
+      })
+      .catch(function () { chip.textContent = "\u25c8"; });
+  }
+
+  /**
+   * Voice: one control, in the chrome, on every page.
+   *
+   * Stage 1 of the nav voice work. On Talk the pill drives the page's own mic, so
+   * there is exactly one voice button visible. On every other page it takes you to
+   * Talk with the mic armed — because the audio pipeline still lives in the Talk
+   * document, a hard navigation kills it. Making that honest in the UI beats a
+   * mic button on Sketch that silently does nothing.
+   */
+  function voiceControl(chrome) {
+    var btn = document.createElement("button");
+    btn.id = "bzVoiceNav";
+    btn.className = "bz-voice";
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", "false");
+    btn.innerHTML = '<span aria-hidden="true">&#127908;</span> Voice';
+    chrome.appendChild(btn);
+
+    var onTalk = section() === "talk";
+    function sync() {
+      var mic = document.getElementById("micBtn");
+      var live = !!(mic && mic.getAttribute("aria-pressed") === "true");
+      btn.setAttribute("aria-pressed", live ? "true" : "false");
+      btn.innerHTML = live
+        ? '<span aria-hidden="true">&#127908;</span> Listening \u2014 End'
+        : '<span aria-hidden="true">&#127908;</span> Voice';
+      btn.title = live ? "End the voice session" : "Talk to BeeZilla out loud";
+    }
+
+    if (onTalk) {
+      btn.addEventListener("click", function () {
+        var mic = document.getElementById("micBtn");
+        if (mic) mic.click();
+        sync();
+      });
+      // The page owns the state; the chrome only mirrors it.
+      var t = setInterval(sync, 400);
+      setTimeout(function () { clearInterval(t); }, 120000);
+      sync();
+    } else {
+      btn.title = "Voice lives on Talk — this takes you there with the mic armed";
+      btn.addEventListener("click", function () {
+        try { localStorage.setItem("bz_listen_mode", "1"); } catch (e) {}
+        location.href = "/buzzy/talk";
+      });
+    }
+
+    // On Talk the page ships its own "Voice" pill, which toggles spoken replies.
+    // Two pills both labelled Voice is the confusion this work exists to end, so
+    // the page one says what it actually does.
+    if (onTalk) {
+      var t2 = setInterval(function () {
+        var vt = document.getElementById("voiceToggle");
+        var label = vt && vt.querySelector(".vt-label");
+        if (label) {
+          if (label.textContent !== "Speak replies") label.textContent = "Speak replies";
+          vt.title = "Read BeeZilla's replies aloud";
+          clearInterval(t2);
+        }
+      }, 300);
+      setTimeout(function () { clearInterval(t2); }, 15000);
+    }
+  }
+
   /** Ask: the chat, on every page, in a panel anchored to the nav. */
   function askControl(nav) {
     var btn = document.createElement("button");
@@ -262,6 +369,21 @@
     btn.setAttribute("aria-controls", "bzPanel");
     btn.innerHTML = "&#128172; Ask";
     nav.appendChild(btn);
+
+    // On Talk the chat is the page. Opening a second chat engine in a panel over it
+    // would be two composers and two sessions on one screen, so the nav control
+    // takes you to the one that exists.
+    if (section() === "talk") {
+      btn.title = "Talk to BeeZilla";
+      btn.addEventListener("click", function () {
+        var input = document.getElementById("chatInput");
+        if (input) {
+          input.scrollIntoView({ block: "center", behavior: "smooth" });
+          input.focus();
+        }
+      });
+      return;
+    }
 
     var panel = document.createElement("div");
     panel.id = "bzPanel";
@@ -387,9 +509,11 @@
     extras.forEach(function (el) { header.appendChild(el); });
 
     loadCompanies();
+    honeyControl(chrome);
     companyControl(chrome);
+    voiceControl(chrome);
     accountControl(chrome);
-    if (section() !== "talk") askControl(chrome);
+    askControl(chrome);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
