@@ -1670,7 +1670,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false, previous_draft: previousDraft, artifact: renderedDocument })}::jsonb, now()
       )
       ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
+        title = EXCLUDED.title,
+        -- A follow-up turn that renders nothing must not demote a finished item. The
+        -- project page said "Deliverable ready, 1 deliverable" until the owner asked a
+        -- follow-up question, which rewrote status to "In progress" and cleared
+        -- data.artifact — the deliverable vanished from its own project.
+        status = CASE WHEN EXCLUDED.status = 'In progress'
+                      THEN COALESCE(NULLIF(buzzy_jobs.status, 'Empty'), 'In progress')
+                      ELSE EXCLUDED.status END,
+        data = COALESCE(buzzy_jobs.data, '{}'::jsonb) ||
+               (CASE WHEN EXCLUDED.data->>'artifact' IS NULL
+                     THEN EXCLUDED.data - 'artifact'
+                     ELSE EXCLUDED.data END),
+        updated_at = now()
     `;
     // Link the conversation to the work it produced. Without this, a file made
     // from a plain conversation was reachable from the Library but the chat had
