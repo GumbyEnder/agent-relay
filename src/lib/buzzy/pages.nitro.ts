@@ -8,7 +8,7 @@
  * Path is sanitized (no traversal); only known pages are served.
  */
 
-import { defineEventHandler, getMethod, setResponseStatus } from "h3";
+import { defineEventHandler, getMethod, sendRedirect, setResponseStatus } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -24,29 +24,43 @@ const html = (body: string, status = 200) =>
   });
 
 export default defineEventHandler(async (event) => {
-  if (getMethod(event) !== "GET") {
+  const method = getMethod(event);
+  // HEAD must answer exactly like GET with the body removed. It used to 405,
+  // which breaks every uptime monitor, CDN reachability check and link
+  // validator that probes with HEAD — the page was fine and the check said no.
+  if (method !== "GET" && method !== "HEAD") {
     setResponseStatus(event, 405);
     return { error: "method not allowed" };
   }
+  const headOnly = method === "HEAD";
+  // Every HTML answer goes through `out`, so HEAD can never forget to drop the
+  // body while keeping the status and content-type.
+  const out = (body: string, status = 200) => html(headOnly ? "" : body, status);
 
   // event.path includes the query string in this runtime. Strip it before
   // matching or /buzzy/talk?job=… is not a known page.
   const path = (event.path ?? "").split("?")[0].replace(/\/+$/, "") || "/buzzy";
   const segments = path.split("/").filter(Boolean); // ["buzzy", maybe "talk"]
 
-  let name: string;
+  // `/buzzy` and `/buzzy/` are not a page of their own any more: Talk is the
+  // consolidated work surface and index.html serves only /buzzy/library. A
+  // server-side 302 replaces the old 200 + `location.replace()` in page JS —
+  // the old shape answered 200 with a Jobs title and a redirect script, which
+  // looked to a crawler (and to QA) like a real page that never rendered.
   if (segments.length === 1) {
-    name = "index";
-  } else if (segments.length === 2) {
+    return sendRedirect(event, "/buzzy/talk", 302);
+  }
+  let name: string;
+  if (segments.length === 2) {
     name = segments[1];
   } else {
     setResponseStatus(event, 404);
-    return html("<h1>Not found</h1>", 404);
+    return out("<h1>Not found</h1>", 404);
   }
 
   if (name.includes("/") || name.includes("\\")) {
     setResponseStatus(event, 404);
-    return html("<h1>Not found</h1>", 404);
+    return out("<h1>Not found</h1>", 404);
   }
 
   // Asset (has an extension, e.g. brand/*.png, sow-pdf.js) → serve the static
@@ -82,22 +96,23 @@ export default defineEventHandler(async (event) => {
     const mime = ASSET_MIME[ext];
     if (!mime) {
       setResponseStatus(event, 404);
-      return html("<h1>Not found</h1>", 404);
+      return out("<h1>Not found</h1>", 404);
     }
     const rel = segments.slice(1).join("/");
     const data = await readBuzzyFile(rel);
     if (!data) {
       setResponseStatus(event, 404);
-      return html("<h1>Not found</h1>", 404);
+      return out("<h1>Not found</h1>", 404);
     }
-    return new Response(new Uint8Array(data), {
+    // HEAD gets the same headers and no body.
+    return new Response(headOnly ? null : new Uint8Array(data), {
       headers: { "content-type": mime },
     });
   }
 
   if (!PAGES.has(name)) {
     setResponseStatus(event, 404);
-    return html("<h1>Not found</h1>", 404);
+    return out("<h1>Not found</h1>", 404);
   }
 
   // /buzzy/library is the Library (documents vault) view of the app shell —
@@ -116,7 +131,7 @@ export default defineEventHandler(async (event) => {
   }
   if (!body) {
     setResponseStatus(event, 404);
-    return html("<h1>Not found</h1>", 404);
+    return out("<h1>Not found</h1>", 404);
   }
   // One chrome for every page: the shared nav (company dropdown + Ask panel) is
   // injected at serve time, so a new page inherits it and no page can drift.
@@ -132,5 +147,5 @@ export default defineEventHandler(async (event) => {
       page = page.slice(0, at) + '<script src="/buzzy/nav.js" defer></script>' + page.slice(at);
     }
   }
-  return html(page);
+  return out(page);
 });

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BeeZilla — Sign in</title>
-  <link rel="icon" href="/buzzy/brand/bz-favicon-180.png" />
+  <link rel="icon" href="/brand/bz-favicon-180.png" />
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -204,6 +204,17 @@
 
         if (mode === "register") {
           setBusy(true, "Creating…");
+          // The button must always reach a terminal state. Three ways it used to
+          // sit on "Creating…" forever: a hung request (no timeout), a success
+          // path whose message was cleared by the mode switch that followed it,
+          // and a `.catch` that returned without re-enabling the controls.
+          var finished = false;
+          var done = function () {
+            if (finished) return;
+            finished = true;
+            setBusy(false);
+          };
+          var watchdog = setTimeout(done, 45000);
           api("/api/auth/sign-up/email", {
             email: addr,
             password: pass,
@@ -215,13 +226,22 @@
               return;
             }
             return signedIn().then(function (ok) {
-              if (ok) return enter();
-              show("ok", "Account created. Check " + addr + " for the verification link, then sign in.");
+              if (ok) { enter(); return; }
+              // Switch the tab FIRST, then show the message — setMode clears the
+              // message area, so the old order printed the confirmation and wiped
+              // it in the same tick. The account exists and the email is sent, so
+              // the screen has to say so.
               setMode("signin");
+              show("ok", "Account created. Check " + addr + " for the verification link, then sign in.");
+              password.value = "";
+              password.focus();
             });
           }).catch(function () {
-            show("error", "Network error — try again.");
-          }).then(function () { setBusy(false); });
+            show("error", "Network error — the account may already exist. Try signing in.");
+          }).then(function () {
+            clearTimeout(watchdog);
+            done();
+          });
           return;
         }
 

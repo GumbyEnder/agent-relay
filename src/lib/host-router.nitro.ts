@@ -34,6 +34,12 @@ import { CONSUMER_ORIGIN, isConsumerHost } from "./product-hosts";
  */
 const CONSUMER_PREFIXES = [
   "/buzzy",
+  // Crawler files are not product surfaces but a consumer domain must serve its
+  // own. Without these the catch-all below answered /robots.txt and /sitemap.xml
+  // with a 302 to /buzzy/talk — a crawler asking for rules got a chat page.
+  "/robots.txt",
+  "/sitemap.xml",
+
   "/api/auth",
   "/api/buzzy",
   "/api/inference",
