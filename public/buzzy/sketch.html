@@ -138,7 +138,9 @@
       undoStack.push(JSON.stringify({ strokes: strokes, images: images }));
       if (undoStack.length > 50) undoStack.shift();
       redoStack.length = 0;
-      autoSave();
+      // The first mark is the moment this board becomes a project; a page you
+      // merely looked at is not one.
+      ensureJob().then(autoSave, function () { /* a scratch board that cannot be saved is not an error toast */ });
     }
 
     // The board IS the input of this project, so it is written back without being
@@ -618,18 +620,22 @@
       setStatus(iterate ? "Creating — using the last render as the reference…" : "Creating — flattening the board…");
       (iterate ? toDataUrl(lastRenderUrl) : flatten()).then(function (composite) {
         setStatus("Creating — the model is working…");
-        var body = {
-          action: "render",
-          prompt: prompt + (iterate
-            ? "\n\nThe attached image is the PREVIOUS render of this board. Change it as instructed and keep everything the instruction does not mention."
-            : "\n\nThe attached image is the owner's board: placed images plus hand-drawn marks, arrows and notes showing what belongs where and how it moves. Honour the layout, the connections and the annotations."),
-          refs: [composite],
-          jobId: jobId || undefined,
-        };
-        return fetch("/api/buzzy/art", {
-          method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); });
+        // Create is the other moment a board becomes a project: without an id the
+        // render lands as an asset no job claims.
+        return ensureJob().then(function (id) {
+          var body = {
+            action: "render",
+            prompt: prompt + (iterate
+              ? "\n\nThe attached image is the PREVIOUS render of this board. Change it as instructed and keep everything the instruction does not mention."
+              : "\n\nThe attached image is the owner's board: placed images plus hand-drawn marks, arrows and notes showing what belongs where and how it moves. Honour the layout, the connections and the annotations."),
+            refs: [composite],
+            jobId: id,
+          };
+          return fetch("/api/buzzy/art", {
+            method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, d: d }; }); });
+        });
       }).then(function (res) {
         btn.disabled = false;
         if (!res.ok) {
@@ -794,20 +800,33 @@
         .catch(function () { resize(); });
     }
 
-    // A board with no project: make one, so the first Create has somewhere to land.
-    if (!jobId) {
+    // A board with no project gets one when the owner first PUTS something on it —
+    // never on page load. Opening Sketch used to POST a new job_art_… every time the
+    // nav sent you here, so a lap of the site left a heap of empty "Sketch board"
+    // projects (BZ-13, Nov 2026). One promise, so a burst of strokes still makes one.
+    var jobPromise = null;
+    function ensureJob() {
+      if (jobId) return Promise.resolve(jobId);
+      if (jobPromise) return jobPromise;
       var id = "job_art_" + Date.now().toString(36);
       // POST /api/buzzy/jobs is the upsert (a PUT to /jobs/<id> is a 404 — the
       // route does not exist, and a board with nowhere to land orphans its render).
-      fetch("/api/buzzy/jobs", {
+      jobPromise = fetch("/api/buzzy/jobs", {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({ id: id, title: "Sketch board", status: "In progress", data: {} }),
       }).then(function (r) {
-        if (!r.ok) return;
+        if (!r.ok) throw new Error("could not open a board");
         jobId = id;
         history.replaceState({}, "", "/buzzy/sketch?job=" + encodeURIComponent(id));
         setStatus("New board ready. Drop images, draw, then Create.");
+        return id;
+      }).catch(function (e) {
+        // One failed attempt must not become one POST per brush stroke: retry on a
+        // later mark, not on every mark.
+        setTimeout(function () { jobPromise = null; }, 5000);
+        throw e;
       });
+      return jobPromise;
     }
     if (!jobId) titleEl.textContent = "New board";
     window.addEventListener("resize", resize);

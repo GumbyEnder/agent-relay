@@ -144,7 +144,13 @@
         a.setAttribute("data-nav", l.id);
       }
       a.href = l.href;
+      // Pages still hand-write `<a data-nav="library" target="_blank">`: the anchor
+      // is reused here, so a link that should no longer open a tab kept its target
+      // and the shell's click handler skipped it (it bails on any non-_self target).
+      // That is how a lap of the site ended in three tabs and a dead mic (BZ-14).
+      // The LIST decides, not the markup it inherited.
       if (l.blank) { a.target = "_blank"; a.rel = "noopener"; }
+      else { a.removeAttribute("target"); a.removeAttribute("rel"); }
       ordered.push(a);
     });
     ordered.forEach(function (a) { nav.appendChild(a); });
