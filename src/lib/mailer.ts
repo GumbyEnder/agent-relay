@@ -128,9 +128,19 @@ export function latestDevMailFor(email: string): OutboundEmail | null {
 
 function getSmtp(): Transporter | null {
   if (globalMail.__agentRelaySmtp__) return globalMail.__agentRelaySmtp__;
+  // Every stage is bounded. An SMTP host that accepts the TCP connection and then
+  // never greets used to hold the sign-up request open indefinitely, which the
+  // browser showed as a button stuck on "Creating…" for an account that already
+  // existed. 8s is generous for a handshake and short enough to stay under a
+  // proxy's patience.
+  const timeouts = {
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 10000,
+  };
   const url = env("SMTP_URL");
   if (url) {
-    globalMail.__agentRelaySmtp__ = createTransport(url);
+    globalMail.__agentRelaySmtp__ = createTransport(url, timeouts);
     return globalMail.__agentRelaySmtp__;
   }
   const host = env("SMTP_HOST");
@@ -143,6 +153,7 @@ function getSmtp(): Transporter | null {
     port: Number.isFinite(port) ? port : 587,
     secure: env("SMTP_SECURE") === "1" || env("SMTP_SECURE") === "true" || port === 465,
     auth: user ? { user, pass: pass ?? "" } : undefined,
+    ...timeouts,
   });
   return globalMail.__agentRelaySmtp__;
 }
@@ -158,6 +169,9 @@ async function sendViaResend(input: {
   if (!key) return false;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
+    // Bounded like SMTP: a provider that stops answering must not hold a
+    // sign-up request (and the button on screen) open.
+    signal: AbortSignal.timeout(8000),
     headers: {
       authorization: `Bearer ${key}`,
       "content-type": "application/json",

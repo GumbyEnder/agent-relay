@@ -214,7 +214,17 @@
             finished = true;
             setBusy(false);
           };
-          var watchdog = setTimeout(done, 45000);
+          // A sign-up either answers or it does not; it must never leave the
+          // button reading "Creating…". 20s is past any honest mail send and
+          // short enough that a user does not retry blind.
+          var watchdog = setTimeout(function () {
+            if (finished) return;
+            show(
+              "error",
+              "Still no answer from the server. If " + addr + " already exists, sign in — otherwise the account may have been created; check your inbox.",
+            );
+            done();
+          }, 20000);
           api("/api/auth/sign-up/email", {
             email: addr,
             password: pass,

@@ -305,12 +305,24 @@ export const auth = betterAuth({
             } catch {
               /* keep original url */
             }
-            await sendVerificationMail({
-              to: user.email,
-              name: user.name,
-              url: finalUrl,
-              host: mailHost,
-            });
+            // The account exists before this mail is attempted. A mail provider
+            // that is slow or down must not turn a successful sign-up into a
+            // hung request (the UI's "Creating…" for a minute) — and it must not
+            // fail the sign-up either, because the user would then retry and be
+            // told the address is taken. Log and continue; the resend route and
+            // the sign-in page can recover.
+            try {
+              await sendVerificationMail({
+                to: user.email,
+                name: user.name,
+                url: finalUrl,
+                host: mailHost,
+              });
+            } catch (err) {
+              console.error(
+                `[auth] verification mail failed for ${user.email}: ${(err as Error)?.message ?? err}`,
+              );
+            }
           },
         },
       }

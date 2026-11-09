@@ -1,9 +1,14 @@
 /**
  * Nitro handler for extension-less /buzzy/* pages.
  *
- * GET /buzzy        → public/buzzy/index.html
- * GET /buzzy/talk   → public/buzzy/talk.html
- * GET /buzzy/memory → public/buzzy/memory.html
+ * GET /buzzy/library → public/buzzy/library.html
+ * GET /buzzy/talk    → public/buzzy/talk.html
+ * GET /buzzy/memory  → public/buzzy/memory.html
+ *
+ * Do NOT ship a `public/buzzy/index.html`: Nitro's static handler answers
+ * `/buzzy/` with it BEFORE this route runs, so the 302 below never fires (it
+ * returned 200 with a JS redirect instead — BZ-4). The Library page therefore
+ * has its own filename.
  *
  * Path is sanitized (no traversal); only known pages are served.
  */
@@ -15,7 +20,7 @@ import { join, resolve } from "node:path";
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
   // to serve it.
-const PAGES = new Set(["index", "talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio"]);
+const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {
@@ -115,11 +120,11 @@ export default defineEventHandler(async (event) => {
     return out("<h1>Not found</h1>", 404);
   }
 
-  // /buzzy/library is the Library (documents vault) view of the app shell —
-  // same index.html, which opens the docs screen when the URL ends in /library.
-  // The root /buzzy/* is the consolidated Work interface: index.html itself
-  // redirects non-library routes to talk.html.
-  const fileName = name === "library" ? "index" : name;
+  // `/buzzy/library` is the Library (documents vault) view of the app shell and
+  // has its own file now: a `public/buzzy/index.html` was answered by Nitro's
+  // static handler for `/buzzy/`, which is exactly the 200-with-a-JS-redirect
+  // shape BZ-4 reported.
+  const fileName = name;
 
   // Dev: repo root/public/buzzy. Prod: cwd is the repo root too (startCommand
   // runs `node .output/server/index.mjs` from the project root).
