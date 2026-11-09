@@ -8,7 +8,7 @@
  *
  * Run: npx tsx scripts/test-file-intent.ts
  */
-import { isDraftRequest, isExplicitDocumentRequest, isFileRequest, isRevisionRequest, producesDeliverable } from "../src/lib/buzzy/intent";
+import { is3dRequest, isDraftRequest, isExplicitDocumentRequest, isFileRequest, isMusicRequest, isRevisionRequest, producesDeliverable } from "../src/lib/buzzy/intent";
 
 let failures = 0;
 function expect(label: string, actual: boolean, want: boolean) {
@@ -102,6 +102,49 @@ expect("the render tool actually ran", turn({ renderedDocText: "# Quote\n…" })
 expect("work mode, brief confirmed", turn({ mode: "work", draftGateOpen: true, message: "ok, go ahead" }), true);
 expect("work mode, still discovering", turn({ mode: "work", draftGateOpen: false, message: "it's a fence job" }), false);
 expect("fresh chat, no gate", turn({ message: "hello" }), false);
+
+// Talk has no Music or 3D button: the words in the box are the only way in, so a
+// miss means the person asked and nothing was made, and a false hit spends a plan.
+console.log("asks for music:");
+for (const m of [
+  "make me a song about ducks",
+  "I want a song about my dog",
+  "I need some background music for my shop",
+  "can I get a jingle for my bakery",
+  "I’d like a happy birthday song for my mom",
+  "play me a lullaby",
+]) expect(JSON.stringify(m), isMusicRequest(m), true);
+for (const m of [
+  "I need a song recommendation",
+  "I want to learn music",
+  "I need a theme for my website",
+  "I need help with my music career",
+  "Do you want music in the video?",
+]) expect(JSON.stringify(m), isMusicRequest(m), false);
+
+console.log("asks for a 3D model:");
+for (const m of [
+  "make a 3D model of a duck",
+  "Can you make a 3D model of a red sports car?",
+  "create a 3-D dragon for my game",
+  "build me a three-dimensional model of my house",
+  "I want a 3D model of my house",
+  "I’d like a 3D version of our logo",
+  "3D model of a coffee mug",
+  "What do you think? Make a 3D cupcake.",
+  "make a 3D model of a 3D printer",
+  "make a 3D model of a race track",
+]) expect(JSON.stringify(m), is3dRequest(m), true);
+for (const m of [
+  "how do I make a 3D model in Blender?",
+  "what is 3D printing?",
+  "make a document about 3D printing",
+  "I need a 3D printer recommendation",
+  "I want to learn 3D",
+  "make the button look 3D",
+  "make a document with a 3D pie chart",
+  "make me a song about ducks",
+]) expect(JSON.stringify(m), is3dRequest(m), false);
 
 console.log("");
 if (failures > 0) {

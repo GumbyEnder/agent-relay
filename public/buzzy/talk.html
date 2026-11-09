@@ -1411,9 +1411,9 @@
             </div>
 
           <div class="paper-attach">
+              <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
+                   is enough — the chat makes it (isMusicRequest / is3dRequest). -->
               <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
-              <button type="button" id="makeMusic" class="paper-toggle" title="Ask BeeZilla to make a piece of music">&#9835; Music</button>
-              <button type="button" id="make3d" class="paper-toggle" title="Ask BeeZilla to make a 3D model">&#9671; 3D</button>
             </div>
           </div>
 
@@ -2331,99 +2331,58 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       "</div>";
     }
 
-    // ── Make music or a 3D model, from the composer ───────────────────────
-    // The result is pushed into the same conversation as an asset message, so it
-    // plays or downloads exactly like anything else the chat produced.
-    function makeBrief(what) {
-      var box = document.getElementById("chatInput");
-      var typed = box && box.value ? box.value.trim() : "";
-      if (typed) { box.value = ""; return typed; }
-      return window.prompt("Describe the " + what + " you want");
-    }
-
-    function sayToChat(text) {
-      chatState.messages.push({ role: "assistant", content: text });
-      renderChatMessages();
-    }
-
-    function makeMusic() {
-      var brief = makeBrief("music");
-      if (!brief) return;
-      chatState.messages.push({ role: "user", content: "Make music: " + brief });
-      var note = { role: "assistant", content: "Making that music…" };
-      chatState.messages.push(note);
-      renderChatMessages();
-      fetch("/api/buzzy/music", {
-        method: "POST", credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: brief, seconds: 20 })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j.ok) {
-            note.content = j.error || "Music did not come back.";
-            if (j.code === "plan_required" || j.code === "quota_exhausted") {
-              var chip = document.getElementById("planChip");
-              if (chip) { chip.textContent = j.error; chip.classList.remove("hidden"); }
-              if (window.bzRefreshPlan) window.bzRefreshPlan();
+    // ── A 3D model the chat started ───────────────────────────────────────
+    // There is no 3D button: asking for a 3D model in the box is enough. The turn
+    // starts the model and returns model3d.taskId; a model takes a minute or two,
+    // so this polls until the server has stored the file, shows progress under the
+    // reply, then attaches the model to that same reply. Progress is written in
+    // place, not by re-rendering the chat, so a track playing above keeps playing.
+    function watchModel3d(taskId, msg) {
+      var tries = 0;
+      var misses = 0;
+      function show(text) {
+        msg.progress = text;
+        var line = document.querySelector('[data-model3d="' + String(taskId).replace(/"/g, "") + '"]');
+        if (line) line.textContent = text;
+        else renderChatMessages();
+      }
+      function stop(text) {
+        clearInterval(tick);
+        msg.progress = text;
+        renderChatMessages();
+      }
+      msg.model3dTask = taskId;
+      show("Building the 3D model…");
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/model3d/" + encodeURIComponent(taskId), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            var status = String(p.status || "");
+            if (p.asset) {
+              clearInterval(tick);
+              msg.progress = "";
+              msg.asset = p.asset;
+              renderChatMessages();
+              return;
             }
-            renderChatMessages();
-            return;
-          }
-          note.content = "Here it is.";
-          note.asset = j.asset;
-          renderChatMessages();
-        })
-        .catch(function () { note.content = "Music failed — check the connection."; renderChatMessages(); });
+            if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
+              return stop("The 3D model did not finish" + (p.error ? ": " + p.error : "."));
+            }
+            if (tries > 60) return stop("The 3D model is taking too long — ask again in a moment.");
+            // One bad poll is not a failed model: give up only after several in a row.
+            if (status === "error") {
+              if (++misses >= 4) stop("Lost touch with the 3D model" + (p.error ? ": " + p.error : "."));
+              return;
+            }
+            misses = 0;
+            show("Building the 3D model… " + (p.progress || 0) + "%");
+          })
+          .catch(function () {
+            if (++misses >= 4) stop("Lost touch with the 3D model — check the connection.");
+          });
+      }, 4000);
     }
-
-    function make3d() {
-      var brief = makeBrief("3D model");
-      if (!brief) return;
-      chatState.messages.push({ role: "user", content: "Make a 3D model: " + brief });
-      var note = { role: "assistant", content: "Starting the model…" };
-      chatState.messages.push(note);
-      renderChatMessages();
-      fetch("/api/buzzy/model3d", {
-        method: "POST", credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: brief })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j.ok || !j.taskId) { note.content = j.error || "The model could not be started."; renderChatMessages(); return; }
-          var tries = 0;
-          var tick = setInterval(function () {
-            tries++;
-            fetch("/api/buzzy/model3d/" + encodeURIComponent(j.taskId), { credentials: "same-origin" })
-              .then(function (r) { return r.json(); })
-              .then(function (p) {
-                if (p.asset) {
-                  clearInterval(tick);
-                  note.content = "Here it is.";
-                  note.asset = p.asset;
-                  renderChatMessages();
-                  return;
-                }
-                if (p.status === "FAILED" || p.status === "error" || tries > 60) {
-                  clearInterval(tick);
-                  note.content = p.error || "The model did not finish.";
-                  renderChatMessages();
-                  return;
-                }
-                note.content = "Making the model… " + (p.progress || 0) + "%";
-                renderChatMessages();
-              })
-              .catch(function () { clearInterval(tick); note.content = "Polling failed."; renderChatMessages(); });
-          }, 4000);
-        })
-        .catch(function () { note.content = "The model could not be started."; renderChatMessages(); });
-    }
-
-    var _mm = document.getElementById("makeMusic");
-    if (_mm) _mm.addEventListener("click", makeMusic);
-    var _m3 = document.getElementById("make3d");
-    if (_m3) _m3.addEventListener("click", make3d);
 
     // ── What happened ────────────────────────────────────────────────
     // The product judges itself on numbers; the person paying should be able to
@@ -2497,6 +2456,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
         if (m.asset && m.asset.url) {
           bubble += renderMediaCard(m.asset);
+        }
+        if (m.progress) {
+          bubble += '<div class="bz-what" data-model3d="' + String(m.model3dTask || "").replace(/"/g, "") + '">' +
+            String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
         return bubble;
@@ -6290,7 +6253,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         // Add assistant reply. A turn that produced a file carries the file
         // descriptor with it so the chat renders the link inline.
-        chatState.messages.push({
+        const replyMsg = {
           role: "assistant",
           content: data.reply,
           document: data.document || null,
@@ -6299,7 +6262,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           artifacts: data.artifacts || null,
           timings: data.timings || null,
           tools: data.tools || null,
-        });
+        };
+        chatState.messages.push(replyMsg);
 
         // Update slots if present
         if (data.slots) {
@@ -6329,6 +6293,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         renderChatMessages();
         renderSlotChecklist();
+        // Asked for a 3D model: the turn started it, and it lands under this reply.
+        if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
+        // A track spends plan minutes: show what is left now, not on the next send.
+        if (data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
         // The turn's own numbers are authoritative — don't re-fetch over them.
         paintContext(data.context);
         // One latency sample per turn: what the owner actually experienced.
@@ -6839,8 +6807,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   window.bzRefreshPlan = refresh;
   var send = document.getElementById("chatSend");
   if (send) send.addEventListener("click", function () { setTimeout(refresh, 2500); });
-  var music = document.getElementById("makeMusic");
-  if (music) music.addEventListener("click", function () { setTimeout(refresh, 6000); });
 })();
 </script>
 
