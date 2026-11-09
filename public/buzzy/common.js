@@ -35,6 +35,12 @@
         }).then(function () { window.location.href = "/buzzy/"; });
       });
       // Place the Log out link beside the nav, not as a 9th nav item.
+      // nav.js may have already adopted a page-built account menu and removed this
+      // link from the header, so the node can be detached by the time this promise
+      // resolves — calling insertBefore on a detached node's null parent throws and
+      // shows up as a page error (Memory did exactly that). Guard, and let the
+      // chrome own identity when it already has.
+      if (!link.parentNode) return;
       var navEl = document.querySelector("#bzNav");
       if (navEl && navEl.parentNode && navEl.contains(link)) navEl.parentNode.insertBefore(out, navEl.nextSibling);
       else link.parentNode.insertBefore(out, link.nextSibling);

@@ -249,7 +249,7 @@
               body: "{}",
             }).then(function () { window.location.href = "/buzzy/"; });
           });
-          link.parentNode.insertBefore(menu, link.nextSibling);
+          if (link.parentNode) link.parentNode.insertBefore(menu, link.nextSibling);
           link.addEventListener("click", function (e) {
             e.preventDefault();
             menu.style.display = menu.style.display === "none" ? "block" : "none";

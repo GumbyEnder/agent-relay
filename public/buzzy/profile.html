@@ -310,7 +310,7 @@
           });
           var navEl = document.querySelector("#bzNav");
           if (navEl && navEl.parentNode && navEl.contains(link)) navEl.parentNode.insertBefore(out, navEl.nextSibling);
-          else link.parentNode.insertBefore(out, link.nextSibling);
+          else if (link.parentNode) link.parentNode.insertBefore(out, link.nextSibling);
         })
         .catch(function () {});
     })();
