@@ -1,0 +1,81 @@
+name: desktop
+
+# The desktop app had no CI at all, and two release-blocking defects shipped
+# anyway: 0.2.0 could not launch at all, and every build up to 0.2.11 failed its
+# readiness probe on networks where loopback name resolution is unavailable.
+# This job builds a packaged tree and starts it, so "the installer is broken"
+# fails here instead of in the owner's hands.
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths:
+      - "desktop/**"
+      - "src/lib/buzzy/**"
+      - "public/buzzy/**"
+      - "scripts/**"
+      - "migrations/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "src/lib/buzzy/**"
+      - "public/buzzy/**"
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  packaged-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Build runtime
+        run: npm run build
+
+      - name: Stage the packaged app (runtime libs, migrations, PGLite)
+        env:
+          # CI has no publisher key set; the stage step refuses to build without
+          # one, so give it an explicit, obviously-fake set rather than weakening
+          # the check that protects real releases.
+          BZ_RECIPE_PUBLISHER_FILE: ""
+        run: |
+          node -e '
+            const fs = require("fs");
+            fs.writeFileSync("/tmp/ci-publishers.json", JSON.stringify({ publishers: [{ id: "ci", key: "ed25519:ci-smoke" }] }));
+          '
+          BZ_RECIPE_PUBLISHER_FILE=/tmp/ci-publishers.json node desktop/dist.mjs stage
+
+      - name: Package (directory target, no NSIS — this is a smoke test, not a release)
+        run: npx electron-builder --dir --publish never
+        working-directory: desktop
+
+      - name: Start the packaged runtime and assert it serves
+        run: node desktop/smoke.mjs
+
+      - name: Upload the log if it failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-smoke-logs
+          path: |
+            dist-desktop/**/*.log
+            /tmp/*.log
+          if-no-files-found: ignore

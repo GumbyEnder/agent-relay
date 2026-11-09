@@ -215,7 +215,28 @@ function registerSettingsIpc() {
     ipcMain.handle("beezilla:settings:saveSearch", wrap((cfg) => handlers.saveSearch(cfg)));
     ipcMain.handle("beezilla:settings:saveMusic", wrap((cfg) => handlers.saveMusic(cfg)));
     ipcMain.handle("beezilla:settings:clear", wrap((kind) => handlers.clear(kind)));
-    ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion() })));
+    ipcMain.handle("beezilla:app:version", wrap(() => ({ version: app.getVersion(), update: updateState })));
+
+    // Updates. Status is always answerable (even when the updater is unavailable,
+    // so the UI can say "updates are off on this build" instead of showing nothing).
+    ipcMain.handle("beezilla:update:status", wrap(() => ({ version: app.getVersion(), ...updateState })));
+    ipcMain.handle("beezilla:update:check", wrap(async () => {
+      if (!updaterRef) updaterRef = await installUpdater();
+      else await updaterRef.checkForUpdates().catch((err) => logLine(`[update] check failed: ${err?.message ?? err}`));
+      return { version: app.getVersion(), ...updateState };
+    }));
+    ipcMain.handle("beezilla:update:download", wrap(async () => {
+      if (!updaterRef) return { ok: false, error: "updates are not available on this build" };
+      await updaterRef.downloadUpdate();
+      return { version: app.getVersion(), ...updateState };
+    }));
+    ipcMain.handle("beezilla:update:install", wrap(async () => {
+      if (!updaterRef) return { ok: false, error: "updates are not available on this build" };
+      // Never restart mid-conversation without being asked: this handler only runs
+      // when the owner presses the button.
+      setImmediate(() => updaterRef.quitAndInstall(false, true));
+      return { ok: true };
+    }));
     // "Connect BeeZilla account" from the Settings screen: same flow as the menu item.
     ipcMain.handle("beezilla:settings:connect", wrap(() => connectManagedAccount()));
     // Diagnostics from the UI: one click to the folder that holds main.log.
@@ -436,6 +457,8 @@ async function createWindow() {
   console.log("[desktop] createWindow: starting runtime");
   const rt = await supervisor.start();
   console.log(`[desktop] runtime ready on ${rt.host}:${rt.port}`);
+  // One check per launch, after the window is usable, never blocking start-up.
+  setTimeout(() => { installUpdater().then((u) => { if (u) updaterRef = u; }); }, 4000);
   const base = `http://${rt.host}:${rt.port}`;
   runtimeBase = base;
 
@@ -651,6 +674,66 @@ function installMediaPermissions() {
     ]);
     return allowed;
   });
+}
+
+/**
+ * Updates.
+ *
+ * Twelve releases shipped before this existed, and every one of them reached an
+ * installed copy only because someone downloaded an installer by hand. The app
+ * can be days behind the server it talks to and the owner has no way to know.
+ *
+ * Deliberately not silent: check on launch, download nothing until the owner says
+ * so, and never restart under them mid-sentence. Prereleases are opt-in through
+ * BZ_UPDATE_PRERELEASE (every build today is one).
+ */
+async function installUpdater() {
+  if (!app.isPackaged) return null;
+  if (process.env.BZ_DISABLE_UPDATES === "1") {
+    logLine("[update] disabled by BZ_DISABLE_UPDATES");
+    return null;
+  }
+  let updater;
+  try {
+    ({ autoUpdater: updater } = await import("electron-updater"));
+  } catch (err) {
+    logLine(`[update] electron-updater unavailable: ${err?.message ?? err}`);
+    return null;
+  }
+  updater.logger = {
+    info: (m) => logLine(`[update] ${m}`),
+    warn: (m) => logLine(`[update] warn: ${m}`),
+    error: (m) => logLine(`[update] error: ${m}`),
+    debug: () => {},
+  };
+  updater.autoDownload = false;
+  updater.autoInstallOnAppQuit = true;
+  updater.allowPrerelease = process.env.BZ_UPDATE_PRERELEASE === "1";
+  updater.on("update-available", (info) => {
+    updateState = { ...updateState, available: info?.version ?? null, error: null };
+    logLine(`[update] ${info?.version} available (installed ${app.getVersion()})`);
+  });
+  updater.on("update-not-available", () => {
+    updateState = { ...updateState, available: null, checkedAt: Date.now() };
+    logLine(`[update] up to date (${app.getVersion()})`);
+  });
+  updater.on("download-progress", (p) => {
+    updateState = { ...updateState, downloading: Math.round(p?.percent ?? 0) };
+  });
+  updater.on("update-downloaded", (info) => {
+    updateState = { ...updateState, downloaded: info?.version ?? null, downloading: null };
+    logLine(`[update] ${info?.version} downloaded — waiting for the owner`);
+  });
+  updater.on("error", (err) => {
+    updateState = { ...updateState, error: String(err?.message ?? err) };
+    logLine(`[update] error: ${err?.message ?? err}`);
+  });
+  try {
+    await updater.checkForUpdates();
+  } catch (err) {
+    logLine(`[update] check failed: ${err?.message ?? err}`);
+  }
+  return updater;
 }
 
 app.whenReady().then(async () => {

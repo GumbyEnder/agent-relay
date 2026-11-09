@@ -7307,7 +7307,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           content: data.reply,
           // A track this turn produced. The card is built from the response, never
           // from the words — that is what stops "here is your song" with no song.
-          asset: data.audio || null,
+          // A picture is an asset too — the card is built from data, never from prose.
+          asset: data.audio || data.image || null,
           document: data.document || null,
           // A track made this turn plays in the reply that announces it; a picture
           // made this turn shows in it the same way. `data.image` was sent by the
