@@ -688,14 +688,28 @@ function installMediaPermissions() {
  * BZ_UPDATE_PRERELEASE (every build today is one).
  */
 async function installUpdater() {
-  if (!app.isPackaged) return null;
+  // Every exit from here says why. Silent returns are how the updater would ship
+  // broken for a third time — an early `return null` with no line is indistinguishable
+  // from "no updates available" in the log, which is exactly what nobody can debug.
+  if (!app.isPackaged) {
+    logLine(`[update] skipped: app.isPackaged is false (running as a script, not an install)`);
+    return null;
+  }
   if (process.env.BZ_DISABLE_UPDATES === "1") {
     logLine("[update] disabled by BZ_DISABLE_UPDATES");
     return null;
   }
+  logLine(`[update] check requested (installed ${app.getVersion()}, prerelease=${process.env.BZ_UPDATE_PRERELEASE === "1"})`);
   let updater;
   try {
-    ({ autoUpdater: updater } = await import("electron-updater"));
+    // A dynamic import inside an asar can hang rather than throw on a hostile
+    // platform; without a bound that hang is indistinguishable from success.
+    const loaded = await Promise.race([
+      import("electron-updater"),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("import timed out after 20 s")), 20_000)),
+    ]);
+    updater = loaded.autoUpdater;
+    logLine("[update] electron-updater loaded");
   } catch (err) {
     logLine(`[update] electron-updater unavailable: ${err?.message ?? err}`);
     return null;
@@ -729,7 +743,13 @@ async function installUpdater() {
     logLine(`[update] error: ${err?.message ?? err}`);
   });
   try {
-    await updater.checkForUpdates();
+    // Bound the whole check: a check that never answers must read as "no answer",
+    // not as "fine".
+    await Promise.race([
+      updater.checkForUpdates(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("no answer within 25 s")), 25_000)),
+    ]);
+    logLine(`[update] check finished (state ${JSON.stringify(updateState)})`);
   } catch (err) {
     logLine(`[update] check failed: ${err?.message ?? err}`);
   }
