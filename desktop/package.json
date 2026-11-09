@@ -1,7 +1,7 @@
 {
   "name": "beezilla-desktop",
   "productName": "BeeZilla",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "private": true,
   "description": "BeeZilla desktop \u2014 the local runtime in a window",
   "type": "module",
@@ -48,10 +48,21 @@
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
     },
-    "artifactName": "BeeZilla-Setup-${version}.${ext}"
+    "artifactName": "BeeZilla-Setup-${version}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "GumbyEnder",
+        "repo": "agent-relay",
+        "releaseType": "prerelease"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^32.2.0",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

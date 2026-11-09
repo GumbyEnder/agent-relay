@@ -47,6 +47,19 @@ export function isExecuteCommand(message: string): boolean {
   );
 }
 
+/**
+ * "Draw me a duck" is a request for a file, not a conversation about drawing.
+ * The canvas is not the only way in — the same sentence typed into chat must
+ * produce a picture, because the alternative is a model that says "I can't draw".
+ */
+export function isImageRequest(message: string): boolean {
+  const m = String(message || "");
+  const NOUN = "(image|picture|illustration|drawing|logo|poster|artwork|art|thumbnail|icon|banner|mockup|render|scene)";
+  if (new RegExp(`\\b(draw|paint|sketch|illustrate|render|generate|make|create|design)\\b[^.\\n]{0,40}\\b${NOUN}\\b`, "i").test(m)) return true;
+  // "draw me a duck" — the noun is the subject, not the object of "of".
+  return /\b(draw|paint|sketch|illustrate)\s+(me\s+)?(a|an|the|some)\b[^.\n]{0,60}/i.test(m);
+}
+
 /** A deliverable request in the owner's own words (not only "file" phrasing). */
 export function isDraftRequest(message: string): boolean {
   if (isFileRequest(message)) return true;

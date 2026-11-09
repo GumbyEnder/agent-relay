@@ -27,6 +27,8 @@ export interface PlanRules {
   musicSecondsPerDay: number;
   /** hard cap on one music request, whatever the remaining quota */
   musicMaxSeconds: number;
+  /** images allowed in a rolling 24 h window (0 = the plan includes none) */
+  imagesPerDay: number;
   /** models this plan may name; null = the deployment's own default set */
   models: string[] | null;
 }
@@ -44,9 +46,9 @@ export const FREE_MODELS = (process.env.BZ_FREE_MODELS ?? "google/gemini-3.1-fla
 export const PLANS: Record<PlanName, PlanRules> = {
   // Music is the most expensive unit we buy, so it is a paid perk: a free account
   // gets chat on the cheap lane, not audio generation.
-  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, models: FREE_MODELS },
-  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, models: null },
-  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, models: null },
+  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, models: FREE_MODELS },
+  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 30, models: null },
+  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 300, models: null },
 };
 
 export const DEFAULT_PLAN: PlanName = ((): PlanName => {
@@ -133,13 +135,39 @@ export interface QuotaVerdict {
  */
 export async function checkQuota(opts: {
   userId: string;
-  scope: "inference" | "music";
+  scope: "inference" | "music" | "image";
   /** music: requested seconds. inference: 1 */
   units?: number;
   model?: string;
 }): Promise<QuotaVerdict> {
   const ent = await getEntitlement(opts.userId);
   const rules = PLANS[ent.plan] ?? PLANS.free;
+
+  if (opts.scope === "image") {
+    // An image is the second most expensive unit we buy after audio, and unlike
+    // audio it is priced per picture, so the counter is a count, not seconds.
+    const want = Math.max(1, Math.round(opts.units ?? 1));
+    if (rules.imagesPerDay <= 0) {
+      return {
+        ok: false,
+        code: "plan_required",
+        plan: ent.plan,
+        error: `the ${ent.plan} plan does not include image generation — pictures are part of the paid plans`,
+      };
+    }
+    const used = await unitsInWindow(opts.userId, "image");
+    if (used + want > rules.imagesPerDay) {
+      return {
+        ok: false,
+        code: "quota_exhausted",
+        plan: ent.plan,
+        used,
+        limit: rules.imagesPerDay,
+        error: `image quota for the ${ent.plan} plan is ${rules.imagesPerDay} per day — ${Math.max(0, rules.imagesPerDay - used)} left`,
+      };
+    }
+    return { ok: true, plan: ent.plan, used, limit: rules.imagesPerDay };
+  }
 
   if (opts.scope === "music") {
     const want = Math.max(1, Math.round(opts.units ?? 0));

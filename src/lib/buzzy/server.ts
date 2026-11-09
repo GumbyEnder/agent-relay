@@ -52,7 +52,9 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isExecuteCommand, isExplicitDocumentRequest, isFileRequest, isMusicRequest, producesDeliverable } from "./intent";
+import { artConfigured, generateImage, imageModel, storeImage } from "./art";
+import { checkQuota, recordUsage } from "./entitlements";
+import { isDraftRequest, isExecuteCommand, isExplicitDocumentRequest, isFileRequest, isImageRequest, isMusicRequest, producesDeliverable } from "./intent";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -269,6 +271,8 @@ export interface ChatResponse {
   done?: boolean;
   warning?: string;
   jobId?: string;
+  /** a picture this turn rendered — the card is built from this, never from prose */
+  image?: { url: string; name: string; bytes: number; type: string };
   previousDraft?: string;
   review?: Array<{ label: string; verdict: "verified" | "stated" | "warning"; detail?: string }>;
   estimate?: { estimateLow: number; estimateHigh: number; civilian: string; free: boolean };
@@ -312,6 +316,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // that has a music tool is that nothing tracked the difference.
   let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
   let musicRefusal: { code: string; error: string } | null = null;
+  let renderedImage: { url: string; name: string; bytes: number; type: string } | null = null;
+  let artRefusal: { code: string; error: string } | null = null;
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
   let extractMs = 0;
@@ -600,6 +606,42 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
         "Tell the owner this exact reason. Do not claim any audio exists.";
       console.warn(`[buzzy] music pre-pass failed: ${made.code} ${made.error}`);
+    }
+  }
+
+  // ── Art pre-pass ──────────────────────────────────────────────────
+  // "draw me a duck" is a request for a file. Chat mode offers no tools, so
+  // without this the model answers with an apology about not being able to draw.
+  if (!renderedImage && isImageRequest(message) && artConfigured()) {
+    const prompt = message.slice(0, 1000);
+    const verdict = await checkQuota({ userId, scope: "image", units: 1 });
+    if (!verdict.ok) {
+      artRefusal = { code: verdict.code ?? "refused", error: verdict.error ?? "quota refused" };
+      messages[0]!.content +=
+        `\n\nAn image was requested and REFUSED by the plan: ${verdict.error}. ` +
+        "Say exactly that. Do not claim any picture exists.";
+    } else {
+      // stage events are optional on this lane
+
+      const made = await generateImage(prompt);
+      await recordUsage({
+        userId, scope: "image", units: made.ok ? 1 : 0, ms: made.ms ?? 0,
+        status: made.ok ? "ok" : "failed", code: made.ok ? null : made.code ?? "failed", model: imageModel(),
+      }).catch(() => {});
+      if (made.ok && made.bytes) {
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+        const name = `art-${stamp}.png`;
+        const stored = await storeImage(userId, made.bytes, name, made.contentType || "image/png");
+        renderedImage = { url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType || "image/png" };
+        messages[0]!.content +=
+          "\n\nAn image has ALREADY been rendered this turn and is attached to your reply. " +
+          "Do not name a file and do not say you will make one later; describe what is in the picture in two sentences and stop.";
+        console.log(`[buzzy] art pre-pass ok: ${name} ${stored.bytes} B`);
+      } else {
+        artRefusal = { code: made.code ?? "image_failed", error: made.error ?? "the provider refused" };
+        messages[0]!.content +=
+          `\n\nImage generation was attempted and FAILED (${made.code}): ${made.error}. Tell the owner that exact reason.`;
+      }
     }
   }
 
@@ -1214,6 +1256,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // really produced nothing and music really is unavailable.
   const DENIES_AUDIO =
     /\b(i (can'?t|cannot|don'?t|do not)\s+(directly\s+)?(produce|make|create|generate|save|output)\s+(audio|music|sound|mp3|files)|no way to (produce|make|generate)\s+(audio|music)|i don'?t produce audio)/i;
+  if (renderedImage) {
+    response.image = renderedImage;
+    // The reply must not deny a picture that exists, and must not name the file:
+    // handed an identifier, the model opens with "art-2026-11-07-06-11-32.png …".
+    const CLAIMS_NO_IMAGE = /\b(i (can'?t|cannot|can not|don'?t|do not)\s+(draw|create|make|generate|produce)\s+(images?|pictures?|art)|i'?m (not able|unable) to (draw|create images?))/i;
+    if (CLAIMS_NO_IMAGE.test(response.reply) || /\bart-\d{4}-\d{2}-\d{2}[^\s]*\.png\b/i.test(response.reply)) {
+      response.reply = `Here it is — the picture is attached below (${Math.round((renderedImage.bytes || 0) / 1024)} KB).`;
+    }
+  } else if (artRefusal && /\b(i (can'?t|cannot|don'?t)\s+(draw|create|make)|i'?m (not able|unable))/i.test(response.reply)) {
+    response.reply = `I tried to draw that and it did not work: ${artRefusal.error}. That is the real reason — not a missing capability.`;
+  }
+
   if (renderedAudio) {
     response.audio = renderedAudio;
     // An audio-only turn is still work. Without a project row the MP3 belongs to
@@ -1250,6 +1304,34 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     response.reply = musicRefusal
       ? `I tried to make that audio and the provider refused: ${musicRefusal.error}. That is the real reason — not a missing capability.`
       : "I can make music here. Ask for a track and I will generate the audio and attach it to my reply.";
+  }
+
+  // An image-only turn is work too, and the rule is the same as audio: without a
+  // project row the picture belongs to nobody and the Library cannot say where it
+  // came from. One project per turn, status naming the deliverable.
+  if (renderedImage && !renderedDocText && !renderedAudio) {
+    const imageJobId = jobId || sessionId || `job_${Date.now()}`;
+    try {
+      await sql`
+        INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
+        VALUES (${imageJobId}, ${userId}, null, ${message.slice(0, 80)}, 'Image ready', null,
+          ${JSON.stringify({ image: renderedImage, approved: false })}::jsonb, now())
+        ON CONFLICT (id) DO UPDATE SET
+          status = 'Image ready',
+          data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()
+      `;
+      const imageAssetId = Number(String(renderedImage.url || "").split("/").pop());
+      if (Number.isFinite(imageAssetId) && imageAssetId > 0) {
+        await sql`UPDATE buzzy_assets SET job_id = ${imageJobId}, session_id = ${sessionId}
+                  WHERE user_id = ${userId} AND id = ${imageAssetId}`;
+      }
+      if (sessionId && !jobId) {
+        await sql`UPDATE buzzy_sessions SET job_id = ${imageJobId} WHERE id = ${sessionId} AND user_id = ${userId}`;
+      }
+      response.jobId = imageJobId;
+    } catch (err) {
+      console.warn("[buzzy/image-project] link failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   // ── Does THIS turn deliver something? ──────────────────────────────

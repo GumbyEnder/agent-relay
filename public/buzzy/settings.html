@@ -242,6 +242,18 @@
           <span class="status" id="logs-status"></span>
         </div>
         <p class="current" id="logs-path"></p>
+
+        <!-- Updates. Every release before 0.2.12 reached an installed copy only
+             because someone reinstalled by hand; the app could be days behind the
+             server it talks to and nothing said so. -->
+        <h2 style="margin-top: 22px">Updates</h2>
+        <div class="row">
+          <span class="current" id="update-version">Checking…</span>
+          <button id="update-check" class="secondary">Check for updates</button>
+          <button id="update-download" class="secondary" hidden>Download</button>
+          <button id="update-install" hidden>Restart and install</button>
+          <span class="status" id="update-status"></span>
+        </div>
       </section>
 
       <p class="sub" style="margin-top: 26px">
@@ -467,6 +479,55 @@
             if (res?.ok && res.data?.file) $("logs-path").textContent = `Log: ${res.data.file}`;
           })
           .catch(() => {});
+        // ── updates ──────────────────────────────────────────────────────────
+        (function initUpdates() {
+          const updates = window.beezilla?.updates;
+          const ver = $("update-version");
+          const status = $("update-status");
+          const btnCheck = $("update-check");
+          const btnDownload = $("update-download");
+          const btnInstall = $("update-install");
+          if (!updates) {
+            if (ver) ver.textContent = "Updates are available in the desktop app only.";
+            return;
+          }
+          const paint = (state) => {
+            const installed = state.version ? `Installed ${state.version}` : "BeeZilla";
+            if (state.downloaded) {
+              ver.textContent = `${installed} · ${state.downloaded} ready to install`;
+              btnDownload.hidden = true;
+              btnInstall.hidden = false;
+            } else if (state.available) {
+              ver.textContent = `${installed} · ${state.available} available`;
+              btnDownload.hidden = false;
+              btnInstall.hidden = true;
+            } else {
+              ver.textContent = state.checkedAt ? `${installed} · up to date` : installed;
+              btnDownload.hidden = true;
+              btnInstall.hidden = true;
+            }
+            if (state.downloading) say(status, `Downloading ${state.downloading}%…`, "");
+            else if (state.error) say(status, `Update check failed: ${state.error}`, "bad");
+            else if (state.downloaded) say(status, "Downloaded. It installs when you press the button.", "ok");
+            else say(status, state.available ? "A newer version is available." : "", state.available ? "ok" : "");
+          };
+          updates.status().then((r) => paint(r?.data ?? {})).catch(() => {});
+          btnCheck?.addEventListener("click", async () => {
+            say(status, "Checking…", "");
+            const r = await updates.check();
+            paint(r?.data ?? r ?? {});
+          });
+          btnDownload?.addEventListener("click", async () => {
+            say(status, "Downloading…", "");
+            const r = await updates.download();
+            paint(r?.data ?? r ?? {});
+          });
+          btnInstall?.addEventListener("click", async () => {
+            say(status, "Restarting to install…", "");
+            await updates.install();
+          });
+        })();
+
         $("open-logs").addEventListener("click", async () => {
           const res = await appBridge.openLogs();
           if (!res?.ok) say($("logs-status"), res?.error || "Could not open the folder.", "err");

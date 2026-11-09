@@ -717,15 +717,20 @@ export default defineEventHandler(async (event) => {
       FROM buzzy_assets WHERE user_id = ${user.id}
         AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
     `;
+    // Job title travel with the file. A card that reads
+    // "music-2026-11-07-06-24-39.mp3" tells the owner nothing; "from <the job that
+    // made it>" is the difference between a blob shelf and a Library.
     const rows = await sql<{
       id: number; filename: string; rel_path: string; content_type: string | null;
-      bytes: number; created_at: string;
+      bytes: number; created_at: string; job_id: string | null; job_title: string | null;
     }>`
-      SELECT id, filename, rel_path, content_type, bytes, created_at
-      FROM buzzy_assets
-      WHERE user_id = ${user.id}
-        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
-      ORDER BY rel_path ASC
+      SELECT a.id, a.filename, a.rel_path, a.content_type, a.bytes, a.created_at,
+             a.job_id, j.title AS job_title
+      FROM buzzy_assets a
+      LEFT JOIN buzzy_jobs j ON j.id = a.job_id AND j.user_id = a.user_id
+      WHERE a.user_id = ${user.id}
+        AND (${prefix} = '' OR a.rel_path LIKE ${prefix + "%"})
+      ORDER BY a.rel_path ASC
       LIMIT ${want} OFFSET ${offset}
     `;
     return {

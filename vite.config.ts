@@ -435,6 +435,11 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/capabilities.nitro.ts",
               },
               {
+                // The canvas's server half: save the board, render an image.
+                route: "/api/buzzy/art",
+                handler: "./src/lib/buzzy/art.nitro.ts",
+              },
+              {
                 // Our inference: the signed-in owner mints a short-lived token
                 // (no shared provider key ever reaches the desktop app).
                 route: "/api/inference-token",

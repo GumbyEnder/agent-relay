@@ -46,6 +46,16 @@ export default defineEventHandler(() => {
       detail: "render tools save versioned files to the Library",
     },
     {
+      id: "image",
+      label: "Images from a sketch or a prompt",
+      ok: Boolean((process.env.BZ_CHAT_KEY ?? "").trim() || (process.env.BZ_IMAGE_VIA_GATEWAY ?? "").trim()),
+      detail: (process.env.BZ_IMAGE_VIA_GATEWAY ?? "").trim()
+        ? "managed — rendered through the inference gateway, no key on this machine"
+        : (process.env.BZ_CHAT_KEY ?? "").trim()
+          ? `${process.env.BZ_IMAGE_MODEL || "google/gemini-3-pro-image"} via the chat lane`
+          : "no image provider is configured",
+    },
+    {
       id: "music",
       label: "Music generation",
       ok: musicConfigured(),
