@@ -262,6 +262,12 @@ function registerSettingsIpc() {
 
 // One install, one runtime: a second launch must focus the existing window, not
 // open a second server against the same PGLite data directory.
+// Update state lives at module scope: the IPC handlers, the tray/settings page and
+// the updater's own event listeners all read it. It was missing at first, so every
+// touch threw ReferenceError inside a promise — silently, because nothing logged.
+let updateState = { available: null, downloaded: null, downloading: null, error: null, checkedAt: null };
+let updaterRef = null;
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -708,7 +714,14 @@ async function installUpdater() {
       import("electron-updater"),
       new Promise((_, reject) => setTimeout(() => reject(new Error("import timed out after 20 s")), 20_000)),
     ]);
-    updater = loaded.autoUpdater;
+    // electron-updater is CommonJS; a dynamic import wraps it, and whether the
+    // named export is hoisted depends on the interop. Take it from wherever it is
+    // rather than assuming — `undefined.autoUpdater` was the second silent death.
+    updater = loaded?.autoUpdater ?? loaded?.default?.autoUpdater ?? loaded?.default ?? null;
+    if (!updater) {
+      logLine(`[update] electron-updater loaded without an autoUpdater (keys: ${Object.keys(loaded ?? {}).join(",")})`);
+      return null;
+    }
     logLine("[update] electron-updater loaded");
   } catch (err) {
     logLine(`[update] electron-updater unavailable: ${err?.message ?? err}`);
