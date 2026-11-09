@@ -300,22 +300,39 @@ export const auth = betterAuth({
             // page follows the host: beezilla.net is the BeeZilla product and
             // has its own sign-in page, everything else is the Dev Boards app.
             let finalUrl = url;
+            let mailHost = "";
             try {
               const u = new URL(url);
-              const host = request ? new URL(request.url).hostname : "";
+              // Prefer the proxy's own host header: `new URL(request.url)` behind
+              // Railway carries the internal host, and the brand of the email is
+              // decided by the host the browser actually used.
+              mailHost = requestedHost(request ? request.headers : null) || new URL(request?.url ?? url).hostname;
               u.searchParams.set(
                 "callbackURL",
-                isConsumerHost(host) ? "/buzzy/login?verified=1" : "/login?verified=1",
+                isConsumerHost(mailHost) ? "/buzzy/login?verified=1" : "/login?verified=1",
               );
               finalUrl = u.toString();
             } catch {
               /* keep original url */
             }
-            await sendVerificationMail({
-              to: user.email,
-              name: user.name,
-              url: finalUrl,
-            });
+            // The account exists before this mail is attempted. A mail provider
+            // that is slow or down must not turn a successful sign-up into a
+            // hung request (the UI's "Creating…" for a minute) — and it must not
+            // fail the sign-up either, because the user would then retry and be
+            // told the address is taken. Log and continue; the resend route and
+            // the sign-in page can recover.
+            try {
+              await sendVerificationMail({
+                to: user.email,
+                name: user.name,
+                url: finalUrl,
+                host: mailHost,
+              });
+            } catch (err) {
+              console.error(
+                `[auth] verification mail failed for ${user.email}: ${(err as Error)?.message ?? err}`,
+              );
+            }
           },
         },
       }
@@ -345,15 +362,22 @@ export const auth = betterAuth({
     // email/password enabled. 15-minute single-use tokens.
     magicLink({
       expiresIn: 60 * 15,
-      sendMagicLink: async ({ email, url }) => {
-        await sendMagicLinkMail({ to: email, url });
+      // Brand the link by the host the browser used (BeeZilla vs Dev Boards):
+      // on the email-first page this mail is also the sign-up email.
+      sendMagicLink: async ({ email, url }, ctx) => {
+        await sendMagicLinkMail({
+          to: email,
+          url,
+          host: requestedHost(ctx?.request?.headers ?? ctx?.headers ?? null),
+        });
       },
     }),
 
     // Email-first "Sign in / Register" page: email lookup, set a password after
     // a link sign-in, and forgot-password (link → new password). See ./email-first.
     emailFirst({
-      onPasswordReplaced: (user) => sendPasswordChangedMail({ to: user.email, name: user.name }),
+      onPasswordReplaced: (user, headers) =>
+        sendPasswordChangedMail({ to: user.email, name: user.name, host: requestedHost(headers) }),
     }),
 
     // One genericOAuth provider per upstream (when auth is on), all federating
@@ -380,6 +404,40 @@ export function readSessionToken(): string | null {
 
 const VERIFY_EMAIL_OK = "/login?verified=1";
 const VERIFY_EMAIL_FAIL = "/login?verified=0";
+const VERIFY_EMAIL_OK_BZ = "/buzzy/login?verified=1";
+const VERIFY_EMAIL_FAIL_BZ = "/buzzy/login?verified=0";
+
+/** Host the browser used, honouring Railway's proxy headers. */
+function requestedHost(headers: Headers | null | undefined): string {
+  if (!headers) return "";
+  const raw = headers.get("x-forwarded-host") ?? headers.get("host") ?? "";
+  return String(raw).split(",")[0].trim().toLowerCase().replace(/:\d+$/, "");
+}
+
+/**
+ * Public origin for a redirect. `new URL(req.url).origin` behind Railway is
+ * `http://…` because TLS terminates at the proxy, so every redirect used to be
+ * an http URL that cost a browser an extra upgrade round-trip (measured: the
+ * verify link took >20s to land on a phone). Build it from the forwarded
+ * protocol + host instead.
+ */
+function requestOrigin(req: Request): string {
+  const headers = req.headers;
+  const proto =
+    (headers.get("x-forwarded-proto") ?? "").split(",")[0].trim() ||
+    new URL(req.url).protocol.replace(":", "") ||
+    "https";
+  const host = requestedHost(headers);
+  if (host) return `${proto}://${host}`;
+  return new URL(req.url).origin;
+}
+
+/** A callbackURL we are willing to follow: same-origin, absolute path only. */
+function safeCallback(raw: string | null): string | null {
+  if (!raw) return null;
+  if (raw.charAt(0) !== "/" || raw.charAt(1) === "/") return null;
+  return raw;
+}
 
 function isVerifyEmailRequest(req: Request): boolean {
   try {
@@ -399,7 +457,10 @@ export async function handleAuthRequest(req: Request): Promise<Response> {
   if (req.method === "GET" && isVerifyEmailRequest(req)) {
     const url = new URL(req.url);
     if (!url.searchParams.get("callbackURL")) {
-      url.searchParams.set("callbackURL", VERIFY_EMAIL_OK);
+      url.searchParams.set(
+        "callbackURL",
+        isConsumerHost(requestedHost(req.headers)) ? VERIFY_EMAIL_OK_BZ : VERIFY_EMAIL_OK,
+      );
       request = new Request(url.toString(), req);
     }
   }
@@ -407,9 +468,21 @@ export async function handleAuthRequest(req: Request): Promise<Response> {
   const res = await auth.handler(request);
   if (!(req.method === "GET" && isVerifyEmailRequest(req))) return res;
 
-  const origin = new URL(req.url).origin;
-  const ok = `${origin}${VERIFY_EMAIL_OK}`;
-  const fail = `${origin}${VERIFY_EMAIL_FAIL}`;
+  const origin = requestOrigin(req);
+  const consumer = isConsumerHost(requestedHost(req.headers));
+  // Follow the callback the email carried (it knows whether this is BeeZilla or
+  // Dev Boards). Ignoring it sent every BeeZilla verification to `/login`, which
+  // the consumer host then bounced to `/buzzy/talk` — the user never saw the
+  // "Email verified" state the link promised.
+  const asked = safeCallback(new URL(req.url).searchParams.get("callbackURL"));
+  const okPath = asked ?? (consumer ? VERIFY_EMAIL_OK_BZ : VERIFY_EMAIL_OK);
+  const failPath = asked
+    ? asked.replace("verified=1", "verified=0")
+    : consumer
+      ? VERIFY_EMAIL_FAIL_BZ
+      : VERIFY_EMAIL_FAIL;
+  const ok = `${origin}${okPath}`;
+  const fail = `${origin}${failPath}`;
   if (res.status >= 300 && res.status < 400) {
     const loc = res.headers.get("location") ?? "";
     if (/[?&]error=/.test(loc)) {

@@ -65,6 +65,9 @@
   <div class="meta" id="meta"></div>
 </header>
 <main>
+  <h2>Sources</h2>
+  <div class="grid" id="sources"><p class="empty-note">Loading…</p></div>
+
   <h2>Deliverables</h2>
   <div class="grid" id="deliverables"><p class="empty-note">Loading…</p></div>
 
@@ -122,6 +125,18 @@
         metaEl.innerHTML = esc(String(p.id)) + " · updated " + esc(new Date(p.updatedAt || p.updated_at || Date.now()).toLocaleString()) +
           '<span class="chip ' + chipClass + '">' + esc(p.status) + "</span>" +
           ' <a class="back" style="margin-left:.6rem" href="/buzzy/talk?job=' + encodeURIComponent(p.id) + '">Open conversation →</a>';
+
+        var srcBox = document.getElementById("sources");
+        var sources = data.sources || [];
+        srcBox.innerHTML = sources.length
+          ? sources.map(function (s) {
+              var label = String(s.label || s.kind || "input");
+              var where = s.url ? '<a href="' + s.url + '">open</a>' : "";
+              var size = s.bytes ? " · " + Math.max(1, Math.round(s.bytes / 1024)) + " KB" : "";
+              return '<div class="dl"><span class="dl-kind">' + (s.kind === "board" ? "board" : s.kind === "reference" ? "reference" : s.kind === "brief" ? "brief" : "input") +
+                '</span><span class="dl-name">' + label + '</span><span class="dl-sub">' + size + " " + where + "</span></div>";
+            }).join("")
+          : '<p class="empty-note">No inputs recorded yet — draw on the sketch board or fill in the brief and they appear here.</p>';
 
         var box = document.getElementById("deliverables");
         if (!data.deliverables || !data.deliverables.length) {

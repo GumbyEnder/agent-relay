@@ -437,13 +437,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The work item's own title. A follow-up turn must not rename the folder to
   // whatever the latest chat message happened to be.
   let previousTitle: string | null = null;
-  // A conversation that began in chat has no jobId in the request: the client
-  // only knows a job id from ?job= on the URL (it reads res.d.paper, which this
-  // server never sends), and the draft block below files the work under
-  // `recordId = jobId || sessionId`. Looking up only `jobId` therefore reported
-  // "no draft on file" for exactly the conversations that had one, so a revision
-  // to a chat-born draft would not version. Look up the session's item too.
-  const draftLookupId = jobId || sessionId || null;
+  // Only the job the caller named. This used to fall back to the session id because
+  // the job row was keyed by the session; now that a job has its own id, the client
+  // must pass it (Talk and chat.js do) — a lookup by session would re-create the
+  // #238 behaviour, where a new matter revised the previous one.
+  const draftLookupId = jobId || null;
   if (draftLookupId) {
     const jrows = await sql`SELECT data->>'draft' AS draft, title FROM buzzy_jobs WHERE id = ${draftLookupId} AND user_id = ${userId}`;
     const prev = jrows[0] && jrows[0].draft ? String(jrows[0].draft).trim() : null;
@@ -1635,7 +1633,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // Persist the draft as a durable job so it surfaces in Work/Library and
     // can wait on the owner's approval (needs-input), instead of living only in
     // this chat. A chat with no job id gets one now (stable per session).
-    const recordId = jobId || sessionId || `job_${Date.now()}`;
+    // #238: `jobId || sessionId` made the session id the job's primary key, so every
+    // turn in one conversation wrote the SAME job row — a second matter silently
+    // extended the first, and its title, slots and draft were overwritten. Absent a
+    // jobId the turn now starts a new item; continuation is when the caller names the
+    // item it is continuing (Talk and chat.js both echo `response.jobId`). The
+    // session still records a pointer to its latest item below — a pointer, not
+    // identity.
+    const recordId = jobId || `job_${Date.now().toString(36)}`;
     response.jobId = recordId;
     if (previousDraft) response.previousDraft = previousDraft;
     // Title source order matters. The renderer derives its title from THIS
@@ -1665,7 +1670,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         ${JSON.stringify({ draft: cleanReply, slots: slotValues, approved: false, previous_draft: previousDraft, artifact: renderedDocument })}::jsonb, now()
       )
       ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = now()
+        title = EXCLUDED.title,
+        -- A follow-up turn that renders nothing must not demote a finished item. The
+        -- project page said "Deliverable ready, 1 deliverable" until the owner asked a
+        -- follow-up question, which rewrote status to "In progress" and cleared
+        -- data.artifact — the deliverable vanished from its own project.
+        status = CASE WHEN EXCLUDED.status = 'In progress'
+                      THEN COALESCE(NULLIF(buzzy_jobs.status, 'Empty'), 'In progress')
+                      ELSE EXCLUDED.status END,
+        data = COALESCE(buzzy_jobs.data, '{}'::jsonb) ||
+               (CASE WHEN EXCLUDED.data->>'artifact' IS NULL
+                     THEN EXCLUDED.data - 'artifact'
+                     ELSE EXCLUDED.data END),
+        updated_at = now()
     `;
     // Link the conversation to the work it produced. Without this, a file made
     // from a plain conversation was reachable from the Library but the chat had
@@ -1786,5 +1803,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   }
 
+  // Every turn names the item it is about, so a client never has to remember it.
+  if (jobId && !response.jobId) response.jobId = jobId;
   return response;
 }

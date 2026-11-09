@@ -23,7 +23,9 @@
     { id: "talk", href: "/buzzy/talk", label: "Talk" },
     { id: "sketch", href: "/buzzy/sketch", label: "Sketch" },
     { id: "studio", href: "/buzzy/studio", label: "Studio" },
-    { id: "library", href: "/buzzy/library", label: "Library", blank: true },
+    // No longer opens a new tab: the page shell below keeps Talk (and the mic)
+    // alive while you move around, so the reason for the `_blank` is gone.
+    { id: "library", href: "/buzzy/library", label: "Library" },
     { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities" },
     { id: "memory", href: "/buzzy/memory", label: "Memory" },
     { id: "experts", href: "/buzzy/experts", label: "Experts" },
@@ -58,6 +60,9 @@
       "#bzChrome select.bz-co-select{appearance:none;background:#101010;color:#f2f2f2;border:1px solid #2c2c2c;border-radius:8px;padding:.28rem 1.5rem .28rem .5rem;font:inherit;font-size:.82rem;max-width:15rem;text-overflow:ellipsis;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,#8d8d8d 50%),linear-gradient(135deg,#8d8d8d 50%,transparent 50%);background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}",
       "#bzChrome button.bz-ask{display:inline-flex;align-items:center;gap:.35rem;background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-ask[aria-expanded='true']{background:#fff0a8}",
+      "#bzChrome button.bz-voice{display:inline-flex;align-items:center;gap:.35rem;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}",
+      "#bzChrome button.bz-voice[aria-pressed='true']{background:#ffd40d;color:#111;border-color:#ffd40d}",
+      "#bzChrome button.bz-voice:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
       "#bzPanel{position:fixed;right:1rem;top:64px;width:min(420px,calc(100vw - 2rem));height:min(560px,calc(100vh - 88px));background:#101010;border:1px solid #2c2c2c;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;z-index:900;padding:.6rem}",
       "#bzPanel.open{display:flex}",
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
@@ -84,6 +89,13 @@
       ".bz-chrome-scroll{overflow-x:auto;scrollbar-width:none}",
       "#bzChrome .bz-account{color:#8d8d8d;font-size:.82rem;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-account:hover{color:#ffd40d}",
+      "#bzChrome .bz-plan{display:inline-flex;align-items:center;border:1px solid #3a3a3a;border-radius:999px;padding:.1rem .5rem;font-size:.7rem;font-weight:800;letter-spacing:.06em;color:#cfcfcf;text-decoration:none;white-space:nowrap}",
+      "#bzChrome .bz-plan-pro{background:#ffd40d;color:#111;border-color:#ffd40d}",
+      "#bzChrome .bz-plan-starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
+      "#bzChrome .bz-voice{display:inline-flex;align-items:center;gap:.3rem}",
+      "#bzChrome button.bz-voice-mic{display:inline-flex;align-items:center;gap:.3rem;background:#141414;color:#e8e8e8;border:1px solid #2c2c2c;border-radius:999px;padding:.28rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
+      "#bzChrome button.bz-voice-mic.on{background:#ffd40d;color:#111;border-color:#ffd40d}",
+      "#bzChrome button.bz-voice-stop{background:#2a1214;color:#ffb4b4;border:1px solid #5b1f24;border-radius:999px;padding:.28rem .55rem;font:inherit;font-size:.8rem;cursor:pointer}",
       ".bz-chrome-scroll::-webkit-scrollbar{display:none}",
     ].join("");
     document.head.appendChild(s);
@@ -113,16 +125,29 @@
       bar.appendChild(nav);
     }
 
-    // Add any missing link, in canonical order, without disturbing existing ones.
-    LINKS.forEach(function (l) {
-      if (nav.querySelector('a[data-nav="' + l.id + '"]')) return;
-      var a = document.createElement("a");
-      a.href = l.href;
-      a.textContent = l.label;
-      a.setAttribute("data-nav", l.id);
-      if (l.blank) { a.target = "_blank"; a.rel = "noopener"; }
-      nav.appendChild(a);
+    // REBUILD, don't append. Pages still hand-write their own <nav>, and they had
+    // drifted into different orders (Library and Wallet shipped Talk, Library,
+    // Capabilities… while Talk shipped Talk, Sketch, Studio…). Appending only what
+    // was missing preserved whatever order the page happened to ship. One list
+    // means one order, identical on every page and on every future page.
+    var wanted = {};
+    LINKS.forEach(function (l) { wanted[l.id] = true; });
+    Array.prototype.forEach.call(nav.querySelectorAll("a[data-nav]"), function (a) {
+      if (!wanted[a.getAttribute("data-nav")]) a.parentNode.removeChild(a);
     });
+    var ordered = [];
+    LINKS.forEach(function (l) {
+      var a = nav.querySelector('a[data-nav="' + l.id + '"]');
+      if (!a) {
+        a = document.createElement("a");
+        a.textContent = l.label;
+        a.setAttribute("data-nav", l.id);
+      }
+      a.href = l.href;
+      if (l.blank) { a.target = "_blank"; a.rel = "noopener"; }
+      ordered.push(a);
+    });
+    ordered.forEach(function (a) { nav.appendChild(a); });
 
     // Active state from the path — the single implementation.
     var active = section();
@@ -219,10 +244,14 @@
     }
     var existing = document.getElementById("accountLink");
     var a = existing || document.createElement("a");
-    a.className = "bz-account";
+    a.id = "accountLink";
+    a.className = "bz-account account-link";
     a.href = "/buzzy/landing";
     chrome.appendChild(a); // moves it out of the nav when the page shipped one there
-    a.textContent = "\u2026";
+    // No "…" placeholder: an empty label with a reserved width cannot be mistaken
+    // for a name, and it does not flash "Sign in" at a signed-in user.
+    a.textContent = "";
+    a.style.minWidth = "5.5rem";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {
@@ -253,6 +282,29 @@
     }, 250);
   }
 
+  /** Honey Drops: the balance, in the chrome, on every page. */
+  function honeyControl(chrome) {
+    // pages that still ship wallet-chip.js inserted a chip beside the nav; one chip only
+    Array.prototype.forEach.call(document.querySelectorAll("header .hd-chip"), function (c) { c.remove(); });
+    var chip = document.createElement("a");
+    chip.id = "bzHoneyChip";
+    chip.className = "hd-chip";
+    chip.href = "/buzzy/wallet";
+    chip.setAttribute("aria-label", "Your Honey Drops wallet");
+    chip.textContent = "\u25c8";           // mark only, no "…" placeholder
+    chip.style.minWidth = "3.6rem";
+    chrome.appendChild(chip);
+    fetch("/api/wallet", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && typeof d.balance === "number") {
+          chip.textContent = "\u25c8 " + Number(d.balance).toLocaleString();
+          chip.title = Number(d.balance).toLocaleString() + " Honey Drops";
+        }
+      })
+      .catch(function () { chip.textContent = "\u25c8"; });
+  }
+
   /** Ask: the chat, on every page, in a panel anchored to the nav. */
   function askControl(nav) {
     var btn = document.createElement("button");
@@ -262,6 +314,21 @@
     btn.setAttribute("aria-controls", "bzPanel");
     btn.innerHTML = "&#128172; Ask";
     nav.appendChild(btn);
+
+    // On Talk the chat is the page. Opening a second chat engine in a panel over it
+    // would be two composers and two sessions on one screen, so the nav control
+    // takes you to the one that exists.
+    if (section() === "talk") {
+      btn.title = "Talk to BeeZilla";
+      btn.addEventListener("click", function () {
+        var input = document.getElementById("chatInput");
+        if (input) {
+          input.scrollIntoView({ block: "center", behavior: "smooth" });
+          input.focus();
+        }
+      });
+      return;
+    }
 
     var panel = document.createElement("div");
     panel.id = "bzPanel";
@@ -342,6 +409,13 @@
 
   function boot() {
     style();
+    // The Ask panel lives outside the page wrapper, so a soft navigation would
+    // otherwise leave the previous page's panel in the document with the same id
+    // and a dead mount. One panel at a time.
+    Array.prototype.forEach.call(document.querySelectorAll("#bzPanel"), function (n) {
+      var page = document.getElementById("bzPage");
+      if (!page || !page.contains(n)) n.remove();
+    });
     var nav = ensureNav();
     if (document.getElementById("bzChrome")) return;
     var header = nav.closest("header") || document.querySelector("header") || document.body;
@@ -387,11 +461,388 @@
     extras.forEach(function (el) { header.appendChild(el); });
 
     loadCompanies();
+    honeyControl(chrome);
+    planChip(chrome);
+    voiceDock(chrome);
     companyControl(chrome);
     accountControl(chrome);
-    if (section() !== "talk") askControl(chrome);
+    askControl(chrome);
   }
+
+  /** Which plan am I on? Visible everywhere, not just under the Talk composer. */
+  function planChip(chrome) {
+    if (document.getElementById("bzPlanChip")) return;
+    var a = document.createElement("a");
+    a.id = "bzPlanChip";
+    a.className = "bz-plan";
+    a.href = "/buzzy/profile";
+    a.textContent = "";
+    a.style.display = "none";
+    chrome.appendChild(a);
+    fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !d.plan) return; // signed out: no chip, no error
+        var label = d.plan === "pro" ? "PRO" : d.plan === "starter" ? "STARTER" : "FREE";
+        a.textContent = label;
+        a.title =
+          d.plan.charAt(0).toUpperCase() + d.plan.slice(1) + " plan" +
+          (d.remaining ? " \u00b7 " + Number(d.remaining.inference || 0).toLocaleString() + " chats left" : "") +
+          (d.planUntil ? " \u00b7 renews " + String(d.planUntil).slice(0, 10) : "");
+        a.className = "bz-plan bz-plan-" + d.plan;
+        a.style.display = "";
+      })
+      .catch(function () { /* a plan chip is not worth an error toast */ });
+  }
+
+  /**
+   * The voice control, anchored in the nav on EVERY page.
+   *
+   * The engine lives on Talk (one voice, one recogniser), so this control is a
+   * remote for it: it shows the live state, can stop it with one click, and can
+   * start it from any page (navigating to Talk first when Talk has not been
+   * mounted in this session yet). The page shell keeps Talk's DOM alive while
+   * you navigate, which is what makes the session survive the click.
+   */
+  function voiceDock(chrome) {
+    if (document.getElementById("bzVoiceDock")) return;
+    var dock = document.createElement("span");
+    dock.id = "bzVoiceDock";
+    dock.className = "bz-voice";
+    var mic = document.createElement("button");
+    mic.id = "bzVoiceMic";
+    mic.type = "button";
+    mic.className = "bz-voice-mic";
+    mic.innerHTML = "&#127908; <span>Listen</span>";
+    mic.setAttribute("aria-pressed", "false");
+    mic.title = "Talk to BeeZilla \u2014 the conversation continues as you navigate";
+    var stop = document.createElement("button");
+    stop.id = "bzVoiceStop";
+    stop.type = "button";
+    stop.className = "bz-voice-stop";
+    stop.innerHTML = "&#9632;";
+    stop.title = "Stop listening";
+    stop.style.display = "none";
+    dock.appendChild(mic);
+    dock.appendChild(stop);
+    chrome.appendChild(dock);
+
+    function engine() { return window.BeeZillaVoice || null; }
+    function paint(st) {
+      st = st || (engine() && engine().state ? engine().state() : null);
+      var on = !!(st && st.mic);
+      var speaking = !!(st && st.speaking);
+      mic.classList.toggle("on", on);
+      mic.setAttribute("aria-pressed", on ? "true" : "false");
+      var label = mic.querySelector("span");
+      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : "Listen";
+      stop.style.display = on ? "" : "none";
+    }
+    // Talk publishes its state here; a page with no engine leaves the dock idle.
+    window.BeeZillaVoiceChip = { update: paint };
+
+    function startHere() {
+      if (engine() && engine().toggle) { engine().toggle(); paint(); return; }
+      var btn = document.getElementById("micBtn");
+      if (btn) { btn.click(); paint(); return; }
+      // Talk is not mounted in this session: go there, then start.
+      if (window.BeeZillaShell) {
+        window.BeeZillaShell.go("/buzzy/talk").then(function () {
+          setTimeout(function () {
+            if (engine() && engine().toggle) engine().toggle();
+            else { var b = document.getElementById("micBtn"); if (b) b.click(); }
+            paint();
+          }, 250);
+        });
+      }
+    }
+
+    mic.addEventListener("click", function () {
+      var st = engine() && engine().state ? engine().state() : null;
+      if (st && st.mic) {
+        if (engine() && engine().stop) engine().stop();
+        else { var b = document.getElementById("micBtn"); if (b) b.click(); }
+        paint();
+        return;
+      }
+      startHere();
+    });
+    stop.addEventListener("click", function () {
+      if (engine() && engine().stop) engine().stop();
+      else { var b = document.getElementById("micBtn"); if (b) b.click(); }
+      paint();
+    });
+
+    // A session started on Talk before this chrome existed still shows up.
+    paint();
+    setInterval(function () { paint(); }, 1500);
+
+    // On Talk the page ships its own "Voice" pill, which toggles spoken replies.
+    // Two controls both labelled Voice is the confusion this work exists to end,
+    // so the page one says what it actually does.
+    if (section() === "talk") {
+      var t2 = setInterval(function () {
+        var vt = document.getElementById("voiceToggle");
+        var label = vt && vt.querySelector(".vt-label");
+        if (label) {
+          if (label.textContent !== "Speak replies") label.textContent = "Speak replies";
+          vt.title = "Read BeeZilla's replies aloud";
+          clearInterval(t2);
+        }
+      }, 300);
+      setTimeout(function () { clearInterval(t2); }, 15000);
+    }
+  }
+
+  window.BeeZillaChrome = { boot: boot, section: section };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
+})();
+
+/**
+ * The page shell: navigation that does not reload the document.
+ *
+ * Why: the voice session lives in Talk's JavaScript. Every `/buzzy/*` page was a
+ * full document load, so clicking one nav link destroyed the recogniser, the
+ * audio context and the half-finished sentence. The fix is not "resume the mic
+ * on load" (you still lose what you were saying) but keeping one document alive
+ * across navigation:
+ *
+ *  - Talk's DOM is CACHED, hidden, still attached. Its closures, recogniser and
+ *    audio stay valid, so the conversation genuinely continues while you move.
+ *  - Other pages are fetched, their scripts executed in order, and rebuilt.
+ *
+ * It is deliberately small and additive: a hard reload still works, every page
+ * still renders on its own, and a browser without `fetch`/`pushState` falls back
+ * to ordinary links.
+ */
+(function () {
+  "use strict";
+  if (window.BeeZillaShell) return;
+  if (!window.fetch || !history.pushState) return;
+
+  // Pages whose DOM must survive navigation, because something live lives in it.
+  var KEEP_ALIVE = ["/buzzy/talk"];
+  var cache = Object.create(null); // key -> { el, title, styles }
+  var busy = false;
+  // popstate fires AFTER location has changed, so "which page am I stashing?"
+  // must come from our own record, never from location.href.
+  var currentKey = keyOf(location.href);
+
+  function keyOf(url) {
+    var u = url instanceof URL ? url : new URL(url, location.href);
+    return u.pathname.replace(/\/+$/, "") + u.search;
+  }
+  function isShellPath(u) {
+    return u.origin === location.origin && /^\/buzzy(\/|$)/.test(u.pathname);
+  }
+  function keepAlive(key) {
+    return KEEP_ALIVE.indexOf(key.replace(/\?.*$/, "")) >= 0;
+  }
+
+  function ensurePageWrapper() {
+    var page = document.getElementById("bzPage");
+    if (!page) {
+      page = document.createElement("div");
+      page.id = "bzPage";
+      var kids = Array.prototype.slice.call(document.body.children);
+      kids.forEach(function (k) {
+        if (k.id === "bzPageCache") return;
+        page.appendChild(k);
+      });
+      document.body.appendChild(page);
+    }
+    if (!document.getElementById("bzPageCache")) {
+      var c = document.createElement("div");
+      c.id = "bzPageCache";
+      c.style.display = "none";
+      document.body.appendChild(c);
+    }
+    return page;
+  }
+
+  function setTitle(t) {
+    if (t) document.title = t;
+  }
+
+  function adoptStyles(doc, key) {
+    var cachedEntry = cache[key];
+    var holder;
+    if (doc) {
+      holder = Array.prototype.slice.call(document.querySelectorAll('[data-bz-style="' + key + '"]'));
+      var fresh = holder.length === 0;
+      if (!fresh) {
+        if (cachedEntry) cachedEntry.styles = holder;
+        holder = null;
+        Array.prototype.forEach.call(document.querySelectorAll("[data-bz-style]"), function (el) {
+          try { el.disabled = el.getAttribute("data-bz-style") !== key; } catch (e) {}
+        });
+        return;
+      }
+      holder = [];
+      Array.prototype.forEach.call(doc.querySelectorAll('style, link[rel="stylesheet"]'), function (el) {
+        var mine = el.cloneNode(true);
+        mine.setAttribute("data-bz-style", key);
+        document.head.appendChild(mine);
+        holder.push(mine);
+      });
+      if (cachedEntry) cachedEntry.styles = holder;
+    } else if (cachedEntry && cachedEntry.styles) {
+      holder = cachedEntry.styles;
+    }
+    // Only the active page's stylesheets are enabled. Pages style `body`, `#app`
+    // and bare element selectors, so leaving two pages' CSS on at once repaints
+    // the current page with the previous one's rules.
+    Array.prototype.forEach.call(document.querySelectorAll("[data-bz-style]"), function (el) {
+      var on = el.getAttribute("data-bz-style") === key;
+      try { el.disabled = !on; } catch (e) { /* link elements on some browsers */ }
+    });
+    if (holder) {
+      holder.forEach(function (el) { try { el.disabled = false; } catch (e) {} });
+    }
+  }
+
+  function runScripts(root) {
+    var scripts = Array.prototype.slice.call(root.querySelectorAll("script"));
+    return scripts.reduce(function (chain, s) {
+      return chain.then(function () {
+        if (s.src && /\/buzzy\/nav\.js(\?|$)/.test(s.src)) { s.remove(); return; }
+        if (s.src) {
+          return new Promise(function (resolve) {
+            var n = document.createElement("script");
+            Array.prototype.forEach.call(s.attributes, function (a) { n.setAttribute(a.name, a.value); });
+            n.onload = resolve;
+            n.onerror = resolve;
+            document.head.appendChild(n);
+            s.remove();
+          });
+        }
+        var inline = document.createElement("script");
+        inline.textContent = s.textContent;
+        s.replaceWith(inline);
+      });
+    }, Promise.resolve());
+  }
+
+  function buildFromDoc(doc, key) {
+    var page = document.createElement("div");
+    page.id = "bzPage";
+    page.setAttribute("data-bz-path", key);
+    var skip = { SCRIPT: false };
+    Array.prototype.forEach.call(doc.body.children, function (child) {
+      if (child.tagName === "SCRIPT" && /\/buzzy\/nav\.js/.test(child.getAttribute("src") || "")) return;
+      page.appendChild(document.importNode(child, true));
+    });
+    return page;
+  }
+
+  function finish(key, title, scrollY) {
+    currentKey = key;
+    adoptStyles(null, key);
+    setTitle(title);
+    if (window.BeeZillaChrome) window.BeeZillaChrome.boot();
+    // Pages that wait for DOMContentLoaded (memory.html) never see it again in a
+    // soft navigation; a synthetic event keeps their boot code honest.
+    try { document.dispatchEvent(new Event("DOMContentLoaded")); } catch (e) {}
+    try { window.scrollTo(0, scrollY || 0); } catch (e) {}
+    busy = false;
+  }
+
+  function stashCurrent() {
+    var page = document.getElementById("bzPage");
+    if (!page) return;
+    var key = page.getAttribute("data-bz-path") || currentKey;
+    if (keepAlive(key)) {
+      // The chrome is rebuilt on restore, so the cached copy must not keep a
+      // second #bzNav / #bzVoiceDock / #bzPlanChip alive: duplicate ids make
+      // getElementById return the hidden copy and the visible control "vanish".
+      var staleHeader = page.querySelector("header");
+      if (staleHeader) staleHeader.remove();
+      cache[key] = {
+        el: page,
+        title: document.title,
+        scrollY: window.scrollY,
+        styles: Array.prototype.slice.call(document.querySelectorAll('[data-bz-style="' + key + '"]')),
+      };
+      document.getElementById("bzPageCache").appendChild(page);
+    } else {
+      page.parentNode && page.parentNode.removeChild(page);
+    }
+  }
+
+  function restore(key) {
+    var entry = cache[key];
+    var page = entry.el;
+    document.getElementById("bzPageCache").removeChild(page);
+    document.body.insertBefore(page, document.getElementById("bzPageCache"));
+    finish(key, entry.title, entry.scrollY);
+  }
+
+  function go(href, opts) {
+    opts = opts || {};
+    var url;
+    try { url = new URL(href, location.href); } catch (e) { return Promise.resolve(); }
+    if (!isShellPath(url)) { location.href = url.href; return Promise.resolve(); }
+    var key = keyOf(url);
+    if (key === keyOf(location.href)) return Promise.resolve();
+    if (busy) return Promise.resolve();
+    busy = true;
+
+    ensurePageWrapper();
+    var target = document.getElementById("bzPage");
+    if (target) target.setAttribute("data-bz-path", currentKey);
+    stashCurrent();
+    currentKey = key;
+    // Default is to push; only popstate passes push:false (history already moved).
+    if (opts.push !== false) history.pushState({ bzShell: key }, "", url.pathname + url.search);
+
+    if (cache[key]) { restore(key); return Promise.resolve(); }
+
+    return fetch(url.href, { credentials: "same-origin", headers: { "x-bz-shell": "1" } })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var page = buildFromDoc(doc, key);
+        document.body.insertBefore(page, document.getElementById("bzPageCache"));
+        adoptStyles(doc, key);
+        return runScripts(page).then(function () {
+          finish(key, doc.title, 0);
+        });
+      })
+      .catch(function () {
+        // A shell that cannot fetch must not trap the user: fall back to a real
+        // navigation, which is the old behaviour and always works.
+        busy = false;
+        location.href = url.href;
+      });
+  }
+
+  document.addEventListener(
+    "click",
+    function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+      if (!a) return;
+      if (a.target && a.target !== "_self") return;
+      if (a.hasAttribute("download")) return;
+      var href = a.getAttribute("href");
+      if (!href || href.charAt(0) === "#") return;
+      var url;
+      try { url = new URL(href, location.href); } catch (err) { return; }
+      if (!isShellPath(url)) return;
+      e.preventDefault();
+      go(url.href);
+    },
+    true
+  );
+
+  window.addEventListener("popstate", function () {
+    go(location.href, { push: false });
+  });
+
+  window.BeeZillaShell = { go: go, cache: cache, get busy() { return busy; }, get currentKey() { return currentKey; } };
 })();

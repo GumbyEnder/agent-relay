@@ -728,15 +728,21 @@ export default defineEventHandler(async (event) => {
       FROM buzzy_assets WHERE user_id = ${user.id}
         AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
     `;
+    // The Library must name the work, not the file. A list of "music-2026-11-07-
+    // 06-20-07.mp3" tells the owner nothing about which conversation produced it,
+    // so join the job and carry its title alongside the row (same defect class as
+    // the desktop issue where the column itself was missing).
     const rows = await sql<{
       id: number; filename: string; rel_path: string; content_type: string | null;
-      bytes: number; created_at: string;
+      bytes: number; created_at: string; job_id: string | null; job_title: string | null;
     }>`
-      SELECT id, filename, rel_path, content_type, bytes, created_at
-      FROM buzzy_assets
-      WHERE user_id = ${user.id}
-        AND (${prefix} = '' OR rel_path LIKE ${prefix + "%"})
-      ORDER BY rel_path ASC
+      SELECT a.id, a.filename, a.rel_path, a.content_type, a.bytes, a.created_at,
+             a.job_id, j.title AS job_title
+      FROM buzzy_assets a
+      LEFT JOIN buzzy_jobs j ON j.id = a.job_id
+      WHERE a.user_id = ${user.id}
+        AND (${prefix} = '' OR a.rel_path LIKE ${prefix + "%"})
+      ORDER BY a.rel_path ASC
       LIMIT ${want} OFFSET ${offset}
     `;
     return {
@@ -4306,8 +4312,34 @@ export default defineEventHandler(async (event) => {
         type: a.content_type,
       })),
     ];
-    const status = deliverables.length ? "Deliverable ready" : messages.length ? "In progress" : "Empty";
-    return { ok: true, project: { ...job, status }, deliverables, session: session[0] ?? null, turns, messages };
+    // A project is a pair: what went in, what came out. Inputs are listed next to the
+    // deliverables so a board or a brief cannot be separated from the thing it made.
+    const data = (job.data ?? {}) as Record<string, unknown>;
+    const recorded = Array.isArray(data.sources) ? (data.sources as Record<string, unknown>[]) : [];
+    const inputs: Record<string, unknown>[] = [...recorded];
+    if (data.board && !recorded.some((r) => r.kind === "board")) {
+      const b = data.board as { strokes?: unknown[]; images?: unknown[] };
+      inputs.push({
+        kind: "board",
+        label: `Sketch board — ${(b.strokes ?? []).length} marks, ${(b.images ?? []).length} images`,
+        url: `/buzzy/sketch?job=${job.id}`,
+      });
+    }
+    if (data.music && !recorded.some((r) => r.kind === "brief")) {
+      inputs.push({ kind: "brief", label: "Music brief, lyrics and instruments", url: `/buzzy/studio?job=${job.id}` });
+    }
+    // A reference image is an INPUT. It is stored as an asset so it can be shown and
+    // re-used, but listing it as a deliverable would let the project claim two outputs
+    // when it produced one.
+    const sourceIds = new Set(
+      inputs.filter((i) => i.kind === "reference").map((i) => String(i.url ?? "").split("/").pop() || ""),
+    );
+    const outputs = deliverables.filter((d) => !(d.kind === "image" && sourceIds.has(String(d.id))));
+    const status = outputs.length ? "Deliverable ready" : messages.length || inputs.length ? "In progress" : "Empty";
+    return {
+      ok: true, project: { ...job, status }, deliverables: outputs, sources: inputs,
+      session: session[0] ?? null, turns, messages,
+    };
   }
 
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────

@@ -3206,6 +3206,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function paintVoice() {
+      // The nav's voice control is a REMOTE for this engine: it shows mic state
+      // on every page and can stop the session with one click while you are
+      // somewhere else. Publishing here (not polling the DOM) keeps the two in
+      // step even while this page is cached behind another one.
+      try {
+        if (window.BeeZillaVoiceChip) {
+          window.BeeZillaVoiceChip.update({
+            mic: !!voice.mic, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
+          });
+        }
+      } catch (_) {}
       var t = document.getElementById("voiceToggle");
       if (t) {
         t.classList.toggle("on", voice.replies);
@@ -3652,6 +3663,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         paintVoice();
       });
       paintVoice();
+      // One engine, addressable from the chrome on any page. The nav dock calls
+      // toggle()/stop() instead of guessing at DOM buttons.
+      window.BeeZillaVoice = {
+        toggle: toggleMic,
+        stop: function () {
+          voice.mic = false;
+          saveListenPref(false);
+          stopListening();
+          stopSpeaking();
+          paintVoice();
+        },
+        state: function () {
+          return { mic: !!voice.mic, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
+        },
+      };
       // ── Listen mode survives leaving the page ──────────────────────────
       // The recognizer runs in the page; a navigation or reload kills it. The
       // INTENT persists, so returning re-arms it without a click. A click is

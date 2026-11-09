@@ -39,17 +39,48 @@ function env(key: string): string | undefined {
   return v || undefined;
 }
 
-/** Product label for outbound mail — branded per deployment (dogfood B5). */
-function brandLabel(): string {
+/**
+ * Product label for outbound mail.
+ *
+ * One deployment serves both products, so the brand of an email is decided by
+ * the HOST the request arrived on, not by a build-time env var. Reading only
+ * `BZ_BRAND` sent BeeZilla sign-ups a "Verify your Dev Boards email" from a
+ * devboards address — the account was right and the product was wrong. The env
+ * var stays as the fallback for callers with no request (magic links from a
+ * background job, dev mail).
+ */
+export type MailBrand = "BeeZilla" | "Dev Boards";
+
+export function brandLabel(host?: string | null): MailBrand {
+  const h = String(host ?? "").toLowerCase();
+  if (h.endsWith("beezilla.net")) return "BeeZilla";
+  if (h && (h.startsWith("app.devboards.ai") || h.endsWith("devboards.ai"))) return "Dev Boards";
   return process.env.BZ_BRAND === "beezilla" ? "BeeZilla" : "Dev Boards";
 }
 
-export function mailFromAddress(): string {
-  return (
-    env("SMTP_FROM") ||
-    env("MAIL_FROM") ||
-    `${brandLabel()} <noreply@localhost>`
-  );
+/** Replace only the display name of a From value, keeping the address. */
+function withDisplayName(from: string, label: string): string {
+  const m = /<([^>]+)>/.exec(from);
+  if (m) return `${label} <${m[1]}>`;
+  if (from.includes("@")) return `${label} <${from}>`;
+  return from;
+}
+
+/**
+ * From header for a brand. A true BeeZilla address needs its own verified
+ * sender (`MAIL_FROM_BEEZILLA`); without one we keep the configured address and
+ * correct the display name rather than inventing an unverified domain.
+ */
+export function mailFromAddress(label: MailBrand = brandLabel()): string {
+  const perBrand = env("MAIL_FROM_BEEZILLA") || env("BZ_MAIL_FROM");
+  if (label === "BeeZilla" && perBrand) return perBrand;
+  const configured = env("SMTP_FROM") || env("MAIL_FROM");
+  if (configured) {
+    const current = brandLabel();
+    if (label === current) return configured;
+    return withDisplayName(configured, label);
+  }
+  return `${label} <noreply@localhost>`;
 }
 
 export function isSmtpConfigured(): boolean {
@@ -97,9 +128,21 @@ export function latestDevMailFor(email: string): OutboundEmail | null {
 
 function getSmtp(): Transporter | null {
   if (globalMail.__agentRelaySmtp__) return globalMail.__agentRelaySmtp__;
+  // Every stage is bounded. An SMTP host that accepts the TCP connection and then
+  // never greets used to hold the sign-up request open indefinitely, which the
+  // browser showed as a button stuck on "Creating…" for an account that already
+  // existed. 8s is generous for a handshake and short enough to stay under a
+  // proxy's patience.
+  const timeouts = {
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 10000,
+  };
   const url = env("SMTP_URL");
   if (url) {
-    globalMail.__agentRelaySmtp__ = createTransport(url);
+    // Options object, not a second argument: createTransport's 2nd parameter is
+    // per-message defaults, so the timeouts never reached the connection there.
+    globalMail.__agentRelaySmtp__ = createTransport({ url, ...timeouts });
     return globalMail.__agentRelaySmtp__;
   }
   const host = env("SMTP_HOST");
@@ -112,6 +155,7 @@ function getSmtp(): Transporter | null {
     port: Number.isFinite(port) ? port : 587,
     secure: env("SMTP_SECURE") === "1" || env("SMTP_SECURE") === "true" || port === 465,
     auth: user ? { user, pass: pass ?? "" } : undefined,
+    ...timeouts,
   });
   return globalMail.__agentRelaySmtp__;
 }
@@ -121,17 +165,21 @@ async function sendViaResend(input: {
   subject: string;
   text: string;
   html?: string;
+  from: string;
 }): Promise<boolean> {
   const key = env("RESEND_API_KEY");
   if (!key) return false;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
+    // Bounded like SMTP: a provider that stops answering must not hold a
+    // sign-up request (and the button on screen) open.
+    signal: AbortSignal.timeout(8000),
     headers: {
       authorization: `Bearer ${key}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      from: mailFromAddress(),
+      from: input.from,
       to: [input.to],
       subject: input.subject,
       text: input.text,
@@ -151,7 +199,10 @@ export async function sendMail(input: {
   text: string;
   html?: string;
   actionUrl?: string;
+  /** Which product this mail belongs to. Defaults from BZ_BRAND. */
+  brand?: MailBrand;
 }): Promise<OutboundEmail> {
+  const from = mailFromAddress(input.brand ?? brandLabel());
   const id = `mail_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const base: OutboundEmail = {
     id,
@@ -165,7 +216,7 @@ export async function sendMail(input: {
   };
 
   try {
-    if (await sendViaResend(input)) {
+    if (await sendViaResend({ ...input, from })) {
       const sent = { ...base, transport: "resend" as const };
       remember(sent);
       console.info(`[mail] resend → ${input.to} · ${input.subject}`);
@@ -174,7 +225,7 @@ export async function sendMail(input: {
     const smtp = getSmtp();
     if (smtp) {
       await smtp.sendMail({
-        from: mailFromAddress(),
+        from,
         to: input.to,
         subject: input.subject,
         text: input.text,
@@ -201,13 +252,16 @@ export async function sendVerificationMail(opts: {
   to: string;
   name?: string | null;
   url: string;
+  /** Request hostname, so the mail carries the product the user signed up to. */
+  host?: string | null;
 }): Promise<OutboundEmail> {
+  const brand = brandLabel(opts.host);
   const name = opts.name?.trim() || "there";
-  const subject = `Verify your ${brandLabel()} email`;
+  const subject = `Verify your ${brand} email`;
   const text = [
     `Hi ${name},`,
     "",
-    `Thanks for registering with ${brandLabel()}.`,
+    `Thanks for registering with ${brand}.`,
     "Please verify your email by opening this link:",
     "",
     opts.url,
@@ -215,18 +269,18 @@ export async function sendVerificationMail(opts: {
     "This link expires in about one hour.",
     "If you did not create an account, you can ignore this message.",
     "",
-    `— ${brandLabel()}`,
+    `— ${brand}`,
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
       <p>Hi ${escapeHtml(name)},</p>
-      <p>Thanks for registering with <strong>${brandLabel()}</strong>.</p>
+      <p>Thanks for registering with <strong>${brand}</strong>.</p>
       <p><a href="${escapeAttr(opts.url)}" style="display:inline-block;padding:0.6rem 1rem;background:#111;color:#fff;text-decoration:none;border-radius:6px">Verify email</a></p>
       <p style="color:#666;font-size:0.9rem">Or paste this URL:<br/><code>${escapeHtml(opts.url)}</code></p>
       <p style="color:#666;font-size:0.85rem">Link expires in about one hour. If you did not sign up, ignore this email.</p>
     </div>
   `.trim();
-  return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url });
+  return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url, brand });
 }
 
 /** Magic-link sign-in email (Better Auth magicLink plugin). */
@@ -234,59 +288,64 @@ export async function sendMagicLinkMail(opts: {
   to: string;
   name?: string | null;
   url: string;
+  host?: string | null;
 }): Promise<OutboundEmail> {
+  const brand = brandLabel(opts.host);
   const name = opts.name?.trim() || "there";
-  const subject = `Your ${brandLabel()} sign-in link`;
+  const subject = `Your ${brand} sign-in link`;
   const text = [
     `Hi ${name},`,
     "",
-    `Click this link to sign in to ${brandLabel()}:`,
+    `Click this link to sign in to ${brand}:`,
     "",
     opts.url,
     "",
     "This link expires in 15 minutes and can be used once.",
     "If you did not request it, you can ignore this message.",
     "",
-    `— ${brandLabel()}`,
+    `— ${brand}`,
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
       <p>Hi ${escapeHtml(name)},</p>
-      <p>Click below to sign in to <strong>${brandLabel()}</strong>:</p>
+      <p>Click below to sign in to <strong>${brand}</strong>:</p>
       <p><a href="${escapeAttr(opts.url)}" style="display:inline-block;padding:0.6rem 1rem;background:#111;color:#fff;text-decoration:none;border-radius:6px">Sign in</a></p>
       <p style="color:#666;font-size:0.9rem">Or paste this URL:<br/><code>${escapeHtml(opts.url)}</code></p>
       <p style="color:#666;font-size:0.85rem">This link expires in 15 minutes and can be used once. If you didn't request it, ignore this email.</p>
     </div>
   `.trim();
-  return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url });
+  return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url, brand });
 }
 
 /** Security notice after a password was replaced (email-first forgot-password flow). */
 export async function sendPasswordChangedMail(opts: {
   to: string;
   name?: string | null;
+  /** Request hostname, so the notice carries the product the user signed in to. */
+  host?: string | null;
 }): Promise<OutboundEmail> {
+  const brand = brandLabel(opts.host);
   const name = opts.name?.trim() || "there";
-  const subject = `Your ${brandLabel()} password was changed`;
+  const subject = `Your ${brand} password was changed`;
   const text = [
     `Hi ${name},`,
     "",
-    `The password for your ${brandLabel()} account was just changed, and your other devices were signed out.`,
+    `The password for your ${brand} account was just changed, and your other devices were signed out.`,
     "",
     "If this was you, there is nothing to do.",
     "If it wasn't, go to the sign-in page, enter your email and choose \"Email me a sign-in link\" to set a new password.",
     "",
-    `— ${brandLabel()}`,
+    `— ${brand}`,
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
       <p>Hi ${escapeHtml(name)},</p>
-      <p>The password for your <strong>${brandLabel()}</strong> account was just changed, and your other devices were signed out.</p>
+      <p>The password for your <strong>${brand}</strong> account was just changed, and your other devices were signed out.</p>
       <p>If this was you, there is nothing to do.</p>
       <p style="color:#666;font-size:0.9rem">If it wasn't, go to the sign-in page, enter your email and choose <em>Email me a sign-in link</em> to set a new password.</p>
     </div>
   `.trim();
-  return sendMail({ to: opts.to, subject, text, html });
+  return sendMail({ to: opts.to, subject, text, html, brand });
 }
 
 function escapeHtml(s: string): string {

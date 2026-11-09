@@ -165,7 +165,12 @@
           if (ev === "text") { liveText += p.t || ""; live.textContent = liveText; log.scrollTop = log.scrollHeight; }
           else if (ev === "stage") { stage.textContent = p.label || p.phase || "Working…"; }
           else if (ev === "tool") { stage.textContent = p.state === "running" ? "Working — " + String(p.name || "a tool").replace(/_/g, " ") + "…" : "Writing the reply…"; }
-          else if (ev === "done") { finalData = p; }
+          else if (ev === "done") {
+            finalData = p;
+            // Adopt the item this turn produced, or the next turn would start a new
+            // one every time (#238). The session id is not the job id any more.
+            if (p && p.jobId && !opts.jobId) opts.jobId = p.jobId;
+          }
           else if (ev === "error") { throw new Error(p.error || "The turn failed."); }
         }
         function pump() {

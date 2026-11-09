@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /buzzy/library
+Disallow: /buzzy/profile
+Disallow: /buzzy/memory
+Disallow: /buzzy/wallet
+Disallow: /buzzy/project
+Disallow: /buzzy/upload
+Disallow: /buzzy/studio
+Disallow: /buzzy/sketch
+
+Sitemap: https://beezilla.net/sitemap.xml

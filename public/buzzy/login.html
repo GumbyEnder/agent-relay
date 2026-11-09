@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BeeZilla — Sign in / Register</title>
-  <link rel="icon" href="/buzzy/brand/bz-favicon-180.png" />
+  <link rel="icon" href="/brand/bz-favicon-180.png" />
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -167,16 +167,31 @@
         passwordError.textContent = on ? (text || "Wrong password") : "";
         password.setAttribute("aria-invalid", on ? "true" : "false");
       }
+      // Every request answers or fails within 20 s, so no button can stay on
+      // "Checking…" / "Logging in…" / "Saving…": a timeout lands in the same
+      // .catch that re-enables the controls.
+      var REQUEST_TIMEOUT_MS = 20000;
       function api(method, path, body) {
+        var controller = typeof AbortController === "function" ? new AbortController() : null;
+        var timer = controller ? setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS) : null;
         return fetch(path, {
           method: method,
           headers: body ? { "content-type": "application/json" } : {},
           credentials: "same-origin",
           body: body ? JSON.stringify(body) : undefined,
+          signal: controller ? controller.signal : undefined,
         }).then(function (r) {
-          return r.json().catch(function () { return {}; }).then(function (data) {
+          // An aborted body read rejects too, so the timer covers the whole answer.
+          return r.json().catch(function (err) {
+            if (err && err.name === "AbortError") throw err;
+            return {};
+          }).then(function (data) {
+            clearTimeout(timer);
             return { ok: r.ok, status: r.status, data: data || {} };
           });
+        }, function (err) {
+          clearTimeout(timer);
+          throw err;
         });
       }
       function codeOf(res) { return (res.data && res.data.code) || ""; }

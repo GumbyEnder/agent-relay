@@ -41,8 +41,15 @@ import { z } from "zod";
 export const RECENT_SIGN_IN_SECONDS = 15 * 60;
 
 export interface EmailFirstOptions {
-  /** Called after an existing password was replaced (best effort, never throws to the caller). */
-  onPasswordReplaced?: (user: { id: string; email: string; name?: string | null }) => Promise<unknown> | unknown;
+  /**
+   * Called after an existing password was replaced (best effort, never throws
+   * to the caller). `headers` are the request's, so the notice can be branded
+   * by the host the browser used.
+   */
+  onPasswordReplaced?: (
+    user: { id: string; email: string; name?: string | null },
+    headers: Headers | null,
+  ) => Promise<unknown> | unknown;
 }
 
 function isRecent(createdAt: Date | string, now = Date.now()): boolean {
@@ -146,7 +153,10 @@ export const emailFirst = (options: EmailFirstOptions = {}) =>
                 .map((s) => ctx.context.internalAdapter.deleteSession(s.token)),
             );
             try {
-              await options.onPasswordReplaced?.({ id: user.id, email: user.email, name: user.name });
+              await options.onPasswordReplaced?.(
+                { id: user.id, email: user.email, name: user.name },
+                ctx.request?.headers ?? ctx.headers ?? null,
+              );
             } catch (err) {
               ctx.context.logger.error("email-first: password-changed notice failed", err);
             }

@@ -63,11 +63,11 @@ BeeZilla (alias **Buzzy**, permanently) is the consumer front door on the same e
 4. **Approve** — the gate is real. No work items, no spend, no external send before approval, and changing the draft voids it.
 5. **Work items & documents** — the approved plan becomes tracked work, and the deliverable downloads as `.md`, `.doc`, or `.pdf` and stays in the Library.
 
-**Pages** (every `/buzzy/*` page is a full page load — no client-side screen switching):
+**Pages** (`/buzzy/talk` is the consolidated work surface; the site chrome moves between `/buzzy/*` pages without reloading the document, so a voice session keeps running):
 
 | Page | What it does |
 |---|---|
-| `/buzzy/` → Work | Jobs and chats as cards with company, status, and recency; **search across every company** by title, problem text, or anything said in a conversation |
+| `/buzzy/` | 302 → `/buzzy/talk`. There is no separate Jobs page: work items and chats are the Talk surface plus the project view (`/buzzy/project?job=<id>`) |
 | `/buzzy/talk` | The chat: interview, draft review, Approve/Change, and the editable multi-line **Brief** panel |
 | `/buzzy/memory` | What BeeZilla remembers about you and your company |
 | `/buzzy/experts` | Expert roles pulled in per job, priced as "about $X" — never raw model IDs |

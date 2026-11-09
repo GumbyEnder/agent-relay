@@ -169,6 +169,22 @@ let deviceB = "";
   const notice = latestDevMailFor(EMAIL);
   assert.ok(notice && /password was changed/i.test(notice.subject), "password-changed notice emailed");
 
+  // Mail is branded by the host the browser used.
+  const bz = await handleAuthRequest(
+    new Request(`${ORIGIN}/api/auth/sign-in/magic-link`, {
+      method: "POST",
+      headers: {
+        origin: ORIGIN,
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-forwarded-host": "beezilla.net",
+      },
+      body: JSON.stringify({ email: EMAIL, callbackURL: AFTER_LINK }),
+    }),
+  );
+  assert.equal(bz.status, 200);
+  assert.match(latestDevMailFor(EMAIL)!.subject, /BeeZilla sign-in link/, "beezilla.net link mail says BeeZilla");
+
   const stillIn = await call("GET", "/get-session", { cookie: deviceC });
   assert.ok(stillIn.data?.session, "the device that reset stays signed in");
   for (const [label, cookie] of [["A", deviceA], ["B", deviceB]] as const) {
