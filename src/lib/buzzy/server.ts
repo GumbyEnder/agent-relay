@@ -1803,5 +1803,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   }
 
+  // Every turn names the item it is about, so a client never has to remember it.
+  if (jobId && !response.jobId) response.jobId = jobId;
   return response;
 }
