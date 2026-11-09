@@ -70,6 +70,7 @@
     <button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
     <button id="clear">Clear drawing</button>
     <button id="save">Save</button>
+    <span id="savedFlag" style="font-size:.76rem;align-self:center"></span>
     <button id="shot" title="Download a PNG of the board">Export PNG</button>
     <button id="svg" title="Download the drawing as vector SVG (images are not included)">Export SVG</button>
   </div>
@@ -119,7 +120,42 @@
       undoStack.push(JSON.stringify({ strokes: strokes, images: images }));
       if (undoStack.length > 50) undoStack.shift();
       redoStack.length = 0;
+      autoSave();
     }
+
+    // The board IS the input of this project, so it is written back without being
+    // asked. Relying on the Save button meant a session of work could live only in
+    // the tab — /buzzy/sketch?job=… then opened an empty project.
+    var saveTimer = null, saving = false, saveAgain = false;
+    function autoSave() {
+      if (!jobId) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { flushSave(); }, 1200);
+    }
+    function flushSave() {
+      if (!jobId) return;
+      if (saving) { saveAgain = true; return; }
+      saving = true;
+      fetch("/api/buzzy/art", {
+        method: "POST", credentials: "same-origin", keepalive: true,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "save", jobId: jobId, board: boardJson() }),
+      }).then(function (r) { if (!r.ok) throw new Error("save failed"); setSaved(true); })
+        .catch(function () { setSaved(false); })
+        .then(function () {
+          saving = false;
+          if (saveAgain) { saveAgain = false; flushSave(); }
+        });
+    }
+    function setSaved(ok) {
+      var el = document.getElementById("savedFlag");
+      if (!el) return;
+      el.textContent = ok ? "Saved to project" : "Not saved — retrying";
+      el.style.color = ok ? "#6ee7a8" : "#ff6b6b";
+      if (ok) { clearTimeout(el._t); el._t = setTimeout(function () { el.textContent = ""; }, 2500); }
+    }
+    window.addEventListener("pagehide", function () { if (jobId) flushSave(); });
+    document.addEventListener("visibilitychange", function () { if (document.hidden) flushSave(); });
     function applySnapshot(json) {
       var d = JSON.parse(json);
       strokes = d.strokes || [];
@@ -489,11 +525,9 @@
 
     document.getElementById("save").addEventListener("click", function () {
       if (!jobId) { setStatus("This board is not attached to a project yet — Create once and it will be."); return; }
-      fetch("/api/buzzy/art", {
-        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "save", jobId: jobId, board: boardJson() }),
-      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-        .then(function (x) { setStatus(x.ok ? "Board saved." : (x.d.error || "Could not save.")); });
+      clearTimeout(saveTimer);
+      flushSave();
+      setStatus("Board saved.");
     });
 
     // The drawing is already vectors — {tool, colour, width, points} — so an SVG

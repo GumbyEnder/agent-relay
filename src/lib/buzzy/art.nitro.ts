@@ -84,8 +84,24 @@ export default defineEventHandler(async (event) => {
     if (!owned.length) return json(404, { error: "No such project", code: "not_found" });
     // The board is the project's source, so it lives beside its brief and survives
     // every reload — not in the browser's memory.
+    const count = (k: string) => (Array.isArray((board as Record<string, unknown>)[k]) ? ((board as Record<string, unknown>)[k] as unknown[]).length : 0);
+    // The board is the project's SOURCE, so it is listed as one: a project should show
+    // what went in beside what came out. Kept as a single entry that is refreshed, not
+    // one row per keystroke.
+    const source = {
+      kind: "board",
+      label: `Sketch board — ${count("strokes")} marks, ${count("images")} images`,
+      url: `/buzzy/sketch?job=${jobId}`,
+      updatedAt: new Date().toISOString(),
+    };
     await sql`
-      UPDATE buzzy_jobs SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{board}', ${JSON.stringify(board)}::jsonb, true),
+      UPDATE buzzy_jobs SET
+        data = jsonb_set(
+          jsonb_set(COALESCE(data, '{}'::jsonb), '{board}', ${JSON.stringify(board)}::jsonb, true),
+          '{sources}',
+          COALESCE((SELECT jsonb_agg(x) FROM jsonb_array_elements(COALESCE(data->'sources', '[]'::jsonb)) x
+                    WHERE x->>'kind' <> 'board'), '[]'::jsonb) || ${JSON.stringify([source])}::jsonb,
+          true),
         updated_at = now()
       WHERE id = ${jobId} AND user_id = ${user.id}`;
     return json(200, { ok: true, saved: true });
@@ -107,6 +123,26 @@ export default defineEventHandler(async (event) => {
   }
 
   const refs = Array.isArray(body.refs) ? (body.refs as unknown[]).filter((r): r is string => typeof r === "string") : [];
+  // The reference image the render was conditioned on is an INPUT of this project.
+  // Storing it is what makes "source in, output out" auditable instead of folklore.
+  let referenceSource: { kind: string; label: string; url: string; bytes: number } | null = null;
+  if (refs.length) {
+    try {
+      const m = /^data:([^;,]+);base64,(.*)$/s.exec(refs[0]);
+      if (m) {
+        const bytes = Buffer.from(m[2]!, "base64");
+        const stampRef = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+        const refStored = await storeImage(user.id, bytes, `reference-${stampRef}.png`, m[1]!);
+        if (jobId) await sql`UPDATE buzzy_assets SET job_id = ${jobId} WHERE user_id = ${user.id} AND id = ${refStored.id}`;
+        referenceSource = {
+          kind: "reference",
+          label: `Reference image used for "${prompt.slice(0, 60)}${prompt.length > 60 ? "…" : ""}"`,
+          url: `/api/buzzy/assets/${refStored.id}`,
+          bytes: refStored.bytes,
+        };
+      }
+    } catch { /* a reference that cannot be stored must not block the render */ }
+  }
   const made = await generateImage(prompt, { referenceImages: refs });
   await recordUsage({
     userId: user.id, scope: "image", units: made.ok ? 1 : 0, ms: made.ms ?? 0,
@@ -127,11 +163,20 @@ export default defineEventHandler(async (event) => {
   if (jobId) {
     try {
       await sql`UPDATE buzzy_assets SET job_id = ${jobId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
+      const inputs = [
+        { kind: "prompt", label: `Instruction: ${prompt.slice(0, 120)}`, url: `/buzzy/sketch?job=${jobId}`, updatedAt: new Date().toISOString() },
+        ...(referenceSource ? [{ ...referenceSource, updatedAt: new Date().toISOString() }] : []),
+      ];
       await sql`
         UPDATE buzzy_jobs SET status = 'Deliverable ready',
-          data = jsonb_set(COALESCE(data, '{}'::jsonb), '{artifacts}', COALESCE(data->'artifacts', '[]'::jsonb) || ${JSON.stringify([
-            { kind: "image", id: String(stored.id), url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType },
-          ])}::jsonb, true),
+          data = jsonb_set(
+            jsonb_set(COALESCE(data, '{}'::jsonb), '{artifacts}', COALESCE(data->'artifacts', '[]'::jsonb) || ${JSON.stringify([
+              { kind: "image", id: String(stored.id), url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType },
+            ])}::jsonb, true),
+            '{sources}',
+            COALESCE((SELECT jsonb_agg(x) FROM jsonb_array_elements(COALESCE(data->'sources', '[]'::jsonb)) x
+                      WHERE x->>'kind' NOT IN ('prompt')), '[]'::jsonb) || ${JSON.stringify(inputs)}::jsonb,
+            true),
           updated_at = now()
         WHERE id = ${jobId} AND user_id = ${user.id}`;
     } catch { /* link is an improvement, not a gate */ }

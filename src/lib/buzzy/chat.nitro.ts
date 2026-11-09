@@ -4306,8 +4306,27 @@ export default defineEventHandler(async (event) => {
         type: a.content_type,
       })),
     ];
-    const status = deliverables.length ? "Deliverable ready" : messages.length ? "In progress" : "Empty";
-    return { ok: true, project: { ...job, status }, deliverables, session: session[0] ?? null, turns, messages };
+    // A project is a pair: what went in, what came out. Inputs are listed next to the
+    // deliverables so a board or a brief cannot be separated from the thing it made.
+    const data = (job.data ?? {}) as Record<string, unknown>;
+    const recorded = Array.isArray(data.sources) ? (data.sources as Record<string, unknown>[]) : [];
+    const inputs: Record<string, unknown>[] = [...recorded];
+    if (data.board && !recorded.some((r) => r.kind === "board")) {
+      const b = data.board as { strokes?: unknown[]; images?: unknown[] };
+      inputs.push({
+        kind: "board",
+        label: `Sketch board — ${(b.strokes ?? []).length} marks, ${(b.images ?? []).length} images`,
+        url: `/buzzy/sketch?job=${job.id}`,
+      });
+    }
+    if (data.music && !recorded.some((r) => r.kind === "brief")) {
+      inputs.push({ kind: "brief", label: "Music brief, lyrics and instruments", url: `/buzzy/studio?job=${job.id}` });
+    }
+    const status = deliverables.length ? "Deliverable ready" : messages.length || inputs.length ? "In progress" : "Empty";
+    return {
+      ok: true, project: { ...job, status }, deliverables, sources: inputs,
+      session: session[0] ?? null, turns, messages,
+    };
   }
 
   // ── GET /api/buzzy/sessions — list the user's Talk sessions ──────────
