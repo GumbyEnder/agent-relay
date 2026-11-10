@@ -1871,7 +1871,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // and raced each other, which is how the name vanished on some loads. ──────
     (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // A non-2xx is an outage, not a logout. The chrome already refuses to
+        // erase a real identity on a 500 (fee2c5f); this page gate used to take
+        // the same answer as "signed out" and eject a signed-in reader to
+        // /buzzy/landing. Only a 200 with no user may refuse.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
