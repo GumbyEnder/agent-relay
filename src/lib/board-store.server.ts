@@ -1981,20 +1981,19 @@ export const durableBoard = {
       // classifier saw a stale heartbeat instead of an unowned card, and
       // nothing ever moved the card where a human or agent would see it.
       //
-      // The clock is max(lastHeartbeat, claimed_at), falling back to updated_at
-      // — same shape as effectiveHeartbeatAt() — so a re-claimed card that
-      // still carries the previous owner's dead heartbeat is not swept out from
-      // under the new owner. `sustained` cards are exempt (see
-      // DEFAULT_STALE_POLICY).
+      // The clock is greatest(lastHeartbeat, claimed_at, updated_at) — the same
+      // shape as effectiveHeartbeatAt(), plus updated_at. updated_at is NOT NULL
+      // and touchMission bumps it on *every* mutation (claim, heartbeat, move,
+      // comment, unclaim), so it is the one clock a human gesture also sets:
+      // an operator dragging an old card into Running, or replying to a call
+      // that returns one, keeps its 6h instead of being snapped back to Inbox on
+      // the next poll. `sustained` cards are exempt (see DEFAULT_STALE_POLICY).
       //
       // There is deliberately NO `claimed_by is not null` filter. Unclaim is a
       // published verb (/api/agent/missions/{id}/unclaim) and it leaves the card
       // on running with claimed_by null (board-engine.ts) — i.e. it manufactures
       // exactly the orphan this sweep exists to clear. Filtering on the owner
-      // made that dead end reachable from a supported endpoint. The fallback is
-      // updated_at, NOT to_timestamp(0): updated_at is NOT NULL and touchMission
-      // bumps it on every move, so an operator's just-moved card keeps its 6h
-      // while a card with no clocks at all stales out from its last touch.
+      // made that dead end reachable from a supported endpoint.
       const staleHours = Number(process.env.STALE_CLAIM_RELEASE_HOURS ?? "6");
       if (staleHours > 0) {
         const now = Date.now();
@@ -2004,11 +2003,15 @@ export const durableBoard = {
             select id, project_id, last_heartbeat, claimed_at, updated_at
               from ar_missions
              where column_id = 'running'
+               -- tags is NOT NULL DEFAULT '[]', but a malformed legacy value must
+               -- not 500 the poll: treat a non-array as "no tags" (i.e. sweepable)
                and not exists (
-                     select 1 from jsonb_array_elements_text(tags) t
+                     select 1 from jsonb_array_elements_text(
+                       case when jsonb_typeof(tags) = 'array' then tags else '[]'::jsonb end
+                     ) t
                       where lower(t) = 'sustained'
                    )
-               and coalesce(greatest(last_heartbeat, claimed_at), updated_at) < ${cutoff}
+               and greatest(last_heartbeat, claimed_at, updated_at) < ${cutoff}
           ), moved as (
             update ar_missions m
                set column_id = 'inbox',
@@ -2023,7 +2026,7 @@ export const durableBoard = {
                -- the UPDATE re-read the row, and a join on id alone would demote
                -- a card an agent woke up on in the same window.
                and m.column_id = 'running'
-               and coalesce(greatest(m.last_heartbeat, m.claimed_at), m.updated_at) < ${cutoff}
+               and greatest(m.last_heartbeat, m.claimed_at, m.updated_at) < ${cutoff}
             returning m.id, m.project_id, s.last_heartbeat, s.claimed_at, s.updated_at
           ), hist as (
             insert into ar_mission_history (
