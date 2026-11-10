@@ -1855,45 +1855,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }).catch(function () {});
     }
 
-    // ── Account: session-aware Sign in / user name + Log out ──────────
-    (function account() {
-      var link = document.querySelector(".account-link");
-      if (!link) return;
+    // ── Account gate. The chrome (nav.js) owns the identity chip and its menu;
+    // this page only refuses a signed-out visitor. Two writers built two menus
+    // and raced each other, which is how the name vanished on some loads. ──────
+    (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (session) {
-          var user = session && session.user;
-          if (!user) { window.location.replace("/buzzy/landing"); return; }
-          var bzDisplayName = user.name || user.email || "Account";
-          link.textContent = bzDisplayName;
-          link.href = "#";
-          link.style.cursor = "pointer";
-          // Profile menu: clicking the name opens a small account panel
-          var menu = document.createElement("div");
-          menu.className = "account-menu";
-          menu.style.display = "none";
-          menu.innerHTML =
-            '<div class="am-name">' + bzDisplayName + "</div>" +
-            '<div class="am-email">' + (user.email || "") + "</div>" +
-            '<button type="button" class="am-signout">Log out</button>';
-          var out = menu.querySelector(".am-signout");
-          out.addEventListener("click", function (e) {
-            e.preventDefault();
-            fetch("/api/auth/sign-out", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "content-type": "application/json" },
-              body: "{}",
-            }).then(function () { window.location.href = "/buzzy/"; });
-          });
-          if (link.parentNode) link.parentNode.insertBefore(menu, link.nextSibling);
-          link.addEventListener("click", function (e) {
-            e.preventDefault();
-            menu.style.display = menu.style.display === "none" ? "block" : "none";
-          });
-          document.addEventListener("click", function (e) {
-            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
-          });
+          if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
         .catch(function () {});
     })();

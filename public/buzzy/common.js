@@ -13,39 +13,10 @@
       .catch(function () { return null; });
   }
 
-  // Session-aware account link: user name + Log out, or keep the Sign in link.
-  function renderAccount() {
-    var link = document.querySelector(".account-link");
-    if (!link) return;
-    resolveSession().then(function (user) {
-      if (!user || !user.name) return; // keep the Sign in link
-      link.textContent = user.name;
-      link.removeAttribute("href");
-      link.style.cursor = "default";
-      var out = document.createElement("a");
-      out.href = "#";
-      out.textContent = "Log out";
-      out.addEventListener("click", function (e) {
-        e.preventDefault();
-        fetch("/api/auth/sign-out", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        }).then(function () { window.location.href = "/buzzy/"; });
-      });
-      // Place the Log out link beside the nav, not as a 9th nav item.
-      // nav.js may have already adopted a page-built account menu and removed this
-      // link from the header, so the node can be detached by the time this promise
-      // resolves — calling insertBefore on a detached node's null parent throws and
-      // shows up as a page error (Memory did exactly that). Guard, and let the
-      // chrome own identity when it already has.
-      if (!link.parentNode) return;
-      var navEl = document.querySelector("#bzNav");
-      if (navEl && navEl.parentNode && navEl.contains(link)) navEl.parentNode.insertBefore(out, navEl.nextSibling);
-      else link.parentNode.insertBefore(out, link.nextSibling);
-    });
-  }
+  // Account identity is the chrome's job (nav.js owns the chip and its dropdown menu).
+  // This file used to insert a second 'Log out' beside the nav, which is exactly the
+  // duplicate identity the chrome was written to remove.
+  function renderAccount() {}
 
   // Canonical header labels (owner-set): Jobs | Chat | Memory | Experts.
   var LABELS = {
