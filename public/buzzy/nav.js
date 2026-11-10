@@ -89,6 +89,12 @@
       ".bz-chrome-scroll{overflow-x:auto;scrollbar-width:none}",
       "#bzChrome .bz-account{color:#8d8d8d;font-size:.82rem;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-account:hover{color:#ffd40d}",
+      // The dropdown is chrome, so the chrome styles it: pages without a local
+      // .account-menu rule (landing, wallet) would otherwise get an unstyled block.
+      "#bzChrome .account-menu{position:absolute;top:100%;right:0;margin-top:.4rem;background:#141414;border:1px solid #2A2A2A;border-radius:6px;padding:.7rem .9rem;min-width:200px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);text-align:left}",
+      "#bzChrome .account-menu .am-name{font-weight:600;color:#fff;font-size:.9rem}",
+      "#bzChrome .account-menu .am-email{font-size:.75rem;color:#888;margin:.15rem 0 .6rem;word-break:break-all}",
+      "#bzChrome .account-menu .am-signout{width:100%;font-size:.8rem;padding:.4rem .6rem;background:#1b1b1b;color:#e8e8e8;border:1px solid #333;border-radius:6px;cursor:pointer}",
       "#bzChrome .bz-plan{display:inline-flex;align-items:center;border:1px solid #3a3a3a;border-radius:999px;padding:.1rem .5rem;font-size:.7rem;font-weight:800;letter-spacing:.06em;color:#cfcfcf;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-plan-pro{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome .bz-plan-starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
@@ -258,9 +264,51 @@
     chrome.style.position = "relative";
 
     function paint(name, email) {
+      user = name ? { name: name, email: email || "" } : null;
       a.textContent = name || "Sign in";
       a.href = name ? "/buzzy/profile" : "/buzzy/landing";
       a.title = email || name || "Sign in";
+      if (user) ensureMenu();
+    }
+    var user = null;
+
+    function signOut(e) {
+      if (e) e.preventDefault();
+      fetch("/api/auth/sign-out", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" }, body: "{}",
+      }).then(function () { window.location.href = "/buzzy/"; });
+    }
+
+    function fillMenu(m) {
+      if (!user) return;
+      m.innerHTML = "";
+      var n = document.createElement("div"); n.className = "am-name"; n.textContent = user.name;
+      m.appendChild(n);
+      if (user.email) {
+        var em = document.createElement("div"); em.className = "am-email"; em.textContent = user.email;
+        m.appendChild(em);
+      }
+      var out = document.createElement("button");
+      out.type = "button"; out.className = "am-signout"; out.textContent = "Log out";
+      out.addEventListener("click", signOut);
+      m.appendChild(out);
+    }
+
+    // One menu, owned by the chrome. Pages that build their own get adopted; pages
+    // that never build one still get a Log out instead of a name that leads nowhere.
+    function ensureMenu() {
+      if (!user) return;
+      var m = chrome.querySelector(".account-menu");
+      if (m) { fillMenu(m); return; }
+      m = document.createElement("div");
+      m.className = "account-menu bz-account-menu";
+      m.setAttribute("data-bz-adopted", "1");
+      m.style.display = "none";
+      m.style.top = "100%";
+      m.style.right = "0";
+      chrome.appendChild(m);
+      fillMenu(m);
     }
     if (!a.textContent) a.textContent = "";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
