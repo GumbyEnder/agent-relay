@@ -3171,7 +3171,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { localStorage.setItem(LISTEN_KEY, on ? "1" : "0"); } catch (_) {}
       // The "on" state also drives the tab title marker, so a background tab
       // still says whether it is listening.
-      try { document.title = on ? "🎙 BeeZilla — Listening" : "🐴 BeeZilla — Chat"; } catch (_) {}
+      try { document.title = on ? "🎙 BeeZilla — Listening" : "BeeZilla — Chat"; } catch (_) {}
     }
 
     function paintVoice() {
