@@ -165,7 +165,12 @@ export default defineEventHandler(async (event) => {
     '<a href="/buzzy/recipes" data-nav="recipes">Recipes</a>',
     '<a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>',
     '<a href="/buzzy/upload" data-nav="publish">Publish</a>',
-    '<a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>',
+    // Empty on purpose: the page cannot know who is signed in, and the text used to
+    // be `Sign in`, which every signed-in reader saw for a round trip on every load
+    // (BZ-15 residual — loudest on Sketch, whose header is otherwise empty). The
+    // chrome paints the last known identity from localStorage, then the real answer.
+    // A blank 5.5rem slot is a skeleton; the word "Sign in" over a real name is a lie.
+    '<a href="/buzzy/landing" class="account-link" id="accountLink" aria-label="Account"></a>',
   ].join("\n      ");
 
   let page = body.toString("utf8");

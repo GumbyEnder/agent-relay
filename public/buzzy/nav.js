@@ -123,6 +123,12 @@
       header.appendChild(row);
     }
     nav.style.flexWrap = "nowrap";
+    // Page CSS owns `#bzNav { padding: 0 0 1rem }` on sketch/capabilities (id selector,
+    // so the shared stylesheet cannot outrank it): the link row measured 26px on Talk,
+    // 34 on Sketch and 42 on Capabilities inside a 48px bar. The bar is chrome; the row
+    // inside it is chrome. Pin both.
+    nav.style.padding = "0";
+    nav.style.margin = "0";
     // One strip, same height everywhere; page-specific header content stays below it.
     if (!nav.closest(".bz-navbar")) {
       var bar = document.createElement("div");
@@ -306,6 +312,12 @@
     function signOut(e) {
       if (e) e.preventDefault();
       writeIdentityCache(null); // next page must not paint the name we just dropped
+      // The plan and balance chips are cached for the same reason; a signed-out page
+      // that paints PRO and a Honey balance is the same lie in a different chip.
+      try {
+        window.localStorage.setItem("bz_plan", "null");
+        window.localStorage.setItem("bz_honey", "null");
+      } catch (err) { /* private mode: the next load's 401 clears them anyway */ }
       fetch("/api/auth/sign-out", {
         method: "POST", credentials: "same-origin",
         headers: { "content-type": "application/json" }, body: "{}",
@@ -428,15 +440,44 @@
     chip.textContent = "\u25c8";           // mark only, no "…" placeholder
     chip.style.minWidth = "3.6rem";
     chrome.appendChild(chip);
+
+    // Same rule as the plan chip and the identity: paint the last known balance
+    // before the round trip, or a signed-in reader watches the header assemble
+    // itself chip by chip on every load (BZ-15 residual). The response wins; a
+    // failed call changes nothing; an authoritative answer with no balance clears
+    // the cache so a stale number cannot outlive the session.
+    var CACHE = "bz_honey";
+    function paint(n) {
+      if (typeof n === "number") {
+        chip.textContent = "\u25c8 " + Number(n).toLocaleString();
+        chip.title = Number(n).toLocaleString() + " Honey Drops";
+      } else {
+        chip.textContent = "\u25c8";
+        chip.title = "";
+      }
+    }
+    try {
+      var raw = window.localStorage.getItem(CACHE);
+      if (raw !== null) {
+        if (raw === "null") paint(null);
+        else paint(Number(raw));
+      }
+    } catch (e) { /* private mode: the round trip is still the truth */ }
+
     fetch("/api/wallet", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      // 401 is an answer (nobody is signed in), not an outage: clear the chip.
+      .then(function (r) { return r.status === 401 ? { balance: null } : r.ok ? r.json() : undefined; })
       .then(function (d) {
+        if (d === undefined) return; // inconclusive: keep whatever we painted
         if (d && typeof d.balance === "number") {
-          chip.textContent = "\u25c8 " + Number(d.balance).toLocaleString();
-          chip.title = Number(d.balance).toLocaleString() + " Honey Drops";
+          paint(d.balance);
+          try { window.localStorage.setItem(CACHE, String(d.balance)); } catch (e) {}
+        } else {
+          paint(null);
+          try { window.localStorage.setItem(CACHE, "null"); } catch (e) {}
         }
       })
-      .catch(function () { chip.textContent = "\u25c8"; });
+      .catch(function () { /* keep whatever we painted */ });
   }
 
   /** Ask: the chat, on every page, in a panel anchored to the nav. */
@@ -622,7 +663,19 @@
 
     header.appendChild(brandRow);
     header.appendChild(bar);
-    extras.forEach(function (el) { header.appendChild(el); });
+    // The header owns the two chrome rows and NOTHING else. Page toolbars used to be
+    // appended into it, so the header measured 132px on Talk, 155 on Sketch and 219 on
+    // Capabilities and the chrome read as a different component per page (BZ-11, frodo's
+    // "move the page content out of <header>"). They go into a sibling strip instead; the
+    // page's own class selectors still apply because they are class-based, not
+    // `header > …`. One header height everywhere, without touching eleven markup files.
+    if (extras.length) {
+      var tools = document.createElement("div");
+      tools.className = "bz-toolbar";
+      extras.forEach(function (el) { tools.appendChild(el); });
+      if (header.parentNode) header.parentNode.insertBefore(tools, header.nextSibling);
+      else header.appendChild(tools);
+    }
 
     loadCompanies();
     honeyControl(chrome);
@@ -691,7 +744,8 @@
     if (cached) paint(cached);
 
     fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      // 401 is an answer (nobody is signed in), not an outage: clear the chip.
+      .then(function (r) { return r.status === 401 ? { ok: false } : r.ok ? r.json() : undefined; })
       .then(function (d) {
         if (!d || typeof d.ok === "undefined") return; // transport oddity: keep the cache
         if (d.ok && d.plan) {
@@ -962,15 +1016,45 @@
     }, Promise.resolve()).then(flush);
   }
 
+  // Chrome-owned nodes must not ride in with the page.
+  // A hard load calls boot(), which empties the page's <header> and rebuilds it from
+  // the chrome; a SOFT load does not (boot() returns early once #bzChrome exists), so
+  // the fetched header used to land inside #bzPage as a SECOND header — a duplicate
+  // nav row and a second identity link, which is where the visible `Sign in` inside
+  // the page came from (BZ-18, and the stray "Sign in" BZ-15 kept reporting). Strip
+  // the chrome's parts and keep whatever the page genuinely owns in that header
+  // (toolbars, search boxes), so the page does not lose its controls.
+  var CHROME_OWNED = [
+    "#bzNav", ".bz-navbar", ".bz-brandrow", ".bz-brand", ".brand", ".brand-link",
+    "#accountLink", ".account-link", ".account-menu", ".hd-chip", "#bzVoiceDock",
+    "#bzPlanChip", "#bzHoneyChip", "#bzPanel",
+  ].join(",");
+  function stripChrome(root) {
+    Array.prototype.forEach.call(root.querySelectorAll(CHROME_OWNED), function (n) {
+      if (n.closest("#bzChrome")) return; // the live chrome, not the imported copy
+      n.parentNode && n.parentNode.removeChild(n);
+    });
+    // Whatever the page kept in its own <header> (a toolbar, a search box) is page
+    // content, not chrome: unwrap it into the page so there is exactly one header
+    // on the document and the page's controls still render.
+    Array.prototype.forEach.call(root.querySelectorAll("header"), function (h) {
+      if (h.closest("#bzChrome")) return;
+      var p = h.parentNode;
+      if (!p) return;
+      while (h.firstChild) p.insertBefore(h.firstChild, h);
+      p.removeChild(h);
+    });
+  }
+
   function buildFromDoc(doc, key) {
     var page = document.createElement("div");
     page.id = "bzPage";
     page.setAttribute("data-bz-path", key);
-    var skip = { SCRIPT: false };
     Array.prototype.forEach.call(doc.body.children, function (child) {
       if (child.tagName === "SCRIPT" && /\/buzzy\/nav\.js/.test(child.getAttribute("src") || "")) return;
       page.appendChild(document.importNode(child, true));
     });
+    stripChrome(page);
     return page;
   }
 
