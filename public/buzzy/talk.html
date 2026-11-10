@@ -3018,11 +3018,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var LISTEN_KEY = "bz_listen_mode";
     var voice = {
       replies: false, mic: false, armed: false, rec: null, speaking: false, sending: false, note: "",
-      // Set when the owner cuts a reply short. A reply streams in over SSE, so
-      // stopping the buffers already playing is not enough — the next chunk
-      // would start a fresh "Speaking" and re-close the mic. While cut is true
-      // arriving audio is dropped; the end of the turn clears it.
-      cut: false,
+      // Barge-in is a TURN state, not a session flag. A reply streams in over
+      // SSE and plays on a schedule, so the stream usually closes BEFORE the
+      // owner hears the end of it: cutting during that tail left a global
+      // `cut` flag with no turn left to clear it, and every later turn's audio
+      // was dropped for the rest of the session while still reporting a
+      // "1.45s to talk" time-to-first-audio it never delivered. Stamp the turn
+      // id instead: audio that belongs to the cut turn is dropped, and a new
+      // turn always has a new id.
+      cutTurn: -1, turnSeq: 0,
       // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
       // (Chrome, and anything with a working speech service); "recorder" = record
       // locally and let the server transcribe (Firefox, Brave, blocked service).
@@ -3139,21 +3143,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.raf = requestAnimationFrame(frame);
     }
 
-    function playPcm(b64) {
+    // Returns true only when this chunk was actually scheduled for playback.
+    // Callers use that (not "a frame arrived") to stamp time-to-first-audio: a
+    // chunk that is dropped because its turn was cut is not sound the owner
+    // heard.
+    function playPcm(b64, turn) {
       // The owner cut this reply short: keep swallowing chunks for the rest of
-      // the turn instead of restarting the voice a second later.
-      if (voice.cut) return;
+      // THIS turn instead of restarting the voice a second later.
+      if (turn != null && voice.cutTurn === turn) return false;
       var ctx = ensureAudio();
       if (!ctx) {
         // Never fail silently: the owner must know why nothing was heard.
         var st = document.getElementById("voiceStageState");
         if (st) st.textContent = "Audio blocked by the browser — tap the mic again";
-        return;
+        return false;
       }
       if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
       var bytes = b64ToBytes(b64);
       var samples = Math.floor(bytes.length / 2);
-      if (!samples) return;
+      if (!samples) return false;
       var view = new DataView(bytes.buffer);
       var buf = ctx.createBuffer(1, samples, 24000);
       var ch = buf.getChannelData(0);
@@ -3176,12 +3184,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         setAvatarState("speaking");
         paintVoice();
         bargeArm();
+        // The mic stream may still be opening — the owner enabled Listen and
+        // spoke immediately — and bargeArm no-ops without it, with nothing to
+        // retry. Arm again the moment the stream lands, or that whole reply is
+        // un-bargeable.
+        if (!voice.barg && voice.mic) {
+          var pending = ensureMic();
+          if (pending) pending.then(function () { if (voice.speaking) bargeArm(); }).catch(function () {});
+        }
       }
       startLevelLoop();
       src.onended = function () {
         voice.active = Math.max(0, voice.active - 1);
         if (!voice.active && !voice.sending) finishSpeaking();
       };
+      return true;
     }
 
     function finishSpeaking() {
@@ -3561,7 +3578,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // hand the mic back, keep the session alive.
         bargeDisarm();
         voice.bargUntil = performance.now() + BARGE_COOLDOWN;
-        voice.cut = true;
+        // Cut THIS turn, not "the voice": see the cutTurn note on `voice`.
+        voice.cutTurn = voice.turnSeq;
+        // The owner has taken the floor, so this turn no longer owns the "waiting"
+        // state: on the recorder path `startRecording` refuses to run while
+        // voice.sending is true, so a barge-in would leave the follow-up
+        // uncaptured until the interrupted stream drained.
+        voice.sending = false;
         stopSpeaking();
         if (voice.mic) startListening();
         paintVoice();
@@ -3835,7 +3858,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (voice.mic) {
         // A fresh listen clears whatever the last failure said.
         voice.note = "";
-        voice.cut = false;
+        // A cut belongs to a turn id, so there is nothing global to clear here:
+        // the next turn gets a new id and plays normally.
         // A spoken conversation needs spoken answers.
         if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
         startListening();
@@ -3946,7 +3970,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Cut the reply short and hand the mic back, without ending the session.
         // This is the one-click barge-in the nav chip offers while speaking.
         interrupt: function () {
-          voice.cut = true;
+          voice.cutTurn = voice.turnSeq;
+          voice.sending = false;
           stopSpeaking();
           if (voice.mic) startListening();
           paintVoice();
@@ -4088,7 +4113,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      *   done  → the same ChatResponse the text lane returns
      *   error → surfaces the failure instead of hanging on a dead stream
      */
-    function streamVoiceTurn(sendBody, metrics, sendStarted) {
+    function streamVoiceTurn(sendBody, metrics, sendStarted, myTurn) {
       var liveBubble = null;
       var liveText = "";
       return fetch(CHAT_BASE, {
@@ -4146,11 +4171,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var clock = document.getElementById("thinkingElapsed");
             if (clock && payload.state !== "running") clock.textContent = "";
           } else if (ev === "audio") {
-            if (metrics.ttfaMs == null) {
-              metrics.ttfaMs = Math.round(performance.now() - sendStarted);
-              metrics.spoken = true;
+            // Stamp "to talk" only for audio that was actually scheduled: an
+            // audio frame on a turn the owner cut is not sound they heard, and
+            // claiming it was is how a silent turn reported 1.45s.
+            if (playPcm(payload.b64, myTurn)) {
+              if (metrics.ttfaMs == null) {
+                metrics.ttfaMs = Math.round(performance.now() - sendStarted);
+                metrics.spoken = true;
+              }
             }
-            playPcm(payload.b64);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -5347,6 +5376,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       input.disabled = true;
       document.getElementById("chatSend").disabled = true;
 
+      // This turn's own id. Declared OUTSIDE the try: `const` inside the try
+      // block is not visible in the finally that reads it, and the whole turn
+      // then dies on `myTurn is not defined` (a page error, not a compile one).
+      const myTurn = ++voice.turnSeq;
+
       try {
         // BZ-F024: one attempt id per send. On a timeout/connection failure we
         // retry ONCE with the SAME id — the server reconciles to the stored
@@ -5406,7 +5440,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         let data;
         if (useVoiceLane) {
-          data = await streamVoiceTurn(sendBody, metrics, sendStarted);
+          data = await streamVoiceTurn(sendBody, metrics, sendStarted, myTurn);
         } else if (typeof ReadableStream !== "undefined") {
           data = await streamTextTurn(sendBody, metrics, sendStarted);
           metrics.turnMs = Math.round(performance.now() - sendStarted);
@@ -5515,7 +5549,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // fallback speaker, and only if no audio came back at all.
         // One voice only. Audio played -> done. No audio -> say so, never swap
         // the browser's speech engine in mid-conversation.
-        if (!metrics.spoken && (voice.mic || voice.replies)) maybeSpeak(data);
+        if (!metrics.spoken && voice.cutTurn !== myTurn && (voice.mic || voice.replies)) maybeSpeak(data);
 
       } catch (err) {
         setChatMascot("18-unimpressed");
@@ -5525,20 +5559,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             : "Couldn't reach the server. Check your connection and try again.";
         document.getElementById("chatError").classList.remove("hidden");
       } finally {
-        voice.sending = false;
-        voice.cut = false;
-        // A spoken turn ended without a reply: go back to listening.
-        if (voice.mic && !voice.speaking) setTimeout(function () {
-          if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
-        }, 600);
-        // Only re-enable if not signed out
-        if (chatState._signedOut) {
-          input.disabled = true;
-          document.getElementById("chatSend").disabled = true;
-        } else {
-          input.disabled = false;
-          document.getElementById("chatSend").disabled = false;
-          input.focus();
+        // A turn that was interrupted keeps draining its SSE stream, so it can
+        // land here AFTER the next turn has already started. Only the newest
+        // turn owns the shared state; a stale finally that cleared it re-armed
+        // the mic over its own follow-up and re-enabled the composer mid-turn.
+        if (myTurn === voice.turnSeq) {
+          voice.sending = false;
+          // A spoken turn ended without a reply: go back to listening.
+          if (voice.mic && !voice.speaking) setTimeout(function () {
+            if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
+          }, 600);
+          // Only re-enable if not signed out
+          if (chatState._signedOut) {
+            input.disabled = true;
+            document.getElementById("chatSend").disabled = true;
+          } else {
+            input.disabled = false;
+            document.getElementById("chatSend").disabled = false;
+            input.focus();
+          }
         }
       }
     }
