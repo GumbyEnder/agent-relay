@@ -1312,7 +1312,7 @@
       <a href="/buzzy/talk" data-nav="talk">Talk</a>
     <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
     <a href="/buzzy/studio" data-nav="studio">Studio</a>
-      <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
       <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
       <a href="/buzzy/memory" data-nav="memory">Memory</a>
       <a href="/buzzy/experts" data-nav="experts">Experts</a>
@@ -2456,7 +2456,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           '<span class="file-sub">Saved to your Library' + size + "</span>" +
         "</span>" +
         '<a href="' + esc(dl) + '" download>Download</a>' +
-        (lib ? '<a href="' + esc(lib) + '" target="_blank" rel="noopener">Open in Library</a>' : "") +
+    // BZ-14 does not stop at the nav: this card link used to carry a blank
+    // target, so "Open in Library" on a file made its own tab and left the
+    // conversation (and the mic) behind in the old one. nav.js soft-navigates any
+    // same-origin /buzzy/ anchor WITHOUT a target attribute, keeping Talk cached,
+    // so the link must stay plain — a target here re-opens the hole the nav fix
+    // closed. Do not spell the attribute out literally: the QA gate greps the
+    // served bytes for it and a comment would read as a live link.
+    (lib ? '<a href="' + esc(lib) + '">Open in Library</a>' : "") +
       "</div>";
     }
 
