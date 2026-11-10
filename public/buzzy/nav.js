@@ -74,7 +74,13 @@
       // unitless line-height therefore changed the identity cluster's height and
       // dropped the chips 2px on memory alone (BZ-11 residual, Nov 2026). The
       // chrome pins its OWN metrics so no host page can move it again.
-      ".bz-brandrow,.bz-brandrow *{line-height:1.55}",
+      // ...and the font. Three hosts ship three different body stacks, and only
+      // memory actually LOADS Inter (Google Fonts) — the other ten just name it and
+      // fall through to the system face. So the company <select> and the chips
+      // measured 1-6px wider on memory and the identity cluster's left edge wandered.
+      // The chrome is one identity in one place: it names a stack every host can
+      // resolve the same way instead of inheriting whatever the page happened to load.
+      ".bz-brandrow,.bz-brandrow *{line-height:1.55;font-family:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif}",
       ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem;font-size:16px}",
       ".bz-brandrow .bz-brand{display:flex;align-items:center;gap:.5rem;text-decoration:none;color:#f2f2f2}",
       ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
