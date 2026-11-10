@@ -68,7 +68,14 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
-      ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem}",
+      // The chrome renders inside eleven different page stylesheets, and three of
+      // them set their own body font-size/line-height (sketch+studio 14px/1.5,
+      // capabilities 15px/1.55, memory inherits the browser default). An inherited
+      // unitless line-height therefore changed the identity cluster's height and
+      // dropped the chips 2px on memory alone (BZ-11 residual, Nov 2026). The
+      // chrome pins its OWN metrics so no host page can move it again.
+      ".bz-brandrow,.bz-brandrow *{line-height:1.55}",
+      ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem;font-size:16px}",
       ".bz-brandrow .bz-brand{display:flex;align-items:center;gap:.5rem;text-decoration:none;color:#f2f2f2}",
       ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
       ".bz-brandrow .bz-brand strong{font-size:.98rem;letter-spacing:.01em}",
