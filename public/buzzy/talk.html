@@ -3580,7 +3580,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.sending = true;
       setAvatarState("thinking");
       paintVoice();
-      fetch("/api/buzzy/transcribe", {
+      // BZ-22: tell the transcriber the names this turn is about. The server
+      // also reads the job back by id and the owner's recent names, so this is
+      // the cold-open half (a ?job= link with nothing in sessionStorage yet).
+      var asrQuery = [];
+      if (chatState.jobId) asrQuery.push("jobId=" + encodeURIComponent(chatState.jobId));
+      var asrNames = [];
+      if (chatState.jobContext && chatState.jobContext.title) asrNames.push(chatState.jobContext.title);
+      if (asrNames.length) asrQuery.push("vocab=" + encodeURIComponent(asrNames.join(",")));
+      fetch("/api/buzzy/transcribe" + (asrQuery.length ? "?" + asrQuery.join("&") : ""), {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav,

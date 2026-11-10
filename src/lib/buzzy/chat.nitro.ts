@@ -73,7 +73,7 @@ import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViola
 import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 import { createHash } from "node:crypto";
-import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES } from "./asr";
+import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES, normalizeVocab } from "./asr";
 
 /**
  * Largest single file the bulk asset path will store. A skills corpus is
@@ -495,8 +495,56 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 413);
       return { ok: false, error: "That recording is too long — keep it under a minute.", code: "audio_too_large" };
     }
+    // BZ-22 — proper nouns. The model joins and mis-spells names it has no
+    // reason to know ("Honey Crumb" → "Honeycrumb", measured 2/2). The fix is a
+    // post-hoc rewrite over a vocabulary built from names this owner actually
+    // uses, never a prompt glossary: a glossary primes the model into hearing
+    // the words on silence (asr.ts carries the measurement).
+    const vocab: string[] = [];
+    const addVocab = (raw: unknown, minSquash = 3) => {
+      for (const term of normalizeVocab(raw, minSquash)) {
+        if (!vocab.some((v) => v.toLowerCase() === term.toLowerCase())) vocab.push(term);
+      }
+    };
+    // Most specific first: what the page sent, then the job this turn is about.
+    addVocab(queryValue(fullPath, "vocab"));
+    const asrJobId = queryValue(fullPath, "jobId");
     try {
-      const r = await transcribeAudio(audio, format);
+      const vocabSql = await getSql();
+      if (asrJobId) {
+        const jobRows = (await vocabSql`
+          SELECT j.title, c.name AS company_name
+          FROM buzzy_jobs j
+          LEFT JOIN buzzy_companies c ON c.id = j.company_id AND c.user_id = j.user_id
+          WHERE j.id = ${asrJobId} AND j.user_id = ${user.id}
+          LIMIT 1
+        `) as Array<{ title?: string | null; company_name?: string | null }>;
+        addVocab(jobRows[0]?.company_name);
+        addVocab(jobRows[0]?.title);
+      }
+      // Then the owner's own recent names. 5-char floor: a one-word job title
+      // like "Test" is a common word, and canonicalising every "test" in a
+      // transcript is noise, not a correction.
+      const titleRows = (await vocabSql`
+        SELECT title AS term FROM buzzy_jobs
+        WHERE user_id = ${user.id} AND title IS NOT NULL AND length(title) >= 5
+        ORDER BY updated_at DESC LIMIT 20
+      `) as Array<{ term?: string | null }>;
+      for (const r of titleRows) addVocab(r.term, 5);
+      const companyRows = (await vocabSql`
+        SELECT name AS term FROM buzzy_companies
+        WHERE user_id = ${user.id} AND name IS NOT NULL AND length(name) >= 5
+        ORDER BY updated_at DESC LIMIT 10
+      `) as Array<{ term?: string | null }>;
+      for (const r of companyRows) addVocab(r.term, 5);
+    } catch {
+      // A vocabulary is an improvement, never a precondition: if the read
+      // fails, transcribe with what we have.
+    }
+    // The product's own coinages, which no owner can be expected to have typed.
+    addVocab(["Honey Drops"]);
+    try {
+      const r = await transcribeAudio(audio, format, vocab);
       // Time to transcript is a product number, not a log line. Recorded with
       // lane "asr" so ops can tell the browser recognizer apart from this path.
       const sql = await getSql();
