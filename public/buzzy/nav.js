@@ -935,6 +935,10 @@
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
       if (!a) return;
+      // The identity chip is a dropdown trigger, not a page link. The shell used to
+      // soft-navigate on it before the chrome's own click handler could toggle the
+      // menu, so clicking your name took you to /buzzy/profile and no menu ever showed.
+      if (a.id === "accountLink") return;
       if (a.target && a.target !== "_self") return;
       if (a.hasAttribute("download")) return;
       var href = a.getAttribute("href");
