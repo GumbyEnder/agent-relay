@@ -272,8 +272,40 @@
     }
     var user = null;
 
+    /**
+     * Last known identity, so the header never lies for a round trip.
+     *
+     * The page ships `Sign in` in its markup and the chrome only painted after
+     * /api/auth/get-session answered, so a signed-in reader watched "Sign in"
+     * flash on every page (loudest on Sketch, whose header is otherwise empty).
+     * `undefined` = never cached, `null` = known signed out, object = identity.
+     * The response always wins; this only covers the gap before it lands.
+     */
+    function readIdentityCache() {
+      try {
+        var raw = window.localStorage.getItem("bz_identity");
+        if (raw === null) return undefined;
+        if (raw === "null") return null;
+        var v = JSON.parse(raw);
+        return v && (v.name || v.email) ? v : null;
+      } catch (e) {
+        return undefined;
+      }
+    }
+    function writeIdentityCache(u) {
+      try {
+        window.localStorage.setItem(
+          "bz_identity",
+          u ? JSON.stringify({ name: u.name || "", email: u.email || "" }) : "null",
+        );
+      } catch (e) { /* private mode: fall back to the round trip */ }
+    }
+    var cached = readIdentityCache();
+    if (cached !== undefined) paint(cached ? cached.name : null, cached ? cached.email : null);
+
     function signOut(e) {
       if (e) e.preventDefault();
+      writeIdentityCache(null); // next page must not paint the name we just dropped
       fetch("/api/auth/sign-out", {
         method: "POST", credentials: "same-origin",
         headers: { "content-type": "application/json" }, body: "{}",
@@ -314,11 +346,18 @@
     fetch("/api/auth/get-session", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {
-        var user = res && res.user;
-        if (user && (user.name || user.email)) paint(user.name || user.email, user.email);
-        else paint(null, null);
+        var u = res && res.user;
+        if (u && (u.name || u.email)) {
+          writeIdentityCache({ name: u.name || u.email, email: u.email || "" });
+          paint(u.name || u.email, u.email);
+        } else {
+          writeIdentityCache(null);
+          paint(null, null);
+        }
       })
-      .catch(function () { paint(null, null); });
+      // A failed round trip proves nothing about who is signed in, so it must not
+      // overwrite the cached identity or repaint "Sign in" over a real name.
+      .catch(function () { /* keep whatever we painted */ });
 
     // Adopt a page-built menu as the dropdown. clone the link once so a page's own
     // click handler (Talk binds a toggle to `.account-link`) cannot double-toggle ours.
@@ -485,10 +524,18 @@
     document.head.appendChild(s);
   }
 
-  /** The brand for row one: whatever the page has, or a plain BeeZilla mark. */
-  function findBrand(header) {
-    var existing = header.querySelector(".brand-link, .brand, .bz-brand");
-    if (existing) return existing;
+  /**
+   * The brand for row one — ALWAYS the canonical one.
+   *
+   * BZ-11 residual: this used to return whatever the page shipped
+   * (`.brand-link, .brand, .bz-brand`), so talk/library/memory rendered their
+   * own large BEEZILLA mark while sketch/studio/capabilities fell through to
+   * this file's 26px mark. Same nav row, two brands, and each page's header CSS
+   * decided where the chips sat. The chrome owns the brand now; page markup is
+   * discarded by the `header.innerHTML = ""` below, so the shipped header is
+   * identical by construction on every page.
+   */
+  function findBrand(_header) {
     var a = document.createElement("a");
     a.className = "bz-brand";
     a.href = "/buzzy/talk";
@@ -525,13 +572,24 @@
       if (el.tagName === "SCRIPT") return false;
       if (el === nav || el.contains(nav)) return false;
       if (el === brand || el.contains(brand)) return false;
+      // The page's own brand mark is superseded by the canonical one above; keeping
+      // it in extras is how a page shipped two logos — its large BEEZILLA beside the
+      // chrome's 26px mark (BZ-11 residual).
+      if (el.matches && el.matches(".brand-link, .brand, .bz-brand")) return false;
+      if (el.querySelector && el.querySelector(".brand-link, .brand, .bz-brand")) return false;
       if (el === account) return false;
       return true;
     });
 
     // Row one: brand, then the identity cluster. Row two: the links. The rows must
     // STACK — a header that is itself a flex row put them side by side.
+    // Page CSS may constrain the header (`header.top{max-width:…}`), which pulled the
+    // identity cluster in from the right edge on Capabilities while every other page
+    // had it flush (BZ-11 residual). Inline wins; the chrome owns its own box.
     header.style.display = "block";
+    header.style.width = "100%";
+    header.style.maxWidth = "none";
+    header.style.boxSizing = "border-box";
     header.innerHTML = "";
 
     var brandRow = document.createElement("div");
