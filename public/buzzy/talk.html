@@ -3658,6 +3658,36 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
         },
       };
+      // ── "Open this job's conversation" without reloading the document ──
+      // The Library's job cards and Talk's own recent-work rows used to assign
+      // location.href = "/buzzy/talk.html?job=…". That is a full document load,
+      // so the recogniser died on the way in and the owner's live mic was gone
+      // (BZ-19). Talk is the page that owns the engine, so it exposes one entry
+      // point and opens the job IN PLACE: same document, same mic, new job.
+      window.BeeZillaTalk = {
+        openJob: function (id) {
+          if (!id) return false;
+          var ctx = null;
+          try {
+            var jc = JSON.parse(sessionStorage.getItem("bz_open_job") || "null");
+            if (jc && jc.jobId === id) ctx = jc;
+          } catch (_) {}
+          chatState.sessionId = null;
+          try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+          chatState.jobId = id;
+          chatState.jobContext = ctx;
+          chatState.slots = {};
+          chatState.messages = [];
+          chatState.paper = null;
+          resetDraftGate();
+          setBackVisible(true);
+          try { history.replaceState(null, "", "/buzzy/talk"); } catch (_) {}
+          updateChrome();
+          restoreTranscript();
+          showRecentWork();
+          return true;
+        },
+      };
       // ── Listen survives soft navigation, NOT a hard reload ─────────────
       // The recogniser lives in this document. The page shell keeps this
       // document alive while you navigate, so the mic keeps running and
@@ -4692,7 +4722,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               if (it.kind === "session") { openSession(it.session); }
               // A work item opens its project — deliverables, activity, transcript in
               // one place. The conversation is one click from there, not the only view.
-              else { window.location.href = "/buzzy/project?job=" + encodeURIComponent(it.job.id); }
+              else {
+                // Soft hop: the shell keeps this document (and the live mic)
+                // while the project page is fetched in. BZ-19.
+                var pu = "/buzzy/project?job=" + encodeURIComponent(it.job.id);
+                if (window.BeeZillaShell) window.BeeZillaShell.go(pu);
+                else window.location.href = pu;
+              }
             });
             el.addEventListener("keydown", function (e) {
               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
@@ -4803,7 +4839,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var it = shown[Number(el.getAttribute("data-idx"))];
             if (!it) return;
             if (it.kind === "session") { openSession(it.session); }
-            else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+            // A job opens its conversation IN THIS DOCUMENT — the recogniser is
+            // not reloaded, so a live mic survives the click (BZ-19).
+            else if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(it.job.id))) {
+              window.location.href = "/buzzy/talk?job=" + encodeURIComponent(it.job.id);
+            }
           });
           el.addEventListener("keydown", function (e) {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }

@@ -1086,7 +1086,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveState();
         goJobs();
       };
-      document.getElementById("newjob").onclick = () => { window.location.href = "/buzzy/talk.html"; };
+      document.getElementById("newjob").onclick = () => {
+        // Soft hop: a full load here would drop a live mic (BZ-19).
+        if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/talk");
+        else window.location.href = "/buzzy/talk";
+      };
       document.getElementById("opendocs").onclick = () => { snapshotCurrent(); state.screen = "docs"; render(); };
       document.querySelectorAll(".jobcard").forEach((el) => {
         el.onclick = () => {
@@ -1123,7 +1127,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try {
         sessionStorage.setItem("bz_open_job", JSON.stringify(payload));
       } catch (_) { /* storage full/blocked — chat still opens, just without context */ }
-      window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(j.id);
+      // Open the conversation WITHOUT reloading the document: Talk is kept alive
+      // by the shell, so a live mic survives the click, and Talk opens the job in
+      // place instead of re-running its own boot from a ?job= URL (BZ-19).
+      const hard = () => { window.location.href = "/buzzy/talk?job=" + encodeURIComponent(j.id); };
+      if (!window.BeeZillaShell) { hard(); return; }
+      window.BeeZillaShell.go("/buzzy/talk").then(() => {
+        if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(j.id))) hard();
+      });
     }
 
     /* ── Documents: mini-vault ──────────────────────────────────────
