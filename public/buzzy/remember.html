@@ -337,34 +337,14 @@
       };
     }
 
-    // ── Account: session-aware Sign in / user name + Log out ──────────
-    (function account() {
-      var link = document.querySelector(".account-link");
-      if (!link) return;
+    // ── Account gate. The chrome (nav.js) owns the identity chip and its menu;
+    // this page only refuses a signed-out visitor. A second menu here raced the
+    // chrome's and made the name disappear on some loads. ─────────────────────
+    (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (session) {
-          var user = session && session.user;
-          if (!user) { window.location.replace("/buzzy/landing"); return; }
-          var bzDisplayName = user.name || user.email || "Account";
-          link.textContent = bzDisplayName;
-          link.removeAttribute("href");
-          link.style.cursor = "default";
-          var out = document.createElement("a");
-          out.href = "#";
-          out.textContent = "Log out";
-          out.addEventListener("click", function (e) {
-            e.preventDefault();
-            fetch("/api/auth/sign-out", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "content-type": "application/json" },
-              body: "{}",
-            }).then(function () { window.location.href = "/buzzy/"; });
-          });
-          var navEl = document.querySelector("#bzNav");
-          if (navEl && navEl.parentNode && navEl.contains(link)) navEl.parentNode.insertBefore(out, navEl.nextSibling);
-          else link.parentNode.insertBefore(out, link.nextSibling);
+          if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
         .catch(function () {});
     })();

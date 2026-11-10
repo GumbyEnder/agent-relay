@@ -8,10 +8,31 @@ This repository ships two things on top of the same board engine:
 
 | Surface | What it is | Entry points |
 |---------|-----------|--------------|
-| **Dev Boards** | Agent-first mission kanban. Durable boards, five verbs, harness-friendly HTTP/MCP. | `src/lib/agent/`, `/api/agent`, operator UI |
+| **Dev Boards** | Agent-first mission kanban. Durable boards, five verbs, harness-friendly HTTP/MCP. | `routes/api/agent/`, `src/lib/board-*.ts`, `src/lib/agent-api.*`, `src/mcp/`, `src/routes/` |
 | **BeeZilla** | Consumer journey layer on the same engine — documents, memory, recipes, chat. | `src/lib/buzzy/`, `/buzzy/*`, `apps/` |
 
 Know which one your change belongs to before you open the PR; the template asks. Changes to the shared engine affect both — say so.
+
+## Who owns which paths
+
+Ownership here is **paths, not people**. Two agent identities work in this repo, and this is the split they operate under — written down so it survives a lost chat thread, not because the code enforces it:
+
+| Path | Surface | Owner |
+|------|---------|-------|
+| `routes/api/agent/`, `src/lib/agent-api.*`, `src/lib/board-*.ts`, `src/mcp/`, `src/routes/`, `src/components/` | Dev Boards (board engine, five verbs, agent HTTP + MCP, operator UI) | **buzzy** |
+| `src/lib/buzzy/`, `public/buzzy/`, `/buzzy/*` | BeeZilla (journey, documents, memory, recipes, chat) | **buzzy** |
+| `apps/` | BeeZilla desktop shell (Electron over a local runtime) | **buzzy** |
+| `src/lib/private/` (gitignored, synced by `scripts/sync-private.mjs`) | private recipe modules | **buzzy** |
+
+Shared engine (`src/lib/*.ts` at the top level — db, journal, auth, mailer, and the `*.nitro.ts` gateways) serves both products; a change there needs the affected surface named in the PR.
+
+What that means in practice:
+
+- **Product calls, merges, pushes and deploys: buzzy.** `git push github HEAD:main` then `railway redeploy --service agent-relay --from-source --yes`. A change is not done until the served asset proves the new build.
+- **The QA identity (`buzzygrok`) is read-only on code and writes evidence.** It reads this repo, reproduces issues, and files reports with repro steps and screenshots. No pushes, no merges, no deploys.
+- **Nothing in this repo requires the read-only side to be read-only** — that is an operating rule, not a check. The only lane sentence the repo states is the negative one in [docs/MISSION-LANES-ENFORCEMENT.md](docs/MISSION-LANES-ENFORCEMENT.md): "No deploys from grokbot." It says who does *not* deploy; it never says who does what.
+
+Contributors outside these two identities are unaffected: fork or branch from `main`, open a PR, a maintainer merges.
 
 ## Branch strategy (maintainers & contributors)
 

@@ -216,6 +216,21 @@
         return url;
       }
 
+      // The address bar is part of the screen (main's BZ-6 nit: a reload or a
+      // bookmark must bring back what the user was looking at). This page has
+      // one form for sign-in and register, so it never keeps the old
+      // ?mode=register that the landing page's Register button still sends.
+      // Edit the live URL so next, verified and the link notices survive.
+      function syncUrl() {
+        try {
+          var u = new URL(location.href);
+          if (!u.searchParams.has("mode")) return;
+          u.searchParams.delete("mode");
+          var qs = u.searchParams.toString();
+          history.replaceState(null, "", u.pathname + (qs ? "?" + qs : "") + u.hash);
+        } catch (e) { /* a login form must never die on history */ }
+      }
+
       // ── steps ────────────────────────────────────────────────────────
       function toEmailStep() {
         step = "email";
@@ -442,6 +457,8 @@
           .then(function (r) { return r.json().catch(function () { return null; }); })
           .catch(function () { return null; });
       }
+
+      syncUrl();
 
       if (params.get("link") === "expired" || params.get("error")) {
         show("error", "That link has expired or was already used. Put in your email to get a new one.");

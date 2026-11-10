@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>🐴 BeeZilla — Memory</title>
+  <title>BeeZilla — Memory</title>
   <link rel="icon" type="image/png" href="/buzzy/brand/revision6_expressions_16-smiling.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
@@ -46,17 +46,12 @@
     header img { width: 48px; height: 48px; }
     header h1 { font-size: 1.1rem; margin: 0; }
     header h1 span { color: var(--yellow); }
-    nav {
-      display: flex;
-      gap: 1rem;
-      margin-left: auto;
-      font-size: 0.92rem;
-    }
-    nav a { color: var(--muted); text-decoration: none; padding: 0.25rem 0.5rem; border-radius: 6px; }
-    nav a.active { color: var(--yellow); background: var(--panel2); }
+    /* The nav is chrome (nav.js + nav.css own it). This page used to carry bare
+       `nav { margin-left: auto }` rules, which beat nothing in nav.css and pushed
+       #bzNav to the right edge here while every other page centred it — the
+       "Memory has a different header" report (BZ-15 follow-up, Nov 2026). A page
+       styles its own content; the header belongs to the shell. */
     .brand-link { text-decoration: none; cursor: pointer; display: flex; align-items: center; gap: 0.75rem; }
-    nav a:hover { color: var(--text); }
-    nav .account-link { color: var(--yellow); border: 1px solid var(--line); }
     main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
     /* Memory redesign: digest card + per-job drill-down */
     .mem-digest {
@@ -260,46 +255,14 @@
   </main>
   <script src="/buzzy/companies.js"></script>
   <script>
-    // Session-aware account link (same as talk.html) — memory.html previously
-    // had no account code, so signed-in users always saw "Sign in" (dogfood 10003).
-    (function account() {
-      var link = document.querySelector(".account-link");
-      if (!link) return;
+    // ── Account gate. The chrome (nav.js) owns the identity chip and its menu;
+    // this page only refuses a signed-out visitor. A second menu here raced the
+    // chrome's and made the name disappear on some loads. ─────────────────────
+    (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (session) {
-          var user = session && session.user;
-          if (!user) { window.location.replace("/buzzy/landing"); return; }
-          var bzDisplayName = user.name || user.email || "Account";
-          link.textContent = bzDisplayName;
-          link.href = "#";
-          link.style.cursor = "pointer";
-          // Profile menu: clicking the name opens a small account panel
-          var menu = document.createElement("div");
-          menu.className = "account-menu";
-          menu.style.display = "none";
-          menu.innerHTML =
-            '<div class="am-name">' + bzDisplayName + "</div>" +
-            '<div class="am-email">' + (user.email || "") + "</div>" +
-            '<button type="button" class="am-signout">Log out</button>';
-          var out = menu.querySelector(".am-signout");
-          out.addEventListener("click", function (e) {
-            e.preventDefault();
-            fetch("/api/auth/sign-out", {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "content-type": "application/json" },
-              body: "{}",
-            }).then(function () { window.location.href = "/buzzy/"; });
-          });
-          link.parentNode.insertBefore(menu, link.nextSibling);
-          link.addEventListener("click", function (e) {
-            e.preventDefault();
-            menu.style.display = menu.style.display === "none" ? "block" : "none";
-          });
-          document.addEventListener("click", function (e) {
-            if (!menu.contains(e.target) && e.target !== link) menu.style.display = "none";
-          });
+          if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
         .catch(function () {});
     })();

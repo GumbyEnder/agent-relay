@@ -89,6 +89,12 @@
       ".bz-chrome-scroll{overflow-x:auto;scrollbar-width:none}",
       "#bzChrome .bz-account{color:#8d8d8d;font-size:.82rem;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-account:hover{color:#ffd40d}",
+      // The dropdown is chrome, so the chrome styles it: pages without a local
+      // .account-menu rule (landing, wallet) would otherwise get an unstyled block.
+      "#bzChrome .account-menu{position:absolute;top:100%;right:0;margin-top:.4rem;background:#141414;border:1px solid #2A2A2A;border-radius:6px;padding:.7rem .9rem;min-width:200px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);text-align:left}",
+      "#bzChrome .account-menu .am-name{font-weight:600;color:#fff;font-size:.9rem}",
+      "#bzChrome .account-menu .am-email{font-size:.75rem;color:#888;margin:.15rem 0 .6rem;word-break:break-all}",
+      "#bzChrome .account-menu .am-signout{width:100%;font-size:.8rem;padding:.4rem .6rem;background:#1b1b1b;color:#e8e8e8;border:1px solid #333;border-radius:6px;cursor:pointer}",
       "#bzChrome .bz-plan{display:inline-flex;align-items:center;border:1px solid #3a3a3a;border-radius:999px;padding:.1rem .5rem;font-size:.7rem;font-weight:800;letter-spacing:.06em;color:#cfcfcf;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-plan-pro{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome .bz-plan-starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
@@ -144,7 +150,13 @@
         a.setAttribute("data-nav", l.id);
       }
       a.href = l.href;
+      // Pages still hand-write `<a data-nav="library" target="_blank">`: the anchor
+      // is reused here, so a link that should no longer open a tab kept its target
+      // and the shell's click handler skipped it (it bails on any non-_self target).
+      // That is how a lap of the site ended in three tabs and a dead mic (BZ-14).
+      // The LIST decides, not the markup it inherited.
       if (l.blank) { a.target = "_blank"; a.rel = "noopener"; }
+      else { a.removeAttribute("target"); a.removeAttribute("rel"); }
       ordered.push(a);
     });
     ordered.forEach(function (a) { nav.appendChild(a); });
@@ -233,52 +245,130 @@
 
   /** Who is signed in? One place, right beside the logo. */
   function accountControl(chrome) {
-    // Pages that already render a full account menu (name, email, Log out) keep it;
-    // adding our own link beside it produced 'Shane' twice on Talk.
-    var menu = document.querySelector("header .account-menu");
-    if (menu) {
-      var stray = chrome.querySelector("a.bz-account");
-      if (stray) stray.remove();
-      chrome.appendChild(menu);
-      return;
+    // The identity is ALWAYS a visible name link owned by the chrome. Talk and Library
+    // build their own `.account-menu` (name, email, Log out) and hide it behind a click;
+    // adopting that menu and deleting our link left the row with no identity at all
+    // (BZ-15: name on landing/login/wallet/sketch, blank on talk/library). The page's
+    // menu becomes the DROPDOWN of the chrome's link, never a replacement for it.
+    var a = document.getElementById("accountLink");
+    if (!a) {
+      a = document.createElement("a");
+      a.id = "accountLink";
     }
-    var existing = document.getElementById("accountLink");
-    var a = existing || document.createElement("a");
-    a.id = "accountLink";
     a.className = "bz-account account-link";
     a.href = "/buzzy/landing";
-    chrome.appendChild(a); // moves it out of the nav when the page shipped one there
     // No "…" placeholder: an empty label with a reserved width cannot be mistaken
     // for a name, and it does not flash "Sign in" at a signed-in user.
-    a.textContent = "";
     a.style.minWidth = "5.5rem";
+    chrome.appendChild(a); // moves it out of the nav when the page shipped one there
+    chrome.style.position = "relative";
+
+    function paint(name, email) {
+      user = name ? { name: name, email: email || "" } : null;
+      a.textContent = name || "Sign in";
+      a.href = name ? "/buzzy/profile" : "/buzzy/landing";
+      a.title = email || name || "Sign in";
+      if (user) ensureMenu();
+    }
+    var user = null;
+
+    function signOut(e) {
+      if (e) e.preventDefault();
+      fetch("/api/auth/sign-out", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" }, body: "{}",
+      }).then(function () { window.location.href = "/buzzy/"; });
+    }
+
+    function fillMenu(m) {
+      if (!user) return;
+      m.innerHTML = "";
+      var n = document.createElement("div"); n.className = "am-name"; n.textContent = user.name;
+      m.appendChild(n);
+      if (user.email) {
+        var em = document.createElement("div"); em.className = "am-email"; em.textContent = user.email;
+        m.appendChild(em);
+      }
+      var out = document.createElement("button");
+      out.type = "button"; out.className = "am-signout"; out.textContent = "Log out";
+      out.addEventListener("click", signOut);
+      m.appendChild(out);
+    }
+
+    // One menu, owned by the chrome. Pages that build their own get adopted; pages
+    // that never build one still get a Log out instead of a name that leads nowhere.
+    function ensureMenu() {
+      if (!user) return;
+      var m = chrome.querySelector(".account-menu");
+      if (m) { fillMenu(m); return; }
+      m = document.createElement("div");
+      m.className = "account-menu bz-account-menu";
+      m.setAttribute("data-bz-adopted", "1");
+      m.style.display = "none";
+      m.style.top = "100%";
+      m.style.right = "0";
+      chrome.appendChild(m);
+      fillMenu(m);
+    }
+    if (!a.textContent) a.textContent = "";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {
         var user = res && res.user;
-        if (user && (user.name || user.email)) {
-          a.textContent = user.name || user.email;
-          a.href = "/buzzy/profile";
-          a.title = user.email || "Your account";
-        } else {
-          a.textContent = "Sign in";
-          a.href = "/buzzy/landing";
-          a.title = "Sign in";
-        }
+        if (user && (user.name || user.email)) paint(user.name || user.email, user.email);
+        else paint(null, null);
       })
-      .catch(function () { a.textContent = "Sign in"; });
+      .catch(function () { paint(null, null); });
 
-    // The page may build its own account menu after us (Talk does). Watch briefly and
-    // hand over to it, so the logo line never reads 'Shane  Shane  shane@…  Log out'.
+    // Adopt a page-built menu as the dropdown. clone the link once so a page's own
+    // click handler (Talk binds a toggle to `.account-link`) cannot double-toggle ours.
+    function adopt(menu) {
+      if (!menu) return;
+      if (menu.getAttribute("data-bz-adopted") === "1") return;
+      menu.setAttribute("data-bz-adopted", "1");
+      menu.classList.add("bz-account-menu");
+      menu.style.display = "none";
+      menu.style.top = "100%";
+      menu.style.right = "0";
+      chrome.appendChild(menu);
+      var fresh = a.cloneNode(true);
+      if (a.parentNode) a.parentNode.replaceChild(fresh, a);
+      else chrome.appendChild(fresh);
+      a = fresh;
+    }
+    adopt(document.querySelector("header .account-menu"));
+
+    // One click handler for chrome + menu, installed once per chrome.
+    if (!chrome.getAttribute("data-bz-acct")) {
+      chrome.setAttribute("data-bz-acct", "1");
+      chrome.addEventListener("click", function (e) {
+        var menu = chrome.querySelector(".account-menu");
+        if (!menu) return;
+        if (a === e.target || a.contains(e.target)) {
+          e.preventDefault();
+          menu.style.display = menu.style.display === "none" ? "block" : "none";
+        }
+      });
+      document.addEventListener("click", function (e) {
+        var menu = chrome.querySelector(".account-menu");
+        if (!menu) return;
+        if (a.contains(e.target) || menu.contains(e.target)) return;
+        menu.style.display = "none";
+      });
+    }
+
+    // The page may build its menu after us (Talk does, on every re-execution of its
+    // script during a soft navigation). Watch briefly, adopt it, and drop strays.
     var tries = 0;
     var watch = setInterval(function () {
       tries++;
-      var later = document.querySelector("header .account-menu");
-      if (later) {
-        if (a.parentNode) a.remove();
-        chrome.appendChild(later);
-        clearInterval(watch);
-      } else if (tries > 24) clearInterval(watch);
+      Array.prototype.forEach.call(document.querySelectorAll("header .account-menu"), function (m) {
+        if (m.getAttribute("data-bz-adopted") === "1") return;
+        var twin = chrome.querySelector(".account-menu");
+        if (twin) { m.remove(); return; }
+        adopt(m);
+      });
+      if (tries > 24) clearInterval(watch);
     }, 250);
   }
 
@@ -705,24 +795,42 @@
 
   function runScripts(root) {
     var scripts = Array.prototype.slice.call(root.querySelectorAll("script"));
+    // One document runs every page's scripts, so a top-level `const` on page B collides
+    // with page A's — "Identifier 'QUESTIONS' has already been declared" killed the
+    // whole Library script on a soft navigation out of Talk (BZ-16). Each run of
+    // CONSECUTIVE inline blocks now executes inside one function scope: the names stay
+    // private to that page, cross-block references inside the page still work, and the
+    // page's globals can no longer overwrite the cached page's state. <script src>
+    // tags keep their own file scope and their position in the order.
+    var batch = [];
+    function flush() {
+      if (!batch.length) return Promise.resolve();
+      var src = batch.join("\n;\n");
+      batch = [];
+      var n = document.createElement("script");
+      n.textContent = "(function(){\n" + src + "\n})();";
+      document.head.appendChild(n);
+      return Promise.resolve();
+    }
     return scripts.reduce(function (chain, s) {
       return chain.then(function () {
         if (s.src && /\/buzzy\/nav\.js(\?|$)/.test(s.src)) { s.remove(); return; }
         if (s.src) {
-          return new Promise(function (resolve) {
-            var n = document.createElement("script");
-            Array.prototype.forEach.call(s.attributes, function (a) { n.setAttribute(a.name, a.value); });
-            n.onload = resolve;
-            n.onerror = resolve;
-            document.head.appendChild(n);
-            s.remove();
+          return flush().then(function () {
+            return new Promise(function (resolve) {
+              var n = document.createElement("script");
+              Array.prototype.forEach.call(s.attributes, function (a) { n.setAttribute(a.name, a.value); });
+              n.onload = resolve;
+              n.onerror = resolve;
+              document.head.appendChild(n);
+              s.remove();
+            });
           });
         }
-        var inline = document.createElement("script");
-        inline.textContent = s.textContent;
-        s.replaceWith(inline);
+        batch.push(s.textContent);
+        s.remove();
       });
-    }, Promise.resolve());
+    }, Promise.resolve()).then(flush);
   }
 
   function buildFromDoc(doc, key) {
@@ -827,6 +935,10 @@
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
       if (!a) return;
+      // The identity chip is a dropdown trigger, not a page link. The shell used to
+      // soft-navigate on it before the chrome's own click handler could toggle the
+      // menu, so clicking your name took you to /buzzy/profile and no menu ever showed.
+      if (a.id === "accountLink") return;
       if (a.target && a.target !== "_self") return;
       if (a.hasAttribute("download")) return;
       var href = a.getAttribute("href");
