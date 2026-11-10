@@ -7,15 +7,16 @@
 -- lived product work is not an agent task, DEFAULT_STALE_POLICY.exemptTags),
 -- not backfill state. Stripping it here was coherent only while the sweep still
 -- filtered on `claimed_by is not null`; post-Amendment-A the sweep's predicate
--- is (running, not sustained, greatest(hb, claimed_at) < cutoff), so an untagged
--- #165 is drained to Inbox at the very next poll — and this script just restored
--- it with a 23-day clock. Keep the tag; revert the move.
+-- is (running, not sustained, greatest(hb, claimed_at, updated_at) < cutoff), so
+-- an untagged #165 is drained to Inbox at the next poll after its clock lapses
+-- — and this script just restored it with a 23-day heartbeat. Keep the tag;
+-- revert the move.
 --
--- WARNING: running with old clocks is only a safe state with
--- STALE_CLAIM_RELEASE_HOURS=0. With the default 6h, these restored rows match
--- the post-A predicate exactly and the next poll re-drains all of them (this
--- time including #165 if its tag were missing). Roll back the code first, or
--- set STALE_CLAIM_RELEASE_HOURS=0 before restarting the service.
+-- WARNING: the restored rows go back to Running with old heartbeat/claim clocks
+-- and updated_at = now(). Because updated_at is part of the sweep's clock, they
+-- are safe for staleHours (6h by default) and then re-drained — i.e. the revert
+-- undoes itself six hours after it runs unless the code is rolled back too.
+-- Roll back the code (or set STALE_CLAIM_RELEASE_HOURS=0) in the same window.
 
 -- Undo the demotion.
 UPDATE ar_missions m

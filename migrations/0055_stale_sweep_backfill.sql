@@ -6,9 +6,10 @@
 -- it nulled claimed_by/claimed_at but left column_id='running' and
 -- last_heartbeat untouched. Result: 22 missions sat in Running for weeks/months
 -- with no owner, classified "stale" instead of "orphaned", and unreachable by
--- any human triage. The code fix (demote to inbox, clock = max(hb, claimed_at),
--- `sustained` exemption) stops NEW strandings; it cannot drain the ones already
--- there, because they no longer match the sweep predicate (claimed_by is null).
+-- any human triage. The code fix (demote to inbox, clock =
+-- greatest(hb, claimed_at, updated_at), `sustained` exemption) stops NEW
+-- strandings; it cannot drain the ones already there, because they no longer
+-- match the sweep predicate (claimed_by is null).
 --
 -- This migration is the drain, and it is deliberately not silent:
 --   1. #165 is tagged `sustained` and exempted permanently (no id special-case
@@ -43,16 +44,19 @@
 -- The tag step below is the brake. `npm start` runs scripts/migrate.mjs before
 -- .output/server/index.mjs, so the first poll happens after this file commits.
 
--- 1. The long-lived epic is not agent work.
+-- 1. The long-lived epic is not agent work. Case-insensitive on the tag, like
+-- the sweep predicate and the TS classifier (both lower-case tags), so a card
+-- tagged `Sustained` does not get a second `sustained` appended.
 UPDATE ar_missions
-   SET tags = CASE
-                WHEN tags @> '["sustained"]'::jsonb THEN tags
-                ELSE tags || '["sustained"]'::jsonb
-              END,
+   SET tags = (CASE WHEN jsonb_typeof(tags) = 'array' THEN tags ELSE '[]'::jsonb END)
+              || '["sustained"]'::jsonb,
        updated_at = now()
  WHERE external_id = 'github:gumbyender/agent-relay#165'
    AND NOT EXISTS (
-     SELECT 1 FROM jsonb_array_elements_text(tags) t WHERE lower(t) = 'sustained'
+     SELECT 1 FROM jsonb_array_elements_text(
+       CASE WHEN jsonb_typeof(tags) = 'array' THEN tags ELSE '[]'::jsonb END
+     ) t
+      WHERE lower(t) = 'sustained'
    );
 
 INSERT INTO ar_events (id, mission_id, agent_id, project_id, kind, message, at, meta)
@@ -71,9 +75,11 @@ WITH stranded AS (
    WHERE m.column_id = 'running'
      AND m.claimed_by IS NULL
      AND NOT EXISTS (
-       SELECT 1 FROM jsonb_array_elements_text(m.tags) t WHERE lower(t) = 'sustained'
+       SELECT 1 FROM jsonb_array_elements_text(
+         CASE WHEN jsonb_typeof(m.tags) = 'array' THEN m.tags ELSE '[]'::jsonb END
+       ) t WHERE lower(t) = 'sustained'
      )
-     AND coalesce(greatest(m.last_heartbeat, m.claimed_at), to_timestamp(0))
+     AND greatest(m.last_heartbeat, m.claimed_at, m.updated_at)
          < now() - interval '6 hours'
      AND NOT EXISTS (
        SELECT 1 FROM ar_mission_history h2
