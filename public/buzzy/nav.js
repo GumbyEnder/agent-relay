@@ -47,6 +47,27 @@
     return seg;
   }
 
+  // The header cancels whatever horizontal padding its containing page puts on
+  // <body> so the bar can span the viewport. That number is a SNAPSHOT of the
+  // current page's CSS, so it must be re-derived whenever the active page (and
+  // therefore its body rule) changes: a soft navigation from Capabilities (body
+  // padding 17.6px) to Talk (none) used to leave margin-left at -17.6px with no
+  // padding left to cancel, pushing the header 18px off the viewport (BZ-11
+  // residual, "after stopping voice"). boot() returns early when the chrome
+  // already exists, so the re-derive lives in applyBleed() and boot() calls it.
+  var chromeBleedHeader = null;
+  function applyBleed() {
+    var h = chromeBleedHeader;
+    if (!h || !h.isConnected) h = chromeBleedHeader = document.querySelector("#bzChrome") ? document.querySelector("#bzChrome").closest("header") : null;
+    if (!h) return;
+    var bcs = window.getComputedStyle(document.body);
+    var padL = parseFloat(bcs.paddingLeft) || 0;
+    var padR = parseFloat(bcs.paddingRight) || 0;
+    h.style.marginLeft = (-padL) + "px";
+    h.style.marginRight = (-padR) + "px";
+  }
+  window.addEventListener("resize", applyBleed);
+
   function style() {
     if (document.getElementById("bz-chrome-css")) return;
     var s = document.createElement("style");
@@ -633,8 +654,13 @@
       if (!page || !page.contains(n)) n.remove();
     });
     var nav = ensureNav();
-    if (document.getElementById("bzChrome")) return;
+    if (document.getElementById("bzChrome")) {
+      // Re-derive the body-padding bleed for the page that is active NOW.
+      applyBleed();
+      return;
+    }
     var header = nav.closest("header") || document.querySelector("header") || document.body;
+    chromeBleedHeader = header;
 
     var brand = findBrand(header);
     var account = document.getElementById("accountLink");
@@ -669,16 +695,12 @@
     // The body's own horizontal padding counts too: Capabilities ships
     // `body{padding:0 17.6px}`, which inset the header by 18px even after the header
     // itself was pinned. Negative margins cancel it, so the bar spans the viewport.
-    var bcs = window.getComputedStyle(document.body);
-    var padL = parseFloat(bcs.paddingLeft) || 0;
-    var padR = parseFloat(bcs.paddingRight) || 0;
     header.style.display = "block";
     header.style.width = "auto";
     header.style.maxWidth = "none";
     header.style.boxSizing = "border-box";
     header.style.margin = "0";
-    header.style.marginLeft = (-padL) + "px";
-    header.style.marginRight = (-padR) + "px";
+    applyBleed();
     header.style.padding = "12px 24px 8px";
     header.innerHTML = "";
 
@@ -912,7 +934,7 @@
     }
   }
 
-  window.BeeZillaChrome = { boot: boot, section: section };
+  window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
@@ -944,9 +966,24 @@
   var KEEP_ALIVE = ["/buzzy/talk"];
   var cache = Object.create(null); // key -> { el, title, styles }
   var busy = false;
-  // popstate fires AFTER location has changed, so "which page am I stashing?"
-  // must come from our own record, never from location.href.
+  // popstate fires AFTER location has changed, so "which page am I stashing?" must
+  // come from our own record, never from location.href.
   var currentKey = keyOf(location.href);
+
+  // A hard load ships the page's own <style> tags with NO data-bz-style, so the
+  // "only the active page's CSS is enabled" switch never saw them: after soft
+  // navigating off Capabilities its `body{padding:0 1.1rem}` stayed live on every
+  // following page, and the chrome's negative margin then cancelled padding that
+  // page did not have (header x = -18px on Talk — BZ-11 residual). Claim the
+  // initial page's stylesheets for its own key so the switch owns them from the
+  // first hop. The chrome's stylesheet is never claimed: it must survive every page.
+  Array.prototype.forEach.call(
+    document.querySelectorAll('head style, head link[rel="stylesheet"]'),
+    function (el) {
+      if (el.id === "bz-chrome-css" || el.hasAttribute("data-bz-style")) return;
+      el.setAttribute("data-bz-style", currentKey);
+    }
+  );
 
   function keyOf(url) {
     var u = url instanceof URL ? url : new URL(url, location.href);
