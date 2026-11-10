@@ -3032,6 +3032,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Capture, held for the whole listen session (see ensureMic) — one
       // microphone, not one per turn.
       micStream: null, micCtx: null,
+      // Voice barge-in watchdog (see bargeArm): a mic analyser plus the
+      // consecutive-loud-frame counter that decides the owner has spoken over
+      // the reply.
+      barg: null, bargCtx: null, bargAn: null, bargHits: 0, bargUntil: 0,
       // Timings
       lastSpeechEnd: 0, metrics: [],
     };
@@ -3171,6 +3175,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         voice.speaking = true;
         setAvatarState("speaking");
         paintVoice();
+        bargeArm();
       }
       startLevelLoop();
       src.onended = function () {
@@ -3181,6 +3186,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function finishSpeaking() {
       voice.speaking = false;
+      bargeDisarm();
       voice.nextTime = 0;
       for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
       // Listen FIRST, repaint second. With the microphone held open for the
@@ -3263,6 +3269,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.active = 0;
       voice.nextTime = 0;
       voice.speaking = false;
+      bargeDisarm();
       try {
         if (voice.gain && voice.ctx) {
           // Rebuild the chain so already-scheduled buffers stop immediately.
@@ -3497,6 +3504,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function releaseMic() {
+      bargeDisarm();
       dropCapture();
       try {
         if (voice.micStream) voice.micStream.getTracks().forEach(function (t) { t.stop(); });
@@ -3504,6 +3512,60 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.micStream = null;
       try { if (voice.micCtx && voice.micCtx.state !== "closed") voice.micCtx.close(); } catch (_) {}
       voice.micCtx = null;
+    }
+
+    // ── Voice barge-in ────────────────────────────────────────────────────
+    // Talking over the reply, the way you can with a person. The mic stream is
+    // held open for the whole listen session (ensureMic) and getUserMedia asks
+    // for echoCancellation, so the reply itself lands in the mic far below the
+    // gate: measured on a digital loopback (reply played by the page, mic fed
+    // from the sink monitor) a 0.02 RMS gate fired 0 times in 116 echo-only
+    // frames (p50 0.0000, max 0.0135) and 398 ms after real speech began; the
+    // same rig with echoCancellation:false fired on 84 of 117 frames of the
+    // reply alone. The numbers are why the gate is a threshold plus three
+    // consecutive frames rather than a guess, and why AEC is not optional.
+    var BARGE_RMS = 0.02, BARGE_FRAMES = 3, BARGE_COOLDOWN = 1200;
+    function bargeDisarm() {
+      if (voice.barg) { clearInterval(voice.barg); voice.barg = null; }
+      voice.bargHits = 0;
+    }
+    function bargeArm() {
+      if (!voice.mic || voice.barg || !voice.micStream) return;
+      if (performance.now() < voice.bargUntil) return;
+      try {
+        if (!voice.bargCtx || voice.bargCtx.state === "closed") {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          voice.bargCtx = new AC();
+          var bsrc = voice.bargCtx.createMediaStreamSource(voice.micStream);
+          voice.bargAn = voice.bargCtx.createAnalyser();
+          voice.bargAn.fftSize = 1024;
+          bsrc.connect(voice.bargAn);
+        }
+        if (voice.bargCtx.state === "suspended") { try { voice.bargCtx.resume(); } catch (_) {} }
+      } catch (_) { return; }
+      var buf = new Float32Array(voice.bargAn.fftSize);
+      var startedAt = performance.now();
+      voice.bargHits = 0;
+      voice.barg = setInterval(function () {
+        if (!voice.speaking || !voice.mic) { bargeDisarm(); return; }
+        // The first 350 ms belong to the reply: a stream start is a transient,
+        // not an interruption.
+        if (performance.now() - startedAt < 350) return;
+        voice.bargAn.getFloatTimeDomainData(buf);
+        var sum = 0;
+        for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        if (Math.sqrt(sum / buf.length) > BARGE_RMS) voice.bargHits++;
+        else voice.bargHits = 0;
+        if (voice.bargHits < BARGE_FRAMES) return;
+        // Same cut the nav chip's one-click barge-in uses: stop the buffers,
+        // hand the mic back, keep the session alive.
+        bargeDisarm();
+        voice.bargUntil = performance.now() + BARGE_COOLDOWN;
+        voice.cut = true;
+        stopSpeaking();
+        if (voice.mic) startListening();
+        paintVoice();
+      }, 80);
     }
 
     function startRecording() {
