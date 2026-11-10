@@ -3013,6 +3013,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var LISTEN_KEY = "bz_listen_mode";
     var voice = {
       replies: false, mic: false, armed: false, rec: null, speaking: false, sending: false, note: "",
+      // Set when the owner cuts a reply short. A reply streams in over SSE, so
+      // stopping the buffers already playing is not enough — the next chunk
+      // would start a fresh "Speaking" and re-close the mic. While cut is true
+      // arriving audio is dropped; the end of the turn clears it.
+      cut: false,
       // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
       // (Chrome, and anything with a working speech service); "recorder" = record
       // locally and let the server transcribe (Firefox, Brave, blocked service).
@@ -3126,6 +3131,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function playPcm(b64) {
+      // The owner cut this reply short: keep swallowing chunks for the rest of
+      // the turn instead of restarting the voice a second later.
+      if (voice.cut) return;
       var ctx = ensureAudio();
       if (!ctx) {
         // Never fail silently: the owner must know why nothing was heard.
@@ -3592,6 +3600,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (voice.mic) {
         // A fresh listen clears whatever the last failure said.
         voice.note = "";
+        voice.cut = false;
         // A spoken conversation needs spoken answers.
         if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
         startListening();
@@ -3696,6 +3705,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Cut the reply short and hand the mic back, without ending the session.
         // This is the one-click barge-in the nav chip offers while speaking.
         interrupt: function () {
+          voice.cut = true;
           stopSpeaking();
           if (voice.mic) startListening();
           paintVoice();
@@ -5212,6 +5222,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         document.getElementById("chatError").classList.remove("hidden");
       } finally {
         voice.sending = false;
+        voice.cut = false;
         // A spoken turn ended without a reply: go back to listening.
         if (voice.mic && !voice.speaking) setTimeout(function () {
           if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
