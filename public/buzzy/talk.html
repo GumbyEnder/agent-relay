@@ -3005,7 +3005,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // the recognizer is re-armed as soon as the browser allows it.
     var LISTEN_KEY = "bz_listen_mode";
     var voice = {
-      replies: false, mic: false, rec: null, speaking: false, sending: false, note: "",
+      replies: false, mic: false, armed: false, rec: null, speaking: false, sending: false, note: "",
       // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
       // (Chrome, and anything with a working speech service); "recorder" = record
       // locally and let the server transcribe (Firefox, Brave, blocked service).
@@ -3182,7 +3182,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try {
         if (window.BeeZillaVoiceChip) {
           window.BeeZillaVoiceChip.update({
-            mic: !!voice.mic, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
+            mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
           });
         }
       } catch (_) {}
@@ -3203,7 +3203,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           ? "Speaking — I'll listen again when I'm done."
           : voice.mic
             ? "Listening — speak, then pause."
-            : (voice.note || "");
+            : voice.armed
+              ? "Paused — touch the page and I'll listen again."
+              : (voice.note || "");
         s.textContent = msg;
         s.classList.toggle("hidden", !msg);
       }
@@ -3540,6 +3542,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function toggleMic() {
+      voice.armed = false;
       voice.mic = !voice.mic;
       saveListenPref(voice.mic);
       if (voice.mic) {
@@ -3638,40 +3641,40 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         toggle: toggleMic,
         stop: function () {
           voice.mic = false;
+          voice.armed = false;
           saveListenPref(false);
           stopListening();
           stopSpeaking();
           paintVoice();
         },
         state: function () {
-          return { mic: !!voice.mic, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
+          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
         },
       };
-      // ── Listen mode survives leaving the page ──────────────────────────
-      // The recognizer runs in the page; a navigation or reload kills it. The
-      // INTENT persists, so returning re-arms it without a click. A click is
-      // the reliable gesture when the browser refuses an ungestured start.
+      // ── Listen survives soft navigation, NOT a hard reload ─────────────
+      // The recogniser lives in this document. The page shell keeps this
+      // document alive while you navigate, so the mic keeps running and
+      // nothing here is needed. A hard reload is a NEW document: browsers
+      // refuse an ungestured start, and restarting the microphone because of
+      // a stored flag — before the owner has done anything in this session —
+      // is a defect (a silent mic that the chrome then claims is listening).
+      // So the intent comes back ARMED, not running: the dock says "Resume",
+      // aria-pressed stays false because nothing is listening yet, and the
+      // first gesture in this document starts it. One click, no lie.
       if (listenPref()) {
-        voice.mic = true;
+        voice.mic = false;
+        voice.armed = true;
         voice.replies = true;
         paintVoice();
-        // Re-apply the title marker too — the intent survived the reload, so the
-        // tab should say so without waiting for the next toggle.
-        try { document.title = "🎙 BeeZilla — Listening"; } catch (_) {}
-        startListening();
-        var rearm = function () {
-          if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
+        var resume = function () {
+          document.removeEventListener("pointerdown", resume, true);
+          document.removeEventListener("keydown", resume, true);
+          voice.armed = false;
+          if (!voice.mic) startListening();
+          paintVoice();
         };
-        var onceClick = function () {
-          rearm();
-          document.removeEventListener("click", onceClick);
-        };
-        document.addEventListener("click", onceClick);
-        window.addEventListener("focus", rearm);
-        document.addEventListener("visibilitychange", function () {
-          if (document.visibilityState === "visible") rearm();
-        });
-        window.addEventListener("pageshow", rearm);
+        document.addEventListener("pointerdown", resume, true);
+        document.addEventListener("keydown", resume, true);
       }
     }
 

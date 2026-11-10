@@ -621,11 +621,20 @@
     function paint(st) {
       st = st || (engine() && engine().state ? engine().state() : null);
       var on = !!(st && st.mic);
+      var armed = !!(st && st.armed);
       var speaking = !!(st && st.speaking);
       mic.classList.toggle("on", on);
+      mic.classList.toggle("armed", armed && !on);
+      // aria-pressed means "the mic is running", so an armed (paused) session is
+      // false. The label carries the offer; the state stays honest.
       mic.setAttribute("aria-pressed", on ? "true" : "false");
       var label = mic.querySelector("span");
-      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : "Listen";
+      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : armed ? "Resume" : "Listen";
+      mic.title = on
+        ? "Listening — click to stop"
+        : armed
+          ? "Microphone paused after a reload — click to listen again"
+          : "Talk to BeeZilla — the conversation continues as you navigate";
       stop.style.display = on ? "" : "none";
     }
     // Talk publishes its state here; a page with no engine leaves the dock idle.
