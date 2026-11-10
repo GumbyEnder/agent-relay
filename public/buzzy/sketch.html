@@ -211,10 +211,16 @@
     function resize() {
       var r = stage.getBoundingClientRect();
       var dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(r.width * dpr);
-      canvas.height = Math.round(r.height * dpr);
-      canvas.style.width = r.width + "px";
-      canvas.style.height = r.height + "px";
+      // The canvas BOX is CSS-owned (#board { inset:0 } inside #stage). Pinning
+      // style.width/height from a rect measured at script-parse time froze the box at
+      // whatever height the stage had before layout settled — 1000px+ on a soft hop,
+      // where this page's scripts run before #bzPage's flex applies. The canvas then
+      // stayed clipped and marks drawn near the bottom were cut off on the next load.
+      // Only the backing store follows the measurement; ResizeObserver re-measures when
+      // layout settles (see the listener at the bottom).
+      var w = Math.max(1, Math.round(r.width * dpr));
+      var h = Math.max(1, Math.round(r.height * dpr));
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
       scale = dpr;
       redraw();
     }
@@ -839,6 +845,10 @@
     }
     if (!jobId) titleEl.textContent = "New board";
     window.addEventListener("resize", resize);
+    // A stage that changes size without a window resize (nav rows wrapping, fonts
+    // landing, #bzPage gaining its flex on a soft hop) must re-measure the backing
+    // store, or the canvas keeps the size it guessed at parse time.
+    if (window.ResizeObserver) new ResizeObserver(function () { resize(); }).observe(stage);
     load();
   })();
 </script>

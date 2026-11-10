@@ -1180,6 +1180,11 @@
         styles: Array.prototype.slice.call(document.querySelectorAll('[data-bz-style="' + key + '"]')),
       };
       document.getElementById("bzPageCache").appendChild(page);
+      // A stashed page keeps its content (that is what keep-alive is for) but must not
+      // keep the id: two elements answering `bzPage` makes getElementById pick whichever
+      // is first in document order, which is how a probe sees "a second <main>" and how
+      // a page's own code can end up measuring the hidden copy. restore() puts it back.
+      page.removeAttribute("id");
     } else {
       page.parentNode && page.parentNode.removeChild(page);
     }
@@ -1189,6 +1194,7 @@
     var entry = cache[key];
     var page = entry.el;
     document.getElementById("bzPageCache").removeChild(page);
+    page.id = "bzPage";
     document.body.insertBefore(page, document.getElementById("bzPageCache"));
     finish(key, entry.title, entry.scrollY);
   }
