@@ -747,24 +747,42 @@
 
   function runScripts(root) {
     var scripts = Array.prototype.slice.call(root.querySelectorAll("script"));
+    // One document runs every page's scripts, so a top-level `const` on page B collides
+    // with page A's — "Identifier 'QUESTIONS' has already been declared" killed the
+    // whole Library script on a soft navigation out of Talk (BZ-16). Each run of
+    // CONSECUTIVE inline blocks now executes inside one function scope: the names stay
+    // private to that page, cross-block references inside the page still work, and the
+    // page's globals can no longer overwrite the cached page's state. <script src>
+    // tags keep their own file scope and their position in the order.
+    var batch = [];
+    function flush() {
+      if (!batch.length) return Promise.resolve();
+      var src = batch.join("\n;\n");
+      batch = [];
+      var n = document.createElement("script");
+      n.textContent = "(function(){\n" + src + "\n})();";
+      document.head.appendChild(n);
+      return Promise.resolve();
+    }
     return scripts.reduce(function (chain, s) {
       return chain.then(function () {
         if (s.src && /\/buzzy\/nav\.js(\?|$)/.test(s.src)) { s.remove(); return; }
         if (s.src) {
-          return new Promise(function (resolve) {
-            var n = document.createElement("script");
-            Array.prototype.forEach.call(s.attributes, function (a) { n.setAttribute(a.name, a.value); });
-            n.onload = resolve;
-            n.onerror = resolve;
-            document.head.appendChild(n);
-            s.remove();
+          return flush().then(function () {
+            return new Promise(function (resolve) {
+              var n = document.createElement("script");
+              Array.prototype.forEach.call(s.attributes, function (a) { n.setAttribute(a.name, a.value); });
+              n.onload = resolve;
+              n.onerror = resolve;
+              document.head.appendChild(n);
+              s.remove();
+            });
           });
         }
-        var inline = document.createElement("script");
-        inline.textContent = s.textContent;
-        s.replaceWith(inline);
+        batch.push(s.textContent);
+        s.remove();
       });
-    }, Promise.resolve());
+    }, Promise.resolve()).then(flush);
   }
 
   function buildFromDoc(doc, key) {
