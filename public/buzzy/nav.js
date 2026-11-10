@@ -80,7 +80,15 @@
       // measured 1-6px wider on memory and the identity cluster's left edge wandered.
       // The chrome is one identity in one place: it names a stack every host can
       // resolve the same way instead of inheriting whatever the page happened to load.
-      ".bz-brandrow,.bz-brandrow *{line-height:1.55;font-family:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif}",
+      // The link row needs the same pin as the brand row. This file pinned
+      // line-height/font-family on .bz-brandrow only, so the nav row still took those
+      // from the host page: sketch/studio/capabilities ship `-apple-system` and
+      // line-height 21.3px, the other eight ship `system-ui` and `normal`. Same
+      // component, two typefaces, and the row's own box 26.1px tall on one page and
+      // 23.8px on the next — centred inside a 48px bar, the links sat 1.2px lower and
+      // the row measured up to 19px wider on the pages with the larger line box
+      // (BZ-11 residual, measured on beezilla.net Nov 2026).
+      ".bz-brandrow,.bz-brandrow *,.bz-navbar,.bz-navbar *{line-height:1.55;font-family:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif}",
       ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem;font-size:16px}",
       ".bz-brandrow .bz-brand{display:flex;align-items:center;gap:.5rem;text-decoration:none;color:#f2f2f2}",
       ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
