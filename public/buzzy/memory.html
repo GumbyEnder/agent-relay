@@ -398,7 +398,12 @@
     if (window.BZCompanies) BZCompanies.onChange(function () { loadMemory(); });
     else loadMemory();
   </script>
-<script src="/buzzy/common.js"></script>
-<script>(function(){var run=function(){if(window.__bzHeader)window.__bzHeader("memory")};if(document.readyState!=="loading")run();else document.addEventListener("DOMContentLoaded",run)})();</script>
+  <!-- BZ-15 residual: common.js was the SECOND gate on this page (the accountGate IIFE
+       above is the first, and it refuses only on a 200 with no user). common.js's
+       __bzHeader() ran gateSignedOut(), whose resolveSession() answers a non-2xx with
+       null — so one 500 from /api/auth/get-session ejected a signed-in reader to
+       /buzzy/landing in under 100ms. The chrome (nav.js) owns the header, the account
+       chip and the active nav link, so this page needs no part of it. Do not re-add:
+       a page-level session read must never be able to log somebody out. -->
 </body>
 </html>
