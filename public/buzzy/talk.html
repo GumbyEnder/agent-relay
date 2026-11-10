@@ -3366,16 +3366,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // Timestamp the moment the owner stopped talking: time-to-talk is
           // measured from here, not from when we happened to send.
           voice.lastSpeechEnd = performance.now();
-          var input = document.getElementById("chatInput");
-          if (input) input.value = jobNameFix(brandName(finalText)).trim();
-          voice.sending = true;
-          setAvatarState("thinking");
-          paintVoice();
-          sendChatMessage();
+          // The recogniser only decided that the turn ended. Its words are not
+          // the words (see sendHeardTurn).
+          sendHeardTurn(finalText);
         }
       };
       rec.onerror = function (e) {
         var err = e && e.error;
+        dropCapture();
         if (err === "not-allowed") {
           // A denied permission has no route around it.
           stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
@@ -3398,11 +3396,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       };
       rec.onend = function () {
         voice.rec = null;
+        // A window that ended without a final utterance never became a turn, so
+        // its clip is not evidence of anything.
+        dropCapture();
         if (voice.mic && !voice.speaking && !voice.sending) {
           setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
         }
       };
       try { rec.start(); } catch (_) { voice.rec = null; }
+      // The recogniser cannot be taught a name, but the audio it just heard can
+      // still reach our own transcriber — so keep the clip while it listens.
+      startCapture();
       paintVoice();
     }
 
@@ -3493,6 +3497,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function releaseMic() {
+      dropCapture();
       try {
         if (voice.micStream) voice.micStream.getTracks().forEach(function (t) { t.stop(); });
       } catch (_) {}
@@ -3597,6 +3602,125 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       releaseMic();
     }
 
+    // ── The clip behind the recogniser's guess ────────────────────────────
+    //
+    // Chrome's SpeechRecognition is a closed service with no vocabulary hook.
+    // Measured on the BZ-22 walk (2026-11-10): the same piper clip that our own
+    // transcriber returns as "Honeycrumb" — and rewrites to "Honey Crumb" once
+    // the account's name is in the vocabulary — came back from Chrome as
+    // "honeycomb". That is not a mangling of a proper noun, it is a different
+    // word, so no post-hoc rewrite can recover it (applyVocab/jobNameFix match
+    // squashed spellings, and "honeycomb" is not "honeycrumb"). Fuzzing that
+    // match would be the glossary-priming trap wearing a regex.
+    //
+    // So the recogniser keeps only what it is genuinely good at — instant
+    // interims and knowing when the owner stopped talking — and the audio of
+    // that same turn goes to /api/buzzy/transcribe for the words that drive the
+    // reply. One transcriber for the words, in every browser.
+    var capState = null;
+    var CAP_MAX_MS = 25000;
+
+    function startCapture() {
+      dropCapture();
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+      ensureMic()
+        .then(function (stream) {
+          if (!stream || !voice.rec || capState) return;
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (!voice.micCtx || voice.micCtx.state === "closed") voice.micCtx = new AC();
+          var ctx = voice.micCtx;
+          if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+          var src = ctx.createMediaStreamSource(stream);
+          var proc = ctx.createScriptProcessor(2048, 1, 1);
+          var chunks = [];
+          var startedAt = Date.now();
+          proc.onaudioprocess = function (ev) {
+            if (!capState) return;
+            if (Date.now() - startedAt > CAP_MAX_MS) { dropCapture(); return; }
+            var input = ev.inputBuffer.getChannelData(0);
+            var copy = new Float32Array(input.length);
+            copy.set(input);
+            chunks.push(copy);
+          };
+          src.connect(proc);
+          proc.connect(ctx.destination);
+          capState = { src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate };
+        })
+        .catch(function () {});
+    }
+
+    // The clip as WAV, or null if nothing usable was captured (a failed mic, a
+    // turn that produced no audio). null means "fall back", never "drop".
+    function finishCapture() {
+      var c = capState;
+      capState = null;
+      if (!c) return null;
+      try { c.proc.disconnect(); c.src.disconnect(); } catch (_) {}
+      var total = 0;
+      for (var i = 0; i < c.chunks.length; i++) total += c.chunks[i].length;
+      if (total < c.rate * 0.3) return null;
+      var flat = new Float32Array(total);
+      var off = 0;
+      for (var k = 0; k < c.chunks.length; k++) { flat.set(c.chunks[k], off); off += c.chunks[k].length; }
+      return encodeWav(downsampleTo16k(flat, c.rate));
+    }
+
+    function dropCapture() {
+      var c = capState;
+      capState = null;
+      if (!c) return;
+      try { c.proc.disconnect(); c.src.disconnect(); } catch (_) {}
+    }
+
+    function asrQueryString() {
+      var q = [];
+      if (chatState.jobId) q.push("jobId=" + encodeURIComponent(chatState.jobId));
+      var names = [];
+      if (chatState.jobContext && chatState.jobContext.title) names.push(chatState.jobContext.title);
+      if (names.length) q.push("vocab=" + encodeURIComponent(names.join(",")));
+      return q.length ? "?" + q.join("&") : "";
+    }
+
+    // A recognised turn: the clip is the evidence, the recogniser's text is the
+    // guess. Send the guess only when the clip cannot be transcribed — a Listen
+    // mode that swallows the turn is worse than one that mishears a name.
+    function sendHeardTurn(srText) {
+      var wav = finishCapture();
+      var fallback = jobNameFix(brandName(srText)).trim();
+      if (!wav) { submitHeard(fallback); return; }
+      // Claim the turn now: the recogniser's onend fires while this fetch is in
+      // flight and would otherwise re-arm the mic over its own turn.
+      voice.sending = true;
+      setAvatarState("thinking");
+      paintVoice();
+      fetch("/api/buzzy/transcribe" + asrQueryString(), {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: wav,
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (d) {
+          var text = d && d.ok && d.text ? jobNameFix(brandName(d.text)).trim() : "";
+          submitHeard(text || fallback);
+        })
+        .catch(function () { submitHeard(fallback); });
+    }
+
+    function submitHeard(text) {
+      if (!text) {
+        voice.sending = false;
+        stageNote("Didn't catch that — try again.");
+        rearmListening();
+        return;
+      }
+      var input = document.getElementById("chatInput");
+      if (input) input.value = text;
+      voice.sending = true;
+      setAvatarState("thinking");
+      paintVoice();
+      sendChatMessage();
+    }
+
     function sendForTranscription(wav) {
       voice.sending = true;
       setAvatarState("thinking");
@@ -3604,12 +3728,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // BZ-22: tell the transcriber the names this turn is about. The server
       // also reads the job back by id and the owner's recent names, so this is
       // the cold-open half (a ?job= link with nothing in sessionStorage yet).
-      var asrQuery = [];
-      if (chatState.jobId) asrQuery.push("jobId=" + encodeURIComponent(chatState.jobId));
-      var asrNames = [];
-      if (chatState.jobContext && chatState.jobContext.title) asrNames.push(chatState.jobContext.title);
-      if (asrNames.length) asrQuery.push("vocab=" + encodeURIComponent(asrNames.join(",")));
-      fetch("/api/buzzy/transcribe" + (asrQuery.length ? "?" + asrQuery.join("&") : ""), {
+      fetch("/api/buzzy/transcribe" + asrQueryString(), {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav,
