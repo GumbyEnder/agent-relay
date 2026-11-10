@@ -73,8 +73,9 @@
     var s = document.createElement("style");
     s.id = "bz-chrome-css";
     s.textContent = [
-      // the switcher row is gone; this hides it on the pages that still ship it
-      "#companyTabs{display:none!important}",
+      // BZ-23: the dead `#companyTabs` divs are gone from talk/library/memory and
+      // companies.js no longer mounts into a cached copy, so there is nothing left
+      // to hide here. The visible switcher is the #bzSelect row below.
       "#bzChrome{display:flex;align-items:center;gap:.55rem;flex-wrap:nowrap;min-width:0}",
       "#bzChrome .bz-co-wrap{display:flex;align-items:center;gap:.3rem;min-width:0}",
       "#bzChrome .bz-co-label{color:#8d8d8d;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}",
