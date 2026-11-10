@@ -168,8 +168,23 @@
       }
       function enter() { window.location.replace(destination()); }
 
+      // The address bar is part of the tab. Switching to Sign in used to leave
+      // ?mode=register in the URL, so the page the user was looking at and the
+      // page a reload/bookmark would bring back were two different tabs (BZ-6
+      // nit, Nov 2026). Every mode change owns the query string, in both
+      // directions; `next` and `verified` survive because we edit the live URL.
+      function syncUrl(next) {
+        try {
+          var u = new URL(location.href);
+          if (next === "register") u.searchParams.set("mode", "register");
+          else u.searchParams.delete("mode");
+          var qs = u.searchParams.toString();
+          history.replaceState(null, "", u.pathname + (qs ? "?" + qs : "") + u.hash);
+        } catch (e) { /* a login form must never die on history */ }
+      }
       function setMode(next) {
         mode = next;
+        syncUrl(next);
         var registering = next === "register";
         tabSignin.setAttribute("aria-selected", registering ? "false" : "true");
         tabRegister.setAttribute("aria-selected", registering ? "true" : "false");
@@ -187,10 +202,7 @@
       }
 
       tabSignin.addEventListener("click", function () { setMode("signin"); });
-      tabRegister.addEventListener("click", function () {
-        setMode("register");
-        try { history.replaceState(null, "", "/buzzy/login?mode=register"); } catch (e) {}
-      });
+      tabRegister.addEventListener("click", function () { setMode("register"); });
 
       form.addEventListener("submit", function (e) {
         e.preventDefault();
