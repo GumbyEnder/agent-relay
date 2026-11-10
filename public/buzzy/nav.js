@@ -113,6 +113,11 @@
       "#bzChrome .bz-plan-starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
       "#bzChrome .bz-voice{display:inline-flex;align-items:center;gap:.3rem}",
       "#bzChrome button.bz-voice-mic{display:inline-flex;align-items:center;gap:.3rem;background:#141414;color:#e8e8e8;border:1px solid #2c2c2c;border-radius:999px;padding:.28rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
+      // Half-duplex is a promise the owner has to be able to SEE. While a reply
+      // is playing the mic is not being listened to, and a chip that just says
+      // "Speaking" reads as "busy", not "you are not being heard".
+      "#bzChrome .bz-voice-hint{margin-left:.35rem;font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.8}",
+      "@media (max-width:900px){#bzChrome .bz-voice-hint{display:none}}",
       "#bzChrome button.bz-voice-mic.on{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome button.bz-voice-stop{background:#2a1214;color:#ffb4b4;border:1px solid #5b1f24;border-radius:999px;padding:.28rem .55rem;font:inherit;font-size:.8rem;cursor:pointer}",
       ".bz-chrome-scroll::-webkit-scrollbar{display:none}",
@@ -790,7 +795,7 @@
     mic.id = "bzVoiceMic";
     mic.type = "button";
     mic.className = "bz-voice-mic";
-    mic.innerHTML = "&#127908; <span>Listen</span>";
+    mic.innerHTML = "&#127908; <span class=\"bz-voice-label\">Listen</span><span class=\"bz-voice-hint\" hidden>mic off</span>";
     mic.setAttribute("aria-pressed", "false");
     mic.title = "Talk to BeeZilla \u2014 the conversation continues as you navigate";
     var stop = document.createElement("button");
@@ -815,13 +820,19 @@
       // aria-pressed means "the mic is running", so an armed (paused) session is
       // false. The label carries the offer; the state stays honest.
       mic.setAttribute("aria-pressed", on ? "true" : "false");
-      var label = mic.querySelector("span");
+      var label = mic.querySelector(".bz-voice-label");
       if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : armed ? "Resume" : "Listen";
+      var hint = mic.querySelector(".bz-voice-hint");
+      if (hint) hint.hidden = !(on && speaking);
       mic.title = on
-        ? "Listening — click to stop"
+        ? speaking
+          ? "Mic is off while I talk \u2014 click to cut me off and speak"
+          : "Listening \u2014 click to stop"
         : armed
-          ? "Microphone paused after a reload — click to listen again"
-          : "Talk to BeeZilla — the conversation continues as you navigate";
+          ? "Microphone paused after a reload \u2014 click to listen again"
+          : "Talk to BeeZilla \u2014 the conversation continues as you navigate";
+      mic.setAttribute("aria-label",
+        on ? (speaking ? "Speaking, microphone off" : "Listening") : armed ? "Resume listening" : "Listen");
       stop.style.display = on ? "" : "none";
     }
     // Talk publishes its state here; a page with no engine leaves the dock idle.
@@ -845,6 +856,12 @@
 
     mic.addEventListener("click", function () {
       var st = engine() && engine().state ? engine().state() : null;
+      if (st && st.mic && st.speaking) {
+        // Manual barge-in: one click cuts the reply short and hands the mic
+        // back without ending the session. Killing the whole listen session
+        // because the owner wanted to talk over me is the wrong trade.
+        if (engine() && engine().interrupt) { engine().interrupt(); paint(); return; }
+      }
       if (st && st.mic) {
         if (engine() && engine().stop) engine().stop();
         else { var b = document.getElementById("micBtn"); if (b) b.click(); }

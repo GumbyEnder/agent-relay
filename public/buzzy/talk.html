@@ -3019,6 +3019,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       asr: "sr",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
+      // Capture, held for the whole listen session (see ensureMic) — one
+      // microphone, not one per turn.
+      micStream: null, micCtx: null,
       // Timings
       lastSpeechEnd: 0, metrics: [],
     };
@@ -3161,8 +3164,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.speaking = false;
       voice.nextTime = 0;
       for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
-      paintVoice();
+      // Listen FIRST, repaint second. With the microphone held open for the
+      // whole session (ensureMic) this is a few milliseconds of work, and it is
+      // the difference between hearing "hey, can you…" and "can you…".
       if (voice.mic) startListening();
+      paintVoice();
     }
 
     function voicePref() {
@@ -3207,7 +3213,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var s = document.getElementById("voiceStatus");
       if (s) {
         var msg = voice.speaking
-          ? "Speaking — I'll listen again when I'm done."
+          ? "Speaking — mic off until I finish. (Tap the mic to cut me off.)"
           : voice.mic
             ? "Listening — speak, then pause."
             : voice.armed
@@ -3414,24 +3420,54 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return new Blob([buf], { type: "audio/wav" });
     }
 
+    /**
+     * The microphone belongs to the listen SESSION, not to one turn.
+     *
+     * Opening it per turn cost 150–500 ms (getUserMedia round trip + new
+     * AudioContext + wiring), and every millisecond of that landed after the
+     * reply had finished playing — exactly when an owner answers back. That is
+     * why the first words of a turn went missing (QA walk, e76f235). One stream,
+     * opened when listening starts, released only when listening stops.
+     */
+    function ensureMic() {
+      var md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) return null;
+      if (voice.micStream) {
+        var live = voice.micStream.getAudioTracks().filter(function (t) { return t.readyState === "live"; });
+        if (live.length) return Promise.resolve(voice.micStream);
+        voice.micStream = null;
+      }
+      return md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+        .then(function (s) { voice.micStream = s; return s; });
+    }
+
+    function releaseMic() {
+      try {
+        if (voice.micStream) voice.micStream.getTracks().forEach(function (t) { t.stop(); });
+      } catch (_) {}
+      voice.micStream = null;
+      try { if (voice.micCtx && voice.micCtx.state !== "closed") voice.micCtx.close(); } catch (_) {}
+      voice.micCtx = null;
+    }
+
     function startRecording() {
       if (recState || voice.sending) return;
-      var md = navigator.mediaDevices;
-      if (!md || !md.getUserMedia) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         stageNote("This browser can't record audio — typed chat works here.");
         voice.mic = false;
         saveListenPref(false);
         paintVoice();
         return;
       }
-      md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+      ensureMic()
         .then(function (stream) {
-          if (!voice.mic) {
-            stream.getTracks().forEach(function (t) { t.stop(); });
-            return;
-          }
+          if (!stream) throw new Error("no mic");
+          if (!voice.mic) { releaseMic(); return; }
           var AC = window.AudioContext || window.webkitAudioContext;
-          var ctx = new AC();
+          // A closed context cannot be reused; a suspended one just needs nudging.
+          if (!voice.micCtx || voice.micCtx.state === "closed") voice.micCtx = new AC();
+          var ctx = voice.micCtx;
+          if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
           var src = ctx.createMediaStreamSource(stream);
           var proc = ctx.createScriptProcessor(2048, 1, 1);
           var chunks = [];
@@ -3475,6 +3511,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             saveListenPref(false);
           } else {
             stageNote("Couldn't open the microphone" + (name ? " (" + name + ")" : "") + " — tap the mic to try again.");
+            releaseMic();
             rearmListening();
           }
           paintVoice();
@@ -3486,8 +3523,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!r) return;
       recState = null;
       try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
-      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
-      try { r.ctx.close(); } catch (_) {}
+      // The stream and its AudioContext stay open: the next turn reuses them,
+      // which is what stops the first words of a reply-turn going missing.
+      // (releaseMic() closes them when the listen session ends.)
       // Nothing was said: re-arm instead of uploading a silent clip and paying
       // the model to tell us it heard nothing.
       if (!r.speechSeen) { rearmListening(); return; }
@@ -3505,8 +3543,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!r) return;
       recState = null;
       try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
-      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
-      try { r.ctx.close(); } catch (_) {}
+      releaseMic();
     }
 
     function sendForTranscription(wav) {
@@ -3639,6 +3676,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveListenPref(false);
         stopListening();
         stopSpeaking();
+        releaseMic();
         paintVoice();
       });
       paintVoice();
@@ -3652,6 +3690,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           saveListenPref(false);
           stopListening();
           stopSpeaking();
+          releaseMic();
+          paintVoice();
+        },
+        // Cut the reply short and hand the mic back, without ending the session.
+        // This is the one-click barge-in the nav chip offers while speaking.
+        interrupt: function () {
+          stopSpeaking();
+          if (voice.mic) startListening();
           paintVoice();
         },
         state: function () {
