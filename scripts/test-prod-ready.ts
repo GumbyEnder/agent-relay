@@ -197,10 +197,52 @@ function emptyBoard(over: Partial<BoardData> = {}): BoardData {
     lastHeartbeat: now - DEFAULT_STALE_HEARTBEAT_MS - 5_000,
   });
   const ready = mission({ id: "m3", title: "ready", column: "ready" });
+  // Orphaned: in running with nobody attached and no clock at all.
+  const orphaned = mission({
+    id: "m4",
+    title: "orphaned",
+    column: "running",
+    claimedBy: null,
+    claimedAt: null,
+    lastHeartbeat: null,
+  });
+  // Released: the old sweep nulled the claim but left the dead heartbeat behind.
+  // Ownership is the truth — this must read "orphaned", never "stale".
+  const released = mission({
+    id: "m5",
+    title: "released by sweep, dead heartbeat left behind",
+    column: "running",
+    claimedBy: null,
+    claimedAt: null,
+    lastHeartbeat: now - DEFAULT_STALE_HEARTBEAT_MS - 5_000,
+  });
+  // Re-claimed 10s ago but still carrying the previous owner's dead heartbeat:
+  // effectiveHeartbeatAt is max(), so this is fresh, not stale on arrival.
+  const reclaimed = mission({
+    id: "m6",
+    title: "re-claimed with a dead heartbeat inherited",
+    column: "running",
+    claimedBy: "a2",
+    claimedAt: now - 10_000,
+    lastHeartbeat: now - DEFAULT_STALE_HEARTBEAT_MS - 5_000,
+  });
+  // Sustained: exempt by tag, permanently n/a.
+  const sustained = mission({
+    id: "m7",
+    title: "sustained epic",
+    column: "running",
+    tags: ["sustained"],
+    claimedBy: null,
+    lastHeartbeat: now - DEFAULT_STALE_HEARTBEAT_MS - 5_000,
+  });
   assert.equal(classifyMissionHealth(fresh, now), "ok");
   assert.equal(classifyMissionHealth(stale, now), "stale");
   assert.equal(isStaleMission(stale, now), true);
   assert.equal(classifyMissionHealth(ready, now), "n/a");
+  assert.equal(classifyMissionHealth(orphaned, now), "orphaned");
+  assert.equal(classifyMissionHealth(released, now), "orphaned");
+  assert.equal(classifyMissionHealth(reclaimed, now), "ok");
+  assert.equal(classifyMissionHealth(sustained, now), "n/a");
   const list = listStaleMissions([fresh, stale, ready], now);
   assert.deepEqual(
     list.map((m) => m.id),
@@ -209,6 +251,10 @@ function emptyBoard(over: Partial<BoardData> = {}): BoardData {
   const sum = staleSummary([fresh, stale, ready], now);
   assert.equal(sum.staleCount, 1);
   assert.ok(sum.staleIds.includes("m2"));
+  const sumAll = staleSummary([fresh, stale, ready, orphaned, released, reclaimed, sustained], now);
+  assert.equal(sumAll.staleCount, 1, "stale must not silently absorb unowned cards");
+  assert.equal(sumAll.orphanedCount, 2, "orphaned = no claimant / no clock");
+  assert.equal(sumAll.okCount, 2, "fresh + re-claimed");
   console.log("✓ stale heartbeat");
 }
 

@@ -1972,18 +1972,63 @@ export const durableBoard = {
         }
         projectId = resolved;
       }
-      // Lazy sweep: auto-release claims with no heartbeat for >6h on running
+      // Lazy sweep: demote claims with no heartbeat clock for >6h on running
       // missions (configurable via STALE_CLAIM_RELEASE_HOURS; 0 disables).
-      // Prevents the dead-key dead-end that stranded missions for 14 months.
+      //
+      // It DEMOTES to inbox — it must never "release in place". The old version
+      // only nulled claimed_by/claimed_at and left column_id='running' and
+      // last_heartbeat intact, which stranded 22 missions for 14 months: the
+      // classifier saw a stale heartbeat instead of an unowned card, and
+      // nothing ever moved the card where a human or agent would see it.
+      //
+      // The clock is max(lastHeartbeat, claimed_at) — same shape as
+      // effectiveHeartbeatAt() — so a re-claimed card that still carries the
+      // previous owner's dead heartbeat is not swept out from under the new
+      // owner. `sustained` cards are exempt (see DEFAULT_STALE_POLICY).
       const staleHours = Number(process.env.STALE_CLAIM_RELEASE_HOURS ?? "6");
       if (staleHours > 0) {
-        const cutoff = new Date(Date.now() - staleHours * 3600_000);
+        const now = Date.now();
+        const cutoff = new Date(now - staleHours * 3600_000);
         await sql`
-          update ar_missions
-          set claimed_by = null, claimed_at = null, updated_at = ${ts(Date.now())}
-          where column_id = 'running'
-            and claimed_by is not null
-            and (last_heartbeat is null or last_heartbeat < ${cutoff})
+          with stranded as (
+            select id, project_id, last_heartbeat, claimed_at
+              from ar_missions
+             where column_id = 'running'
+               and claimed_by is not null
+               and not (tags @> '["sustained"]'::jsonb)
+               and coalesce(greatest(last_heartbeat, claimed_at), to_timestamp(0)) < ${cutoff}
+          ), moved as (
+            update ar_missions m
+               set column_id = 'inbox',
+                   claimed_by = null,
+                   claimed_at = null,
+                   last_heartbeat = null,
+                   updated_at = ${ts(now)}
+              from stranded s
+             where m.id = s.id
+            returning m.id, m.project_id, s.last_heartbeat, s.claimed_at
+          ), hist as (
+            insert into ar_mission_history (
+              id, mission_id, project_id, actor_id, actor_name, actor_kind,
+              from_column, to_column, at, note, meta
+            )
+            select 'hist_sweep_' || md5(id || ':' || to_char(now(), 'YYYYMMDDHH24MISSUS')),
+                   id, project_id, null, 'stale-claim-sweep', 'system',
+                   'running', 'inbox', ${ts(now)},
+                   'released-by-stale-sweep',
+                   jsonb_build_object('lastHeartbeat', last_heartbeat, 'claimedAt', claimed_at)
+              from moved
+            on conflict (id) do nothing
+            returning id
+          )
+          insert into ar_events (id, mission_id, agent_id, project_id, kind, message, at, meta)
+          select 'ev_sweep_' || md5(id || ':' || to_char(now(), 'YYYYMMDDHH24MISSUS')),
+                 id, null, project_id, 'mission_released',
+                 ${`Stale claim released — back to inbox after no heartbeat for ${staleHours}h`},
+                 ${ts(now)},
+                 jsonb_build_object('sweep', 'stale-claim')
+            from moved
+          on conflict (id) do nothing
         `;
       }
       const board = await loadBoard(sql, projectId ?? null);
