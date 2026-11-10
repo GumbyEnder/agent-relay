@@ -3311,6 +3311,27 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return String(t || "").replace(/\b(?:b?ee?[\s-]?)?zil{1,2}a\b/gi, "BeeZilla");
     }
 
+    // BZ-22. The server route rewrites proper nouns post-hoc against a
+    // vocabulary (asr.ts explains why a prompt glossary was rejected with
+    // numbers). Chrome's own recogniser never reaches that code, so the same
+    // correction runs here with the one name the page always holds: the job
+    // this turn is about. A recogniser joins or hyphenates the words, so the
+    // gap between them is optional — that is what turns "honeycrumb" back into
+    // "Honey Crumb". Terms with no letters (a "%" title) are ignored.
+    function jobNameFix(t) {
+      var s = String(t || "");
+      var title = String((chatState.jobContext && chatState.jobContext.title) || "").trim();
+      if (!/[a-z]/i.test(title)) return s;
+      // Escape the title, then let any whitespace run in it also match nothing
+      // (the recogniser joins words) — "Honey Crumb" catches "honeycrumb".
+      // A trailing \b would fail on titles that end in punctuation ("Corp."),
+      // so the end condition is a non-word lookahead instead.
+      var pat = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]*");
+      var lead = /^[a-z0-9]/i.test(title) ? "\\b" : "";
+      try { return s.replace(new RegExp(lead + pat + "(?![\\w])", "gi"), title); }
+      catch (_) { return s; }
+    }
+
     // One spoken turn: returns the final transcript, or "" if nothing heard.
     function startListening() {
       if (voice.rec || recState) return;
@@ -3346,7 +3367,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // measured from here, not from when we happened to send.
           voice.lastSpeechEnd = performance.now();
           var input = document.getElementById("chatInput");
-          if (input) input.value = brandName(finalText).trim();
+          if (input) input.value = jobNameFix(brandName(finalText)).trim();
           voice.sending = true;
           setAvatarState("thinking");
           paintVoice();
@@ -3601,7 +3622,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             rearmListening();
             return;
           }
-          var text = brandName(data.text).trim();
+          // The server already applied the job/company vocabulary it knows; this
+          // adds the job the page is in, for the cold ?job= open the server
+          // cannot see the title of.
+          var text = jobNameFix(brandName(data.text)).trim();
           if (!text) {
             stageNote("Didn't catch that — try again.");
             rearmListening();
