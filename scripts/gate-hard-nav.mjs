@@ -70,6 +70,7 @@ console.log(
 );
 
 let servedBad = [];
+const unchecked = [];
 if (ORIGIN) {
   const pages = files.filter((f) => f.endsWith(".html"));
   console.log(`\nserved bytes at ${ORIGIN}:`);
@@ -78,10 +79,11 @@ if (ORIGIN) {
     let html;
     try {
       const res = await fetch(ORIGIN + route, { headers: { "cache-control": "no-cache" } });
-      if (!res.ok) { console.log(`  ${route}  HTTP ${res.status}`); continue; }
+      if (!res.ok) { console.log(`  ${route}  HTTP ${res.status}  NOT MEASURED`); unchecked.push(`${route} HTTP ${res.status}`); continue; }
       html = await res.text();
     } catch (e) {
-      console.log(`  ${route}  fetch failed: ${e.message}`);
+      console.log(`  ${route}  fetch failed: ${e.message}  NOT MEASURED`);
+      unchecked.push(`${route} fetch failed: ${e.message}`);
       continue;
     }
     const found = [...html.matchAll(ASSIGN)].map((m) => m[1]);
@@ -100,6 +102,7 @@ if (ORIGIN) {
   if (navStrays.length) servedBad.push({ route: "/buzzy/nav.js", strays: navStrays });
 }
 
-const fail = bad.length > 0 || servedBad.length > 0;
-console.log(`\nVERDICT ${fail ? "FAIL" : "PASS"}  tree_strays=${bad.length} served_strays=${servedBad.length}`);
+const fail = bad.length > 0 || servedBad.length > 0 || unchecked.length > 0;
+if (unchecked.length) console.log(`  NOT MEASURED (fails the gate, not skipped): ${unchecked.join(", ")}`);
+console.log(`\nVERDICT ${fail ? "FAIL" : "PASS"}  tree_strays=${bad.length} served_strays=${servedBad.length} unmeasured=${unchecked.length}`);
 process.exit(fail ? 1 : 0);
