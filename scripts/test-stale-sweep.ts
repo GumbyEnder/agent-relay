@@ -72,7 +72,13 @@ async function main() {
   assert((await durableBoard.claim(handback, "agent_sweep_d")).ok, "claimed handback");
   assert((await durableBoard.unclaim(handback, "agent_sweep_d")).ok, "unclaimed handback");
 
-  // 8. #165-shaped: the exact card 0055 tags before it demotes — running,
+  // 8. A human just dragged an old card into Running: the card still carries a
+  //    dead heartbeat from a previous owner, claimed_by is null, and ONLY
+  //    updated_at is fresh. It must survive 6h — otherwise a poll overrides the
+  //    operator on the most common human path (the D1 regression).
+  const humanMoved = await mk("human moved into running");
+
+  // 9. #165-shaped: the exact card 0055 tags before it demotes — running,
   //    unclaimed, 23-day heartbeat, NO `sustained` tag. This is the fixture
   //    that pins Amendment A's blast radius. The sweep no longer carries
   //    `claimed_by is not null`, so an untagged runner is reachable; and the
@@ -85,12 +91,14 @@ async function main() {
 
   const sql = await getSql();
   const old = new Date(Date.now() - 2 * DAY);
-  await sql`update ar_missions set claimed_at = ${old}, last_heartbeat = ${old} where id = ${abandoned}`;
-  await sql`update ar_missions set last_heartbeat = ${old} where id = ${reclaimed}`;
-  await sql`update ar_missions set claimed_at = ${old}, last_heartbeat = ${old} where id = ${sustained}`;
+  await sql`update ar_missions set claimed_at = ${old}, last_heartbeat = ${old}, updated_at = ${old} where id = ${abandoned}`;
+  await sql`update ar_missions set last_heartbeat = ${old}, updated_at = ${old} where id = ${reclaimed}`;
+  await sql`update ar_missions set claimed_at = ${old}, last_heartbeat = ${old}, updated_at = ${old} where id = ${sustained}`;
   await sql`update ar_missions set last_heartbeat = ${old}, updated_at = ${old} where id = ${sustainedCaps}`;
-  await sql`update ar_missions set last_heartbeat = ${old} where id = ${unowned}`;
+  await sql`update ar_missions set last_heartbeat = ${old}, updated_at = ${old} where id = ${unowned}`;
   await sql`update ar_missions set updated_at = ${old} where id = ${movedStale}`;
+  // dead heartbeat, no owner, ONLY updated_at fresh (what a human drag leaves)
+  await sql`update ar_missions set last_heartbeat = ${old}, claimed_by = null where id = ${humanMoved}`;
   await sql`update ar_missions
                set external_id = 'github:gumbyender/agent-relay#165',
                    claimed_by = null,
@@ -149,6 +157,10 @@ async function main() {
   assert(hb.column === "running", `just-unclaimed card survives the sweep (got ${hb.column})`);
   assert(hb.claimedBy === null, "just-unclaimed card has no owner");
   assert(classifyMissionHealth(hb, Date.now()) === "orphaned", "just-unclaimed card classifies orphaned");
+
+  // a human's just-moved card survives on updated_at alone (the D1 regression)
+  const hm = at(humanMoved);
+  assert(hm.column === "running", `human-moved card with dead heartbeat survives (got ${hm.column})`);
 
   // #165-shaped: an untagged epic is demoted exactly like any other runner.
   // The brake is the `sustained` tag that 0055 applies before this sweep can
