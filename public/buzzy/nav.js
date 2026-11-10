@@ -834,6 +834,29 @@
    * mounted in this session yet). The page shell keeps Talk's DOM alive while
    * you navigate, which is what makes the session survive the click.
    */
+  // The tab title has TWO inputs: the page's own name and the live-mic marker.
+  // One authority, in the CHROME's scope, because the dock repaints the marker
+  // and the shell sets the page name from another IIFE. Before this, a soft hop
+  // to Library renamed the tab "BeeZilla \u2014 Library" while the mic was still
+  // running — QA caught it, and the marker only came back on the hop to Talk.
+  var bzTitle = {
+    page: document.title,
+    listening: function () {
+      var eng = window.BeeZillaVoice && window.BeeZillaVoice.state ? window.BeeZillaVoice.state() : null;
+      return !!(eng && (eng.mic || eng.armed));
+    },
+    apply: function () {
+      var t = this.listening() ? "\ud83c\udf99 BeeZilla \u2014 Listening" : this.page;
+      if (t && document.title !== t) document.title = t;
+    },
+    setPage: function (t) {
+      if (!t) return;
+      this.page = t;
+      this.apply();
+    },
+  };
+  window.BeeZillaTitle = bzTitle;
+
   function voiceDock(chrome) {
     if (document.getElementById("bzVoiceDock")) return;
     var dock = document.createElement("span");
@@ -882,6 +905,9 @@
       mic.setAttribute("aria-label",
         on ? (speaking ? "Speaking, microphone off" : "Listening") : armed ? "Resume listening" : "Listen");
       stop.style.display = on ? "" : "none";
+      // The mic marker is a property of the TAB, not of the page: this is the
+      // one writer for it, so a soft hop and a start/stop both land here.
+      bzTitle.apply();
     }
     // Talk publishes its state here; a page with no engine leaves the dock idle.
     window.BeeZillaVoiceChip = { update: paint };
@@ -1028,8 +1054,13 @@
     return page;
   }
 
+  // The page name is one of the title's two inputs; the live-mic marker is the
+  // other, and the chrome owns it (window.BeeZillaTitle). This delegates so the
+  // two IIFEs cannot each rename the tab.
   function setTitle(t) {
-    if (t) document.title = t;
+    if (!t) return;
+    if (window.BeeZillaTitle) window.BeeZillaTitle.setPage(t);
+    else document.title = t;
   }
 
   function adoptStyles(doc, key) {
@@ -1175,7 +1206,7 @@
       if (staleHeader) staleHeader.remove();
       cache[key] = {
         el: page,
-        title: document.title,
+        title: window.BeeZillaTitle ? window.BeeZillaTitle.page : document.title,
         scrollY: window.scrollY,
         styles: Array.prototype.slice.call(document.querySelectorAll('[data-bz-style="' + key + '"]')),
       };

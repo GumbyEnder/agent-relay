@@ -3160,6 +3160,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var startAt = Math.max(ctx.currentTime + 0.05, voice.nextTime);
       src.start(startAt);
       voice.nextTime = startAt + buf.duration;
+      // How long the reply actually SPEAKS, and when the last sample lands. The
+      // turn number alone (send -> last byte) reads ~3.6s for a 6.9s turn because
+      // playback keeps going after the stream closes: a voice turn cannot be
+      // shorter than its own audio, so the screen has to say both numbers.
+      voice.audioMs = (voice.audioMs || 0) + Math.round(buf.duration * 1000);
+      voice.playEndAt = startAt + buf.duration;
       voice.active++;
       if (!voice.speaking) {
         voice.speaking = true;
@@ -3195,9 +3201,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     function saveListenPref(on) {
       try { localStorage.setItem(LISTEN_KEY, on ? "1" : "0"); } catch (_) {}
-      // The "on" state also drives the tab title marker, so a background tab
-      // still says whether it is listening.
-      try { document.title = on ? "🎙 BeeZilla — Listening" : "BeeZilla — Chat"; } catch (_) {}
+      // The tab title marker is written by the CHROME (nav.js voiceDock), not
+      // here: it is the tab's state and it has to survive a soft hop, and a page
+      // that writes it too would rename the Library tab "BeeZilla — Chat".
+      // Only a page served without the chrome writes it itself.
+      if (!window.BeeZillaVoiceChip) {
+        try { document.title = on ? "🎙 BeeZilla — Listening" : "BeeZilla — Chat"; } catch (_) {}
+      }
     }
 
     function paintVoice() {
@@ -3802,7 +3812,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           console.table(voice.metrics.slice(-8).map(function (x) {
             return {
               at: x.at, mode: x.mode, surface: x.surface,
-              "asr ms": x.asrMs, "ttft ms": x.ttftMs, "to talk ms": x.ttfaMs, "turn ms": x.turnMs,
+              "asr ms": x.asrMs, "ttft ms": x.ttftMs, "to talk ms": x.ttfaMs,
+              "turn ms": x.turnMs, "spoken ms": x.audioMs, "end ms": x.endMs,
             };
           }));
         } catch (_) {}
@@ -3835,7 +3846,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!m) { el.textContent = ""; return; }
       var parts = [];
       if (m.ttfaMs != null) parts.push("<strong>" + (m.ttfaMs / 1000).toFixed(2) + "s</strong> to talk");
-      if (m.turnMs != null) parts.push((m.turnMs / 1000).toFixed(2) + "s turn");
+      // A voice turn's length is its speech: name the spoken seconds and the end
+      // of the last word, so "3.64s turn" cannot be read as the whole reply.
+      if (m.audioMs) parts.push((m.audioMs / 1000).toFixed(1) + "s spoken");
+      if (m.endMs != null) parts.push((m.endMs / 1000).toFixed(1) + "s to last word");
+      else if (m.turnMs != null) parts.push((m.turnMs / 1000).toFixed(2) + "s turn");
       if (m.asrMs != null && m.asrMs > 60) parts.push((m.asrMs / 1000).toFixed(2) + "s to send");
       // Name the lane on screen: "voice" means the audio model answered,
       // "text" means it fell back — that difference is the whole diagnosis.
@@ -5161,7 +5176,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           spoken: false,
           model: null,
           userSpeechMs: voice.userSpeechMs,
+          audioMs: 0,
+          endMs: null,
         };
+        voice.audioMs = 0;
+        voice.playEndAt = 0;
         voice.lastSpeechEnd = 0;
         voice.userSpeechMs = 0;
 
@@ -5252,6 +5271,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         paintContext(data.context);
         // One latency sample per turn: what the owner actually experienced.
         metrics.turnMs = metrics.turnMs || Math.round(performance.now() - sendStarted);
+        // `turnMs` stops when the audio STREAM ends, not when the last word is
+        // heard: the buffers already scheduled keep playing. Report the tail
+        // separately so the on-screen number is the end of the reply, and never
+        // report a voice turn as faster than the speech inside it.
+        if (voice.audioMs) {
+          metrics.audioMs = voice.audioMs;
+          var ctxNow = voice.ctx && voice.ctx.currentTime ? voice.ctx.currentTime : 0;
+          var tail = voice.playEndAt && ctxNow ? Math.max(0, voice.playEndAt - ctxNow) * 1000 : 0;
+          metrics.endMs = Math.round(metrics.turnMs + tail);
+        }
         metrics.replyChars = (data.reply || "").length;
         metrics.model = data.timings && data.timings.model ? data.timings.model : null;
         // Trust the server about which lane answered: a tool/draft turn runs on
