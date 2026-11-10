@@ -239,52 +239,88 @@
 
   /** Who is signed in? One place, right beside the logo. */
   function accountControl(chrome) {
-    // Pages that already render a full account menu (name, email, Log out) keep it;
-    // adding our own link beside it produced 'Shane' twice on Talk.
-    var menu = document.querySelector("header .account-menu");
-    if (menu) {
-      var stray = chrome.querySelector("a.bz-account");
-      if (stray) stray.remove();
-      chrome.appendChild(menu);
-      return;
+    // The identity is ALWAYS a visible name link owned by the chrome. Talk and Library
+    // build their own `.account-menu` (name, email, Log out) and hide it behind a click;
+    // adopting that menu and deleting our link left the row with no identity at all
+    // (BZ-15: name on landing/login/wallet/sketch, blank on talk/library). The page's
+    // menu becomes the DROPDOWN of the chrome's link, never a replacement for it.
+    var a = document.getElementById("accountLink");
+    if (!a) {
+      a = document.createElement("a");
+      a.id = "accountLink";
     }
-    var existing = document.getElementById("accountLink");
-    var a = existing || document.createElement("a");
-    a.id = "accountLink";
     a.className = "bz-account account-link";
     a.href = "/buzzy/landing";
-    chrome.appendChild(a); // moves it out of the nav when the page shipped one there
     // No "…" placeholder: an empty label with a reserved width cannot be mistaken
     // for a name, and it does not flash "Sign in" at a signed-in user.
-    a.textContent = "";
     a.style.minWidth = "5.5rem";
+    chrome.appendChild(a); // moves it out of the nav when the page shipped one there
+    chrome.style.position = "relative";
+
+    function paint(name, email) {
+      a.textContent = name || "Sign in";
+      a.href = name ? "/buzzy/profile" : "/buzzy/landing";
+      a.title = email || name || "Sign in";
+    }
+    if (!a.textContent) a.textContent = "";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (res) {
         var user = res && res.user;
-        if (user && (user.name || user.email)) {
-          a.textContent = user.name || user.email;
-          a.href = "/buzzy/profile";
-          a.title = user.email || "Your account";
-        } else {
-          a.textContent = "Sign in";
-          a.href = "/buzzy/landing";
-          a.title = "Sign in";
-        }
+        if (user && (user.name || user.email)) paint(user.name || user.email, user.email);
+        else paint(null, null);
       })
-      .catch(function () { a.textContent = "Sign in"; });
+      .catch(function () { paint(null, null); });
 
-    // The page may build its own account menu after us (Talk does). Watch briefly and
-    // hand over to it, so the logo line never reads 'Shane  Shane  shane@…  Log out'.
+    // Adopt a page-built menu as the dropdown. clone the link once so a page's own
+    // click handler (Talk binds a toggle to `.account-link`) cannot double-toggle ours.
+    function adopt(menu) {
+      if (!menu) return;
+      if (menu.getAttribute("data-bz-adopted") === "1") return;
+      menu.setAttribute("data-bz-adopted", "1");
+      menu.classList.add("bz-account-menu");
+      menu.style.display = "none";
+      menu.style.top = "100%";
+      menu.style.right = "0";
+      chrome.appendChild(menu);
+      var fresh = a.cloneNode(true);
+      if (a.parentNode) a.parentNode.replaceChild(fresh, a);
+      else chrome.appendChild(fresh);
+      a = fresh;
+    }
+    adopt(document.querySelector("header .account-menu"));
+
+    // One click handler for chrome + menu, installed once per chrome.
+    if (!chrome.getAttribute("data-bz-acct")) {
+      chrome.setAttribute("data-bz-acct", "1");
+      chrome.addEventListener("click", function (e) {
+        var menu = chrome.querySelector(".account-menu");
+        if (!menu) return;
+        if (a === e.target || a.contains(e.target)) {
+          e.preventDefault();
+          menu.style.display = menu.style.display === "none" ? "block" : "none";
+        }
+      });
+      document.addEventListener("click", function (e) {
+        var menu = chrome.querySelector(".account-menu");
+        if (!menu) return;
+        if (a.contains(e.target) || menu.contains(e.target)) return;
+        menu.style.display = "none";
+      });
+    }
+
+    // The page may build its menu after us (Talk does, on every re-execution of its
+    // script during a soft navigation). Watch briefly, adopt it, and drop strays.
     var tries = 0;
     var watch = setInterval(function () {
       tries++;
-      var later = document.querySelector("header .account-menu");
-      if (later) {
-        if (a.parentNode) a.remove();
-        chrome.appendChild(later);
-        clearInterval(watch);
-      } else if (tries > 24) clearInterval(watch);
+      Array.prototype.forEach.call(document.querySelectorAll("header .account-menu"), function (m) {
+        if (m.getAttribute("data-bz-adopted") === "1") return;
+        var twin = chrome.querySelector(".account-menu");
+        if (twin) { m.remove(); return; }
+        adopt(m);
+      });
+      if (tries > 24) clearInterval(watch);
     }, 250);
   }
 
