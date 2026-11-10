@@ -3670,7 +3670,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           document.removeEventListener("pointerdown", resume, true);
           document.removeEventListener("keydown", resume, true);
           voice.armed = false;
-          if (!voice.mic) startListening();
+          // startListening() starts the recogniser; voice.mic is the declared
+          // state it publishes, so the chrome and the dock agree the moment the
+          // gesture lands. A refused permission comes back through rec.onerror,
+          // which clears both the flag and the stored intent.
+          if (!voice.mic) { voice.mic = true; startListening(); }
           paintVoice();
         };
         document.addEventListener("pointerdown", resume, true);
