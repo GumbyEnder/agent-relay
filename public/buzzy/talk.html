@@ -3732,13 +3732,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // on the way in and the owner's live mic was gone (BZ-19). Talk is the page that owns the engine, so it exposes one entry
       // point and opens the job IN PLACE: same document, same mic, new job.
       window.BeeZillaTalk = {
-        openJob: function (id) {
+        openJob: function (id, provided) {
           if (!id) return false;
           var ctx = null;
           try {
             var jc = JSON.parse(sessionStorage.getItem("bz_open_job") || "null");
             if (jc && jc.jobId === id) ctx = jc;
           } catch (_) {}
+          // A row in Talk's own recent-work list already holds the job record;
+          // before this it passed only the id, so opening the same job from
+          // Talk and from the Library gave two different greetings.
+          if (!ctx && provided) ctx = bzJobCtx(provided);
           chatState.sessionId = null;
           try { localStorage.removeItem("bz_session_id"); } catch (_) {}
           chatState.jobId = id;
@@ -4443,6 +4447,22 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setPhase(chatState.jobContext ? "Chat — " + chatState.jobContext.title : "Talk to BeeZilla");
     }
 
+    // The one shape the context opener understands. The Library builds it from
+    // sessionStorage; Talk now builds the same shape from the job record so both
+    // doors greet identically.
+    function bzJobCtx(j) {
+      if (!j || !j.id) return null;
+      var d = (j.data && typeof j.data === "object") ? j.data : {};
+      return {
+        jobId: j.id,
+        title: j.title || "Untitled job",
+        template: j.template || "General",
+        status: j.status || "Discovering",
+        problem: String(d.problem || d.description || d.challenge || "").slice(0, 400),
+        companyId: j.companyId || null,
+      };
+    }
+
     async function restoreTranscript() {
       try {
         const q = chatState.jobId
@@ -4473,6 +4493,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
       } catch (_) { /* signed out, empty, or unreachable — fall through */ }
       setChatMascot("17-attentive");
+      // No transcript for this job (most jobs are shells created by Sketch or
+      // Studio and never held a conversation). A bare ?job= link carries no
+      // sessionStorage context, so ask for the job itself and greet with it —
+      // otherwise the same job opens with an opener from the Library and a
+      // blank "I'm BeeZilla" greeting from a link. One request, only on this path.
+      if (!chatState.jobContext && chatState.jobId) {
+        try {
+          var jr = await fetch("/api/buzzy/jobs/" + encodeURIComponent(chatState.jobId), {
+            credentials: "same-origin",
+            signal: AbortSignal.timeout(8000),
+          });
+          if (jr.ok) {
+            var jd = await jr.json();
+            if (jd && jd.job) chatState.jobContext = bzJobCtx(jd.job);
+          }
+        } catch (_) { /* keep the plain greeting */ }
+      }
       // Job context opener — the Chat button on a Jobs card carries the
       // project here; greet with context instead of the generic welcome.
       var jc = chatState.jobContext;
@@ -4912,7 +4949,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             // location.href to a /buzzy/ URL: that is a document load, and the
             // mic in this document dies on the way in (BZ-16). The shell's soft
             // navigation does the same move without dropping the recogniser.
-            else if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(it.job.id))) {
+            else if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(it.job.id, it.job))) {
               if (window.BeeZillaShell) {
                 window.BeeZillaShell.go("/buzzy/talk?job=" + encodeURIComponent(it.job.id));
               } else {

@@ -2391,6 +2391,49 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── GET /api/buzzy/jobs/:id — one job, minus its artifact bytes ──────
+  // Talk can receive a bare job id (a ?job= link, or a recent-work row that
+  // knows only the id) and still owes the reader the same context opener the
+  // Library card gets from sessionStorage. The list endpoint carries
+  // data.artifact (a base64 .docx), so it is the wrong thing to fetch for one
+  // row; this returns the header fields the opener needs and drops the artifact.
+  if (method === "GET" && path.startsWith("/api/buzzy/jobs/")) {
+    const id = decodeURIComponent(path.slice("/api/buzzy/jobs/".length));
+    if (id && !id.includes("/")) {
+      const user = await getSessionUserFromHeaders(headersFromEvent(event));
+      if (!user) {
+        setResponseStatus(event, 401);
+        return { error: "Sign in required", code: "signed_out" };
+      }
+      const sql = await getSql();
+      const rows = await sql`
+        SELECT id, template, title, status, company_id, data, created_at, updated_at
+        FROM buzzy_jobs
+        WHERE id = ${id} AND user_id = ${user.id}
+        LIMIT 1
+      `;
+      if (!rows.length) {
+        setResponseStatus(event, 404);
+        return { error: "Job not found", code: "not_found" };
+      }
+      const r = rows[0];
+      const data = typeof r.data === "string" ? safeParseJson(r.data) : r.data;
+      if (data && typeof data === "object") delete (data as Record<string, unknown>).artifact;
+      return {
+        job: {
+          id: r.id,
+          template: r.template,
+          title: r.title,
+          status: r.status,
+          companyId: typeof r.company_id === "string" ? r.company_id : null,
+          data,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        },
+      };
+    }
+  }
+
   // ── GET /api/buzzy/search — work search across ALL of the user's companies
   // Matches job titles, captured problem text, and chat message content, so a
   // user can find work by what was said in it, not just its title. Archived
