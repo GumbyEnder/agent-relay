@@ -13,10 +13,13 @@
 -- revert the move.
 --
 -- WARNING: the restored rows go back to Running with old heartbeat/claim clocks
--- and updated_at = now(). Because updated_at is part of the sweep's clock, they
--- are safe for staleHours (6h by default) and then re-drained — i.e. the revert
--- undoes itself six hours after it runs unless the code is rolled back too.
--- Roll back the code (or set STALE_CLAIM_RELEASE_HOURS=0) in the same window.
+-- and updated_at = now(). On the post-Amendment-A code, updated_at is part of
+-- the sweep's clock, so they are safe for staleHours (6h by default) and then
+-- re-drained. Rolling the CODE back does not help: every earlier version of the
+-- sweep used max(hb, claimed_at) with a to_timestamp(0) fallback, which matches
+-- these rows immediately. The only way for a reverted card to stay in Running
+-- is the new code with STALE_CLAIM_RELEASE_HOURS=0; otherwise treat this as a
+-- 6h revert and say so in the incident note.
 
 -- Undo the demotion.
 UPDATE ar_missions m
