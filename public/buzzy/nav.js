@@ -176,6 +176,16 @@
     // inside it is chrome. Pin both.
     nav.style.padding = "0";
     nav.style.margin = "0";
+    // The bar is one bar; the TYPE inside it has to be one type. Sketch, Studio and
+    // Capabilities style body (14px/1.5, 15px/1.55) and the row inherited it, so the
+    // links measured 21.3px tall on six pages and 26.1px on those three: the row sat
+    // 2.5px lower, and the company select rendered in a second typeface. Same rule as
+    // `.bz-brandrow` — the chrome names its own font, size and leading. Inline, because
+    // the page's `#bzNav`/`#bzNav a` id rules outrank any stylesheet we ship.
+    var CHROME_FONT = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
+    nav.style.fontFamily = CHROME_FONT;
+    nav.style.fontSize = "16px";
+    nav.style.lineHeight = "1.55";
     // One strip, same height everywhere; page-specific header content stays below it.
     if (!nav.closest(".bz-navbar")) {
       var bar = document.createElement("div");
@@ -213,6 +223,14 @@
       ordered.push(a);
     });
     ordered.forEach(function (a) { nav.appendChild(a); });
+    // Anchors too: `#bzNav a` is a page-owned id rule on sketch/studio/capabilities,
+    // so an inherited value cannot reach them. 0.86rem is the shared nav.css size;
+    // writing it inline keeps the label box identical wherever the row is rendered.
+    Array.prototype.forEach.call(nav.querySelectorAll("a[data-nav]"), function (a) {
+      a.style.fontFamily = CHROME_FONT;
+      a.style.fontSize = "0.86rem";
+      a.style.lineHeight = "1.55";
+    });
 
     // Active state from the path — the single implementation.
     var active = section();
