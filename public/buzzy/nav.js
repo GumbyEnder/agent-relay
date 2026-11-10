@@ -344,8 +344,13 @@
     }
     if (!a.textContent) a.textContent = "";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      // A non-2xx or a non-JSON body is an outage, not a logout: 200 with
+      // `{user: null}` is the only shape that proves nobody is signed in. Treating
+      // every failed round trip as signed-out repainted "Sign in" over a real name,
+      // which is the same lie this cache exists to prevent.
+      .then(function (r) { return r.ok ? r.json() : undefined; })
       .then(function (res) {
+        if (res === undefined) return; // inconclusive: keep whatever we painted
         var u = res && res.user;
         if (u && (u.name || u.email)) {
           writeIdentityCache({ name: u.name || u.email, email: u.email || "" });
@@ -583,13 +588,24 @@
 
     // Row one: brand, then the identity cluster. Row two: the links. The rows must
     // STACK — a header that is itself a flex row put them side by side.
-    // Page CSS may constrain the header (`header.top{max-width:…}`), which pulled the
-    // identity cluster in from the right edge on Capabilities while every other page
-    // had it flush (BZ-11 residual). Inline wins; the chrome owns its own box.
+    // Page CSS may constrain the header (`header.top{max-width:…}`, `header{padding:…}`),
+    // which pulled the identity cluster in from the right edge on Capabilities while
+    // every other page had it flush (BZ-11 residual). Inline wins; the chrome owns its
+    // own box, so the shipped header lands in the same place on every page.
+    // The body's own horizontal padding counts too: Capabilities ships
+    // `body{padding:0 17.6px}`, which inset the header by 18px even after the header
+    // itself was pinned. Negative margins cancel it, so the bar spans the viewport.
+    var bcs = window.getComputedStyle(document.body);
+    var padL = parseFloat(bcs.paddingLeft) || 0;
+    var padR = parseFloat(bcs.paddingRight) || 0;
     header.style.display = "block";
-    header.style.width = "100%";
+    header.style.width = "auto";
     header.style.maxWidth = "none";
     header.style.boxSizing = "border-box";
+    header.style.margin = "0";
+    header.style.marginLeft = (-padL) + "px";
+    header.style.marginRight = (-padR) + "px";
+    header.style.padding = "12px 24px 8px";
     header.innerHTML = "";
 
     var brandRow = document.createElement("div");
@@ -617,7 +633,15 @@
     askControl(chrome);
   }
 
-  /** Which plan am I on? Visible everywhere, not just under the Talk composer. */
+  /**
+   * Which plan am I on? Visible everywhere, not just under the Talk composer.
+   *
+   * The chip only appeared once /api/buzzy/entitlement answered, so a signed-in
+   * reader saw the header snap from no chip to PRO a round trip after paint (loudest
+   * on Sketch, which ships an empty header). The last answer is cached and painted
+   * first; the response still wins, a failed round trip changes nothing, and an
+   * authoritative "no plan" clears the cache so a signed-out page cannot show PRO.
+   */
   function planChip(chrome) {
     if (document.getElementById("bzPlanChip")) return;
     var a = document.createElement("a");
@@ -627,18 +651,56 @@
     a.textContent = "";
     a.style.display = "none";
     chrome.appendChild(a);
+
+    var CACHE = "bz_plan";
+    function readCache() {
+      try {
+        var raw = window.localStorage.getItem(CACHE);
+        if (!raw || raw === "null") return null;
+        var v = JSON.parse(raw);
+        return v && v.plan ? v : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    function writeCache(d) {
+      try {
+        window.localStorage.setItem(
+          CACHE,
+          d && d.plan ? JSON.stringify({ plan: d.plan, remaining: d.remaining || null, planUntil: d.planUntil || null }) : "null",
+        );
+      } catch (e) { /* private mode: the round trip is still the truth */ }
+    }
+    function paint(d) {
+      if (!d || !d.plan) {
+        a.textContent = "";
+        a.style.display = "none";
+        return;
+      }
+      var label = d.plan === "pro" ? "PRO" : d.plan === "starter" ? "STARTER" : "FREE";
+      a.textContent = label;
+      a.title =
+        d.plan.charAt(0).toUpperCase() + d.plan.slice(1) + " plan" +
+        (d.remaining ? " \u00b7 " + Number(d.remaining.inference || 0).toLocaleString() + " chats left" : "") +
+        (d.planUntil ? " \u00b7 renews " + String(d.planUntil).slice(0, 10) : "");
+      a.className = "bz-plan bz-plan-" + d.plan;
+      a.style.display = "";
+    }
+
+    var cached = readCache();
+    if (cached) paint(cached);
+
     fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
-        if (!d || !d.ok || !d.plan) return; // signed out: no chip, no error
-        var label = d.plan === "pro" ? "PRO" : d.plan === "starter" ? "STARTER" : "FREE";
-        a.textContent = label;
-        a.title =
-          d.plan.charAt(0).toUpperCase() + d.plan.slice(1) + " plan" +
-          (d.remaining ? " \u00b7 " + Number(d.remaining.inference || 0).toLocaleString() + " chats left" : "") +
-          (d.planUntil ? " \u00b7 renews " + String(d.planUntil).slice(0, 10) : "");
-        a.className = "bz-plan bz-plan-" + d.plan;
-        a.style.display = "";
+        if (!d || typeof d.ok === "undefined") return; // transport oddity: keep the cache
+        if (d.ok && d.plan) {
+          writeCache(d);
+          paint(d);
+        } else {
+          writeCache(null); // signed out, or no plan: the chip must not outlive it
+          paint(null);
+        }
       })
       .catch(function () { /* a plan chip is not worth an error toast */ });
   }
