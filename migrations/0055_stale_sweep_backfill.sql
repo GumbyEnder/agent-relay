@@ -20,7 +20,28 @@
 --   4. One summary post per board so Volution Launch / Zeeva Admin / Hello World
 --      game / bns Store can see what landed in their Inbox.
 --
--- Nothing is deleted. Reversible by rollback/0055_stale_sweep_backfill.down.sql.
+-- Measured on production 2026-11-10 (22 running, all claimed_by NULL, all
+-- lane='open', so no column_lane_mismatch and no no_lane_history): the 22 split
+-- 12 / 6 / 2 / 1 / 1 across Volution Launch, Zeeva Admin, Hello World game,
+-- bns Store and BeeZilla. BeeZilla's single runner is #165, tagged below, so it
+-- posts no summary — the four-board list above is exactly the set that moves,
+-- not an abbreviation of five.
+--
+-- Idempotence: this file must be safe to replay (a later operator can restore a
+-- backup and re-run it, and the live sweep may already have drained part of the
+-- population). The tag step guards on the tag, the summary guards on its
+-- deterministic ids, and the demotion CTE additionally refuses any card that
+-- already carries this run's history note — a replay must never write a second
+-- hist_bf_*/ev_bf_* pair per card and double-count it in the per-board count.
+--
+-- Nothing is deleted. Reversible by rollback/0055_stale_sweep_backfill.down.sql
+-- (which reverts the demotion only and keeps the `sustained` tag).
+--
+-- Rehearsal assertion, read after migrate and BEFORE the server's first poll:
+--   select tags from ar_missions where external_id =
+--     'github:gumbyender/agent-relay#165';   -- must contain "sustained"
+-- The tag step below is the brake. `npm start` runs scripts/migrate.mjs before
+-- .output/server/index.mjs, so the first poll happens after this file commits.
 
 -- 1. The long-lived epic is not agent work.
 UPDATE ar_missions
@@ -30,7 +51,9 @@ UPDATE ar_missions
               END,
        updated_at = now()
  WHERE external_id = 'github:gumbyender/agent-relay#165'
-   AND NOT (tags @> '["sustained"]'::jsonb);
+   AND NOT EXISTS (
+     SELECT 1 FROM jsonb_array_elements_text(tags) t WHERE lower(t) = 'sustained'
+   );
 
 INSERT INTO ar_events (id, mission_id, agent_id, project_id, kind, message, at, meta)
 SELECT 'ev_bf_sustain_' || m.id, m.id, NULL, m.project_id, 'note',
@@ -47,9 +70,16 @@ WITH stranded AS (
     FROM ar_missions m
    WHERE m.column_id = 'running'
      AND m.claimed_by IS NULL
-     AND NOT (m.tags @> '["sustained"]'::jsonb)
+     AND NOT EXISTS (
+       SELECT 1 FROM jsonb_array_elements_text(m.tags) t WHERE lower(t) = 'sustained'
+     )
      AND coalesce(greatest(m.last_heartbeat, m.claimed_at), to_timestamp(0))
          < now() - interval '6 hours'
+     AND NOT EXISTS (
+       SELECT 1 FROM ar_mission_history h2
+        WHERE h2.mission_id = m.id
+          AND h2.note = 'released-by-stale-sweep backfill 2026-11-10'
+     )
 ), moved AS (
   UPDATE ar_missions m
      SET column_id = 'inbox',

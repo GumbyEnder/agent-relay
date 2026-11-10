@@ -1,7 +1,21 @@
--- Rollback of 0055. Restores the pre-backfill state exactly: cards back in
--- Running with no owner, their old heartbeat/claim clocks restored from the
--- history meta, the backfill's history + events removed, and #165 untagged.
--- (This restores the defect too. It exists for a clean revert, not a safe state.)
+-- Rollback of 0055. Restores the demotion: cards back in Running with no owner
+-- and their old heartbeat/claim clocks restored from the history meta, plus the
+-- backfill's own history + events removed. (This restores the defect too. It
+-- exists for a clean revert of the DEMOTION, not a safe state.)
+--
+-- It does NOT untag #165. The `sustained` tag is a standing policy fact (long-
+-- lived product work is not an agent task, DEFAULT_STALE_POLICY.exemptTags),
+-- not backfill state. Stripping it here was coherent only while the sweep still
+-- filtered on `claimed_by is not null`; post-Amendment-A the sweep's predicate
+-- is (running, not sustained, greatest(hb, claimed_at) < cutoff), so an untagged
+-- #165 is drained to Inbox at the very next poll — and this script just restored
+-- it with a 23-day clock. Keep the tag; revert the move.
+--
+-- WARNING: running with old clocks is only a safe state with
+-- STALE_CLAIM_RELEASE_HOURS=0. With the default 6h, these restored rows match
+-- the post-A predicate exactly and the next poll re-drains all of them (this
+-- time including #165 if its tag were missing). Roll back the code first, or
+-- set STALE_CLAIM_RELEASE_HOURS=0 before restarting the service.
 
 -- Undo the demotion.
 UPDATE ar_missions m
@@ -17,15 +31,13 @@ UPDATE ar_missions m
    AND m.column_id = 'inbox';
 
 DELETE FROM ar_events
- WHERE (meta->>'backfill') = 'stale-sweep-2026-11-10';
+ WHERE (meta->>'backfill') = 'stale-sweep-2026-11-10'
+   -- but keep the tag's own explanation: the tag survives this rollback, so the
+   -- note that says why it exists survives with it (meta->>'tag' = 'sustained').
+   AND coalesce(meta->>'tag', '') <> 'sustained';
 
 DELETE FROM ar_mission_history
  WHERE actor_name = 'stale-sweep-backfill'
    AND note = 'released-by-stale-sweep backfill 2026-11-10';
 
-UPDATE ar_missions
-   SET tags = (SELECT coalesce(jsonb_agg(t), '[]'::jsonb)
-                 FROM jsonb_array_elements_text(tags) AS t
-                WHERE t <> 'sustained')
- WHERE external_id = 'github:gumbyender/agent-relay#165'
-   AND tags @> '["sustained"]'::jsonb;
+-- No tag removal. #165 keeps `sustained` — see the header.
