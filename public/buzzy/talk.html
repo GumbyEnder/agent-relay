@@ -3673,6 +3673,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function initVoice() {
+      // Say which transcriber is actually running. A browser with no
+      // SpeechRecognition (Firefox) records and posts the clip, but voice.asr
+      // stayed "sr" forever, so the voice-metrics lane and the nav chip
+      // reported a recogniser that does not exist. Measured on the 654fe95
+      // walk: recorder path in use, state().asr said "sr".
+      voice.asr = srAvailable() ? "sr" : "recorder";
       voice.replies = voicePref();
       mountAvatars();
       var t = document.getElementById("voiceToggle");
