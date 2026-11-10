@@ -50,9 +50,12 @@ const fs = await import("node:fs/promises");
 const path = await import("node:path");
 const root = path.resolve(import.meta.dirname, "..");
 const blankHits = [];
+const unreadable = [];
 for (const file of Object.keys(ALLOW_BLANK)) {
   let text;
-  try { text = await fs.readFile(path.join(root, file), "utf8"); } catch { continue; }
+  try { text = await fs.readFile(path.join(root, file), "utf8"); }
+  catch { unreadable.push(file); continue; }
+
   text.split("\n").forEach((line, i) => {
     if (!/_blank/.test(line)) return;
     const window = text.split("\n").slice(Math.max(0, i - 2), i + 3).join("\n");
@@ -64,10 +67,11 @@ for (const file of Object.keys(ALLOW_BLANK)) {
   });
 }
 const strayBlanks = blankHits.filter((h) => !h.allowed || !h.noopener);
-console.log("\ndocument/external _blank (not nav):");
-console.log(blankHits.length
-  ? blankHits.map((h) => `  ${h.file}:${h.line}  ${h.noopener ? "rel=noopener" : "NO rel=noopener"}  ${h.allowed || "STRAY — not enumerated"}`).join("\n")
-  : "  none");
+console.log("document/external _blank (not nav):");
+if (unreadable.length) console.log(`  UNREADABLE (enumerated file missing — fails, not skipped): ${unreadable.join(", ")}`);
+
+const blankLines = blankHits.map((h) => `  ${h.file}:${h.line}  ${h.noopener ? "rel=noopener" : "NO rel=noopener"}  ${h.allowed || "STRAY — not enumerated"}`);
+console.log(blankLines.length ? blankLines.join("\n") : (unreadable.length ? "  none read (see UNREADABLE above)" : "  none"));
 
 const pad = (s, n) => String(s).padEnd(n);
 console.log(pad("page", 13) + pad("http", 6) + pad("anchors", 9) + pad("sig", 11) + pad("libBlank", 10) + "title");
@@ -80,7 +84,7 @@ console.log("\nnav signatures:", sigs.join(" | "));
 console.log("library NAV ANCHOR target=_blank on:", blanks.length ? blanks.join(", ") : "none (0/11)");
 const badTitle = rows.filter((r) => !/^BeeZilla — /.test(r.title));
 console.log("titles off the shared shape:", badTitle.length ? badTitle.map((r) => `${r.page}=${r.title}`).join(", ") : "none");
-const verdict = sigs.length === 1 && blanks.length === 0 && badTitle.length === 0 && strayBlanks.length === 0;
+const verdict = sigs.length === 1 && blanks.length === 0 && badTitle.length === 0 && strayBlanks.length === 0 && unreadable.length === 0;
 if (strayBlanks.length) console.log("STRAY _blank (must be enumerated + rel=noopener):", strayBlanks.map((h) => `${h.file}:${h.line}`).join(", "));
 console.log("\nGATE: one nav signature, 0 nav-anchor _blank, shared titles, no unenumerated _blank");
 console.log("\nVERDICT:", verdict ? "PASS" : "FAIL");
