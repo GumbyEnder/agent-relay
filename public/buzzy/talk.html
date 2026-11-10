@@ -2162,7 +2162,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // and raced each other, which is how the name vanished on some loads. ──────
     (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // A non-2xx is an OUTAGE, not a logout. `r.ok ? r.json() : null` turned a
+        // 500 from get-session into "signed out" and ejected a signed-in reader to
+        // /buzzy/landing. Only a 200 whose body has no user may refuse.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
@@ -5254,7 +5260,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function checkAuthAndEnableInput() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // An outage is not a logout here either: a 500 used to disable the composer
+        // and set _signedOut, so Talk looked signed out during an auth blip. Only a
+        // 200 with no user disables it; a non-2xx falls through to the catch.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           var user = session && session.user;
           if (!user) {
@@ -5268,10 +5280,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
         })
         .catch(function () {
-          // assume signed out
-          chatState._signedOut = true;
-          document.getElementById("chatInput").disabled = true;
-          document.getElementById("chatSend").disabled = true;
+          // Outage, not logout. The chrome keeps the last known identity (fee2c5f);
+          // if there is one, do not strand a signed-in reader behind a dead composer.
+          // No cache means "never asked yet", so leave the shipped disabled state.
+          var cached = null;
+          try { cached = JSON.parse(window.localStorage.getItem("bz_identity") || "null"); } catch (e) {}
+          if (cached && (cached.name || cached.email)) {
+            chatState._signedOut = false;
+            document.getElementById("chatInput").disabled = false;
+            document.getElementById("chatSend").disabled = false;
+          }
         });
     }
 
