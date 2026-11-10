@@ -1312,7 +1312,7 @@
       <a href="/buzzy/talk" data-nav="talk">Talk</a>
     <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
     <a href="/buzzy/studio" data-nav="studio">Studio</a>
-      <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
       <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
       <a href="/buzzy/memory" data-nav="memory">Memory</a>
       <a href="/buzzy/experts" data-nav="experts">Experts</a>
@@ -1354,7 +1354,6 @@
     </script>
     </div>
   </header>
-  <div id="companyTabs"></div>
   <main>
     <div id="digestCard" class="bz-digest hidden" style="display:none"></div>
     <div id="chatScreen">
@@ -2162,7 +2161,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // and raced each other, which is how the name vanished on some loads. ──────
     (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // A non-2xx is an OUTAGE, not a logout. `r.ok ? r.json() : null` turned a
+        // 500 from get-session into "signed out" and ejected a signed-in reader to
+        // /buzzy/landing. Only a 200 whose body has no user may refuse.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
@@ -2456,7 +2461,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           '<span class="file-sub">Saved to your Library' + size + "</span>" +
         "</span>" +
         '<a href="' + esc(dl) + '" download>Download</a>' +
-        (lib ? '<a href="' + esc(lib) + '" target="_blank" rel="noopener">Open in Library</a>' : "") +
+    // BZ-14 does not stop at the nav: this card link used to carry a blank
+    // target, so "Open in Library" on a file made its own tab and left the
+    // conversation (and the mic) behind in the old one. nav.js soft-navigates any
+    // same-origin /buzzy/ anchor WITHOUT a target attribute, keeping Talk cached,
+    // so the link must stay plain — a target here re-opens the hole the nav fix
+    // closed. Do not spell the attribute out literally: the QA gate greps the
+    // served bytes for it and a comment would read as a live link.
+    (lib ? '<a href="' + esc(lib) + '">Open in Library</a>' : "") +
       "</div>";
     }
 
@@ -3005,13 +3017,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // the recognizer is re-armed as soon as the browser allows it.
     var LISTEN_KEY = "bz_listen_mode";
     var voice = {
-      replies: false, mic: false, rec: null, speaking: false, sending: false, note: "",
+      replies: false, mic: false, armed: false, rec: null, speaking: false, sending: false, note: "",
+      // Set when the owner cuts a reply short. A reply streams in over SSE, so
+      // stopping the buffers already playing is not enough — the next chunk
+      // would start a fresh "Speaking" and re-close the mic. While cut is true
+      // arriving audio is dropped; the end of the turn clears it.
+      cut: false,
       // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
       // (Chrome, and anything with a working speech service); "recorder" = record
       // locally and let the server transcribe (Firefox, Brave, blocked service).
       asr: "sr",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
+      // Capture, held for the whole listen session (see ensureMic) — one
+      // microphone, not one per turn.
+      micStream: null, micCtx: null,
       // Timings
       lastSpeechEnd: 0, metrics: [],
     };
@@ -3116,6 +3136,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function playPcm(b64) {
+      // The owner cut this reply short: keep swallowing chunks for the rest of
+      // the turn instead of restarting the voice a second later.
+      if (voice.cut) return;
       var ctx = ensureAudio();
       if (!ctx) {
         // Never fail silently: the owner must know why nothing was heard.
@@ -3154,8 +3177,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.speaking = false;
       voice.nextTime = 0;
       for (var i = 0; i < avatars.length; i++) avatars[i].setLevel(0);
-      paintVoice();
+      // Listen FIRST, repaint second. With the microphone held open for the
+      // whole session (ensureMic) this is a few milliseconds of work, and it is
+      // the difference between hearing "hey, can you…" and "can you…".
       if (voice.mic) startListening();
+      paintVoice();
     }
 
     function voicePref() {
@@ -3182,7 +3208,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try {
         if (window.BeeZillaVoiceChip) {
           window.BeeZillaVoiceChip.update({
-            mic: !!voice.mic, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
+            mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
           });
         }
       } catch (_) {}
@@ -3200,10 +3226,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var s = document.getElementById("voiceStatus");
       if (s) {
         var msg = voice.speaking
-          ? "Speaking — I'll listen again when I'm done."
+          ? "Speaking — mic off until I finish. (Tap the mic to cut me off.)"
           : voice.mic
             ? "Listening — speak, then pause."
-            : (voice.note || "");
+            : voice.armed
+              ? "Paused — touch the page and I'll listen again."
+              : (voice.note || "");
         s.textContent = msg;
         s.classList.toggle("hidden", !msg);
       }
@@ -3405,24 +3433,54 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return new Blob([buf], { type: "audio/wav" });
     }
 
+    /**
+     * The microphone belongs to the listen SESSION, not to one turn.
+     *
+     * Opening it per turn cost 150–500 ms (getUserMedia round trip + new
+     * AudioContext + wiring), and every millisecond of that landed after the
+     * reply had finished playing — exactly when an owner answers back. That is
+     * why the first words of a turn went missing (QA walk, e76f235). One stream,
+     * opened when listening starts, released only when listening stops.
+     */
+    function ensureMic() {
+      var md = navigator.mediaDevices;
+      if (!md || !md.getUserMedia) return null;
+      if (voice.micStream) {
+        var live = voice.micStream.getAudioTracks().filter(function (t) { return t.readyState === "live"; });
+        if (live.length) return Promise.resolve(voice.micStream);
+        voice.micStream = null;
+      }
+      return md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+        .then(function (s) { voice.micStream = s; return s; });
+    }
+
+    function releaseMic() {
+      try {
+        if (voice.micStream) voice.micStream.getTracks().forEach(function (t) { t.stop(); });
+      } catch (_) {}
+      voice.micStream = null;
+      try { if (voice.micCtx && voice.micCtx.state !== "closed") voice.micCtx.close(); } catch (_) {}
+      voice.micCtx = null;
+    }
+
     function startRecording() {
       if (recState || voice.sending) return;
-      var md = navigator.mediaDevices;
-      if (!md || !md.getUserMedia) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         stageNote("This browser can't record audio — typed chat works here.");
         voice.mic = false;
         saveListenPref(false);
         paintVoice();
         return;
       }
-      md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+      ensureMic()
         .then(function (stream) {
-          if (!voice.mic) {
-            stream.getTracks().forEach(function (t) { t.stop(); });
-            return;
-          }
+          if (!stream) throw new Error("no mic");
+          if (!voice.mic) { releaseMic(); return; }
           var AC = window.AudioContext || window.webkitAudioContext;
-          var ctx = new AC();
+          // A closed context cannot be reused; a suspended one just needs nudging.
+          if (!voice.micCtx || voice.micCtx.state === "closed") voice.micCtx = new AC();
+          var ctx = voice.micCtx;
+          if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
           var src = ctx.createMediaStreamSource(stream);
           var proc = ctx.createScriptProcessor(2048, 1, 1);
           var chunks = [];
@@ -3466,6 +3524,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             saveListenPref(false);
           } else {
             stageNote("Couldn't open the microphone" + (name ? " (" + name + ")" : "") + " — tap the mic to try again.");
+            releaseMic();
             rearmListening();
           }
           paintVoice();
@@ -3477,8 +3536,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!r) return;
       recState = null;
       try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
-      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
-      try { r.ctx.close(); } catch (_) {}
+      // The stream and its AudioContext stay open: the next turn reuses them,
+      // which is what stops the first words of a reply-turn going missing.
+      // (releaseMic() closes them when the listen session ends.)
       // Nothing was said: re-arm instead of uploading a silent clip and paying
       // the model to tell us it heard nothing.
       if (!r.speechSeen) { rearmListening(); return; }
@@ -3496,8 +3556,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!r) return;
       recState = null;
       try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
-      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
-      try { r.ctx.close(); } catch (_) {}
+      releaseMic();
     }
 
     function sendForTranscription(wav) {
@@ -3540,11 +3599,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function toggleMic() {
+      voice.armed = false;
       voice.mic = !voice.mic;
       saveListenPref(voice.mic);
       if (voice.mic) {
         // A fresh listen clears whatever the last failure said.
         voice.note = "";
+        voice.cut = false;
         // A spoken conversation needs spoken answers.
         if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
         startListening();
@@ -3617,6 +3678,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function initVoice() {
+      // Say which transcriber is actually running. A browser with no
+      // SpeechRecognition (Firefox) records and posts the clip, but voice.asr
+      // stayed "sr" forever, so the voice-metrics lane and the nav chip
+      // reported a recogniser that does not exist. Measured on the 654fe95
+      // walk: recorder path in use, state().asr said "sr".
+      voice.asr = srAvailable() ? "sr" : "recorder";
       voice.replies = voicePref();
       mountAvatars();
       var t = document.getElementById("voiceToggle");
@@ -3629,6 +3696,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveListenPref(false);
         stopListening();
         stopSpeaking();
+        releaseMic();
         paintVoice();
       });
       paintVoice();
@@ -3638,40 +3706,86 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         toggle: toggleMic,
         stop: function () {
           voice.mic = false;
+          voice.armed = false;
           saveListenPref(false);
           stopListening();
           stopSpeaking();
+          releaseMic();
+          paintVoice();
+        },
+        // Cut the reply short and hand the mic back, without ending the session.
+        // This is the one-click barge-in the nav chip offers while speaking.
+        interrupt: function () {
+          voice.cut = true;
+          stopSpeaking();
+          if (voice.mic) startListening();
           paintVoice();
         },
         state: function () {
-          return { mic: !!voice.mic, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
+          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
         },
       };
-      // ── Listen mode survives leaving the page ──────────────────────────
-      // The recognizer runs in the page; a navigation or reload kills it. The
-      // INTENT persists, so returning re-arms it without a click. A click is
-      // the reliable gesture when the browser refuses an ungestured start.
+      // ── "Open this job's conversation" without reloading the document ──
+      // The Library's job cards and Talk's own recent-work rows used to hard-load
+      // /buzzy/talk.html?job=… as a full document load, so the recogniser died
+      // on the way in and the owner's live mic was gone (BZ-19). Talk is the page that owns the engine, so it exposes one entry
+      // point and opens the job IN PLACE: same document, same mic, new job.
+      window.BeeZillaTalk = {
+        openJob: function (id, provided) {
+          if (!id) return false;
+          var ctx = null;
+          try {
+            var jc = JSON.parse(sessionStorage.getItem("bz_open_job") || "null");
+            if (jc && jc.jobId === id) ctx = jc;
+          } catch (_) {}
+          // A row in Talk's own recent-work list already holds the job record;
+          // before this it passed only the id, so opening the same job from
+          // Talk and from the Library gave two different greetings.
+          if (!ctx && provided) ctx = bzJobCtx(provided);
+          chatState.sessionId = null;
+          try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+          chatState.jobId = id;
+          chatState.jobContext = ctx;
+          chatState.slots = {};
+          chatState.messages = [];
+          chatState.paper = null;
+          resetDraftGate();
+          setBackVisible(true);
+          try { history.replaceState(null, "", "/buzzy/talk"); } catch (_) {}
+          updateChrome();
+          restoreTranscript();
+          showRecentWork();
+          return true;
+        },
+      };
+      // ── Listen survives soft navigation, NOT a hard reload ─────────────
+      // The recogniser lives in this document. The page shell keeps this
+      // document alive while you navigate, so the mic keeps running and
+      // nothing here is needed. A hard reload is a NEW document: browsers
+      // refuse an ungestured start, and restarting the microphone because of
+      // a stored flag — before the owner has done anything in this session —
+      // is a defect (a silent mic that the chrome then claims is listening).
+      // So the intent comes back ARMED, not running: the dock says "Resume",
+      // aria-pressed stays false because nothing is listening yet, and the
+      // first gesture in this document starts it. One click, no lie.
       if (listenPref()) {
-        voice.mic = true;
+        voice.mic = false;
+        voice.armed = true;
         voice.replies = true;
         paintVoice();
-        // Re-apply the title marker too — the intent survived the reload, so the
-        // tab should say so without waiting for the next toggle.
-        try { document.title = "🎙 BeeZilla — Listening"; } catch (_) {}
-        startListening();
-        var rearm = function () {
-          if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
+        var resume = function () {
+          document.removeEventListener("pointerdown", resume, true);
+          document.removeEventListener("keydown", resume, true);
+          voice.armed = false;
+          // startListening() starts the recogniser; voice.mic is the declared
+          // state it publishes, so the chrome and the dock agree the moment the
+          // gesture lands. A refused permission comes back through rec.onerror,
+          // which clears both the flag and the stored intent.
+          if (!voice.mic) { voice.mic = true; startListening(); }
+          paintVoice();
         };
-        var onceClick = function () {
-          rearm();
-          document.removeEventListener("click", onceClick);
-        };
-        document.addEventListener("click", onceClick);
-        window.addEventListener("focus", rearm);
-        document.addEventListener("visibilitychange", function () {
-          if (document.visibilityState === "visible") rearm();
-        });
-        window.addEventListener("pageshow", rearm);
+        document.addEventListener("pointerdown", resume, true);
+        document.addEventListener("keydown", resume, true);
       }
     }
 
@@ -4332,6 +4446,22 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       setPhase(chatState.jobContext ? "Chat — " + chatState.jobContext.title : "Talk to BeeZilla");
     }
 
+    // The one shape the context opener understands. The Library builds it from
+    // sessionStorage; Talk now builds the same shape from the job record so both
+    // doors greet identically.
+    function bzJobCtx(j) {
+      if (!j || !j.id) return null;
+      var d = (j.data && typeof j.data === "object") ? j.data : {};
+      return {
+        jobId: j.id,
+        title: j.title || "Untitled job",
+        template: j.template || "General",
+        status: j.status || "Discovering",
+        problem: String(d.problem || d.description || d.challenge || "").slice(0, 400),
+        companyId: j.companyId || null,
+      };
+    }
+
     async function restoreTranscript() {
       try {
         const q = chatState.jobId
@@ -4362,6 +4492,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
       } catch (_) { /* signed out, empty, or unreachable — fall through */ }
       setChatMascot("17-attentive");
+      // No transcript for this job (most jobs are shells created by Sketch or
+      // Studio and never held a conversation). A bare ?job= link carries no
+      // sessionStorage context, so ask for the job itself and greet with it —
+      // otherwise the same job opens with an opener from the Library and a
+      // blank "I'm BeeZilla" greeting from a link. One request, only on this path.
+      if (!chatState.jobContext && chatState.jobId) {
+        try {
+          var jr = await fetch("/api/buzzy/jobs/" + encodeURIComponent(chatState.jobId), {
+            credentials: "same-origin",
+            signal: AbortSignal.timeout(8000),
+          });
+          if (jr.ok) {
+            var jd = await jr.json();
+            if (jd && jd.job) chatState.jobContext = bzJobCtx(jd.job);
+          }
+        } catch (_) { /* keep the plain greeting */ }
+      }
       // Job context opener — the Chat button on a Jobs card carries the
       // project here; greet with context instead of the generic welcome.
       var jc = chatState.jobContext;
@@ -4678,7 +4825,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               if (it.kind === "session") { openSession(it.session); }
               // A work item opens its project — deliverables, activity, transcript in
               // one place. The conversation is one click from there, not the only view.
-              else { window.location.href = "/buzzy/project?job=" + encodeURIComponent(it.job.id); }
+              else {
+                // Soft hop: the shell keeps this document (and the live mic)
+                // while the project page is fetched in. BZ-19.
+                var pu = "/buzzy/project?job=" + encodeURIComponent(it.job.id);
+                if (window.BeeZillaShell) window.BeeZillaShell.go(pu);
+                else window.location.href = pu;
+              }
             });
             el.addEventListener("keydown", function (e) {
               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
@@ -4789,7 +4942,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var it = shown[Number(el.getAttribute("data-idx"))];
             if (!it) return;
             if (it.kind === "session") { openSession(it.session); }
-            else { window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(it.job.id); }
+            // A job opens its conversation IN THIS DOCUMENT — the recogniser is
+            // not reloaded, so a live mic survives the click (BZ-19).
+            // If the in-place opener is missing we still must not assign
+            // location.href to a /buzzy/ URL: that is a document load, and the
+            // mic in this document dies on the way in (BZ-16). The shell's soft
+            // navigation does the same move without dropping the recogniser.
+            else if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(it.job.id, it.job))) {
+              if (window.BeeZillaShell) {
+                window.BeeZillaShell.go("/buzzy/talk?job=" + encodeURIComponent(it.job.id));
+              } else {
+                console.warn("bz: no shell to open job", it.job.id);
+              }
+            }
           });
           el.addEventListener("keydown", function (e) {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
@@ -5112,6 +5277,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         document.getElementById("chatError").classList.remove("hidden");
       } finally {
         voice.sending = false;
+        voice.cut = false;
         // A spoken turn ended without a reply: go back to listening.
         if (voice.mic && !voice.speaking) setTimeout(function () {
           if (voice.mic && !voice.speaking && !voice.sending && !voice.rec) startListening();
@@ -5130,7 +5296,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function checkAuthAndEnableInput() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // An outage is not a logout here either: a 500 used to disable the composer
+        // and set _signedOut, so Talk looked signed out during an auth blip. Only a
+        // 200 with no user disables it; a non-2xx falls through to the catch.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           var user = session && session.user;
           if (!user) {
@@ -5144,10 +5316,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
         })
         .catch(function () {
-          // assume signed out
-          chatState._signedOut = true;
-          document.getElementById("chatInput").disabled = true;
-          document.getElementById("chatSend").disabled = true;
+          // Outage, not logout. The chrome keeps the last known identity (fee2c5f);
+          // if there is one, do not strand a signed-in reader behind a dead composer.
+          // No cache means "never asked yet", so leave the shipped disabled state.
+          var cached = null;
+          try { cached = JSON.parse(window.localStorage.getItem("bz_identity") || "null"); } catch (e) {}
+          if (cached && (cached.name || cached.email)) {
+            chatState._signedOut = false;
+            document.getElementById("chatInput").disabled = false;
+            document.getElementById("chatSend").disabled = false;
+          }
         });
     }
 

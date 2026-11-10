@@ -631,7 +631,6 @@
     </script>
   </div>
   </header>
-  <div id="companyTabs"></div>
   <main id="app"></main>
 
   <script src="/buzzy/companies.js"></script>
@@ -967,9 +966,11 @@
     }
 
     // index.html now serves ONLY the Library (documents). Any other /buzzy/
-    // route is the consolidated Work interface, so leave for it immediately.
+    // route is the consolidated Work interface, so leave for it immediately —
+    // through the shell, because this document may be sitting on top of a live
+    // Talk and a hard replace would take the mic with it (BZ-16).
     if (window.location.pathname.replace(/\/+$/, "") !== "/buzzy/library") {
-      window.location.replace("/buzzy/talk");
+      if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/talk");
     }
 
     loadState();
@@ -1086,7 +1087,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveState();
         goJobs();
       };
-      document.getElementById("newjob").onclick = () => { window.location.href = "/buzzy/talk.html"; };
+      document.getElementById("newjob").onclick = () => {
+        // Soft hop, always: a full load here would drop a live mic (BZ-19) and
+        // a /buzzy/ URL assigned to location.href is a full load by definition
+        // (BZ-16). No hard fallback — if the shell is gone the chrome is gone.
+        softGo("/buzzy/talk");
+      };
       document.getElementById("opendocs").onclick = () => { snapshotCurrent(); state.screen = "docs"; render(); };
       document.querySelectorAll(".jobcard").forEach((el) => {
         el.onclick = () => {
@@ -1099,6 +1105,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           assignJobToActive(el.getAttribute("data-move"));
         };
       });
+    }
+
+    /* ── Soft navigation only, inside /buzzy/* (BZ-16) ───────────────
+     * Assigning location.href to a same-origin /buzzy/ URL is a full document
+     * load. The page shell keeps Talk's document alive across navigation, and
+     * that document owns the speech recogniser: a hard load silently kills a
+     * live mic. Every intra-product hop goes through here instead, so there is
+     * exactly one place that can navigate and exactly one way it does it. */
+    function softGo(href) {
+      if (window.BeeZillaShell) return window.BeeZillaShell.go(href);
+      console.warn("bz: page shell missing, refusing hard load to", href);
+      return Promise.resolve();
     }
 
     // Launch agent chat with this job's context (dogfood UX: Chat on every card)
@@ -1123,7 +1141,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try {
         sessionStorage.setItem("bz_open_job", JSON.stringify(payload));
       } catch (_) { /* storage full/blocked — chat still opens, just without context */ }
-      window.location.href = "/buzzy/talk.html?job=" + encodeURIComponent(j.id);
+      // Open the conversation WITHOUT reloading the document: Talk is kept alive
+      // by the shell, so a live mic survives the click, and Talk opens the job in
+      // place instead of re-running its own boot from a ?job= URL (BZ-19).
+      // No hard fallback: a /buzzy/ URL assigned to location.href is a document
+      // load and costs the mic (BZ-16).
+      return softGo("/buzzy/talk").then(() => {
+        if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(j.id))) {
+          softGo("/buzzy/talk?job=" + encodeURIComponent(j.id));
+        }
+      });
     }
 
     /* ── Documents: mini-vault ──────────────────────────────────────
@@ -1860,7 +1887,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // and raced each other, which is how the name vanished on some loads. ──────
     (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // A non-2xx is an outage, not a logout. The chrome already refuses to
+        // erase a real identity on a 500 (fee2c5f); this page gate used to take
+        // the same answer as "signed out" and eject a signed-in reader to
+        // /buzzy/landing. Only a 200 with no user may refuse.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })

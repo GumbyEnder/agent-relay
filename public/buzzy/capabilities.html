@@ -53,7 +53,7 @@
     <a href="/buzzy/talk" data-nav="talk">Talk</a>
     <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
     <a href="/buzzy/studio" data-nav="studio">Studio</a>
-    <a href="/buzzy/library" data-nav="library" target="_blank" rel="noopener">Library</a>
+    <a href="/buzzy/library" data-nav="library">Library</a>
     <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
     <a href="/buzzy/memory" data-nav="memory">Memory</a>
     <a href="/buzzy/experts" data-nav="experts">Experts</a>
@@ -103,24 +103,12 @@
     });
 </script>
 <script id="caps-account">
-  /* The header ships a Sign in link as the no-JS fallback. This page never
-   * replaced it, so a signed-in owner read "Sign in" next to their own
-   * capabilities. Deliberately not common.js: that script also gates signed-out
-   * visitors off the page, and this page must stay readable by anyone — it just
-   * must not lie about who is looking at it. */
-  (function () {
-    fetch("/api/auth/get-session", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (s) {
-        var u = s && s.user;
-        var link = document.getElementById("accountLink");
-        if (!u || !u.name || !link) return;
-        link.textContent = u.name;
-        link.removeAttribute("href");
-        link.style.cursor = "default";
-      })
-      .catch(function () { /* stay as the fallback */ });
-  })();
+  /* Retired: the chrome owns identity now. This block used to replace the header's
+   * "Sign in" with the signed-in name after /api/auth/get-session, but the chrome
+   * paints the name from its cached identity first and this page's link is the
+   * chrome's link — this script removed its href and set cursor:default, which
+   * killed the link to /buzzy/profile. The served nav link ships EMPTY (a skeleton)
+   * and nav.js paints it, so there is nothing left for this page to do. */
 </script>
 </body>
 </html>

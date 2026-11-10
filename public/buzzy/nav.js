@@ -47,13 +47,35 @@
     return seg;
   }
 
+  // The header cancels whatever horizontal padding its containing page puts on
+  // <body> so the bar can span the viewport. That number is a SNAPSHOT of the
+  // current page's CSS, so it must be re-derived whenever the active page (and
+  // therefore its body rule) changes: a soft navigation from Capabilities (body
+  // padding 17.6px) to Talk (none) used to leave margin-left at -17.6px with no
+  // padding left to cancel, pushing the header 18px off the viewport (BZ-11
+  // residual, "after stopping voice"). boot() returns early when the chrome
+  // already exists, so the re-derive lives in applyBleed() and boot() calls it.
+  var chromeBleedHeader = null;
+  function applyBleed() {
+    var h = chromeBleedHeader;
+    if (!h || !h.isConnected) h = chromeBleedHeader = document.querySelector("#bzChrome") ? document.querySelector("#bzChrome").closest("header") : null;
+    if (!h) return;
+    var bcs = window.getComputedStyle(document.body);
+    var padL = parseFloat(bcs.paddingLeft) || 0;
+    var padR = parseFloat(bcs.paddingRight) || 0;
+    h.style.marginLeft = (-padL) + "px";
+    h.style.marginRight = (-padR) + "px";
+  }
+  window.addEventListener("resize", applyBleed);
+
   function style() {
     if (document.getElementById("bz-chrome-css")) return;
     var s = document.createElement("style");
     s.id = "bz-chrome-css";
     s.textContent = [
-      // the switcher row is gone; this hides it on the pages that still ship it
-      "#companyTabs{display:none!important}",
+      // BZ-23: the dead `#companyTabs` divs are gone from talk/library/memory and
+      // companies.js no longer mounts into a cached copy, so there is nothing left
+      // to hide here. The visible switcher is the #bzSelect row below.
       "#bzChrome{display:flex;align-items:center;gap:.55rem;flex-wrap:nowrap;min-width:0}",
       "#bzChrome .bz-co-wrap{display:flex;align-items:center;gap:.3rem;min-width:0}",
       "#bzChrome .bz-co-label{color:#8d8d8d;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}",
@@ -68,7 +90,20 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
-      ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem}",
+      // The chrome renders inside eleven different page stylesheets, and three of
+      // them set their own body font-size/line-height (sketch+studio 14px/1.5,
+      // capabilities 15px/1.55, memory inherits the browser default). An inherited
+      // unitless line-height therefore changed the identity cluster's height and
+      // dropped the chips 2px on memory alone (BZ-11 residual, Nov 2026). The
+      // chrome pins its OWN metrics so no host page can move it again.
+      // ...and the font. Three hosts ship three different body stacks, and only
+      // memory actually LOADS Inter (Google Fonts) — the other ten just name it and
+      // fall through to the system face. So the company <select> and the chips
+      // measured 1-6px wider on memory and the identity cluster's left edge wandered.
+      // The chrome is one identity in one place: it names a stack every host can
+      // resolve the same way instead of inheriting whatever the page happened to load.
+      ".bz-brandrow,.bz-brandrow *{line-height:1.55;font-family:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif}",
+      ".bz-brandrow{display:flex;align-items:center;gap:.9rem;height:56px;min-height:56px;padding:0 .1rem;font-size:16px}",
       ".bz-brandrow .bz-brand{display:flex;align-items:center;gap:.5rem;text-decoration:none;color:#f2f2f2}",
       ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
       ".bz-brandrow .bz-brand strong{font-size:.98rem;letter-spacing:.01em}",
@@ -100,6 +135,11 @@
       "#bzChrome .bz-plan-starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
       "#bzChrome .bz-voice{display:inline-flex;align-items:center;gap:.3rem}",
       "#bzChrome button.bz-voice-mic{display:inline-flex;align-items:center;gap:.3rem;background:#141414;color:#e8e8e8;border:1px solid #2c2c2c;border-radius:999px;padding:.28rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
+      // Half-duplex is a promise the owner has to be able to SEE. While a reply
+      // is playing the mic is not being listened to, and a chip that just says
+      // "Speaking" reads as "busy", not "you are not being heard".
+      "#bzChrome .bz-voice-hint{margin-left:.35rem;font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.8}",
+      "@media (max-width:900px){#bzChrome .bz-voice-hint{display:none}}",
       "#bzChrome button.bz-voice-mic.on{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome button.bz-voice-stop{background:#2a1214;color:#ffb4b4;border:1px solid #5b1f24;border-radius:999px;padding:.28rem .55rem;font:inherit;font-size:.8rem;cursor:pointer}",
       ".bz-chrome-scroll::-webkit-scrollbar{display:none}",
@@ -123,6 +163,22 @@
       header.appendChild(row);
     }
     nav.style.flexWrap = "nowrap";
+    // Page CSS owns `#bzNav { padding: 0 0 1rem }` on sketch/capabilities (id selector,
+    // so the shared stylesheet cannot outrank it): the link row measured 26px on Talk,
+    // 34 on Sketch and 42 on Capabilities inside a 48px bar. The bar is chrome; the row
+    // inside it is chrome. Pin both.
+    nav.style.padding = "0";
+    nav.style.margin = "0";
+    // The bar is one bar; the TYPE inside it has to be one type. Sketch, Studio and
+    // Capabilities style body (14px/1.5, 15px/1.55) and the row inherited it, so the
+    // links measured 21.3px tall on six pages and 26.1px on those three: the row sat
+    // 2.5px lower, and the company select rendered in a second typeface. Same rule as
+    // `.bz-brandrow` — the chrome names its own font, size and leading. Inline, because
+    // the page's `#bzNav`/`#bzNav a` id rules outrank any stylesheet we ship.
+    var CHROME_FONT = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
+    nav.style.fontFamily = CHROME_FONT;
+    nav.style.fontSize = "16px";
+    nav.style.lineHeight = "1.55";
     // One strip, same height everywhere; page-specific header content stays below it.
     if (!nav.closest(".bz-navbar")) {
       var bar = document.createElement("div");
@@ -160,6 +216,14 @@
       ordered.push(a);
     });
     ordered.forEach(function (a) { nav.appendChild(a); });
+    // Anchors too: `#bzNav a` is a page-owned id rule on sketch/studio/capabilities,
+    // so an inherited value cannot reach them. 0.86rem is the shared nav.css size;
+    // writing it inline keeps the label box identical wherever the row is rendered.
+    Array.prototype.forEach.call(nav.querySelectorAll("a[data-nav]"), function (a) {
+      a.style.fontFamily = CHROME_FONT;
+      a.style.fontSize = "0.86rem";
+      a.style.lineHeight = "1.55";
+    });
 
     // Active state from the path — the single implementation.
     var active = section();
@@ -222,7 +286,9 @@
     sel.addEventListener("change", function () {
       var id = sel.value;
       if (id === "__add") {
-        location.href = "/buzzy/talk?addCompany=1";
+        // Soft hop: a /buzzy/ URL assigned to location.href is a document load,
+        // and Talk's document is where the recogniser lives (BZ-16).
+        if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/talk?addCompany=1");
         return;
       }
       var api = window.BZCompanies;
@@ -272,12 +338,55 @@
     }
     var user = null;
 
+    /**
+     * Last known identity, so the header never lies for a round trip.
+     *
+     * The page ships `Sign in` in its markup and the chrome only painted after
+     * /api/auth/get-session answered, so a signed-in reader watched "Sign in"
+     * flash on every page (loudest on Sketch, whose header is otherwise empty).
+     * `undefined` = never cached, `null` = known signed out, object = identity.
+     * The response always wins; this only covers the gap before it lands.
+     */
+    function readIdentityCache() {
+      try {
+        var raw = window.localStorage.getItem("bz_identity");
+        if (raw === null) return undefined;
+        if (raw === "null") return null;
+        var v = JSON.parse(raw);
+        return v && (v.name || v.email) ? v : null;
+      } catch (e) {
+        return undefined;
+      }
+    }
+    function writeIdentityCache(u) {
+      try {
+        window.localStorage.setItem(
+          "bz_identity",
+          u ? JSON.stringify({ name: u.name || "", email: u.email || "" }) : "null",
+        );
+      } catch (e) { /* private mode: fall back to the round trip */ }
+    }
+    var cached = readIdentityCache();
+    if (cached !== undefined) paint(cached ? cached.name : null, cached ? cached.email : null);
+
     function signOut(e) {
       if (e) e.preventDefault();
+      writeIdentityCache(null); // next page must not paint the name we just dropped
+      // The plan and balance chips are cached for the same reason; a signed-out page
+      // that paints PRO and a Honey balance is the same lie in a different chip.
+      try {
+        window.localStorage.setItem("bz_plan", "null");
+        window.localStorage.setItem("bz_honey", "null");
+      } catch (err) { /* private mode: the next load's 401 clears them anyway */ }
       fetch("/api/auth/sign-out", {
         method: "POST", credentials: "same-origin",
         headers: { "content-type": "application/json" }, body: "{}",
-      }).then(function () { window.location.href = "/buzzy/"; });
+      }).then(function () {
+        // Sign-out is the one place a hard load is correct: the session is gone,
+        // so the engine in this document MUST die with it. Everything else in
+        // /buzzy/* navigates through the shell (BZ-16).
+        window.location.href = "/buzzy/";
+      });
     }
 
     function fillMenu(m) {
@@ -312,13 +421,25 @@
     }
     if (!a.textContent) a.textContent = "";
     fetch("/api/auth/get-session", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      // A non-2xx or a non-JSON body is an outage, not a logout: 200 with
+      // `{user: null}` is the only shape that proves nobody is signed in. Treating
+      // every failed round trip as signed-out repainted "Sign in" over a real name,
+      // which is the same lie this cache exists to prevent.
+      .then(function (r) { return r.ok ? r.json() : undefined; })
       .then(function (res) {
-        var user = res && res.user;
-        if (user && (user.name || user.email)) paint(user.name || user.email, user.email);
-        else paint(null, null);
+        if (res === undefined) return; // inconclusive: keep whatever we painted
+        var u = res && res.user;
+        if (u && (u.name || u.email)) {
+          writeIdentityCache({ name: u.name || u.email, email: u.email || "" });
+          paint(u.name || u.email, u.email);
+        } else {
+          writeIdentityCache(null);
+          paint(null, null);
+        }
       })
-      .catch(function () { paint(null, null); });
+      // A failed round trip proves nothing about who is signed in, so it must not
+      // overwrite the cached identity or repaint "Sign in" over a real name.
+      .catch(function () { /* keep whatever we painted */ });
 
     // Adopt a page-built menu as the dropdown. clone the link once so a page's own
     // click handler (Talk binds a toggle to `.account-link`) cannot double-toggle ours.
@@ -384,15 +505,44 @@
     chip.textContent = "\u25c8";           // mark only, no "…" placeholder
     chip.style.minWidth = "3.6rem";
     chrome.appendChild(chip);
+
+    // Same rule as the plan chip and the identity: paint the last known balance
+    // before the round trip, or a signed-in reader watches the header assemble
+    // itself chip by chip on every load (BZ-15 residual). The response wins; a
+    // failed call changes nothing; an authoritative answer with no balance clears
+    // the cache so a stale number cannot outlive the session.
+    var CACHE = "bz_honey";
+    function paint(n) {
+      if (typeof n === "number") {
+        chip.textContent = "\u25c8 " + Number(n).toLocaleString();
+        chip.title = Number(n).toLocaleString() + " Honey Drops";
+      } else {
+        chip.textContent = "\u25c8";
+        chip.title = "";
+      }
+    }
+    try {
+      var raw = window.localStorage.getItem(CACHE);
+      if (raw !== null) {
+        if (raw === "null") paint(null);
+        else paint(Number(raw));
+      }
+    } catch (e) { /* private mode: the round trip is still the truth */ }
+
     fetch("/api/wallet", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      // 401 is an answer (nobody is signed in), not an outage: clear the chip.
+      .then(function (r) { return r.status === 401 ? { balance: null } : r.ok ? r.json() : undefined; })
       .then(function (d) {
+        if (d === undefined) return; // inconclusive: keep whatever we painted
         if (d && typeof d.balance === "number") {
-          chip.textContent = "\u25c8 " + Number(d.balance).toLocaleString();
-          chip.title = Number(d.balance).toLocaleString() + " Honey Drops";
+          paint(d.balance);
+          try { window.localStorage.setItem(CACHE, String(d.balance)); } catch (e) {}
+        } else {
+          paint(null);
+          try { window.localStorage.setItem(CACHE, "null"); } catch (e) {}
         }
       })
-      .catch(function () { chip.textContent = "\u25c8"; });
+      .catch(function () { /* keep whatever we painted */ });
   }
 
   /** Ask: the chat, on every page, in a panel anchored to the nav. */
@@ -485,10 +635,18 @@
     document.head.appendChild(s);
   }
 
-  /** The brand for row one: whatever the page has, or a plain BeeZilla mark. */
-  function findBrand(header) {
-    var existing = header.querySelector(".brand-link, .brand, .bz-brand");
-    if (existing) return existing;
+  /**
+   * The brand for row one — ALWAYS the canonical one.
+   *
+   * BZ-11 residual: this used to return whatever the page shipped
+   * (`.brand-link, .brand, .bz-brand`), so talk/library/memory rendered their
+   * own large BEEZILLA mark while sketch/studio/capabilities fell through to
+   * this file's 26px mark. Same nav row, two brands, and each page's header CSS
+   * decided where the chips sat. The chrome owns the brand now; page markup is
+   * discarded by the `header.innerHTML = ""` below, so the shipped header is
+   * identical by construction on every page.
+   */
+  function findBrand(_header) {
     var a = document.createElement("a");
     a.className = "bz-brand";
     a.href = "/buzzy/talk";
@@ -507,8 +665,13 @@
       if (!page || !page.contains(n)) n.remove();
     });
     var nav = ensureNav();
-    if (document.getElementById("bzChrome")) return;
+    if (document.getElementById("bzChrome")) {
+      // Re-derive the body-padding bleed for the page that is active NOW.
+      applyBleed();
+      return;
+    }
     var header = nav.closest("header") || document.querySelector("header") || document.body;
+    chromeBleedHeader = header;
 
     var brand = findBrand(header);
     var account = document.getElementById("accountLink");
@@ -525,13 +688,31 @@
       if (el.tagName === "SCRIPT") return false;
       if (el === nav || el.contains(nav)) return false;
       if (el === brand || el.contains(brand)) return false;
+      // The page's own brand mark is superseded by the canonical one above; keeping
+      // it in extras is how a page shipped two logos — its large BEEZILLA beside the
+      // chrome's 26px mark (BZ-11 residual).
+      if (el.matches && el.matches(".brand-link, .brand, .bz-brand")) return false;
+      if (el.querySelector && el.querySelector(".brand-link, .brand, .bz-brand")) return false;
       if (el === account) return false;
       return true;
     });
 
     // Row one: brand, then the identity cluster. Row two: the links. The rows must
     // STACK — a header that is itself a flex row put them side by side.
+    // Page CSS may constrain the header (`header.top{max-width:…}`, `header{padding:…}`),
+    // which pulled the identity cluster in from the right edge on Capabilities while
+    // every other page had it flush (BZ-11 residual). Inline wins; the chrome owns its
+    // own box, so the shipped header lands in the same place on every page.
+    // The body's own horizontal padding counts too: Capabilities ships
+    // `body{padding:0 17.6px}`, which inset the header by 18px even after the header
+    // itself was pinned. Negative margins cancel it, so the bar spans the viewport.
     header.style.display = "block";
+    header.style.width = "auto";
+    header.style.maxWidth = "none";
+    header.style.boxSizing = "border-box";
+    header.style.margin = "0";
+    applyBleed();
+    header.style.padding = "12px 24px 8px";
     header.innerHTML = "";
 
     var brandRow = document.createElement("div");
@@ -548,7 +729,19 @@
 
     header.appendChild(brandRow);
     header.appendChild(bar);
-    extras.forEach(function (el) { header.appendChild(el); });
+    // The header owns the two chrome rows and NOTHING else. Page toolbars used to be
+    // appended into it, so the header measured 132px on Talk, 155 on Sketch and 219 on
+    // Capabilities and the chrome read as a different component per page (BZ-11, frodo's
+    // "move the page content out of <header>"). They go into a sibling strip instead; the
+    // page's own class selectors still apply because they are class-based, not
+    // `header > …`. One header height everywhere, without touching eleven markup files.
+    if (extras.length) {
+      var tools = document.createElement("div");
+      tools.className = "bz-toolbar";
+      extras.forEach(function (el) { tools.appendChild(el); });
+      if (header.parentNode) header.parentNode.insertBefore(tools, header.nextSibling);
+      else header.appendChild(tools);
+    }
 
     loadCompanies();
     honeyControl(chrome);
@@ -559,7 +752,15 @@
     askControl(chrome);
   }
 
-  /** Which plan am I on? Visible everywhere, not just under the Talk composer. */
+  /**
+   * Which plan am I on? Visible everywhere, not just under the Talk composer.
+   *
+   * The chip only appeared once /api/buzzy/entitlement answered, so a signed-in
+   * reader saw the header snap from no chip to PRO a round trip after paint (loudest
+   * on Sketch, which ships an empty header). The last answer is cached and painted
+   * first; the response still wins, a failed round trip changes nothing, and an
+   * authoritative "no plan" clears the cache so a signed-out page cannot show PRO.
+   */
   function planChip(chrome) {
     if (document.getElementById("bzPlanChip")) return;
     var a = document.createElement("a");
@@ -569,18 +770,57 @@
     a.textContent = "";
     a.style.display = "none";
     chrome.appendChild(a);
+
+    var CACHE = "bz_plan";
+    function readCache() {
+      try {
+        var raw = window.localStorage.getItem(CACHE);
+        if (!raw || raw === "null") return null;
+        var v = JSON.parse(raw);
+        return v && v.plan ? v : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    function writeCache(d) {
+      try {
+        window.localStorage.setItem(
+          CACHE,
+          d && d.plan ? JSON.stringify({ plan: d.plan, remaining: d.remaining || null, planUntil: d.planUntil || null }) : "null",
+        );
+      } catch (e) { /* private mode: the round trip is still the truth */ }
+    }
+    function paint(d) {
+      if (!d || !d.plan) {
+        a.textContent = "";
+        a.style.display = "none";
+        return;
+      }
+      var label = d.plan === "pro" ? "PRO" : d.plan === "starter" ? "STARTER" : "FREE";
+      a.textContent = label;
+      a.title =
+        d.plan.charAt(0).toUpperCase() + d.plan.slice(1) + " plan" +
+        (d.remaining ? " \u00b7 " + Number(d.remaining.inference || 0).toLocaleString() + " chats left" : "") +
+        (d.planUntil ? " \u00b7 renews " + String(d.planUntil).slice(0, 10) : "");
+      a.className = "bz-plan bz-plan-" + d.plan;
+      a.style.display = "";
+    }
+
+    var cached = readCache();
+    if (cached) paint(cached);
+
     fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      // 401 is an answer (nobody is signed in), not an outage: clear the chip.
+      .then(function (r) { return r.status === 401 ? { ok: false } : r.ok ? r.json() : undefined; })
       .then(function (d) {
-        if (!d || !d.ok || !d.plan) return; // signed out: no chip, no error
-        var label = d.plan === "pro" ? "PRO" : d.plan === "starter" ? "STARTER" : "FREE";
-        a.textContent = label;
-        a.title =
-          d.plan.charAt(0).toUpperCase() + d.plan.slice(1) + " plan" +
-          (d.remaining ? " \u00b7 " + Number(d.remaining.inference || 0).toLocaleString() + " chats left" : "") +
-          (d.planUntil ? " \u00b7 renews " + String(d.planUntil).slice(0, 10) : "");
-        a.className = "bz-plan bz-plan-" + d.plan;
-        a.style.display = "";
+        if (!d || typeof d.ok === "undefined") return; // transport oddity: keep the cache
+        if (d.ok && d.plan) {
+          writeCache(d);
+          paint(d);
+        } else {
+          writeCache(null); // signed out, or no plan: the chip must not outlive it
+          paint(null);
+        }
       })
       .catch(function () { /* a plan chip is not worth an error toast */ });
   }
@@ -603,7 +843,7 @@
     mic.id = "bzVoiceMic";
     mic.type = "button";
     mic.className = "bz-voice-mic";
-    mic.innerHTML = "&#127908; <span>Listen</span>";
+    mic.innerHTML = "&#127908; <span class=\"bz-voice-label\">Listen</span><span class=\"bz-voice-hint\" hidden>mic off</span>";
     mic.setAttribute("aria-pressed", "false");
     mic.title = "Talk to BeeZilla \u2014 the conversation continues as you navigate";
     var stop = document.createElement("button");
@@ -621,11 +861,26 @@
     function paint(st) {
       st = st || (engine() && engine().state ? engine().state() : null);
       var on = !!(st && st.mic);
+      var armed = !!(st && st.armed);
       var speaking = !!(st && st.speaking);
       mic.classList.toggle("on", on);
+      mic.classList.toggle("armed", armed && !on);
+      // aria-pressed means "the mic is running", so an armed (paused) session is
+      // false. The label carries the offer; the state stays honest.
       mic.setAttribute("aria-pressed", on ? "true" : "false");
-      var label = mic.querySelector("span");
-      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : "Listen";
+      var label = mic.querySelector(".bz-voice-label");
+      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : armed ? "Resume" : "Listen";
+      var hint = mic.querySelector(".bz-voice-hint");
+      if (hint) hint.hidden = !(on && speaking);
+      mic.title = on
+        ? speaking
+          ? "Mic is off while I talk \u2014 click to cut me off and speak"
+          : "Listening \u2014 click to stop"
+        : armed
+          ? "Microphone paused after a reload \u2014 click to listen again"
+          : "Talk to BeeZilla \u2014 the conversation continues as you navigate";
+      mic.setAttribute("aria-label",
+        on ? (speaking ? "Speaking, microphone off" : "Listening") : armed ? "Resume listening" : "Listen");
       stop.style.display = on ? "" : "none";
     }
     // Talk publishes its state here; a page with no engine leaves the dock idle.
@@ -649,6 +904,12 @@
 
     mic.addEventListener("click", function () {
       var st = engine() && engine().state ? engine().state() : null;
+      if (st && st.mic && st.speaking) {
+        // Manual barge-in: one click cuts the reply short and hands the mic
+        // back without ending the session. Killing the whole listen session
+        // because the owner wanted to talk over me is the wrong trade.
+        if (engine() && engine().interrupt) { engine().interrupt(); paint(); return; }
+      }
       if (st && st.mic) {
         if (engine() && engine().stop) engine().stop();
         else { var b = document.getElementById("micBtn"); if (b) b.click(); }
@@ -684,7 +945,7 @@
     }
   }
 
-  window.BeeZillaChrome = { boot: boot, section: section };
+  window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
@@ -716,9 +977,24 @@
   var KEEP_ALIVE = ["/buzzy/talk"];
   var cache = Object.create(null); // key -> { el, title, styles }
   var busy = false;
-  // popstate fires AFTER location has changed, so "which page am I stashing?"
-  // must come from our own record, never from location.href.
+  // popstate fires AFTER location has changed, so "which page am I stashing?" must
+  // come from our own record, never from location.href.
   var currentKey = keyOf(location.href);
+
+  // A hard load ships the page's own <style> tags with NO data-bz-style, so the
+  // "only the active page's CSS is enabled" switch never saw them: after soft
+  // navigating off Capabilities its `body{padding:0 1.1rem}` stayed live on every
+  // following page, and the chrome's negative margin then cancelled padding that
+  // page did not have (header x = -18px on Talk — BZ-11 residual). Claim the
+  // initial page's stylesheets for its own key so the switch owns them from the
+  // first hop. The chrome's stylesheet is never claimed: it must survive every page.
+  Array.prototype.forEach.call(
+    document.querySelectorAll('head style, head link[rel="stylesheet"]'),
+    function (el) {
+      if (el.id === "bz-chrome-css" || el.hasAttribute("data-bz-style")) return;
+      el.setAttribute("data-bz-style", currentKey);
+    }
+  );
 
   function keyOf(url) {
     var u = url instanceof URL ? url : new URL(url, location.href);
@@ -833,15 +1109,45 @@
     }, Promise.resolve()).then(flush);
   }
 
+  // Chrome-owned nodes must not ride in with the page.
+  // A hard load calls boot(), which empties the page's <header> and rebuilds it from
+  // the chrome; a SOFT load does not (boot() returns early once #bzChrome exists), so
+  // the fetched header used to land inside #bzPage as a SECOND header — a duplicate
+  // nav row and a second identity link, which is where the visible `Sign in` inside
+  // the page came from (BZ-18, and the stray "Sign in" BZ-15 kept reporting). Strip
+  // the chrome's parts and keep whatever the page genuinely owns in that header
+  // (toolbars, search boxes), so the page does not lose its controls.
+  var CHROME_OWNED = [
+    "#bzNav", ".bz-navbar", ".bz-brandrow", ".bz-brand", ".brand", ".brand-link",
+    "#accountLink", ".account-link", ".account-menu", ".hd-chip", "#bzVoiceDock",
+    "#bzPlanChip", "#bzHoneyChip", "#bzPanel",
+  ].join(",");
+  function stripChrome(root) {
+    Array.prototype.forEach.call(root.querySelectorAll(CHROME_OWNED), function (n) {
+      if (n.closest("#bzChrome")) return; // the live chrome, not the imported copy
+      n.parentNode && n.parentNode.removeChild(n);
+    });
+    // Whatever the page kept in its own <header> (a toolbar, a search box) is page
+    // content, not chrome: unwrap it into the page so there is exactly one header
+    // on the document and the page's controls still render.
+    Array.prototype.forEach.call(root.querySelectorAll("header"), function (h) {
+      if (h.closest("#bzChrome")) return;
+      var p = h.parentNode;
+      if (!p) return;
+      while (h.firstChild) p.insertBefore(h.firstChild, h);
+      p.removeChild(h);
+    });
+  }
+
   function buildFromDoc(doc, key) {
     var page = document.createElement("div");
     page.id = "bzPage";
     page.setAttribute("data-bz-path", key);
-    var skip = { SCRIPT: false };
     Array.prototype.forEach.call(doc.body.children, function (child) {
       if (child.tagName === "SCRIPT" && /\/buzzy\/nav\.js/.test(child.getAttribute("src") || "")) return;
       page.appendChild(document.importNode(child, true));
     });
+    stripChrome(page);
     return page;
   }
 

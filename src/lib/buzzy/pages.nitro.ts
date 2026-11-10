@@ -145,7 +145,39 @@ export default defineEventHandler(async (event) => {
   // an HTML string that itself contains "</body>", and replacing the first match
   // injected a <script> tag into JavaScript source — "Invalid or unexpected token",
   // a dead page, and the bug was invisible until the browser ran it.
+  // The nav ROW is written once, here, and substituted into every page. Pages
+  // used to hand-write it and drifted into three shapes — ten anchors on
+  // talk/sketch/studio/capabilities/project, eight on the rest, none on landing
+  // — so the same URL shipped a different nav depending on where you landed,
+  // and four pages still shipped `target="_blank"` on Library long after the
+  // new tab was supposed to be gone (BZ-11, BZ-14). Substituting the row makes
+  // the shipped markup identical by construction; nav.js then owns state (active
+  // link, account menu, company switcher) and never structure.
+  const NAV_ROW = [
+    '<a href="/buzzy/talk" data-nav="talk">Talk</a>',
+    '<a href="/buzzy/sketch" data-nav="sketch">Sketch</a>',
+    '<a href="/buzzy/studio" data-nav="studio">Studio</a>',
+    // No target, no rel: one document, one mic. The shell keeps Talk alive.
+    '<a href="/buzzy/library" data-nav="library">Library</a>',
+    '<a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>',
+    '<a href="/buzzy/memory" data-nav="memory">Memory</a>',
+    '<a href="/buzzy/experts" data-nav="experts">Experts</a>',
+    '<a href="/buzzy/recipes" data-nav="recipes">Recipes</a>',
+    '<a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>',
+    '<a href="/buzzy/upload" data-nav="publish">Publish</a>',
+    // Empty on purpose: the page cannot know who is signed in, and the text used to
+    // be `Sign in`, which every signed-in reader saw for a round trip on every load
+    // (BZ-15 residual — loudest on Sketch, whose header is otherwise empty). The
+    // chrome paints the last known identity from localStorage, then the real answer.
+    // A blank 5.5rem slot is a skeleton; the word "Sign in" over a real name is a lie.
+    '<a href="/buzzy/landing" class="account-link" id="accountLink" aria-label="Account"></a>',
+  ].join("\n      ");
+
   let page = body.toString("utf8");
+  page = page.replace(
+    /(<nav id="bzNav"[^>]*>)[\s\S]*?(<\/nav>)/,
+    (_m, open: string, close: string) => `${open}\n      ${NAV_ROW}\n    ${close}`,
+  );
   if (!page.includes("/buzzy/nav.js")) {
     const at = page.lastIndexOf("</body>");
     if (at > 0) {

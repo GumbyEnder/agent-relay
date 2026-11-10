@@ -315,7 +315,7 @@
         })
           .then(function (r) { return r.json().then(function (b) { return { s: r.status, b: b }; }); })
           .then(function (res) {
-            if (res.s === 201) { say("Published. It is on the shelf now.", true); setTimeout(function () { location.href = "/buzzy/recipes"; }, 900); }
+            if (res.s === 201) { say("Published. It is on the shelf now.", true); setTimeout(function () { if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/recipes"); }, 900); }
             else { say(res.b.error || "That did not publish.", false); btn.disabled = false; }
           })
           .catch(function (e) { say("Could not reach the server (" + e.message + ").", false); btn.disabled = false; });
@@ -324,7 +324,11 @@
       var link = document.querySelector(".account-link");
       if (link) {
         fetch("/api/auth/get-session", { credentials: "same-origin" })
-          .then(function (r) { return r.ok ? r.json() : null; })
+          // A non-2xx is an outage, not a logout: only a 200 with no user may eject.
+          .then(function (r) {
+            if (!r.ok) throw new Error("get-session " + r.status);
+            return r.json();
+          })
           .then(function (s) {
             var u = s && s.user;
             if (!u) { window.location.replace("/buzzy/landing"); return; }

@@ -462,7 +462,17 @@
 
   function boot() {
     injectStyle();
-    var el = document.getElementById("companyTabs");
+    // BZ-23: this used to be an unscoped getElementById("companyTabs"), which can
+    // hand back a copy sitting inside #bzPageCache (soft nav keeps the previous
+    // page alive there) instead of the live page's own node — the mount then
+    // renders into a display:none subtree and the visible control is empty.
+    // Only ever mount into the live page.
+    var el = document.querySelector("#bzPage #companyTabs") ||
+             (function () {
+               var cand = document.getElementById("companyTabs");
+               if (cand && (cand.closest("#bzPageCache") || cand.closest("#bzChrome"))) return null;
+               return cand;
+             })();
     if (el) api.mount(el);
     if (!state.started) { state.started = true; load(); }
   }

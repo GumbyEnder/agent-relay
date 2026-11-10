@@ -333,7 +333,7 @@
         goRemember();
       };
       document.getElementById("back").onclick = () => {
-        window.location.href = "/buzzy/";
+        if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/");
       };
     }
 
@@ -342,7 +342,13 @@
     // chrome's and made the name disappear on some loads. ─────────────────────
     (function accountGate() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        // A non-2xx is an OUTAGE, not a logout. `r.ok ? r.json() : null` turned a
+        // 500 from get-session into "signed out" and ejected a signed-in reader to
+        // /buzzy/landing. Only a 200 whose body has no user may refuse.
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
         .then(function (session) {
           if (!(session && session.user)) window.location.replace("/buzzy/landing");
         })
