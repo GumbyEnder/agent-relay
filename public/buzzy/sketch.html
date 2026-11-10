@@ -26,6 +26,12 @@
   button.primary { background:var(--bz-yellow); color:#111; font-weight:600; border-color:var(--bz-yellow); }
   button:disabled { opacity:0.5; cursor:default; }
   #stage { position:relative; flex:1; overflow:hidden; background:#141414; }
+  /* nav.js moves body's children into #bzPage on the first soft hop, so #stage stops
+     being a flex item of body and `flex:1` resolves against an auto-height block:
+     the canvas collapsed to its content height (~83px) while a hard load looked fine.
+     This rule travels with this page's stylesheet, which the shell enables only while
+     Sketch is the active page. */
+  #bzPage { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
   #board { position:absolute; inset:0; touch-action:none; }
   #layers { position:absolute; inset:0; pointer-events:none; }
   .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
@@ -35,7 +41,10 @@
                       border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
   footer { border-top:1px solid var(--bz-line); padding:0.6rem 1rem; display:flex; gap:0.6rem; align-items:center; }
   #status { color:var(--bz-muted); font-size:0.8rem; }
-  #result { position: relative; } position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
+  /* The closing brace used to sit at the end of the first declaration, so every rule
+     after it (`position:absolute; … display:none`) was dropped: the panel rendered on
+     every visit, over the canvas, with no render behind it. */
+  #result { position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
             border-radius:12px; padding:0.6rem; display:none; }
   #result img { width:100%; border-radius:8px; display:block; }
   #result a { color:var(--bz-yellow); font-size:0.8rem; text-decoration:none; display:inline-block; margin-top:0.4rem; }
