@@ -3304,6 +3304,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (voice.mic) setTimeout(function () { if (voice.mic && !voice.speaking && !voice.rec) startListening(); }, 1200);
     }
 
+    // The product's own name is the one word both transcribers get wrong: the
+    // server regex covers "bee zilla"/"Bee-Zilla" but the browser recogniser
+    // returns "bezilla" (one e) and that used to reach the model verbatim.
+    function brandName(t) {
+      return String(t || "").replace(/\b(?:b?ee?[\s-]?)?zil{1,2}a\b/gi, "BeeZilla");
+    }
+
     // One spoken turn: returns the final transcript, or "" if nothing heard.
     function startListening() {
       if (voice.rec || recState) return;
@@ -3339,7 +3346,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // measured from here, not from when we happened to send.
           voice.lastSpeechEnd = performance.now();
           var input = document.getElementById("chatInput");
-          if (input) input.value = finalText.trim();
+          if (input) input.value = brandName(finalText).trim();
           voice.sending = true;
           setAvatarState("thinking");
           paintVoice();
@@ -3586,7 +3593,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             rearmListening();
             return;
           }
-          var text = String(data.text || "").trim();
+          var text = brandName(data.text).trim();
           if (!text) {
             stageNote("Didn't catch that — try again.");
             rearmListening();

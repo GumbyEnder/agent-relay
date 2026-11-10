@@ -66,8 +66,13 @@ const ASR_SYSTEM =
 
 const ASR_USER_TEXT = "Transcribe the audio verbatim.";
 
-/** "Beezilla" / "bee zilla" / "Bee-Zilla" → the product's spelling. */
-const brandFix = (text: string) => text.replace(/\bbee[\s-]?zilla\b/gi, "BeeZilla");
+/**
+ * "Beezilla" / "bee zilla" / "Bee-Zilla" / "bezilla" → the product's spelling.
+ * The one-e spelling is what the live model actually returned on a QA clip
+ * (2026-11-10), so the prefix is optional and a single "l" is accepted.
+ */
+const brandFix = (text: string) =>
+  text.replace(/\b(?:b?ee?[\s-]?)?zil{1,2}a\b/gi, "BeeZilla");
 
 /**
  * Transcribe one recorded clip. Throws on transport failure; an empty string is a
