@@ -31,6 +31,7 @@
     "preview": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
     "parity": "node scripts/parity-check.mjs",
+    "gate:hard-nav": "node scripts/gate-hard-nav.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "verify": "npm run typecheck && npm run build && npm run test:ci",

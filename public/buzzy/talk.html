@@ -3721,10 +3721,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         },
       };
       // ── "Open this job's conversation" without reloading the document ──
-      // The Library's job cards and Talk's own recent-work rows used to assign
-      // location.href = "/buzzy/talk.html?job=…". That is a full document load,
-      // so the recogniser died on the way in and the owner's live mic was gone
-      // (BZ-19). Talk is the page that owns the engine, so it exposes one entry
+      // The Library's job cards and Talk's own recent-work rows used to hard-load
+      // /buzzy/talk.html?job=… as a full document load, so the recogniser died
+      // on the way in and the owner's live mic was gone (BZ-19). Talk is the page that owns the engine, so it exposes one entry
       // point and opens the job IN PLACE: same document, same mic, new job.
       window.BeeZillaTalk = {
         openJob: function (id) {
@@ -4903,8 +4902,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (it.kind === "session") { openSession(it.session); }
             // A job opens its conversation IN THIS DOCUMENT — the recogniser is
             // not reloaded, so a live mic survives the click (BZ-19).
+            // If the in-place opener is missing we still must not assign
+            // location.href to a /buzzy/ URL: that is a document load, and the
+            // mic in this document dies on the way in (BZ-16). The shell's soft
+            // navigation does the same move without dropping the recogniser.
             else if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(it.job.id))) {
-              window.location.href = "/buzzy/talk?job=" + encodeURIComponent(it.job.id);
+              if (window.BeeZillaShell) {
+                window.BeeZillaShell.go("/buzzy/talk?job=" + encodeURIComponent(it.job.id));
+              } else {
+                console.warn("bz: no shell to open job", it.job.id);
+              }
             }
           });
           el.addEventListener("keydown", function (e) {

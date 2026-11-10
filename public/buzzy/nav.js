@@ -254,7 +254,9 @@
     sel.addEventListener("change", function () {
       var id = sel.value;
       if (id === "__add") {
-        location.href = "/buzzy/talk?addCompany=1";
+        // Soft hop: a /buzzy/ URL assigned to location.href is a document load,
+        // and Talk's document is where the recogniser lives (BZ-16).
+        if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/talk?addCompany=1");
         return;
       }
       var api = window.BZCompanies;
@@ -347,7 +349,12 @@
       fetch("/api/auth/sign-out", {
         method: "POST", credentials: "same-origin",
         headers: { "content-type": "application/json" }, body: "{}",
-      }).then(function () { window.location.href = "/buzzy/"; });
+      }).then(function () {
+        // Sign-out is the one place a hard load is correct: the session is gone,
+        // so the engine in this document MUST die with it. Everything else in
+        // /buzzy/* navigates through the shell (BZ-16).
+        window.location.href = "/buzzy/";
+      });
     }
 
     function fillMenu(m) {

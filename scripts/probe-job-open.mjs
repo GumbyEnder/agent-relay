@@ -57,13 +57,31 @@ await p.click("#newjob").catch(() => {});
 await p.waitForTimeout(2500);
 const afterNewJob = await p.evaluate(() => ({ path: location.pathname, mark: window.__docMark, mic: window.BeeZillaVoice && window.BeeZillaVoice.state().mic }));
 
+// BZ-16: the recent-work panel on Talk is the most reachable hard-load site —
+// no Library hop needed. Clicking a job row there must open the job in place.
+await p.waitForSelector(".rw-item", { timeout: 20000 }).catch(() => {});
+const rwRows = [];
+for (const r of await p.$$(".rw-item")) if (await r.$(".rw-tools")) rwRows.push(r);
+let afterRw = null;
+if (rwRows.length) {
+  await rwRows[0].click();
+  await p.waitForTimeout(3000);
+  afterRw = await p.evaluate(() => ({
+    path: location.pathname, mark: window.__docMark,
+    mic: window.BeeZillaVoice && window.BeeZillaVoice.state().mic,
+    navEntries: performance.getEntriesByType("navigation").length,
+  }));
+}
+
 await b.close();
-console.log(JSON.stringify({ origin: ORIGIN, jobId, started, onLibrary, afterJob, afterNewJob, pageErrors: errs }, null, 2));
-const sameDoc = started.mark === onLibrary.mark && onLibrary.mark === afterJob.mark && afterJob.mark === afterNewJob.mark;
+console.log(JSON.stringify({ origin: ORIGIN, jobId, started, onLibrary, afterJob, afterNewJob, afterRw, pageErrors: errs }, null, 2));
+const sameDoc = started.mark === onLibrary.mark && onLibrary.mark === afterJob.mark && afterJob.mark === afterNewJob.mark &&
+  (!afterRw || afterRw.mark === started.mark);
 const pass = started.state && started.state.mic === true &&
   onLibrary.path === "/buzzy/library" && onLibrary.mic === true &&
   afterJob.path === "/buzzy/talk" && afterJob.mic === true &&
   afterNewJob.path === "/buzzy/talk" && afterNewJob.mic === true &&
+  (!afterRw || (afterRw.path === "/buzzy/talk" && afterRw.mic === true && afterRw.navEntries === 1)) &&
   sameDoc && afterJob.navEntries === 1 && errs.length === 0;
 console.log("same document:", sameDoc, "| nav entries:", afterJob && afterJob.navEntries);
 console.log("VERDICT:", pass ? "PASS" : "FAIL");

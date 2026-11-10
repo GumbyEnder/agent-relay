@@ -315,7 +315,7 @@
         })
           .then(function (r) { return r.json().then(function (b) { return { s: r.status, b: b }; }); })
           .then(function (res) {
-            if (res.s === 201) { say("Published. It is on the shelf now.", true); setTimeout(function () { location.href = "/buzzy/recipes"; }, 900); }
+            if (res.s === 201) { say("Published. It is on the shelf now.", true); setTimeout(function () { if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/recipes"); }, 900); }
             else { say(res.b.error || "That did not publish.", false); btn.disabled = false; }
           })
           .catch(function (e) { say("Could not reach the server (" + e.message + ").", false); btn.disabled = false; });

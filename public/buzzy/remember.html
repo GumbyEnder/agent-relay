@@ -333,7 +333,7 @@
         goRemember();
       };
       document.getElementById("back").onclick = () => {
-        window.location.href = "/buzzy/";
+        if (window.BeeZillaShell) window.BeeZillaShell.go("/buzzy/");
       };
     }
 
