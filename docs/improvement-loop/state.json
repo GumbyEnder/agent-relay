@@ -157,6 +157,18 @@
       "change": "GENERATE_MUSIC_TOOL in music.ts; one TOOL_POLICIES entry (gate draft, metered, 130s budget); executor branch that generates, reads length from the brief, stores to the asset shelf and sets response.audio; intent.ts treats song/track/jingle requests as deliverables; talk.html renders the audio through the existing media card; claim guard now permits an audio claim only when an asset was produced.",
       "evidence": "Production: 'make me a 15-second ambient pad' -> TURN 8.3s, response.audio=/api/buzzy/assets/8229 (481,004 b, audio/mpeg, verified 200 + MPEG ADTS layer III), document: none, draft: none, Library 2 -> 3. Server-side music pre-pass fires because the model twice claimed a finished pad in <7s without calling the tool.",
       "open": "Desktop line is another agent's; parity gate reports its drift (search-status route, bundle 1 migration behind)."
+    },
+    {
+      "id": "barge-head-preroll",
+      "priority": "P0",
+      "status": "done",
+      "title": "A barge-in lost the head of the interrupting utterance",
+      "root_cause": "The recorder for the interrupting turn starts at DETECTION, not at speech onset: 350 ms reply grace + 3x80 ms loud frames + 80 ms poll, then startListening()/startCapture(). 'Hold on, skip the first one.' reached the transcriber as 'on. Skip the first one.'",
+      "shipped": [
+        "2593250 mic pre-roll ring (1800 ms) kept while the mic stream is open; preRollTake() seeds startCapture() and startRecording(), trimmed to the first speech (two 30 ms windows over 0.015 RMS, 80 ms lead-in); preRollStop() on listen end / mic release; state().preRollMs + console 'pre ms'"
+      ],
+      "evidence": "Local old-vs-new (scratch/barge/preroll-probe.mjs + preroll-align.py): clip offset 0.34 s on c354e4c -> 0.01-0.02 s on 2593250. Prod walk (scratch/barge/prod-preroll-walk.mjs, signed-in, synthetic mic + scripted recogniser, real transcriber): cut at 375 ms, preRollMs 325, transcribe returned 'Hold on, skip the first one.' verbatim, bubble present, 0 pageerrors. Served talk = 264,124 B md5 838b34a321b7547f0c9babd2cbd7aa79, preRoll x25, speechSynthesis 0. barge-cut-probe both paths PASS (6/6).",
+      "vault": "01_Projects/Dev Boards/BeeZilla/BZ-QA-Ledger.md (2026-11-11 14:45Z)"
     }
   ],
   "probes": {
