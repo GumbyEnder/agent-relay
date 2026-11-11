@@ -3036,6 +3036,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Capture, held for the whole listen session (see ensureMic) — one
       // microphone, not one per turn.
       micStream: null, micCtx: null,
+      // Rolling tail of mic audio kept while the stream is open (see preRoll*):
+      // the head of a turn is spoken before we can possibly notice it.
+      preRoll: null, lastPreRollMs: 0,
       // Voice barge-in watchdog (see bargeArm): a mic analyser plus the
       // consecutive-loud-frame counter that decides the owner has spoken over
       // the reply.
@@ -3436,6 +3439,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function stopListening() {
       if (recState) cancelRecording();
+      // The ring is a recording of the room: it must not outlive the mode that
+      // justifies it. Kept while voice.mic is still true (a recognised turn ends
+      // the recogniser, not the session).
+      if (!voice.mic) preRollStop();
       if (!voice.rec) return;
       try { voice.rec.stop(); } catch (_) {}
       voice.rec = null;
@@ -3513,15 +3520,86 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!md || !md.getUserMedia) return null;
       if (voice.micStream) {
         var live = voice.micStream.getAudioTracks().filter(function (t) { return t.readyState === "live"; });
-        if (live.length) return Promise.resolve(voice.micStream);
+        if (live.length) { preRollStart(); return Promise.resolve(voice.micStream); }
         voice.micStream = null;
       }
       return md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
-        .then(function (s) { voice.micStream = s; return s; });
+        .then(function (s) { voice.micStream = s; preRollStart(); return s; });
+    }
+
+    // ── Mic pre-roll (the head of a turn) ─────────────────────────────────
+    // A turn is recorded from the moment we NOTICE it, never from the moment the
+    // owner started talking: the barge-in gate needs three loud frames (240 ms)
+    // and the first 350 ms belong to the reply, and the recorder path needs a
+    // getUserMedia/AudioContext round trip. Measured on the 2946 walk, "Hold on,
+    // skip the first one." reached the transcriber as "on. Skip the first one."
+    // — the head was gone before any recorder existed. So while the microphone
+    // is open, keep the last ~1.8 s of it in a ring and hand the ring's tail to
+    // whatever recorder starts next. This is the whole of residual (1).
+    var PRE_ROLL_MS = 1800, PRE_ROLL_EDGE = 0.015;
+
+    function preRollStop() {
+      var p = voice.preRoll;
+      voice.preRoll = null;
+      if (!p) return;
+      try { p.proc.disconnect(); p.src.disconnect(); } catch (_) {}
+    }
+
+    function preRollStart() {
+      if (!voice.micStream) return;
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!voice.micCtx || voice.micCtx.state === "closed") voice.micCtx = new AC();
+        var ctx = voice.micCtx;
+        if (voice.preRoll && voice.preRoll.ctx === ctx && voice.preRoll.stream === voice.micStream) return;
+        preRollStop();
+        if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+        var src = ctx.createMediaStreamSource(voice.micStream);
+        var proc = ctx.createScriptProcessor(2048, 1, 1);
+        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [] };
+        var cap = Math.max(1, Math.ceil((PRE_ROLL_MS / 1000) * ctx.sampleRate / 2048));
+        proc.onaudioprocess = function (ev) {
+          if (voice.preRoll !== p) return;
+          var input = ev.inputBuffer.getChannelData(0);
+          var copy = new Float32Array(input.length);
+          copy.set(input);
+          p.chunks.push(copy);
+          while (p.chunks.length > cap) p.chunks.shift();
+        };
+        src.connect(proc);
+        proc.connect(ctx.destination);
+        voice.preRoll = p;
+      } catch (_) { voice.preRoll = null; }
+    }
+
+    // Snapshot, taken the instant a recorder starts. Trim the leading quiet off
+    // the front: most of the ring is the tail of the reply and room tone, and a
+    // clip that opens with two seconds of that costs transcription accuracy and
+    // upload size for nothing. A ring with no speech in it is dropped entirely —
+    // never extend a turn with silence to make the buffer look used.
+    function preRollTake() {
+      var p = voice.preRoll;
+      if (!p || !p.chunks.length) return null;
+      var total = 0, i;
+      for (i = 0; i < p.chunks.length; i++) total += p.chunks[i].length;
+      var flat = new Float32Array(total), off = 0;
+      for (i = 0; i < p.chunks.length; i++) { flat.set(p.chunks[i], off); off += p.chunks[i].length; }
+      var win = Math.max(1, Math.round(p.rate * 0.03));
+      var run = 0, first = -1;
+      for (var s = 0; s + win <= flat.length; s += win) {
+        var sum = 0;
+        for (var j = s; j < s + win; j++) sum += flat[j] * flat[j];
+        run = Math.sqrt(sum / win) > PRE_ROLL_EDGE ? run + 1 : 0;
+        if (run >= 2) { first = s - win; break; }   // two loud windows, not a click
+      }
+      if (first < 0) return null;
+      var lead = Math.max(0, first - Math.round(p.rate * 0.08));
+      return { rate: p.rate, samples: flat.subarray(lead) };
     }
 
     function releaseMic() {
       bargeDisarm();
+      preRollStop();
       dropCapture();
       try {
         if (voice.micStream) voice.micStream.getTracks().forEach(function (t) { t.stop(); });
@@ -3612,6 +3690,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var src = ctx.createMediaStreamSource(stream);
           var proc = ctx.createScriptProcessor(2048, 1, 1);
           var chunks = [];
+          // The words that started the interruption were spoken before this
+          // recorder existed (detection is 240 ms behind the gate, plus the
+          // reply's 350 ms grace). The ring holds that head.
+          voice.lastPreRollMs = 0;
+          var pre = preRollTake();
+          if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
+            chunks.push(pre.samples);
+            voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
+          }
           var speechSeen = false;
           var quietSince = 0;
           var startedAt = Date.now();
@@ -3718,6 +3805,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var src = ctx.createMediaStreamSource(stream);
           var proc = ctx.createScriptProcessor(2048, 1, 1);
           var chunks = [];
+          // The head of the turn was spoken before this recorder existed; the
+          // ring has it (see preRollTake).
+          voice.lastPreRollMs = 0;
+          var pre = preRollTake();
+          if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
+            chunks.push(pre.samples);
+            voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
+          }
           var startedAt = Date.now();
           proc.onaudioprocess = function (ev) {
             if (!capState) return;
@@ -3977,7 +4072,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paintVoice();
         },
         state: function () {
-          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr };
+          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr, preRollMs: voice.lastPreRollMs || 0 };
         },
       };
       // ── "Open this job's conversation" without reloading the document ──
@@ -4059,6 +4154,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               at: x.at, mode: x.mode, surface: x.surface,
               "asr ms": x.asrMs, "ttft ms": x.ttftMs, "to talk ms": x.ttfaMs,
               "turn ms": x.turnMs, "spoken ms": x.audioMs, "end ms": x.endMs,
+              "pre ms": x.preRollMs,
             };
           }));
         } catch (_) {}
@@ -5432,6 +5528,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           userSpeechMs: voice.userSpeechMs,
           audioMs: 0,
           endMs: null,
+          preRollMs: voice.lastPreRollMs || null,
         };
         voice.audioMs = 0;
         voice.playEndAt = 0;
