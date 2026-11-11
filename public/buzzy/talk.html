@@ -3551,12 +3551,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         var AC = window.AudioContext || window.webkitAudioContext;
         if (!voice.micCtx || voice.micCtx.state === "closed") voice.micCtx = new AC();
         var ctx = voice.micCtx;
+        // Resume BEFORE the reuse check. This is the bug that made a fresh page
+        // keep the head and a long-lived listen session lose it: Chrome suspends
+        // an AudioContext (tab backgrounded, renderer audio idled, a device
+        // switch), the ring stops producing frames, and the early return below
+        // left it dead for the rest of the session. Every later barge-in then had
+        // an empty ring while the barge gate still fired, because the gate owns a
+        // separate context (bargCtx) that it resumes on every arm.
+        if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
         if (voice.preRoll && voice.preRoll.ctx === ctx && voice.preRoll.stream === voice.micStream) return;
         preRollStop();
-        if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
         var src = ctx.createMediaStreamSource(voice.micStream);
         var proc = ctx.createScriptProcessor(2048, 1, 1);
-        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [] };
+        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [], frames: 0, pumped: Date.now() };
         var cap = Math.max(1, Math.ceil((PRE_ROLL_MS / 1000) * ctx.sampleRate / 2048));
         proc.onaudioprocess = function (ev) {
           if (voice.preRoll !== p) return;
@@ -3564,6 +3571,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var copy = new Float32Array(input.length);
           copy.set(input);
           p.chunks.push(copy);
+          p.frames++;
+          p.pumped = Date.now();
           while (p.chunks.length > cap) p.chunks.shift();
         };
         src.connect(proc);
@@ -3571,6 +3580,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         voice.preRoll = p;
       } catch (_) { voice.preRoll = null; }
     }
+
+    // The ring is the only copy of the words spoken before a recorder exists, so
+    // it is not allowed to die quietly. Once a second, while the mic is open: a
+    // suspended context is resumed, a missing ring is rebuilt, and a ring that
+    // has stopped producing frames is replaced. (Both failures are silent in the
+    // product: the turn still works, it just loses its first words — residual 1.)
+    setInterval(function () {
+      if (!voice.mic || !voice.micStream) return;
+      var p = voice.preRoll;
+      if (!p) { preRollStart(); return; }
+      try { if (voice.micCtx && voice.micCtx.state === "suspended") voice.micCtx.resume(); } catch (_) {}
+      if (Date.now() - p.pumped > 2000) { preRollStop(); preRollStart(); }
+    }, 1000);
 
     // Snapshot, taken the instant a recorder starts. Trim the leading quiet off
     // the front: most of the ring is the tail of the reply and room tone, and a
@@ -4072,7 +4094,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paintVoice();
         },
         state: function () {
-          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr, preRollMs: voice.lastPreRollMs || 0 };
+          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr, preRollMs: voice.lastPreRollMs || 0,
+                   // QA-facing: a ring that is not pumping is the residual (1)
+                   // failure mode, and it is invisible from the transcript alone.
+                   ring: voice.preRoll ? { state: voice.preRoll.ctx.state, frames: voice.preRoll.frames || 0 } : null };
         },
       };
       // ── "Open this job's conversation" without reloading the document ──
@@ -4169,6 +4194,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         speechMs: m.userSpeechMs || null,
         asrMs: m.asrMs, ttftMs: m.ttftMs, ttfaMs: m.ttfaMs, turnMs: m.turnMs,
         replyChars: m.replyChars, spoken: !!m.spoken,
+        // How much mic pre-roll went into the clip. 0 on a spoken turn means the
+        // head was never captured — the one number that separates a capture bug
+        // from a transcriber bug on a real walk.
+        preRollMs: m.preRollMs == null ? null : m.preRollMs,
       };
       try {
         fetch("/api/buzzy/voice-metrics", {

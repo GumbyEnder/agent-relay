@@ -109,19 +109,21 @@ async function recordVoiceMetrics(
     spoken?: boolean;
     lane?: string | null;
     speechMs?: number | null;
+    preRollMs?: number | null;
   },
 ): Promise<void> {
   try {
     await sql`
       INSERT INTO buzzy_voice_metrics
         (user_id, job_id, session_id, source, mode, model, asr_ms, ttft_ms, ttfa_ms,
-         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane, speech_ms)
+         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane, speech_ms, pre_roll_ms)
       VALUES
         (${row.userId}, ${row.jobId ?? null}, ${row.sessionId ?? null}, ${row.source},
          ${row.mode ?? null}, ${row.model ?? null}, ${row.asrMs ?? null}, ${row.ttftMs ?? null},
          ${row.ttfaMs ?? null}, ${row.turnMs ?? null}, ${row.extractMs ?? null},
          ${row.llmMs ?? null}, ${row.honchoMs ?? null}, ${row.replyChars ?? null},
-         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null}, ${row.speechMs ?? null})
+         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null}, ${row.speechMs ?? null},
+         ${row.preRollMs ?? null})
     `;
   } catch (err) {
     // A lost metric must never break a turn.
@@ -1411,6 +1413,7 @@ export default defineEventHandler(async (event) => {
       spoken: body.spoken === true,
       lane: typeof body.lane === "string" ? body.lane.slice(0, 8) : null,
       speechMs: num("speechMs"),
+      preRollMs: num("preRollMs"),
     });
     return { ok: true };
   }
@@ -1526,7 +1529,8 @@ export default defineEventHandler(async (event) => {
     `) as Array<Record<string, unknown>>;
     const recent = (await sql`
       SELECT created_at, source, mode, model, lane, asr_ms, ttft_ms, ttfa_ms, turn_ms,
-             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id, speech_ms
+             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id, speech_ms,
+             pre_roll_ms
       FROM buzzy_voice_metrics
       WHERE (${scopeAll} OR user_id = ${scopeUid})
       ORDER BY created_at DESC LIMIT 25
@@ -1565,6 +1569,7 @@ export default defineEventHandler(async (event) => {
         model: c.model ?? v.model ?? null,
         lane: c.lane ?? v.lane ?? null,
         speech_ms: c.speech_ms ?? v.speech_ms ?? null,
+        pre_roll_ms: c.pre_roll_ms ?? null,
         asr_ms: c.asr_ms ?? null,
         ttft_ms: c.ttft_ms ?? v.ttft_ms ?? null,
         ttfa_ms: c.ttfa_ms ?? v.ttfa_ms ?? null,
