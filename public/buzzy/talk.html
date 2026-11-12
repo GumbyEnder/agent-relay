@@ -3038,7 +3038,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       micStream: null, micCtx: null,
       // Rolling tail of mic audio kept while the stream is open (see preRoll*):
       // the head of a turn is spoken before we can possibly notice it.
-      preRoll: null, lastPreRollMs: 0,
+      preRoll: null, lastPreRollMs: 0, lastPreRollWhy: null, pendingPre: null, ringDead: false,
       // Voice barge-in watchdog (see bargeArm): a mic analyser plus the
       // consecutive-loud-frame counter that decides the owner has spoken over
       // the reply.
@@ -3536,7 +3536,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // — the head was gone before any recorder existed. So while the microphone
     // is open, keep the last ~1.8 s of it in a ring and hand the ring's tail to
     // whatever recorder starts next. This is the whole of residual (1).
-    var PRE_ROLL_MS = 1800, PRE_ROLL_EDGE = 0.015;
+    var PRE_ROLL_MS = 1800, PRE_ROLL_EDGE = 0.015, PRE_ROLL_LOW = 0.003;
 
     function preRollStop() {
       var p = voice.preRoll;
@@ -3563,7 +3563,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         preRollStop();
         var src = ctx.createMediaStreamSource(voice.micStream);
         var proc = ctx.createScriptProcessor(2048, 1, 1);
-        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [], frames: 0, pumped: Date.now() };
+        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [], frames: 0, pumped: Date.now(), peakSeen: 0, lastPeak: 0, rebuilds: 0 };
         var cap = Math.max(1, Math.ceil((PRE_ROLL_MS / 1000) * ctx.sampleRate / 2048));
         proc.onaudioprocess = function (ev) {
           if (voice.preRoll !== p) return;
@@ -3573,6 +3573,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           p.chunks.push(copy);
           p.frames++;
           p.pumped = Date.now();
+          // "frames incrementing" is NOT "the ring hears audio": Chrome calls this
+          // callback with all-zero buffers when the source node is attached to a
+          // stream that is not delivering yet, and the ring then looks alive in
+          // state() while every clip silently loses its head. Track the level so
+          // that state() and the barge gate can tell the two apart.
+          var pk = 0;
+          for (var q = 0; q < copy.length; q++) { var a = copy[q] < 0 ? -copy[q] : copy[q]; if (a > pk) pk = a; }
+          p.lastPeak = pk;
+          if (pk > p.peakSeen) p.peakSeen = pk;
+          if (pk > 0.0015 && voice.ringDead) voice.ringDead = false;
           while (p.chunks.length > cap) p.chunks.shift();
         };
         src.connect(proc);
@@ -3591,7 +3601,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var p = voice.preRoll;
       if (!p) { preRollStart(); return; }
       try { if (voice.micCtx && voice.micCtx.state === "suspended") voice.micCtx.resume(); } catch (_) {}
-      if (Date.now() - p.pumped > 2000) { preRollStop(); preRollStart(); }
+      if (Date.now() - p.pumped > 2000) { preRollStop(); preRollStart(); return; }
+      // A ring that pumps frames but has never been handed more than a few LSBs
+      // is deaf, not quiet: a microphone stream that is live still delivers room
+      // tone, and this one has delivered digital silence for ~2.5 s. Rebuild the
+      // source node (up to three times — if that does not cure it the ring is
+      // reported as dead rather than rebuilt forever in a silent room).
+      if (p.frames >= 60 && p.peakSeen <= 0.0001 && p.rebuilds < 3) {
+        voice.lastPreRollWhy = "ring-deaf-rebuild";
+        preRollStop();
+        preRollStart();
+        if (voice.preRoll) voice.preRoll.rebuilds = p.rebuilds + 1;
+        return;
+      }
+      if (p.frames >= 60 && p.peakSeen <= 0.0001) voice.ringDead = true;
     }, 1000);
 
     // Snapshot, taken the instant a recorder starts. Trim the leading quiet off
@@ -3599,29 +3622,80 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // clip that opens with two seconds of that costs transcription accuracy and
     // upload size for nothing. A ring with no speech in it is dropped entirely —
     // never extend a turn with silence to make the buffer look used.
-    function preRollTake() {
+    function preRollTake(opts) {
+      opts = opts || {};
       var p = voice.preRoll;
-      if (!p || !p.chunks.length) return null;
+      if (!p || !p.chunks.length) { voice.lastPreRollWhy = voice.ringDead ? "ring-dead" : "no-ring"; return null; }
       var total = 0, i;
       for (i = 0; i < p.chunks.length; i++) total += p.chunks[i].length;
       var flat = new Float32Array(total), off = 0;
       for (i = 0; i < p.chunks.length; i++) { flat.set(p.chunks[i], off); off += p.chunks[i].length; }
       var win = Math.max(1, Math.round(p.rate * 0.03));
-      var run = 0, first = -1;
+      var run = 0, first = -1, firstLow = -1, runLow = 0;
       for (var s = 0; s + win <= flat.length; s += win) {
         var sum = 0;
         for (var j = s; j < s + win; j++) sum += flat[j] * flat[j];
-        run = Math.sqrt(sum / win) > PRE_ROLL_EDGE ? run + 1 : 0;
-        if (run >= 2) { first = s - win; break; }   // two loud windows, not a click
+        var rms = Math.sqrt(sum / win);
+        run = rms > PRE_ROLL_EDGE ? run + 1 : 0;
+        if (first < 0 && run >= 2) first = s - win;   // two loud windows, not a click
+        runLow = rms > PRE_ROLL_LOW ? runLow + 1 : 0;
+        if (firstLow < 0 && runLow >= 2) firstLow = s - win;
+        if (first >= 0 && firstLow >= 0) break;
       }
-      if (first < 0) return null;
-      var lead = Math.max(0, first - Math.round(p.rate * 0.08));
-      return { rate: p.rate, samples: flat.subarray(lead) };
+      var gateMs = Number(opts.gateMs) || 0;
+      // How far back the gate's testimony reaches. gateMs is measured from the
+      // moment the reply started, NOT from the start of the owner's speech — on
+      // the 9:09 walk the reply had been playing 2.5 s before the first word — so
+      // it says nothing about where the head is. What is known: the gate needs
+      // 240 ms of frames after a 350 ms grace, and echo cancellation eats several
+      // hundred milliseconds more before the new voice reaches full level. So the
+      // head is somewhere in the last ~1.5 s of an 1.8 s ring; taking that window
+      // when it holds real audio costs a little room tone and never costs words.
+      var fromGate = gateMs > 0 ? Math.max(0, flat.length - Math.round(p.rate * 1.5)) : -1;
+      var start;
+      if (first >= 0) {
+        start = Math.max(0, first - Math.round(p.rate * 0.08));
+        voice.lastPreRollWhy = "edge";
+        // Echo cancellation spends the first few hundred milliseconds of a new
+        // speaker's voice learning that it is not the reply, so the head of a
+        // barge-in arrives at 5–10 % of its later level: present, quiet, and
+        // invisible to the edge scan above. If a quiet-but-real onset starts
+        // earlier, and the gate agrees it is earlier, keep that instead of
+        // handing the transcriber a clip that begins mid-phrase.
+        if (firstLow >= 0 && fromGate >= 0) {
+          var startLow = Math.max(0, firstLow - Math.round(p.rate * 0.08));
+          if (startLow < start && startLow >= fromGate) { start = startLow; voice.lastPreRollWhy = "edge-low"; }
+        }
+      } else if (fromGate >= 0 && p.lastPeak > 0.0015) {
+        // Nothing cleared even the low edge, yet the gate measured this stream
+        // above its own threshold: take the window the gate vouches for. A ring
+        // with no level at all is reported, never padded with room tone.
+        start = fromGate;
+        voice.lastPreRollWhy = "gate-tail";
+      } else {
+        voice.lastPreRollWhy = "no-speech";
+        return null;
+      }
+      return { rate: p.rate, samples: flat.subarray(start) };
+    }
+
+    // The barge gate takes the ring the instant it is certain, because everything
+    // after that point is async: startListening() hops through a promise before
+    // the recorder exists, and the 1 s watchdog can rebuild the ring in that
+    // window. A snapshot is the only copy of the head, so it is taken once, at
+    // certainty, and handed to whichever recorder starts next.
+    function preRollPending() {
+      var s = voice.pendingPre;
+      voice.pendingPre = null;
+      if (s && performance.now() - s.at < 1500) return s;
+      return preRollTake();
     }
 
     function releaseMic() {
       bargeDisarm();
       preRollStop();
+      voice.pendingPre = null;
+      voice.ringDead = false;
       dropCapture();
       try {
         if (voice.micStream) voice.micStream.getTracks().forEach(function (t) { t.stop(); });
@@ -3674,6 +3748,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (Math.sqrt(sum / buf.length) > BARGE_RMS) voice.bargHits++;
         else voice.bargHits = 0;
         if (voice.bargHits < BARGE_FRAMES) return;
+        // Certain now: this is speech on the same stream the ring is reading, and
+        // everything from here to the recorder is async. Take the head here.
+        var gateMs = performance.now() - startedAt;
+        try {
+          var head = preRollTake({ gateMs: gateMs });
+          if (head && head.samples && head.samples.length)
+            voice.pendingPre = { at: performance.now(), rate: head.rate, samples: head.samples, why: voice.lastPreRollWhy };
+          // The gate just measured >= BARGE_RMS on this stream; a ring whose
+          // loudest frame is LSBs is not hearing the same stream. Say so and
+          // rebuild, so it is a one-turn loss instead of a silent session-long one.
+          if (voice.preRoll && !(voice.preRoll.peakSeen > 0.0015) && (voice.preRoll.rebuilds || 0) < 3) {
+            if (!voice.pendingPre) voice.lastPreRollWhy = "ring-deaf";
+            preRollStop();
+            preRollStart();
+            if (voice.preRoll) voice.preRoll.rebuilds = (voice.preRoll.rebuilds || 0) + 1;
+          }
+        } catch (_) {}
         // Same cut the nav chip's one-click barge-in uses: stop the buffers,
         // hand the mic back, keep the session alive.
         bargeDisarm();
@@ -3716,10 +3807,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // recorder existed (detection is 240 ms behind the gate, plus the
           // reply's 350 ms grace). The ring holds that head.
           voice.lastPreRollMs = 0;
-          var pre = preRollTake();
+          var pre = preRollPending();
           if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
             chunks.push(pre.samples);
             voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
+          } else if (pre) {
+            // Say it out loud: a head that exists but cannot be used (a ring
+            // recorded on a different AudioContext) used to look identical to a
+            // head that was never captured.
+            voice.lastPreRollWhy = "rate-mismatch";
           }
           var speechSeen = false;
           var quietSince = 0;
@@ -3830,10 +3926,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // The head of the turn was spoken before this recorder existed; the
           // ring has it (see preRollTake).
           voice.lastPreRollMs = 0;
-          var pre = preRollTake();
+          var pre = preRollPending();
           if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
             chunks.push(pre.samples);
             voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
+          } else if (pre) {
+            // Say it out loud: a head that exists but cannot be used (a ring
+            // recorded on a different AudioContext) used to look identical to a
+            // head that was never captured.
+            voice.lastPreRollWhy = "rate-mismatch";
           }
           var startedAt = Date.now();
           proc.onaudioprocess = function (ev) {
@@ -4094,10 +4195,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paintVoice();
         },
         state: function () {
-          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr, preRollMs: voice.lastPreRollMs || 0,
+          var p = voice.preRoll;
+          return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
+                   preRollMs: voice.lastPreRollMs || 0,
+                   // Why the take produced what it produced: "edge" (speech found),
+                   // "gate-tail" (the barge gate vouched for the level), "no-speech",
+                   // "no-ring", "ring-deaf", "ring-dead". A 0 with no why is what
+                   // made residual (1) unfalsifiable for three walks.
+                   preRollWhy: voice.lastPreRollWhy || null,
                    // QA-facing: a ring that is not pumping is the residual (1)
                    // failure mode, and it is invisible from the transcript alone.
-                   ring: voice.preRoll ? { state: voice.preRoll.ctx.state, frames: voice.preRoll.frames || 0 } : null };
+                   // peak is the loudest frame it has heard — frames that increment
+                   // over silence are a deaf ring, not a working one.
+                   ring: p ? { state: p.ctx.state, frames: p.frames || 0, peak: Math.round((p.peakSeen || 0) * 1e4) / 1e4,
+                               last: Math.round((p.lastPeak || 0) * 1e4) / 1e4,
+                               rebuilds: p.rebuilds || 0, deaf: !(p.peakSeen > 0.0015) } : null };
         },
       };
       // ── "Open this job's conversation" without reloading the document ──
