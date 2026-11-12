@@ -3039,10 +3039,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Rolling tail of mic audio kept while the stream is open (see preRoll*):
       // the head of a turn is spoken before we can possibly notice it.
       preRoll: null, lastPreRollMs: 0, lastPreRollWhy: null, pendingPre: null, ringDead: false,
-      // Voice barge-in watchdog (see bargeArm): a mic analyser plus the
-      // consecutive-loud-frame counter that decides the owner has spoken over
-      // the reply.
-      barg: null, bargCtx: null, bargAn: null, bargHits: 0, bargUntil: 0,
+      // Voice barge-in (see bargeArm): the detector runs on the pre-roll ring's
+      // own frames — one stream, one AudioContext, one truth. It used to be a
+      // second MediaStreamSource + AnalyserNode on a context of its own, which
+      // could be suspended, or left attached to a stream that had been released
+      // and re-opened, while the ring went on hearing the room. On the 9:03 AM
+      // 7bad961 walk that is exactly what happened: the ring recorded the
+      // interruption at full scale (peak 1.0008) and the reply was never cut.
+      // A detector that reads the ring cannot be deaf while the ring hears.
+      barg: false, bargHits: 0, bargUntil: 0,
+      speakStartedAt: 0, gateFrames: 0, gatePeak: 0, gateRms: 0, gateFires: 0,
+      gateWhy: null, gateLastFireAt: 0,
       // Timings
       lastSpeechEnd: 0, metrics: [],
     };
@@ -3184,6 +3191,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.active++;
       if (!voice.speaking) {
         voice.speaking = true;
+        // The barge grace is measured from here, not from arm time: a chunk can
+        // be scheduled while the mic is still opening.
+        voice.speakStartedAt = performance.now();
         setAvatarState("speaking");
         paintVoice();
         bargeArm();
@@ -3555,9 +3565,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // keep the head and a long-lived listen session lose it: Chrome suspends
         // an AudioContext (tab backgrounded, renderer audio idled, a device
         // switch), the ring stops producing frames, and the early return below
-        // left it dead for the rest of the session. Every later barge-in then had
-        // an empty ring while the barge gate still fired, because the gate owns a
-        // separate context (bargCtx) that it resumes on every arm.
+        // left it dead for the rest of the session. The barge detector now reads
+        // this same ring, so a resume here is also what keeps barge-in alive.
         if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
         if (voice.preRoll && voice.preRoll.ctx === ctx && voice.preRoll.stream === voice.micStream) return;
         preRollStop();
@@ -3578,12 +3587,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // stream that is not delivering yet, and the ring then looks alive in
           // state() while every clip silently loses its head. Track the level so
           // that state() and the barge gate can tell the two apart.
-          var pk = 0;
-          for (var q = 0; q < copy.length; q++) { var a = copy[q] < 0 ? -copy[q] : copy[q]; if (a > pk) pk = a; }
+          var pk = 0, sq = 0;
+          for (var q = 0; q < copy.length; q++) { var a = copy[q] < 0 ? -copy[q] : copy[q]; if (a > pk) pk = a; sq += copy[q] * copy[q]; }
           p.lastPeak = pk;
           if (pk > p.peakSeen) p.peakSeen = pk;
           if (pk > 0.0015 && voice.ringDead) voice.ringDead = false;
           while (p.chunks.length > cap) p.chunks.shift();
+          // This frame is also the barge-in vote (see bargeFeed): the ring is the
+          // one path known to hear this stream, so it decides, not a second
+          // analyser on a context that can be suspended.
+          bargeFeed(Math.sqrt(sq / copy.length));
         };
         src.connect(proc);
         proc.connect(ctx.destination);
@@ -3715,71 +3728,70 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // same rig with echoCancellation:false fired on 84 of 117 frames of the
     // reply alone. The numbers are why the gate is a threshold plus three
     // consecutive frames rather than a guess, and why AEC is not optional.
-    var BARGE_RMS = 0.02, BARGE_FRAMES = 3, BARGE_COOLDOWN = 1200;
+    var BARGE_RMS = 0.02, BARGE_FRAMES = 3, BARGE_COOLDOWN = 1200, BARGE_GRACE = 350;
     function bargeDisarm() {
-      if (voice.barg) { clearInterval(voice.barg); voice.barg = null; }
+      voice.barg = false;
       voice.bargHits = 0;
     }
+    // "Arm" no longer builds anything: it marks the current turn as one a barge
+    // may interrupt. The vote is cast by the ring's own frame callback
+    // (bargeFeed), 42.7 ms per frame at 48 kHz, so detection is at the ring's
+    // resolution instead of an 80 ms poll of a second analyser.
     function bargeArm() {
       if (!voice.mic || voice.barg || !voice.micStream) return;
       if (performance.now() < voice.bargUntil) return;
-      try {
-        if (!voice.bargCtx || voice.bargCtx.state === "closed") {
-          var AC = window.AudioContext || window.webkitAudioContext;
-          voice.bargCtx = new AC();
-          var bsrc = voice.bargCtx.createMediaStreamSource(voice.micStream);
-          voice.bargAn = voice.bargCtx.createAnalyser();
-          voice.bargAn.fftSize = 1024;
-          bsrc.connect(voice.bargAn);
-        }
-        if (voice.bargCtx.state === "suspended") { try { voice.bargCtx.resume(); } catch (_) {} }
-      } catch (_) { return; }
-      var buf = new Float32Array(voice.bargAn.fftSize);
-      var startedAt = performance.now();
+      if (!voice.preRoll) preRollStart();   // no ring, no evidence, no gate
+      if (!voice.preRoll) { voice.gateWhy = "no-ring"; return; }
+      voice.barg = true;
       voice.bargHits = 0;
-      voice.barg = setInterval(function () {
-        if (!voice.speaking || !voice.mic) { bargeDisarm(); return; }
-        // The first 350 ms belong to the reply: a stream start is a transient,
-        // not an interruption.
-        if (performance.now() - startedAt < 350) return;
-        voice.bargAn.getFloatTimeDomainData(buf);
-        var sum = 0;
-        for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        if (Math.sqrt(sum / buf.length) > BARGE_RMS) voice.bargHits++;
-        else voice.bargHits = 0;
-        if (voice.bargHits < BARGE_FRAMES) return;
-        // Certain now: this is speech on the same stream the ring is reading, and
-        // everything from here to the recorder is async. Take the head here.
-        var gateMs = performance.now() - startedAt;
-        try {
-          var head = preRollTake({ gateMs: gateMs });
-          if (head && head.samples && head.samples.length)
-            voice.pendingPre = { at: performance.now(), rate: head.rate, samples: head.samples, why: voice.lastPreRollWhy };
-          // The gate just measured >= BARGE_RMS on this stream; a ring whose
-          // loudest frame is LSBs is not hearing the same stream. Say so and
-          // rebuild, so it is a one-turn loss instead of a silent session-long one.
-          if (voice.preRoll && !(voice.preRoll.peakSeen > 0.0015) && (voice.preRoll.rebuilds || 0) < 3) {
-            if (!voice.pendingPre) voice.lastPreRollWhy = "ring-deaf";
-            preRollStop();
-            preRollStart();
-            if (voice.preRoll) voice.preRoll.rebuilds = (voice.preRoll.rebuilds || 0) + 1;
-          }
-        } catch (_) {}
-        // Same cut the nav chip's one-click barge-in uses: stop the buffers,
-        // hand the mic back, keep the session alive.
-        bargeDisarm();
-        voice.bargUntil = performance.now() + BARGE_COOLDOWN;
-        // Cut THIS turn, not "the voice": see the cutTurn note on `voice`.
-        voice.cutTurn = voice.turnSeq;
-        // The owner has taken the floor, so this turn no longer owns the "waiting"
-        // state: on the recorder path `startRecording` refuses to run while
-        // voice.sending is true, so a barge-in would leave the follow-up
-        // uncaptured until the interrupted stream drained.
-        voice.sending = false;
-        stopSpeaking();
-        if (voice.mic) startListening();
-        paintVoice();
-      }, 80);
+      voice.gateFrames = 0;
+      voice.gatePeak = 0;
+      voice.gateWhy = "armed";
+    }
+    // One vote per ring frame. rms is this frame's RMS over the same buffer the
+    // ring just stored, so a frame that fires the gate is a frame that is in the
+    // pre-roll — the head and the testimony cannot disagree.
+    function bargeFeed(rms) {
+      voice.gateFrames = (voice.gateFrames || 0) + 1;
+      voice.gateRms = Math.round(rms * 1e4) / 1e4;
+      if (rms > (voice.gatePeak || 0)) voice.gatePeak = Math.round(rms * 1e4) / 1e4;
+      if (!voice.barg || !voice.speaking || !voice.mic) return;
+      var now = performance.now();
+      // The first 350 ms of the reply belong to the reply: a stream start is a
+      // transient, not an interruption.
+      if (now - (voice.speakStartedAt || now) < BARGE_GRACE) { voice.bargHits = 0; return; }
+      if (now < voice.bargUntil) return;
+      if (rms > BARGE_RMS) { voice.bargHits++; if (!voice.bargHits || voice.gateWhy !== "fired") voice.gateWhy = "loud"; }
+      else { voice.bargHits = 0; }
+      if (voice.bargHits < BARGE_FRAMES) return;
+      bargeFire(now);
+    }
+    // Certain now: this is speech on the stream the ring signs for, and
+    // everything from here to the recorder is async. Take the head here, then do
+    // the same cut the nav chip's one-click barge-in does: stop the buffers,
+    // hand the mic back, keep the session alive.
+    function bargeFire(at) {
+      var gateMs = at - (voice.speakStartedAt || at);
+      try {
+        var head = preRollTake({ gateMs: gateMs });
+        if (head && head.samples && head.samples.length)
+          voice.pendingPre = { at: performance.now(), rate: head.rate, samples: head.samples, why: voice.lastPreRollWhy };
+      } catch (_) {}
+      bargeDisarm();
+      voice.bargUntil = performance.now() + BARGE_COOLDOWN;
+      // Cut THIS turn, not "the voice": see the cutTurn note on `voice`.
+      voice.cutTurn = voice.turnSeq;
+      // The owner has taken the floor, so this turn no longer owns the "waiting"
+      // state: on the recorder path `startRecording` refuses to run while
+      // voice.sending is true, so a barge-in would leave the follow-up
+      // uncaptured until the interrupted stream drained.
+      voice.sending = false;
+      voice.gateFires = (voice.gateFires || 0) + 1;
+      voice.gateWhy = "fired";
+      voice.gateLastFireAt = Date.now();
+      stopSpeaking();
+      if (voice.mic) startListening();
+      paintVoice();
     }
 
     function startRecording() {
@@ -4209,7 +4221,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // over silence are a deaf ring, not a working one.
                    ring: p ? { state: p.ctx.state, frames: p.frames || 0, peak: Math.round((p.peakSeen || 0) * 1e4) / 1e4,
                                last: Math.round((p.lastPeak || 0) * 1e4) / 1e4,
-                               rebuilds: p.rebuilds || 0, deaf: !(p.peakSeen > 0.0015) } : null };
+                               rebuilds: p.rebuilds || 0, deaf: !(p.peakSeen > 0.0015) } : null,
+                   // QA-facing: the barge detector votes on the RING's frames, so
+                   // "the ring heard 1.0008 and nothing happened" can no longer be
+                   // a mystery — gate.peak is the loudest ring frame seen since the
+                   // turn was armed, gate.fires is how many times it cut, and
+                   // gate.why says which stage it reached ("armed", "loud", "fired",
+                   // "no-ring"). A reply that plays through a barge shows
+                   // peak > 0.02 with fires 0.
+                   gate: { armed: !!voice.barg, frames: voice.gateFrames || 0,
+                           peak: voice.gatePeak || 0, rms: voice.gateRms || 0,
+                           hits: voice.bargHits || 0, fires: voice.gateFires || 0,
+                           why: voice.gateWhy || null,
+                           sinceSpeakMs: voice.speaking ? Math.round(performance.now() - (voice.speakStartedAt || performance.now())) : null,
+                           lastFireAgoMs: voice.gateLastFireAt ? Date.now() - voice.gateLastFireAt : null } };
         },
       };
       // ── "Open this job's conversation" without reloading the document ──
