@@ -3039,6 +3039,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Rolling tail of mic audio kept while the stream is open (see preRoll*):
       // the head of a turn is spoken before we can possibly notice it.
       preRoll: null, lastPreRollMs: 0, lastPreRollSamples: 0, lastPreRollWhy: null, pendingPre: null, ringDead: false,
+      lastRingZero: null, lastHead: null, takeSeq: 0,
       // What the ring itself held at the moment of the take: how long it was and
       // its level every 250 ms. headMs alone cannot tell "the head was dropped"
       // from "the head was never in the signal", and that difference is a code
@@ -3609,9 +3610,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // One line of truth per turn, for state() and for the QA walk: what the clip
     // was, not what the last capture happened to record.
     function setLastTurn(pol, rate) {
+      // The ring fields come from the take that produced THIS clip's head, not
+      // from whichever take ran last (voice.lastHead, stamped by the recorder that
+      // consumed it). A take id makes the pairing checkable from outside.
+      var h = voice.lastHead || null;
       voice.lastTurn = {
+        takeId: h ? h.takeId : null,
         headMs: voice.lastPreRollMs || 0,
-        why: voice.lastPreRollWhy || null,
+        why: (h && h.why) || voice.lastPreRollWhy || null,
         clipMs: Math.round((pol.samples.length / rate) * 1000),
         leadMs: pol.leadMs || 0,
         clipPeak: Math.round((pol.peak || 0) * 1000) / 1000,
@@ -3620,8 +3626,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         splitMs: pol.splitMs || 0,
         headPeak: pol.headPeak || 0,
         bodyPeak: pol.bodyPeak || 0,
-        ringMs: voice.lastRingMs || 0,
-        ring: voice.lastRingProfile || null,
+        ringMs: (h && h.ringMs) || voice.lastRingMs || 0,
+        ring: (h && h.ring) || voice.lastRingProfile || null,
+        // Exact-zero fraction per bin: 1 means the ring was handed silence in that
+        // 250 ms, which is a starved capture, not a canceller ducking a live voice.
+        ringZero: (h && h.ringZero) || voice.lastRingZero || null,
+        rebuiltAt: h ? h.rebuiltAt : null,
       };
     }
 
@@ -3693,7 +3703,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         preRollStop();
         var src = ctx.createMediaStreamSource(voice.micStream);
         var proc = ctx.createScriptProcessor(2048, 1, 1);
-        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [], frames: 0, pumped: Date.now(), peakSeen: 0, lastPeak: 0, rebuilds: 0 };
+        var p = { ctx: ctx, stream: voice.micStream, src: src, proc: proc, rate: ctx.sampleRate, chunks: [], frames: 0, pumped: Date.now(), peakSeen: 0, lastPeak: 0, rebuilds: 0, builtAt: Date.now() };
         var cap = Math.max(1, Math.ceil((PRE_ROLL_MS / 1000) * ctx.sampleRate / 2048));
         proc.onaudioprocess = function (ev) {
           if (voice.preRoll !== p) return;
@@ -3718,8 +3728,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           while (p.chunks.length > cap) p.chunks.shift();
           // This frame is also the barge-in vote (see bargeFeed): the ring is the
           // one path known to hear this stream, so it decides, not a second
-          // analyser on a context that can be suspended.
-          bargeFeed(Math.sqrt(sq / copy.length));
+          // analyser on a context that can be suspended. The peak rides along so a
+          // frame of exact zeros is reported as a starving ring instead of being
+          // voted on as if it were a quiet room.
+          bargeFeed(Math.sqrt(sq / copy.length), pk);
         };
         src.connect(proc);
         proc.connect(ctx.destination);
@@ -3775,16 +3787,22 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
       // What the ring held, for the next walk: 15 bins of 250 ms. Without this
       // "headMs 249" is ambiguous between a dropped head and a head that never
-      // reached the ring.
-      var prof = [];
+      // reached the ring. `ringZero` is the half that decides WHICH of those two
+      // it is: 0.0001 RMS is 3 LSB, and a bin that is 100 % exact zeros is a ring
+      // that was handed silence (starved ScriptProcessor), not a canceller that
+      // ducked a live voice. Reading a flat profile as "the canceller ate it" is
+      // the mistake walk 3187 made, so the distinction is now measured, not argued.
+      var prof = [], profZero = [];
       var bin = Math.max(win, Math.round(p.rate * 0.25));
       for (s = 0; s < flat.length && prof.length < 15; s += bin) {
-        var e = Math.min(flat.length, s + bin), sq = 0;
-        for (j = s; j < e; j++) sq += flat[j] * flat[j];
+        var e = Math.min(flat.length, s + bin), sq = 0, zeros = 0;
+        for (j = s; j < e; j++) { sq += flat[j] * flat[j]; if (flat[j] === 0) zeros++; }
         prof.push(Math.round(Math.sqrt(sq / Math.max(1, e - s)) * 1e4) / 1e4);
+        profZero.push(Math.round((zeros / Math.max(1, e - s)) * 100) / 100);
       }
       voice.lastRingMs = Math.round((flat.length / p.rate) * 1000);
       voice.lastRingProfile = prof;
+      voice.lastRingZero = profZero;
       // Read the low edge off this ring, not off a remembered device: three
       // times the quietest fifth of it. A canceller that ducks the first second
       // of a barge-in by 40 dB then still leaves a head that stands clear of
@@ -3845,7 +3863,22 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // only thing that says where the owner began, so nothing earlier than its
       // window is ever the head: clamp the clip to it.
       if (fromGate >= 0 && start < fromGate) { start = fromGate; voice.lastPreRollWhy = "gate-clamp"; }
-      return { rate: p.rate, samples: flat.subarray(start) };
+      return {
+        rate: p.rate,
+        samples: flat.subarray(start),
+        // One snapshot, one id. The clip and the ring profile it is judged by must
+        // come from the SAME take: preRollPending() can call preRollTake() a second
+        // time, and lastPreRollWhy/lastRingProfile are last-writer-wins, so without
+        // this a turn reported a clip beside another snapshot's bins and the pair
+        // was not evidence of anything (walk 3187: clipPeak 1.003 beside 13 bins at
+        // the 1e-4 floor — those cannot describe one buffer).
+        takeId: ++voice.takeSeq,
+        why: voice.lastPreRollWhy,
+        ringMs: voice.lastRingMs,
+        ring: prof,
+        ringZero: profZero,
+        rebuiltAt: p.builtAt ? Date.now() - p.builtAt : null,
+      };
     }
 
     // The barge gate takes the ring the instant it is certain, because everything
@@ -3933,9 +3966,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // One vote per ring frame. rms is this frame's RMS over the same buffer the
     // ring just stored, so a frame that fires the gate is a frame that is in the
     // pre-roll — the head and the testimony cannot disagree.
-    function bargeFeed(rms) {
+    function bargeFeed(rms, pk) {
       voice.gateFrames = (voice.gateFrames || 0) + 1;
       voice.gateRms = Math.round(rms * 1e4) / 1e4;
+      // A frame of exact zeros is the capture being handed silence, not the room
+      // being quiet: the ring has no audio and the owner's voice is not in it. Count
+      // it so the next walk can tell the two apart (walk 3187 lost "Hold on," to a
+      // ring that was 92 % exact zeros and read it as a ducked head for an hour).
+      if (typeof pk === "number" && pk <= 0.0001) voice.gateZeroFrames = (voice.gateZeroFrames || 0) + 1;
       if (rms > (voice.gatePeak || 0)) voice.gatePeak = Math.round(rms * 1e4) / 1e4;
       if (!voice.barg || !voice.speaking || !voice.mic) return;
       var now = performance.now();
@@ -3957,7 +3995,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try {
         var head = preRollTake({ gateMs: gateMs });
         if (head && head.samples && head.samples.length)
-          voice.pendingPre = { at: performance.now(), rate: head.rate, samples: head.samples, why: voice.lastPreRollWhy };
+          // Carry the WHOLE take, not just its samples: the ring profile that this
+          // head must be judged by is the one it was cut from, and a later take
+          // overwrites the globals setLastTurn used to read.
+          voice.pendingPre = { at: performance.now(), rate: head.rate, samples: head.samples, why: head.why,
+            takeId: head.takeId, ringMs: head.ringMs, ring: head.ring, ringZero: head.ringZero, rebuiltAt: head.rebuiltAt };
       } catch (_) {}
       restartTurnCapture();
       bargeDisarm();
@@ -4004,6 +4046,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           voice.lastPreRollMs = 0;
           voice.lastPreRollSamples = 0;
           var pre = preRollPending();
+          voice.lastHead = pre || null;
           if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
             chunks.push(pre.samples);
             voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
@@ -4131,6 +4174,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           voice.lastPreRollMs = 0;
           voice.lastPreRollSamples = 0;
           var pre = preRollPending();
+          voice.lastHead = pre || null;
           if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
             chunks.push(pre.samples);
             voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
