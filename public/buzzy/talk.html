@@ -3625,7 +3625,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         headGain: pol.headGain ? Math.round(pol.headGain * 10) / 10 : 1,
         splitMs: pol.splitMs || 0,
         headPeak: pol.headPeak || 0,
+        // headPeak covers [0, splitMs) of the POLISHED clip, not headMs of ring:
+        // polishSamples trims the lead and cuts the head at its onset. Walk 3187
+        // reported headPeak 0.0001 beside splitMs 10, and that 80 dB was read as a
+        // 249 ms double-talk measurement. It is a 10 ms one. Read the ring for the head.
+        headPeakSpanMs: pol.splitMs || 0,
         bodyPeak: pol.bodyPeak || 0,
+        aec: voice.aec || null,
         ringMs: (h && h.ringMs) || voice.lastRingMs || 0,
         ring: (h && h.ring) || voice.lastRingProfile || null,
         // Exact-zero fraction per bin: 1 means the ring was handed silence in that
@@ -3653,7 +3659,28 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         voice.micStream = null;
       }
       return md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
-        .then(function (s) { voice.micStream = s; preRollStart(); return s; });
+        .then(function (s) { voice.micStream = s; voice.aec = aecSettings(s); preRollStart(); return s; });
+    }
+
+    // What the browser actually APPLIED, not what we asked for. Chrome silently
+    // drops a constraint on some devices, and the AEC ticket needs to know whether
+    // a dead head was processed at all. deviceId goes out as an 8-char hash so two
+    // walks can be compared without putting a hardware serial in telemetry.
+    function aecSettings(stream) {
+      try {
+        var t = stream.getAudioTracks()[0];
+        if (!t || !t.getSettings) return null;
+        var s = t.getSettings() || {}, h = 2166136261, id = String(s.deviceId || "");
+        for (var i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = (h * 16777619) >>> 0; }
+        return {
+          ec: s.echoCancellation === undefined ? null : !!s.echoCancellation,
+          ns: s.noiseSuppression === undefined ? null : !!s.noiseSuppression,
+          agc: s.autoGainControl === undefined ? null : !!s.autoGainControl,
+          sr: s.sampleRate || null,
+          ch: s.channelCount || null,
+          dev: id ? h.toString(16) : null,
+        };
+      } catch (_) { return null; }
     }
 
     // ── Mic pre-roll (the head of a turn) ─────────────────────────────────
