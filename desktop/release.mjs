@@ -157,17 +157,27 @@ if (!hasTag) {
 }
 
 /* -- release ---------------------------------------------------------------- */
-const exists = (() => {
+const releaseExists = (name) => {
   try {
-    run("gh", ["release", "view", tag, "-R", REPO], { capture: true });
+    run("gh", ["release", "view", name, "-R", REPO], { capture: true });
     return true;
   } catch {
     return false;
   }
-})();
+};
 
-const assets = [installer, existsSync(blockmap) ? blockmap : null].filter(Boolean);
-if (exists) {
+// latest.yml is the update manifest. It is worthless on GitHub unless it is
+// uploaded WITH the exe — and until 0.3.4 this script uploaded only the exe and
+// the blockmap, so every release shipped an update nobody could be offered
+// (BZ-D1b). Refuse to publish without it.
+const manifest = join(ROOT, "dist-desktop", "latest.yml");
+if (!existsSync(manifest)) {
+  console.error(`refusing: ${manifest} does not exist — the build produced no update manifest, so no install could ever see this release`);
+  process.exit(1);
+}
+
+const assets = [installer, existsSync(blockmap) ? blockmap : null, manifest].filter(Boolean);
+if (releaseExists(tag)) {
   log(`release ${tag} exists — uploading assets (clobber)`);
   run("gh", ["release", "upload", tag, ...assets, "--clobber", "-R", REPO]);
 } else {
@@ -201,3 +211,72 @@ if (asset.size !== bytes) {
 log(`verified on GitHub: ${asset.name} ${asset.size} b · prerelease=${parsed.isPrerelease}`);
 log(`download page: ${parsed.url}`);
 log(`sha256 ${sha} — compare it after downloading`);
+
+/* -- the update feed -------------------------------------------------------- */
+// Every installed copy has ONE fixed URL baked in (desktop/package.json
+// build.publish → the generic provider). That URL is a release tagged
+// `desktop-channel` whose latest.yml is replaced on every publish, and whose
+// assets are exactly the filenames that latest.yml names. Nothing about this
+// depends on GitHub's `releases/latest`, on prerelease flags, or on the
+// `desktop-v` tag prefix — the three things that made the GitHub provider
+// unresolvable (BZ-D1).
+const CHANNEL_TAG = "desktop-channel";
+const FEED_URL = `https://github.com/${REPO}/releases/download/${CHANNEL_TAG}`;
+const channelNotes =
+  "Update feed for BeeZilla desktop installs.\n\n" +
+  "Do not delete. `latest.yml` here is the manifest electron-updater reads; it is\n" +
+  "replaced (clobbered) by `node desktop/release.mjs` on every publish, together\n" +
+  "with the installer it names. This release is a prerelease on purpose: it must\n" +
+  "never become the repository's `releases/latest`.\n";
+
+if (!releaseExists(CHANNEL_TAG)) {
+  log(`creating feed release ${CHANNEL_TAG}`);
+  run("gh", [
+    "release", "create", CHANNEL_TAG,
+    "--target", run("git", ["-C", ROOT, "rev-parse", REF ?? "HEAD"], { capture: true }).trim(),
+    "--title", "BeeZilla desktop update feed",
+    "--notes", channelNotes,
+    "--prerelease",
+    "-R", REPO,
+  ]);
+}
+log(`publishing feed → ${CHANNEL_TAG}`);
+run("gh", ["release", "upload", CHANNEL_TAG, ...assets, "--clobber", "-R", REPO]);
+
+// Prune: one installer's worth of assets, not one per release ever made.
+const channelJson = JSON.parse(
+  run("gh", ["release", "view", CHANNEL_TAG, "-R", REPO, "--json", "assets"], { capture: true }),
+);
+const keep = new Set(assets.map((a) => a.split("/").pop()));
+const stale = channelJson.assets.filter((a) => !keep.has(a.name)).map((a) => a.name);
+if (stale.length) {
+  log(`pruning stale feed assets: ${stale.join(", ")}`);
+  run("gh", ["release", "delete-asset", CHANNEL_TAG, ...stale, "--yes", "-R", REPO]);
+}
+
+/* -- prove the feed resolves (this is what an install actually does) -------- */
+// Deliberately not through Electron: fetch latest.yml from the exact URL baked
+// into the app, check it names this version, and check the bytes it promises are
+// the bytes we just uploaded.
+const feedManifest = await (await fetch(`${FEED_URL}/latest.yml`, { redirect: "follow" })).text();
+if (!new RegExp(`^version:\\s*${version.replace(/\./g, "\\.")}\\s*$`, "m").test(feedManifest)) {
+  console.error(`FAILED: ${FEED_URL}/latest.yml does not announce ${version}:\n${feedManifest}`);
+  process.exit(1);
+}
+const promisedFile = (feedManifest.match(/^path:\s*(.+)$/m) ?? [])[1]?.trim();
+const promisedB64 = (feedManifest.match(/^sha512:\s*(.+)$/m) ?? [])[1]?.trim();
+const promisedSize = Number((feedManifest.match(/^\s+size:\s*(\d+)$/m) ?? [])[1]);
+const servedHead = await fetch(`${FEED_URL}/${encodeURIComponent(promisedFile ?? "")}`, { method: "HEAD", redirect: "follow" });
+if (promisedFile !== wanted || !servedHead.ok || Number(servedHead.headers.get("content-length")) !== bytes) {
+  console.error(
+    `FAILED: feed names ${promisedFile} (${promisedSize} b) but the URL serves ` +
+      `${servedHead.status} ${servedHead.headers.get("content-length")} b — expected ${wanted} ${bytes} b`,
+  );
+  process.exit(1);
+}
+const localB64 = createHash("sha512").update(readFileSync(installer)).digest("base64");
+if (promisedB64 !== localB64) {
+  console.error("FAILED: feed sha512 does not match the installer about to be published");
+  process.exit(1);
+}
+log(`feed verified: ${FEED_URL}/latest.yml → ${version}, ${promisedFile}, ${bytes} b, sha512 matches`);
