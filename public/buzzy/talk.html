@@ -3039,6 +3039,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Rolling tail of mic audio kept while the stream is open (see preRoll*):
       // the head of a turn is spoken before we can possibly notice it.
       preRoll: null, lastPreRollMs: 0, lastPreRollWhy: null, pendingPre: null, ringDead: false,
+      // What the LAST turn's clip actually was: head kept, leading silence
+      // trimmed, level lifted. Global preRollMs only ever described whichever
+      // turn last started a capture, which is why "0 / no-speech" on the 10:10
+      // walk could not be told apart from a turn that kept its head.
+      lastTurn: null,
       // Voice barge-in (see bargeArm): the detector runs on the pre-roll ring's
       // own frames — one stream, one AudioContext, one truth. It used to be a
       // second MediaStreamSource + AnalyserNode on a context of its own, which
@@ -3409,6 +3414,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
       };
       rec.onerror = function (e) {
+        if (rec._bzStale) return;
         var err = e && e.error;
         dropCapture();
         if (err === "not-allowed") {
@@ -3432,6 +3438,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
       };
       rec.onend = function () {
+        // A recogniser this page ABORTED on purpose (see restartTurnCapture) is
+        // stale: its onend must not clobber the recogniser that replaced it, nor
+        // drop the fresh capture that was seeded with the barge head.
+        if (rec._bzStale) return;
         voice.rec = null;
         // A window that ended without a final utterance never became a turn, so
         // its clip is not evidence of anything.
@@ -3516,6 +3526,44 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return new Blob([buf], { type: "audio/wav" });
     }
 
+    // What the transcriber is handed must not open with seconds of nothing, and
+    // must not arrive at a whisper. Both happened on the 10:10 walk: the posted
+    // clip was 11.3 s long with the head 7.6 s in, and echo cancellation had
+    // ducked the first few hundred milliseconds of the interruption. Trim the
+    // leading near-silence (keeping 60 ms so the first consonant is not clipped)
+    // and lift a quiet clip: normalising cannot invent words, it only stops the
+    // model from having to hear them at -45 dBFS under a loud reply.
+    function polishSamples(flat, rate) {
+      var i = 0, edge = 0.0015, keep = Math.round(rate * 0.06);
+      while (i < flat.length && Math.abs(flat[i]) < edge) i++;
+      if (i >= flat.length) return { samples: flat.subarray(0, 0), peak: 0, leadMs: Math.round((flat.length / rate) * 1000) };
+      var start = Math.max(0, i - keep);
+      var out = start > 0 ? flat.subarray(start) : flat;
+      var peak = 0;
+      for (var k = 0; k < out.length; k++) { var a = out[k] < 0 ? -out[k] : out[k]; if (a > peak) peak = a; }
+      var leadMs = Math.round((start / rate) * 1000);
+      if (peak > 0.0005 && peak < 0.25) {
+        var g = Math.min(4, 0.9 / peak);
+        var lifted = new Float32Array(out.length);
+        for (var j = 0; j < out.length; j++) lifted[j] = Math.max(-1, Math.min(1, out[j] * g));
+        return { samples: lifted, peak: Math.min(1, peak * g), leadMs: leadMs, gain: g };
+      }
+      return { samples: out, peak: peak, leadMs: leadMs };
+    }
+
+    // One line of truth per turn, for state() and for the QA walk: what the clip
+    // was, not what the last capture happened to record.
+    function setLastTurn(pol, rate) {
+      voice.lastTurn = {
+        headMs: voice.lastPreRollMs || 0,
+        why: voice.lastPreRollWhy || null,
+        clipMs: Math.round((pol.samples.length / rate) * 1000),
+        leadMs: pol.leadMs || 0,
+        clipPeak: Math.round((pol.peak || 0) * 1000) / 1000,
+        gain: pol.gain ? Math.round(pol.gain * 100) / 100 : 1,
+      };
+    }
+
     /**
      * The microphone belongs to the listen SESSION, not to one turn.
      *
@@ -3546,7 +3594,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // — the head was gone before any recorder existed. So while the microphone
     // is open, keep the last ~1.8 s of it in a ring and hand the ring's tail to
     // whatever recorder starts next. This is the whole of residual (1).
-    var PRE_ROLL_MS = 1800, PRE_ROLL_EDGE = 0.015, PRE_ROLL_LOW = 0.003;
+    // 3.5 s, not 1.8 s. The gate cannot fire until echo cancellation has
+    // stopped subtracting the reply from the owner's voice — measured 1.5 s of
+    // clip on the 10:10 walk — and the head sits BEFORE that. A ring that only
+    // reaches back 1.8 s leaves the first words of a barge-in on its very edge.
+    var PRE_ROLL_MS = 3500, PRE_ROLL_EDGE = 0.015, PRE_ROLL_LOW = 0.003;
 
     function preRollStop() {
       var p = voice.preRoll;
@@ -3591,7 +3643,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           for (var q = 0; q < copy.length; q++) { var a = copy[q] < 0 ? -copy[q] : copy[q]; if (a > pk) pk = a; sq += copy[q] * copy[q]; }
           p.lastPeak = pk;
           if (pk > p.peakSeen) p.peakSeen = pk;
-          if (pk > 0.0015 && voice.ringDead) voice.ringDead = false;
+          // Real audio resets the deaf accounting: an episode that ends must not
+          // leave the ring with no rebuilds left for the next stall.
+          if (pk > 0.0015) { if (voice.ringDead) voice.ringDead = false; if (p.rebuilds) p.rebuilds = 0; }
           while (p.chunks.length > cap) p.chunks.shift();
           // This frame is also the barge-in vote (see bargeFeed): the ring is the
           // one path known to hear this stream, so it decides, not a second
@@ -3664,7 +3718,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // hundred milliseconds more before the new voice reaches full level. So the
       // head is somewhere in the last ~1.5 s of an 1.8 s ring; taking that window
       // when it holds real audio costs a little room tone and never costs words.
-      var fromGate = gateMs > 0 ? Math.max(0, flat.length - Math.round(p.rate * 1.5)) : -1;
+      var fromGate = gateMs > 0 ? Math.max(0, flat.length - Math.round(p.rate * 2.6)) : -1;
       var start;
       if (first >= 0) {
         start = Math.max(0, first - Math.round(p.rate * 0.08));
@@ -3689,6 +3743,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         voice.lastPreRollWhy = "no-speech";
         return null;
       }
+      // A 3.5 s ring can hold the tail of the reply before the interruption, and
+      // the edge scan can read the reply's own echo as speech. The gate is the
+      // only thing that says where the owner began, so nothing earlier than its
+      // window is ever the head: clamp the clip to it.
+      if (fromGate >= 0 && start < fromGate) { start = fromGate; voice.lastPreRollWhy = "gate-clamp"; }
       return { rate: p.rate, samples: flat.subarray(start) };
     }
 
@@ -3702,6 +3761,32 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.pendingPre = null;
       if (s && performance.now() - s.at < 1500) return s;
       return preRollTake();
+    }
+
+    // A capture or recogniser left over from the previous turn OWNS the clip
+    // that will be posted, and startListening() refuses to start a second one
+    // (`if (voice.rec || recState) return`). The 10:10 walk measured exactly
+    // that: the fire took the head ("edge-low"), nothing consumed it, and the
+    // clip that reached the transcriber was the OLD capture's buffer — 11.3 s
+    // long with the interruption 7.6 s in, behind seconds of silence.
+    // So a fire ends whatever was capturing, WITHOUT touching the microphone
+    // stream or the ring: the head lives in voice.pendingPre and stays put for
+    // whichever recorder the new turn starts.
+    function restartTurnCapture() {
+      if (capState) dropCapture();
+      if (recState) {
+        // Same rule for the recorder: stop the callbacks, keep the stream.
+        var r = recState;
+        r.stale = true;
+        recState = null;
+        try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
+      }
+      if (voice.rec) {
+        try { voice.rec._bzStale = true; } catch (_) {}
+        try { voice.rec.abort ? voice.rec.abort() : voice.rec.stop(); } catch (_) {}
+        voice.rec = null;
+      }
+      voice.firstInterimAt = 0;
     }
 
     function releaseMic() {
@@ -3777,6 +3862,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (head && head.samples && head.samples.length)
           voice.pendingPre = { at: performance.now(), rate: head.rate, samples: head.samples, why: voice.lastPreRollWhy };
       } catch (_) {}
+      restartTurnCapture();
       bargeDisarm();
       voice.bargUntil = performance.now() + BARGE_COOLDOWN;
       // Cut THIS turn, not "the voice": see the cutTurn note on `voice`.
@@ -3833,7 +3919,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var quietSince = 0;
           var startedAt = Date.now();
           proc.onaudioprocess = function (ev) {
-            if (!recState) return;
+            // Identity, not truthiness: a recorder that was replaced (a barge-in
+            // restarts the turn, see restartTurnCapture) must not finish the NEW
+            // one or push its own buffered silence into this turn.
+            if (!recState || recState.proc !== proc) return;
             var input = ev.inputBuffer.getChannelData(0);
             var copy = new Float32Array(input.length);
             copy.set(input);
@@ -3893,7 +3982,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
-      sendForTranscription(encodeWav(downsampleTo16k(flat, r.rate)));
+      var pol = polishSamples(flat, r.rate);
+      setLastTurn(pol, r.rate);
+      if (!pol.samples.length) { rearmListening(); return; }
+      sendForTranscription(encodeWav(downsampleTo16k(pol.samples, r.rate)));
     }
 
     function cancelRecording() {
@@ -3950,7 +4042,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
           var startedAt = Date.now();
           proc.onaudioprocess = function (ev) {
-            if (!capState) return;
+            if (!capState || capState.proc !== proc) return;
             if (Date.now() - startedAt > CAP_MAX_MS) { dropCapture(); return; }
             var input = ev.inputBuffer.getChannelData(0);
             var copy = new Float32Array(input.length);
@@ -3977,7 +4069,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < c.chunks.length; k++) { flat.set(c.chunks[k], off); off += c.chunks[k].length; }
-      return encodeWav(downsampleTo16k(flat, c.rate));
+      var pol = polishSamples(flat, c.rate);
+      setLastTurn(pol, c.rate);
+      if (!pol.samples.length) return null;
+      return encodeWav(downsampleTo16k(pol.samples, c.rate));
     }
 
     function dropCapture() {
@@ -4215,6 +4310,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // "no-ring", "ring-deaf", "ring-dead". A 0 with no why is what
                    // made residual (1) unfalsifiable for three walks.
                    preRollWhy: voice.lastPreRollWhy || null,
+                   // The turn that was actually posted: head kept, leading
+                   // silence trimmed, level lifted. This is the number QA should
+                   // walk on — preRollMs above only describes the last capture
+                   // that started, which may be a later turn.
+                   lastTurn: voice.lastTurn || null,
                    // QA-facing: a ring that is not pumping is the residual (1)
                    // failure mode, and it is invisible from the transcript alone.
                    // peak is the loudest frame it has heard — frames that increment
