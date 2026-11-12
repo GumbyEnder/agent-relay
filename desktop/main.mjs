@@ -705,7 +705,11 @@ async function installUpdater() {
     logLine("[update] disabled by BZ_DISABLE_UPDATES");
     return null;
   }
-  logLine(`[update] check requested (installed ${app.getVersion()}, prerelease=${process.env.BZ_UPDATE_PRERELEASE === "1"})`);
+  logLine(
+    `[update] check requested (installed ${app.getVersion()}, feed=${
+      process.env.BZ_UPDATE_FEED_URL || "app-update.yml"
+    })`,
+  );
   let updater;
   try {
     // A dynamic import inside an asar can hang rather than throw on a hostile
@@ -735,7 +739,31 @@ async function installUpdater() {
   };
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = true;
-  updater.allowPrerelease = process.env.BZ_UPDATE_PRERELEASE === "1";
+  // BZ-D1: the GitHub provider resolved the release through `releases/latest`,
+  // which is the newest NON-prerelease in this repo — the web release v0.3.0 —
+  // so it asked for releases/download/v0.3.0/latest.yml and 404'd, forever.
+  // `allowPrerelease` cannot fix that either: with a channel set it requires the
+  // tag to parse as semver, and `desktop-v0.3.3` does not.
+  // So the feed is a generic provider on a fixed URL: the `desktop-channel`
+  // GitHub release, whose latest.yml is replaced on every publish
+  // (desktop/package.json build.publish, desktop/release.mjs). No tag lookup,
+  // no prerelease logic, nothing to regress when a web release appears.
+  const feedOverride = process.env.BZ_UPDATE_FEED_URL || null;
+  if (feedOverride) {
+    updater.setFeedURL({ provider: "generic", url: feedOverride, channel: "latest" });
+    logLine(`[update] feed overridden by BZ_UPDATE_FEED_URL → ${feedOverride}`);
+  }
+  updater.allowPrerelease = false;
+  try {
+    const feedFile = join(process.resourcesPath ?? "", "app-update.yml");
+    logLine(
+      `[update] feed config: ${
+        existsSync(feedFile) ? readFileSync(feedFile, "utf8").replace(/\s+/g, " ").trim() : "MISSING app-update.yml"
+      }`,
+    );
+  } catch (err) {
+    logLine(`[update] feed config unreadable: ${err?.message ?? err}`);
+  }
   updater.on("update-available", (info) => {
     updateState = { ...updateState, available: info?.version ?? null, error: null };
     logLine(`[update] ${info?.version} available (installed ${app.getVersion()})`);
