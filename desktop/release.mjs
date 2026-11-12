@@ -176,21 +176,31 @@ if (!existsSync(manifest)) {
   process.exit(1);
 }
 
-const assets = [installer, existsSync(blockmap) ? blockmap : null, manifest].filter(Boolean);
+// Order matters, and it is the difference between a slow publish and a broken
+// feed. latest.yml is what an install actually reads, so it must land LAST: a
+// run killed mid-upload (a 180 MB artefact over a slow link is minutes, and the
+// caller may cap the tool at seven) otherwise leaves a manifest announcing a
+// version whose bytes are still missing — every client then 404s on the
+// installer while `latest.yml` looks healthy. Measured: 2026-11-12, 8 minutes of
+// exactly that between the manifest upload and the exe landing.
+const payload = [installer, existsSync(blockmap) ? blockmap : null].filter(Boolean);
+const assets = [...payload, manifest];
 if (releaseExists(tag)) {
   log(`release ${tag} exists — uploading assets (clobber)`);
-  run("gh", ["release", "upload", tag, ...assets, "--clobber", "-R", REPO]);
+  run("gh", ["release", "upload", tag, ...payload, "--clobber", "-R", REPO]);
+  run("gh", ["release", "upload", tag, manifest, "--clobber", "-R", REPO]);
 } else {
   const notesFile = join(ROOT, "dist-desktop", `RELEASE-${version}.md`);
   writeFileSync(notesFile, notes);
   run("gh", [
     "release", "create", tag,
-    ...assets,
+    ...payload,
     "--title", `BeeZilla Desktop ${version} (Windows x64)`,
     "--notes-file", notesFile,
     ...(prerelease ? ["--prerelease"] : []),
     "-R", REPO,
   ]);
+  run("gh", ["release", "upload", tag, manifest, "--clobber", "-R", REPO]);
   log(`release ${tag} created`);
 }
 
@@ -241,7 +251,10 @@ if (!releaseExists(CHANNEL_TAG)) {
   ]);
 }
 log(`publishing feed → ${CHANNEL_TAG}`);
-run("gh", ["release", "upload", CHANNEL_TAG, ...assets, "--clobber", "-R", REPO]);
+run("gh", ["release", "upload", CHANNEL_TAG, ...payload, "--clobber", "-R", REPO]);
+// Manifest last, for the same reason as the tag release: until the bytes it
+// names are in place, a manifest on the feed is an outage, not a publish.
+run("gh", ["release", "upload", CHANNEL_TAG, manifest, "--clobber", "-R", REPO]);
 
 // Prune: one installer's worth of assets, not one per release ever made.
 const channelJson = JSON.parse(
