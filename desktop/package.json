@@ -1,9 +1,9 @@
 {
   "name": "beezilla-desktop",
   "productName": "BeeZilla",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
-  "description": "BeeZilla desktop \u2014 the local runtime in a window",
+  "description": "BeeZilla desktop — the local runtime in a window",
   "type": "module",
   "main": "main.mjs",
   "author": "BeeZilla",
@@ -51,10 +51,9 @@
     "artifactName": "BeeZilla-Setup-${version}.${ext}",
     "publish": [
       {
-        "provider": "github",
-        "owner": "GumbyEnder",
-        "repo": "agent-relay",
-        "releaseType": "prerelease"
+        "provider": "generic",
+        "url": "https://github.com/GumbyEnder/agent-relay/releases/download/desktop-channel",
+        "channel": "latest"
       }
     ]
   },
