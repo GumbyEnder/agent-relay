@@ -251,7 +251,9 @@ const keep = new Set(assets.map((a) => a.split("/").pop()));
 const stale = channelJson.assets.filter((a) => !keep.has(a.name)).map((a) => a.name);
 if (stale.length) {
   log(`pruning stale feed assets: ${stale.join(", ")}`);
-  run("gh", ["release", "delete-asset", CHANNEL_TAG, ...stale, "--yes", "-R", REPO]);
+  // gh takes exactly one asset name per call — passing several silently treats
+  // the extras as flags/positional garbage.
+  for (const name of stale) run("gh", ["release", "delete-asset", CHANNEL_TAG, name, "--yes", "-R", REPO]);
 }
 
 /* -- prove the feed resolves (this is what an install actually does) -------- */
