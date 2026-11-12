@@ -3038,7 +3038,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       micStream: null, micCtx: null,
       // Rolling tail of mic audio kept while the stream is open (see preRoll*):
       // the head of a turn is spoken before we can possibly notice it.
-      preRoll: null, lastPreRollMs: 0, lastPreRollWhy: null, pendingPre: null, ringDead: false,
+      preRoll: null, lastPreRollMs: 0, lastPreRollSamples: 0, lastPreRollWhy: null, pendingPre: null, ringDead: false,
+      // What the ring itself held at the moment of the take: how long it was and
+      // its level every 250 ms. headMs alone cannot tell "the head was dropped"
+      // from "the head was never in the signal", and that difference is a code
+      // fix versus a device fact.
+      lastRingMs: 0, lastRingProfile: null,
       // What the LAST turn's clip actually was: head kept, leading silence
       // trimmed, level lifted. Global preRollMs only ever described whichever
       // turn last started a capture, which is why "0 / no-speech" on the 10:10
@@ -3533,22 +3538,72 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // leading near-silence (keeping 60 ms so the first consonant is not clipped)
     // and lift a quiet clip: normalising cannot invent words, it only stops the
     // model from having to hear them at -45 dBFS under a loud reply.
-    function polishSamples(flat, rate) {
-      var i = 0, edge = 0.0015, keep = Math.round(rate * 0.06);
+    // headSamples = how many leading samples came from the ring. The head of a
+    // barge-in and the body of it are the same utterance at wildly different
+    // levels (the canceller ducks the first second), so they are normalised as
+    // two regions, not one clip.
+    function polishSamples(flat, rate, headSamples) {
+      // "Silence" has to be read from THIS clip. A fixed 0.0015 edge erased a
+      // ducked head on the 1:07 PM walk: the body arrives near full scale, so
+      // 0.002 is 54 dB down and looks like nothing — yet it is the owner's
+      // first words. Trim relative to the clip's own peak instead.
+      var i = 0, peakAll = 0;
+      for (i = 0; i < flat.length; i++) { var a0 = flat[i] < 0 ? -flat[i] : flat[i]; if (a0 > peakAll) peakAll = a0; }
+      var edge = Math.max(0.0002, peakAll * 0.0008);
+      i = 0;
       while (i < flat.length && Math.abs(flat[i]) < edge) i++;
       if (i >= flat.length) return { samples: flat.subarray(0, 0), peak: 0, leadMs: Math.round((flat.length / rate) * 1000) };
+      var keep = Math.round(rate * 0.06);
       var start = Math.max(0, i - keep);
       var out = start > 0 ? flat.subarray(start) : flat;
+      var split = headSamples > 0 ? Math.max(0, Math.min(out.length, headSamples - start)) : 0;
+      var headGain = 1, splitMs = 0, headPeakOut = 0, bodyPeakOut = 0;
+      if (split > rate * 0.12) {
+        var bodyPeak = 0, k;
+        for (k = split; k < out.length; k++) { var ab = out[k] < 0 ? -out[k] : out[k]; if (ab > bodyPeak) bodyPeak = ab; }
+        // The ring is taken AT the gate, and the gate is three frames (128 ms)
+        // after the loud onset — so the head's tail always carries the first
+        // syllable of the body. Lifting "everything up to split" therefore
+        // measured the body's own peak as the head's (measured: headPeak 0.4 =
+        // bodyPeak 0.4, gain stayed 1). Find the onset inside the head and lift
+        // only what is before it.
+        var loudAt = split, hw = Math.max(1, Math.round(rate * 0.03));
+        for (k = 0; k + hw <= split; k += hw) {
+          var sq2 = 0;
+          for (var q = k; q < k + hw; q++) sq2 += out[q] * out[q];
+          if (Math.sqrt(sq2 / hw) > bodyPeak * 0.25) { loudAt = Math.max(0, k - Math.round(rate * 0.08)); break; }
+        }
+        var headPeak = 0;
+        for (k = 0; k < loudAt; k++) { var ah = out[k] < 0 ? -out[k] : out[k]; if (ah > headPeak) headPeak = ah; }
+        splitMs = Math.round((loudAt / rate) * 1000);
+        headPeakOut = Math.round(headPeak * 1e4) / 1e4;
+        bodyPeakOut = Math.round(bodyPeak * 1e3) / 1e3;
+        // Only when the head is BOTH real (above the noise floor) and far under
+        // the body. A head already at body level is left alone: gain that is not
+        // needed is distortion the model did not ask for.
+        if (loudAt > rate * 0.12 && headPeak > 0.0002 && bodyPeak > headPeak * 3) {
+          headGain = Math.min(PRE_ROLL_HEAD_GAIN_MAX, 0.9 / headPeak);
+          var ramp = Math.max(1, Math.round(rate * 0.025));
+          var lh = new Float32Array(out.length);
+          lh.set(out);
+          for (k = 0; k < loudAt; k++) {
+            var fromEnd = loudAt - k;
+            var gk = fromEnd < ramp ? 1 + (headGain - 1) * (fromEnd / ramp) : headGain;
+            lh[k] = Math.max(-1, Math.min(1, out[k] * gk));
+          }
+          out = lh;
+        }
+      }
       var peak = 0;
-      for (var k = 0; k < out.length; k++) { var a = out[k] < 0 ? -out[k] : out[k]; if (a > peak) peak = a; }
+      for (var k2 = 0; k2 < out.length; k2++) { var a = out[k2] < 0 ? -out[k2] : out[k2]; if (a > peak) peak = a; }
       var leadMs = Math.round((start / rate) * 1000);
       if (peak > 0.0005 && peak < 0.25) {
         var g = Math.min(4, 0.9 / peak);
         var lifted = new Float32Array(out.length);
         for (var j = 0; j < out.length; j++) lifted[j] = Math.max(-1, Math.min(1, out[j] * g));
-        return { samples: lifted, peak: Math.min(1, peak * g), leadMs: leadMs, gain: g };
+        return { samples: lifted, peak: Math.min(1, peak * g), leadMs: leadMs, gain: g, headGain: headGain, splitMs: splitMs, headPeak: headPeakOut, bodyPeak: bodyPeakOut };
       }
-      return { samples: out, peak: peak, leadMs: leadMs };
+      return { samples: out, peak: peak, leadMs: leadMs, headGain: headGain, splitMs: splitMs, headPeak: headPeakOut, bodyPeak: bodyPeakOut };
     }
 
     // One line of truth per turn, for state() and for the QA walk: what the clip
@@ -3561,6 +3616,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         leadMs: pol.leadMs || 0,
         clipPeak: Math.round((pol.peak || 0) * 1000) / 1000,
         gain: pol.gain ? Math.round(pol.gain * 100) / 100 : 1,
+        headGain: pol.headGain ? Math.round(pol.headGain * 10) / 10 : 1,
+        splitMs: pol.splitMs || 0,
+        headPeak: pol.headPeak || 0,
+        bodyPeak: pol.bodyPeak || 0,
+        ringMs: voice.lastRingMs || 0,
+        ring: voice.lastRingProfile || null,
       };
     }
 
@@ -3598,7 +3659,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // stopped subtracting the reply from the owner's voice — measured 1.5 s of
     // clip on the 10:10 walk — and the head sits BEFORE that. A ring that only
     // reaches back 1.8 s leaves the first words of a barge-in on its very edge.
-    var PRE_ROLL_MS = 3500, PRE_ROLL_EDGE = 0.015, PRE_ROLL_LOW = 0.003;
+    var PRE_ROLL_MS = 3500, PRE_ROLL_EDGE = 0.015;
+    // (The old fixed low edge, 0.003 RMS, is gone: see PRE_ROLL_FLOOR below.)
+    // The absolute low edge is a guess about a device, and the 1:07 PM walk
+    // disproved it: Chrome's canceller held the whole "Hold on," under 0.003
+    // RMS while the body came in near full scale. So the low edge is now read
+    // off the ring's own floor (see preRollTake), never below this, and the
+    // head is lifted toward the body's level before upload — a model cannot
+    // hear words that arrive 54 dB under the rest of the clip.
+    var PRE_ROLL_FLOOR = 0.0004, PRE_ROLL_HEAD_MAX_MS = 1200, PRE_ROLL_HEAD_GAIN_MAX = 400;
 
     function preRollStop() {
       var p = voice.preRoll;
@@ -3698,15 +3767,37 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var flat = new Float32Array(total), off = 0;
       for (i = 0; i < p.chunks.length; i++) { flat.set(p.chunks[i], off); off += p.chunks[i].length; }
       var win = Math.max(1, Math.round(p.rate * 0.03));
-      var run = 0, first = -1, firstLow = -1, runLow = 0;
-      for (var s = 0; s + win <= flat.length; s += win) {
+      var wins = [], s = 0, j = 0;
+      for (s = 0; s + win <= flat.length; s += win) {
         var sum = 0;
-        for (var j = s; j < s + win; j++) sum += flat[j] * flat[j];
-        var rms = Math.sqrt(sum / win);
-        run = rms > PRE_ROLL_EDGE ? run + 1 : 0;
-        if (first < 0 && run >= 2) first = s - win;   // two loud windows, not a click
-        runLow = rms > PRE_ROLL_LOW ? runLow + 1 : 0;
-        if (firstLow < 0 && runLow >= 2) firstLow = s - win;
+        for (j = s; j < s + win; j++) sum += flat[j] * flat[j];
+        wins.push(Math.sqrt(sum / win));
+      }
+      // What the ring held, for the next walk: 15 bins of 250 ms. Without this
+      // "headMs 249" is ambiguous between a dropped head and a head that never
+      // reached the ring.
+      var prof = [];
+      var bin = Math.max(win, Math.round(p.rate * 0.25));
+      for (s = 0; s < flat.length && prof.length < 15; s += bin) {
+        var e = Math.min(flat.length, s + bin), sq = 0;
+        for (j = s; j < e; j++) sq += flat[j] * flat[j];
+        prof.push(Math.round(Math.sqrt(sq / Math.max(1, e - s)) * 1e4) / 1e4);
+      }
+      voice.lastRingMs = Math.round((flat.length / p.rate) * 1000);
+      voice.lastRingProfile = prof;
+      // Read the low edge off this ring, not off a remembered device: three
+      // times the quietest fifth of it. A canceller that ducks the first second
+      // of a barge-in by 40 dB then still leaves a head that stands clear of
+      // this room's floor, and a head that does not is not recoverable by gain.
+      var sorted = wins.slice().sort(function (a, b) { return a - b; });
+      var floorRms = sorted.length ? sorted[Math.floor(sorted.length * 0.2)] : 0;
+      var lowEdge = Math.min(PRE_ROLL_EDGE, Math.max(PRE_ROLL_FLOOR, floorRms * 3));
+      var run = 0, first = -1, firstLow = -1, runLow = 0;
+      for (var w = 0; w < wins.length; w++) {
+        run = wins[w] > PRE_ROLL_EDGE ? run + 1 : 0;
+        if (first < 0 && run >= 2) first = w * win - win;   // two loud windows, not a click
+        runLow = wins[w] > lowEdge ? runLow + 1 : 0;
+        if (firstLow < 0 && runLow >= 2) firstLow = w * win - win;
         if (first >= 0 && firstLow >= 0) break;
       }
       var gateMs = Number(opts.gateMs) || 0;
@@ -3733,6 +3824,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var startLow = Math.max(0, firstLow - Math.round(p.rate * 0.08));
           if (startLow < start && startLow >= fromGate) { start = startLow; voice.lastPreRollWhy = "edge-low"; }
         }
+        // The head is the phrase the interruption opened with, not the reply it
+        // interrupted: 1.2 s is a generous phrase, and anything earlier is the
+        // agent's own tail arriving through a leaky canceller — which the head
+        // lift would then shout into the transcriber as the owner's words.
+        var headCap = Math.max(0, first - Math.round((p.rate * PRE_ROLL_HEAD_MAX_MS) / 1000));
+        if (start < headCap) { start = headCap; voice.lastPreRollWhy += "+head-cap"; }
       } else if (fromGate >= 0 && p.lastPeak > 0.0015) {
         // Nothing cleared even the low edge, yet the gate measured this stream
         // above its own threshold: take the window the gate vouches for. A ring
@@ -3905,10 +4002,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // recorder existed (detection is 240 ms behind the gate, plus the
           // reply's 350 ms grace). The ring holds that head.
           voice.lastPreRollMs = 0;
+          voice.lastPreRollSamples = 0;
           var pre = preRollPending();
           if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
             chunks.push(pre.samples);
             voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
+            voice.lastPreRollSamples = pre.samples.length;
           } else if (pre) {
             // Say it out loud: a head that exists but cannot be used (a ring
             // recorded on a different AudioContext) used to look identical to a
@@ -3982,7 +4081,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
-      var pol = polishSamples(flat, r.rate);
+      var pol = polishSamples(flat, r.rate, voice.lastPreRollSamples);
       setLastTurn(pol, r.rate);
       if (!pol.samples.length) { rearmListening(); return; }
       sendForTranscription(encodeWav(downsampleTo16k(pol.samples, r.rate)));
@@ -4030,10 +4129,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // The head of the turn was spoken before this recorder existed; the
           // ring has it (see preRollTake).
           voice.lastPreRollMs = 0;
+          voice.lastPreRollSamples = 0;
           var pre = preRollPending();
           if (pre && Math.abs(pre.rate - ctx.sampleRate) < 1 && pre.samples.length) {
             chunks.push(pre.samples);
             voice.lastPreRollMs = Math.round(pre.samples.length / pre.rate * 1000);
+            voice.lastPreRollSamples = pre.samples.length;
           } else if (pre) {
             // Say it out loud: a head that exists but cannot be used (a ring
             // recorded on a different AudioContext) used to look identical to a
@@ -4069,7 +4170,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < c.chunks.length; k++) { flat.set(c.chunks[k], off); off += c.chunks[k].length; }
-      var pol = polishSamples(flat, c.rate);
+      var pol = polishSamples(flat, c.rate, voice.lastPreRollSamples);
       setLastTurn(pol, c.rate);
       if (!pol.samples.length) return null;
       return encodeWav(downsampleTo16k(pol.samples, c.rate));
@@ -4305,6 +4406,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var p = voice.preRoll;
           return { mic: !!voice.mic, armed: !!voice.armed, speaking: !!voice.speaking, sending: !!voice.sending, asr: voice.asr,
                    preRollMs: voice.lastPreRollMs || 0,
+                   preRollSamples: voice.lastPreRollSamples || 0,
                    // Why the take produced what it produced: "edge" (speech found),
                    // "gate-tail" (the barge gate vouched for the level), "no-speech",
                    // "no-ring", "ring-deaf", "ring-dead". A 0 with no why is what
