@@ -77,7 +77,7 @@ BeeZilla (alias **Buzzy**, permanently) is the consumer front door on the same e
 
 **Multi-company.** One account can hold several companies — facts, profile lines and work are scoped to the active company, while search spans all of them.
 
-**Memory.** Short-term state is the current job's draft; long-term is a per-account **Honcho** peer plus a sanitized card. Job history is the product store, not the memory layer.
+**Memory.** Short-term state is the current job's draft. External Honcho synchronization is disabled until an authenticated, scoped user-consent flow is implemented; configuring its environment variables alone does not enable it. Job history and DB-backed memory remain available. This disables Honcho transmission only, not other network services, and does not delete previously transmitted data.
 
 **Models.** The picker shows roles, not model IDs, and defaults to the cheapest model likely to succeed (Marvin / `z-ai/glm-5.3-flash`), escalating only when a job needs it. The catalog and routing live in [`src/lib/buzzy/llm.ts`](src/lib/buzzy/llm.ts) and `BZ_CHAT_MODELS`.
 
@@ -114,7 +114,7 @@ BZ_BRAND=beezilla npm run dev
 | `BZ_VOICE_MODEL` / `BZ_VOICE_NAME` / `BZ_VOICE_FORMAT` | The spoken lane: one voice, the audio model's — never the browser's |
 | `BZ_ASR_MODEL` | Speech-to-text for `/api/buzzy/transcribe`, the path Firefox and Brave use (they have no usable `SpeechRecognition`) |
 | `BZ_BRAVE_KEY` / `BZ_HYPERBROWSER_KEY` | Live web search and pages a plain fetch cannot read |
-| `BZ_HONCHO_URL` / `BZ_HONCHO_KEY` / `BZ_HONCHO_WORKSPACE` | Long-term memory — one workspace, one peer per account |
+| `BZ_HONCHO_URL` / `BZ_HONCHO_KEY` / `BZ_HONCHO_WORKSPACE` | Legacy settings; Honcho sync is disabled pending authenticated, scoped consent |
 | `AGENT_RELAY_API_KEY` | Optional gate for Dev Boards agent demos |
 
 Secrets are never committed; per-deployment values live in the host's service variables.
