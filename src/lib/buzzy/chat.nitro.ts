@@ -3281,12 +3281,13 @@ export default defineEventHandler(async (event) => {
     }
     const token = "sh_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
     const id = "shl_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    await sql`
+    const inserted = await sql`
       INSERT INTO buzzy_share_links (id, user_id, doc_id, version, token, expires_at)
       VALUES (${id}, ${user.id}, ${doc.id}, ${version}, ${token}, now() + (${ttlHours}::text || ' hours')::interval)
+      RETURNING expires_at
     `;
     setResponseStatus(event, 201);
-    return { ok: true, created: true, share: { id, token, expiresAt: null, url: `/api/buzzy/shared/${token}` } };
+    return { ok: true, created: true, share: { id, token, expiresAt: inserted[0]?.expires_at ?? null, url: `/api/buzzy/shared/${token}` } };
   }
 
   // ── GET /api/buzzy/shares — the recorded links on this account ──────────
@@ -3759,7 +3760,7 @@ export default defineEventHandler(async (event) => {
       member: { id: memberId, email, role, status: "invited" },
       // No mail channel is wired on this deployment — hand back the link and
       // say so, instead of claiming an email went out.
-      inviteUrl: `/buzzy/team/join?token=${token}`,
+      inviteUrl: `/buzzy/join?token=${token}`,
       note: "Invitation created. No email was sent (this deployment has no delivery channel) — send this link to them yourself. It expires in 7 days.",
       expiresInDays: 7,
     };

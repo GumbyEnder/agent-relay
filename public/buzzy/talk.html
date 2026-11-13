@@ -293,6 +293,8 @@
     .talk-sub .mode-tab { padding: 0.24rem 0.8rem; font-size: 0.76rem; }
     .talk-attach { margin: 0; font-size: 0.78rem; padding: 0.24rem 0.7rem; }
     .talk-sub-right { display: inline-flex; align-items: center; gap: 0.45rem; }
+    .file-card .file-share { min-height: 0; padding: 0.2rem 0.65rem; border-radius: 999px; border: 1px solid #6B5A1E; background: transparent; color: #FFC107; font: inherit; font-size: 0.8rem; cursor: pointer; }
+    .file-card .file-share:hover { background: #2A2204; }
     .board-solo { margin-top: 0.7rem; }
     .board-solo:empty { display: none; }
     .board-solo .wb-panel { min-height: 20rem; }
@@ -1426,6 +1428,7 @@
   <link rel="stylesheet" href="/buzzy/inspiration.css" />
   <link rel="stylesheet" href="/buzzy/voice-stage.css" />
   <link rel="stylesheet" href="/buzzy/whiteboard.css" />
+  <link rel="stylesheet" href="/buzzy/share.css" />
 </head>
 <body>
   <header>
@@ -2618,6 +2621,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return '<div class="bz-what" title="' + esc(JSON.stringify(t)) + '">' + esc(bits.join(" · ")) + "</div>";
     }
 
+    // "spring-menu-plan.docx" -> "Spring menu plan", for the share window's heading.
+    function readableName(file) {
+      var base = String(file || "").replace(/\.[A-Za-z0-9]{2,5}$/, "").replace(/[-_]+/g, " ").trim();
+      return base ? base.charAt(0).toUpperCase() + base.slice(1) : "this document";
+    }
     function renderFileCard(doc) {
       var name = String(doc.filename || "document");
       var size = doc.bytes ? " · " + Math.max(1, Math.round(doc.bytes / 1024)) + " KB" : "";
@@ -2643,8 +2651,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // closed. Do not spell the attribute out literally: the QA gate greps the
     // served bytes for it and a comment would read as a live link.
     (lib ? '<a href="' + esc(lib) + '">Open in Library</a>' : "") +
+        // Share: an explicit Selected team / Public choice (share.js), never automatic.
+        (doc.documentId && window.BeeZillaShare
+          ? '<button type="button" class="file-share" data-doc="' + esc(doc.documentId) + '" data-title="' + esc(doc.title || readableName(name)) + '">Share</button>'
+          : "") +
       "</div>";
     }
+
+    // One delegated listener: a file card's Share opens the share window for that document.
+    document.addEventListener("click", function (e) {
+      var b = e.target && e.target.closest ? e.target.closest(".file-share") : null;
+      if (!b || !window.BeeZillaShare) return;
+      window.BeeZillaShare.open({ docId: b.getAttribute("data-doc"), title: b.getAttribute("data-title"), returnFocus: b });
+    });
 
     function renderChatMessages() {
       const container = document.getElementById("chatMessages");
@@ -7132,6 +7151,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/experts-data.js"></script>
 <script src="/buzzy/privacy.js"></script>
 <script src="/buzzy/inspiration.js"></script>
+<script src="/buzzy/qr.js"></script>
+<script src="/buzzy/share.js"></script>
 <script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>

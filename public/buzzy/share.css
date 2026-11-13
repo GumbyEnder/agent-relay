@@ -1,0 +1,473 @@
+/* share.css — the BeeZilla Share window (share.js). Every class is prefixed sh-.
+ * Dark by default; the light palette applies under <html data-theme="light">.
+ */
+
+.sh-root,
+.sh-pill {
+  --sh-panel: #151515;
+  --sh-border: #2a2a2a;
+  --sh-text: #f2f2f2;
+  --sh-muted: #bdbdbd;
+  --sh-accent: #ffc107;
+  --sh-ink: #141414;
+  --sh-field: #1e1e1e;
+  --sh-field-border: #3d3d3d;
+  --sh-card: #1b1b1b;
+  --sh-warn: rgba(255, 193, 7, 0.1);
+  --sh-danger: #ff8a80;
+  --sh-scrim: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+html[data-theme="light"] .sh-root,
+html[data-theme="light"] .sh-pill {
+  --sh-panel: #ffffff;
+  --sh-border: #dadada;
+  --sh-text: #141414;
+  --sh-muted: #4d4d4d;
+  --sh-accent: #ffc107;
+  --sh-ink: #141414;
+  --sh-field: #f6f6f6;
+  --sh-field-border: #b8b8b8;
+  --sh-card: #fafafa;
+  --sh-warn: #fff6d6;
+  --sh-danger: #b3261e;
+  --sh-scrim: rgba(20, 20, 20, 0.35);
+  color-scheme: light;
+}
+
+/* hidden means hidden, even where a rule below sets display */
+.sh-root[hidden],
+.sh-root [hidden],
+.sh-pill[hidden] {
+  display: none !important;
+}
+
+/* overlay */
+.sh-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 16px;
+}
+
+.sh-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--sh-scrim);
+}
+
+.sh-dialog {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  background: var(--sh-panel);
+  color: var(--sh-text);
+  border: 1px solid var(--sh-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.sh-dialog:focus,
+.sh-dialog:focus-visible {
+  outline: none;
+}
+
+/* header: title, minimise, close */
+.sh-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px 20px;
+  border-bottom: 1px solid var(--sh-border);
+}
+
+.sh-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sh-head-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.sh-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--sh-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.sh-icon:hover {
+  background: var(--sh-field);
+  border-color: var(--sh-border);
+}
+
+/* body scrolls when the window is short */
+.sh-body {
+  display: grid;
+  gap: 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px 20px 22px;
+  overflow-y: auto;
+}
+
+/* the two choice cards */
+.sh-choices {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sh-legend {
+  padding: 0;
+  margin-bottom: 2px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sh-hint {
+  margin: 0 0 4px;
+  color: var(--sh-muted);
+  font-size: 14px;
+}
+
+.sh-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 520px) {
+  .sh-cards {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.sh-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 96px;
+  padding: 16px;
+  background: var(--sh-card);
+  border: 1px solid var(--sh-border);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.sh-card:hover {
+  border-color: var(--sh-field-border);
+}
+
+.sh-card.sh-card-on {
+  border-color: var(--sh-accent);
+  box-shadow: inset 0 0 0 1px var(--sh-accent);
+}
+
+.sh-card.sh-card-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sh-card:focus-within {
+  outline: 3px solid var(--sh-accent);
+  outline-offset: 2px;
+}
+
+.sh-radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  accent-color: var(--sh-accent);
+}
+
+.sh-card-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sh-card-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sh-card-desc {
+  color: var(--sh-muted);
+  font-size: 14px;
+}
+
+/* the panels under the cards */
+.sh-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sh-note,
+.sh-empty {
+  margin: 0;
+  color: var(--sh-muted);
+  font-size: 14px;
+}
+
+.sh-status {
+  margin: 0;
+  font-size: 14px;
+}
+
+.sh-status:empty {
+  display: none;
+}
+
+.sh-members {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--sh-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.sh-member {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--sh-border);
+  font-size: 14px;
+}
+
+.sh-member:first-child {
+  border-top: 0;
+}
+
+.sh-member-email {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sh-member-role,
+.sh-member-status {
+  color: var(--sh-muted);
+  white-space: nowrap;
+}
+
+/* invite form */
+.sh-invite {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.sh-invite-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 520px) {
+  .sh-invite-row {
+    grid-template-columns: minmax(0, 1fr) 150px;
+  }
+}
+
+.sh-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sh-field-label {
+  color: var(--sh-muted);
+  font-size: 13px;
+}
+
+.sh-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--sh-text);
+  background: var(--sh-field);
+  border: 1px solid var(--sh-field-border);
+  border-radius: 10px;
+}
+
+.sh-invite-result {
+  display: grid;
+  gap: 10px;
+}
+
+.sh-link-field {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.sh-copy-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+/* buttons */
+.sh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sh-text);
+  background: var(--sh-field);
+  border: 1px solid var(--sh-field-border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.sh-btn-primary {
+  color: var(--sh-ink);
+  background: var(--sh-accent);
+  border-color: var(--sh-accent);
+  font-weight: 600;
+}
+
+.sh-btn-danger {
+  color: var(--sh-danger);
+  background: transparent;
+  border-color: var(--sh-danger);
+}
+
+.sh-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sh-root .sh-btn:focus-visible,
+.sh-root .sh-icon:focus-visible,
+.sh-root .sh-input:focus-visible {
+  outline: 3px solid var(--sh-accent);
+  outline-offset: 2px;
+}
+
+/* public link */
+.sh-warning {
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--sh-text);
+  background: var(--sh-warn);
+  border: 1px solid var(--sh-accent);
+  border-radius: 12px;
+}
+
+.sh-link {
+  display: grid;
+  gap: 10px;
+}
+
+.sh-qr {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 14px;
+  color: #141414;
+  background: #ffffff;
+  border-radius: 12px;
+}
+
+.sh-qr-slot svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.sh-qr .sh-note {
+  color: #4d4d4d;
+}
+
+.sh-qr-caption {
+  color: #4d4d4d;
+  font-size: 13px;
+}
+
+.sh-expiry {
+  margin: 0;
+  color: var(--sh-muted);
+  font-size: 14px;
+}
+
+/* minimised: a pill at the bottom-left (the bottom-right is taken) */
+.sh-pill {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 10001;
+  box-sizing: border-box;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 10px 16px;
+  overflow: hidden;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--sh-text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: var(--sh-panel);
+  border: 1px solid var(--sh-accent);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.sh-pill:focus-visible {
+  outline: 3px solid var(--sh-accent);
+  outline-offset: 2px;
+}
