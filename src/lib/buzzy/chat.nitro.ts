@@ -38,6 +38,7 @@ import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
+import { fetchPageText } from "./webpage";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
@@ -1064,6 +1065,9 @@ export default defineEventHandler(async (event) => {
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The Talk bar's privacy control. Unknown values mean the default (no change).
+    let privacy: "advocate" | "lockdown" | "open" | undefined =
+      body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
     // Voice lane: stream text + audio back over SSE so speech starts on the
     // first audio chunk instead of after the whole buffered reply.
     const voice = body.voice === true;
@@ -1071,6 +1075,16 @@ export default defineEventHandler(async (event) => {
     const surface: "text" | "voice" = voice ? "voice" : "text";
 
     const sql = await getSql();
+
+    // The account's privacy mode wins when it is Lockdown: a second device, or a
+    // page whose slider was never touched, must not run outside calls the owner
+    // turned off. (Table from migration 0057; absent on an older database.)
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${userId} LIMIT 1`;
+      const accountMode = pm[0]?.mode;
+      if (accountMode === "lockdown") privacy = "lockdown";
+      else if (!privacy && (accountMode === "advocate" || accountMode === "open")) privacy = accountMode;
+    } catch { /* no table yet: the request's own value stands */ }
 
     // ── Plan + quota, before any provider call ───────────────────────────────
     // The web app calls the provider from OUR server, not through /api/inference,
@@ -1199,6 +1213,7 @@ export default defineEventHandler(async (event) => {
         jobContext,
         mode,
         execute,
+        privacy,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,
@@ -2079,6 +2094,79 @@ export default defineEventHandler(async (event) => {
       forgotten: rows.length,
       note: "Those remembered details are gone and won't be used again. Approved documents and your Library are untouched — delete a job or the account for that.",
     };
+  }
+
+  // ── GET /api/buzzy/read?url= — the reader view behind Talk's address bar ──
+  // A web address typed into "Search or enter a URL" opens here as text: title,
+  // readable text and the page's links, fetched by the same SSRF-guarded reader
+  // the chat uses (public http(s) pages only). Off in Lockdown.
+  if (method === "GET" && path === "/api/buzzy/read") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+      if (pm[0]?.mode === "lockdown") {
+        setResponseStatus(event, 403);
+        return { ok: false, error: "Reading web pages is off while privacy is set to Lockdown.", code: "lockdown" };
+      }
+    } catch { /* no table yet: not in Lockdown */ }
+    const url = (queryValue(fullPath, "url") ?? "").trim().slice(0, 2000);
+    if (!url) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Give me a web address to read.", code: "bad_url" };
+    }
+    const page = await fetchPageText(url);
+    if (!page.ok) {
+      setResponseStatus(event, 422);
+      return { ok: false, error: page.error, code: page.code };
+    }
+    const text = page.text ?? "";
+    return {
+      ok: true,
+      url: page.finalUrl ?? url,
+      title: page.title || "",
+      text: text.slice(0, 40_000),
+      truncated: text.length > 40_000,
+      links: (page.links ?? []).slice(0, 80),
+    };
+  }
+
+  // ── /api/buzzy/privacy — the owner's privacy mode, per account ─────────
+  // GET → { mode, saved, defaultMode }. Until the owner chooses, the mode is this
+  // deployment's default: Open on the hosted site, Advocate in the desktop app
+  // (BZ_RUNTIME=local) — roadmap phase 5. PUT { mode } → saves it. The chat reads
+  // the same row on every turn, so Lockdown holds on every device and page.
+  if (path === "/api/buzzy/privacy" && (method === "GET" || method === "PUT")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    if (method === "PUT") {
+      let body: Record<string, unknown> = {};
+      try {
+        const parsed = await event.req.json();
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+      } catch { /* handled below */ }
+      const mode = body.mode;
+      if (mode !== "advocate" && mode !== "lockdown" && mode !== "open") {
+        setResponseStatus(event, 400);
+        return { error: "mode must be advocate, lockdown or open", code: "bad_mode" };
+      }
+      await sql`
+        INSERT INTO buzzy_privacy_mode (user_id, mode, updated_at) VALUES (${user.id}, ${mode}, now())
+        ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode, updated_at = now()
+      `;
+      return { ok: true, mode };
+    }
+    const defaultMode = (process.env.BZ_RUNTIME ?? "").trim().toLowerCase() === "local" ? "advocate" : "open";
+    const rows = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+    return { ok: true, mode: rows[0]?.mode ?? defaultMode, saved: rows.length > 0, defaultMode };
   }
 
   // ── GET /api/buzzy/profile — account-scoped business profile + defaults ──
@@ -3196,12 +3284,13 @@ export default defineEventHandler(async (event) => {
     }
     const token = "sh_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
     const id = "shl_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    await sql`
+    const inserted = await sql`
       INSERT INTO buzzy_share_links (id, user_id, doc_id, version, token, expires_at)
       VALUES (${id}, ${user.id}, ${doc.id}, ${version}, ${token}, now() + (${ttlHours}::text || ' hours')::interval)
+      RETURNING expires_at
     `;
     setResponseStatus(event, 201);
-    return { ok: true, created: true, share: { id, token, expiresAt: null, url: `/api/buzzy/shared/${token}` } };
+    return { ok: true, created: true, share: { id, token, expiresAt: inserted[0]?.expires_at ?? null, url: `/api/buzzy/shared/${token}` } };
   }
 
   // ── GET /api/buzzy/shares — the recorded links on this account ──────────
@@ -3674,7 +3763,7 @@ export default defineEventHandler(async (event) => {
       member: { id: memberId, email, role, status: "invited" },
       // No mail channel is wired on this deployment — hand back the link and
       // say so, instead of claiming an email went out.
-      inviteUrl: `/buzzy/team/join?token=${token}`,
+      inviteUrl: `/buzzy/join?token=${token}`,
       note: "Invitation created. No email was sent (this deployment has no delivery channel) — send this link to them yourself. It expires in 7 days.",
       expiresInDays: 7,
     };

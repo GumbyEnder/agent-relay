@@ -183,6 +183,131 @@
     }
     .composer-card #chatInput:focus { outline: none; box-shadow: none; }
     .composer-card .paper-attach { margin-top: 0.45rem; }
+    /* ── The Talk to BeeZilla bar (reference A6b7ky7) ─────────────────── */
+    .talk-card {
+      border: none;
+      background: transparent;
+      padding: 0;
+    }
+    .talk-bar {
+      position: relative;
+      display: flex;
+      align-items: stretch;
+      gap: 0.6rem;
+      padding: 0.55rem;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #171717, #121212);
+      border: 1px solid #2A2A2A;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 30px rgba(0, 0, 0, 0.35);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .talk-bar:focus-within { border-color: #3A3A3A; }
+    .talk-btn {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0 1.6rem 0 1.3rem;
+      min-height: 3.25rem;
+      border: none;
+      color: #141414;
+      font: inherit;
+      font-size: 1.12rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      cursor: pointer;
+      background: linear-gradient(180deg, #FFD54F 0%, #FFC107 55%, #FFB300 100%);
+      clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+      filter: drop-shadow(0 0 10px rgba(255, 193, 7, 0.45));
+      transition: filter 0.15s, transform 0.1s;
+    }
+    .talk-btn:hover { filter: drop-shadow(0 0 16px rgba(255, 193, 7, 0.7)); }
+    .talk-btn:active { transform: scale(0.98); }
+    .talk-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+    .talk-btn .tb-mic { width: 1.35rem; height: 1.35rem; fill: currentColor; flex: 0 0 auto; }
+    .talk-btn.on { animation: talkPulse 1.6s ease-in-out infinite; }
+    @keyframes talkPulse {
+      0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.45)); }
+      50% { filter: drop-shadow(0 0 20px rgba(255, 193, 7, 0.9)); }
+    }
+    .talk-field {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0 0.45rem 0 1.15rem;
+      border-radius: 999px;
+      background: #0D0D0D;
+      border: 1px solid #1F1F1F;
+    }
+    .composer-card .talk-field #chatInput {
+      flex: 1 1 auto;
+      min-height: 0;
+      height: 1.6rem;
+      max-height: 9rem;
+      padding: 0.95rem 0 0.9rem;
+      box-sizing: content-box;
+      background: transparent;
+      border: none;
+      color: #F2F2F2;
+      font-size: 1.02rem;
+      line-height: 1.6rem;
+      resize: none;
+      overflow-y: auto;
+    }
+    .composer-card .talk-field #chatInput::placeholder { color: #6F6F6F; }
+    .talk-actions { display: none; align-items: center; gap: 0.35rem; flex: 0 0 auto; }
+    .talk-bar.has-text .talk-actions { display: inline-flex; }
+    .talk-doit { min-height: 0; padding: 0.42rem 0.8rem; border-radius: 999px; font-size: 0.85rem; }
+    .talk-send {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2.5rem; height: 2.5rem; min-height: 0; padding: 0;
+      border-radius: 50%; border: none;
+      background: var(--bz-yellow); color: #141414; cursor: pointer;
+    }
+    .talk-send svg { width: 1.25rem; height: 1.25rem; fill: currentColor; }
+    .talk-send:disabled, .talk-doit:disabled { opacity: 0.45; cursor: default; }
+    .talk-drop-hint {
+      display: none;
+      position: absolute; inset: 0;
+      margin: 0;
+      align-items: center; justify-content: center;
+      border-radius: 999px;
+      background: rgba(20, 20, 20, 0.92);
+      color: var(--bz-yellow);
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .talk-bar.over { border-color: var(--bz-yellow); box-shadow: 0 0 0 1px var(--bz-yellow), 0 0 24px rgba(255, 193, 7, 0.35); }
+    .talk-bar.over .talk-drop-hint { display: flex; }
+    .talk-sub {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.6rem;
+      margin: 0.55rem 0.4rem 0;
+    }
+    .talk-sub .mode-tabs { margin: 0; }
+    .talk-sub .mode-tab { padding: 0.24rem 0.8rem; font-size: 0.76rem; }
+    .talk-attach { margin: 0; font-size: 0.78rem; padding: 0.24rem 0.7rem; }
+    .talk-sub-right { display: inline-flex; align-items: center; gap: 0.45rem; }
+    .file-card .file-share { min-height: 0; padding: 0.2rem 0.65rem; border-radius: 999px; border: 1px solid #6B5A1E; background: transparent; color: #FFC107; font: inherit; font-size: 0.8rem; cursor: pointer; }
+    .file-card .file-share:hover { background: #2A2204; }
+    .board-solo { margin-top: 0.7rem; }
+    .board-solo:empty { display: none; }
+    .board-solo .wb-panel { min-height: 20rem; }
+    #boardToggle[aria-pressed="true"] { color: #FFC107; border-color: #FFC107; }
+    @media (max-width: 640px) {
+      .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; }
+      .talk-btn { padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
+                  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%); }
+      .talk-btn .tb-label { display: none; }
+      .talk-field { padding-left: 0.85rem; border-radius: 18px; }
+      .composer-card .talk-field #chatInput { font-size: 16px; padding: 0.7rem 0; }
+      .talk-doit { display: none; }
+    }
     /* The composer never moves. A conversation adds a transcript below it. */
 .chat-messages:empty { flex: 0 0 auto; max-height: none; padding: 0; }
 .recent-below { order: 6; margin-top: 1.1rem; }
@@ -956,6 +1081,18 @@
       font-size: 0.8rem;
     }
     .drawer-close:hover { border-color: var(--bz-yellow); background: rgba(255,193,7,0.08); }
+    .drawer-tools { display: flex; align-items: center; gap: 0.4rem; }
+    /* History minimised: a tab on the right edge brings the drawer back. */
+    .sessions-pill {
+      position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 60;
+      min-height: 0; padding: 0.7rem 0.4rem; border: 1px solid #6B5A1E; border-right: none;
+      border-radius: 10px 0 0 10px; background: #141414; color: var(--bz-yellow);
+      font: inherit; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em;
+      writing-mode: vertical-rl; cursor: pointer;
+    }
+    .sessions-pill:hover { background: #2A2204; }
+    .sessions-pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .sessions-pill.hidden { display: none; }
     .drawer-actions { padding: 0.8rem 1rem; border-bottom: 1px solid #222; }
     .drawer-actions button { width: 100%; }
     .drawer-note {
@@ -1298,6 +1435,12 @@
 .work-offer button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.85rem; }
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
+  <link rel="stylesheet" href="/buzzy/browse.css" />
+  <link rel="stylesheet" href="/buzzy/privacy.css" />
+  <link rel="stylesheet" href="/buzzy/inspiration.css" />
+  <link rel="stylesheet" href="/buzzy/voice-stage.css" />
+  <link rel="stylesheet" href="/buzzy/whiteboard.css" />
+  <link rel="stylesheet" href="/buzzy/share.css" />
 </head>
 <body>
   <header>
@@ -1378,27 +1521,82 @@
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
 
-          <!-- Voice stage: a real face while you talk. It only appears when
-               the mic is on, so typed chat stays as clean as it was. -->
-          <div id="voiceStage" class="voice-stage hidden">
-            <canvas id="voiceAvatar" aria-hidden="true"></canvas>
-            <div class="vs-body">
-              <p class="vs-state" id="voiceStageState">Listening</p>
-              <p class="vs-lat" id="voiceStageLat"></p>
+          <!-- Voice workspace (owner's reference zMWSgG0, top): only while voice is on.
+               A big mic with the live level, the words as they are heard, and the
+               whiteboard beside it (voice-stage.js). Pressing the mic ends voice. -->
+          <div id="voiceStage" class="voice-stage vs-workspace vs-no-board hidden">
+            <div class="vs-panel">
+              <div class="vs-mic-col">
+                <button id="vsMic" class="vs-mic" type="button" aria-label="Stop talking to BeeZilla" title="Stop voice">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+                </button>
+                <canvas id="vsWave" class="vs-wave" aria-hidden="true"></canvas>
+              </div>
+              <div class="vs-live">
+                <p class="vs-state" id="voiceStageState">Listening</p>
+                <p class="vs-text" id="vsText" aria-live="polite"></p>
+                <p class="vs-lat" id="voiceStageLat"></p>
+              </div>
+              <button id="voiceStageEnd" class="vs-end" type="button">End voice</button>
             </div>
-            <button id="voiceStageEnd" class="secondary" type="button">End voice</button>
+            <div class="vs-board" id="vsBoard"></div>
           </div>
-          <div class="composer-card" id="composerCard">
-            <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-              <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-              <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+          <!-- One line to make anything: the docked Talk to BeeZilla button starts voice,
+               the field takes typing, and a file or picture dropped anywhere on the bar
+               is read like an attached paper. No plus button (owner's reference A6b7ky7). -->
+          <div class="composer-card talk-card" id="composerCard">
+            <div class="talk-bar" id="talkBar">
+              <button id="micBtn" class="talk-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">
+                <svg class="tb-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+                <span class="tb-label">Talk to BeeZilla</span>
+              </button>
+              <div class="talk-field">
+                <textarea id="chatInput" rows="1" placeholder="What would you like to make?" aria-label="What would you like to make?" disabled></textarea>
+                <div class="talk-actions">
+                  <button id="chatDoIt" class="secondary talk-doit" type="button" disabled
+                          title="Stop asking — produce it now">Do it</button>
+                  <button id="chatSend" class="talk-send" disabled aria-label="Send" title="Send">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.6l-4.3-4.3 1.4-1.4L20.4 13l-6.7 6.7-1.4-1.4 4.3-4.3H4z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
+              <div class="talk-privacy">
+                <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
+                  <span class="pv-icons"></span>
+                </button>
+                <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
+                  <div class="pp-head">
+                    <strong>Privacy</strong>
+                    <span class="pp-tools">
+                      <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
+                      <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
+                    </span>
+                  </div>
+                  <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
+                    <span class="pp-thumb" aria-hidden="true"></span>
+                    <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
+                    <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
+                    <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+                  </div>
+                  <p class="pp-desc" id="privacyDesc"></p>
+                </div>
+              </div>
+              <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
             </div>
-            <div class="chat-input-row">
-              <textarea id="chatInput" rows="2" placeholder="What do you want to talk about" aria-label="Describe the job for BeeZilla" disabled></textarea>
-              <button id="micBtn" class="mic-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">&#127908;</button>
-              <button id="chatDoIt" class="secondary" type="button" disabled
-                      title="Stop asking — produce it now">Do it</button>
-              <button id="chatSend" disabled>Send</button>
+            <div class="talk-sub">
+              <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+                <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+                <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+              </div>
+              <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
+                   is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
+                   dropped on the bar; this link is for a phone or a pasted letter. -->
+              <span class="talk-sub-right">
+                <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open the whiteboard">&#9638; Whiteboard</button>
+                <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
+                <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a paper</button>
+              </span>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
             <!-- Plan + remaining quota, read from /api/buzzy/entitlement. A refusal
@@ -1409,12 +1607,8 @@
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
             </div>
-
-          <div class="paper-attach">
-              <button type="button" id="paperToggle" class="paper-toggle" aria-expanded="false">📎 Attach a paper</button>
-              <button type="button" id="makeMusic" class="paper-toggle" title="Ask BeeZilla to make a piece of music">&#9835; Music</button>
-              <button type="button" id="make3d" class="paper-toggle" title="Ask BeeZilla to make a 3D model">&#9671; 3D</button>
-            </div>
+            <!-- The whiteboard opened from the bar while voice is off (voice-stage.js). -->
+            <div id="boardSolo" class="board-solo"></div>
           </div>
 
           <!-- The brief is one line above the conversation, expandable in place.
@@ -1474,6 +1668,42 @@
           </div>
           <!-- History of work sits below the chat, in every state, so the
                page never reflows when a conversation starts. -->
+          <!-- Browse half (owner's references zMWSgG0 / qVxl1TJ): building happens
+               above, finding and inspiration below. browse.js wires it; a search
+               replaces the tab content until ✕ or Escape. -->
+          <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
+            <div class="bz-search" role="search">
+              <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+              <input id="bzSearch" type="search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"
+                     aria-label="Search your work, skills and recipes, or enter a web address" />
+              <span class="bz-search-tools">
+                <button type="button" id="bzCopy" class="bz-icon-btn" aria-label="Copy the link to this page" title="Copy the link to this page">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                </button>
+              </span>
+            </div>
+            <p class="bz-search-note" id="bzSearchNote" role="status" aria-live="polite"></p>
+            <div class="bz-results hidden" id="bzResults" role="region" aria-label="Search results">
+              <div class="bz-results-head">
+                <h2>Search results</h2>
+                <button type="button" class="bz-icon-btn" id="bzResultsClose" aria-label="Close search" title="Close search">&#10005;</button>
+              </div>
+              <div class="bz-chips" role="tablist" aria-label="Show">
+                <button type="button" role="tab" data-f="all" class="on" aria-selected="true">All <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="documents" aria-selected="false">Documents <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="skills" aria-selected="false">Skills <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="recipes" aria-selected="false">Recipes <span class="bz-chip-n"></span></button>
+              </div>
+              <div class="bz-results-grid" id="bzResultsGrid"></div>
+            </div>
+            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Browse">
+              <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
+              <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
+              <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
+              <button type="button" role="tab" data-tab="experts" aria-selected="false" tabindex="-1">Experts</button>
+            </div>
+            <div class="bz-pane" id="bzPane" role="tabpanel"></div>
+          </section>
           <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
@@ -1486,7 +1716,10 @@
     <aside id="sessionsDrawer" aria-label="History" aria-hidden="true">
       <div class="drawer-header">
         <h3>History</h3>
-        <button id="sessionsClose" class="drawer-close" type="button">Close</button>
+        <span class="drawer-tools">
+          <button id="sessionsMin" class="drawer-close" type="button" aria-label="Minimise history" title="Minimise">&ndash;</button>
+          <button id="sessionsClose" class="drawer-close" type="button">Close</button>
+        </span>
       </div>
       <div class="drawer-actions">
         <button id="drawerNewChat" class="secondary" type="button">Start a new chat</button>
@@ -1494,6 +1727,7 @@
       <p class="drawer-note">Pick a past chat to reopen it, rename it, or get a quick summary.</p>
       <div id="sessionsList"></div>
     </aside>
+    <button id="sessionsPill" class="sessions-pill hidden" type="button" aria-label="Open history again">History</button>
   </main>
 
   <script src="/buzzy/companies.js"></script>
@@ -2331,99 +2565,58 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       "</div>";
     }
 
-    // ── Make music or a 3D model, from the composer ───────────────────────
-    // The result is pushed into the same conversation as an asset message, so it
-    // plays or downloads exactly like anything else the chat produced.
-    function makeBrief(what) {
-      var box = document.getElementById("chatInput");
-      var typed = box && box.value ? box.value.trim() : "";
-      if (typed) { box.value = ""; return typed; }
-      return window.prompt("Describe the " + what + " you want");
-    }
-
-    function sayToChat(text) {
-      chatState.messages.push({ role: "assistant", content: text });
-      renderChatMessages();
-    }
-
-    function makeMusic() {
-      var brief = makeBrief("music");
-      if (!brief) return;
-      chatState.messages.push({ role: "user", content: "Make music: " + brief });
-      var note = { role: "assistant", content: "Making that music…" };
-      chatState.messages.push(note);
-      renderChatMessages();
-      fetch("/api/buzzy/music", {
-        method: "POST", credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: brief, seconds: 20 })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j.ok) {
-            note.content = j.error || "Music did not come back.";
-            if (j.code === "plan_required" || j.code === "quota_exhausted") {
-              var chip = document.getElementById("planChip");
-              if (chip) { chip.textContent = j.error; chip.classList.remove("hidden"); }
-              if (window.bzRefreshPlan) window.bzRefreshPlan();
+    // ── A 3D model the chat started ───────────────────────────────────────
+    // There is no 3D button: asking for a 3D model in the box is enough. The turn
+    // starts the model and returns model3d.taskId; a model takes a minute or two,
+    // so this polls until the server has stored the file, shows progress under the
+    // reply, then attaches the model to that same reply. Progress is written in
+    // place, not by re-rendering the chat, so a track playing above keeps playing.
+    function watchModel3d(taskId, msg) {
+      var tries = 0;
+      var misses = 0;
+      function show(text) {
+        msg.progress = text;
+        var line = document.querySelector('[data-model3d="' + String(taskId).replace(/"/g, "") + '"]');
+        if (line) line.textContent = text;
+        else renderChatMessages();
+      }
+      function stop(text) {
+        clearInterval(tick);
+        msg.progress = text;
+        renderChatMessages();
+      }
+      msg.model3dTask = taskId;
+      show("Building the 3D model…");
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/model3d/" + encodeURIComponent(taskId), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            var status = String(p.status || "");
+            if (p.asset) {
+              clearInterval(tick);
+              msg.progress = "";
+              msg.asset = p.asset;
+              renderChatMessages();
+              return;
             }
-            renderChatMessages();
-            return;
-          }
-          note.content = "Here it is.";
-          note.asset = j.asset;
-          renderChatMessages();
-        })
-        .catch(function () { note.content = "Music failed — check the connection."; renderChatMessages(); });
+            if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
+              return stop("The 3D model did not finish" + (p.error ? ": " + p.error : "."));
+            }
+            if (tries > 60) return stop("The 3D model is taking too long — ask again in a moment.");
+            // One bad poll is not a failed model: give up only after several in a row.
+            if (status === "error") {
+              if (++misses >= 4) stop("Lost touch with the 3D model" + (p.error ? ": " + p.error : "."));
+              return;
+            }
+            misses = 0;
+            show("Building the 3D model… " + (p.progress || 0) + "%");
+          })
+          .catch(function () {
+            if (++misses >= 4) stop("Lost touch with the 3D model — check the connection.");
+          });
+      }, 4000);
     }
-
-    function make3d() {
-      var brief = makeBrief("3D model");
-      if (!brief) return;
-      chatState.messages.push({ role: "user", content: "Make a 3D model: " + brief });
-      var note = { role: "assistant", content: "Starting the model…" };
-      chatState.messages.push(note);
-      renderChatMessages();
-      fetch("/api/buzzy/model3d", {
-        method: "POST", credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: brief })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j.ok || !j.taskId) { note.content = j.error || "The model could not be started."; renderChatMessages(); return; }
-          var tries = 0;
-          var tick = setInterval(function () {
-            tries++;
-            fetch("/api/buzzy/model3d/" + encodeURIComponent(j.taskId), { credentials: "same-origin" })
-              .then(function (r) { return r.json(); })
-              .then(function (p) {
-                if (p.asset) {
-                  clearInterval(tick);
-                  note.content = "Here it is.";
-                  note.asset = p.asset;
-                  renderChatMessages();
-                  return;
-                }
-                if (p.status === "FAILED" || p.status === "error" || tries > 60) {
-                  clearInterval(tick);
-                  note.content = p.error || "The model did not finish.";
-                  renderChatMessages();
-                  return;
-                }
-                note.content = "Making the model… " + (p.progress || 0) + "%";
-                renderChatMessages();
-              })
-              .catch(function () { clearInterval(tick); note.content = "Polling failed."; renderChatMessages(); });
-          }, 4000);
-        })
-        .catch(function () { note.content = "The model could not be started."; renderChatMessages(); });
-    }
-
-    var _mm = document.getElementById("makeMusic");
-    if (_mm) _mm.addEventListener("click", makeMusic);
-    var _m3 = document.getElementById("make3d");
-    if (_m3) _m3.addEventListener("click", make3d);
 
     // ── What happened ────────────────────────────────────────────────
     // The product judges itself on numbers; the person paying should be able to
@@ -2444,6 +2637,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return '<div class="bz-what" title="' + esc(JSON.stringify(t)) + '">' + esc(bits.join(" · ")) + "</div>";
     }
 
+    // "spring-menu-plan.docx" -> "Spring menu plan", for the share window's heading.
+    function readableName(file) {
+      var base = String(file || "").replace(/\.[A-Za-z0-9]{2,5}$/, "").replace(/[-_]+/g, " ").trim();
+      return base ? base.charAt(0).toUpperCase() + base.slice(1) : "this document";
+    }
     function renderFileCard(doc) {
       var name = String(doc.filename || "document");
       var size = doc.bytes ? " · " + Math.max(1, Math.round(doc.bytes / 1024)) + " KB" : "";
@@ -2469,8 +2667,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // closed. Do not spell the attribute out literally: the QA gate greps the
     // served bytes for it and a comment would read as a live link.
     (lib ? '<a href="' + esc(lib) + '">Open in Library</a>' : "") +
+        // Share: an explicit Selected team / Public choice (share.js), never automatic.
+        // Not in the desktop app (window.beezilla): its links would point at this
+        // computer, which nobody else can reach.
+        (doc.documentId && window.BeeZillaShare && !window.beezilla
+          ? '<button type="button" class="file-share" data-doc="' + esc(doc.documentId) + '" data-title="' + esc(doc.title || readableName(name)) + '">Share</button>'
+          : "") +
       "</div>";
     }
+
+    // One delegated listener: a file card's Share opens the share window for that document.
+    document.addEventListener("click", function (e) {
+      var b = e.target && e.target.closest ? e.target.closest(".file-share") : null;
+      if (!b || !window.BeeZillaShare) return;
+      window.BeeZillaShare.open({ docId: b.getAttribute("data-doc"), title: b.getAttribute("data-title"), returnFocus: b });
+    });
 
     function renderChatMessages() {
       const container = document.getElementById("chatMessages");
@@ -2497,6 +2708,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
         if (m.asset && m.asset.url) {
           bubble += renderMediaCard(m.asset);
+        }
+        if (m.progress) {
+          bubble += '<div class="bz-what" data-model3d="' + String(m.model3dTask || "").replace(/"/g, "") + '">' +
+            String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
         return bubble;
@@ -3085,6 +3300,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Timings
       lastSpeechEnd: 0, metrics: [],
     };
+    // The voice workspace panel (voice-stage.js) reads this state; it never writes it.
+    window.bzVoice = voice;
     // The avatar is drawn, not swapped: eyes + mouth are painted over the
     // display face and driven by the real audio level.
     var avatars = [];
@@ -3176,6 +3393,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           wide: total > 0.02 ? Math.min(1, (high * 1.4 + mid * 0.4) / total) : 0.5,
           bright: Math.min(1, high * 2.4)
         };
+        if (window.bzVoiceOut) window.bzVoiceOut(level);
         for (var a = 0; a < avatars.length; a++) {
           avatars[a].setLevel(level);
           if (avatars[a].setViseme) avatars[a].setViseme(viseme);
@@ -3299,7 +3517,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (m) {
         m.classList.toggle("on", voice.mic);
         m.setAttribute("aria-pressed", voice.mic ? "true" : "false");
-        m.textContent = voice.mic ? (voice.speaking ? "\uD83D\uDD0A" : "\uD83C\uDF99") : "\uD83C\uDFA4";
+        // The docked Talk to BeeZilla button says what the mic is doing; the
+        // second press ends voice (the same toggleMic as before).
+        var lab = m.querySelector(".tb-label");
+        var word = voice.mic ? (voice.speaking ? "BeeZilla is talking" : "Listening\u2026") : "Talk to BeeZilla";
+        if (lab) lab.textContent = word;
+        else m.textContent = voice.mic ? (voice.speaking ? "\uD83D\uDD0A" : "\uD83C\uDF99") : "\uD83C\uDFA4";
+        m.setAttribute("aria-label", voice.mic ? "Stop talking to BeeZilla" : "Talk to BeeZilla");
       }
       var s = document.getElementById("voiceStatus");
       if (s) {
@@ -3428,9 +3652,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
         }
         var finalText = "";
+        var heardSoFar = "";
         for (var i = e.resultIndex; i < e.results.length; i++) {
           if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+          heardSoFar += e.results[i][0].transcript;
         }
+        // The voice workspace shows the words as they are heard.
+        if (window.bzVoiceWords) window.bzVoiceWords(heardSoFar.trim(), !!finalText.trim());
         if (finalText.trim()) {
           voice.userSpeechMs = voice.firstInterimAt
             ? Math.round(performance.now() - voice.firstInterimAt)
@@ -6253,6 +6481,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           mode: chatState.mode || "chat",
           execute: pendingExecute === true,
           attemptId: attemptId,
+          // The Talk bar's privacy slider: Lockdown turns off web lookups and outside makers.
+          privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
@@ -6339,7 +6569,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         // Add assistant reply. A turn that produced a file carries the file
         // descriptor with it so the chat renders the link inline.
-        chatState.messages.push({
+        const replyMsg = {
           role: "assistant",
           content: data.reply,
           document: data.document || null,
@@ -6348,7 +6578,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           artifacts: data.artifacts || null,
           timings: data.timings || null,
           tools: data.tools || null,
-        });
+        };
+        chatState.messages.push(replyMsg);
 
         // Update slots if present
         if (data.slots) {
@@ -6378,6 +6609,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         renderChatMessages();
         renderSlotChecklist();
+        // Asked for a 3D model: the turn started it, and it lands under this reply.
+        if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
+        // A track spends plan minutes: show what is left now, not on the next send.
+        if (data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
         // The turn's own numbers are authoritative — don't re-fetch over them.
         paintContext(data.context);
         // One latency sample per turn: what the owner actually experienced.
@@ -6542,6 +6777,58 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
       submitPaper({ filename: "", fileKind: "paste", text: pasted });
     };
+    // The bar is a drop target too: a file or picture dropped on it takes the same
+    // path as Attach a paper (papers are read, pictures/sound/3D are kept).
+    (function wireTalkBar() {
+      var bar = document.getElementById("talkBar");
+      var input = document.getElementById("chatInput");
+      if (!bar || !input) return;
+      var depth = 0;
+      bar.addEventListener("dragenter", function (e) {
+        if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") < 0) return;
+        e.preventDefault(); depth++; bar.classList.add("over");
+      });
+      bar.addEventListener("dragover", function (e) {
+        if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") < 0) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+      });
+      bar.addEventListener("dragleave", function () {
+        depth = Math.max(0, depth - 1);
+        if (!depth) bar.classList.remove("over");
+      });
+      bar.addEventListener("drop", function (e) {
+        var files = e.dataTransfer && e.dataTransfer.files;
+        depth = 0; bar.classList.remove("over");
+        if (!files || !files.length) return;
+        e.preventDefault();
+        Array.prototype.slice.call(files, 0, 5).forEach(function (file) {
+          readDroppedFile(file).then(function (payload) {
+            return payload.mediaFile ? submitMedia(payload.mediaFile) : submitPaper(payload);
+          }).catch(function (err) {
+            chatState.messages.push({ role: "assistant", content: (err && err.message) || "Couldn't read that file." });
+            renderChatMessages();
+          });
+        });
+      });
+      function fit() {
+        var cs = window.getComputedStyle(input);
+        var pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+        input.style.height = "auto";
+        input.style.height = Math.min(Math.max(input.scrollHeight - pad, 0), 144) + "px";
+        bar.classList.toggle("has-text", !!input.value.trim());
+      }
+      input.addEventListener("input", fit);
+      // Sending, a starter chip and a voice transcript all set the field from code,
+      // which fires no input event — so refit on every programmatic write too.
+      var native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+      if (native && native.get && native.set) {
+        Object.defineProperty(input, "value", {
+          configurable: true,
+          get: function () { return native.get.call(this); },
+          set: function (v) { native.set.call(this, v); fit(); },
+        });
+      }
+    })();
     (function wirePaperDrop() {
       var zone = document.getElementById("paperDrop");
       if (!zone) return;
@@ -6602,6 +6889,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       overlay.classList.remove("hidden");
       drawer.classList.add("open");
       drawer.setAttribute("aria-hidden", "false");
+      var pill = document.getElementById("sessionsPill");
+      if (pill) pill.classList.add("hidden");
       loadSessions();
     }
     function closeSessionsDrawer() {
@@ -6663,6 +6952,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sessionsError("Couldn't reach the server. Check your connection and try again.");
       }
     }
+    // Hooks for the browse half (browse.js): open a chat from a search result, and
+    // put a suggested prompt into the Talk bar without sending it.
+    window.bzOpenSession = function (sess) { openSession(sess); };
+    window.bzPrompt = function (text) {
+      var el = document.getElementById("chatInput");
+      if (!el) return;
+      el.value = String(text || "");
+      try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { window.scrollTo(0, 0); }
+      if (!el.disabled) {
+        el.focus();
+        try { el.setSelectionRange(el.value.length, el.value.length); } catch (_) {}
+      }
+    };
+
     async function openSession(s) {
       try {
         const r = await fetch("/api/buzzy/transcript?sessionId=" + encodeURIComponent(s.id), {
@@ -6780,7 +7083,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("newChatBtn").onclick = () => { startNewChat(); };
     document.getElementById("sessionsToggle").onclick = () => { openSessionsDrawer(); };
     document.getElementById("backToRecent").onclick = goBackToRecent;
-    document.getElementById("sessionsClose").onclick = () => { closeSessionsDrawer(); };
+    document.getElementById("sessionsClose").onclick = () => {
+      closeSessionsDrawer();
+      document.getElementById("sessionsPill").classList.add("hidden");
+    };
+    // Minimise: the drawer folds away and a "History" tab on the right edge
+    // brings it back (every pop-up has close and minimise — roadmap phase 3).
+    document.getElementById("sessionsMin").onclick = () => {
+      closeSessionsDrawer();
+      var pill = document.getElementById("sessionsPill");
+      pill.classList.remove("hidden");
+      pill.focus();
+    };
+    document.getElementById("sessionsPill").onclick = () => { openSessionsDrawer(); };
     document.getElementById("drawerNewChat").onclick = () => { startNewChat(); };
     document.getElementById("sessionsOverlay").addEventListener("click", function () {
       closeSessionsDrawer();
@@ -6888,8 +7203,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   window.bzRefreshPlan = refresh;
   var send = document.getElementById("chatSend");
   if (send) send.addEventListener("click", function () { setTimeout(refresh, 2500); });
-  var music = document.getElementById("makeMusic");
-  if (music) music.addEventListener("click", function () { setTimeout(refresh, 6000); });
 })();
 </script>
 
@@ -6916,5 +7229,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   }
 })();
 </script>
+<script src="/buzzy/experts-data.js"></script>
+<script src="/buzzy/privacy.js"></script>
+<script src="/buzzy/inspiration.js"></script>
+<script src="/buzzy/qr.js"></script>
+<script src="/buzzy/share.js"></script>
+<script src="/buzzy/whiteboard.js"></script>
+<script src="/buzzy/voice-stage.js"></script>
+<script src="/buzzy/browse.js"></script>
 </body>
 </html>
