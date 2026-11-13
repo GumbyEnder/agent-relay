@@ -147,6 +147,7 @@
       var checkTimer = null;
       var lastWrong = null;      // the password value already known to be wrong
       var linkEmail = "";        // where the last sign-in link went
+      var blockedUntil = 0;      // after "too many tries": no password check before this time
       // Every request takes a ticket. Going back to the email step voids the
       // tickets in flight, so a late answer can neither keep "Next" dead nor
       // pull the page back to a screen the visitor already left.
@@ -358,6 +359,16 @@
         if (!pass) { if (!fromTimer) wrongPassword(true, "Put in your password."); return; }
         if (pass === lastWrong) { wrongPassword(true); return; }
         if (pass.length < MIN_PASSWORD) { lastWrong = pass; wrongPassword(true); return; }
+        var wait = blockedUntil - Date.now();
+        if (wait > 0) {
+          // Too many tries: say so and check this value by itself once the limit
+          // has passed, so nobody has to come back and press Log in. Nothing is
+          // sent meanwhile.
+          var secs = Math.ceil(wait / 1000);
+          show("error", "Too many tries. Checking again in " + secs + (secs === 1 ? " second." : " seconds."));
+          checkTimer = setTimeout(function () { attemptPassword(true); }, wait);
+          return;
+        }
         if (busy) {
           // A check is still running; look at this value as soon as it's done.
           checkTimer = setTimeout(function () { attemptPassword(fromTimer); }, 300);
@@ -367,9 +378,17 @@
         submit.disabled = true; submit.textContent = "Logging in…";
         api("POST", "/api/auth/sign-in/email", { email: addr, password: pass, rememberMe: true })
           .then(function (res) {
+            // A check the visitor walked away from (they changed the email) must
+            // not move the page, even if it succeeded: its cookie is set, and the
+            // next sign-in on this page replaces it.
+            if (!live(t)) return;
             if (res.ok) { enter(); return; }
-            if (!live(t) || password.value !== pass) return; // moved on, or typed on meanwhile
-            if (tooMany(res)) return;
+            if (password.value !== pass) return; // typed on meanwhile
+            if (res.status === 429) {
+              blockedUntil = Date.now() + (res.retryAfter || 60) * 1000;
+              attemptPassword(true); // shows the wait, then checks again by itself
+              return;
+            }
             var code = codeOf(res);
             if (code === "EMAIL_NOT_VERIFIED") {
               show("ok", "Confirm your email first. We just sent a link to " + addr + ".");

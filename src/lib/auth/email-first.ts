@@ -172,8 +172,10 @@ export const emailFirst = (options: EmailFirstOptions = {}) =>
       // The page checks a password 2 s after typing stops, so one person can
       // spend a few sign-in attempts in a few seconds. Better Auth's default for
       // /sign-in* (3 per rolling 10 s) locked people out mid-typo. 10 per rolling
-      // minute lets them finish and still allows fewer guesses per minute per IP
-      // than the default (about 18). Plugin rules override that default.
+      // minute covers a few pauses and typo fixes and still allows fewer guesses
+      // per minute per IP than the default (about 18). The price: whoever does
+      // run past 10 waits up to a minute, not 10 s — the page waits out
+      // X-Retry-After itself and checks again. Plugin rules override the default.
       { pathMatcher: (path: string) => path === "/sign-in/email", window: 60, max: 10 },
     ],
   }) satisfies BetterAuthPlugin;
