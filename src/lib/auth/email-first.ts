@@ -169,5 +169,11 @@ export const emailFirst = (options: EmailFirstOptions = {}) =>
     rateLimit: [
       { pathMatcher: (path: string) => path === "/email-first/lookup", window: 60, max: 10 },
       { pathMatcher: (path: string) => path === "/email-first/set-password", window: 60, max: 5 },
+      // The page checks a password 2 s after typing stops, so one person can
+      // spend a few sign-in attempts in a few seconds. Better Auth's default for
+      // /sign-in* (3 per rolling 10 s) locked people out mid-typo. 10 per rolling
+      // minute lets them finish and still allows fewer guesses per minute per IP
+      // than the default (about 18). Plugin rules override that default.
+      { pathMatcher: (path: string) => path === "/sign-in/email", window: 60, max: 10 },
     ],
   }) satisfies BetterAuthPlugin;

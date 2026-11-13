@@ -6,8 +6,10 @@
  */
 import assert from "node:assert/strict";
 import { latestDevMailFor, isDevMailInboxEnabled } from "../src/lib/mailer";
+import { betterAuth } from "better-auth";
+import { memoryAdapter } from "better-auth/adapters/memory";
 import { auth, handleAuthRequest } from "../src/lib/auth/server";
-import { RECENT_SIGN_IN_SECONDS } from "../src/lib/auth/email-first";
+import { emailFirst, RECENT_SIGN_IN_SECONDS } from "../src/lib/auth/email-first";
 
 assert.equal(isDevMailInboxEnabled(), true);
 
@@ -208,6 +210,41 @@ let deviceB = "";
   assert.ok(res.status === 302 || res.status === 307, `bad link redirects, got ${res.status}`);
   assert.ok((res.headers.get("location") ?? "").includes("/buzzy/login?link=expired"));
   console.log("✓ expired link returns to the sign-in page");
+}
+
+// 8. The page checks a password 2 s after typing stops, so a person fixing a
+//    typo spends several sign-in attempts quickly. With rate limiting on (as in
+//    production) ten wrong tries are judged; the eleventh gets a 429 with a
+//    retry hint. Better Auth's own default would have refused the fourth.
+{
+  const limited = betterAuth({
+    baseURL: ORIGIN,
+    secret: "rate-limit-check-secret-0123456789abcdef",
+    database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
+    emailAndPassword: { enabled: true },
+    rateLimit: { enabled: true, storage: "memory" },
+    advanced: { ipAddress: { ipAddressHeaders: ["x-forwarded-for"] } },
+    plugins: [emailFirst()],
+  });
+  const post = (path: string, body: unknown) =>
+    limited.handler(
+      new Request(`${ORIGIN}/api/auth${path}`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json", "x-forwarded-for": "203.0.113.7" },
+        body: JSON.stringify(body),
+      }),
+    );
+  const user = { email: "limit@example.com", password: "right-pass-1" };
+  const up = await post("/sign-up/email", { ...user, name: "" });
+  assert.equal(up.status, 200, `sign-up for the rate-limit check: ${up.status}`);
+  for (let i = 1; i <= 10; i++) {
+    const res = await post("/sign-in/email", { email: user.email, password: `wrong-pass-${i}` });
+    assert.equal(res.status, 401, `wrong try ${i} is judged, not rate limited (got ${res.status})`);
+  }
+  const blocked = await post("/sign-in/email", { email: user.email, password: user.password });
+  assert.equal(blocked.status, 429, "the eleventh try in a minute is refused");
+  assert.ok(Number(blocked.headers.get("X-Retry-After")) > 0, "the refusal says when to retry");
+  console.log("✓ sign-in allows 10 tries a minute (2 s auto-check is safe), then 429 with a retry hint");
 }
 
 console.log("\nEmail-first sign-in checks passed.");

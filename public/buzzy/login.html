@@ -146,8 +146,14 @@
       var busy = false;
       var checkTimer = null;
       var lastWrong = null;      // the password value already known to be wrong
-      var attemptSeq = 0;
       var linkEmail = "";        // where the last sign-in link went
+      // Every request takes a ticket. Going back to the email step voids the
+      // tickets in flight, so a late answer can neither keep "Next" dead nor
+      // pull the page back to a screen the visitor already left.
+      var ticket = 0;
+      function begin() { busy = true; return ++ticket; }
+      function live(t) { return t === ticket; }
+      function done(t) { if (t === ticket) busy = false; }
 
       // ── helpers ──────────────────────────────────────────────────────
       function show(kind, text) { msg.className = "msg show " + kind; msg.textContent = text; }
@@ -187,7 +193,12 @@
             return {};
           }).then(function (data) {
             clearTimeout(timer);
-            return { ok: r.ok, status: r.status, data: data || {} };
+            return {
+              ok: r.ok,
+              status: r.status,
+              data: data || {},
+              retryAfter: Number(r.headers.get("X-Retry-After")) || 0,
+            };
           });
         }, function (err) {
           clearTimeout(timer);
@@ -197,7 +208,10 @@
       function codeOf(res) { return (res.data && res.data.code) || ""; }
       function tooMany(res) {
         if (res.status !== 429) return false;
-        show("error", "Too many tries. Wait a few seconds, then try again.");
+        var wait = res.retryAfter;
+        show("error", wait > 0
+          ? "Too many tries. Try again in " + wait + (wait === 1 ? " second." : " seconds.")
+          : "Too many tries. Wait a minute, then try again.");
         return true;
       }
       function currentEmail() { return (email.value || "").trim().toLowerCase(); }
@@ -234,6 +248,8 @@
       // ── steps ────────────────────────────────────────────────────────
       function toEmailStep() {
         step = "email";
+        ticket++;              // whatever was in flight no longer owns the page
+        busy = false;
         clearTimeout(checkTimer);
         form.classList.remove("hidden");
         sent.classList.add("hidden");
@@ -288,9 +304,10 @@
       function lookup() {
         var addr = currentEmail();
         if (!validEmail(addr)) { show("error", "Enter your email address."); return; }
-        busy = true; submit.disabled = true; submit.textContent = "Checking…";
+        var t = begin(); submit.disabled = true; submit.textContent = "Checking…";
         api("POST", "/api/auth/email-first/lookup", { email: addr })
           .then(function (res) {
+            if (!live(t)) return;
             if (tooMany(res)) return toEmailStep();
             if (!res.ok) {
               toEmailStep();
@@ -302,29 +319,34 @@
             // Known email without a password, or a new email: send a link.
             return sendLink(addr, res.data.exists ? "signin" : "new");
           })
-          .catch(function () { toEmailStep(); show("error", "Network problem. Try again."); })
+          .catch(function () {
+            if (!live(t)) return;
+            toEmailStep();
+            show("error", "Network problem. Try again.");
+          })
           .then(function () {
-            busy = false;
+            done(t);
             submit.disabled = false;
             if (step === "email") submit.textContent = "Next";
           });
       }
 
       function sendLink(addr, kind) {
-        busy = true;
+        var t = begin();
         return api("POST", "/api/auth/sign-in/magic-link", {
           email: addr,
           callbackURL: afterLinkURL(),
           newUserCallbackURL: afterLinkURL(),
           errorCallbackURL: "/buzzy/login?link=expired",
         }).then(function (res) {
+          if (!live(t)) return;   // the visitor changed the email meanwhile
           if (tooMany(res)) return;
           if (!res.ok) { show("error", "We couldn't send the email. Try again."); return; }
           clearMsg();
           toSentStep(addr, kind);
         }).catch(function () {
-          show("error", "Network problem. Try again.");
-        }).then(function () { busy = false; });
+          if (live(t)) show("error", "Network problem. Try again.");
+        }).then(function () { done(t); });
       }
 
       // ── step 2: password (checked 2 s after typing stops, or on Log in) ─
@@ -341,26 +363,33 @@
           checkTimer = setTimeout(function () { attemptPassword(fromTimer); }, 300);
           return;
         }
-        busy = true;
-        var seq = ++attemptSeq;
+        var t = begin();
         submit.disabled = true; submit.textContent = "Logging in…";
         api("POST", "/api/auth/sign-in/email", { email: addr, password: pass, rememberMe: true })
           .then(function (res) {
             if (res.ok) { enter(); return; }
-            if (seq !== attemptSeq || password.value !== pass) return; // typed on meanwhile
+            if (!live(t) || password.value !== pass) return; // moved on, or typed on meanwhile
             if (tooMany(res)) return;
             var code = codeOf(res);
             if (code === "EMAIL_NOT_VERIFIED") {
               show("ok", "Confirm your email first. We just sent a link to " + addr + ".");
               return;
             }
+            if (res.status !== 401) {
+              // Only a 401 is a verdict on the password. A server fault must not
+              // be remembered as "wrong", or retyping the right one would never
+              // be sent again.
+              var m = res.status < 500 && res.data && res.data.message;
+              show("error", m || "Something went wrong. Try again.");
+              return;
+            }
             lastWrong = pass;
             wrongPassword(true);
           })
-          .catch(function () { show("error", "Network problem. Try again."); })
+          .catch(function () { if (live(t)) show("error", "Network problem. Try again."); })
           .then(function () {
-            busy = false;
-            if (step === "password") { submit.disabled = false; submit.textContent = "Log in"; }
+            done(t);
+            if (live(t) && step === "password") { submit.disabled = false; submit.textContent = "Log in"; }
           });
       }
 
@@ -393,6 +422,7 @@
 
       resend.addEventListener("click", function () {
         if (busy || !linkEmail) return;
+        var t = begin();
         resend.disabled = true;
         api("POST", "/api/auth/sign-in/magic-link", {
           email: linkEmail,
@@ -400,12 +430,13 @@
           newUserCallbackURL: afterLinkURL(),
           errorCallbackURL: "/buzzy/login?link=expired",
         }).then(function (res) {
+          if (!live(t)) return;   // "Use a different email" was pressed meanwhile
           if (tooMany(res)) return;
           if (res.ok) show("ok", "Sent again. Check your inbox (and spam folder).");
           else show("error", "We couldn't send the email. Try again.");
         }).catch(function () {
-          show("error", "Network problem. Try again.");
-        }).then(function () { resend.disabled = false; });
+          if (live(t)) show("error", "Network problem. Try again.");
+        }).then(function () { done(t); resend.disabled = false; });
       });
 
       changeEmail.addEventListener("click", function () {
@@ -437,7 +468,7 @@
           newPassword.setAttribute("aria-invalid", "true");
           return;
         }
-        busy = true; save.disabled = true; save.textContent = "Saving…";
+        var t = begin(); save.disabled = true; save.textContent = "Saving…";
         api("POST", "/api/auth/email-first/set-password", { newPassword: pass })
           .then(function (res) {
             if (res.ok) { enter(); return; }
@@ -448,7 +479,7 @@
             newPassword.setAttribute("aria-invalid", "true");
           })
           .catch(function () { show("error", "Network problem. Try again."); })
-          .then(function () { busy = false; save.disabled = false; save.textContent = "Save password"; });
+          .then(function () { done(t); save.disabled = false; save.textContent = "Save password"; });
       });
 
       // ── start ────────────────────────────────────────────────────────
