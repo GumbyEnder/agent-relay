@@ -235,3 +235,56 @@
 @media (prefers-reduced-motion: reduce) {
   .bz-totop, .bz-search { transition: none; }
 }
+
+/* ── Reader: the built-in browser for a typed web address ──────────── */
+.bz-reader {
+  margin-top: 0.6rem;
+  border-radius: 14px;
+  background: #141414;
+  border: 1px solid #232323;
+  overflow: hidden;
+}
+.bz-reader-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid #222;
+  background: #121212;
+}
+.bz-crumbs { display: flex; align-items: center; gap: 0.25rem; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.bz-crumb {
+  min-height: 0;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #A9A9A9;
+  font: inherit;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bz-crumb:hover { color: #F2F2F2; }
+.bz-crumb.on { color: #141414; background: #FFC107; font-weight: 700; }
+.bz-crumb-sep { color: #555; }
+.bz-reader-out { flex: 0 0 auto; color: #FFC107; font-size: 0.82rem; text-decoration: none; white-space: nowrap; }
+.bz-reader-out:hover { text-decoration: underline; }
+.bz-reader-body { max-height: 70vh; overflow-y: auto; padding: 1.1rem 1.4rem 1.4rem; color: #DADADA; }
+.bz-reader-body h2 { margin: 0 0 0.25rem; color: #F4F4F4; font-size: 1.35rem; line-height: 1.25; }
+.bz-reader-url { margin: 0 0 1rem; color: #8A8A8A; font-size: 0.8rem; overflow-wrap: anywhere; }
+.bz-reader-text p { margin: 0 0 0.7rem; line-height: 1.6; max-width: 72ch; }
+.bz-reader-body h3 { margin: 1.4rem 0 0.5rem; font-size: 0.95rem; color: #F2F2F2; }
+.bz-reader-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.bz-reader-links li { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.bz-reader-links button {
+  min-height: 0; padding: 0; border: none; background: none;
+  color: #FFC107; font: inherit; text-align: left; cursor: pointer;
+}
+.bz-reader-links button:hover { text-decoration: underline; }
+.bz-reader-links span { color: #6F6F6F; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bz-reader-msg { color: #BDBDBD; }
+@media (max-width: 640px) {
+  .bz-reader-out { display: none; }
+  .bz-reader-body { padding: 1rem; }
+}

@@ -89,10 +89,6 @@
     }
     return null;
   }
-  function openUrl(href) {
-    var w = window.open(href, "_blank", "noopener,noreferrer");
-    say(w ? "Opened " + href + " in a new tab." : "Your browser blocked the new tab — the address is " + href);
-  }
 
   function say(msg) {
     if (!note) return;
@@ -158,7 +154,7 @@
     var my = ++seq;
     var url = asUrl(q);
     var ql = q.toLowerCase();
-    var webItem = url ? [{ group: "all", icon: "web", title: "Open " + url.replace(/^https?:\/\//, "").replace(/\/$/, ""), type: "Web page · new tab", href: url, external: true }] : [];
+    var webItem = url ? [{ group: "all", icon: "web", title: "Open " + url.replace(/^https?:\/\//, "").replace(/\/$/, ""), type: "Web page · read it here", reader: url }] : [];
     if (q.length < 2) { show(webItem, q); return; }
     Promise.all([
       getJSON("/api/buzzy/search?q=" + encodeURIComponent(q)),
@@ -241,6 +237,8 @@
     seq++;
     input.value = "";
     results.classList.add("hidden");
+    var rd = document.getElementById("bzReader");
+    if (rd) { rd.classList.add("hidden"); }
     tabs.classList.remove("hidden");
     pane.classList.remove("hidden");
     say("");
@@ -257,7 +255,7 @@
     if (e.key === "Escape") { e.preventDefault(); closeSearch(); input.blur(); return; }
     if (e.key === "Enter") {
       var url = asUrl(input.value);
-      if (url) { e.preventDefault(); openUrl(url); }
+      if (url) { e.preventDefault(); openReader(url); }
     }
   });
   $("bzResultsClose").addEventListener("click", function () { closeSearch(); input.focus(); });
@@ -273,6 +271,7 @@
     if (!el) return;
     var it = items[Number(el.getAttribute("data-i"))];
     if (!it) return;
+    if (it.reader) { e.preventDefault(); openReader(it.reader); return; }
     if (it.session && window.bzOpenSession) { e.preventDefault(); closeSearch(); window.bzOpenSession(it.session); return; }
     if (it.prompt && window.bzPrompt) { e.preventDefault(); closeSearch(); window.bzPrompt(it.prompt); return; }
     if (it.href && window.BeeZillaShell && !it.external && /^\/buzzy\//.test(it.href)) {
@@ -281,6 +280,120 @@
   });
   var copyBtn = $("bzCopy");
   if (copyBtn) copyBtn.addEventListener("click", copyLink);
+
+  // ── Reader: the built-in browser for a typed web address ──────────────
+  // Home · Back · breadcrumbs · the page as text with its links. Fetched by the
+  // server's public-page reader (/api/buzzy/read); the real page is one click
+  // away in a new tab. Home (or Escape) returns to the tabs.
+  var reader = document.createElement("div");
+  reader.className = "bz-reader hidden";
+  reader.id = "bzReader";
+  reader.setAttribute("role", "region");
+  reader.setAttribute("aria-label", "Web page");
+  reader.innerHTML =
+    '<div class="bz-reader-bar">' +
+      '<button type="button" class="bz-icon-btn" data-r="home" aria-label="Home — back to Inspiration" title="Home">&#8962;</button>' +
+      '<button type="button" class="bz-icon-btn" data-r="back" aria-label="Back" title="Back">&#8592;</button>' +
+      '<nav class="bz-crumbs" aria-label="Pages you opened"></nav>' +
+      '<a class="bz-reader-out" target="_blank" rel="noopener noreferrer">Open the real page &#8599;</a>' +
+    "</div>" +
+    '<div class="bz-reader-body" aria-live="polite"></div>';
+  root.insertBefore(reader, tabs);
+  var trail = [];   // pages opened, oldest first
+  var at = -1;      // index in trail being shown
+  var readSeq = 0;
+
+  function showReader(on) {
+    reader.classList.toggle("hidden", !on);
+    results.classList.add("hidden");
+    tabs.classList.toggle("hidden", on);
+    pane.classList.toggle("hidden", on);
+  }
+  function crumbs() {
+    var nav = reader.querySelector(".bz-crumbs");
+    nav.innerHTML = trail.map(function (p, i) {
+      var label = p.title || p.url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      return '<button type="button" class="bz-crumb' + (i === at ? " on" : "") + '" data-i="' + i + '"' +
+        (i === at ? ' aria-current="page"' : "") + ">" + esc(label.slice(0, 40)) + "</button>";
+    }).join('<span class="bz-crumb-sep" aria-hidden="true">›</span>');
+  }
+  function paint(p) {
+    var body = reader.querySelector(".bz-reader-body");
+    var out = reader.querySelector(".bz-reader-out");
+    out.href = p.url;
+    if (p.error) {
+      body.innerHTML = '<p class="bz-reader-msg">' + esc(p.error) + "</p>";
+      return;
+    }
+    var paras = String(p.text || "").split(/\n+/).slice(0, 400);
+    body.innerHTML =
+      "<h2>" + esc(p.title || p.url) + "</h2>" +
+      '<p class="bz-reader-url">' + esc(p.url) + "</p>" +
+      '<div class="bz-reader-text">' + paras.map(function (t) { return "<p>" + esc(t) + "</p>"; }).join("") + "</div>" +
+      (p.truncated ? '<p class="bz-reader-msg">This page is long — the rest is on the real page.</p>' : "") +
+      ((p.links && p.links.length)
+        ? '<h3>Links on this page</h3><ul class="bz-reader-links">' + p.links.map(function (l, i) {
+            return '<li><button type="button" data-link="' + i + '">' + esc(l.text) + '</button> <span>' +
+              esc(l.href.replace(/^https?:\/\//, "").slice(0, 70)) + "</span></li>";
+          }).join("") + "</ul>"
+        : "");
+    body.scrollTop = 0;
+  }
+  function openReader(url, opts) {
+    opts = opts || {};
+    var my = ++readSeq;
+    showReader(true);
+    if (!opts.fromTrail) {
+      trail = trail.slice(0, at + 1);
+      trail.push({ url: url, title: "" });
+      if (trail.length > 12) trail.shift();
+      at = trail.length - 1;
+    }
+    crumbs();
+    var body = reader.querySelector(".bz-reader-body");
+    body.innerHTML = '<p class="bz-reader-msg">Reading ' + esc(url) + "…</p>";
+    reader.querySelector(".bz-reader-out").href = url;
+    fetch("/api/buzzy/read?url=" + encodeURIComponent(url), { credentials: "same-origin" })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: "That page could not be read." }; }); })
+      .then(function (j) {
+        if (my !== readSeq) return;
+        var page = j && j.ok
+          ? { url: j.url || url, title: j.title || "", text: j.text || "", truncated: !!j.truncated, links: j.links || [] }
+          : { url: url, error: (j && j.error) || "That page could not be read." };
+        if (trail[at]) { trail[at].title = page.title || trail[at].title; trail[at].page = page; trail[at].url = page.url; }
+        crumbs();
+        paint(page);
+      })
+      .catch(function () { if (my === readSeq) paint({ url: url, error: "Couldn't reach BeeZilla to read that page — check the connection." }); });
+  }
+  function goTrail(i) {
+    if (!trail[i]) return;
+    at = i;
+    crumbs();
+    if (trail[i].page) { showReader(true); paint(trail[i].page); }
+    else openReader(trail[i].url, { fromTrail: true });
+  }
+  function home() {
+    readSeq++;
+    showReader(false);
+    input.value = "";
+  }
+  reader.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button") : null;
+    if (!b) return;
+    var r = b.getAttribute("data-r");
+    if (r === "home") { home(); return; }
+    if (r === "back") { if (at > 0) goTrail(at - 1); else home(); return; }
+    if (b.hasAttribute("data-i")) { goTrail(Number(b.getAttribute("data-i"))); return; }
+    if (b.hasAttribute("data-link")) {
+      var cur = trail[at] && trail[at].page;
+      var l = cur && cur.links && cur.links[Number(b.getAttribute("data-link"))];
+      if (l) openReader(l.href);
+    }
+  });
+  reader.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { e.preventDefault(); home(); input.focus(); }
+  });
 
   // ── Tabs: Inspiration · Library · Memory · Experts ─────────────────────
   var current = null;

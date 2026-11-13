@@ -38,6 +38,7 @@ import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
+import { fetchPageText } from "./webpage";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
@@ -2092,6 +2093,45 @@ export default defineEventHandler(async (event) => {
       ok: true,
       forgotten: rows.length,
       note: "Those remembered details are gone and won't be used again. Approved documents and your Library are untouched — delete a job or the account for that.",
+    };
+  }
+
+  // ── GET /api/buzzy/read?url= — the reader view behind Talk's address bar ──
+  // A web address typed into "Search or enter a URL" opens here as text: title,
+  // readable text and the page's links, fetched by the same SSRF-guarded reader
+  // the chat uses (public http(s) pages only). Off in Lockdown.
+  if (method === "GET" && path === "/api/buzzy/read") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+      if (pm[0]?.mode === "lockdown") {
+        setResponseStatus(event, 403);
+        return { ok: false, error: "Reading web pages is off while privacy is set to Lockdown.", code: "lockdown" };
+      }
+    } catch { /* no table yet: not in Lockdown */ }
+    const url = (queryValue(fullPath, "url") ?? "").trim().slice(0, 2000);
+    if (!url) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Give me a web address to read.", code: "bad_url" };
+    }
+    const page = await fetchPageText(url);
+    if (!page.ok) {
+      setResponseStatus(event, 422);
+      return { ok: false, error: page.error, code: page.code };
+    }
+    const text = page.text ?? "";
+    return {
+      ok: true,
+      url: page.finalUrl ?? url,
+      title: page.title || "",
+      text: text.slice(0, 40_000),
+      truncated: text.length > 40_000,
+      links: (page.links ?? []).slice(0, 80),
     };
   }
 
