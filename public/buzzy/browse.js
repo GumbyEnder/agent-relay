@@ -133,8 +133,9 @@
   function files() {
     if (cache.files) return Promise.resolve(cache.files);
     return getJSON("/api/buzzy/assets?limit=300").then(function (j) {
-      var list = j && (j.files || j.assets || j.rows || j.items);
-      cache.files = Array.isArray(list) ? list : [];
+      // The rows are under `items`; `files` is a count. Take the first array found.
+      var list = j && [j.items, j.assets, j.rows, j.files].filter(Array.isArray)[0];
+      cache.files = list || [];
       return cache.files;
     });
   }
