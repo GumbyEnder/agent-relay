@@ -1420,6 +1420,7 @@
   <link rel="stylesheet" href="/buzzy/browse.css" />
   <link rel="stylesheet" href="/buzzy/privacy.css" />
   <link rel="stylesheet" href="/buzzy/inspiration.css" />
+  <link rel="stylesheet" href="/buzzy/voice-stage.css" />
 </head>
 <body>
   <header>
@@ -1500,15 +1501,25 @@
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
 
-          <!-- Voice stage: a real face while you talk. It only appears when
-               the mic is on, so typed chat stays as clean as it was. -->
-          <div id="voiceStage" class="voice-stage hidden">
-            <canvas id="voiceAvatar" aria-hidden="true"></canvas>
-            <div class="vs-body">
-              <p class="vs-state" id="voiceStageState">Listening</p>
-              <p class="vs-lat" id="voiceStageLat"></p>
+          <!-- Voice workspace (owner's reference zMWSgG0, top): only while voice is on.
+               A big mic with the live level, the words as they are heard, and the
+               whiteboard beside it (voice-stage.js). Pressing the mic ends voice. -->
+          <div id="voiceStage" class="voice-stage vs-workspace vs-no-board hidden">
+            <div class="vs-panel">
+              <div class="vs-mic-col">
+                <button id="vsMic" class="vs-mic" type="button" aria-label="Stop talking to BeeZilla" title="Stop voice">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+                </button>
+                <canvas id="vsWave" class="vs-wave" aria-hidden="true"></canvas>
+              </div>
+              <div class="vs-live">
+                <p class="vs-state" id="voiceStageState">Listening</p>
+                <p class="vs-text" id="vsText" aria-live="polite"></p>
+                <p class="vs-lat" id="voiceStageLat"></p>
+              </div>
+              <button id="voiceStageEnd" class="vs-end" type="button">End voice</button>
             </div>
-            <button id="voiceStageEnd" class="secondary" type="button">End voice</button>
+            <div class="vs-board" id="vsBoard"></div>
           </div>
           <!-- One line to make anything: the docked Talk to BeeZilla button starts voice,
                the field takes typing, and a file or picture dropped anywhere on the bar
@@ -3237,6 +3248,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Timings
       lastSpeechEnd: 0, metrics: [],
     };
+    // The voice workspace panel (voice-stage.js) reads this state; it never writes it.
+    window.bzVoice = voice;
     // The avatar is drawn, not swapped: eyes + mouth are painted over the
     // display face and driven by the real audio level.
     var avatars = [];
@@ -3328,6 +3341,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           wide: total > 0.02 ? Math.min(1, (high * 1.4 + mid * 0.4) / total) : 0.5,
           bright: Math.min(1, high * 2.4)
         };
+        if (window.bzVoiceOut) window.bzVoiceOut(level);
         for (var a = 0; a < avatars.length; a++) {
           avatars[a].setLevel(level);
           if (avatars[a].setViseme) avatars[a].setViseme(viseme);
@@ -3582,9 +3596,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
         }
         var finalText = "";
+        var heardSoFar = "";
         for (var i = e.resultIndex; i < e.results.length; i++) {
           if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+          heardSoFar += e.results[i][0].transcript;
         }
+        // The voice workspace shows the words as they are heard.
+        if (window.bzVoiceWords) window.bzVoiceWords(heardSoFar.trim(), !!finalText.trim());
         if (finalText.trim()) {
           voice.userSpeechMs = voice.firstInterimAt
             ? Math.round(performance.now() - voice.firstInterimAt)
@@ -7106,6 +7124,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/experts-data.js"></script>
 <script src="/buzzy/privacy.js"></script>
 <script src="/buzzy/inspiration.js"></script>
+<script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>
 </body>
 </html>
