@@ -293,6 +293,10 @@
     .talk-sub .mode-tab { padding: 0.24rem 0.8rem; font-size: 0.76rem; }
     .talk-attach { margin: 0; font-size: 0.78rem; padding: 0.24rem 0.7rem; }
     .talk-sub-right { display: inline-flex; align-items: center; gap: 0.45rem; }
+    .board-solo { margin-top: 0.7rem; }
+    .board-solo:empty { display: none; }
+    .board-solo .wb-panel { min-height: 20rem; }
+    #boardToggle[aria-pressed="true"] { color: #FFC107; border-color: #FFC107; }
     @media (max-width: 640px) {
       .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; }
       .talk-btn { padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
@@ -1421,6 +1425,7 @@
   <link rel="stylesheet" href="/buzzy/privacy.css" />
   <link rel="stylesheet" href="/buzzy/inspiration.css" />
   <link rel="stylesheet" href="/buzzy/voice-stage.css" />
+  <link rel="stylesheet" href="/buzzy/whiteboard.css" />
 </head>
 <body>
   <header>
@@ -1573,6 +1578,7 @@
                    is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
                    dropped on the bar; this link is for a phone or a pasted letter. -->
               <span class="talk-sub-right">
+                <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open the whiteboard">&#9638; Whiteboard</button>
                 <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
                 <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a paper</button>
               </span>
@@ -1586,6 +1592,8 @@
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
             </div>
+            <!-- The whiteboard opened from the bar while voice is off (voice-stage.js). -->
+            <div id="boardSolo" class="board-solo"></div>
           </div>
 
           <!-- The brief is one line above the conversation, expandable in place.
@@ -7124,6 +7132,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/experts-data.js"></script>
 <script src="/buzzy/privacy.js"></script>
 <script src="/buzzy/inspiration.js"></script>
+<script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>
 </body>

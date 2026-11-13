@@ -118,10 +118,57 @@
     g.fill();
   }
 
+  // ── The whiteboard: beside the voice workspace while voice is on; under the
+  // Talk bar when opened from its "Whiteboard" button. One board at a time,
+  // per conversation (the shared bz_session_id), saved in this browser.
+  var boardSlot = document.getElementById("vsBoard");
+  var soloSlot = document.getElementById("boardSolo");
+  var toggle = document.getElementById("boardToggle");
+  var board = null, boardWhere = null, soloWanted = false, closedForVoice = false;
+  function boardId() {
+    try { return localStorage.getItem("bz_session_id") || "talk"; } catch (_) { return "talk"; }
+  }
+  function unmountBoard() {
+    if (board) { try { board.destroy(); } catch (_) {} }
+    board = null; boardWhere = null;
+    stage.classList.add("vs-no-board");
+  }
+  function placeBoard() {
+    if (!window.BeeZillaWhiteboard || !boardSlot) return;
+    var voiceOn = !stage.classList.contains("hidden");
+    if (!voiceOn) closedForVoice = false;
+    var where = voiceOn && !closedForVoice ? "voice" : soloWanted ? "solo" : null;
+    if (where === boardWhere) return;
+    unmountBoard();
+    if (!where) return;
+    var slot = where === "voice" ? boardSlot : soloSlot;
+    if (!slot) return;
+    board = window.BeeZillaWhiteboard.mount(slot, {
+      boardId: boardId(),
+      onClose: function () {
+        if (boardWhere === "voice") closedForVoice = true;
+        else { soloWanted = false; if (toggle) toggle.setAttribute("aria-pressed", "false"); }
+        unmountBoard();
+        placeBoard();
+      },
+    });
+    boardWhere = where;
+    if (where === "voice") stage.classList.remove("vs-no-board");
+  }
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      soloWanted = !soloWanted;
+      toggle.setAttribute("aria-pressed", soloWanted ? "true" : "false");
+      placeBoard();
+    });
+  }
+
   // Run only while the stage is on screen; start whenever it opens.
   new MutationObserver(function () {
     if (!stage.classList.contains("hidden") && !raf) raf = requestAnimationFrame(draw);
     if (stage.classList.contains("hidden") && words) words.textContent = "";
+    placeBoard();
   }).observe(stage, { attributes: true, attributeFilter: ["class"] });
   if (!stage.classList.contains("hidden")) raf = requestAnimationFrame(draw);
+  placeBoard();
 })();
