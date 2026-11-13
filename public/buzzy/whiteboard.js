@@ -29,7 +29,7 @@
   function load(key) {
     try { var v = JSON.parse(localStorage.getItem(key) || "null"); return v && Array.isArray(v.cards) ? v : null; } catch (_) { return null; }
   }
-  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (_) {} }
+  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (_) { /* best effort */ } }
 
   // What a card is, from whatever the source called it.
   function kindOf(c) {
@@ -324,7 +324,7 @@
       var at = { x: p.x - CARD_W / 2, y: p.y - 30 };
       var raw = e.dataTransfer.getData(TYPE);
       if (raw) {
-        try { var c = JSON.parse(raw); addCard({ kind: c.kind, title: c.title, url: c.url, contentType: c.contentType }, at); } catch (_) {}
+        try { var c = JSON.parse(raw); addCard({ kind: c.kind, title: c.title, url: c.url, contentType: c.contentType }, at); } catch (_) { /* best effort */ }
         return;
       }
       var uri = (e.dataTransfer.getData("text/uri-list") || "").split("\n")[0].trim();
@@ -333,6 +333,14 @@
         addCard({ kind: "file", title: u.host + u.pathname.replace(/\/$/, ""), url: uri }, at);
       }
     });
+
+    // While a card is being dragged anywhere on the page, show where it can go
+    // (roadmap: "highlight board drop targets"), not only once it is over the board.
+    function dragStarted(e) { if (acceptable(e)) root.classList.add("wb-target"); }
+    function dragFinished() { root.classList.remove("wb-target"); root.classList.remove("wb-over"); }
+    document.addEventListener("dragstart", dragStarted);
+    document.addEventListener("dragend", dragFinished);
+    document.addEventListener("drop", dragFinished);
 
     // ── Search the board ─────────────────────────────────────────────────
     var library = null;
@@ -405,6 +413,9 @@
       destroy: function () {
         clearTimeout(saveTimer); clearTimeout(searchTimer);
         document.removeEventListener("click", outside);
+        document.removeEventListener("dragstart", dragStarted);
+        document.removeEventListener("dragend", dragFinished);
+        document.removeEventListener("drop", dragFinished);
         save(key, state);
         root.remove();
       },

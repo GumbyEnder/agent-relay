@@ -35,6 +35,24 @@
   outline: none;
 }
 .wb-panel.wb-over .wb-canvas { box-shadow: inset 0 0 0 2px #FFC107; background-color: #16130A; }
+.wb-panel.wb-target .wb-canvas { outline: 2px dashed #FFC107; outline-offset: -5px; }
+.wb-panel.wb-target .wb-canvas::before {
+  content: "Drop here to add it to the board";
+  position: absolute;
+  top: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 0.2rem 0.75rem;
+  border-radius: 999px;
+  background: #FFC107;
+  color: #141414;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+:root[data-theme="light"] .wb-panel.wb-target .wb-canvas { outline-color: #B8860B; }
 .wb-hint {
   position: absolute; inset: 0; margin: 0;
   display: flex; align-items: center; justify-content: center; text-align: center;
