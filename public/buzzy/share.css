@@ -167,6 +167,11 @@ html[data-theme="light"] .sh-pill {
   font-size: 14px;
 }
 
+.sh-hint.sh-hint-on {
+  color: var(--sh-accent, #FFC107);
+  font-weight: 600;
+}
+
 .sh-cards {
   display: grid;
   gap: 10px;

@@ -223,7 +223,8 @@
     var body = make("div", "sh-body");
     var choices = make("fieldset", "sh-choices");
     choices.appendChild(make("legend", "sh-legend", "Who can see this?"));
-    choices.appendChild(make("p", "sh-hint", "Nothing is shared until you choose one."));
+    var hint = make("p", "sh-hint", "Nothing is shared until you choose one.");
+    choices.appendChild(hint);
     var cards = make("div", "sh-cards");
     var group = uid + "-who";
     var teamCard = makeCard(group, "team", "Selected team", "Only people on your team.");
@@ -602,6 +603,25 @@
     pill.addEventListener("click", restore);
 
     session = { token: token, close: close, minimise: minimise, restore: restore };
+
+    // A public link that is already on has to be said up front — "Nothing is
+    // shared" would be false. The list carries no tokens, so the link itself
+    // appears only when the owner asks for it (creating returns the existing
+    // link for the same accepted version, never a second one).
+    if (docId) {
+      api("GET", "/api/buzzy/shares").then(function (res) {
+        if (!current() || link || !res.ok || !res.data || !Array.isArray(res.data.shares)) return;
+        var now = Date.now();
+        var on = res.data.shares.filter(function (s) {
+          return s && s.doc_id === docId && !s.revoked_at && new Date(s.expires_at).getTime() > now;
+        })[0];
+        if (!on) return;
+        say(hint, "A public link to this document is on. " + expiryText(on.expires_at) +
+          " Choose Public to see it or turn it off.");
+        hint.classList.add("sh-hint-on");
+      });
+    }
+
     document.addEventListener("keydown", onKeyDown, true);
     document.addEventListener("focusin", onFocusIn, true);
     dialog.focus();
