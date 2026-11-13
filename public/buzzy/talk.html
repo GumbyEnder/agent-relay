@@ -3056,6 +3056,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // turn last started a capture, which is why "0 / no-speech" on the 10:10
       // walk could not be told apart from a turn that kept its head.
       lastTurn: null,
+      // A barge turn is OWNED by the clip, not by the recogniser (see
+      // sendBargeClip). The gate already proved speech started; Chrome's
+      // recogniser only gets to say where it ended. On the 9:15 PM walk
+      // (b123b80) the gate fired, the story was cut, and the recogniser
+      // returned no speech at all — so the turn was dropped with its audio in
+      // hand: no bubble, no follow-up, no take, and issue 299 stayed
+      // unmeasured for a second night.
+      bargeClip: false, bargeSent: false,
       // Voice barge-in (see bargeArm): the detector runs on the pre-roll ring's
       // own frames — one stream, one AudioContext, one truth. It used to be a
       // second MediaStreamSource + AnalyserNode on a context of its own, which
@@ -3416,6 +3424,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           voice.userSpeechMs = voice.firstInterimAt
             ? Math.round(performance.now() - voice.firstInterimAt)
             : null;
+          // The recogniser heard the turn, so it keeps the floor: no barge
+          // fallback may post this clip a second time.
+          voice.bargeClip = false;
           stopListening();
           // Timestamp the moment the owner stopped talking: time-to-talk is
           // measured from here, not from when we happened to send.
@@ -3428,7 +3439,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       rec.onerror = function (e) {
         if (rec._bzStale) return;
         var err = e && e.error;
-        dropCapture();
+        // A barge turn's clip is the evidence, so it must survive the
+        // recogniser's own failure. Dropping it here is what silently ate the
+        // 9:15 PM walk's interruption: "no-speech" is Chrome saying IT heard
+        // nothing, not that the room was quiet — the gate had already measured
+        // 0.34 RMS on the ring. onend posts the clip (see sendBargeClip).
+        var keepClip = !!voice.bargeClip && voice.mic && err !== "not-allowed" && err !== "service-not-allowed";
+        if (!keepClip) dropCapture();
         if (err === "not-allowed") {
           // A denied permission has no route around it.
           stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
@@ -3455,8 +3472,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // drop the fresh capture that was seeded with the barge head.
         if (rec._bzStale) return;
         voice.rec = null;
-        // A window that ended without a final utterance never became a turn, so
-        // its clip is not evidence of anything.
+        // A window that ended without a final utterance never became a turn —
+        // UNLESS the barge gate had already voted. Then this window is the turn
+        // the owner took, and the clip (gate take + capture) is the evidence;
+        // the recogniser's silence is just its opinion. Anything else loses the
+        // interruption with its audio sitting in hand.
+        if (voice.bargeClip && voice.mic) {
+          if (sendBargeClip()) return;
+        }
+        // Its clip is not evidence of anything.
         dropCapture();
         if (voice.mic && !voice.speaking && !voice.sending) {
           setTimeout(function () { if (voice.mic && !voice.speaking && !voice.sending) startListening(); }, 400);
@@ -4131,6 +4155,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       preRollStop();
       probeStop();
       voice.pendingPre = null;
+      voice.bargeClip = false;
+      voice.bargeSent = false;
       voice.ringDead = false;
       dropCapture();
       try {
@@ -4214,6 +4240,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.bargUntil = performance.now() + BARGE_COOLDOWN;
       // Cut THIS turn, not "the voice": see the cutTurn note on `voice`.
       voice.cutTurn = voice.turnSeq;
+      // From here the turn belongs to the clip: the gate measured speech on the
+      // ring, so a recogniser that later reports nothing may not discard it.
+      voice.bargeClip = true;
+      voice.bargeSent = false;
       // The owner has taken the floor, so this turn no longer owns the "waiting"
       // state: on the recorder path `startRecording` refuses to run while
       // voice.sending is true, so a barge-in would leave the follow-up
@@ -4401,10 +4431,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var copy = new Float32Array(input.length);
             copy.set(input);
             chunks.push(copy);
+            // End-of-speech on a BARGE turn. Chrome's recogniser is allowed to
+            // be the one that ends the turn, but it is not allowed to be the
+            // only one: on the 9:15 PM walk it never finalised, the reply was
+            // already cut, and the clip sat here until the recogniser ended the
+            // window with nothing. The gate proved the speech started; 1.2 s of
+            // quiet after it is the same endpointing the recorder lane uses.
+            var sum = 0;
+            for (var q = 0; q < copy.length; q++) sum += copy[q] * copy[q];
+            var rms = Math.sqrt(sum / copy.length);
+            if (rms > 0.02) { capState.speechSeen = true; capState.quietSince = 0; }
+            else if (capState.speechSeen && !capState.quietSince) capState.quietSince = Date.now();
+            if (voice.bargeClip && capState.speechSeen && capState.quietSince &&
+                Date.now() - capState.quietSince > 1200) sendBargeClip();
           };
           src.connect(proc);
           proc.connect(ctx.destination);
-          capState = { src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate };
+          capState = { src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false, quietSince: 0 };
         })
         .catch(function () {});
     }
@@ -4484,6 +4527,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       sendChatMessage();
     }
 
+    // A barge turn posts its clip even when the recogniser heard nothing.
+    // By the time this runs the gate has already voted on the same ring frames
+    // that are in the clip, so "was there speech" is answered; Chrome's
+    // recogniser only gets to say when the speech ended. Returns true when the
+    // clip was posted, so a caller must not re-arm over the turn it started.
+    function sendBargeClip() {
+      if (!voice.bargeClip || voice.bargeSent) return false;
+      var wav = finishCapture();
+      if (!wav) return false;
+      voice.bargeSent = true;
+      voice.bargeClip = false;
+      // This window IS the turn. Stop the recogniser without letting its onend
+      // post a second turn from the same audio.
+      try { if (voice.rec) { voice.rec._bzStale = true; voice.rec.stop(); } } catch (_) {}
+      voice.rec = null;
+      voice.lastSpeechEnd = performance.now();
+      sendForTranscription(wav);
+      return true;
+    }
+
     function sendForTranscription(wav) {
       voice.sending = true;
       setAvatarState("thinking");
@@ -4536,6 +4599,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (voice.mic) {
         // A fresh listen clears whatever the last failure said.
         voice.note = "";
+        voice.bargeClip = false;
+        voice.bargeSent = false;
         // A cut belongs to a turn id, so there is nothing global to clear here:
         // the next turn gets a new id and plays normally.
         // A spoken conversation needs spoken answers.
@@ -4544,6 +4609,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       } else {
         stopListening();
         stopSpeaking();
+        // Turning Listen OFF must release the microphone, not just stop using it.
+        // This branch used to leave micStream and the probe stream live, so the
+        // browser's mic indicator stayed lit and a stopped session still showed
+        // three RecordStreams on the device — the owner's own privacy signal
+        // said "recording" while the product said "not listening".
+        releaseMic();
       }
       paintVoice();
     }
@@ -4697,7 +4768,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                            hits: voice.bargHits || 0, fires: voice.gateFires || 0,
                            why: voice.gateWhy || null,
                            sinceSpeakMs: voice.speaking ? Math.round(performance.now() - (voice.speakStartedAt || performance.now())) : null,
-                           lastFireAgoMs: voice.gateLastFireAt ? Date.now() - voice.gateLastFireAt : null } };
+                           lastFireAgoMs: voice.gateLastFireAt ? Date.now() - voice.gateLastFireAt : null },
+                   // A barge turn is owned by its clip: "pending" means the gate
+                   // has voted and the turn is still waiting for a transcript
+                   // (either the recogniser's or ours), "sent" means the clip
+                   // became the turn. A cut with pending false and sent false on
+                   // a walk is a lost interruption — the exact shape of 3187.
+                   barge: { pending: !!voice.bargeClip, sent: !!voice.bargeSent },
+                   // Which capture handles THIS page still holds. One for a
+                   // normal session, two with ?voiceprobe=1; a stopped session
+                   // must hold none. (Chrome's own recogniser opens a third
+                   // stream of its own, invisible here and to this page.)
+                   streams: { mic: !!voice.micStream, probe: !!voice.probeStream } };
         },
       };
       // ── "Open this job's conversation" without reloading the document ──
