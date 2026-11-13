@@ -39,7 +39,8 @@ import { emailAndPasswordEnabled } from "./email-password";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
 import { isConsumerHost } from "../product-hosts";
-import { sendVerificationMail, sendMagicLinkMail } from "../mailer";
+import { sendVerificationMail, sendMagicLinkMail, sendPasswordChangedMail } from "../mailer";
+import { emailFirst } from "./email-first";
 import {
   GROK_ISSUER_DEFAULT,
   PREVIEW_ALLOWED_HOSTS,
@@ -269,7 +270,16 @@ export const auth = betterAuth({
   // (incl. the client's `/get-session`) skip the DB — this shrinks the "loading"
   // window and reduces auth flicker. See the `auth` skill for the full
   // flicker-prevention guidance (gate on `isPending`; SSR the session).
-  session: { cookieCache: { enabled: true, maxAge: 300 } },
+  //
+  // Stay signed in for good: every visit (at most once a day) pushes the
+  // session and its cookie another 400 days out — the longest a browser keeps
+  // a cookie. Only signing out, or a password reset on another device, ends it.
+  // Shared engine: this applies to Dev Boards sign-ins too.
+  session: {
+    expiresIn: 60 * 60 * 24 * 400,
+    updateAge: 60 * 60 * 24,
+    cookieCache: { enabled: true, maxAge: 300 },
+  },
 
   // Traditional human auth: register → verify email → sign in.
   ...(emailAndPasswordEnabled
@@ -352,9 +362,22 @@ export const auth = betterAuth({
     // email/password enabled. 15-minute single-use tokens.
     magicLink({
       expiresIn: 60 * 15,
-      sendMagicLink: async ({ email, url }) => {
-        await sendMagicLinkMail({ to: email, url });
+      // Brand the link by the host the browser used (BeeZilla vs Dev Boards):
+      // on the email-first page this mail is also the sign-up email.
+      sendMagicLink: async ({ email, url }, ctx) => {
+        await sendMagicLinkMail({
+          to: email,
+          url,
+          host: requestedHost(ctx?.request?.headers ?? ctx?.headers ?? null),
+        });
       },
+    }),
+
+    // Email-first "Sign in / Register" page: email lookup, set a password after
+    // a link sign-in, and forgot-password (link → new password). See ./email-first.
+    emailFirst({
+      onPasswordReplaced: (user, headers) =>
+        sendPasswordChangedMail({ to: user.email, name: user.name, host: requestedHost(headers) }),
     }),
 
     // One genericOAuth provider per upstream (when auth is on), all federating

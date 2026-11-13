@@ -140,7 +140,9 @@ function getSmtp(): Transporter | null {
   };
   const url = env("SMTP_URL");
   if (url) {
-    globalMail.__agentRelaySmtp__ = createTransport(url, timeouts);
+    // Options object, not a second argument: createTransport's 2nd parameter is
+    // per-message defaults, so the timeouts never reached the connection there.
+    globalMail.__agentRelaySmtp__ = createTransport({ url, ...timeouts });
     return globalMail.__agentRelaySmtp__;
   }
   const host = env("SMTP_HOST");
@@ -313,6 +315,37 @@ export async function sendMagicLinkMail(opts: {
     </div>
   `.trim();
   return sendMail({ to: opts.to, subject, text, html, actionUrl: opts.url, brand });
+}
+
+/** Security notice after a password was replaced (email-first forgot-password flow). */
+export async function sendPasswordChangedMail(opts: {
+  to: string;
+  name?: string | null;
+  /** Request hostname, so the notice carries the product the user signed in to. */
+  host?: string | null;
+}): Promise<OutboundEmail> {
+  const brand = brandLabel(opts.host);
+  const name = opts.name?.trim() || "there";
+  const subject = `Your ${brand} password was changed`;
+  const text = [
+    `Hi ${name},`,
+    "",
+    `The password for your ${brand} account was just changed, and your other devices were signed out.`,
+    "",
+    "If this was you, there is nothing to do.",
+    "If it wasn't, go to the sign-in page, enter your email and choose \"Email me a sign-in link\" to set a new password.",
+    "",
+    `— ${brand}`,
+  ].join("\n");
+  const html = `
+    <div style="font-family:system-ui,sans-serif;line-height:1.5;max-width:32rem">
+      <p>Hi ${escapeHtml(name)},</p>
+      <p>The password for your <strong>${brand}</strong> account was just changed, and your other devices were signed out.</p>
+      <p>If this was you, there is nothing to do.</p>
+      <p style="color:#666;font-size:0.9rem">If it wasn't, go to the sign-in page, enter your email and choose <em>Email me a sign-in link</em> to set a new password.</p>
+    </div>
+  `.trim();
+  return sendMail({ to: opts.to, subject, text, html, brand });
 }
 
 function escapeHtml(s: string): string {
