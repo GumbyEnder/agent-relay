@@ -1081,6 +1081,18 @@
       font-size: 0.8rem;
     }
     .drawer-close:hover { border-color: var(--bz-yellow); background: rgba(255,193,7,0.08); }
+    .drawer-tools { display: flex; align-items: center; gap: 0.4rem; }
+    /* History minimised: a tab on the right edge brings the drawer back. */
+    .sessions-pill {
+      position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 60;
+      min-height: 0; padding: 0.7rem 0.4rem; border: 1px solid #6B5A1E; border-right: none;
+      border-radius: 10px 0 0 10px; background: #141414; color: var(--bz-yellow);
+      font: inherit; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em;
+      writing-mode: vertical-rl; cursor: pointer;
+    }
+    .sessions-pill:hover { background: #2A2204; }
+    .sessions-pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .sessions-pill.hidden { display: none; }
     .drawer-actions { padding: 0.8rem 1rem; border-bottom: 1px solid #222; }
     .drawer-actions button { width: 100%; }
     .drawer-note {
@@ -1704,7 +1716,10 @@
     <aside id="sessionsDrawer" aria-label="History" aria-hidden="true">
       <div class="drawer-header">
         <h3>History</h3>
-        <button id="sessionsClose" class="drawer-close" type="button">Close</button>
+        <span class="drawer-tools">
+          <button id="sessionsMin" class="drawer-close" type="button" aria-label="Minimise history" title="Minimise">&ndash;</button>
+          <button id="sessionsClose" class="drawer-close" type="button">Close</button>
+        </span>
       </div>
       <div class="drawer-actions">
         <button id="drawerNewChat" class="secondary" type="button">Start a new chat</button>
@@ -1712,6 +1727,7 @@
       <p class="drawer-note">Pick a past chat to reopen it, rename it, or get a quick summary.</p>
       <div id="sessionsList"></div>
     </aside>
+    <button id="sessionsPill" class="sessions-pill hidden" type="button" aria-label="Open history again">History</button>
   </main>
 
   <script src="/buzzy/companies.js"></script>
@@ -6822,6 +6838,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       overlay.classList.remove("hidden");
       drawer.classList.add("open");
       drawer.setAttribute("aria-hidden", "false");
+      var pill = document.getElementById("sessionsPill");
+      if (pill) pill.classList.add("hidden");
       loadSessions();
     }
     function closeSessionsDrawer() {
@@ -7014,7 +7032,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("newChatBtn").onclick = () => { startNewChat(); };
     document.getElementById("sessionsToggle").onclick = () => { openSessionsDrawer(); };
     document.getElementById("backToRecent").onclick = goBackToRecent;
-    document.getElementById("sessionsClose").onclick = () => { closeSessionsDrawer(); };
+    document.getElementById("sessionsClose").onclick = () => {
+      closeSessionsDrawer();
+      document.getElementById("sessionsPill").classList.add("hidden");
+    };
+    // Minimise: the drawer folds away and a "History" tab on the right edge
+    // brings it back (every pop-up has close and minimise — roadmap phase 3).
+    document.getElementById("sessionsMin").onclick = () => {
+      closeSessionsDrawer();
+      var pill = document.getElementById("sessionsPill");
+      pill.classList.remove("hidden");
+      pill.focus();
+    };
+    document.getElementById("sessionsPill").onclick = () => { openSessionsDrawer(); };
     document.getElementById("drawerNewChat").onclick = () => { startNewChat(); };
     document.getElementById("sessionsOverlay").addEventListener("click", function () {
       closeSessionsDrawer();

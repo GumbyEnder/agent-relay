@@ -92,6 +92,12 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
+      "#bzPanel .bz-panel-tools{display:flex;align-items:center;gap:.35rem}",
+      "#bzPanel .bz-panel-close:hover{color:#ffd40d}",
+      "#bzPanel .bz-panel-close:focus-visible{outline:2px solid #ffd40d;outline-offset:2px;border-radius:4px}",
+      "#bzPanel.min{height:auto;top:auto;bottom:1rem;width:auto;min-width:230px;padding:.5rem .7rem}",
+      "#bzPanel.min .bz-panel-body{display:none}",
+      "#bzPanel.min .bz-panel-head{padding:0;color:#e6e6e6;cursor:pointer}",
       // The chrome renders inside eleven different page stylesheets, and three of
       // them set their own body font-size/line-height (sketch+studio 14px/1.5,
       // capabilities 15px/1.55, memory inherits the browser default). An inherited
@@ -634,8 +640,17 @@
     close.type = "button";
     close.setAttribute("aria-label", "Close");
     close.innerHTML = "&times;";
+    // Every pop-up has close and minimise (roadmap phase 3). Minimised, the panel
+    // folds to its title bar at the bottom right and keeps the conversation.
+    var min = document.createElement("button");
+    min.className = "bz-panel-close bz-panel-min";
+    min.type = "button";
+    var tools = document.createElement("span");
+    tools.className = "bz-panel-tools";
+    tools.appendChild(min);
+    tools.appendChild(close);
     head.appendChild(title);
-    head.appendChild(close);
+    head.appendChild(tools);
     var body = document.createElement("div");
     body.className = "bz-panel-body";
     panel.appendChild(head);
@@ -657,24 +672,46 @@
       document.head.appendChild(s);
     }
 
-    function open() {
-      panel.classList.add("open");
-      btn.setAttribute("aria-expanded", "true");
-      mountChat();
+    function setMin(on) {
+      panel.classList.toggle("min", on);
+      min.textContent = on ? "\u25A1" : "\u2013";
+      min.setAttribute("aria-label", on ? "Restore Ask BeeZilla" : "Minimise Ask BeeZilla");
+      min.title = on ? "Restore" : "Minimise";
+      btn.setAttribute("aria-expanded", panel.classList.contains("open") && !on ? "true" : "false");
+    }
+    function focusInput() {
       var input = body.querySelector(".bzc-in");
       if (input) input.focus();
     }
+    function open() {
+      panel.classList.add("open");
+      setMin(false);
+      mountChat();
+      focusInput();
+    }
     function shut() {
       panel.classList.remove("open");
+      setMin(false);
       btn.setAttribute("aria-expanded", "false");
     }
+    setMin(false);
     btn.addEventListener("click", function () {
-      if (panel.classList.contains("open")) shut();
+      // A minimised panel comes back; an open one closes.
+      if (panel.classList.contains("open") && !panel.classList.contains("min")) shut();
       else open();
     });
-    close.addEventListener("click", shut);
+    close.addEventListener("click", function (e) { e.stopPropagation(); shut(); });
+    min.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var folding = !panel.classList.contains("min");
+      setMin(folding);
+      if (folding) btn.focus(); else focusInput();
+    });
+    head.addEventListener("click", function () {
+      if (panel.classList.contains("min")) { setMin(false); focusInput(); }
+    });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && panel.classList.contains("open")) shut();
+      if (e.key === "Escape" && panel.classList.contains("open") && !panel.classList.contains("min")) shut();
     });
   }
 
