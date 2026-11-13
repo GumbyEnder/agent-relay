@@ -12,8 +12,11 @@
  *               3D makers (the server enforces this per turn), and the Inspiration
  *               wall is hidden. Messages still reach the AI that answers.
  *
- * Stored in this browser (localStorage "bz.privacy") and sent with every chat turn
- * as `privacy`. window.bzPrivacy() reads it; a "bz:privacy" event announces changes.
+ * Saved to the account (GET/PUT /api/buzzy/privacy — the server also applies the
+ * account's Lockdown on every chat turn), mirrored in this browser
+ * (localStorage "bz.privacy") so the page knows it before the network answers, and
+ * sent with every chat turn as `privacy`. window.bzPrivacy() reads it; a
+ * "bz:privacy" event announces changes.
  */
 (function () {
   "use strict";
@@ -89,12 +92,41 @@
     }
   }
 
-  function set(mode) {
-    if (!MODES[mode] || mode === read()) { paint(); return; }
+  function save(mode) {
+    return fetch("/api/buzzy/privacy", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: mode }),
+    }).then(function (r) { return r.ok; }).catch(function () { return false; });
+  }
+
+  function apply(mode) {
     write(mode);
     paint();
     try { window.dispatchEvent(new CustomEvent("bz:privacy", { detail: { mode: mode } })); } catch (_) {}
   }
+
+  function set(mode) {
+    if (!MODES[mode] || mode === read()) { paint(); return; }
+    apply(mode);
+    save(mode).then(function (ok) {
+      if (!ok && desc) desc.textContent = MODES[mode].desc + " (Saved in this browser only — couldn't reach your account.)";
+    });
+  }
+
+  // The account is the source of truth. A choice made in this browser before it
+  // was saved to the account is carried up once.
+  fetch("/api/buzzy/privacy", { credentials: "same-origin" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      if (!j || !j.ok || !MODES[j.mode]) return;
+      var local = null;
+      try { local = localStorage.getItem(KEY); } catch (_) {}
+      if (j.saved) { if (j.mode !== read()) apply(j.mode); }
+      else if (MODES[local] && local !== j.mode) save(local);
+    })
+    .catch(function () {});
 
   function open() {
     pop.classList.remove("hidden");

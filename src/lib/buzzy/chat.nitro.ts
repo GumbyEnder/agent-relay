@@ -1065,7 +1065,7 @@ export default defineEventHandler(async (event) => {
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
     // The Talk bar's privacy control. Unknown values mean the default (no change).
-    const privacy: "advocate" | "lockdown" | "open" | undefined =
+    let privacy: "advocate" | "lockdown" | "open" | undefined =
       body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
     // Voice lane: stream text + audio back over SSE so speech starts on the
     // first audio chunk instead of after the whole buffered reply.
@@ -1074,6 +1074,16 @@ export default defineEventHandler(async (event) => {
     const surface: "text" | "voice" = voice ? "voice" : "text";
 
     const sql = await getSql();
+
+    // The account's privacy mode wins when it is Lockdown: a second device, or a
+    // page whose slider was never touched, must not run outside calls the owner
+    // turned off. (Table from migration 0057; absent on an older database.)
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${userId} LIMIT 1`;
+      const accountMode = pm[0]?.mode;
+      if (accountMode === "lockdown") privacy = "lockdown";
+      else if (!privacy && (accountMode === "advocate" || accountMode === "open")) privacy = accountMode;
+    } catch { /* no table yet: the request's own value stands */ }
 
     // ── Plan + quota, before any provider call ───────────────────────────────
     // The web app calls the provider from OUR server, not through /api/inference,
@@ -2083,6 +2093,37 @@ export default defineEventHandler(async (event) => {
       forgotten: rows.length,
       note: "Those remembered details are gone and won't be used again. Approved documents and your Library are untouched — delete a job or the account for that.",
     };
+  }
+
+  // ── /api/buzzy/privacy — the owner's privacy mode, per account ─────────
+  // GET → { mode } ("open" until chosen). PUT { mode } → saves it. The chat reads
+  // the same row on every turn, so Lockdown holds on every device and page.
+  if (path === "/api/buzzy/privacy" && (method === "GET" || method === "PUT")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    if (method === "PUT") {
+      let body: Record<string, unknown> = {};
+      try {
+        const parsed = await event.req.json();
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+      } catch { /* handled below */ }
+      const mode = body.mode;
+      if (mode !== "advocate" && mode !== "lockdown" && mode !== "open") {
+        setResponseStatus(event, 400);
+        return { error: "mode must be advocate, lockdown or open", code: "bad_mode" };
+      }
+      await sql`
+        INSERT INTO buzzy_privacy_mode (user_id, mode, updated_at) VALUES (${user.id}, ${mode}, now())
+        ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode, updated_at = now()
+      `;
+      return { ok: true, mode };
+    }
+    const rows = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+    return { ok: true, mode: rows[0]?.mode ?? "open", saved: rows.length > 0 };
   }
 
   // ── GET /api/buzzy/profile — account-scoped business profile + defaults ──
