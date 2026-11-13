@@ -288,3 +288,20 @@
   .bz-reader-out { display: none; }
   .bz-reader-body { padding: 1rem; }
 }
+
+/* Inspiration: the owner's explicit choice of what to see. */
+.bz-insp-kinds { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0.6rem 0.4rem; }
+.bz-insp-kinds button {
+  min-height: 0;
+  padding: 0.3rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid #2E2E2E;
+  background: transparent;
+  color: #B5B5B5;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.bz-insp-kinds button:hover { color: #F2F2F2; border-color: #4A4A4A; }
+.bz-insp-kinds button[aria-checked="true"] { background: #FFC107; border-color: #FFC107; color: #141414; font-weight: 700; }
+.bz-insp-kinds button:focus-visible { outline: 2px solid #FFC107; outline-offset: 2px; }

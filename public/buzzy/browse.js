@@ -419,7 +419,31 @@
         return;
       }
       if (window.BeeZillaInspiration && window.BeeZillaInspiration.mount) {
-        mounted = window.BeeZillaInspiration.mount(pane, { onPrompt: function (t) { if (window.bzPrompt) window.bzPrompt(t); } });
+        // Tailored by an explicit choice (roadmap phase 5): which kinds of finished
+        // work the owner wants to see. Remembered in this browser; never inferred.
+        var KINDS = [["all", "All"], ["photo", "Pictures"], ["audio", "Music"], ["3d", "3D"], ["document", "Documents"]];
+        var want = store("bz.insp.kind") || "all";
+        if (!KINDS.some(function (k) { return k[0] === want; })) want = "all";
+        pane.innerHTML = '<div class="bz-insp-kinds" role="radiogroup" aria-label="Show in Inspiration">' +
+          KINDS.map(function (k) {
+            return '<button type="button" role="radio" data-kind="' + k[0] + '" aria-checked="' + (k[0] === want) + '">' + k[1] + "</button>";
+          }).join("") + '</div><div class="bz-insp-wall"></div>';
+        mounted = window.BeeZillaInspiration.mount(pane.querySelector(".bz-insp-wall"), {
+          onPrompt: function (t) { if (window.bzPrompt) window.bzPrompt(t); },
+        });
+        var applyKind = function (k) {
+          want = k;
+          store("bz.insp.kind", k);
+          pane.querySelectorAll(".bz-insp-kinds [data-kind]").forEach(function (b) {
+            b.setAttribute("aria-checked", b.getAttribute("data-kind") === k ? "true" : "false");
+          });
+          if (mounted && mounted.filter) mounted.filter(k === "all" ? null : k);
+        };
+        pane.querySelector(".bz-insp-kinds").addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest("[data-kind]") : null;
+          if (b) applyKind(b.getAttribute("data-kind"));
+        });
+        if (want !== "all") applyKind(want);
         return;
       }
       // Without the wall, finished work still has a home: show recent work.
