@@ -1064,6 +1064,9 @@ export default defineEventHandler(async (event) => {
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The Talk bar's privacy control. Unknown values mean the default (no change).
+    const privacy: "advocate" | "lockdown" | "open" | undefined =
+      body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
     // Voice lane: stream text + audio back over SSE so speech starts on the
     // first audio chunk instead of after the whole buffered reply.
     const voice = body.voice === true;
@@ -1199,6 +1202,7 @@ export default defineEventHandler(async (event) => {
         jobContext,
         mode,
         execute,
+        privacy,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,

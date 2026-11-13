@@ -292,6 +292,7 @@
     .talk-sub .mode-tabs { margin: 0; }
     .talk-sub .mode-tab { padding: 0.24rem 0.8rem; font-size: 0.76rem; }
     .talk-attach { margin: 0; font-size: 0.78rem; padding: 0.24rem 0.7rem; }
+    .talk-sub-right { display: inline-flex; align-items: center; gap: 0.45rem; }
     @media (max-width: 640px) {
       .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; }
       .talk-btn { padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
@@ -1417,6 +1418,7 @@
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
   <link rel="stylesheet" href="/buzzy/browse.css" />
+  <link rel="stylesheet" href="/buzzy/privacy.css" />
 </head>
 <body>
   <header>
@@ -1526,6 +1528,28 @@
                   </button>
                 </div>
               </div>
+              <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
+              <div class="talk-privacy">
+                <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
+                  <span class="pv-icons"></span>
+                </button>
+                <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
+                  <div class="pp-head">
+                    <strong>Privacy</strong>
+                    <span class="pp-tools">
+                      <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
+                      <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
+                    </span>
+                  </div>
+                  <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
+                    <span class="pp-thumb" aria-hidden="true"></span>
+                    <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
+                    <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
+                    <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+                  </div>
+                  <p class="pp-desc" id="privacyDesc"></p>
+                </div>
+              </div>
               <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
             </div>
             <div class="talk-sub">
@@ -1536,7 +1560,10 @@
               <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
                    is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
                    dropped on the bar; this link is for a phone or a pasted letter. -->
-              <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a paper</button>
+              <span class="talk-sub-right">
+                <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
+                <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a paper</button>
+              </span>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
             <!-- Plan + remaining quota, read from /api/buzzy/entitlement. A refusal
@@ -6341,6 +6368,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           mode: chatState.mode || "chat",
           execute: pendingExecute === true,
           attemptId: attemptId,
+          // The Talk bar's privacy slider: Lockdown turns off web lookups and outside makers.
+          privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
@@ -7074,6 +7103,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 })();
 </script>
 <script src="/buzzy/experts-data.js"></script>
+<script src="/buzzy/privacy.js"></script>
 <script src="/buzzy/browse.js"></script>
 </body>
 </html>

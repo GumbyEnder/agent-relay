@@ -298,6 +298,12 @@
 
   var TABS = {
     inspiration: function () {
+      // Lockdown hides inspiration (roadmap: Private/Lockdown disables it).
+      if (window.bzPrivacy && window.bzPrivacy() === "lockdown") {
+        pane.innerHTML = '<p class="bz-pane-text">Inspiration is off while privacy is set to Lockdown. ' +
+          "Your own work is still under Library.</p>";
+        return;
+      }
       if (window.BeeZillaInspiration && window.BeeZillaInspiration.mount) {
         mounted = window.BeeZillaInspiration.mount(pane, { onPrompt: function (t) { if (window.bzPrompt) window.bzPrompt(t); } });
         return;
@@ -354,6 +360,9 @@
     var next = all[(at + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length];
     if (next) { select(next.getAttribute("data-tab")); next.focus(); }
   });
+
+  // A privacy change can hide or show the wall.
+  window.addEventListener("bz:privacy", function () { if (current === "inspiration") select("inspiration"); });
 
   // The wall script may arrive after this one.
   select(store("bz.browse.tab") || "inspiration");

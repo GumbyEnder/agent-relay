@@ -264,6 +264,13 @@ export interface ChatRequest {
   /** The composer's "Do it now" control. An explicit execute flag beats any
    *  phrase-matching: the person pressed a button that means "produce it". */
   execute?: boolean;
+  /**
+   * The owner's privacy mode from the Talk bar. "lockdown": nothing leaves
+   * BeeZilla this turn except the call to the model that answers — no web
+   * lookups, no music, picture or 3D providers. "advocate" and "open" change
+   * nothing here yet (Open does not publish anything automatically).
+   */
+  privacy?: "advocate" | "lockdown" | "open";
 }
 
 /** Per-turn latency breakdown. Product metric — surfaced to the client and
@@ -514,6 +521,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // reply only says it is on its way. Without this, "make a 3D model of a race
   // track" also read as a song ("make … track") and as a request for a document.
   const wants3d = is3dRequest(message);
+  const lockdown = req.privacy === "lockdown";
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
   const requestedDraft = !wants3d && (isDraftRequest(message) || req.execute === true);
@@ -690,7 +698,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // No gate on mode: a person who types "just make me a lullaby" in Chat mode
   // asked for a file, not a conversation about files. The quota check inside
   // gatedMusic is what decides whether this account may spend, not the UI tab.
-  if (!wants3d && isMusicRequest(message) && musicConfigured()) {
+  if (!lockdown && !wants3d && isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
@@ -748,7 +756,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Art pre-pass ───────────────────────────────────────────────────
   // "draw me a duck" is a request for a file, and the canvas is not the only way in.
   // Same rule as music: the harness renders, the model narrates what exists.
-  if (!renderedImage && !wants3d && isImageRequest(message) && artConfigured()) {
+  if (!lockdown && !renderedImage && !wants3d && isImageRequest(message) && artConfigured()) {
     const prompt = message.slice(0, 1000);
     const verdict = await checkQuota({ userId, scope: "image", units: 1 });
     if (!verdict.ok) {
@@ -791,7 +799,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // takes a minute or two — longer than a turn should hold the connection — so the
   // turn starts the task and hands its id back, and the page polls
   // GET /api/buzzy/model3d/:id until the file is stored.
-  if (wants3d) {
+  // Lockdown: say so instead of calling out. The model is told once, below.
+  if (lockdown) {
+    if (wants3d) threeDRefusal = { code: "lockdown", error: "3D models are off in Lockdown" };
+    messages[0]!.content +=
+      "\n\nPRIVACY — LOCKDOWN: the owner chose Lockdown. Nothing leaves BeeZilla this turn except this reply: " +
+      "no web lookups, and no music, picture or 3D makers. If they ask for one of those, say it is off in Lockdown " +
+      "and that the privacy control on the Talk bar switches it back. Never claim you looked something up.";
+  } else if (wants3d) {
     if (!threeDConfigured()) {
       threeDRefusal = { code: "not_configured", error: "3D models are not set up on this deployment" };
       messages[0]!.content +=
@@ -823,7 +838,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // So when the request is a lookup, the harness does it and hands the model
   // what it read, with the URLs. The model cannot skip the research.
   const researchIntent = /\b(research|look ?up|find out|check|verify|current|latest|today|right now|how much|price|cost|deadline|hours)\b/i.test(message);
-  const runWebPrepass = surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent)));
+  const runWebPrepass = !lockdown && (surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent))));
   if (runWebPrepass) {
     const webCtx = await buildVoiceWebContext(message);
     for (const call of webCtx.calls) {
@@ -865,7 +880,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
-  const toolCtx = { draftGateOpen };
+  const toolCtx = { draftGateOpen, lockdown };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
   // non-empty tool list is what disables streaming), which is the 12s answer.

@@ -165,6 +165,12 @@
       stage.textContent = "Working…";
 
       var body = { message: text, stream: true };
+      // Same privacy slider as Talk (stored per browser): Lockdown turns off web
+      // lookups and outside makers on the server.
+      try {
+        var pv = localStorage.getItem("bz.privacy");
+        if (pv === "advocate" || pv === "lockdown" || pv === "open") body.privacy = pv;
+      } catch (_) {}
       if (opts.jobId) body.jobId = opts.jobId;
       var sid = getSession();
       if (sid) body.sessionId = sid;
