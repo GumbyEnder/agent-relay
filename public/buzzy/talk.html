@@ -3045,6 +3045,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // from "the head was never in the signal", and that difference is a code
       // fix versus a device fact.
       lastRingMs: 0, lastRingProfile: null,
+      // Probe stream (issue 299): a second, UNPROCESSED capture used only as a
+      // level meter, so "the head is at the floor" can be told apart from "the
+      // head never arrived". Opt-in (?voiceprobe=1); never transcribed, never
+      // uploaded, never played.
+      probeStream: null, probeCtx: null, probe: null, probeSettings: null,
+      probeErr: null, probeLast: null, probeGaveUp: false,
       // What the LAST turn's clip actually was: head kept, leading silence
       // trimmed, level lifted. Global preRollMs only ever described whichever
       // turn last started a capture, which is why "0 / no-speech" on the 10:10
@@ -3638,6 +3644,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // 250 ms, which is a starved capture, not a canceller ducking a live voice.
         ringZero: (h && h.ringZero) || voice.lastRingZero || null,
         rebuiltAt: h ? h.rebuiltAt : null,
+        probe: (h && h.probe) || voice.probeLast || null,
       };
     }
 
@@ -3655,11 +3662,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!md || !md.getUserMedia) return null;
       if (voice.micStream) {
         var live = voice.micStream.getAudioTracks().filter(function (t) { return t.readyState === "live"; });
-        if (live.length) { preRollStart(); return Promise.resolve(voice.micStream); }
+        if (live.length) { preRollStart(); probeStart(); return Promise.resolve(voice.micStream); }
         voice.micStream = null;
       }
       return md.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
-        .then(function (s) { voice.micStream = s; voice.aec = aecSettings(s); preRollStart(); return s; });
+        .then(function (s) { voice.micStream = s; voice.aec = aecSettings(s); preRollStart(); probeStart(); return s; });
     }
 
     // What the browser actually APPLIED, not what we asked for. Chrome silently
@@ -3681,6 +3688,172 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           dev: id ? h.toString(16) : null,
         };
       } catch (_) { return null; }
+    }
+
+    // ── Probe stream (issue 299): is the head crushed, or was it never there? ──
+    // The AEC ring says "this bin is at the floor". That is one fact with two
+    // causes: the canceller/APM ducked a live voice, or the voice arrived late
+    // / the capture path lost it. The deciding experiment is a SECOND capture
+    // opened with echoCancellation/noiseSuppression/autoGainControl OFF, binned
+    // exactly like the ring and snapshotted at the same take. Reading it:
+    //   probe loud, AEC at floor   -> APM gating a live voice (architectural fix)
+    //   probe also at floor        -> late onset / dead capture path, not the AEC
+    //   probe within a few dB      -> Chrome handed BOTH streams one processed
+    //                                 capture; the ratio proves nothing, say so
+    // Chrome can silently ignore ec:false, so the applied settings are recorded
+    // too (ecApplied). Opt-in only: a diagnostic that costs a second mic handle
+    // must never run for an owner who did not ask for it, and nothing from this
+    // stream is ever transcribed, uploaded or played.
+    var PROBE_ON = false;
+    try { PROBE_ON = /(?:^|[?&])voiceprobe=1(?:&|$)/.test(location.search); } catch (_) {}
+
+    function probeRingStop() {
+      var p = voice.probe;
+      voice.probe = null;
+      if (p) { try { p.proc.disconnect(); p.src.disconnect(); } catch (_) {} }
+    }
+
+    function probeStop() {
+      probeRingStop();
+      try { if (voice.probeStream) voice.probeStream.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+      voice.probeStream = null;
+      try { if (voice.probeCtx && voice.probeCtx.state !== "closed") voice.probeCtx.close(); } catch (_) {}
+      voice.probeCtx = null;
+      voice.probeGaveUp = false;
+    }
+
+    function probeRingStart() {
+      if (!PROBE_ON || !voice.probeStream) return;
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!voice.probeCtx || voice.probeCtx.state === "closed") voice.probeCtx = new AC();
+        var ctx = voice.probeCtx;
+        if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+        if (voice.probe && voice.probe.stream === voice.probeStream) return;
+        probeRingStop();
+        var src = ctx.createMediaStreamSource(voice.probeStream);
+        var proc = ctx.createScriptProcessor(2048, 1, 1);
+        var p = { ctx: ctx, stream: voice.probeStream, src: src, proc: proc, rate: ctx.sampleRate,
+                  chunks: [], frames: 0, pumped: Date.now(), peakSeen: 0 };
+        var cap = Math.max(1, Math.ceil((PRE_ROLL_MS / 1000) * ctx.sampleRate / 2048));
+        proc.onaudioprocess = function (ev) {
+          if (voice.probe !== p) return;
+          var input = ev.inputBuffer.getChannelData(0);
+          var copy = new Float32Array(input.length);
+          copy.set(input);
+          p.chunks.push(copy);
+          p.frames++;
+          p.pumped = Date.now();
+          var pk = 0;
+          for (var q = 0; q < copy.length; q++) { var a = copy[q] < 0 ? -copy[q] : copy[q]; if (a > pk) pk = a; }
+          if (pk > p.peakSeen) p.peakSeen = pk;
+          while (p.chunks.length > cap) p.chunks.shift();
+        };
+        src.connect(proc);
+        // The output buffer is never written, so this is a silent sink — the
+        // same wiring the AEC ring uses. It does NOT monitor the mic.
+        proc.connect(ctx.destination);
+        voice.probe = p;
+      } catch (e) {
+        voice.probeErr = "ring:" + ((e && (e.name || e.message)) || "failed");
+        voice.probe = null;
+      }
+    }
+
+    function probeStart() {
+      if (!PROBE_ON) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+      if (voice.probeStream) { probeRingStart(); return; }
+      // One attempt per listen session: an exclusive-access device will keep
+      // saying no, and a getUserMedia retry loop is noise, not evidence.
+      if (voice.probeGaveUp) return;
+      navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+        .then(function (s) {
+          if (!voice.mic) { try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {} return; }
+          voice.probeStream = s;
+          voice.probeSettings = aecSettings(s);
+          voice.probeErr = null;
+          probeRingStart();
+        })
+        .catch(function (e) {
+          voice.probeErr = String((e && (e.name || e.message)) || "probe-failed");
+          voice.probeGaveUp = true;
+        });
+    }
+
+    function probeTick() {
+      if (!PROBE_ON || !voice.mic) return;
+      if (!voice.probeStream) { probeStart(); return; }
+      if (!voice.probe) { probeRingStart(); return; }
+      try { if (voice.probe.ctx.state === "suspended") voice.probe.ctx.resume(); } catch (_) {}
+      if (Date.now() - (voice.probe.pumped || 0) > 2000) { probeRingStop(); probeRingStart(); }
+    }
+
+    // Snapshot of the probe ring at the same take as the AEC ring, binned the
+    // same way (15 x 250 ms), and judged against that ring here rather than in
+    // the QA walk's head: the verdict rule is written once, next to the data.
+    function probeSnapshot(aecProf) {
+      if (!PROBE_ON) return null;
+      if (!voice.probeStream) {
+        voice.probeLast = { err: voice.probeErr || "no-probe-stream", settings: voice.probeSettings || null };
+        return voice.probeLast;
+      }
+      var p = voice.probe;
+      if (!p || !p.chunks.length) {
+        voice.probeLast = { err: "no-probe-ring", settings: voice.probeSettings || null };
+        return voice.probeLast;
+      }
+      var total = 0, i;
+      for (i = 0; i < p.chunks.length; i++) total += p.chunks[i].length;
+      var flat = new Float32Array(total), off = 0;
+      for (i = 0; i < p.chunks.length; i++) { flat.set(p.chunks[i], off); off += p.chunks[i].length; }
+      var bin = Math.max(1, Math.round(p.rate * 0.25)), prof = [], profZero = [];
+      for (var s = 0; s < flat.length && prof.length < 15; s += bin) {
+        var e = Math.min(flat.length, s + bin), sq = 0, zeros = 0;
+        for (var j = s; j < e; j++) { sq += flat[j] * flat[j]; if (flat[j] === 0) zeros++; }
+        prof.push(Math.round(Math.sqrt(sq / Math.max(1, e - s)) * 1e4) / 1e4);
+        profZero.push(Math.round((zeros / Math.max(1, e - s)) * 100) / 100);
+      }
+      var st = voice.probeSettings || null;
+      var out = {
+        ms: Math.round((flat.length / p.rate) * 1000),
+        ring: prof,
+        ringZero: profZero,
+        frames: p.frames || 0,
+        peak: Math.round((p.peakSeen || 0) * 1e4) / 1e4,
+        agoMs: Date.now() - (p.pumped || Date.now()),
+        settings: st,
+        // If Chrome ignored ec:false this is a second PROCESSED stream and the
+        // whole comparison is void — say that, do not report an AEC number.
+        ecApplied: st ? !!st.ec : null,
+        err: null,
+        verdict: null, medAbsDb: null, deltas: null,
+      };
+      // Align from the NEWEST bin: both rings hold the last PRE_ROLL_MS and are
+      // snapshotted at the same instant, so the tail is what lines up.
+      var n = Math.min(prof.length, (aecProf || []).length);
+      if (n >= 2) {
+        var pa = prof.slice(prof.length - n), aa = aecProf.slice(aecProf.length - n);
+        var deltas = [], loudP = 0, loudA = 0;
+        for (var k = 0; k < n; k++) {
+          if (pa[k] > 0.0002) loudP++;
+          if (aa[k] > 0.0002) loudA++;
+          if (pa[k] > 0.0002 && aa[k] > 0.0002) {
+            deltas.push(Math.round((20 * Math.log(pa[k] / aa[k]) / Math.LN10) * 10) / 10);
+          }
+        }
+        out.deltas = deltas;
+        if (!loudP && !loudA) out.verdict = "both-floor";
+        else if (loudP && !loudA) out.verdict = "aec-floor";
+        else if (!loudP) out.verdict = "probe-floor";
+        else if (deltas.length >= 2) {
+          var ad = deltas.map(function (x) { return x < 0 ? -x : x; }).sort(function (a, b) { return a - b; });
+          out.medAbsDb = ad[Math.floor(ad.length / 2)];
+          out.verdict = out.medAbsDb <= 6 ? "shared-capture" : "separate-capture";
+        } else out.verdict = "partial";
+      }
+      voice.probeLast = out;
+      return out;
     }
 
     // ── Mic pre-roll (the head of a turn) ─────────────────────────────────
@@ -3773,6 +3946,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // product: the turn still works, it just loses its first words — residual 1.)
     setInterval(function () {
       if (!voice.mic || !voice.micStream) return;
+      if (PROBE_ON) probeTick();
       var p = voice.preRoll;
       if (!p) { preRollStart(); return; }
       try { if (voice.micCtx && voice.micCtx.state === "suspended") voice.micCtx.resume(); } catch (_) {}
@@ -3799,6 +3973,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // never extend a turn with silence to make the buffer look used.
     function preRollTake(opts) {
       opts = opts || {};
+      // A take that produces no ring must not inherit the previous take's probe
+      // reading: the probe is only evidence when it is paired with THIS clip.
+      voice.probeLast = null;
       var p = voice.preRoll;
       if (!p || !p.chunks.length) { voice.lastPreRollWhy = voice.ringDead ? "ring-dead" : "no-ring"; return null; }
       var total = 0, i;
@@ -3901,6 +4078,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // the 1e-4 floor — those cannot describe one buffer).
         takeId: ++voice.takeSeq,
         why: voice.lastPreRollWhy,
+        // The probe snapshot is taken HERE, beside the AEC ring it is compared
+        // with, so the two bin lists belong to one instant and one take id.
+        probe: probeSnapshot(prof),
         ringMs: voice.lastRingMs,
         ring: prof,
         ringZero: profZero,
@@ -3949,6 +4129,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function releaseMic() {
       bargeDisarm();
       preRollStop();
+      probeStop();
       voice.pendingPre = null;
       voice.ringDead = false;
       dropCapture();
@@ -4488,6 +4669,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // walk on — preRollMs above only describes the last capture
                    // that started, which may be a later turn.
                    lastTurn: voice.lastTurn || null,
+                   // Probe stream (issue 299), only with ?voiceprobe=1: is it
+                   // alive, what constraints did Chrome APPLY, and is its ring
+                   // pumping? A probe with ecApplied true is a processed stream
+                   // and cannot measure the AEC — read that before the numbers.
+                   probe: { on: PROBE_ON, err: voice.probeErr || null,
+                            settings: voice.probeSettings || null,
+                            ring: voice.probe ? { state: voice.probe.ctx.state, frames: voice.probe.frames || 0,
+                                                  peak: Math.round((voice.probe.peakSeen || 0) * 1e4) / 1e4,
+                                                  agoMs: Date.now() - (voice.probe.pumped || Date.now()) } : null },
                    // QA-facing: a ring that is not pumping is the residual (1)
                    // failure mode, and it is invisible from the transcript alone.
                    // peak is the loudest frame it has heard — frames that increment
