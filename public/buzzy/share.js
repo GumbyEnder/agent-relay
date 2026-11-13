@@ -171,8 +171,53 @@
 
   // ---- the window -------------------------------------------------------------------------
 
+  // The desktop app serves its pages from this computer (127.0.0.1). A public or
+  // team link made there would point at a machine nobody else can reach, so the
+  // window says how sharing works instead of making a link that cannot work.
+  function openOnDesktop(options) {
+    var title = typeof options.title === "string" && options.title.trim() ? options.title.trim() : "this document";
+    var returnTo = options.returnFocus || document.activeElement || null;
+    var root = make("div", "sh-root");
+    var scrim = make("div", "sh-scrim");
+    var dialog = make("div", "sh-dialog");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "Share");
+    dialog.tabIndex = -1;
+    var head = make("header", "sh-head");
+    head.appendChild(make("h2", "sh-title", "Share “" + title + "”"));
+    var closeBtn = make("button", "sh-icon", "✕");
+    closeBtn.type = "button";
+    closeBtn.title = "Close";
+    closeBtn.setAttribute("aria-label", "Close");
+    var actions = make("div", "sh-head-actions");
+    actions.appendChild(closeBtn);
+    head.appendChild(actions);
+    var body = make("div", "sh-body");
+    body.appendChild(make("p", "sh-hint",
+      "Sharing works on the BeeZilla website. In the desktop app your documents stay on this computer and nothing is uploaded."));
+    body.appendChild(make("p", "sh-hint",
+      "To share this one, download it and send the file yourself."));
+    dialog.appendChild(head);
+    dialog.appendChild(body);
+    root.appendChild(scrim);
+    root.appendChild(dialog);
+    document.body.appendChild(root);
+    function done() {
+      document.removeEventListener("keydown", onKey, true);
+      if (root.parentNode) root.parentNode.removeChild(root);
+      if (returnTo && document.documentElement.contains(returnTo) && typeof returnTo.focus === "function") returnTo.focus();
+    }
+    function onKey(e) { if (e.key === "Escape") { e.preventDefault(); done(); } }
+    closeBtn.addEventListener("click", done);
+    scrim.addEventListener("click", done);
+    document.addEventListener("keydown", onKey, true);
+    closeBtn.focus();
+  }
+
   function open(options) {
     options = options || {};
+    if (window.beezilla) { openOnDesktop(options); return; }
     if (session) session.close();
 
     var docId = options.docId === undefined || options.docId === null ? "" : String(options.docId);

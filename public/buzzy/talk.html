@@ -2668,7 +2668,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // served bytes for it and a comment would read as a live link.
     (lib ? '<a href="' + esc(lib) + '">Open in Library</a>' : "") +
         // Share: an explicit Selected team / Public choice (share.js), never automatic.
-        (doc.documentId && window.BeeZillaShare
+        // Not in the desktop app (window.beezilla): its links would point at this
+        // computer, which nobody else can reach.
+        (doc.documentId && window.BeeZillaShare && !window.beezilla
           ? '<button type="button" class="file-share" data-doc="' + esc(doc.documentId) + '" data-title="' + esc(doc.title || readableName(name)) + '">Share</button>'
           : "") +
       "</div>";
