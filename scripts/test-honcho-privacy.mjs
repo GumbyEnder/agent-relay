@@ -7,15 +7,21 @@
  * Run: npm run test:honcho-privacy (uses Node built-in TypeScript stripping).
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
 
-const pages = ["index", "talk"].map((name) => ({
+// index.html was renamed to library.html upstream. The demo is a separate deployment with its own copy.
+const pages = [
+  { name: "library", file: "public/buzzy/library.html" },
+  { name: "talk", file: "public/buzzy/talk.html" },
+  { name: "demo", file: "packages/beezilla-demo/index.html" },
+].map(({ name, file }) => ({
   name,
-  source: readFileSync(new URL(`../public/buzzy/${name}.html`, import.meta.url), "utf8"),
+  source: readFileSync(new URL(`../${file}`, import.meta.url), "utf8"),
 }));
+const ambientHoncho = /HONCHO_BASE|ensureHonchoPeer|syncHonchoChat|honcho-api-production|\/v3\/workspaces\//;
 const serverSource = readFileSync(new URL("../src/lib/buzzy/honcho.ts", import.meta.url), "utf8");
 
 function functionSource(source, name) {
@@ -64,8 +70,8 @@ for (const { name, source } of pages) {
       if (/\bsrc\s*=/.test(match[1])) continue;
       new vm.Script(match[2], { filename: `${name}.html:inline-${++count}` });
     }
-    assert.ok(count >= 2, "the production inline scripts were inspected");
-    assert.doesNotMatch(source, /HONCHO_BASE|ensureHonchoPeer|syncHonchoChat|honcho-api-production|\/v3\/workspaces\//);
+    assert.ok(count >= 1, "the production inline scripts were inspected");
+    assert.doesNotMatch(source, ambientHoncho);
   });
 
   for (const origin of ["http://127.0.0.1:4747", "https://hosted.example"]) {
@@ -102,12 +108,25 @@ for (const { name, source } of pages) {
       assert.equal(h.effects.snapshots, 1);
       assert.equal(h.effects.renders, 5);
       assert.equal(h.effects.drafts, 3);
-      assert.equal(h.effects.generations, name === "index" ? 1 : 0);
+      assert.equal(h.effects.generations, name === "library" ? 1 : 0);
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(h.requests.length, 0, "UI actions must not initiate third-party memory requests");
     });
   }
 }
+
+// Covers pages added later too: every browser-served file must stay free of the ambient uploader.
+test("every browser-served .html/.js under public/ and packages/beezilla-demo is free of ambient Honcho", () => {
+  const files = ["public", "packages/beezilla-demo"].flatMap((dir) =>
+    readdirSync(new URL(`../${dir}/`, import.meta.url), { recursive: true })
+      .filter((file) => /\.(html|js)$/.test(file))
+      .map((file) => `${dir}/${file}`));
+  assert.ok(files.includes("public/buzzy/library.html") && files.includes("packages/beezilla-demo/index.html"),
+    "the browser pages were inspected");
+  for (const file of files) {
+    assert.doesNotMatch(readFileSync(new URL(`../${file}`, import.meta.url), "utf8"), ambientHoncho, file);
+  }
+});
 
 function serverHarness(env) {
   const requests = [];
