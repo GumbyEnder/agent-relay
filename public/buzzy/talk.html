@@ -1416,6 +1416,7 @@
 .work-offer button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.85rem; }
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
+  <link rel="stylesheet" href="/buzzy/browse.css" />
 </head>
 <body>
   <header>
@@ -1605,6 +1606,42 @@
           </div>
           <!-- History of work sits below the chat, in every state, so the
                page never reflows when a conversation starts. -->
+          <!-- Browse half (owner's references zMWSgG0 / qVxl1TJ): building happens
+               above, finding and inspiration below. browse.js wires it; a search
+               replaces the tab content until ✕ or Escape. -->
+          <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
+            <div class="bz-search" role="search">
+              <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+              <input id="bzSearch" type="search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"
+                     aria-label="Search your work, skills and recipes, or enter a web address" />
+              <span class="bz-search-tools">
+                <button type="button" id="bzCopy" class="bz-icon-btn" aria-label="Copy the link to this page" title="Copy the link to this page">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                </button>
+              </span>
+            </div>
+            <p class="bz-search-note" id="bzSearchNote" role="status" aria-live="polite"></p>
+            <div class="bz-results hidden" id="bzResults" role="region" aria-label="Search results">
+              <div class="bz-results-head">
+                <h2>Search results</h2>
+                <button type="button" class="bz-icon-btn" id="bzResultsClose" aria-label="Close search" title="Close search">&#10005;</button>
+              </div>
+              <div class="bz-chips" role="tablist" aria-label="Show">
+                <button type="button" role="tab" data-f="all" class="on" aria-selected="true">All <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="documents" aria-selected="false">Documents <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="skills" aria-selected="false">Skills <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="recipes" aria-selected="false">Recipes <span class="bz-chip-n"></span></button>
+              </div>
+              <div class="bz-results-grid" id="bzResultsGrid"></div>
+            </div>
+            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Browse">
+              <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
+              <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
+              <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
+              <button type="button" role="tab" data-tab="experts" aria-selected="false" tabindex="-1">Experts</button>
+            </div>
+            <div class="bz-pane" id="bzPane" role="tabpanel"></div>
+          </section>
           <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
           <div id="chatError" class="chat-error hidden"></div>
           <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
@@ -6771,6 +6808,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sessionsError("Couldn't reach the server. Check your connection and try again.");
       }
     }
+    // Hooks for the browse half (browse.js): open a chat from a search result, and
+    // put a suggested prompt into the Talk bar without sending it.
+    window.bzOpenSession = function (sess) { openSession(sess); };
+    window.bzPrompt = function (text) {
+      var el = document.getElementById("chatInput");
+      if (!el) return;
+      el.value = String(text || "");
+      try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { window.scrollTo(0, 0); }
+      if (!el.disabled) {
+        el.focus();
+        try { el.setSelectionRange(el.value.length, el.value.length); } catch (_) {}
+      }
+    };
+
     async function openSession(s) {
       try {
         const r = await fetch("/api/buzzy/transcript?sessionId=" + encodeURIComponent(s.id), {
@@ -7022,5 +7073,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   }
 })();
 </script>
+<script src="/buzzy/experts-data.js"></script>
+<script src="/buzzy/browse.js"></script>
 </body>
 </html>
