@@ -961,7 +961,6 @@
       catalog.jobs.unshift(state);
       catalog.currentId = state.id;
       state.screen = "pick";
-      ensureHonchoPeer();
       render();
     }
 
@@ -1557,7 +1556,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           { who: "bee", text: "Got it — I'll treat this as a " + (t ? t.name : "") + " job. When you're ready, I'll show a full draft. Nothing starts until you approve it." },
         ];
         state.screen = "chat";
-        syncHonchoChat();
         render();
       };
       document.getElementById("back").onclick = () => { state.screen = "pick"; render(); };
@@ -1576,7 +1574,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         "<p class='muted'>Approve the draft next — that's when the board appears.</p>";
       document.getElementById("draft").onclick = () => {
         buildDraft();
-        syncHonchoChat();
         state.screen = "draft";
         render();
         generateDraft();
@@ -1586,7 +1583,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (!v) {
           if (state.problem) {
             buildDraft();
-            syncHonchoChat();
             state.screen = "draft";
             render();
           }
@@ -1596,7 +1592,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         state.messages.push({ who: "me", text: v });
         state.problem = (state.problem ? state.problem + "\n\n" : "") + v;
         buildDraft();
-        syncHonchoChat();
         state.screen = "draft";
         render();
       };
@@ -1849,38 +1844,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       else if (state.screen === "docs") goDocs();
       saveState();
     }
-    const HONCHO_BASE = "https://honcho-api-production-5869.up.railway.app";
-
-    function ensureHonchoPeer() {
-      if (!catalog.userId) return;
-      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/peers", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: catalog.userId }),
-      }).catch(function () {});
-    }
-
-    function syncHonchoChat() {
-      if (!catalog.userId || !state.id) return;
-      ensureHonchoPeer();
-      const sid = String(state.id).slice(0, 128);
-      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/sessions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: sid, peers: { [catalog.userId]: {}, beezilla: {} } }),
-      }).then(function () {
-        const msgs = (state.messages || []).filter(function (m) { return m.who === "me" && m.text; }).slice(-5);
-        if (!msgs.length && state.problem) msgs.push({ who: "me", text: state.problem });
-        if (!msgs.length) return;
-        return fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/sessions/" + encodeURIComponent(sid) + "/messages", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            messages: msgs.map(function (m) { return { content: String(m.text).slice(0, 4000), peer_id: catalog.userId }; }),
-          }),
-        });
-      }).catch(function () {});
-    }
+    // External memory sync is disabled pending authenticated, scoped consent.
+    // This UI must never send owner IDs or conversations to an ambient third party.
 
     // ── Account gate. The chrome (nav.js) owns the identity chip and its menu;
     // this page only refuses a signed-out visitor. Two writers built two menus
