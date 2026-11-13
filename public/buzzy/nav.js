@@ -20,18 +20,20 @@
   "use strict";
 
   var LINKS = [
+    // The owner's roadmap names five main places: Talk, Library, Memory, Experts,
+    // Recipes. Everything else stays one click away under "More" (`more: true`).
     { id: "talk", href: "/buzzy/talk", label: "Talk" },
-    { id: "sketch", href: "/buzzy/sketch", label: "Sketch" },
-    { id: "studio", href: "/buzzy/studio", label: "Studio" },
     // No longer opens a new tab: the page shell below keeps Talk (and the mic)
     // alive while you move around, so the reason for the `_blank` is gone.
     { id: "library", href: "/buzzy/library", label: "Library" },
-    { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities" },
     { id: "memory", href: "/buzzy/memory", label: "Memory" },
     { id: "experts", href: "/buzzy/experts", label: "Experts" },
     { id: "recipes", href: "/buzzy/recipes", label: "Recipes" },
-    { id: "wallet", href: "/buzzy/wallet", label: "Honey Drops" },
-    { id: "publish", href: "/buzzy/upload", label: "Publish" },
+    { id: "sketch", href: "/buzzy/sketch", label: "Sketch", more: true },
+    { id: "studio", href: "/buzzy/studio", label: "Studio", more: true },
+    { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities", more: true },
+    { id: "wallet", href: "/buzzy/wallet", label: "Honey Drops", more: true },
+    { id: "publish", href: "/buzzy/upload", label: "Publish", more: true },
   ];
 
   function section(pathname) {
@@ -215,7 +217,49 @@
       else { a.removeAttribute("target"); a.removeAttribute("rel"); }
       ordered.push(a);
     });
-    ordered.forEach(function (a) { nav.appendChild(a); });
+    // Main places in the row; the rest in one "More" menu (idempotent: this runs
+    // again after every soft navigation, so reuse the menu if it exists).
+    var more = nav.querySelector(".bz-more");
+    if (!more) {
+      more = document.createElement("div");
+      more.className = "bz-more";
+      more.innerHTML =
+        '<button type="button" class="bz-more-btn" aria-haspopup="true" aria-expanded="false">More <span aria-hidden="true">&#9662;</span></button>' +
+        '<div class="bz-more-menu" hidden></div>';
+      var moreBtn = more.querySelector(".bz-more-btn");
+      var moreMenu = more.querySelector(".bz-more-menu");
+      var setOpen = function (open) {
+        moreMenu.hidden = !open;
+        moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (!open) return;
+        // The link row scrolls sideways, which clips anything absolutely placed in
+        // it: pin the menu to the viewport under the button instead.
+        var r = moreBtn.getBoundingClientRect();
+        var w = moreMenu.offsetWidth || 180;
+        moreMenu.style.top = Math.round(r.bottom + 6) + "px";
+        moreMenu.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + "px";
+      };
+      window.addEventListener("resize", function () { setOpen(false); });
+      window.addEventListener("scroll", function () { if (!moreMenu.hidden) setOpen(false); }, { passive: true });
+      moreBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        setOpen(moreMenu.hidden);
+        if (!moreMenu.hidden) { var first = moreMenu.querySelector("a"); if (first) first.focus(); }
+      });
+      moreMenu.addEventListener("click", function () { setOpen(false); });
+      more.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !moreMenu.hidden) { setOpen(false); moreBtn.focus(); }
+      });
+      document.addEventListener("click", function (e) {
+        if (!more.contains(e.target)) setOpen(false);
+      });
+    }
+    var menu = more.querySelector(".bz-more-menu");
+    ordered.forEach(function (a, i) {
+      if (LINKS[i].more) menu.appendChild(a);
+      else nav.appendChild(a);
+    });
+    nav.appendChild(more);
     // Anchors too: `#bzNav a` is a page-owned id rule on sketch/studio/capabilities,
     // so an inherited value cannot reach them. 0.86rem is the shared nav.css size;
     // writing it inline keeps the label box identical wherever the row is rendered.
@@ -233,6 +277,13 @@
       if (on) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
+    // A page that lives under More lights up More.
+    var moreButton = nav.querySelector(".bz-more-btn");
+    if (moreButton) {
+      moreButton.classList.toggle("active", LINKS.some(function (l) { return l.more && l.id === active; }));
+      moreButton.style.fontFamily = CHROME_FONT;
+      moreButton.style.fontSize = "0.86rem";
+    }
     return nav;
   }
 
