@@ -3056,14 +3056,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // turn last started a capture, which is why "0 / no-speech" on the 10:10
       // walk could not be told apart from a turn that kept its head.
       lastTurn: null,
-      // A barge turn is OWNED by the clip, not by the recogniser (see
-      // sendBargeClip). The gate already proved speech started; Chrome's
+      // A turn is OWNED by its clip, not by the recogniser (see sendTurnClip).
+      // Speech was already measured on the audio the clip holds; Chrome's
       // recogniser only gets to say where it ended. On the 9:15 PM walk
       // (b123b80) the gate fired, the story was cut, and the recogniser
       // returned no speech at all — so the turn was dropped with its audio in
       // hand: no bubble, no follow-up, no take, and issue 299 stayed
-      // unmeasured for a second night.
+      // unmeasured for a second night. bargeClip marks the gate-opened case
+      // (a cut reply); it is no longer a precondition for keeping the audio.
       bargeClip: false, bargeSent: false,
+      // Set the moment the recogniser produces a final transcript: from then on
+      // THIS window belongs to its words, and onend/onerror may not also post the
+      // clip. Without it, a kept clip and the recognised turn were two turns from
+      // one window — stopListening() can end the recogniser before sendHeardTurn
+      // has taken the capture.
+      textClaim: false,
       // Voice barge-in (see bargeArm): the detector runs on the pre-roll ring's
       // own frames — one stream, one AudioContext, one truth. It used to be a
       // second MediaStreamSource + AnalyserNode on a context of its own, which
@@ -3397,6 +3404,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // One spoken turn: returns the final transcript, or "" if nothing heard.
     function startListening() {
       if (voice.rec || recState) return;
+      // One window, one clip: the posted flag is per recogniser window, not
+      // per session, so a kept turn cannot suppress the next one.
+      voice.bargeSent = false;
+      voice.textClaim = false;
       // Firefox ships no SpeechRecognition and Brave's service is blocked, so
       // those browsers record the clip and let the server transcribe it.
       if (!srAvailable() || voice.asr === "recorder") { startRecording(); return; }
@@ -3427,6 +3438,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // The recogniser heard the turn, so it keeps the floor: no barge
           // fallback may post this clip a second time.
           voice.bargeClip = false;
+          // Its words are the turn now; the clip may not also become one (see
+          // textClaim — stopListening can reach onend before sendHeardTurn runs).
+          voice.textClaim = true;
           stopListening();
           // Timestamp the moment the owner stopped talking: time-to-talk is
           // measured from here, not from when we happened to send.
@@ -3439,12 +3453,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       rec.onerror = function (e) {
         if (rec._bzStale) return;
         var err = e && e.error;
-        // A barge turn's clip is the evidence, so it must survive the
+        // A clip that MEASURED speech is the evidence, and it must survive the
         // recogniser's own failure. Dropping it here is what silently ate the
-        // 9:15 PM walk's interruption: "no-speech" is Chrome saying IT heard
-        // nothing, not that the room was quiet — the gate had already measured
-        // 0.34 RMS on the ring. onend posts the clip (see sendBargeClip).
-        var keepClip = !!voice.bargeClip && voice.mic && err !== "not-allowed" && err !== "service-not-allowed";
+        // 9:15 PM walk's interruption (the gate had measured 0.34 RMS on the
+        // ring) — and the same line ate ordinary turns: it demanded
+        // voice.bargeClip, so a late SR failure on a turn the gate never opened
+        // threw away audio the capture had already measured as speech. Chrome's
+        // "no-speech" is IT saying it heard nothing, not that the room was
+        // quiet. A denied mic permission is the one case with no route around it.
+        // onend posts the kept clip (see sendTurnClip).
+        var keepClip = err !== "not-allowed" && voice.mic && clipHasSpeech();
         if (!keepClip) dropCapture();
         if (err === "not-allowed") {
           // A denied permission has no route around it.
@@ -3457,6 +3475,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // blocked service hits Chrome the same way. Recording needs nothing
           // but getUserMedia, so this session switches to the server transcriber.
           voice.asr = "recorder";
+          if (keepClip) {
+            // A service cut mid-turn is the case this fix exists for: the audio
+            // is already in hand, so post it instead of starting a second
+            // recorder over it (startRecording drops whatever the capture holds).
+            // Stale first, so this window's onend can neither post it twice nor
+            // null out the recogniser the next turn opens.
+            try { rec._bzStale = true; } catch (_) {}
+            try { rec.stop(); } catch (_) {}
+            voice.rec = null;
+            if (sendTurnClip()) return;
+            if (voice.mic) startRecording();
+            return;
+          }
           try { rec.stop(); } catch (_) {}
           voice.rec = null;
           if (voice.mic) startRecording();
@@ -3473,12 +3504,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (rec._bzStale) return;
         voice.rec = null;
         // A window that ended without a final utterance never became a turn —
-        // UNLESS the barge gate had already voted. Then this window is the turn
-        // the owner took, and the clip (gate take + capture) is the evidence;
-        // the recogniser's silence is just its opinion. Anything else loses the
-        // interruption with its audio sitting in hand.
-        if (voice.bargeClip && voice.mic) {
-          if (sendBargeClip()) return;
+        // UNLESS the audio in hand measured as speech. Then this window is the
+        // turn the owner took, and the clip is the evidence; the recogniser's
+        // silence is just its opinion. Anything else loses the turn with its
+        // audio sitting in hand.
+        if (voice.mic && clipHasSpeech()) {
+          if (sendTurnClip()) return;
         }
         // Its clip is not evidence of anything.
         dropCapture();
@@ -4443,7 +4474,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (rms > 0.02) { capState.speechSeen = true; capState.quietSince = 0; }
             else if (capState.speechSeen && !capState.quietSince) capState.quietSince = Date.now();
             if (voice.bargeClip && capState.speechSeen && capState.quietSince &&
-                Date.now() - capState.quietSince > 1200) sendBargeClip();
+                Date.now() - capState.quietSince > 1200) sendTurnClip();
           };
           src.connect(proc);
           proc.connect(ctx.destination);
@@ -4476,6 +4507,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       capState = null;
       if (!c) return;
       try { c.proc.disconnect(); c.src.disconnect(); } catch (_) {}
+    }
+
+    // Was this window's audio measured as speech? On a barge turn the gate has
+    // already voted on the same ring frames the clip holds; on an ordinary turn
+    // the capture's own frame callback measured it against the same 0.02 floor
+    // (see the bargeFeed/BARGE_RMS note). Either way it is OUR measurement of
+    // the room, and it — never the recogniser's opinion — decides whether a clip
+    // may be thrown away. capState is null once a clip has been finished, so a
+    // turn already sent cannot be posted twice.
+    function clipHasSpeech() {
+      if (voice.textClaim) return false;   // this window's words already are the turn
+      return !!(voice.bargeClip || (capState && capState.speechSeen));
     }
 
     function asrQueryString() {
@@ -4527,13 +4570,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       sendChatMessage();
     }
 
-    // A barge turn posts its clip even when the recogniser heard nothing.
-    // By the time this runs the gate has already voted on the same ring frames
-    // that are in the clip, so "was there speech" is answered; Chrome's
+    // A turn whose audio measured as speech posts its clip even when the
+    // recogniser heard nothing. By the time this runs the speech was measured on
+    // the same audio the clip holds, so "was there speech" is answered; Chrome's
     // recogniser only gets to say when the speech ended. Returns true when the
     // clip was posted, so a caller must not re-arm over the turn it started.
-    function sendBargeClip() {
-      if (!voice.bargeClip || voice.bargeSent) return false;
+    function sendTurnClip() {
+      if (voice.bargeSent || !clipHasSpeech()) return false;
       var wav = finishCapture();
       if (!wav) return false;
       voice.bargeSent = true;
@@ -4775,6 +4818,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // became the turn. A cut with pending false and sent false on
                    // a walk is a lost interruption — the exact shape of 3187.
                    barge: { pending: !!voice.bargeClip, sent: !!voice.bargeSent },
+                   // QA-facing: what decides whether a failed window keeps its
+                   // audio (see clipHasSpeech). capture.speechSeen is the
+                   // capture's own measurement of this window; kept is the
+                   // combined answer, so "SR failed and the turn vanished" can
+                   // be told apart from "SR failed and there was nothing to keep".
+                   capture: { speechSeen: !!(capState && capState.speechSeen), kept: clipHasSpeech() },
                    // Which capture handles THIS page still holds. One for a
                    // normal session, two with ?voiceprobe=1; a stopped session
                    // must hold none. (Chrome's own recogniser opens a third
