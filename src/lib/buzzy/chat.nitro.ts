@@ -2136,7 +2136,9 @@ export default defineEventHandler(async (event) => {
   }
 
   // ── /api/buzzy/privacy — the owner's privacy mode, per account ─────────
-  // GET → { mode } ("open" until chosen). PUT { mode } → saves it. The chat reads
+  // GET → { mode, saved, defaultMode }. Until the owner chooses, the mode is this
+  // deployment's default: Open on the hosted site, Advocate in the desktop app
+  // (BZ_RUNTIME=local) — roadmap phase 5. PUT { mode } → saves it. The chat reads
   // the same row on every turn, so Lockdown holds on every device and page.
   if (path === "/api/buzzy/privacy" && (method === "GET" || method === "PUT")) {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
@@ -2162,8 +2164,9 @@ export default defineEventHandler(async (event) => {
       `;
       return { ok: true, mode };
     }
+    const defaultMode = (process.env.BZ_RUNTIME ?? "").trim().toLowerCase() === "local" ? "advocate" : "open";
     const rows = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
-    return { ok: true, mode: rows[0]?.mode ?? "open", saved: rows.length > 0 };
+    return { ok: true, mode: rows[0]?.mode ?? defaultMode, saved: rows.length > 0, defaultMode };
   }
 
   // ── GET /api/buzzy/profile — account-scoped business profile + defaults ──

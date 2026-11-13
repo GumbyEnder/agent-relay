@@ -5,7 +5,8 @@
  * "Open to the world" pill).
  *
  * What each mode does on the hosted site TODAY (said in the picker, word for word):
- *   Open      — the cloud default. Publishing finished work is not switched on yet,
+ *   Open      — the website's default (the desktop app starts on Advocate; the server
+ *               says which via GET /api/buzzy/privacy). Publishing finished work is not switched on yet,
  *               so nothing is published automatically.
  *   Advocate  — BeeZilla works only for you; nothing is published.
  *   Lockdown  — nothing extra leaves BeeZilla: no web lookups, no music, picture or
@@ -41,13 +42,14 @@
   };
   var ORDER = ["advocate", "lockdown", "open"];
 
+  var fallback = "open"; // replaced by the deployment's default once the server answers
   function read() {
     var v = null;
-    try { v = localStorage.getItem(KEY); } catch (_) {}
-    return MODES[v] ? v : "open";
+    try { v = localStorage.getItem(KEY); } catch (_) { /* private mode */ }
+    return MODES[v] ? v : fallback;
   }
   function write(v) {
-    try { localStorage.setItem(KEY, v); } catch (_) {}
+    try { localStorage.setItem(KEY, v); } catch (_) { /* best effort */ }
   }
   window.bzPrivacy = read;
 
@@ -104,7 +106,14 @@
   function apply(mode) {
     write(mode);
     paint();
-    try { window.dispatchEvent(new CustomEvent("bz:privacy", { detail: { mode: mode } })); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent("bz:privacy", { detail: { mode: mode } })); } catch (_) { /* best effort */ }
+  }
+
+  function paintDefault(mode) {
+    if (!MODES[mode]) return;
+    fallback = mode;
+    paint();
+    try { window.dispatchEvent(new CustomEvent("bz:privacy", { detail: { mode: mode } })); } catch (_) { /* old browsers */ }
   }
 
   function set(mode) {
@@ -122,9 +131,12 @@
     .then(function (j) {
       if (!j || !j.ok || !MODES[j.mode]) return;
       var local = null;
-      try { local = localStorage.getItem(KEY); } catch (_) {}
+      try { local = localStorage.getItem(KEY); } catch (_) { /* best effort */ }
       if (j.saved) { if (j.mode !== read()) apply(j.mode); }
-      else if (MODES[local] && local !== j.mode) save(local);
+      else if (MODES[local]) { if (local !== j.mode) save(local); }
+      // Nothing chosen yet: show this deployment's default (Open on the website,
+      // Advocate in the desktop app), without saving it as a choice.
+      else if (j.mode !== read()) paintDefault(j.mode);
     })
     .catch(function () {});
 
