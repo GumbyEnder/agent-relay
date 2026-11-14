@@ -4466,7 +4466,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var pol = polishSamples(flat, r.rate, voice.lastPreRollSamples);
       setLastTurn(pol, r.rate);
       if (!pol.samples.length) { rearmListening(); return; }
-      sendForTranscription(encodeWav(downsampleTo16k(pol.samples, r.rate)));
+      var wav = encodeWav(downsampleTo16k(pol.samples, r.rate));
+      // The recorder lane is the Firefox/Brave path (srAvailable() false). It
+      // never goes through a clip barge, so before 369e655+1 this commit left
+      // NO frozen record: lastMoment was null on every non-Chrome walk and the
+      // instrumentation looked correct only because every walk was Chrome.
+      // Speech was already required to reach here (the !speechSeen and <0.3 s
+      // returns above), so speechSeen/kept are facts of this path, not claims.
+      freezeMoment("rec-clip", { speechSeen: true, kept: true, bytes: wav.size });
+      sendForTranscription(wav);
     }
 
     function cancelRecording() {
@@ -4875,7 +4883,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // clip. lastMoment.path says which lane committed the turn:
                    // "clip-barge" (gate opened it), "clip-late" (recogniser gave
                    // up, the clip's own measurement kept it), "sr-clip" (words
-                   // plus clip), "sr-text" (words only, no usable clip).
+                   // plus clip), "sr-text" (words only, no usable clip),
+                   // "rec-clip" (the recorder lane: Firefox/Brave, no SR).
                    lastMoment: voice.lastMoment || null,
                    // Probe stream (issue 299), only with ?voiceprobe=1: is it
                    // alive, what constraints did Chrome APPLY, and is its ring
