@@ -57,6 +57,7 @@ import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, producesDeliverable } from "./intent";
 import { selfKnowledgeNote } from "./self-knowledge";
+import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
@@ -328,6 +329,12 @@ export interface ChatResponse {
     /** Where to find it later. */
     libraryUrl?: string;
   }>;
+  /**
+   * On-screen actions the owner asked for in this message ("open the whiteboard"),
+   * from the closed list in pilot.ts. The Talk page carries them out where the
+   * owner can see them, with Stop at every step (public/buzzy/pilot.js).
+   */
+  actions?: AppAction[];
   /** What ran this turn, in order — the "what happened" strip reads this. */
   tools?: Array<{ name: string; ms: number; ok: boolean; code?: string }>;
   /** The file this turn produced, with links the chat can show inline. */
@@ -835,7 +842,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Answered from verified facts tied to this code (self-knowledge/answers.json),
   // not from the model's guess about what BeeZilla can do. Local data, so it is
   // allowed in Lockdown too.
-  const selfNote = selfKnowledgeNote(message);
+  // Asked to do something in BeeZilla itself ("open the whiteboard", "switch to
+  // Lockdown"): the page does it on screen, step by step (pilot.ts, pilot.js), and
+  // the reply only says so. Otherwise a question about BeeZilla gets its facts.
+  const appPlan = planAppActions(message, req.privacy ?? null);
+  if (appPlan) messages[0]!.content += "\n\n" + appActionsNote(appPlan);
+  const selfNote = appPlan ? null : selfKnowledgeNote(message);
   if (selfNote) messages[0]!.content += "\n\n" + selfNote;
 
   // Research pre-pass. Two reasons, one mechanism:
@@ -1603,6 +1615,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       lane,
     },
   };
+  if (appPlan) response.actions = appPlan;
   // ── Audio-only turns ───────────────────────────────────────────────
   // A track is the deliverable, not a draft of one. Materialising the reply as a
   // document beside the mp3 gave the owner two artifacts for one request: a

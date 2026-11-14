@@ -6560,6 +6560,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         renderChatMessages();
         renderSlotChecklist();
+        // Asked BeeZilla to do something on this page ("open the whiteboard"): it
+        // does it where the owner can watch, with Stop at every step (pilot.js).
+        if (Array.isArray(data.actions) && data.actions.length && window.BeeZillaPilot) window.BeeZillaPilot.run(data.actions);
         // Asked for a 3D model: the turn started it, and it lands under this reply.
         if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
         // A track spends plan minutes: show what is left now, not on the next send.
@@ -7188,5 +7191,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>
+<script src="/buzzy/pilot.js"></script>
 </body>
 </html>
