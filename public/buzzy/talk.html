@@ -3056,6 +3056,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // turn last started a capture, which is why "0 / no-speech" on the 10:10
       // walk could not be told apart from a turn that kept its head.
       lastTurn: null,
+      // The frozen record of the moment a turn was COMMITTED (see freezeMoment).
+      // The capture/preRollWhy fields state() exposes are read from live globals
+      // and describe whatever is happening at poll time; this one describes the
+      // turn. Written once per turn, never rewritten.
+      lastMoment: null,
       // A turn is OWNED by its clip, not by the recogniser (see sendTurnClip).
       // Speech was already measured on the audio the clip holds; Chrome's
       // recogniser only gets to say where it ended. On the 9:15 PM walk
@@ -3064,7 +3069,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // hand: no bubble, no follow-up, no take, and issue 299 stayed
       // unmeasured for a second night. bargeClip marks the gate-opened case
       // (a cut reply); it is no longer a precondition for keeping the audio.
-      bargeClip: false, bargeSent: false,
+      bargeClip: false, bargeSent: false, bargeWasClip: false,
       // Set the moment the recogniser produces a final transcript: from then on
       // THIS window belongs to its words, and onend/onerror may not also post the
       // clip. Without it, a kept clip and the recognised turn were two turns from
@@ -3407,6 +3412,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // One window, one clip: the posted flag is per recogniser window, not
       // per session, so a kept turn cannot suppress the next one.
       voice.bargeSent = false;
+      voice.bargeWasClip = false;
       voice.textClaim = false;
       // Firefox ships no SpeechRecognition and Brave's service is blocked, so
       // those browsers record the clip and let the server transcribe it.
@@ -3437,6 +3443,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             : null;
           // The recogniser heard the turn, so it keeps the floor: no barge
           // fallback may post this clip a second time.
+          // If the gate opened this window, the clip is still the evidence
+          // (sendHeardTurn posts it to /transcribe) — so the clip DID become the
+          // turn. Clearing the pending flag without saying so left state()
+          // reporting the "lost interruption" shape (pending false, sent false)
+          // for a barge that was delivered, which is what made the 5:07 PM walk's
+          // barge triad look like a defect it was not.
+          voice.bargeWasClip = !!voice.bargeClip;
+          if (voice.bargeWasClip) voice.bargeSent = true;
           voice.bargeClip = false;
           // Its words are the turn now; the clip may not also become one (see
           // textClaim — stopListening can reach onend before sendHeardTurn runs).
@@ -3701,6 +3715,53 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         rebuiltAt: h ? h.rebuiltAt : null,
         probe: (h && h.probe) || voice.probeLast || null,
       };
+    }
+
+    // The moment a turn was COMMITTED, frozen — the number QA should grade on.
+    //
+    // state()'s capture/preRollWhy are read from live globals: capState is nulled
+    // the instant a clip is finished, and lastPreRollWhy is last-writer-wins
+    // across turns. A poll that lands even a second late therefore describes a
+    // window that no longer exists. That is exactly what happened on the 5:07 PM
+    // walk (b7e8646): read 55 s after the barge, state() said
+    // capture.speechSeen false / preRollWhy "no-speech" / preRollMs 0 while
+    // lastTurn proved a 2897 ms clip at 0.878 peak — a real interruption,
+    // ungradeable because the read lost a race with the next capture.
+    //
+    // This object is written once, at the commit, and never rewritten, so a QA
+    // read at any later moment describes the same turn. `speechSeen` must be
+    // passed by the caller: the capture's own measurement is read BEFORE
+    // finishCapture nulls capState.
+    function freezeMoment(path, detail) {
+      var t = voice.lastTurn || null;
+      var d = detail || {};
+      voice.lastMoment = {
+        at: Date.now(),
+        path: path || null,
+        speechSeen: d.speechSeen != null ? !!d.speechSeen : null,
+        bytes: d.bytes != null ? d.bytes : null,
+        asr: voice.asr || null,
+        // Measured at commit, then unrecoverable: the send path zeroes
+        // lastSpeechEnd, which is why a late state() can only ever show a stamp.
+        asrMs: voice.lastSpeechEnd ? Math.round(performance.now() - voice.lastSpeechEnd) : null,
+        preRollWhy: voice.lastPreRollWhy || null,
+        preRollMs: voice.lastPreRollMs || 0,
+        preRollSamples: voice.lastPreRollSamples || 0,
+        kept: d.kept != null ? !!d.kept : clipHasSpeech(),
+        bargeWindow: d.bargeWindow != null ? !!d.bargeWindow : !!(voice.bargeClip || voice.bargeWasClip),
+        bargeSent: !!voice.bargeSent,
+        textClaim: !!voice.textClaim,
+        gateFires: voice.gateFires || 0,
+        takeId: t ? t.takeId : null,
+        headMs: t ? t.headMs : null,
+        clipMs: t ? t.clipMs : null,
+        leadMs: t ? t.leadMs : null,
+        clipPeak: t ? t.clipPeak : null,
+        bodyPeak: t ? t.bodyPeak : null,
+        why: t ? t.why : null,
+        ringMs: t ? t.ringMs : null,
+      };
+      return voice.lastMoment;
     }
 
     /**
@@ -4282,6 +4343,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.sending = false;
       voice.gateFires = (voice.gateFires || 0) + 1;
       voice.gateWhy = "fired";
+      // Two QA walks reported gate.fires 2 with a lastFireAgoMs that only covers
+      // ONE fire, so "the gate double-counted" and "the gate fired twice inside
+      // its own 1200 ms cooldown" look identical from a counter. Keep the last
+      // few, with what each one saw.
+      voice.gateFireLog = (voice.gateFireLog || []).concat([{
+        at: Date.now(), msSinceSpeak: Math.round(at - (voice.speakStartedAt || at)),
+        msSincePrev: voice.gateLastFireAt ? Date.now() - voice.gateLastFireAt : null,
+        peak: voice.gatePeak || 0, hits: voice.bargHits || 0, turnSeq: voice.turnSeq || 0,
+      }]).slice(-6);
       voice.gateLastFireAt = Date.now();
       stopSpeaking();
       if (voice.mic) startListening();
@@ -4534,8 +4604,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // guess. Send the guess only when the clip cannot be transcribed — a Listen
     // mode that swallows the turn is worse than one that mishears a name.
     function sendHeardTurn(srText) {
+      var seen = !!(capState && capState.speechSeen);
+      var bargeWin = !!(voice.bargeClip || voice.bargeWasClip);
       var wav = finishCapture();
       var fallback = jobNameFix(brandName(srText)).trim();
+      // A turn posted from the recogniser's words still carries the clip when one
+      // exists — so the moment is recorded here too, with the same frozen shape
+      // as the clip path. "sr-text" means there was no usable clip and the words
+      // are all there is.
+      freezeMoment(wav ? "sr-clip" : "sr-text",
+        { speechSeen: seen || bargeWin, bargeWindow: bargeWin, kept: !!wav, bytes: wav ? wav.byteLength : null });
       if (!wav) { submitHeard(fallback); return; }
       // Claim the turn now: the recogniser's onend fires while this fetch is in
       // flight and would otherwise re-arm the mic over its own turn.
@@ -4577,6 +4655,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // clip was posted, so a caller must not re-arm over the turn it started.
     function sendTurnClip() {
       if (voice.bargeSent || !clipHasSpeech()) return false;
+      // Both of these are read from LIVE state, so they must be read here, before
+      // finishCapture nulls capState and before the pending flag is cleared.
+      var bargeWin = !!(voice.bargeClip || voice.bargeWasClip);
+      var seen = !!((capState && capState.speechSeen) || bargeWin);
       var wav = finishCapture();
       if (!wav) return false;
       voice.bargeSent = true;
@@ -4586,6 +4668,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { if (voice.rec) { voice.rec._bzStale = true; voice.rec.stop(); } } catch (_) {}
       voice.rec = null;
       voice.lastSpeechEnd = performance.now();
+      freezeMoment(bargeWin ? "clip-barge" : "clip-late",
+        { speechSeen: seen, bargeWindow: bargeWin, kept: true, bytes: wav.byteLength });
       sendForTranscription(wav);
       return true;
     }
@@ -4783,6 +4867,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // walk on — preRollMs above only describes the last capture
                    // that started, which may be a later turn.
                    lastTurn: voice.lastTurn || null,
+                   // THE field to grade a turn on. Frozen at commit, never
+                   // rewritten: the live capture/preRollWhy below describe the
+                   // window that is happening NOW (or nothing, once a clip is
+                   // finished), which is why a 55 s-late poll on the 5:07 PM walk
+                   // read "no-speech" for a turn that had a 2897 ms 0.878-peak
+                   // clip. lastMoment.path says which lane committed the turn:
+                   // "clip-barge" (gate opened it), "clip-late" (recogniser gave
+                   // up, the clip's own measurement kept it), "sr-clip" (words
+                   // plus clip), "sr-text" (words only, no usable clip).
+                   lastMoment: voice.lastMoment || null,
                    // Probe stream (issue 299), only with ?voiceprobe=1: is it
                    // alive, what constraints did Chrome APPLY, and is its ring
                    // pumping? A probe with ecApplied true is a processed stream
@@ -4810,6 +4904,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                            peak: voice.gatePeak || 0, rms: voice.gateRms || 0,
                            hits: voice.bargHits || 0, fires: voice.gateFires || 0,
                            why: voice.gateWhy || null,
+                           fireLog: voice.gateFireLog || [],
                            sinceSpeakMs: voice.speaking ? Math.round(performance.now() - (voice.speakStartedAt || performance.now())) : null,
                            lastFireAgoMs: voice.gateLastFireAt ? Date.now() - voice.gateLastFireAt : null },
                    // A barge turn is owned by its clip: "pending" means the gate
@@ -4823,7 +4918,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                    // capture's own measurement of this window; kept is the
                    // combined answer, so "SR failed and the turn vanished" can
                    // be told apart from "SR failed and there was nothing to keep".
-                   capture: { speechSeen: !!(capState && capState.speechSeen), kept: clipHasSpeech() },
+                   // LIVE ONLY (live says whether a capture is even open): once a
+                   // clip is finished capState is null and both read false/kept,
+                   // which is not a measurement — grade lastMoment instead.
+                   capture: { speechSeen: !!(capState && capState.speechSeen), kept: clipHasSpeech(),
+                              live: !!capState },
                    // Which capture handles THIS page still holds. One for a
                    // normal session, two with ?voiceprobe=1; a stopped session
                    // must hold none. (Chrome's own recogniser opens a third
