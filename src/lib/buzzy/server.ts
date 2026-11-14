@@ -56,6 +56,7 @@ import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, producesDeliverable } from "./intent";
+import { selfKnowledgeNote } from "./self-knowledge";
 import { createModelTask, threeDConfigured } from "./models3d";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
@@ -829,6 +830,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       }
     }
   }
+
+  // ── Questions about BeeZilla itself (roadmap phase 6) ─────────────────
+  // Answered from verified facts tied to this code (self-knowledge/answers.json),
+  // not from the model's guess about what BeeZilla can do. Local data, so it is
+  // allowed in Lockdown too.
+  const selfNote = selfKnowledgeNote(message);
+  if (selfNote) messages[0]!.content += "\n\n" + selfNote;
 
   // Research pre-pass. Two reasons, one mechanism:
   //   * the spoken lane runs an audio model with NO tools, so a spoken lookup

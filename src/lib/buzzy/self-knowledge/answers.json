@@ -1,0 +1,932 @@
+[
+  {
+    "id": "sk-001",
+    "q": "What is BeeZilla?",
+    "a": "You describe a job in plain words. BeeZilla asks for the details it needs, writes a draft you can check, and keeps your drafts, decisions and documents together in one place.",
+    "sources": [
+      {
+        "file": "src/routes/__root.tsx",
+        "symbol": "describe the job, approve the draft, watch it get done"
+      },
+      {
+        "file": "public/buzzy/landing.html",
+        "symbol": "Your work, handled."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-002",
+    "q": "Is BeeZilla legal or financial advice?",
+    "a": "No. BeeZilla helps you get the work done, but it is not legal or financial advice. Even the Legal expert says it helps with letters, agreements and notices, not legal advice.",
+    "sources": [
+      {
+        "file": "public/buzzy/landing.html",
+        "symbol": "this is not legal or financial advice"
+      },
+      {
+        "file": "public/buzzy/experts-data.js",
+        "symbol": "not legal advice"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-003",
+    "q": "How do I start a job?",
+    "a": "Type what you need into the Talk bar (it says \"What would you like to make?\") and press Send. BeeZilla may ask a few questions first, then writes a draft for you to check.",
+    "sources": [
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "What would you like to make?"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-004",
+    "q": "What does the Do it button do?",
+    "a": "Do it tells BeeZilla to stop asking questions and make the thing now, using what it already knows.",
+    "sources": [
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "Stop asking — produce it now"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-005",
+    "q": "What is the difference between Chat and Work?",
+    "a": "Chat is the normal way to talk it through. Work first collects the key details of the job in one go, then goes through the usual draft-and-approve steps.",
+    "sources": [
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "Chat is the default. Work mode makes the harness delineate the task"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-006",
+    "q": "What can BeeZilla make?",
+    "a": "Documents (Word), slide decks (PowerPoint) and spreadsheets (Excel). It can also make pictures, music and 3D models when your plan and this site's setup allow it.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "render_document"
+      },
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "render_presentation"
+      },
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "render_sheet"
+      },
+      {
+        "file": "src/lib/buzzy/art.ts",
+        "symbol": "Image generation."
+      },
+      {
+        "file": "src/lib/buzzy/music.ts",
+        "symbol": "Music, from ElevenLabs."
+      },
+      {
+        "file": "src/lib/buzzy/models3d.ts",
+        "symbol": "Text → 3D, from Meshy."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "Pictures, music and 3D each need their maker to be set up on this site, and pictures and music need a paid plan."
+  },
+  {
+    "id": "sk-007",
+    "q": "Do I need to press a Music or 3D button?",
+    "a": "No. Just ask, for example \"make a song about rain\" or \"make a 3D model of a chair\", and BeeZilla works out which maker to use.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/intent.ts",
+        "symbol": "export function isMusicRequest"
+      },
+      {
+        "file": "src/lib/buzzy/intent.ts",
+        "symbol": "export function is3dRequest"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-008",
+    "q": "How long does a 3D model take?",
+    "a": "Usually a minute or two. BeeZilla starts it, shows progress in the chat, and the model appears as a download when it is finished.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/models3d.ts",
+        "symbol": "Generation takes 40–90 seconds"
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "it takes a minute or two"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "Only when a 3D maker is set up on this site; otherwise BeeZilla says it can't make one here."
+  },
+  {
+    "id": "sk-009",
+    "q": "Can I make music on the free plan?",
+    "a": "No. The free plan has no music. Starter includes 15 minutes a day, up to 3 minutes per track. Pro includes 60 minutes a day, up to 10 minutes per track.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "free: { inferencePerDay: 100, musicSecondsPerDay: 0"
+      },
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180"
+      },
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-010",
+    "q": "How many chats do I get?",
+    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. The line under the Talk bar shows how many you have left today.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "inferencePerDay: 100"
+      },
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "inferencePerDay: 1000"
+      },
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "inferencePerDay: 10000"
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": " chats left"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-011",
+    "q": "Can I make pictures on the free plan?",
+    "a": "No. The free plan has no picture making. Starter allows 60 pictures a day and Pro allows 400.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "imagesPerDay: 0"
+      },
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "imagesPerDay: 60"
+      },
+      {
+        "file": "src/lib/buzzy/entitlements.ts",
+        "symbol": "imagesPerDay: 400"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-012",
+    "q": "Where are my files saved?",
+    "a": "In your Library. Every draft BeeZilla writes is saved there as a document, and every change becomes a new version. Older versions are kept.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/documents.ts",
+        "symbol": "export async function materializeDraft"
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "Saved to your Library"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-013",
+    "q": "What file formats can I download?",
+    "a": "PDF, Word (.docx), Markdown (.md) and CSV, made from the exact version you pick.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "Try pdf, docx, md, or csv."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-014",
+    "q": "What does accepting a document mean?",
+    "a": "Accepting marks one exact version as approved. Only an accepted version can be shared or sent. If the document changes later, you accept the new version again.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "Only the accepted version can be shared."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-015",
+    "q": "Can I share a draft that isn't accepted yet?",
+    "a": "No. Sharing needs an accepted version, so review it and accept it first. That rule is there so a draft never goes out by mistake.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "sharing a draft is exactly what this gate prevents"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-016",
+    "q": "How do I share a document?",
+    "a": "Press Share on a document card in Talk, then choose Selected team or Public. Nothing is shared until you choose.",
+    "sources": [
+      {
+        "file": "public/buzzy/share.js",
+        "symbol": "Nothing is shared until you choose one."
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "file-share"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-017",
+    "q": "What do people see when they open a public link?",
+    "a": "A clean, read-only page showing the accepted version. There are no menus and they don't need an account. Each public link also comes with a QR code, so someone can open it with a phone camera.",
+    "sources": [
+      {
+        "file": "public/buzzy/shared.html",
+        "symbol": "Shared with you · read only"
+      },
+      {
+        "file": "public/buzzy/share.js",
+        "symbol": "QR code for the public link"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-018",
+    "q": "How long does a public link last, and can I turn it off?",
+    "a": "Three days unless set otherwise, and never more than 30 days. You can press Turn link off at any time, and the link stops working at once.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "Number(body.ttlHours) || 72"
+      },
+      {
+        "file": "public/buzzy/share.js",
+        "symbol": "Turn link off"
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "That link has expired or been turned off."
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-019",
+    "q": "How do I invite a teammate?",
+    "a": "In Share, choose Selected team, enter their email and a role, then press Create invitation. BeeZilla does not email them, so copy the invitation link and send it yourself. It lasts 7 days.",
+    "sources": [
+      {
+        "file": "public/buzzy/share.js",
+        "symbol": "Create invitation"
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "No email was sent (this deployment has no delivery channel)"
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "It expires in 7 days."
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-020",
+    "q": "How does an invited teammate join?",
+    "a": "They open the invitation link, sign in (or create an account) with the email you invited, and press Join the team.",
+    "sources": [
+      {
+        "file": "public/buzzy/join.html",
+        "symbol": "Join the team"
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "Sign in with that address to accept it."
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-021",
+    "q": "What can each team role do?",
+    "a": "The owner can do everything. An admin runs the work, shares and manages the team, but cannot delete the account. A reviewer can read, accept and ask for changes. A member reads and drafts.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/team.ts",
+        "symbol": "accepting a document is reserved for the owner, an admin, or a reviewer"
+      },
+      {
+        "file": "src/lib/buzzy/team.ts",
+        "symbol": "creating a share link needs the owner or an admin"
+      },
+      {
+        "file": "src/lib/buzzy/team.ts",
+        "symbol": "only the account owner can delete the account"
+      },
+      {
+        "file": "src/lib/buzzy/team.ts",
+        "symbol": "member: new Set([\"read\", \"draft\"])"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-022",
+    "q": "Can BeeZilla send emails for me?",
+    "a": "Not yet. No email sending is set up, so BeeZilla never claims it sent anything. Invitations and approvals say plainly that nothing was sent.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "this deployment has no delivery channel"
+      },
+      {
+        "file": "docs/BEEZILLA-CAPABILITIES.md",
+        "symbol": "No outbound mail channel is wired."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "Sending email is planned, not built."
+  },
+  {
+    "id": "sk-023",
+    "q": "Who can see my work?",
+    "a": "Only you and the teammates you invite. A document becomes visible to anyone else only if you make a public link for it, and you can turn that off.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "The ONLY unauthenticated buzzy route."
+      },
+      {
+        "file": "public/buzzy/share.js",
+        "symbol": "Turn link off"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-024",
+    "q": "What are the privacy modes?",
+    "a": "Advocate: BeeZilla works only for you and nothing is published. Lockdown: nothing extra leaves BeeZilla (no web lookups, no music, picture or 3D makers). Open: your finished work can be shared with everyone, but publishing isn't switched on yet.",
+    "sources": [
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "BeeZilla works only for you"
+      },
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "Nothing extra leaves BeeZilla"
+      },
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "Publishing is not switched on yet"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-025",
+    "q": "What exactly does Lockdown turn off?",
+    "a": "Web lookups and the music, picture and 3D makers. It also hides the Inspiration wall. Your messages still go to the AI that answers you, because that is how BeeZilla replies.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "no web lookups, and no music, picture or 3D makers"
+      },
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "Your messages still reach the AI that answers you"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-026",
+    "q": "Does Open mode publish my work?",
+    "a": "Not yet. Publishing isn't switched on, so nothing is published automatically. Sharing stays your choice, one item at a time.",
+    "sources": [
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "Publishing is not switched on yet, so nothing is published automatically"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "Automatic publishing in Open mode is planned; what it would publish is still being decided."
+  },
+  {
+    "id": "sk-027",
+    "q": "Which privacy mode do I start in?",
+    "a": "The website starts on Open and the desktop app starts on Advocate. Once you pick a mode, it is saved to your account and applies everywhere you sign in.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "=== \"local\" ? \"advocate\" : \"open\""
+      },
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "Saved to the account"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-028",
+    "q": "Can BeeZilla look things up on the web?",
+    "a": "Yes. It can search the web and read public pages. When your question needs current facts, like prices, opening hours or deadlines, it looks them up first and answers from what it read, not from memory. It doesn't do this in Lockdown.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "name: \"web_search\""
+      },
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "name: \"read_web_page\""
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "Research pre-pass"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "Web search must be set up on this site."
+  },
+  {
+    "id": "sk-029",
+    "q": "Can I open a website inside BeeZilla?",
+    "a": "Yes. Type a web address into the search bar and it opens in a built-in reader with Home, Back and a trail of where you've been. Pages are shown as text you can read. Addresses on private networks are refused, and the reader is off in Lockdown.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "/api/buzzy/read"
+      },
+      {
+        "file": "public/buzzy/browse.js",
+        "symbol": "bzReader"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-030",
+    "q": "Can BeeZilla log in to websites or fill in forms for me?",
+    "a": "Not yet. It reads public pages only: no clicking, no logging in and no sending forms.",
+    "sources": [
+      {
+        "file": "docs/BEEZILLA-CAPABILITIES.md",
+        "symbol": "Interaction, structure extraction and authenticated sessions are still absent"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "Acting on websites for you is planned, with your permission for each site."
+  },
+  {
+    "id": "sk-031",
+    "q": "What does the search bar search?",
+    "a": "Your own work: your documents, the skills listed under Experts and the recipes. A web address opens in the reader instead.",
+    "sources": [
+      {
+        "file": "public/buzzy/browse.js",
+        "symbol": "/api/buzzy/search"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-032",
+    "q": "What is the Inspiration wall?",
+    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Whiteboard. It is hidden in Lockdown.",
+    "sources": [
+      {
+        "file": "public/buzzy/inspiration.js",
+        "symbol": "BeeZillaInspiration"
+      },
+      {
+        "file": "public/buzzy/privacy.js",
+        "symbol": "The Inspiration wall is hidden"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-033",
+    "q": "What is the Whiteboard?",
+    "a": "A board for laying out a job. Add cards for your files, connect two cards by dragging from a corner of one to the other, and use Search the board to add things from your Library.",
+    "sources": [
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Search the board"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-034",
+    "q": "Is my Whiteboard saved to my account?",
+    "a": "Not yet. It is saved in this browser, one board per conversation, so another computer won't see it.",
+    "sources": [
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "bz.board."
+      }
+    ],
+    "surfaces": [
+      "website"
+    ],
+    "limits": "Saving boards to your account is not built yet."
+  },
+  {
+    "id": "sk-035",
+    "q": "How does talking to BeeZilla by voice work?",
+    "a": "Press Talk to BeeZilla. A big mic appears with a live sound level and your words as you speak, and the Whiteboard opens beside it. Press the mic again, or End voice, to stop.",
+    "sources": [
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "Pressing the mic again ends voice"
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "End voice"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-036",
+    "q": "Can BeeZilla read its replies out loud?",
+    "a": "Yes. Turn on Speak replies and it reads its answers aloud.",
+    "sources": [
+      {
+        "file": "public/buzzy/nav.js",
+        "symbol": "Speak replies"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-037",
+    "q": "Can I give BeeZilla a document to read?",
+    "a": "Yes. Use Attach a paper, or drag the file onto the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "sources": [
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": ".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz"
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "Attach a paper"
+      },
+      {
+        "file": "src/lib/buzzy/paper.ts",
+        "symbol": "encrypted PDFs get their own next action"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-038",
+    "q": "What is History?",
+    "a": "Your past chats. Pick one to reopen it, rename it or get a quick summary. You can also start a new chat from there.",
+    "sources": [
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "Pick a past chat to reopen it, rename it, or get a quick summary."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-039",
+    "q": "What are the Experts?",
+    "a": "Twelve areas: Legal, Medical, Software, Technology, Accounting, Home & Contractors, Career & Work, Insurance, Government & Forms, Education, Landlord & Tenant and Travel. Each lists skills BeeZilla is set up for. Picking a skill puts a request for it into the Talk bar for you.",
+    "sources": [
+      {
+        "file": "public/buzzy/experts-data.js",
+        "symbol": "Landlord & Tenant"
+      },
+      {
+        "file": "public/buzzy/browse.js",
+        "symbol": "I need help with "
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-040",
+    "q": "What is a recipe?",
+    "a": "A tested, sealed way of doing a job that someone has already worked out. You can see what it does, who made it, when it last changed and what it costs. The steps stay sealed until you open it.",
+    "sources": [
+      {
+        "file": "public/buzzy/recipes.html",
+        "symbol": "A recipe is a way of doing a job that someone has already worked out, tested and sealed."
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-041",
+    "q": "How do I make my own recipe?",
+    "a": "Use Learn a recipe. Pick a job you already finished, and BeeZilla works out the method from what you actually did. You correct it, then set a price in Honey Drops or make it free.",
+    "sources": [
+      {
+        "file": "public/buzzy/upload.html",
+        "symbol": "You don't write a recipe here."
+      },
+      {
+        "file": "public/buzzy/upload.html",
+        "symbol": "Price in Honey Drops"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-042",
+    "q": "What are Honey Drops?",
+    "a": "Play money for recipes. You spend them to open a recipe and earn them when someone opens yours. They can't be bought with real money, and they can't leave the site.",
+    "sources": [
+      {
+        "file": "public/buzzy/wallet.html",
+        "symbol": "Honey Drops are the currency here."
+      },
+      {
+        "file": "public/buzzy/wallet.html",
+        "symbol": "This is play money for now"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-043",
+    "q": "What is Memory?",
+    "a": "What BeeZilla has learned from your chats. If it is empty, chat with BeeZilla and what it learns will show up there.",
+    "sources": [
+      {
+        "file": "public/buzzy/memory.html",
+        "symbol": "chat with BeeZilla and what it learns will appear here"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-044",
+    "q": "What is Sketch?",
+    "a": "A drawing board. Drop or paste pictures, draw arrows and notes between them, then press Create to make a new picture. You can also mark an area of a picture and describe a change.",
+    "sources": [
+      {
+        "file": "public/buzzy/sketch.html",
+        "symbol": "Drop or paste images, draw between them, then Create."
+      },
+      {
+        "file": "public/buzzy/sketch.html",
+        "symbol": "Drag a box on the picture, then describe the change."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-045",
+    "q": "What is Studio?",
+    "a": "A workspace for a music track. Select part of the track on the waveform to change it, keep versions, edit the brief and the lyrics, and ask BeeZilla about the track.",
+    "sources": [
+      {
+        "file": "public/buzzy/studio.html",
+        "symbol": "Drag on the waveform to select a passage."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-046",
+    "q": "What is the Capabilities page?",
+    "a": "A live list of what this BeeZilla can do, read from the same list the chat uses. A green line means that capability is set up here.",
+    "sources": [
+      {
+        "file": "public/buzzy/capabilities.html",
+        "symbol": "Read from the same registry the chat loop uses."
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-047",
+    "q": "Does BeeZilla get the math right?",
+    "a": "It uses an exact calculator for arithmetic instead of guessing numbers, and it checks drafts for amounts you never gave it.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "name: \"calculate\""
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "mentionsInventedAmount"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-048",
+    "q": "Does BeeZilla remember facts about my business?",
+    "a": "It only uses facts you have confirmed: your company facts, facts confirmed from your papers and decisions you made. If nothing is confirmed, it asks you instead of guessing.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "name: \"search_knowledge\""
+      },
+      {
+        "file": "docs/BEEZILLA-CAPABILITIES.md",
+        "symbol": "Account's **confirmed** facts only"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-049",
+    "q": "What happens when BeeZilla can't do something?",
+    "a": "It says so plainly and gives the reason, for example \"not set up here\" or \"off in Lockdown\", instead of pretending.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/toolRegistry.ts",
+        "symbol": "refusalFor"
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "no 3D provider is configured on this deployment"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ]
+  },
+  {
+    "id": "sk-050",
+    "q": "Is there a desktop app, and can it share links?",
+    "a": "Yes, there is a BeeZilla desktop app that runs on your own computer and starts in Advocate mode. Share links only work from the website: links made on your computer would point at a machine nobody else can reach, so the desktop app says so instead of making one.",
+    "sources": [
+      {
+        "file": "public/buzzy/share.js",
+        "symbol": "Sharing works on the BeeZilla website."
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "BZ_RUNTIME"
+      }
+    ],
+    "surfaces": [
+      "desktop"
+    ]
+  }
+]
