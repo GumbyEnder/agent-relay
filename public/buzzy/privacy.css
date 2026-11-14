@@ -1,0 +1,111 @@
+/* The privacy control on the Talk bar (privacy.js). */
+.talk-privacy { position: relative; flex: 0 0 auto; align-self: flex-start; }
+.privacy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: 0;
+  height: 2rem;
+  padding: 0 0.55rem;
+  margin-top: 0.15rem;
+  border-radius: 999px;
+  border: 1px solid #2C2C2C;
+  background: #1A1A1A;
+  color: #CFCFCF;
+  cursor: pointer;
+}
+.privacy-btn:hover, .privacy-btn[aria-expanded="true"] { color: #FFC107; border-color: #4A3B0A; }
+.privacy-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 2px; }
+.pv-icons { display: inline-flex; align-items: center; gap: 0.3rem; }
+.pv-icons svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.privacy-btn[data-mode="lockdown"] { color: #FF8A80; }
+.privacy-btn[data-mode="advocate"] { color: #FFC107; }
+
+.privacy-pop {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  z-index: 60;
+  width: min(23rem, calc(100vw - 2rem));
+  padding: 0.85rem 0.95rem 0.95rem;
+  border-radius: 14px;
+  background: #151515;
+  border: 1px solid #2C2C2C;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.privacy-pop.hidden { display: none; }
+.pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; }
+.pp-head strong { color: #F2F2F2; font-size: 0.98rem; }
+.pp-tools { display: inline-flex; gap: 0.2rem; }
+.pp-tools button {
+  min-height: 0; width: 1.9rem; height: 1.9rem; padding: 0;
+  border: none; border-radius: 8px; background: transparent; color: #BDBDBD;
+  font-size: 1rem; line-height: 1; cursor: pointer;
+}
+.pp-tools button:hover { background: #222; color: #FFC107; }
+.pp-tools button:focus-visible { outline: 2px solid #FFC107; }
+
+/* One three-position slider: a sliding thumb under three equal choices. */
+.pp-slider {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: #0E0E0E;
+  border: 1px solid #262626;
+}
+.pp-thumb {
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  left: 0.25rem;
+  width: calc((100% - 0.5rem) / 3);
+  border-radius: 999px;
+  background: #FFC107;
+  transition: transform 0.18s ease, background 0.18s;
+}
+.pp-slider[data-mode="lockdown"] .pp-thumb { transform: translateX(100%); background: #E5484D; }
+.pp-slider[data-mode="open"] .pp-thumb { transform: translateX(200%); background: #2E9E5B; }
+.pp-slider button {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  padding: 0.5rem 0.3rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #BDBDBD;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pp-slider button[aria-checked="true"] { color: #121212; }
+.pp-slider[data-mode="lockdown"] button[aria-checked="true"],
+.pp-slider[data-mode="open"] button[aria-checked="true"] { color: #fff; }
+.pp-slider button:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.pp-desc { margin: 0.75rem 0.15rem 0; color: #BDBDBD; font-size: 0.86rem; line-height: 1.5; }
+
+/* Minimised: the mode stays in view as a small pill (reference: "Open to the world"). */
+.privacy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 0;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #2E9E5B;
+  background: #12301F;
+  color: #E7F6EC;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.privacy-chip.hidden { display: none; }
+.privacy-chip[data-mode="advocate"] { border-color: #8A6D00; background: #2A2204; color: #FFE08A; }
+.privacy-chip[data-mode="lockdown"] { border-color: #8E2A2E; background: #2E1213; color: #FFC7C9; }
+.privacy-chip .pv-icons svg { width: 0.95rem; height: 0.95rem; }
+@media (prefers-reduced-motion: reduce) { .pp-thumb { transition: none; } }

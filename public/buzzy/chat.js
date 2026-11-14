@@ -120,6 +120,39 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    // Asking for a 3D model starts one on the server (same rule as Talk). It takes a
+    // minute or two, so the turn returns the task id and this polls until the file is
+    // stored — the reply already said it is on its way, and here is where it lands.
+    function watchModel(taskId) {
+      var line = bubble("bzc-a", "Building the 3D model…");
+      var tries = 0;
+      var misses = 0;
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/model3d/" + encodeURIComponent(taskId), {
+          credentials: "same-origin",
+          headers: authHeaders(),
+        }).then(function (r) { return r.json(); }).then(function (p) {
+          var status = String(p.status || "");
+          if (p.asset) {
+            clearInterval(tick);
+            line.textContent = "Your 3D model is ready.";
+            card({ kind: "model", url: p.asset.url, name: p.asset.name, bytes: p.asset.bytes });
+          } else if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED" || tries > 60) {
+            clearInterval(tick);
+            line.textContent = "The 3D model did not finish" + (p.error ? ": " + p.error : ".");
+          } else if (status === "error") {
+            if (++misses >= 4) { clearInterval(tick); line.textContent = "Lost touch with the 3D model."; }
+          } else {
+            misses = 0;
+            line.textContent = "Building the 3D model… " + (p.progress || 0) + "%";
+          }
+        }).catch(function () {
+          if (++misses >= 4) { clearInterval(tick); line.textContent = "Lost touch with the 3D model — check the connection."; }
+        });
+      }, 4000);
+    }
+
     function send() {
       var text = (input.value || "").trim();
       if (!text) return;
@@ -132,6 +165,12 @@
       stage.textContent = "Working…";
 
       var body = { message: text, stream: true };
+      // Same privacy slider as Talk (stored per browser): Lockdown turns off web
+      // lookups and outside makers on the server.
+      try {
+        var pv = localStorage.getItem("bz.privacy");
+        if (pv === "advocate" || pv === "lockdown" || pv === "open") body.privacy = pv;
+      } catch (_) {}
       if (opts.jobId) body.jobId = opts.jobId;
       var sid = getSession();
       if (sid) body.sessionId = sid;
@@ -194,6 +233,7 @@
         else if (!liveText) live.textContent = "(no reply)";
         (data.artifacts || []).forEach(card);
         if (data.audio && data.audio.url) card({ kind: "audio", url: data.audio.url, name: data.audio.name, bytes: data.audio.bytes });
+        if (data.model3d && data.model3d.taskId) watchModel(data.model3d.taskId);
       }).catch(function (e) {
         sendBtn.disabled = false;
         stage.textContent = "";

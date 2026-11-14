@@ -1,0 +1,109 @@
+/* The voice workspace (voice-stage.js; reference zMWSgG0, top). Overrides the
+   older single-row voice stage styles in talk.html. */
+.voice-stage.vs-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: stretch;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  border: none;
+  background: none;
+}
+.voice-stage.vs-workspace.hidden { display: none; }
+.voice-stage.vs-workspace.vs-no-board { grid-template-columns: minmax(0, 1fr); }
+.vs-panel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  min-height: 12.5rem;
+  padding: 1.4rem 1.5rem 1.6rem;
+  border-radius: 16px;
+  border: 1px solid #262626;
+  background: radial-gradient(130% 160% at 10% 0%, #191919 0%, #121212 55%, #0E0E0E 100%);
+}
+.vs-mic-col { display: flex; flex-direction: column; align-items: center; gap: 0.85rem; flex: 0 0 auto; }
+.vs-mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 6.4rem;
+  height: 6.4rem;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #FFE082 0%, #FFC107 55%, #FFB300 100%);
+  color: #141414;
+  cursor: pointer;
+  box-shadow: 0 0 0 10px rgba(255, 193, 7, 0.10), 0 0 34px rgba(255, 193, 7, 0.55);
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+.vs-mic svg { width: 2.9rem; height: 2.9rem; fill: #FFF8E1; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.25)); }
+.vs-mic:hover { transform: scale(1.03); }
+.vs-mic:active { transform: scale(0.98); }
+.vs-mic:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
+.voice-stage.vs-hot .vs-mic { box-shadow: 0 0 0 14px rgba(255, 193, 7, 0.16), 0 0 48px rgba(255, 193, 7, 0.8); }
+.voice-stage .vs-wave { display: block; width: 9.5rem; height: 2.9rem; flex-shrink: 0; }
+.vs-live { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; flex-direction: column; }
+.vs-live .vs-state { margin: 0; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #FFC107; }
+.vs-text {
+  flex: 1 1 auto;
+  margin: 0.55rem 0 0;
+  padding: 1rem 1.15rem;
+  min-height: 5.5rem;
+  border-radius: 14px;
+  border: 1px solid #2A2A2A;
+  background: #0D0D0D;
+  color: #F4F4F4;
+  font-size: 1.6rem;
+  line-height: 1.3;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.vs-text:empty::before { content: "Speak — your words show up here."; color: #5E5E5E; font-size: 1.05rem; }
+.vs-text:not(:empty):not(.vs-text-final)::after {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 1.1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  background: #FFC107;
+  animation: vsCaret 1s steps(1) infinite;
+}
+@keyframes vsCaret { 50% { opacity: 0; } }
+.vs-live .vs-lat { margin: 0.45rem 0 0; }
+.vs-end {
+  position: absolute;
+  right: 1rem;
+  bottom: 0.7rem;
+  min-height: 0;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #333;
+  border-radius: 999px;
+  background: transparent;
+  color: #A9A9A9;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.vs-end:hover { color: #FFC107; border-color: #6B5A1E; }
+.vs-board { min-width: 0; }
+.vs-board:empty { display: none; }
+
+@media (max-width: 860px) {
+  .voice-stage.vs-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .vs-panel { flex-direction: column; align-items: stretch; gap: 1rem; padding: 1.1rem; }
+  .vs-mic-col { flex-direction: row; justify-content: center; }
+  .vs-mic { width: 4.6rem; height: 4.6rem; }
+  .vs-mic svg { width: 2.1rem; height: 2.1rem; }
+  .vs-text { font-size: 1.25rem; min-height: 4rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vs-mic { transition: none; }
+  .vs-text:not(:empty):not(.vs-text-final)::after { animation: none; }
+}

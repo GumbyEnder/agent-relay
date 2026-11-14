@@ -20,7 +20,10 @@ import { join, resolve } from "node:path";
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
   // to serve it.
-const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio"]);
+const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio", "shared", "join"]);
+// Opened by people who were sent a share or invitation link, often not BeeZilla
+// users yet: served as written, without the app's nav, account menu or nav.js.
+const STANDALONE = new Set(["shared", "join"]);
 
 const html = (body: string, status = 200) =>
   new Response(body, {
@@ -174,6 +177,7 @@ export default defineEventHandler(async (event) => {
   ].join("\n      ");
 
   let page = body.toString("utf8");
+  if (STANDALONE.has(fileName)) return out(page);
   page = page.replace(
     /(<nav id="bzNav"[^>]*>)[\s\S]*?(<\/nav>)/,
     (_m, open: string, close: string) => `${open}\n      ${NAV_ROW}\n    ${close}`,

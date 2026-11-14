@@ -55,7 +55,9 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, producesDeliverable } from "./intent";
+import { selfKnowledgeNote } from "./self-knowledge";
+import { createModelTask, threeDConfigured } from "./models3d";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -263,6 +265,13 @@ export interface ChatRequest {
   /** The composer's "Do it now" control. An explicit execute flag beats any
    *  phrase-matching: the person pressed a button that means "produce it". */
   execute?: boolean;
+  /**
+   * The owner's privacy mode from the Talk bar. "lockdown": nothing leaves
+   * BeeZilla this turn except the call to the model that answers — no web
+   * lookups, no music, picture or 3D providers. "advocate" and "open" change
+   * nothing here yet (Open does not publish anything automatically).
+   */
+  privacy?: "advocate" | "lockdown" | "open";
 }
 
 /** Per-turn latency breakdown. Product metric — surfaced to the client and
@@ -299,6 +308,11 @@ export interface ChatResponse {
   timings?: TurnTimings;
   /** Audio this turn produced — the chat renders a player for it. */
   audio?: { url: string; name: string; bytes: number; type: string };
+  /**
+   * A 3D model this turn STARTED. It takes a minute or two, so the page polls
+   * GET /api/buzzy/model3d/:taskId and shows the file when it is stored.
+   */
+  model3d?: { taskId: string };
   /**
    * Everything this turn actually produced. The renderer draws these cards and
    * only these cards; a sentence claiming a file that is not in this list is a
@@ -504,9 +518,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ("research X and save it in the file") fell through the gate and the product
   // answered without producing anything.
   const wantsLibraryFile = isFileRequest(message);
+  // A 3D model is its own deliverable: the 3D pre-pass below starts it and the
+  // reply only says it is on its way. Without this, "make a 3D model of a race
+  // track" also read as a song ("make … track") and as a request for a document.
+  const wants3d = is3dRequest(message);
+  const lockdown = req.privacy === "lockdown";
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
-  const requestedDraft = isDraftRequest(message) || req.execute === true;
+  const requestedDraft = !wants3d && (isDraftRequest(message) || req.execute === true);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -657,6 +676,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let musicRefusal: { code: string; error: string } | null = null;
   let renderedImage: { url: string; name: string; bytes: number; type: string } | null = null;
   let artRefusal: { code: string; error: string } | null = null;
+  // The 3D model this turn started, or why it could not be started.
+  let model3dTask: { taskId: string } | null = null;
+  let threeDRefusal: { code: string; error: string } | null = null;
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
@@ -677,7 +699,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // No gate on mode: a person who types "just make me a lullaby" in Chat mode
   // asked for a file, not a conversation about files. The quota check inside
   // gatedMusic is what decides whether this account may spend, not the UI tab.
-  if (isMusicRequest(message) && musicConfigured()) {
+  if (!lockdown && !wants3d && isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
@@ -735,7 +757,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Art pre-pass ───────────────────────────────────────────────────
   // "draw me a duck" is a request for a file, and the canvas is not the only way in.
   // Same rule as music: the harness renders, the model narrates what exists.
-  if (!renderedImage && isImageRequest(message) && artConfigured()) {
+  if (!lockdown && !renderedImage && !wants3d && isImageRequest(message) && artConfigured()) {
     const prompt = message.slice(0, 1000);
     const verdict = await checkQuota({ userId, scope: "image", units: 1 });
     if (!verdict.ok) {
@@ -772,6 +794,50 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   }
 
+  // ── 3D pre-pass ────────────────────────────────────────────────────
+  // Talk used to have a 3D button; now asking is enough. Same rule as music and
+  // pictures: the harness starts the model, the model narrates what exists. A model
+  // takes a minute or two — longer than a turn should hold the connection — so the
+  // turn starts the task and hands its id back, and the page polls
+  // GET /api/buzzy/model3d/:id until the file is stored.
+  // Lockdown: say so instead of calling out. The model is told once, below.
+  if (lockdown) {
+    if (wants3d) threeDRefusal = { code: "lockdown", error: "3D models are off in Lockdown" };
+    messages[0]!.content +=
+      "\n\nPRIVACY — LOCKDOWN: the owner chose Lockdown. Nothing leaves BeeZilla this turn except this reply: " +
+      "no web lookups, and no music, picture or 3D makers. If they ask for one of those, say it is off in Lockdown " +
+      "and that the privacy control on the Talk bar switches it back. Never claim you looked something up.";
+  } else if (wants3d) {
+    if (!threeDConfigured()) {
+      threeDRefusal = { code: "not_configured", error: "3D models are not set up on this deployment" };
+      messages[0]!.content +=
+        "\n\nThe owner asked for a 3D model, but no 3D provider is configured on this deployment, so none can be made here. " +
+        "Say exactly that in one sentence. Do not describe a model and do not offer to make one later.";
+    } else {
+      req.onStage?.({ phase: "model3d", label: "Starting your 3D model", etaMs: 4000 });
+      const started = await createModelTask(message);
+      if (started.ok) {
+        model3dTask = { taskId: started.taskId };
+        messages[0]!.content +=
+          "\n\nA 3D model was STARTED this turn and is being built now; it takes a minute or two. It appears in this " +
+          "conversation as a download the moment it is finished. Do not say it is finished, attached or saved, and do not " +
+          "describe the finished model. Say in one short sentence that you are making it, and stop.";
+      } else {
+        threeDRefusal = { code: started.code, error: started.error };
+        messages[0]!.content +=
+          `\n\n3D model generation was attempted and FAILED (${started.code}): ${started.error} ` +
+          "Tell the owner that exact reason in one sentence. Do not claim any model exists.";
+      }
+    }
+  }
+
+  // ── Questions about BeeZilla itself (roadmap phase 6) ─────────────────
+  // Answered from verified facts tied to this code (self-knowledge/answers.json),
+  // not from the model's guess about what BeeZilla can do. Local data, so it is
+  // allowed in Lockdown too.
+  const selfNote = selfKnowledgeNote(message);
+  if (selfNote) messages[0]!.content += "\n\n" + selfNote;
+
   // Research pre-pass. Two reasons, one mechanism:
   //   * the spoken lane runs an audio model with NO tools, so a spoken lookup
   //     had nothing to call and the avatar claimed it couldn't browse;
@@ -780,7 +846,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // So when the request is a lookup, the harness does it and hands the model
   // what it read, with the URLs. The model cannot skip the research.
   const researchIntent = /\b(research|look ?up|find out|check|verify|current|latest|today|right now|how much|price|cost|deadline|hours)\b/i.test(message);
-  const runWebPrepass = surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent)));
+  const runWebPrepass = !lockdown && (surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent))));
   if (runWebPrepass) {
     const webCtx = await buildVoiceWebContext(message);
     for (const call of webCtx.calls) {
@@ -822,7 +888,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
-  const toolCtx = { draftGateOpen };
+  const toolCtx = { draftGateOpen, lockdown };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
   // non-empty tool list is what disables streaming), which is the 12s answer.
@@ -1247,7 +1313,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // "did this turn produce one" instead, or every reply in a draft-bearing
   // conversation becomes a new version of one document (and a chat answer to
   // "what is a fence quote?" grows a Download card). See producesDeliverable.
-  const deliversThisTurn = producesDeliverable({
+  // A 3D turn delivers the model, not a document: in a conversation that already
+  // holds a draft, "make a 3D model of it" must not become the draft's next version.
+  const deliversThisTurn = !wants3d && producesDeliverable({
     renderedDocText,
     requestedDraft,
     mode,
@@ -1369,7 +1437,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       (musicConfigured()
         ? "Ask me to make the track and I'll generate it now."
         : "Music isn't configured on this deployment, so no track can be produced here.");
-  } else if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn) {
+  } else if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn && !renderedAudio) {
+    // (A track made this turn IS a delivery: "I want a song about my dog" asks for
+    // music without asking for a document, and its true "I've created the song"
+    // was being replaced with "I did not actually produce anything".)
     const wantsMusic = /\b(song|track|music|audio|jingle|score)\b/i.test(
       [message, ...history.filter((h) => h.role === "user").map((h) => h.content)].join(" "),
     );
@@ -1382,6 +1453,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       reason +
       " Nothing on my side claims otherwise. Tell me to build it again and I will run the tool and report exactly what it returned.";
   }
+  // A 3D turn's reply went through checks written for audio and pictures: "a 3D
+  // model of a race track" is not a song, and "a 3D logo" is not a drawing. When one
+  // of them rewrote it, say the one sentence that is true instead.
+  if (wants3d && finalReply !== guardedReply && !renderedAudio) {
+    finalReply = model3dTask
+      ? "I'm making that 3D model now — it will appear right here when it's finished, usually in a minute or two."
+      : `I couldn't make that 3D model: ${threeDRefusal?.error ?? "the 3D service did not start it"}.`;
+  }
+
   // Strip a leading machine token before the reply becomes the answer. The model
   // learned the filename from project memory, so it survived removing it from the
   // prompt; and cleanReply is copied here, so stripping afterwards changed nothing.
@@ -1753,6 +1833,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // A picture rides its reply the same way a track does: the card and the sentence
   // must not be able to disagree about whether a file exists.
   if (renderedImage) (response as { image?: typeof renderedImage }).image = renderedImage;
+  // Not a file yet: the page polls this id and shows the model when it is stored.
+  if (model3dTask) response.model3d = model3dTask;
 
   // ── The artifact envelope ──────────────────────────────────────────
   // One list of what this turn actually produced. The client renders these and
