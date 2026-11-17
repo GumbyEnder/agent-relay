@@ -28,10 +28,16 @@ It answers liveness, not board data. `HEALTH_PATHS` in `product-surface.ts`.
 see a pending file and race — one wins, the other dies on a duplicate table and the
 deploy is rolled back. The second process now blocks, then finds everything applied.
 
-`BZ_SKIP_MIGRATIONS=1` is honoured for a service that must never touch schema. Either
-set it on the consumer service, or leave migrations enabled on both and let the lock
-serialise them — **pick one and write it down**, because "which service owns schema"
-has to be answerable from the logs.
+`BZ_SKIP_MIGRATIONS=1` is honoured for a service that must never touch schema.
+
+**Decision (2026-11-17): migrations stay enabled on both services, and the advisory
+lock serialises them.** Neither service is special, so either can boot first and a
+deploy of a migration does not have to be sequenced by hand. What that buys in
+simplicity it gives up in "one owner" clarity, so the answer to *"which service owns
+schema?"* is the log line, not a convention: `[migrate] applied …` on whichever booted
+first, `[migrate] up to date.` or `[migrate] waited Nms …` on the other. If that ever
+becomes confusing, set `BZ_SKIP_MIGRATIONS=1` on `beezilla-web` — the consumer service
+has no reason to own schema.
 
 ## Env slice for `beezilla-web`
 
@@ -76,6 +82,31 @@ Identical values to `agent-relay` unless noted. Copy them, do not retype them.
 of the split; a console secret on the consumer service is exactly what stage 2 removes.
 
 **Platform-provided** — `PORT`, `HOST=0.0.0.0`, `NITRO_HOST=0.0.0.0`, `NODE_ENV=production`.
+
+## Status 2026-11-17T19:44Z — service is up, traffic is NOT moved yet
+
+`beezilla-web` exists, is linked to `GumbyEnder/agent-relay@main`, and is deployed at
+`a5898f8` with the env slice below. Verified on its own Railway hostname
+(`beezilla-web-production.up.railway.app`), which is the only place the cutover can be
+tested safely:
+
+| request | result |
+|---|---|
+| `/buzzy/talk` | 200 |
+| `/api/buzzy/privacy` | 401 `signed_out` (real route, real Postgres) |
+| `/api/agent/health` | 200 (railway.json's healthcheck) |
+| `/boards` | 404 `{"code":"wrong_surface"}` |
+| `/api/agent/boards`, `/admin`, `/api/agent/keys` | 404 |
+| `/` on the railway hostname | 404 (the consumer front door is beezilla.net) |
+| boot log | `[migrate] up to date.` — shared Postgres, advisory lock, nothing re-applied |
+
+**Both services currently serve; beezilla.net still points at `agent-relay`**, so
+consumer traffic is unchanged. The remaining step is the domain move, and it needs a DNS
+edit because each Railway custom domain carries its own CNAME target:
+
+- now: `beezilla.net` → `d7v851h1.up.railway.app`, `www` → `uvvrhnw8.up.railway.app`
+- after the move Railway issues a new target per domain, so the registrar/Cloudflare
+  records must be updated before traffic follows.
 
 ## Cutover
 
