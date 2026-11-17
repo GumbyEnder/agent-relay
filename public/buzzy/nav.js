@@ -151,6 +151,24 @@
       "#bzChrome button.bz-voice-mic.on{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome button.bz-voice-stop{background:#2a1214;color:#ffb4b4;border:1px solid #5b1f24;border-radius:999px;padding:.28rem .55rem;font:inherit;font-size:.8rem;cursor:pointer}",
       ".bz-chrome-scroll::-webkit-scrollbar{display:none}",
+      // ── Phone width (≤640px) ─────────────────────────────────────────────
+      // At 390px the identity cluster (honey · plan · Listen · mic · company ·
+      // account · Ask) is wider than the screen, so it pushed the document to
+      // 571px and clipped every label on the right: "Recip", "Mor", and a company
+      // select hanging off the edge. Wrapping the cluster and the link row keeps
+      // each label whole; the bars grow taller instead of the page growing wider.
+      // `#bzNav` needs !important because ensureNav() pins flex-wrap:nowrap inline
+      // (the desktop bar is one unbroken strip) — the inline value cannot be
+      // outranked by a stylesheet any other way.
+      "@media (max-width:640px){",
+      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.4rem;padding:.35rem 0}",
+      ".bz-brandrow .bz-cluster{margin-left:0;width:100%;flex-wrap:wrap;row-gap:.4rem;gap:.5rem}",
+      "#bzChrome{flex-wrap:wrap;row-gap:.35rem}",
+      "#bzChrome .bz-co-wrap{flex:1 1 8rem;min-width:0}",
+      "#bzChrome select.bz-co-select{max-width:100%;width:100%}",
+      ".bz-navbar{height:auto;min-height:44px;flex-wrap:wrap;justify-content:flex-start;gap:.3rem .85rem;padding:4px 8px 6px;overflow-x:visible}",
+      "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
+      "}",
     ].join("");
     document.head.appendChild(s);
   }

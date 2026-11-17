@@ -17,10 +17,34 @@ import { musicConfigured } from "./music";
 import { browserAvailable } from "./browser";
 import { threeDConfigured } from "./models3d";
 import { signingSecret } from "./inferenceToken";
+import { resolveOperatorContext } from "../auth/verify.server";
 
 const has = (key: string) => Boolean((process.env[key] ?? "").trim());
 
-export default defineEventHandler(() => {
+function headersFromEvent(event: any): Headers {
+  const rawHeaders = event?.node?.req?.headers ?? event?.req?.headers ?? {};
+  if (rawHeaders instanceof Headers) return rawHeaders;
+  const init: [string, string][] = Object.entries(
+    rawHeaders as Record<string, string | string[] | undefined>,
+  ).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")]);
+  return new Headers(init);
+}
+
+export default defineEventHandler(async (event) => {
+  // Model ids and provider endpoints are deployment internals. The page is
+  // reachable by every signed-in customer, so a non-admin gets the honest
+  // "this is configured" answer without the wiring; an admin (a name in
+  // AGENT_RELAY_ADMIN_EMAILS) gets the model and the base URL they need to
+  // debug it. Everything else — what is on, what is missing — stays visible to
+  // everyone, because that is the question this endpoint exists to answer.
+  let isAdmin = false;
+  try {
+    const ctx = await resolveOperatorContext(headersFromEvent(event));
+    isAdmin = ctx.role === "admin";
+  } catch {
+    isAdmin = false;
+  }
+
   const tools = TOOL_POLICIES.map((p) => ({
     name: p.name,
     offered: p.offered,
@@ -36,7 +60,9 @@ export default defineEventHandler(() => {
       label: "Conversation and drafting",
       ok: has("BZ_CHAT_KEY") || has("BZ_CHAT_BASE_URL"),
       detail: has("BZ_CHAT_KEY")
-        ? `model ${process.env.BZ_CHAT_MODEL?.trim() || "z-ai/glm-5.3-flash"} via ${process.env.BZ_CHAT_BASE_URL?.trim() || "Nous inference"}`
+        ? isAdmin
+          ? `model ${process.env.BZ_CHAT_MODEL?.trim() || "z-ai/glm-5.3-flash"} via ${process.env.BZ_CHAT_BASE_URL?.trim() || "Nous inference"}`
+          : "connected — the model this deployment is configured with"
         : "no provider key on this deployment (BZ_CHAT_KEY)",
     },
     {
@@ -72,7 +98,9 @@ export default defineEventHandler(() => {
       label: "Spoken replies",
       ok: has("BZ_CHAT_KEY"),
       detail: has("BZ_CHAT_KEY")
-        ? `audio lane ${process.env.BZ_VOICE_MODEL?.trim() || "openai/gpt-audio-mini"}`
+        ? isAdmin
+          ? `audio lane ${process.env.BZ_VOICE_MODEL?.trim() || "openai/gpt-audio-mini"}`
+          : "spoken replies in one voice"
         : "needs BZ_CHAT_KEY",
     },
     {

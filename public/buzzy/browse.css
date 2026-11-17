@@ -60,6 +60,33 @@
 .bz-icon-btn:hover { color: #FFC107; background: #1C1C1C; }
 .bz-icon-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 1px; }
 .bz-icon-btn svg { width: 1.3rem; height: 1.3rem; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+/* A share control that copies a link must look like a labelled action, not a
+   mystery icon. Same height as the URL field so the bar stays one line. */
+.bz-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.2rem;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid #2E2E2E;
+  border-radius: 999px;
+  background: #161616;
+  color: #D8D8D8;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bz-share-btn:hover { color: #FFC107; border-color: #6B5A1E; background: #1C1C1C; }
+.bz-share-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 1px; }
+.bz-share-btn svg { width: 1rem; height: 1rem; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; }
+@media (max-width: 640px) {
+  /* The label matters more than the icon on a phone: it is the only thing that
+     says what the button does. */
+  .bz-share-btn { font-size: 0.74rem; padding: 0.2rem 0.55rem; }
+}
 .bz-search-note { min-height: 1.1rem; margin: 0.4rem 1.2rem 0; font-size: 0.8rem; color: #FFC107; }
 
 /* ── Search results ────────────────────────────────────────────────── */

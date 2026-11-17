@@ -41,7 +41,7 @@ import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music"
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
 import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, recordUsage } from "./entitlements";
-import { compactHistory, normalizeToolResult, estimateTokens, contextWindowFor, contextState, CONTEXT_COMPACT_AT, type ContextState } from "./context";
+import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -425,8 +425,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // (Phase 4: explicit about what was dropped — the marker states it).
   const rawHistory = rows.reverse() as Array<{ role: string; content: string }>;
   // Budget a slice of the model's real window, so compaction happens well
-  // before the request would fail — not at an arbitrary 12k.
-  const ctxLimit = contextWindowFor(resolvedModel || model);
+  // before the request would fail — not at an arbitrary 12k. The window used is
+  // the conversation's, not this turn's lane: one history is shared by the typed
+  // and spoken lanes, so the smallest window either of them can be handed is the
+  // binding one (and the same total the context meter reports).
+  const ctxLimit = conversationWindowFor();
   const historyBudget = Math.max(8000, Math.floor(ctxLimit * CONTEXT_COMPACT_AT));
   const { messages: history, compacted, droppedCount } = compactHistory(rawHistory, historyBudget, 6);
 
@@ -874,7 +877,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Context accounting ─────────────────────────────────────────────
   // Measured on exactly what we send: persona + history + this message, plus
   // a fixed allowance for the tool schemas and protocol overhead.
-  const TOOL_OVERHEAD_TOKENS = 1500;
+  const TOOL_OVERHEAD_TOKENS = CONTEXT_TOOL_OVERHEAD_TOKENS;
   const usedTokens =
     estimateTokens([
       { role: "system", content: systemPrompt },

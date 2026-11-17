@@ -376,7 +376,13 @@
     .chat-main > p.muted:last-of-type { order: 9; }
 
     @media (max-width: 900px) {
-      .chat-layout { grid-template-columns: 1fr; }
+      /* minmax(0,…): a bare `1fr` track takes its MIN-CONTENT width, so one wide
+         child (the browse search field, a long mp3 filename) made the whole chat
+         column 404px inside a 342px screen and pushed its left edge off-canvas —
+         which is why the board title, the hint line and the first tab all lost
+         their left letters. The column may never be wider than the screen. */
+      .chat-layout { grid-template-columns: minmax(0, 1fr); }
+      .chat-main { min-width: 0; max-width: 100%; }
       .composer-card { border-radius: 10px; }
     }
     /* Mobile: the composer is the point of the page — strip the chrome that
@@ -1677,8 +1683,14 @@
               <input id="bzSearch" type="search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"
                      aria-label="Search your work, skills and recipes, or enter a web address" />
               <span class="bz-search-tools">
-                <button type="button" id="bzCopy" class="bz-icon-btn" aria-label="Copy the link to this page" title="Copy the link to this page">
+                <!-- A share control that only copies a URL has to SAY so. The
+                     icon alone read as "share this" and left the owner guessing
+                     what left the page (nothing did). -->
+                <button type="button" id="bzCopy" class="bz-share-btn"
+                        aria-label="Copy a link to this page — nothing is shared or sent"
+                        title="Copies this page's address to your clipboard. Nothing is shared or sent.">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                  <span>Copy page link</span>
                 </button>
               </span>
             </div>
@@ -2688,15 +2700,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Newest first, but each exchange still reads question-then-answer:
       // [u2, a2, u1, a1]. Your words and the reply stay at the top; older
       // turns and the work history drop below. No scroll games.
-      const ordered = (function oldestToNewestPairs(msgs) {
-        var out = [];
-        for (var i = msgs.length - 1; i >= 0; i--) out.push(msgs[i]);
-        for (var j = 0; j < out.length - 1; j++) {
-          if (out[j].role === "assistant" && out[j + 1].role === "user") {
-            var t = out[j]; out[j] = out[j + 1]; out[j + 1] = t;
-            j++;
-          }
+      //
+      // Grouped by TURN rather than by swapping neighbouring pairs: the old
+      // reverse-then-swap pass only fixed a pair when an assistant message sat
+      // immediately before its user message, so a turn whose reply arrived as a
+      // second message (or whose reply was still missing) left the previous pair
+      // reversed — the "messages briefly re-sort" the QA walk saw, and how a
+      // reply could end up above its own prompt.
+      const ordered = (function groupByTurn(msgs) {
+        var turns = [];
+        var cur = null;
+        for (var i = 0; i < msgs.length; i++) {
+          var m = msgs[i];
+          if (m.role === "user" || !cur) { cur = [m]; turns.push(cur); }
+          else cur.push(m);
         }
+        var out = [];
+        for (var t = turns.length - 1; t >= 0; t--) out.push.apply(out, turns[t]);
         return out;
       })(chatState.messages);
       const html = ordered.map((m) => {
@@ -2708,6 +2728,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
         if (m.asset && m.asset.url) {
           bubble += renderMediaCard(m.asset);
+        }
+        // The artifact envelope is the delivery list for this turn. Anything the
+        // turn produced but did not put on `document`/`asset` still gets a card
+        // here — a file that exists with no card in the conversation is exactly
+        // "the mp3 only shows up in the Work tab".
+        if (Array.isArray(m.artifacts) && m.artifacts.length) {
+          var already = {};
+          if (m.document && m.document.downloadUrl) already[m.document.downloadUrl] = 1;
+          if (m.asset && m.asset.url) already[m.asset.url] = 1;
+          m.artifacts.forEach(function (a) {
+            if (!a || !a.url || already[a.url]) return;
+            already[a.url] = 1;
+            bubble += renderMediaCard({ name: a.name, url: a.url, bytes: a.bytes, type: a.contentType });
+          });
         }
         if (m.progress) {
           bubble += '<div class="bz-what" data-model3d="' + String(m.model3dTask || "").replace(/"/g, "") + '">' +
@@ -5298,6 +5332,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     /**
+     * Where the live (streaming) bubble goes.
+     *
+     * The transcript reads newest turn first, and inside a turn question-then-
+     * answer: [u2, a2, u1, a1]. So the answer being streamed belongs directly
+     * UNDER the prompt it answers. It used to be inserted as the container's
+     * first child, which paints the reply ABOVE the question for the whole turn —
+     * invisible on a 2s chat turn, glaring on a music turn that composes for 25s.
+     */
+    function mountLiveBubble(node) {
+      var c = document.getElementById("chatMessages");
+      if (!c) return;
+      var prompts = c.querySelectorAll(".bubble.me");
+      var last = prompts.length ? prompts[prompts.length - 1] : null;
+      var think = document.getElementById("thinkingIndicator");
+      if (last && last.parentNode === c) c.insertBefore(node, last.nextSibling);
+      else if (think && think.parentNode === c) c.insertBefore(node, think);
+      else c.appendChild(node);
+    }
+
+    /**
      * One spoken turn. Same body as the text lane plus voice:true, consumed as
      * Server-Sent Events:
      *   text  → live transcript bubble (the answer appears as it is spoken)
@@ -5342,8 +5396,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (!liveBubble) {
               liveBubble = document.createElement("div");
               liveBubble.className = "bubble streaming";
-              var c = document.getElementById("chatMessages");
-              if (c) c.insertBefore(liveBubble, c.firstChild);
+              mountLiveBubble(liveBubble);
             }
             liveBubble.textContent = liveText;
           } else if (ev === "stage") {
@@ -5436,14 +5489,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (!dataLines.length) return;
           var payload;
           try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
-          if (ev === "text") {
+          if (ev === "stage") {
+            // The server names the work and how long it should take ("Composing
+            // 15s of audio"). This frame was silently dropped on the typed lane,
+            // so a 25-second music turn showed only dots and a bare clock — the
+            // owner could not tell "working" from "hung".
+            if (window.__bzStage) window.__bzStage(payload);
+          } else if (ev === "tool") {
+            if (window.__bzStage) {
+              window.__bzStage(payload.state === "running"
+                ? { label: "Working — " + String(payload.name || "a tool").replace(/_/g, " ") + "…" }
+                : { label: "Done — " + Math.round((payload.ms || 0) / 100) / 10 + "s. Writing the reply…" });
+            }
+          } else if (ev === "text") {
             if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
             liveText += payload.t || "";
             if (!liveBubble) {
               liveBubble = document.createElement("div");
               liveBubble.className = "bubble streaming";
-              var c = document.getElementById("chatMessages");
-              if (c) c.insertBefore(liveBubble, c.firstChild);
+              mountLiveBubble(liveBubble);
             }
             liveBubble.textContent = liveText;
           } else if (ev === "done") {

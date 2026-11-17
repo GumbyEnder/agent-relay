@@ -52,7 +52,12 @@ import {
   setPlan,
   type PlanName,
 } from "./entitlements";
-import { contextWindowFor, contextState } from "./context";
+import {
+  conversationWindowFor,
+  contextState,
+  CONTEXT_TOOL_OVERHEAD_TOKENS,
+  CONTEXT_PROMPT_OVERHEAD_TOKENS,
+} from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
@@ -391,10 +396,12 @@ export default defineEventHandler(async (event) => {
           : [];
     } catch { rows = []; }
     const label = modelParam || getModels()[0]?.label || "";
-    const modelId = getModels().find((m) => m.label === label)?.model || label;
-    const limit = contextWindowFor(modelId);
+    // One total for the whole conversation, not the window of whichever model
+    // answered last (see conversationWindowFor).
+    const limit = conversationWindowFor();
     const chars = rows.reduce((acc, r) => acc + String(r.content || "").length, 0);
-    const used = Math.ceil(chars / 4) + 1500 + 2200; // turns + tool schemas + persona
+    const used =
+      Math.ceil(chars / 4) + CONTEXT_TOOL_OVERHEAD_TOKENS + CONTEXT_PROMPT_OVERHEAD_TOKENS;
     return { ok: true, model: label, messages: rows.length, context: contextState(used, limit) };
   }
 
