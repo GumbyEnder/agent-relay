@@ -80,6 +80,15 @@
   #colorS { left:14px; top:9px; }
   #palette { display:flex; flex-wrap:wrap; gap:2px; max-width:250px; }
   #palette button { width:15px; height:15px; padding:0; border-radius:3px; border:1px solid #333; }
+  #textbar { display:flex; visibility:hidden; align-items:center; gap:0.4rem; flex-wrap:wrap;
+             padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
+  #textbar.on { visibility:visible; }
+  #textbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  #fontSize { width:64px; background:#101010; border:1px solid var(--bz-line); color:var(--bz-text);
+              border-radius:8px; padding:0.25rem; font-size:0.8rem; }
+  .text-edit { position:absolute; z-index:6; outline:1px dashed var(--bz-yellow); outline-offset:2px;
+               min-width:24px; white-space:pre; cursor:text; padding:0; margin:0; border:0;
+               line-height:1.3; caret-color:var(--bz-yellow); }
   select { background:#101010; border:1px solid var(--bz-line); color:var(--bz-text); border-radius:8px;
            padding:0.3rem; font-size:0.8rem; }
 </style>
@@ -145,6 +154,29 @@
     <option value="fill">Fill</option>
     <option value="both" selected>Outline + fill</option>
   </select>
+</div>
+
+<div id="textbar">
+  <span class="lbl">Text</span>
+  <select id="fontFamily" title="Font">
+    <option value="Inter, 'Segoe UI', sans-serif">Inter (default)</option>
+    <option value="Arial, Helvetica, sans-serif">Arial</option>
+    <option value="Verdana, Geneva, sans-serif">Verdana</option>
+    <option value="Georgia, 'Times New Roman', serif">Georgia</option>
+    <option value="'Times New Roman', Times, serif">Times New Roman</option>
+    <option value="'Courier New', Courier, monospace">Courier New</option>
+    <option value="Impact, 'Arial Black', sans-serif">Impact</option>
+    <option value="'Comic Sans MS', 'Comic Sans', cursive">Comic Sans</option>
+  </select>
+  <input id="fontSize" type="number" min="6" max="240" step="1" value="20" title="Text size" />
+  <button id="tBold" title="Bold"><b>B</b></button>
+  <button id="tItalic" title="Italic"><i>I</i></button>
+  <button id="tUnder" title="Underline"><u>U</u></button>
+  <label class="lbl" style="display:flex;align-items:center;gap:0.3rem">
+    <input type="checkbox" id="tBg" /> Background
+  </label>
+  <input id="tBgColor" type="color" value="#000000" title="Text background" />
+  <span class="hint">Click the board to type. Double-click text to edit it; Esc finishes.</span>
 </div>
 
 <div id="work">
@@ -336,6 +368,13 @@
 
     // One renderer for screen, PNG, JPG and the model's reference: the exported file
     // cannot drift from the board by having a second drawing routine.
+    // A text mark anchored to another mark rides on it; the stored x1/y1 is the
+    // fallback for when that mark is gone (deleting the road must not delete the note).
+    function textPos(s) {
+      if (s.anchor) { var a = anchorPoint(s.anchor); if (a) return { x: a.x, y: a.y }; }
+      return { x: s.x1, y: s.y1 };
+    }
+
     function drawMark(g, s, isDraft) {
       var w = s.width || 3;
       g.save();
@@ -362,7 +401,7 @@
           }
         }
       } else if (s.tool === "text") {
-        var at = { x: s.x1, y: s.y1 };
+        var at = textPos(s);
         g.font = fontFor(s);
         g.textBaseline = "top";
         g.fillStyle = stroke;
@@ -430,7 +469,8 @@
       if (s.tool === "text") {
         var lines = String(s.text || "").split("\n");
         var fs = s.size || 20;
-        return { x: s.x1 - 4, y: s.y1 - 3, w: Math.max(20, (s.w || 90)) , h: lines.length * fs * 1.3 + 6 };
+        var at = textPos(s);
+        return { x: at.x - 4, y: at.y - 3, w: Math.max(20, s.w || measureTextWidth(s)), h: lines.length * fs * 1.3 + 6 };
       }
       if (s.tool === "polygon") {
         var ps = s.points || [];
@@ -465,7 +505,7 @@
       g.save();
       g.beginPath(); g.rect(0, 0, doc.w, doc.h); g.clip();
       if (rasterCv) g.drawImage(rasterCv, 0, 0, doc.w, doc.h);
-      doc.strokes.forEach(function (st) { drawMark(g, st, false); });
+      doc.strokes.forEach(function (st) { if (st !== editingMark) drawMark(g, st, false); });
       if (draft) drawMark(g, draft, true);
       g.restore();
       // paper edge
@@ -474,6 +514,7 @@
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       paintOverlays(g);
       syncImages();
+      positionEditor();
     }
 
     // Screen (CSS px inside #stage) → document coordinates.
@@ -675,6 +716,152 @@
       setStatus("Picked " + hex + (secondary ? " as secondary." : " as primary."));
     }
 
+    // ── text ──────────────────────────────────────────────────────────
+    // Paint's text tool is a box you type into, not a prompt that hides the board.
+    // The mark stays editable for the life of the document: double-click re-opens
+    // the same box, in place, at the same font.
+    var editingMark = null, editEl = null, markDrag = null;
+
+    function measureTextWidth(m) {
+      var fs = m.size || 20;
+      ctx.save();
+      ctx.font = fontFor(m);
+      var w = 24;
+      String(m.text || "").split("\n").forEach(function (ln) { w = Math.max(w, ctx.measureText(ln).width); });
+      ctx.restore();
+      return w + 8;
+    }
+    function barOpts() {
+      var fam = document.getElementById("fontFamily");
+      var sz = document.getElementById("fontSize");
+      return {
+        font: fam ? fam.value : "Inter, 'Segoe UI', sans-serif",
+        size: Math.max(6, Math.min(240, Number(sz && sz.value) || 20)),
+        bold: document.getElementById("tBold").classList.contains("on"),
+        italic: document.getElementById("tItalic").classList.contains("on"),
+        underline: document.getElementById("tUnder").classList.contains("on"),
+        bg: document.getElementById("tBg").checked ? document.getElementById("tBgColor").value : null,
+      };
+    }
+    function adoptTextStyle(m) {
+      document.getElementById("fontFamily").value = m.font || "Inter, 'Segoe UI', sans-serif";
+      document.getElementById("fontSize").value = m.size || 20;
+      document.getElementById("tBold").classList.toggle("on", !!m.bold);
+      document.getElementById("tItalic").classList.toggle("on", !!m.italic);
+      document.getElementById("tUnder").classList.toggle("on", !!m.underline);
+      document.getElementById("tBg").checked = !!m.bg;
+      if (m.bg) document.getElementById("tBgColor").value = m.bg;
+    }
+    function syncTextBar() {
+      var sel = null;
+      for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) sel = doc.strokes[i];
+      var show = tool === "text" || (sel && sel.tool === "text");
+      document.getElementById("textbar").classList.toggle("on", !!show);
+      if (sel && sel.tool === "text") adoptTextStyle(sel);
+      else if (tool === "text") {
+        // keep the bar's own values, but reflect the current colour
+      }
+    }
+
+    function editorFont(m) {
+      return (m.italic ? "italic " : "") + (m.bold ? "700 " : "400 ") +
+        Math.max(1, (m.size || 20) * view.zoom) + "px " + (m.font || "Inter, 'Segoe UI', sans-serif");
+    }
+    function positionEditor() {
+      if (!editEl || !editingMark) return;
+      var at = textPos(editingMark);
+      editEl.style.left = (at.x * view.zoom + view.panX) + "px";
+      editEl.style.top = (at.y * view.zoom + view.panY) + "px";
+      editEl.style.font = editorFont(editingMark);
+      editEl.style.color = editingMark.color || colorP;
+      editEl.style.background = editingMark.bg || "transparent";
+    }
+    function openTextEditor(mark, isNew) {
+      if (editEl) closeTextEditor();
+      editingMark = mark;
+      var el = document.createElement("div");
+      el.className = "text-edit";
+      el.setAttribute("contenteditable", "true");
+      el.setAttribute("autocorrect", "off");
+      el.setAttribute("autocapitalize", "off");
+      el.spellcheck = false;
+      el.textContent = mark.text || "";
+      stage.appendChild(el);
+      editEl = el;
+      positionEditor();
+      el.addEventListener("input", function () {
+        mark.text = el.textContent || "";
+        mark.w = measureTextWidth(mark);
+        positionEditor();
+        paint();
+      });
+      el.addEventListener("keydown", function (e) {
+        e.stopPropagation();
+        if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+          e.preventDefault();
+          closeTextEditor();
+        }
+      });
+      el.addEventListener("blur", function () { if (editEl === el) closeTextEditor(); });
+      el.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      el.focus();
+      if (!isNew) {
+        var rg = document.createRange();
+        rg.selectNodeContents(el);
+        rg.collapse(false);
+        var sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(rg);
+      }
+      setStatus(isNew ? "Type, then click away or press Esc." : "Editing — Esc finishes.");
+      paint();
+    }
+    function closeTextEditor() {
+      if (!editEl) { editingMark = null; return; }
+      var el = editEl, m = editingMark;
+      editEl = null; editingMark = null;
+      if (m) {
+        m.text = String(el.textContent || "").replace(/\u00a0/g, " ");
+        if (!m.text.trim()) doc.strokes = doc.strokes.filter(function (x) { return x !== m; });
+        else { m.w = measureTextWidth(m); if (m.anchor && !anchorPoint(m.anchor)) m.anchor = null; }
+      }
+      if (el.parentNode) el.parentNode.removeChild(el);
+      paint();
+      syncTextBar();
+      autoSave();
+      setStatus(doc.strokes.length + " marks on the board");
+    }
+    function editTextMark(hit) {
+      snapshot();
+      adoptTextStyle(hit);
+      selectedStroke = hit.id;
+      syncTextBar();
+      openTextEditor(hit, false);
+    }
+    // Bar values apply to the mark already selected, so restyling is one click.
+    (function wireTextBar() {
+      function apply() {
+        var sel = null;
+        for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) sel = doc.strokes[i];
+        if (!sel || sel.tool !== "text") return;
+        var o = barOpts();
+        sel.font = o.font; sel.size = o.size; sel.bold = o.bold; sel.italic = o.italic;
+        sel.underline = o.underline; sel.bg = o.bg;
+        sel.w = measureTextWidth(sel);
+        paint(); autoSave();
+      }
+      ["fontFamily", "fontSize", "tBgColor"].forEach(function (id) {
+        document.getElementById(id).addEventListener("input", apply);
+        document.getElementById(id).addEventListener("change", apply);
+      });
+      ["tBold", "tItalic", "tUnder"].forEach(function (id) {
+        document.getElementById(id).addEventListener("click", function () {
+          document.getElementById(id).classList.toggle("on");
+          apply();
+        });
+      });
+      document.getElementById("tBg").addEventListener("change", apply);
+    })();
+
     // ── pointer ───────────────────────────────────────────────────────
     var mode = null;          // what the current gesture is doing
     var sprayTimer = null;
@@ -686,11 +873,21 @@
 
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button === 2) rightBtn = true;
+      // pointerdown runs before blur, so a click on the board while the text box is
+      // open would otherwise create the next mark and then have blur close THAT one.
+      if (editEl) closeTextEditor();
       var p = pt(e);
 
       if (tool === "select") {
         var hit = hitTest(p);
         selectedStroke = hit ? hit.id : null;
+        if (hit) {
+          // Any mark can be dragged; text is the one that has to be (Paint's text
+          // box is movable after you type in it).
+          markDrag = { id: hit.id, sx: p.x, sy: p.y, ox: hit.x1, oy: hit.y1, moved: false };
+          canvas.setPointerCapture(e.pointerId);
+        }
+        syncTextBar();
         paint();
         return;
       }
@@ -704,16 +901,20 @@
         return;
       }
       if (tool === "text") {
-        var t = window.prompt("Text:");
-        if (t) {
-          snapshot();
-          var hit2 = hitTest(p);
-          doc.strokes.push({ id: newId(), tool: "text", color: e.button === 2 ? colorS : colorP,
-                             x1: p.x, y1: p.y, text: t, size: 20, anchor: hit2 ? hit2.id : null });
-          paint();
-          setStatus(hit2 ? "Text attached to that mark." : "Text added.");
-          autoSave();
-        }
+        // Keep focus: the default action of the press would move it to the document
+        // and blur the box we are about to open, closing it on the first keystroke.
+        e.preventDefault();
+        var hit2 = hitTest(p);
+        if (hit2 && hit2.tool === "text") { editTextMark(hit2); return; }
+        snapshot();
+        var m = { id: newId(), tool: "text", color: e.button === 2 ? colorS : colorP,
+                  x1: p.x, y1: p.y, text: "", w: 24, anchor: hit2 ? hit2.id : null };
+        var o = barOpts();
+        m.font = o.font; m.size = o.size; m.bold = o.bold; m.italic = o.italic;
+        m.underline = o.underline; m.bg = o.bg;
+        doc.strokes.push(m);
+        selectedStroke = m.id;
+        openTextEditor(m, true);
         return;
       }
 
@@ -786,6 +987,18 @@
         curvePending.cx = p.x; curvePending.cy = p.y;
         draft = curvePending; paint(); return;
       }
+      if (markDrag) {
+        if (!inDoc(p) && !markDrag.moved) return;
+        var mk = null;
+        for (var q = 0; q < doc.strokes.length; q++) if (doc.strokes[q].id === markDrag.id) mk = doc.strokes[q];
+        if (!mk) { markDrag = null; return; }
+        if (!markDrag.moved) { if (Math.abs(p.x - markDrag.sx) + Math.abs(p.y - markDrag.sy) < 2) return; snapshot(); markDrag.moved = true; }
+        mk.x1 = markDrag.ox + (p.x - markDrag.sx);
+        mk.y1 = markDrag.oy + (p.y - markDrag.sy);
+        if (mk.anchor && anchorPoint(mk.anchor)) { mk.anchor = null; }   // moving detaches the note
+        paint();
+        return;
+      }
       if (polyDraft && !mode) {
         // live rubber band from the last corner
         draft = { tool: "polygon", color: polyDraft.color, width: polyDraft.width, op: polyDraft.op,
@@ -805,6 +1018,7 @@
     });
 
     canvas.addEventListener("pointerup", function (e) {
+      if (markDrag) { var moved = markDrag.moved; markDrag = null; if (moved) autoSave(); return; }
       if (mode === "spray") { clearInterval(sprayTimer); sprayTimer = null; mode = null; autoSave(); return; }
       if (mode === "erase") { mode = null; autoSave(); return; }
       if (mode === "draw" || mode === "shape") {
@@ -836,8 +1050,10 @@
     });
 
     // A polygon stays open until a double-click or Enter closes it.
-    canvas.addEventListener("dblclick", function () {
-      if (polyDraft) closePolygon();
+    canvas.addEventListener("dblclick", function (e) {
+      if (polyDraft) { closePolygon(); return; }
+      var hit = hitTest(pt(e));
+      if (hit && hit.tool === "text") editTextMark(hit);
     });
     function closePolygon() {
       if (!polyDraft) return;
@@ -947,7 +1163,9 @@
       document.querySelectorAll("[data-tool]").forEach(function (b) {
         b.classList.toggle("on", b.getAttribute("data-tool") === t);
       });
-      canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy" : "crosshair";
+      canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy" : t === "text" ? "text" : "crosshair";
+      if (t !== "text" && editEl) closeTextEditor();
+      syncTextBar();
       setStatus(toolHint(t));
       paint();
     }
