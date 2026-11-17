@@ -1,21 +1,30 @@
 /**
  * Honey Drops — wallet, ledger, purchases, privacy.
  *
+ * Hermetic by default: an in-memory PGlite, the same engine scripts/test-0055-replay.mjs
+ * uses, so `npm run test:ci` needs no database server. Set DATABASE_URL_TEST to run the
+ * identical assertions against a real Postgres (scripts/recipe-seal-pg.sh).
+ *
+ * This test was wired into test:ci while it still required DATABASE_URL_TEST, so CI
+ * failed with exit 2 before a single assertion ran. A hermetic suite cannot depend on a
+ * service the job does not start.
+ *
+ *   npx tsx scripts/test-wallet.ts
  *   DATABASE_URL_TEST=postgres://… npx tsx scripts/test-wallet.ts
  */
+import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { grant, ledger, ownsRecipe, purchase, salesSummary, splitPrice, walletSummary } from "../src/lib/wallet/wallet";
 
 const url = process.env.DATABASE_URL_TEST;
-if (!url) {
-  console.error("DATABASE_URL_TEST is required (see scripts/recipe-seal-pg.sh)");
-  process.exit(2);
-}
-const pool = new Pool({ connectionString: url });
+const pool = url ? new Pool({ connectionString: url }) : null;
+const db = url ? null : new PGlite();
 const q = <T = Record<string, unknown>>(text: string, params?: unknown[]) =>
-  pool.query<T>(text, params ?? []).then((r) => r.rows);
+  url
+    ? pool!.query<T>(text, params ?? []).then((r) => r.rows)
+    : db!.query<T>(text, params ?? []).then((r) => r.rows);
 
 let pass = 0;
 let fail = 0;
@@ -34,10 +43,16 @@ const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 
 async function migrate() {
-  const files = ["0045_honey_drops_wallet.sql"];
+  // Everything the wallet module reads. 0046 gives salesSummary() its ratings
+  // aggregate; against a live database those tables already existed, which is why
+  // a one-file list only surfaced as a failure once the test ran on a fresh engine.
+  const files = ["0045_honey_drops_wallet.sql", "0046_recipe_ratings.sql", "0047_recipe_blobs.sql"];
   for (const f of files) {
     const sql = readFileSync(join(process.cwd(), "migrations", f), "utf8");
-    await q(sql);
+    // exec() for the migration: it is several statements, and PGlite's query() speaks
+    // the extended protocol, which takes one.
+    if (url) await pool!.query(sql);
+    else await db!.exec(sql);
   }
 }
 
@@ -164,6 +179,7 @@ async function migrate() {
   });
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
-  await pool.end();
+  if (url) await pool!.end();
+  else await db!.close();
   process.exit(fail > 0 ? 1 : 0);
 })();
