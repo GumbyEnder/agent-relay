@@ -4,6 +4,10 @@
 **Audience:** anyone deciding whether to publish or buy a sealed recipe, and anyone about to
 extend the leak gate.
 
+This document is about the **seal**: what a bundle is, what the manifest may not say, and what
+the promise does not cover. The wire contract — endpoints, licences, tokens, metering, error
+codes — is [`RECIPE-MARKETPLACE-PROTOCOL.md`](./RECIPE-MARKETPLACE-PROTOCOL.md).
+
 This document exists because a security claim that is only in a pull-request thread is not a
 claim. It states exactly what the seal guarantees, exactly what it does not, and why the
 boundary sits where it does.
