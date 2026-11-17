@@ -20,18 +20,20 @@
   "use strict";
 
   var LINKS = [
+    // The owner's roadmap names five main places: Talk, Library, Memory, Experts,
+    // Recipes. Everything else stays one click away under "More" (`more: true`).
     { id: "talk", href: "/buzzy/talk", label: "Talk" },
-    { id: "sketch", href: "/buzzy/sketch", label: "Sketch" },
-    { id: "studio", href: "/buzzy/studio", label: "Studio" },
     // No longer opens a new tab: the page shell below keeps Talk (and the mic)
     // alive while you move around, so the reason for the `_blank` is gone.
     { id: "library", href: "/buzzy/library", label: "Library" },
-    { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities" },
     { id: "memory", href: "/buzzy/memory", label: "Memory" },
     { id: "experts", href: "/buzzy/experts", label: "Experts" },
     { id: "recipes", href: "/buzzy/recipes", label: "Recipes" },
-    { id: "wallet", href: "/buzzy/wallet", label: "Honey Drops" },
-    { id: "publish", href: "/buzzy/upload", label: "Publish" },
+    { id: "sketch", href: "/buzzy/sketch", label: "Sketch", more: true },
+    { id: "studio", href: "/buzzy/studio", label: "Studio", more: true },
+    { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities", more: true },
+    { id: "wallet", href: "/buzzy/wallet", label: "Honey Drops", more: true },
+    { id: "publish", href: "/buzzy/upload", label: "Publish", more: true },
   ];
 
   function section(pathname) {
@@ -90,6 +92,12 @@
       "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
       "#bzPanel .bz-panel-body{flex:1;min-height:0}",
       "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
+      "#bzPanel .bz-panel-tools{display:flex;align-items:center;gap:.35rem}",
+      "#bzPanel .bz-panel-close:hover{color:#ffd40d}",
+      "#bzPanel .bz-panel-close:focus-visible{outline:2px solid #ffd40d;outline-offset:2px;border-radius:4px}",
+      "#bzPanel.min{height:auto;top:auto;bottom:1rem;width:auto;min-width:230px;padding:.5rem .7rem}",
+      "#bzPanel.min .bz-panel-body{display:none}",
+      "#bzPanel.min .bz-panel-head{padding:0;color:#e6e6e6;cursor:pointer}",
       // The chrome renders inside eleven different page stylesheets, and three of
       // them set their own body font-size/line-height (sketch+studio 14px/1.5,
       // capabilities 15px/1.55, memory inherits the browser default). An inherited
@@ -215,7 +223,49 @@
       else { a.removeAttribute("target"); a.removeAttribute("rel"); }
       ordered.push(a);
     });
-    ordered.forEach(function (a) { nav.appendChild(a); });
+    // Main places in the row; the rest in one "More" menu (idempotent: this runs
+    // again after every soft navigation, so reuse the menu if it exists).
+    var more = nav.querySelector(".bz-more");
+    if (!more) {
+      more = document.createElement("div");
+      more.className = "bz-more";
+      more.innerHTML =
+        '<button type="button" class="bz-more-btn" aria-haspopup="true" aria-expanded="false">More <span aria-hidden="true">&#9662;</span></button>' +
+        '<div class="bz-more-menu" hidden></div>';
+      var moreBtn = more.querySelector(".bz-more-btn");
+      var moreMenu = more.querySelector(".bz-more-menu");
+      var setOpen = function (open) {
+        moreMenu.hidden = !open;
+        moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (!open) return;
+        // The link row scrolls sideways, which clips anything absolutely placed in
+        // it: pin the menu to the viewport under the button instead.
+        var r = moreBtn.getBoundingClientRect();
+        var w = moreMenu.offsetWidth || 180;
+        moreMenu.style.top = Math.round(r.bottom + 6) + "px";
+        moreMenu.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + "px";
+      };
+      window.addEventListener("resize", function () { setOpen(false); });
+      window.addEventListener("scroll", function () { if (!moreMenu.hidden) setOpen(false); }, { passive: true });
+      moreBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        setOpen(moreMenu.hidden);
+        if (!moreMenu.hidden) { var first = moreMenu.querySelector("a"); if (first) first.focus(); }
+      });
+      moreMenu.addEventListener("click", function () { setOpen(false); });
+      more.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !moreMenu.hidden) { setOpen(false); moreBtn.focus(); }
+      });
+      document.addEventListener("click", function (e) {
+        if (!more.contains(e.target)) setOpen(false);
+      });
+    }
+    var menu = more.querySelector(".bz-more-menu");
+    ordered.forEach(function (a, i) {
+      if (LINKS[i].more) menu.appendChild(a);
+      else nav.appendChild(a);
+    });
+    nav.appendChild(more);
     // Anchors too: `#bzNav a` is a page-owned id rule on sketch/studio/capabilities,
     // so an inherited value cannot reach them. 0.86rem is the shared nav.css size;
     // writing it inline keeps the label box identical wherever the row is rendered.
@@ -233,6 +283,13 @@
       if (on) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
+    // A page that lives under More lights up More.
+    var moreButton = nav.querySelector(".bz-more-btn");
+    if (moreButton) {
+      moreButton.classList.toggle("active", LINKS.some(function (l) { return l.more && l.id === active; }));
+      moreButton.style.fontFamily = CHROME_FONT;
+      moreButton.style.fontSize = "0.86rem";
+    }
     return nav;
   }
 
@@ -583,8 +640,17 @@
     close.type = "button";
     close.setAttribute("aria-label", "Close");
     close.innerHTML = "&times;";
+    // Every pop-up has close and minimise (roadmap phase 3). Minimised, the panel
+    // folds to its title bar at the bottom right and keeps the conversation.
+    var min = document.createElement("button");
+    min.className = "bz-panel-close bz-panel-min";
+    min.type = "button";
+    var tools = document.createElement("span");
+    tools.className = "bz-panel-tools";
+    tools.appendChild(min);
+    tools.appendChild(close);
     head.appendChild(title);
-    head.appendChild(close);
+    head.appendChild(tools);
     var body = document.createElement("div");
     body.className = "bz-panel-body";
     panel.appendChild(head);
@@ -606,24 +672,46 @@
       document.head.appendChild(s);
     }
 
-    function open() {
-      panel.classList.add("open");
-      btn.setAttribute("aria-expanded", "true");
-      mountChat();
+    function setMin(on) {
+      panel.classList.toggle("min", on);
+      min.textContent = on ? "\u25A1" : "\u2013";
+      min.setAttribute("aria-label", on ? "Restore Ask BeeZilla" : "Minimise Ask BeeZilla");
+      min.title = on ? "Restore" : "Minimise";
+      btn.setAttribute("aria-expanded", panel.classList.contains("open") && !on ? "true" : "false");
+    }
+    function focusInput() {
       var input = body.querySelector(".bzc-in");
       if (input) input.focus();
     }
+    function open() {
+      panel.classList.add("open");
+      setMin(false);
+      mountChat();
+      focusInput();
+    }
     function shut() {
       panel.classList.remove("open");
+      setMin(false);
       btn.setAttribute("aria-expanded", "false");
     }
+    setMin(false);
     btn.addEventListener("click", function () {
-      if (panel.classList.contains("open")) shut();
+      // A minimised panel comes back; an open one closes.
+      if (panel.classList.contains("open") && !panel.classList.contains("min")) shut();
       else open();
     });
-    close.addEventListener("click", shut);
+    close.addEventListener("click", function (e) { e.stopPropagation(); shut(); });
+    min.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var folding = !panel.classList.contains("min");
+      setMin(folding);
+      if (folding) btn.focus(); else focusInput();
+    });
+    head.addEventListener("click", function () {
+      if (panel.classList.contains("min")) { setMin(false); focusInput(); }
+    });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && panel.classList.contains("open")) shut();
+      if (e.key === "Escape" && panel.classList.contains("open") && !panel.classList.contains("min")) shut();
     });
   }
 

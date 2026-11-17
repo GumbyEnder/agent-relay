@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Shared with you — BeeZilla</title>
+  <style>
+    :root {
+      --bg: #0E0E0E;
+      --panel: #151515;
+      --line: #262626;
+      --text: #F2F2F2;
+      --muted: #A3A3A3;
+      --accent: #FFC107;
+      --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 1.1rem 16px 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .brand { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text); font-weight: 700; text-decoration: none; }
+    .brand-dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px rgba(255, 193, 7, 0.6); }
+    main { max-width: 760px; margin: 0 auto; padding: 1rem 16px 3rem; }
+    .sheet {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1.6rem 1.7rem 2rem;
+    }
+    .badge {
+      display: inline-block;
+      margin: 0 0 0.9rem;
+      padding: 0.2rem 0.65rem;
+      border: 1px solid #5A4A12;
+      border-radius: 999px;
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    h1 { margin: 0 0 0.3rem; font-size: 1.85rem; line-height: 1.2; }
+    .doc h2 { margin: 1.6rem 0 0.4rem; font-size: 1.25rem; color: var(--accent); }
+    .doc h3, .doc h4, .doc h5, .doc h6 { margin: 1.2rem 0 0.3rem; font-size: 1.05rem; }
+    .doc p { margin: 0.55rem 0; }
+    .doc ul, .doc ol { margin: 0.5rem 0; padding-left: 1.4rem; }
+    .doc li { margin: 0.2rem 0; }
+    .doc blockquote { margin: 0.8rem 0; padding: 0.2rem 0 0.2rem 0.9rem; border-left: 3px solid var(--accent); color: #D6D6D6; }
+    .doc pre { overflow-x: auto; padding: 0.8rem 1rem; border-radius: 10px; background: #0B0B0B; border: 1px solid var(--line); font-size: 0.88rem; }
+    .doc code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+    .doc a { color: var(--accent); }
+    .table-wrap { overflow-x: auto; margin: 0.8rem 0; }
+    .doc table { border-collapse: collapse; min-width: 100%; font-size: 0.92rem; }
+    .doc th, .doc td { padding: 0.45rem 0.7rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .doc th { background: #1C1C1C; }
+    .note { margin: 1.6rem 0 0; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+    .state { padding: 2.5rem 0; text-align: center; color: var(--muted); }
+    .state strong { display: block; margin-bottom: 0.4rem; color: var(--text); font-size: 1.15rem; }
+    .print { min-height: 0; padding: 0.3rem 0.8rem; border: 1px solid #333; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 0.8rem; cursor: pointer; }
+    .print:hover { color: var(--accent); border-color: #6B5A1E; }
+    .print:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .hidden { display: none !important; }
+    @media (max-width: 560px) {
+      .sheet { padding: 1.2rem 1.1rem 1.5rem; border-radius: 12px; }
+      h1 { font-size: 1.5rem; }
+    }
+    @media print {
+      body { background: #fff; color: #111; }
+      .top, .print { display: none; }
+      .sheet { border: none; background: none; padding: 0; }
+      .badge { color: #555; border-color: #bbb; }
+      .doc h2, .doc a { color: #111; }
+      .doc th { background: #eee; }
+      .note { color: #555; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a class="brand" href="/" rel="noopener"><span class="brand-dot" aria-hidden="true"></span>BeeZilla</a>
+    <button type="button" class="print hidden" id="printBtn">Print or save as PDF</button>
+  </div>
+  <main>
+    <article class="sheet" id="sheet" aria-live="polite">
+      <div class="state" id="state"><strong>Opening the shared document…</strong></div>
+      <div class="hidden" id="docWrap">
+        <span class="badge">Shared with you · read only</span>
+        <h1 id="docTitle"></h1>
+        <div class="doc" id="doc"></div>
+        <p class="note" id="docNote"></p>
+      </div>
+    </article>
+  </main>
+  <script>
+  /**
+   * The page behind a public share link (share.js makes links of the form
+   * /buzzy/shared#sh_…). It reads exactly one pinned, accepted version through the
+   * public read route and draws it as plain text: every piece goes in with
+   * textContent, so nothing in the document can run as code on this page.
+   */
+  (function () {
+    "use strict";
+
+    var state = document.getElementById("state");
+    var wrap = document.getElementById("docWrap");
+    var titleEl = document.getElementById("docTitle");
+    var docEl = document.getElementById("doc");
+    var noteEl = document.getElementById("docNote");
+    var printBtn = document.getElementById("printBtn");
+
+    function showState(head, text) {
+      state.textContent = "";
+      var s = document.createElement("strong");
+      s.textContent = head;
+      state.appendChild(s);
+      if (text) state.appendChild(document.createTextNode(text));
+      state.classList.remove("hidden");
+      wrap.classList.add("hidden");
+    }
+
+    function tokenFromUrl() {
+      var h = (location.hash || "").replace(/^#/, "");
+      if (/^sh_[A-Za-z0-9]{20,40}$/.test(h)) return h;
+      var q = new URLSearchParams(location.search).get("t") || "";
+      return /^sh_[A-Za-z0-9]{20,40}$/.test(q) ? q : "";
+    }
+
+    // ── Inline marks: **bold**, *italic* / _italic_, `code`, [text](https://…) ──
+    var INLINE = /(\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_)/;
+    function addInline(parent, text) {
+      var rest = String(text);
+      while (rest) {
+        var m = INLINE.exec(rest);
+        if (!m) { parent.appendChild(document.createTextNode(rest)); break; }
+        if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+        var el;
+        if (m[2] !== undefined) { el = document.createElement("strong"); el.textContent = m[2]; }
+        else if (m[3] !== undefined) { el = document.createElement("code"); el.textContent = m[3]; }
+        else if (m[4] !== undefined) {
+          el = document.createElement("a");
+          el.textContent = m[4];
+          el.href = m[5];
+          el.rel = "noopener noreferrer nofollow";
+          el.target = "_blank";
+        }
+        else { el = document.createElement("em"); el.textContent = m[6] !== undefined ? m[6] : m[7]; }
+        parent.appendChild(el);
+        rest = rest.slice(m.index + m[0].length);
+      }
+    }
+
+    function cells(line) {
+      return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(function (c) { return c.trim(); });
+    }
+
+    // ── Blocks: headings, lists, quotes, code fences, pipe tables, paragraphs ──
+    function render(markdown, title) {
+      var lines = String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
+      var para = [], list = null, listKind = "", table = null, fence = null, skippedTitle = false;
+
+      function flushPara() {
+        if (!para.length) return;
+        var p = document.createElement("p");
+        addInline(p, para.join(" "));
+        docEl.appendChild(p);
+        para = [];
+      }
+      function flushList() { list = null; listKind = ""; }
+      function flushTable() { table = null; }
+      function flushAll() { flushPara(); flushList(); flushTable(); }
+
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+
+        if (fence) {
+          if (/^\s*```/.test(line)) { fence = null; continue; }
+          fence.textContent += (fence.textContent ? "\n" : "") + line;
+          continue;
+        }
+        if (/^\s*```/.test(line)) {
+          flushAll();
+          var pre = document.createElement("pre");
+          fence = document.createElement("code");
+          pre.appendChild(fence);
+          docEl.appendChild(pre);
+          continue;
+        }
+        if (!line.trim()) { flushAll(); continue; }
+
+        var h = /^(#{1,6})\s+(.*)$/.exec(line);
+        if (h) {
+          flushAll();
+          var text = h[2].replace(/\s+#+\s*$/, "").trim();
+          // The page already shows the title; skip the document's own copy of it.
+          if (!skippedTitle && h[1].length === 1 && text.toLowerCase() === String(title || "").trim().toLowerCase()) {
+            skippedTitle = true;
+            continue;
+          }
+          // The title is the page's only h1; # and ## both become section headings.
+          var level = Math.min(6, Math.max(2, h[1].length));
+          var hd = document.createElement("h" + level);
+          addInline(hd, text);
+          docEl.appendChild(hd);
+          continue;
+        }
+
+        if (/^\s*\|.*\|\s*$/.test(line)) {
+          flushPara(); flushList();
+          if (/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)) continue;
+          var row = document.createElement("tr");
+          var head = !table;
+          if (!table) {
+            var tw = document.createElement("div");
+            tw.className = "table-wrap";
+            table = document.createElement("table");
+            tw.appendChild(table);
+            docEl.appendChild(tw);
+          }
+          cells(line).forEach(function (c) {
+            var td = document.createElement(head ? "th" : "td");
+            addInline(td, c);
+            row.appendChild(td);
+          });
+          table.appendChild(row);
+          continue;
+        }
+        flushTable();
+
+        var li = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+        if (li) {
+          flushPara();
+          var kind = /\d/.test(li[1]) ? "ol" : "ul";
+          if (!list || listKind !== kind) {
+            list = document.createElement(kind);
+            listKind = kind;
+            docEl.appendChild(list);
+          }
+          var item = document.createElement("li");
+          addInline(item, li[2]);
+          list.appendChild(item);
+          continue;
+        }
+        flushList();
+
+        var q = /^\s*>\s?(.*)$/.exec(line);
+        if (q) {
+          flushPara();
+          var bq = document.createElement("blockquote");
+          addInline(bq, q[1]);
+          docEl.appendChild(bq);
+          continue;
+        }
+
+        para.push(line.trim());
+      }
+      flushAll();
+    }
+
+    var token = tokenFromUrl();
+    if (!token) {
+      showState("This link is incomplete.", "Ask the person who shared it to send the whole link again.");
+      return;
+    }
+
+    fetch("/api/buzzy/shared/" + encodeURIComponent(token), { credentials: "omit", cache: "no-store" })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, data: j || {} }; });
+      })
+      .then(function (res) {
+        if (!res.ok || typeof res.data.content !== "string") {
+          var msg = typeof res.data.error === "string" && res.data.error
+            ? res.data.error
+            : "Ask the person who shared it for a fresh link.";
+          showState("This document can't be opened.", msg);
+          return;
+        }
+        var title = typeof res.data.title === "string" && res.data.title.trim() ? res.data.title.trim() : "Shared document";
+        document.title = title + " — shared with you";
+        titleEl.textContent = title;
+        render(res.data.content, title);
+        noteEl.textContent = typeof res.data.note === "string" ? res.data.note : "";
+        state.classList.add("hidden");
+        wrap.classList.remove("hidden");
+        printBtn.classList.remove("hidden");
+      })
+      .catch(function () {
+        showState("BeeZilla could not be reached.", "Check your connection and open the link again.");
+      });
+
+    printBtn.addEventListener("click", function () { window.print(); });
+  })();
+  </script>
+</body>
+</html>

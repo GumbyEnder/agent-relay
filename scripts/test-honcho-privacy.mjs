@@ -4,11 +4,11 @@
  * Runs the actual legacy UI action bodies with a minimal DOM and the actual
  * server module with a fetch recorder. Other UI/network providers are outside
  * this test; passing does not establish offline mode or a full application build.
- * Run: npm run test:honcho-privacy (uses Node built-in TypeScript stripping).
+ * Run: npm run test:honcho-privacy (uses the installed TypeScript compiler).
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
+import ts from "typescript";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -59,7 +59,16 @@ function browserHarness(source, origin) {
     generateDraft() { effects.generations++; },
     fetch: async (...args) => { requests.push(args); return { ok: true }; },
   });
-  vm.runInContext(["newJob", "goProblem", "goChat"].map((name) => functionSource(source, name)).join("\n"), context);
+  // Load an old uploader too when testing pre-fix files. A negative control
+  // must fail because recorded requests contain the synthetic conversation,
+  // rather than because an omitted helper throws ReferenceError.
+  const legacyBase = source.match(/^ {4}const HONCHO_BASE = [^\n]+;$/m)?.[0] ?? "";
+  const legacyHelpers = ["ensureHonchoPeer", "syncHonchoChat"]
+    .filter((name) => source.includes(`    function ${name}() {`))
+    .map((name) => functionSource(source, name));
+  vm.runInContext([legacyBase, ...legacyHelpers,
+    ...["newJob", "goProblem", "goChat"].map((name) => functionSource(source, name)),
+  ].join("\n"), context);
   return { context, element, requests, effects };
 }
 
@@ -135,8 +144,15 @@ function serverHarness(env) {
     fetch: async (...args) => { requests.push(args); return { ok: true }; },
   });
   // This module has no dependencies. Execute its production TypeScript after
-  // built-in stripping; never load provider code or real process credentials.
-  const code = stripTypeScriptTypes(serverSource).replace(/^export /gm, "");
+  // compilation; never load provider code or real process credentials. Avoid
+  // node:module's stripTypeScriptTypes, which is absent before Node 22.13.
+  const compiled = ts.transpileModule(serverSource, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    fileName: "honcho.ts", reportDiagnostics: true,
+  });
+  assert.deepEqual(compiled.diagnostics?.filter(d => d.category === ts.DiagnosticCategory.Error) ?? [], [],
+    "the production server TypeScript compiles");
+  const code = compiled.outputText.replace(/^export /gm, "");
   vm.runInContext(code, context);
   return { api: context, requests };
 }

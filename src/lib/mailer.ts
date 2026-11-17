@@ -140,9 +140,10 @@ function getSmtp(): Transporter | null {
   };
   const url = env("SMTP_URL");
   if (url) {
-    // The URL goes inside the options object. As a second argument the timeouts
-    // were message defaults, not connection settings: they never applied, and
-    // the call did not type-check (every CI run on main failed on it).
+    // The URL goes inside the options object. As a second argument, `timeouts`
+    // was read as send-mail defaults rather than connection settings, so none of
+    // the three bounds applied and the call did not type-check — every CI run on
+    // main from 2026-11-12 on failed here at src/lib/mailer.ts:143 (TS2769).
     globalMail.__agentRelaySmtp__ = createTransport({ url, ...timeouts });
     return globalMail.__agentRelaySmtp__;
   }

@@ -41,12 +41,18 @@ export interface ToolPolicy {
   sideEffects: ToolSideEffect;
   /** Plain-language reason used when the tool is declared but withheld. */
   withheldReason?: string;
+  /**
+   * Reaches a service outside BeeZilla (the web, a music provider). The owner's
+   * Lockdown privacy mode withholds every such tool.
+   */
+  egress?: boolean;
 }
 
 export const TOOL_POLICIES: ToolPolicy[] = [
   // ── Read-only, always offered ────────────────────────────────────────
   {
     name: "web_search",
+    egress: true,
     schema: WEB_SEARCH_TOOL,
     gate: "always",
     offered: true,
@@ -57,6 +63,7 @@ export const TOOL_POLICIES: ToolPolicy[] = [
   },
   {
     name: "read_web_page",
+    egress: true,
     schema: READ_WEB_PAGE_TOOL,
     gate: "always",
     offered: true,
@@ -98,6 +105,7 @@ export const TOOL_POLICIES: ToolPolicy[] = [
   // ── Superseded: kept executable, never offered ───────────────────────
   {
     name: "fetch_website",
+    egress: true,
     schema: FETCH_WEBSITE_TOOL,
     gate: "always",
     offered: false,
@@ -114,6 +122,7 @@ export const TOOL_POLICIES: ToolPolicy[] = [
   // "The track is in your Library" while nothing had been generated.
   {
     name: "generate_music",
+    egress: true,
     schema: GENERATE_MUSIC_TOOL,
     gate: "draft",
     offered: true,
@@ -161,15 +170,21 @@ export const TOOL_POLICIES: ToolPolicy[] = [
 export interface ToolContext {
   /** True once the brief is complete or the owner asked for the deliverable. */
   draftGateOpen: boolean;
+  /** The owner chose Lockdown: nothing that leaves BeeZilla is offered. */
+  lockdown?: boolean;
+}
+
+function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
+  return p.offered && (p.gate === "always" || ctx.draftGateOpen) && !(ctx.lockdown && p.egress);
 }
 
 /** The schemas the model is allowed to see on this turn. */
 export function offeredTools(ctx: ToolContext): unknown[] {
-  return TOOL_POLICIES.filter((p) => p.offered && (p.gate === "always" || ctx.draftGateOpen)).map((p) => p.schema);
+  return TOOL_POLICIES.filter((p) => allowed(p, ctx)).map((p) => p.schema);
 }
 
 export function offeredToolNames(ctx: ToolContext): string[] {
-  return TOOL_POLICIES.filter((p) => p.offered && (p.gate === "always" || ctx.draftGateOpen)).map((p) => p.name);
+  return TOOL_POLICIES.filter((p) => allowed(p, ctx)).map((p) => p.name);
 }
 
 export function policyFor(name: string): ToolPolicy | undefined {
@@ -185,6 +200,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   if (!policy) return `${name} is not a tool BeeZilla has.`;
   if (!policy.offered) {
     return `${name} is not available in this conversation — ${policy.withheldReason ?? "it has been retired."}`;
+  }
+  if (ctx.lockdown && policy.egress) {
+    return `${name} is off in Lockdown — nothing leaves BeeZilla in that mode. The privacy control on the Talk bar switches it back.`;
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
