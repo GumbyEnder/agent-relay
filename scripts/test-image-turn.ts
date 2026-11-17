@@ -14,7 +14,7 @@
  */
 import { readFileSync } from "node:fs";
 import { repairImageReply, deniesImageCapability, fakesImageAction, IMAGE_TURN_SENTENCE } from "../src/lib/buzzy/artReply";
-import { pickImageUrl, describePayload } from "../src/lib/buzzy/art";
+import { pickImageUrl, describePayload, normalizeImageUrl, fetchImageUrl } from "../src/lib/buzzy/art";
 import { isImageRequest } from "../src/lib/buzzy/intent";
 
 let failures = 0;
@@ -111,6 +111,57 @@ for (const msg of ["what style suits a white house?", "how do I clean terracotta
 expect("no context, no draw", isImageRequest("a Spanish tile, a white house", undefined), false);
 expect("make-phrasings still draw", isImageRequest("Make me a picture of a house"), true);
 expect("English verb + noun still draws", isImageRequest("Can you draw me a picture of a red sports car"), true);
+
+console.log("the provider's link is untrusted input:");
+// A model can hand back any URL. Anything but plain https on a public host is
+// refused before a socket is opened, and a redirect is re-checked like a hop.
+const BAD_SCHEMES = [
+  "http://cdn.example/x.png",
+  "ftp://cdn.example/x.png",
+  "data:image/png;base64,AAAA",
+  "https://user:pass@cdn.example/x.png",
+  "https://cdn.example:8080/x.png",
+  "https://localhost/x.png",
+  "https://box.local/x.png",
+  "https://metadata.internal/x.png",
+];
+for (const url of BAD_SCHEMES) {
+  expect(`refused: ${url.slice(0, 44)}`, normalizeImageUrl(url) === null, true);
+}
+expect("plain https is kept", normalizeImageUrl("https://cdn.example/x.png?t=1") !== null, true);
+
+const PRIVATE = [
+  "https://127.0.0.1/x.png",
+  "https://127.1.2.3/x.png",
+  "https://10.0.0.5/x.png",
+  "https://172.16.4.9/x.png",
+  "https://192.168.1.20/x.png",
+  "https://169.254.169.254/latest/meta-data",
+  "https://100.64.0.9/x.png",
+  "https://[::1]/x.png",
+  "https://[fe80::1]/x.png",
+  "https://[fd00::1]/x.png",
+  "https://2130706433/x.png", // URL parsing turns this into 127.0.0.1
+];
+for (const url of PRIVATE) {
+  const got = await fetchImageUrl(url, Date.now());
+  expect(`blocked at fetch: ${url.slice(0, 44)}`, !got.ok && got.code === "image_url_blocked", true);
+}
+
+// The first hop is public, the redirect is not. The hop loop must catch it.
+const realFetch = globalThis.fetch;
+let redirectCalls = 0;
+globalThis.fetch = (async () => {
+  redirectCalls += 1;
+  return new Response(null, { status: 302, headers: { location: "https://169.254.169.254/x.png" } });
+}) as unknown as typeof fetch;
+try {
+  const hopped = await fetchImageUrl("https://93.184.216.34/x.png", Date.now());
+  expect("a public link is fetched", redirectCalls === 1, true);
+  expect("the redirect is refused", !hopped.ok && hopped.code === "image_url_blocked", true);
+} finally {
+  globalThis.fetch = realFetch;
+}
 
 console.log("the server names the art time separately:");
 expect("artMs is declared", /let artMs = 0;/.test(server), true);

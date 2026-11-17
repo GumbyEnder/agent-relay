@@ -11,6 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { getSql } from "@/lib/db";
+import { hostBlocked } from "./website";
 
 const env = (k: string) => (process.env[k] ?? "").trim();
 const BASE_URL = env("BZ_CHAT_BASE_URL") || "https://inference-api.nousresearch.com/v1";
@@ -211,32 +212,70 @@ export function describePayload(body: unknown): Record<string, unknown> {
   };
 }
 
-/** Fetch an image the provider linked to rather than inlined. */
+/** Fetch an image the provider linked to rather than inlined.
+ *
+ *  The link is model-supplied, so it is untrusted input: https only, no
+ *  credentials, no port but 443 — and every hop, the first and any redirect,
+ *  must resolve to a public address. Refusing only the first URL would leave
+ *  a public URL free to redirect at 169.254.169.254. The address rule itself
+ *  lives in website.ts (hostBlocked) so there is one SSRF rule, not two.
+ */
 export async function fetchImageUrl(url: string, started: number): Promise<ArtResult> {
   const MAX = 32 * 1024 * 1024;
+  const refused = (error: string): ArtResult => ({
+    ok: false,
+    code: "image_url_blocked",
+    error,
+    ms: Date.now() - started,
+  });
+
+  let current = normalizeImageUrl(url);
+  if (!current) {
+    return refused("the provider's image link was not a plain https address, so it was not fetched");
+  }
+
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-    if (!res.ok) {
-      return { ok: false, code: "image_download_failed", error: `image link answered ${res.status}`, ms: Date.now() - started };
+    for (let hop = 0; hop < 4; hop += 1) {
+      const gate = await hostBlocked(new URL(current).hostname);
+      if (gate === "blocked") {
+        return refused("the provider's image link pointed at a private, loopback or link-local address, so it was not fetched");
+      }
+      if (gate === "missing") {
+        return { ok: false, code: "image_download_failed", error: "the image link did not resolve", ms: Date.now() - started };
+      }
+      const res = await fetch(current, { redirect: "manual", signal: AbortSignal.timeout(60_000) });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc) {
+          return { ok: false, code: "image_download_failed", error: "the image link redirected nowhere", ms: Date.now() - started };
+        }
+        current = normalizeImageUrl(new URL(loc, current).toString());
+        if (!current) return refused("the image link redirected somewhere other than a plain https address, so it was not fetched");
+        continue;
+      }
+      if (!res.ok) {
+        return { ok: false, code: "image_download_failed", error: `image link answered ${res.status}`, ms: Date.now() - started };
+      }
+      const type = (res.headers.get("content-type") || "").split(";")[0]!.trim();
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.byteLength) {
+        return { ok: false, code: "no_image", error: "linked image was empty", ms: Date.now() - started };
+      }
+      if (buf.byteLength > MAX) {
+        return { ok: false, code: "no_image", error: `linked image was ${buf.byteLength} bytes — too large to store`, ms: Date.now() - started };
+      }
+      if (type && !/^image\//i.test(type)) {
+        return { ok: false, code: "no_image", error: `image link answered ${type}, not an image`, ms: Date.now() - started };
+      }
+      return {
+        ok: true,
+        bytes: buf,
+        contentType: /^image\//i.test(type) ? type : sniffImageType(buf),
+        ms: Date.now() - started,
+        model: IMAGE_MODEL,
+      };
     }
-    const type = (res.headers.get("content-type") || "").split(";")[0]!.trim();
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (!buf.byteLength) {
-      return { ok: false, code: "no_image", error: "linked image was empty", ms: Date.now() - started };
-    }
-    if (buf.byteLength > MAX) {
-      return { ok: false, code: "no_image", error: `linked image was ${buf.byteLength} bytes — too large to store`, ms: Date.now() - started };
-    }
-    if (type && !/^image\//i.test(type)) {
-      return { ok: false, code: "no_image", error: `image link answered ${type}, not an image`, ms: Date.now() - started };
-    }
-    return {
-      ok: true,
-      bytes: buf,
-      contentType: /^image\//i.test(type) ? type : sniffImageType(buf),
-      ms: Date.now() - started,
-      model: IMAGE_MODEL,
-    };
+    return { ok: false, code: "image_download_failed", error: "the image link redirected in a loop", ms: Date.now() - started };
   } catch (err) {
     return {
       ok: false,
@@ -245,6 +284,35 @@ export async function fetchImageUrl(url: string, started: number): Promise<ArtRe
       ms: Date.now() - started,
     };
   }
+}
+
+/**
+ * The part of the guard that needs no DNS: scheme, credentials, port and
+ * obviously-local names. Returns the cleaned URL, or null when the link is
+ * not fetchable at all. `hostBlocked` adds the address check on top.
+ */
+export function normalizeImageUrl(raw: string): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!s || s.length > 2000) return null;
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:") return null;
+  if (u.username || u.password) return null;
+  if (u.port && u.port !== "443") return null;
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (!host) return null;
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
+    return null;
+  }
+  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) return null;
+  u.hash = "";
+  u.hostname = host;
+  return u.toString();
 }
 
 /** A stored image must be labelled honestly; magic bytes settle it. */
