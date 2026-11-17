@@ -1,9 +1,12 @@
 /**
  * BZ-F043 — read the operator's saved model controls for one turn.
  *
- * The controls live in `ar_operator_prefs.prefs` (the existing JSONB column), so
- * this adds no schema. Everything read here is ownership-scoped to the `userId`
- * the turn already resolved — a turn for one account cannot read another's.
+ * The controls live in the console's per-account preferences row. This module
+ * never names that table: it asks `@/lib/operator-prefs.server` for the object,
+ * so the consumer side stays free of `ar_*` schema knowledge (see the boundary
+ * check in scripts/check-buzzy-boundary.mjs). Everything read here is
+ * ownership-scoped to the `userId` the turn already resolved — a turn for one
+ * account cannot read another's.
  *
  * Validation is deliberate: a stored value that the running policy does not
  * recognise is NOT passed through. It degrades to `value` and reports why, so a
@@ -12,7 +15,9 @@
  */
 
 import type { Sql } from "@/lib/db";
+import { readOperatorPrefsRow } from "@/lib/operator-prefs.server";
 import type { ModelPreference } from "./modelPolicy";
+
 
 /** The preferences the running policy understands. Keep in step with modelPolicy. */
 export const KNOWN_PREFERENCES: readonly ModelPreference[] = [
@@ -45,13 +50,7 @@ function asNumber(v: unknown): number | undefined {
 }
 
 export async function readModelPrefs(sql: Sql, userId: string): Promise<ModelPrefs> {
-  const rows = (await sql`
-    select prefs from ar_operator_prefs where user_id = ${userId} limit 1
-  `) as Array<{ prefs: unknown }>;
-
-  const raw = rows[0]?.prefs;
-  const prefs: Record<string, unknown> =
-    raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const prefs = await readOperatorPrefsRow(sql, userId);
 
   const stored = asString(prefs.modelPreference);
   let preference: ModelPreference = "value";
