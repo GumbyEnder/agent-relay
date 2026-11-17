@@ -1,0 +1,159 @@
+/* The Whiteboard (whiteboard.js; reference zMWSgG0, top right). */
+.wb-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 15rem;
+  border-radius: 16px;
+  border: 1px solid #262626;
+  background: #141414;
+  overflow: hidden;
+}
+.wb-head { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 0.8rem 0.4rem 1rem; }
+.wb-title { margin: 0; font-size: 0.95rem; font-weight: 600; color: #D9D9D9; }
+.wb-tools { display: inline-flex; gap: 0.15rem; }
+.wb-btn {
+  min-height: 0; width: 1.9rem; height: 1.9rem; padding: 0;
+  border: none; border-radius: 8px; background: transparent; color: #CFCFCF;
+  font: inherit; font-size: 1rem; line-height: 1; cursor: pointer;
+}
+.wb-btn:hover { background: #222; color: #FFC107; }
+.wb-btn:focus-visible { outline: 2px solid #FFC107; }
+.wb-panel.wb-min { height: auto; min-height: 0; }
+.wb-panel.wb-min .wb-canvas, .wb-panel.wb-min .wb-foot { display: none; }
+
+.wb-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 12.5rem;
+  margin: 0 0.6rem;
+  border-radius: 12px;
+  overflow: auto;
+  background-color: #111;
+  background-image: radial-gradient(#2E2E2E 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  outline: none;
+}
+.wb-panel.wb-over .wb-canvas { box-shadow: inset 0 0 0 2px #FFC107; background-color: #16130A; }
+.wb-panel.wb-target .wb-canvas { outline: 2px dashed #FFC107; outline-offset: -5px; }
+.wb-panel.wb-target .wb-canvas::before {
+  content: "Drop here to add it to the board";
+  position: absolute;
+  top: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 0.2rem 0.75rem;
+  border-radius: 999px;
+  background: #FFC107;
+  color: #141414;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+:root[data-theme="light"] .wb-panel.wb-target .wb-canvas { outline-color: #B8860B; }
+.wb-hint {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 1rem; color: #6A6A6A; font-size: 0.9rem; pointer-events: none;
+}
+.wb-hint[hidden] { display: none; }
+.wb-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.wb-link {
+  fill: none; stroke: #FFC107; stroke-width: 3; stroke-linecap: round;
+  pointer-events: stroke; cursor: pointer;
+}
+.wb-link.wb-sel { stroke-width: 5; filter: drop-shadow(0 0 6px rgba(255, 193, 7, 0.8)); }
+.wb-link.wb-preview { stroke-dasharray: 6 6; pointer-events: none; }
+
+.wb-card {
+  position: absolute;
+  width: 7.5rem;
+  padding: 0.4rem 0.4rem 0.45rem;
+  border-radius: 10px;
+  border: 1px solid #2E2E2E;
+  background: #1B1B1B;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  color: #EDEDED;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.wb-card:focus-visible { outline: 2px solid #FFC107; outline-offset: 2px; }
+.wb-card.wb-moving { cursor: grabbing; z-index: 5; box-shadow: 0 12px 26px rgba(0, 0, 0, 0.55); }
+.wb-card.wb-flash { box-shadow: 0 0 0 3px #FFC107; }
+.wb-img { display: block; width: 100%; height: 4.6rem; object-fit: cover; border-radius: 7px; background: #222; }
+.wb-glyph {
+  display: flex; align-items: center; justify-content: center;
+  height: 4.6rem; border-radius: 7px; background: #222;
+  font-size: 2rem; font-weight: 800; color: #FFC107;
+}
+.wb-g-document { background: linear-gradient(135deg, #2B7CD3, #185ABD); color: #fff; }
+.wb-g-sheet { background: linear-gradient(135deg, #21A366, #107C41); color: #fff; }
+.wb-g-slides { background: linear-gradient(135deg, #E86E44, #C43E1C); color: #fff; }
+.wb-g-pdf { background: linear-gradient(135deg, #E5484D, #B4232A); color: #fff; font-size: 1.4rem; }
+.wb-g-note { background: #FFE082; color: #3A2E00; }
+.wb-name { display: block; margin-top: 0.35rem; font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-rm {
+  position: absolute; top: 0.35rem; right: 0.35rem;
+  min-height: 0; width: 1.4rem; height: 1.4rem; padding: 0;
+  border: none; border-radius: 50%; background: rgba(0, 0, 0, 0.65); color: #eee;
+  font-size: 0.7rem; cursor: pointer; opacity: 0; transition: opacity 0.12s;
+}
+.wb-card:hover .wb-rm, .wb-card:focus-within .wb-rm { opacity: 1; }
+@media (hover: none) { .wb-rm { opacity: 1; } }
+.wb-handle {
+  position: absolute;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #FFC107;
+  box-shadow: 0 0 0 2px #141414;
+  cursor: crosshair;
+}
+.wb-nw { left: -6px; top: -6px; }
+.wb-ne { right: -6px; top: -6px; }
+.wb-sw { left: -6px; bottom: -6px; }
+.wb-se { right: -6px; bottom: -6px; }
+
+.wb-foot { position: relative; padding: 0.6rem; }
+.wb-search {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 0;
+  padding: 0.6rem 0.9rem 0.6rem 2.2rem;
+  border-radius: 999px;
+  border: 1px solid #2A2A2A;
+  background: #0E0E0E url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDBDBD' stroke-width='2'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5L21 21'/%3E%3C/svg%3E") no-repeat 0.75rem 50% / 1rem;
+  color: #F2F2F2;
+  font: inherit;
+  font-size: 0.9rem;
+}
+.wb-search:focus { outline: none; border-color: #FFC107; box-shadow: none; }
+.wb-results {
+  position: absolute;
+  left: 0.6rem; right: 0.6rem; bottom: calc(100% - 0.2rem);
+  z-index: 20;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.3rem;
+  border-radius: 12px;
+  border: 1px solid #2C2C2C;
+  background: #171717;
+  box-shadow: 0 -10px 26px rgba(0, 0, 0, 0.5);
+}
+.wb-results[hidden] { display: none; }
+.wb-opt {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%;
+  min-height: 0; padding: 0.45rem 0.6rem; border: none; border-radius: 8px;
+  background: transparent; color: #EDEDED; font: inherit; text-align: left; cursor: pointer;
+}
+.wb-opt:hover, .wb-opt:focus-visible { background: #222; outline: none; }
+.wb-opt-name { font-size: 0.88rem; }
+.wb-opt-sub { font-size: 0.74rem; color: #8D8D8D; }
+.wb-none { margin: 0.4rem 0.6rem; color: #8D8D8D; font-size: 0.85rem; }
+
+:root[data-theme="light"] .wb-panel { background: #fff; border-color: #E2E2E2; }
+:root[data-theme="light"] .wb-canvas { background-color: #FAFAF7; background-image: radial-gradient(#DDD 1px, transparent 1.2px); }
+:root[data-theme="light"] .wb-card { background: #fff; border-color: #E2E2E2; color: #141414; }
+@media (prefers-reduced-motion: reduce) { .wb-rm { transition: none; } }
