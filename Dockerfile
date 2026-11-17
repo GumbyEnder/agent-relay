@@ -17,7 +17,15 @@ COPY . .
 # Build-time only. Declared as ARG (not ENV) so the key is not in the image env.
 ARG BZ_PRIVATE_DEPLOY_KEY
 ARG BZ_REQUIRE_PRIVATE=1
-RUN npm run build \
+# Typecheck belongs in the image, not only in CI. `vite build` does not typecheck,
+# so six CI-red commits on main deployed quietly while no one noticed: they all
+# died on TS2769 in src/lib/mailer.ts and Railway kept reporting SUCCESS. The
+# sync has to run first — tsc resolves `@/lib/private/*`, which only exists after
+# it — and it is idempotent, so `prebuild` re-syncing inside `npm run build`
+# costs a cache-hit checkout and nothing more.
+RUN node scripts/sync-private.mjs \
+ && npm run typecheck \
+ && npm run build \
  && rm -rf /app/.private
 
 FROM node:22-bookworm-slim AS runner
