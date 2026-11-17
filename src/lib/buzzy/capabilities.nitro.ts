@@ -17,7 +17,7 @@ import { musicConfigured } from "./music";
 import { browserAvailable } from "./browser";
 import { threeDConfigured } from "./models3d";
 import { signingSecret } from "./inferenceToken";
-import { resolveOperatorContext } from "../auth/verify.server";
+import { resolveOperatorContext } from "@/lib/auth/verify.server";
 
 const has = (key: string) => Boolean((process.env[key] ?? "").trim());
 
