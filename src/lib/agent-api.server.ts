@@ -50,7 +50,7 @@ import { canAccessBoardByOwner } from "./board-tenancy";
 import { summarizeTickets } from "./ticket-summary";
 import { renderDocsHtmlPage, wantsHtmlDocs } from "./docs-html";
 import { DEFAULT_PROJECT_ID } from "./seed";
-import { validateModelPrefsPatch } from "./buzzy/modelPrefs";
+import { validateModelPrefsPatch } from "./buzzy/public";
 import {
   CLOSED_AUTHORITY,
   lanesEnforceEnvEnabled as lanesEnforceEnvEnabledShared,

@@ -1,57 +1,25 @@
 /**
- * Host split for the two products that share this deployment.
+ * Host/product split for the two products that share this repo.
  *
- * This deployment serves BOTH products, so "which product am I?" is answered by
- * the hostname, not by the build:
+ * Since stage 2 of the split (2026-11-17) there can be TWO services from this one
+ * repo: the console service (everything) and the BeeZilla service (consumer
+ * surface only). `BZ_SURFACE` says which one this process is:
  *
- * - **beezilla.net** (consumer) — only BeeZilla surfaces are reachable:
- *   `/buzzy/*` pages and their assets, the BeeZilla APIs, the auth endpoints it
- *   needs, and the capability endpoints a desktop client may point at. Anything
- *   else (the operator board, its API, admin) redirects to `/buzzy/talk`, so a
- *   consumer never lands on Dev Boards furniture.
+ *   all     — default, one service, hostname decides (the pre-split behaviour)
+ *   buzzy   — consumer service: `/buzzy/*`, the BeeZilla APIs, auth, capability
+ *             endpoints and the platform healthcheck. Console paths 404 here.
+ *   console — operator service: Buzzy pages 301 to the product domain.
  *
- * - **every other host** (`app.devboards.ai` and its Railway hostnames) — the
- *   Dev Boards console, unchanged, EXCEPT `/buzzy/*` which 301s to the consumer
- *   domain: BeeZilla now lives on its own product domain.
- *
- * On a console request this handler only ever looks at the path prefix, and on a
- * consumer request it never touches `/api/agent` — which is why it cannot change
- * how the console behaves. Failures here must be loud in tests, not silent in
- * production: the routing is three string comparisons, no I/O.
+ * The decision itself lives in `./product-surface` as a pure function so
+ * `scripts/test-surface-routing.ts` can drive every case in CI. This file is only
+ * the h3 adapter: read the request, ask for a decision, act on it. That split
+ * exists because a routing bug lands on a page a customer is looking at, and the
+ * old version could only be tested by deploying it.
  */
-import { defineEventHandler, getRequestURL, sendRedirect } from "h3";
+import { defineEventHandler, getRequestURL, sendRedirect, setResponseStatus } from "h3";
 import type { H3Event } from "h3";
 import { CONSUMER_ORIGIN, isConsumerHost } from "./product-hosts";
-
-/**
- * Paths the consumer domain is allowed to serve. Everything else is BeeZilla's
- * front door (`/buzzy/talk`), because a consumer has no use for the operator
- * board, the mission API or the admin surface.
- *
- * `/api/inference*`, `/api/music-token`, `/api/search*` are the capability
- * endpoints a desktop client or the browser spends tokens against; they are
- * harmless on either host and the desktop's cloud URL may be pointed here.
- */
-const CONSUMER_PREFIXES = [
-  "/buzzy",
-  // Crawler files are not product surfaces but a consumer domain must serve its
-  // own. Without these the catch-all below answered /robots.txt and /sitemap.xml
-  // with a 302 to /buzzy/talk — a crawler asking for rules got a chat page.
-  "/robots.txt",
-  "/sitemap.xml",
-
-  "/api/auth",
-  "/api/buzzy",
-  "/api/inference",
-  "/api/music-token",
-  "/api/search-token",
-  "/api/search",
-  "/api/recipes",
-  "/api/wallet",
-  "/brand",
-  "/favicon",
-  "/assets",
-];
+import { decideSurface, moveEnabled, surfaceFromEnv } from "./product-surface";
 
 /** Request host without port, honouring the proxy header Railway sets. */
 function requestHost(event: H3Event): string {
@@ -61,47 +29,27 @@ function requestHost(event: H3Event): string {
   return String(raw).split(",")[0].trim().toLowerCase().replace(/:\d+$/, "");
 }
 
-function isConsumerPath(pathname: string): boolean {
-  return CONSUMER_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
-}
-
-/**
- * The move is gated: until `beezilla.net` resolves, a 301 on
- * app.devboards.ai/buzzy/* would send every existing bookmark to a dead host.
- * Flip `BZ_MOVE_BUZZY=1` on the service once DNS is verified.
- */
-function moveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.BZ_MOVE_BUZZY ?? "").trim() === "1";
-}
-
 export default defineEventHandler((event) => {
   const url = getRequestURL(event);
-  const pathname = url.pathname;
   const host = requestHost(event);
 
-  if (isConsumerHost(host)) {
-    // One consumer origin, not two. www and the apex are separate cookie jars, so a
-    // sign-in on www leaves the apex signed out (measured: sessions 200 on www, 401
-    // on apex in the same browser). www exists to catch typos and old links, so it
-    // 301s to the canonical origin before anything else reads the request.
-    if (host.startsWith("www.") && CONSUMER_ORIGIN.startsWith("https://")) {
-      return sendRedirect(event, `${CONSUMER_ORIGIN}${pathname}${url.search}`, 301);
-    }
-    if (isConsumerPath(pathname)) return; // BeeZilla surface — let it through.
-    // `/` and everything that is not a BeeZilla surface: the consumer front door.
-    return sendRedirect(event, "/buzzy/talk", 302);
-  }
+  const decision = decideSurface({
+    surface: surfaceFromEnv(),
+    host,
+    pathname: url.pathname,
+    method: event.node?.req?.method ?? "GET",
+    search: url.search,
+    moveEnabled: moveEnabled(),
+    consumerOrigin: CONSUMER_ORIGIN,
+    isConsumerHost: isConsumerHost(host),
+  });
 
-  // Console host. Move the BeeZilla pages to the product domain — reads only, so
-  // a POST to a page path still meets the normal 404/405 rather than a redirect.
-  // Gated on BZ_MOVE_BUZZY so this ships safely ahead of DNS.
-  if (moveEnabled() && (pathname === "/buzzy" || pathname.startsWith("/buzzy/"))) {
-    const method = event.node?.req?.method ?? "GET";
-    if (method !== "GET" && method !== "HEAD") return;
-    return sendRedirect(event, `${CONSUMER_ORIGIN}${pathname}${url.search}`, 301);
+  if (decision.kind === "redirect") return sendRedirect(event, decision.to, decision.status);
+  if (decision.kind === "deny") {
+    // Loud on purpose: a console path on the consumer service is a deployment
+    // mistake, and a redirect to /buzzy/talk would hide it behind a chat page.
+    setResponseStatus(event, decision.status);
+    return { error: "Not here", code: "wrong_surface", detail: decision.reason };
   }
-
   return;
 });

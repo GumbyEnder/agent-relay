@@ -9,8 +9,7 @@
  * fail-closed configuration check and the response shape cannot drift apart.
  */
 import { getSessionUserFromHeaders } from "./auth/verify.server";
-import { mintInferenceToken, type TokenScope } from "./buzzy/inferenceToken";
-import { getEntitlement } from "./buzzy/entitlements";
+import { getEntitlement, mintInferenceToken, type TokenScope } from "./buzzy/public";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
