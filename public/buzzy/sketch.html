@@ -93,6 +93,14 @@
             padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
   @media (max-width: 640px) { #selHint, #textbar .hint { display:none; } }
   #selbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  #canvasPanel { position:absolute; z-index:8; right:12px; top:12px; width:250px; display:none;
+                 background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
+                 padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
+  #canvasPanel.on { display:block; }
+  #canvasPanel .row { margin-bottom:0.4rem; }
+  #canvasPanel label { color:var(--bz-muted); font-size:0.78rem; width:88px; display:inline-block; }
+  #canvasPanel input[type="number"] { width:74px; background:#101010; border:1px solid var(--bz-line);
+                                      color:var(--bz-text); border-radius:6px; padding:0.2rem 0.3rem; font-size:0.78rem; }
   #transformPanel { position:absolute; z-index:8; right:12px; top:12px; width:230px; display:none;
                     background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
                     padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
@@ -154,6 +162,8 @@
   <button class="tool" data-tool="arrow" title="Arrow (9)"><span class="glyph">➔</span></button>
   <button class="tool" data-tool="bubble" title="Speech bubble (6)"><span class="glyph">💬</span></button>
   <button class="tool" data-tool="text" title="Text — click to place a text box (T)"><span class="glyph">T</span></button>
+  <button class="tool" data-tool="zoom" title="Zoom (Z) — click to zoom in, Alt-click out"><span class="glyph">⌕</span></button>
+  <button class="tool" data-tool="pan" title="Pan (H) — drag the board"><span class="glyph">✥</span></button>
   <span class="sep"></span>
   <div id="sizeWrap"><span>Size</span><input id="size" type="range" min="1" max="50" value="6" /><span id="sizeVal">6</span></div>
   <div id="tolWrap"><span>Fill tol.</span><input id="tol" type="range" min="0" max="120" value="24" /><span id="tolVal">24</span></div>
@@ -163,6 +173,16 @@
     <input id="colorS" type="color" value="#ffffff" />
   </div>
   <div id="palette"></div>
+  <span class="sep"></span>
+  <select id="zoomSel" title="Zoom">
+    <option value="0.25">25%</option><option value="0.5">50%</option><option value="0.75">75%</option>
+    <option value="1" selected>100%</option><option value="2">200%</option><option value="4">400%</option>
+    <option value="8">800%</option>
+  </select>
+  <button id="zoomFit" title="Fit the board in the window">Fit</button>
+  <button id="gridBtn" title="Gridlines">Grid</button>
+  <button id="rulerBtn" title="Rulers">Rulers</button>
+  <button id="canvasBtn" title="Canvas size, background, open, file to the Library">Canvas…</button>
   <select id="op" title="Shape style">
     <option value="outline">Outline</option>
     <option value="fill">Fill</option>
@@ -215,6 +235,20 @@
   <div id="stage">
     <canvas id="board"></canvas>
     <div id="layers"></div>
+    <div id="canvasPanel">
+      <div class="row" style="display:flex;justify-content:space-between;align-items:center"><b>Canvas</b><button id="canvasClose">Close</button></div>
+      <div class="row"><label>Width</label><input id="cvW" type="number" min="1" max="8000" value="1000" /> px</div>
+      <div class="row"><label>Height</label><input id="cvH" type="number" min="1" max="8000" value="700" /> px</div>
+      <div class="row"><label>Background</label><input id="cvBg" type="color" value="#141414" /></div>
+      <div class="row"><button id="cvApply" class="primary">Apply size</button></div>
+      <div class="row" style="gap:0.4rem;display:flex;flex-wrap:wrap;margin-top:0.5rem">
+        <button id="cvOpen" title="Open an image from disk and edit it here">Open image…</button>
+        <button id="cvLibrary" title="File the board as a picture in this project's Library">Save to Library</button>
+        <button id="cvJpg" title="Download a JPG of the board">Export JPG</button>
+      </div>
+      <input id="cvFile" type="file" accept="image/*" style="display:none" />
+      <div class="hint" id="cvStatus" style="margin-top:0.4rem"></div>
+    </div>
     <div id="transformPanel">
       <div class="row" style="display:flex;align-items:center;justify-content:space-between"><b>Resize / skew</b><span class="hint" id="rsTarget"></span></div>
       <div class="row" style="display:flex;align-items:center"><label>Width %</label><input id="rsW" type="number" value="100" min="1" max="2000" /></div>
@@ -574,12 +608,16 @@
       doc.strokes.forEach(function (st) { if (st !== editingMark) drawMark(g, st, false); });
       if (draft) drawMark(g, draft, true);
       if (floating) g.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
+      // Gridlines go ON TOP of the art. Under the raster they were invisible the moment
+      // there was a pixel layer, which on this board is always (the paper is painted).
+      if (showGrid) drawGrid(g);
       g.restore();
       // paper edge
       g.save(); g.strokeStyle = "rgba(255,255,255,0.09)"; g.lineWidth = 1 / view.zoom;
       g.strokeRect(0.5 / view.zoom, 0.5 / view.zoom, doc.w, doc.h); g.restore();
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       paintOverlays(g);
+      if (showRulers) drawRulers(g);
       syncImages();
       positionEditor();
     }
@@ -945,6 +983,74 @@
       document.getElementById("tBg").addEventListener("change", apply);
     })();
 
+    // ── view: zoom, pan, rulers, gridlines ───────────────────────────
+    var showGrid = false, showRulers = false, spaceDown = false;
+
+    // Zoom keeps the document point under the cursor fixed. Every pointer conversion
+    // goes through pt(), so the only thing a zoom changes is the transform and the pan.
+    function setZoom(z, atClient) {
+      z = Math.max(0.05, Math.min(8, z));
+      var r = canvas.getBoundingClientRect();
+      var sx = atClient ? atClient.x - r.left : r.width / 2;
+      var sy = atClient ? atClient.y - r.top : r.height / 2;
+      var docX = (sx - view.panX) / view.zoom, docY = (sy - view.panY) / view.zoom;
+      view.zoom = z;
+      view.panX = sx - docX * z;
+      view.panY = sy - docY * z;
+      var zoomEl = document.getElementById("zoomSel");
+      if (zoomEl) {
+        var fixed = ["0.25", "0.5", "0.75", "1", "2", "4", "8"];
+        zoomEl.value = fixed.indexOf(String(Math.round(z * 100) / 100)) >= 0 ? String(Math.round(z * 100) / 100) : "";
+      }
+      paint(); syncSelBar();
+    }
+    function zoomToFit() {
+      var r = canvas.getBoundingClientRect();
+      var z = Math.min(1, Math.min((r.width - 40) / Math.max(1, doc.w), (r.height - 40) / Math.max(1, doc.h)));
+      view.zoom = Math.max(0.05, z);
+      view.panX = Math.round((r.width - doc.w * view.zoom) / 2);
+      view.panY = Math.round((r.height - doc.h * view.zoom) / 2);
+      paint();
+    }
+    function drawGrid(g) {
+      g.save();
+      g.strokeStyle = "rgba(255,255,255,0.07)";
+      g.lineWidth = 1 / view.zoom;
+      g.beginPath();
+      for (var x = 40; x < doc.w; x += 40) { g.moveTo(x, 0); g.lineTo(x, doc.h); }
+      for (var y = 40; y < doc.h; y += 40) { g.moveTo(0, y); g.lineTo(doc.w, y); }
+      g.stroke();
+      g.restore();
+    }
+    // Rulers are drawn in screen space: they measure the document but belong to the
+    // window, so they do not scale, move with the pan, or appear in an export.
+    function drawRulers(g) {
+      var band = 20, w = stage.clientWidth, h = stage.clientHeight;
+      g.save();
+      g.fillStyle = "rgba(12,12,12,0.92)";
+      g.fillRect(0, 0, w, band); g.fillRect(0, 0, band, h);
+      g.strokeStyle = "rgba(255,255,255,0.12)"; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(0, band + 0.5); g.lineTo(w, band + 0.5);
+      g.moveTo(band + 0.5, 0); g.lineTo(band + 0.5, h); g.stroke();
+      g.fillStyle = "rgba(200,200,200,0.75)";
+      g.font = "9px Inter, sans-serif";
+      var stepDoc = 50;
+      while (stepDoc * view.zoom < 46) stepDoc *= 2;
+      for (var x = Math.ceil((-view.panX / view.zoom) / stepDoc) * stepDoc; x * view.zoom + view.panX < w; x += stepDoc) {
+        var sx = x * view.zoom + view.panX;
+        if (sx < band) continue;
+        g.fillRect(sx, band - 4, 1, 4);
+        g.fillText(String(x), sx + 2, band - 7);
+      }
+      for (var y = Math.ceil((-view.panY / view.zoom) / stepDoc) * stepDoc; y * view.zoom + view.panY < h; y += stepDoc) {
+        var sy = y * view.zoom + view.panY;
+        if (sy < band) continue;
+        g.fillRect(band - 4, sy, 4, 1);
+        g.save(); g.translate(band - 7, sy + 2); g.rotate(-Math.PI / 2); g.fillText(String(y), 0, 0); g.restore();
+      }
+      g.restore();
+    }
+
     // ── selection and transforms ──────────────────────────────────────
     // A selection is a rectangle (or a lasso path) over the paint layer. Everything
     // that moves pixels has to see one picture, so any selection operation first
@@ -1226,12 +1332,51 @@
 
     canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
+    // Trackpad pinch arrives as a ctrl+wheel, so it zooms; a plain wheel pans a zoomed
+    // board instead of scrolling the page away from the drawing.
+    stage.addEventListener("wheel", function (e) {
+      if (e.ctrlKey || e.metaKey || tool === "zoom") {
+        e.preventDefault();
+        setZoom(view.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), { x: e.clientX, y: e.clientY });
+        syncSelBar();
+        return;
+      }
+      if (view.zoom > 1 || view.panX || view.panY) {
+        e.preventDefault();
+        view.panX -= e.deltaX; view.panY -= e.deltaY;
+        paint(); syncSelBar();
+      }
+    }, { passive: false });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === " " && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "")) {
+        if (!spaceDown) { spaceDown = true; canvas.style.cursor = "grab"; }
+        e.preventDefault();
+      }
+    });
+    window.addEventListener("keyup", function (e) {
+      if (e.key === " ") { spaceDown = false; canvas.style.cursor = tool === "pan" ? "grab" : "crosshair"; }
+    });
+
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button === 2) rightBtn = true;
       // pointerdown runs before blur, so a click on the board while the text box is
       // open would otherwise create the next mark and then have blur close THAT one.
       if (editEl) closeTextEditor();
       var p = pt(e);
+
+      if (tool === "zoom") {
+        e.preventDefault();
+        setZoom(view.zoom * (e.altKey || e.button === 2 ? 0.8 : 1.25), { x: e.clientX, y: e.clientY });
+        setStatus("Zoom " + Math.round(view.zoom * 100) + "%.");
+        return;
+      }
+      if (tool === "pan" || spaceDown) {
+        e.preventDefault();
+        mode = "pan";
+        panFrom = { x: e.clientX, y: e.clientY, px: view.panX, py: view.panY };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
 
       if (tool === "selrect" || tool === "selfree") {
         e.preventDefault();
@@ -1343,7 +1488,9 @@
       var col = e.button === 2 ? colorS : colorP;
       if (tool === "pencil" || tool === "brush") {
         mode = "draw";
-        draft = { tool: tool, color: col, width: size, points: [withPressure(p, e)] };
+        // Pencil is Paint's pencil: one device pixel, hard edge. The size slider is the
+        // brush's; letting it widen the pencil turns it into a second brush.
+        draft = { tool: tool, color: col, width: tool === "pencil" ? 1 : size, points: [withPressure(p, e)] };
       } else {
         mode = "shape";
         draft = { tool: tool, color: col, width: size, op: op,
@@ -1362,6 +1509,7 @@
     var lastPoint = { x: 0, y: 0 };
     var erasePrev = null;
     var selMoveFrom = null;
+    var panFrom = null;
     canvas.addEventListener("pointermove", function (e) {
       var p = pt(e);
       lastPoint = p;
@@ -1388,6 +1536,12 @@
                   points: polyDraft.points.concat([p]) };
         paint(); return;
       }
+      if (mode === "pan") {
+        view.panX = panFrom.px + (e.clientX - panFrom.x);
+        view.panY = panFrom.py + (e.clientY - panFrom.y);
+        paint();
+        return;
+      }
       if (mode === "selmove") {
         floating.x = selMoveFrom.ox + (p.x - selMoveFrom.x);
         floating.y = selMoveFrom.oy + (p.y - selMoveFrom.y);
@@ -1413,6 +1567,7 @@
     });
 
     canvas.addEventListener("pointerup", function (e) {
+      if (mode === "pan") { mode = null; panFrom = null; return; }
       if (mode === "selmove") {
         mode = null; selMoveFrom = null;
         dropFloating();
@@ -1580,7 +1735,8 @@
       document.querySelectorAll("[data-tool]").forEach(function (b) {
         b.classList.toggle("on", b.getAttribute("data-tool") === t);
       });
-      canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy" : t === "text" ? "text" : "crosshair";
+      canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy"
+        : t === "text" ? "text" : t === "pan" ? "grab" : t === "zoom" ? "zoom-in" : "crosshair";
       if (t !== "text" && editEl) closeTextEditor();
       syncTextBar();
       syncSelBar();
@@ -1662,6 +1818,9 @@
         else if (e.key === "v") { e.preventDefault(); pasteSel(); }
         return;
       }
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(view.zoom * 1.25); return; }
+      if (e.key === "-" || e.key === "_") { e.preventDefault(); setZoom(view.zoom / 1.25); return; }
+      if (e.key === "0") { e.preventDefault(); setZoom(1); return; }
       if (e.key === "Enter" && polyDraft) { e.preventDefault(); closePolygon(); return; }
       if (e.key === "Escape") {
         if (floating) { dropFloating(); return; }
@@ -1669,7 +1828,7 @@
         if (polyDraft) { polyDraft = null; draft = null; paint(); return; }
         if (curvePending) { curvePending = null; draft = null; paint(); return; }
       }
-      var keys = { s: "select", m: "selrect", n: "selfree", p: "pencil", b: "brush", e: "eraser", f: "fill", i: "picker", a: "airbrush",
+      var keys = { s: "select", m: "selrect", n: "selfree", p: "pencil", z: "zoom", h: "pan", b: "brush", e: "eraser", f: "fill", i: "picker", a: "airbrush",
                    l: "line", c: "curve", r: "rect", o: "ellipse", v: "triangle", y: "polygon",
                    t: "text", "5": "star", "6": "bubble", "9": "arrow" };
       if (e.shiftKey && e.key === "R") { setTool("rrect"); return; }
@@ -1704,6 +1863,101 @@
     document.getElementById("rot180").addEventListener("click", function () { transformSelection("rot180"); });
     document.getElementById("flipH").addEventListener("click", function () { transformSelection("flipH"); });
     document.getElementById("flipV").addEventListener("click", function () { transformSelection("flipV"); });
+
+    // ── canvas panel: size, background, open, file to the Library ────
+    document.getElementById("zoomSel").addEventListener("change", function (e) {
+      if (e.target.value) setZoom(Number(e.target.value));
+    });
+    document.getElementById("zoomFit").addEventListener("click", zoomToFit);
+    document.getElementById("gridBtn").addEventListener("click", function () {
+      showGrid = !showGrid;
+      this.classList.toggle("on", showGrid);
+      paint();
+    });
+    document.getElementById("rulerBtn").addEventListener("click", function () {
+      showRulers = !showRulers;
+      this.classList.toggle("on", showRulers);
+      paint();
+    });
+    var cvPanel = document.getElementById("canvasPanel");
+    function openCanvasPanel() {
+      document.getElementById("cvW").value = Math.round(doc.w);
+      document.getElementById("cvH").value = Math.round(doc.h);
+      document.getElementById("cvBg").value = doc.bg;
+      cvPanel.classList.toggle("on");
+    }
+
+    document.getElementById("canvasBtn").addEventListener("click", openCanvasPanel);
+    document.getElementById("canvasClose").addEventListener("click", function () { cvPanel.classList.remove("on"); });
+    document.getElementById("cvApply").addEventListener("click", function () {
+      var w = Math.max(1, Math.min(8000, Math.round(Number(document.getElementById("cvW").value) || doc.w)));
+      var h = Math.max(1, Math.min(8000, Math.round(Number(document.getElementById("cvH").value) || doc.h)));
+      snapshot();
+      flattenAll();
+      var c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(rasterCv, 0, 0);
+      rasterCv = c;
+      doc.w = w; doc.h = h;
+      sel = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Canvas is now " + w + "×" + h + ".");
+      document.getElementById("cvStatus").textContent = "Canvas " + w + "×" + h;
+    });
+    document.getElementById("cvBg").addEventListener("input", function (e) {
+      doc.bg = e.target.value;
+      paint(); autoSave();
+    });
+    document.getElementById("cvFile").addEventListener("change", function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var im = new Image();
+        im.onload = function () {
+          // Opening a picture replaces the canvas with it, the way Paint's Open does:
+          // you are now editing that picture, not drawing on top of another board.
+          snapshot();
+          var w = Math.min(im.naturalWidth || 1200, 4096), h = Math.min(im.naturalHeight || 800, 4096);
+          doc.w = w; doc.h = h;
+          doc.strokes = []; doc.images = []; selectedStroke = null; selected = null;
+          rasterCv = document.createElement("canvas");
+          rasterCv.width = w; rasterCv.height = h;
+          rasterCv.getContext("2d").drawImage(im, 0, 0, w, h);
+          sel = null; floating = null;
+          renderImages(); zoomToFit(); autoSave(); syncSelBar();
+          setStatus("Opened " + f.name + " — " + w + "×" + h + ".");
+          document.getElementById("cvStatus").textContent = "Opened " + f.name;
+        };
+        im.onerror = function () { setStatus("That file is not an image this browser can read."); };
+        im.src = String(reader.result);
+      };
+      reader.readAsDataURL(f);
+      e.target.value = "";
+    });
+    document.getElementById("cvOpen").addEventListener("click", function () { document.getElementById("cvFile").click(); });
+    document.getElementById("cvJpg").addEventListener("click", function () {
+      renderBoard(1, "image/jpeg").then(function (url) {
+        var a = document.createElement("a");
+        a.href = url; a.download = "sketch-" + Date.now() + ".jpg"; a.click();
+      });
+    });
+    document.getElementById("cvLibrary").addEventListener("click", function () {
+      var note = document.getElementById("cvStatus");
+      note.textContent = "Filing the board…";
+      ensureJob().then(function (id) {
+        return renderBoard(1, "image/png").then(function (dataUrl) {
+          return fetch("/api/buzzy/art", {
+            method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "file", jobId: id, dataUrl: dataUrl, name: "board-" + Date.now() + ".png" }),
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d, status: r.status }; }); });
+        });
+      }).then(function (res) {
+        if (!res.ok) { note.textContent = res.d.error || "Could not file it."; setStatus(res.d.error || "Could not file the board."); return; }
+        note.textContent = "Saved to the Library as " + res.d.image.name + ".";
+        setStatus("Board filed to the Library.");
+      }).catch(function (e) { note.textContent = "Failed: " + e.message; });
+    });
 
     function setStatus(t) { statusEl.textContent = t; }
 
@@ -2075,6 +2329,7 @@
       board: boardJson, save: flushSave,
       state: function () {
         return { jobId: jobId, saving: saving, saveAgain: saveAgain, w: doc.w, h: doc.h,
+                 zoom: view.zoom, panX: view.panX, panY: view.panY, bg: doc.bg,
                  strokes: doc.strokes.length, images: doc.images.length,
                  sel: sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null, floating: !!floating };
       },
