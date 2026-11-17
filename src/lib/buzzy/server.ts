@@ -60,7 +60,8 @@ import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteComm
 import { selfKnowledgeNote } from "./self-knowledge";
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
-import { VIDEO_DAILY_LIMIT, VIDEO_RECIPES, createVideoJob, recipeById, videoConfigured, videoJobsToday } from "./video";
+import { VIDEO_DAILY_LIMIT, VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoJobsToday } from "./video";
+import type { VideoTopicInput } from "./video";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -818,13 +819,30 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       messages[0]!.content +=
         `\n\nA video was requested and REFUSED by the daily limit (${VIDEO_DAILY_LIMIT} per day). ` +
         "Say exactly that in one sentence. Nothing was charged. Do not describe a video.";
+    } else if (videoRequest.needsTable) {
+      // The chart race is the one recipe a sentence cannot start: the kit's job
+      // body needs the table itself plus where the numbers came from. Asking here
+      // is honest; starting a job without them would be a 400 and a wasted turn.
+      videoRefusal = {
+        code: "needs_table",
+        error: "A chart race needs your numbers — the table plus where they came from.",
+      };
+      messages[0]!.content +=
+        "\n\nA chart race was requested, but that recipe needs the person's own table before it can start: " +
+        "the first column is dates (2005, 2024-01, 2024 Q2), then one column of numbers per competitor, at least " +
+        "six dated rows, and they must say where the numbers come from. Ask for exactly those two things in one " +
+        "or two sentences and say the chart card will take the table as a paste or a CSV file. Do NOT claim a job " +
+        "started and do NOT describe a chart.";
     } else {
       req.onStage?.({ phase: "video", label: `Making your ${label.toLowerCase()}`, etaMs: 8000 });
-      const started = await createVideoJob({
-        recipe: videoRequest.recipe,
-        topic: videoRequest.topic,
-        userId,
-      });
+      // `needsTable` was excluded above, so this is one of the four topic recipes.
+      const started = await createVideoJob(
+        topicJobInput({
+          recipe: videoRequest.recipe as VideoTopicInput["recipe"],
+          topic: videoRequest.topic,
+          userId,
+        }),
+      );
       if (started.ok) {
         videoJob = {
           jobId: started.jobId,
@@ -1356,7 +1374,31 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                   errorCode: "daily_limit",
                 };
               }
-              const started = await createVideoJob({ recipe: known.id, topic, userId });
+              const started =
+                known.id === "chart-race-from-your-numbers"
+                  ? await createVideoJob({
+                      recipe: "chart-race-from-your-numbers",
+                      userId,
+                      chart: {
+                        question: String((content.chart as Record<string, unknown> | undefined)?.question ?? topic),
+                        dataCsv: String((content.chart as Record<string, unknown> | undefined)?.data_csv ?? ""),
+                        source: String((content.chart as Record<string, unknown> | undefined)?.source ?? ""),
+                        chart: (content.chart as Record<string, unknown> | undefined)?.chart === "line" ? "line" : "bar",
+                        unit: String((content.chart as Record<string, unknown> | undefined)?.unit ?? ""),
+                        format: (() => {
+                          const f = String((content.chart as Record<string, unknown> | undefined)?.format ?? "portrait");
+                          return f === "square" || f === "vertical" ? f : "portrait";
+                        })(),
+                        aiText: Boolean((content.chart as Record<string, unknown> | undefined)?.ai_text),
+                      },
+                    })
+                  : await createVideoJob(
+                      topicJobInput({
+                        recipe: known.id as VideoTopicInput["recipe"],
+                        topic,
+                        userId,
+                      }),
+                    );
               if (!started.ok) {
                 return {
                   message:

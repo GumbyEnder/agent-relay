@@ -236,15 +236,15 @@ export function isExplicitDocumentRequest(message: string): boolean {
  */
 export type VideoAskRecipe =
   | "explain-on-a-chalkboard"
-  | "paper-cut-tips"
-  | "chart-race"
+  | "ai-creator-tips-paper-cut"
+  | "chart-race-from-your-numbers"
   | "picture-reel"
   | "narrated-explainer";
 
 /** Ordered: the first hint that matches wins, so specific phrases come first. */
 const VIDEO_RECIPE_HINTS: Array<{ recipe: VideoAskRecipe; re: RegExp }> = [
-  { recipe: "chart-race", re: /\b(chart[-\s]?race|racing (bar )?chart|bar chart race|race chart)\b/i },
-  { recipe: "paper-cut-tips", re: /\bpaper[-\s]?cut(out)?s?\b/i },
+  { recipe: "chart-race-from-your-numbers", re: /\b(chart[-\s]?race|racing (bar )?chart|bar chart race|race chart)\b/i },
+  { recipe: "ai-creator-tips-paper-cut", re: /\bpaper[-\s]?cut(out)?s?\b/i },
   { recipe: "picture-reel", re: /\b(picture|photo|image)s? reel\b|\breel of (pictures|photos|images)\b/i },
   { recipe: "narrated-explainer", re: /\b(narrated explainer|explainer video|narrated video|voice[-\s]?over)\b/i },
   // The chalkboard is the flagship and "infographic" is what most people type for
@@ -264,7 +264,9 @@ const VIDEO_MAKE =
  * request scaffolding stripped, so the kit is not asked to render "make me an
  * infographic about".
  */
-export function videoAsk(message: string): { recipe: VideoAskRecipe; topic: string } | null {
+export function videoAsk(
+  message: string,
+): { recipe: VideoAskRecipe; topic: string; needsTable: boolean } | null {
   const m = String(message || "").trim();
   if (!m) return null;
 
@@ -291,7 +293,10 @@ export function videoAsk(message: string): { recipe: VideoAskRecipe; topic: stri
   // "make a video about X" with no recipe named: the narrated explainer is the
   // one that makes no stylistic assumption, so that is the honest default.
   const recipe: VideoAskRecipe = hint ? hint.recipe : "narrated-explainer";
-  return { recipe, topic: videoTopicFrom(m, hint?.re) };
+  // The chart race is the one recipe a sentence cannot supply: POST /jobs wants a
+  // table and a source alongside the question. The harness must ask for the
+  // numbers instead of starting a job that the kit will refuse in a second.
+  return { recipe, topic: videoTopicFrom(m, hint?.re), needsTable: recipe === "chart-race-from-your-numbers" };
 }
 
 export function isVideoRequest(message: string): boolean {

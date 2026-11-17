@@ -49,14 +49,32 @@ for (const m of [
 ]) expect(JSON.stringify(m), isVideoRequest(m), true);
 
 console.log("starts a job — the other four recipes:");
-expectRecipe("paper-cut", "make me a paper-cut tips video about saving water", "paper-cut-tips");
-expectRecipe("paper-cut short", "paper cut tips on punctuality", "paper-cut-tips");
-expectRecipe("chart race", "make a chart race of streaming subscribers", "chart-race");
-expectRecipe("bar chart race", "give me a bar chart race for the top five browsers", "chart-race");
+expectRecipe("paper-cut", "make me a paper-cut tips video about saving water", "ai-creator-tips-paper-cut");
+expectRecipe("paper-cut short", "paper cut tips on punctuality", "ai-creator-tips-paper-cut");
+expectRecipe("chart race", "make a chart race of streaming subscribers", "chart-race-from-your-numbers");
+expectRecipe("bar chart race", "give me a bar chart race for the top five browsers", "chart-race-from-your-numbers");
 expectRecipe("picture reel", "make me a picture reel of our shop", "picture-reel");
 expectRecipe("photo reel", "reel of photos from the launch, please", "picture-reel");
 expectRecipe("narrated explainer", "make a narrated explainer about tides", "narrated-explainer");
 expectRecipe("plain video", "make a video about how yeast works", "narrated-explainer");
+
+console.log("the chart race is the one recipe a sentence cannot start:");
+for (const m of ["make a chart race of streaming subscribers", "give me a bar chart race for the top five browsers"]) {
+  const got = videoAsk(m);
+  if (got && got.needsTable === true) console.log(`  ok   "${m}" -> asks for the table`);
+  else {
+    failures += 1;
+    console.error(`  FAIL "${m}" — needsTable was ${got ? got.needsTable : "null"}`);
+  }
+}
+for (const m of ["make me an infographic about the water cycle", "make a narrated explainer about tides"]) {
+  const got = videoAsk(m);
+  if (got && got.needsTable === false) console.log(`  ok   "${m}" -> starts on the topic alone`);
+  else {
+    failures += 1;
+    console.error(`  FAIL "${m}" — needsTable was ${got ? got.needsTable : "null"}`);
+  }
+}
 
 console.log("topics — the request is not the topic:");
 expectTopic("infographic", "make me an infographic about the water cycle", "the water cycle");

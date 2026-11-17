@@ -52,18 +52,49 @@ Kit-side checklist (not ours to set, but ours to verify before calling this done
 - `DAILY_LIMIT_PER_USER=5` on `serve.py`;
 - the end card disabled (`--no-brand`) for **all five** recipes, not just the
   chalkboard, and the QC gate no longer failing a job when the card is absent;
-- the five recipe ids on disk match `VIDEO_RECIPES` in `video.ts`;
-- `POST /jobs` request field names confirmed against `JOB-CONTRACT.md`
-  (`jobBody()` in `video.ts` is the single place to correct them).
+- the five recipe ids on disk match `VIDEO_RECIPES` in `video.ts`;  ✓ confirmed 2026-11-17
+- `POST /jobs` request field names confirmed against `JOB-CONTRACT.md`.  ✓ confirmed 2026-11-17
+
+## The contract, as read from the kit (2026-11-17)
+
+Zip sha256 `9793bbbc619d03d9463ae49c9a6a4cc7e7a62d6b22d0ce9cbffa09bab1c78364`
+(the zip and the kit password are NOT in this repo and must never be committed).
+
+`POST /jobs` takes `kind`, never a recipe id. The five recipe ids are the kit's
+own — the `recipe` field of each `recipes/<id>.recipe.json`:
+
+| Recipe id | kind | other fields |
+|---|---|---|
+| `explain-on-a-chalkboard` | `tips` | `look: "chalk"`, `board` (7 colours, default `forest`) |
+| `ai-creator-tips-paper-cut` | `tips` | `look: "paper"` (ignores `board`) |
+| `chart-race-from-your-numbers` | `chart` | `question`, `data_csv`, `source`, `chart`, `unit`, `format`, `ai_text` |
+| `picture-reel` | `reel` | `pictures: "library" \| "ai"` |
+| `narrated-explainer` | `explainer` | — |
+
+All kinds: `user` (app user id, cut to 80). `kitJobBody()` in `video.ts` is the
+single place that builds and validates this, and the limits there are serve.py's
+own (topic 8–200, question 8–80, source 3–120, CSV non-empty < 200 KB).
+
+Three keys the old body sent that the kit ignores silently — removed:
+`recipe`, `brand`, `text_model` (and `user_id`, which serve.py never read).
+The end card is a per-script `--no-brand` flag on the render side; the writing
+model is `TEXT_MODEL` in the worker's environment. Neither is a job field.
+
+`GET /jobs/<id>`: `files` is an OBJECT keyed by role
+(`{video, thumbnail, post}`) — reading it as an array was the bug that made a
+finished render look empty. Also surfaced: `cause`, `charge`, `attempt`,
+`seconds`, `rounds`. The status call carries NO `eta_minutes`; only the 202 does.
 
 ## Honest gaps
 
-- The kit is password-protected and not on disk: recipe ids other than
-  `explain-on-a-chalkboard` are the kebab-case convention, pending one read of
-  `recipes/`.
-- `POST /jobs` body field names are provisional; the response shape and the
-  failure codes come straight from the brief.
+- The chart race cannot be started from a sentence: the job body needs the
+  table and the source. Chat asks for them (`needsTable` on `videoAsk`); the
+  Recipes card is where the table is collected.
 - The write path (ownership row, daily count, asset storage) needs Postgres, so it
   is exercised by the live E2E, not by the unit tests.
-- The Recipes-page card (one input box, queued → making → done with ETA) is not
-  built yet; the chat path is.
+- The Recipes-page card (questions from `recipe.asks`, queued → making → done
+  with ETA) is not built yet; the chat path is.
+- Kit-side, still to do on the render server (not in this repo): `TEXT_MODEL=gemini-flash-latest`,
+  `DAILY_LIMIT_PER_USER=5`, and `--no-brand` on all four kind commands in
+  `worker.py` (all five scripts accept the flag; the QC window then stays at its
+  base length instead of +10 s).

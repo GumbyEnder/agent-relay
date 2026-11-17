@@ -41,7 +41,6 @@ import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./
 import {
   VIDEO_DAILY_LIMIT,
   VIDEO_RECIPES,
-  classifyFiles,
   fetchVideoFile,
   noteVideoState,
   readVideoJob,
@@ -637,14 +636,16 @@ export default defineEventHandler(async (event) => {
     if (job.state === "failed") {
       return { ok: true, jobId: kitJobId, state: "failed", message: job.message || "The render failed. Nothing was charged." };
     }
-    if (job.state !== "done" || !job.files?.length) {
+    if (job.state !== "done" || !job.files?.video) {
       return { ok: true, jobId: kitJobId, state: job.state, etaMinutes: job.etaMinutes, message: job.message };
     }
 
     // Done: pull the three outputs that matter and put them on the same asset
     // shelf as every other file. Content-addressed, so a second poll (two tabs,
-    // a reload) stores nothing twice.
-    const pick = classifyFiles(job.files);
+    // a reload) stores nothing twice. `files` is an object keyed by role
+    // ({video, thumbnail, post}) — the kit names each file after the recipe, so
+    // the role is the only key that is stable across all five.
+    const pick = { video: job.files.video, thumb: job.files.thumbnail, postText: job.files.post };
     if (!pick.video) {
       await noteVideoState(kitJobId, "failed", "the kit finished without an mp4").catch(() => {});
       return { ok: true, jobId: kitJobId, state: "failed", message: "The render finished but produced no video file. Nothing was charged." };
@@ -669,7 +670,9 @@ export default defineEventHandler(async (event) => {
       },
       // Shane's rule for every generated asset, on the asset itself: the person
       // is told this was made by AI before they post it anywhere.
-      reviewNote: "Review before posting — this video was made with AI",
+      // The kit's own notice, word for word (recipes/*.recipe.json → review_notice),
+      // so the product and the render agree on what the person is told.
+      reviewNote: "Review before posting - this video was made with AI",
     };
     if (pick.thumb) {
       const thumb = await fetchVideoFile(kitJobId, pick.thumb);
