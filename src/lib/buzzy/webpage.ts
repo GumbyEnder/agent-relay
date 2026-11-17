@@ -23,6 +23,10 @@ export interface PageText {
   ok: boolean;
   text?: string;
   finalUrl?: string;
+  /** The page's <title>, when it is HTML. */
+  title?: string;
+  /** Up to 80 http(s) links on the page, absolute, for a reader view. */
+  links?: Array<{ href: string; text: string }>;
   error?: string;
   code?: "blocked" | "unread" | "not_html" | "too_big" | "bad_url";
 }
@@ -36,6 +40,37 @@ function decodeEntities(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#x27;|&#39;/g, "'")
     .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+}
+
+/** The document's <title>, decoded and trimmed ("" when there is none). */
+export function pageTitle(html: string): string {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  return m ? decodeEntities(m[1]).replace(/\s+/g, " ").trim().slice(0, 200) : "";
+}
+
+/** The page's http(s) links, absolute and de-duplicated, with their visible text. */
+export function pageLinks(html: string, base: string): Array<{ href: string; text: string }> {
+  const out: Array<{ href: string; text: string }> = [];
+  const seen = new Set<string>();
+  const re = /<a\s[^>]*?href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) && out.length < 80) {
+    let href: string;
+    try {
+      const u = new URL(decodeEntities(m[2]).trim(), base);
+      if (!/^https?:$/.test(u.protocol)) continue;
+      u.hash = "";
+      href = u.href;
+    } catch {
+      continue;
+    }
+    if (seen.has(href)) continue;
+    const text = htmlToText(m[3]).replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!text) continue;
+    seen.add(href);
+    out.push({ href, text });
+  }
+  return out;
 }
 
 /** Visible text of an HTML document, with scripts/styles/nav chrome removed. */
@@ -120,9 +155,12 @@ export async function fetchPageText(rawUrl: string, timeoutMs = 8000): Promise<P
       return { ok: false, error: "That page is too large to read in one go.", code: "too_big" };
     }
     const raw = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-    const text = /text\/plain/i.test(ctype) ? raw.trim() : htmlToText(raw);
+    const isPlain = /text\/plain/i.test(ctype);
+    const text = isPlain ? raw.trim() : htmlToText(raw);
     if (!text) return { ok: false, error: "That page had no readable text.", code: "not_html" };
-    return { ok: true, text, finalUrl: current };
+    return isPlain
+      ? { ok: true, text, finalUrl: current }
+      : { ok: true, text, finalUrl: current, title: pageTitle(raw), links: pageLinks(raw, current) };
   }
   return { ok: false, error: "That link redirects in a loop.", code: "unread" };
 }

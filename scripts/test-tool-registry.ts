@@ -65,6 +65,15 @@ check("a tool past its budget fails by name", !slow.ok && /calculate/.test(Strin
 const fast = await withToolBudget("calculate", async () => "1+1=2");
 check("a fast tool returns its value", fast.ok && fast.value === "1+1=2");
 
+console.log("lockdown (the owner's privacy mode):");
+const locked = offeredToolNames({ draftGateOpen: true, lockdown: true });
+const outside = TOOL_POLICIES.filter((p) => p.egress).map((p) => p.name);
+check("web, page reading and music are marked as leaving BeeZilla", ["web_search", "read_web_page", "generate_music"].every((n) => outside.includes(n)), outside.join(","));
+check("lockdown offers none of them", outside.every((n) => !locked.includes(n)), locked.join(","));
+check("lockdown keeps the local tools", ["calculate", "render_document", "render_sheet"].every((n) => locked.includes(n)), locked.join(","));
+check("a withheld outside tool explains Lockdown", /Lockdown/.test(refusalFor("web_search", { draftGateOpen: true, lockdown: true }) ?? ""));
+check("without lockdown nothing changes", outside.filter((n) => policyFor(n)?.offered).every((n) => offeredToolNames({ draftGateOpen: true }).includes(n)));
+
 console.log("result clamp:");
 const clamped = clampResult("web_search", "x".repeat(20000));
 check("result is trimmed to the declared cap", clamped.length < 20000 && /trimmed/.test(clamped));
