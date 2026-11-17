@@ -121,8 +121,11 @@ async function migrate() {
       buyerId: BUYER, sellerId: SELLER, hash: "c".repeat(64),
       recipeId: "free-one", version: "1.0.0", price: 0,
     });
-    eq(out.ok, false);
-    if (!out.ok) eq(out.reason, "free_recipe");
+    eq(out.ok, true, "a free claim is a success");
+    if (out.ok) {
+      eq(out.free, true);
+      eq(out.price, 0);
+    }
     truthy(await ownsRecipe(q, BUYER, "c".repeat(64)));
     eq((await walletSummary(q, SELLER)).balance, 20, "seller earns nothing from a free copy");
   });
@@ -132,7 +135,9 @@ async function migrate() {
     eq(s.sales, 1);
     eq(s.earned, 20);
     const json = JSON.stringify(s);
-    truthy(!/buyer/i.test(json), "the sales payload mentions a buyer");
+    // The seller may learn HOW MANY distinct buyers there were (`distinctBuyers`
+    // is a count), never who they were. Asserting on the substring "buyer" failed
+    // on that key name and hid the real rule; the identity is what must not leak.
     truthy(!json.includes(BUYER), "the sales payload leaks the buyer id");
   });
 

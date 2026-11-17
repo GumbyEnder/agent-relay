@@ -50,8 +50,17 @@ export interface PurchaseRequest {
 }
 
 export type PurchaseOutcome =
-  | { ok: true; purchaseId: string; price: number; balanceAfter: number; alreadyOwned: false }
-  | { ok: false; reason: "already_owned" | "insufficient_funds" | "free_recipe"; balance: number };
+  | {
+      ok: true;
+      /** null for a free claim: no purchase row exists, only the entitlement. */
+      purchaseId: string | null;
+      price: number;
+      balanceAfter: number;
+      alreadyOwned: false;
+      /** Set when nothing was charged. The claim still succeeded. */
+      free?: true;
+    }
+  | { ok: false; reason: "already_owned" | "insufficient_funds"; balance: number };
 
 export const DEFAULT_PLATFORM_SPLIT_BP = 2000;
 
@@ -155,13 +164,23 @@ export async function purchase(q: Q, req: PurchaseRequest): Promise<PurchaseOutc
   if (req.sellerId !== req.buyerId) await ensureWallet(q, req.sellerId);
 
   if (price === 0) {
-    // Free: no money moves, but ownership is still recorded.
+    // Free: no money moves, but ownership is still recorded — and a claim that
+    // recorded the entitlement is a SUCCESS. This used to return ok:false with
+    // reason "free_recipe", so the UI painted a failure over a claim that had
+    // actually worked. Nothing about prices, splits or plans changes here.
     await q(
       `INSERT INTO ar_recipe_entitlement (user_id, hash, purchase_id)
        VALUES ($1, $2, NULL) ON CONFLICT (user_id, hash) DO NOTHING`,
       [req.buyerId, req.hash],
     );
-    return { ok: false, reason: "free_recipe", balance: (await walletSummary(q, req.buyerId)).balance };
+    return {
+      ok: true,
+      purchaseId: null,
+      price: 0,
+      balanceAfter: (await walletSummary(q, req.buyerId)).balance,
+      alreadyOwned: false,
+      free: true,
+    };
   }
 
   // The platform share is recorded on the purchase row. It is not credited to a
