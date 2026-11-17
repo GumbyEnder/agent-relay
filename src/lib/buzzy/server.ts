@@ -39,6 +39,7 @@ import {
 import { calculate } from "./calc";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
+import { repairImageReply } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
@@ -874,6 +875,39 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     if (webCtx.block) messages[0] = { role: "system", content: String(messages[0].content) + webCtx.block };
   }
 
+  // ── Last word: an asset that exists, said AFTER the owner's message ─────
+  // Every pre-pass above writes its note into messages[0], the SYSTEM message.
+  // Measured on production 2026-11-17: that note was in the context and both
+  // lanes ignored it — gemini-flash-lite answered a picture turn with a
+  // fabricated {"action":"dalle.text2im"} blob and gpt-audio-mini said "I can't
+  // draw or create images" while the PNG was already in buzzy_assets. Split
+  // against the same prompts: a note in the leading system message was obeyed
+  // by neither model, the same note placed after the owner's message was obeyed
+  // by both. So the fact that something was already made is repeated here, last.
+  // The lying checks further down stay the guarantee; this exists so the audio
+  // lane is not already speaking the wrong sentence before any text can repair it.
+  const afterNotes: string[] = [];
+  if (renderedImage) {
+    afterNotes.push(
+      "A picture was already made for this request and is attached to this reply. " +
+        "Describe what is in it in two sentences. Never say you cannot create images, " +
+        "never offer to make one later, and never answer with JSON or a tool call.",
+    );
+  }
+  if (renderedAudio) {
+    afterNotes.push(
+      "The track was already made this turn and is attached to this reply. Describe it in one or two " +
+        "sentences. Never say you cannot make audio and never answer with JSON or a tool call.",
+    );
+  }
+  if (model3dTask) {
+    afterNotes.push(
+      "The 3D model was already started this turn and is being built now. Say only that, in one sentence. " +
+        "Never say it is finished or attached, and never answer with JSON or a tool call.",
+    );
+  }
+  if (afterNotes.length) messages.push({ role: "system", content: afterNotes.join("\n\n") });
+
   // ── Context accounting ─────────────────────────────────────────────
   // Measured on exactly what we send: persona + history + this message, plus
   // a fixed allowance for the tool schemas and protocol overhead.
@@ -1440,6 +1474,17 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? `I tried to draw that and it failed: ${artRefusal.error}.`
       : "I did not produce an image on that turn — nothing was rendered and nothing was saved. " +
         "Ask me to draw it and I will.";
+  }
+  // The mirror of the check above, and the reason it exists: on 2026-11-17 the
+  // picture WAS rendered and the reply still denied it ("I can't draw or create
+  // images directly here") or arrived as a fabricated tool call. A stored image
+  // is a fact; the sentence next to it has to agree with it.
+  if (renderedImage) {
+    const repaired = repairImageReply(finalReply);
+    if (repaired) {
+      console.warn("[buzzy] reply denied or faked a picture this turn actually rendered");
+      finalReply = repaired;
+    }
   }
 
   if (!renderedAudio && claimsAudio(finalReply)) {

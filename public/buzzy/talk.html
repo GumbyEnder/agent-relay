@@ -2541,6 +2541,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
     }
 
+    /**
+     * The first picture in a turn's artifacts. The server sends both a top-level
+     * `image` and an `artifacts` list; this is the fallback so a future shape change
+     * cannot silently drop the card again.
+     */
+    function firstImageArtifact(list) {
+      if (!Array.isArray(list)) return null;
+      for (var i = 0; i < list.length; i++) {
+        var a = list[i];
+        if (!a || !a.url) continue;
+        if (a.kind === "image" || /^image\//i.test(a.contentType || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(a.name || "")) {
+          return { url: a.url, name: a.name || "image.png", bytes: a.bytes || 0, type: a.contentType || "image/png" };
+        }
+      }
+      return null;
+    }
+
     function renderMediaCard(a) {
       var esc = function (v) { return String(v == null ? "" : v).replace(/</g, "&lt;").replace(/"/g, "&quot;"); };
       var name = esc(a.name || "file");
@@ -2569,11 +2586,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         '<a href="' + url + '" download="' + name + '">Download</a>' +
         // A track is not finished when it plays: it opens in the studio, where the
         // owner can see the plan, select a passage and tell BeeZilla what to change.
+        // A picture is finished, but it is a Library item: the card says where it lives
+        // instead of leaving the owner to guess.
         (isAudio
           ? '<a class="studio-link" href="/buzzy/studio?job=' +
             encodeURIComponent(chatState.jobId || "") +
             '">Open studio →</a>'
-          : "") +
+          : isImage && chatState.jobId
+            ? '<a class="studio-link" href="/buzzy/library?job=' +
+              encodeURIComponent(chatState.jobId) +
+              '">In your Library →</a>'
+            : "") +
       "</div>";
     }
 
@@ -6745,8 +6768,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           role: "assistant",
           content: data.reply,
           document: data.document || null,
-          // A track made this turn plays in the reply that announces it.
-          asset: data.audio || data.asset || null,
+          // A track made this turn plays in the reply that announces it; a picture
+          // made this turn shows in it the same way. `data.image` was sent by the
+          // server since the art pre-pass shipped and never read here — that is
+          // why a made image "did not appear" (production, 2026-11-17).
+          asset: data.audio || data.asset || data.image || firstImageArtifact(data.artifacts) || null,
           artifacts: data.artifacts || null,
           timings: data.timings || null,
           tools: data.tools || null,
