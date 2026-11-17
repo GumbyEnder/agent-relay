@@ -148,7 +148,17 @@ for (const code of documented) {
   else skips.push(`code ${code} (private modules absent)`);
 }
 
-// ── 3. secrets ────────────────────────────────────────────────────────────────
+// ── 3. section references ─────────────────────────────────────────────────────
+// A document that points at "§12" when it has nine sections is worse than one with
+// no cross-references: every pointer has to land.
+const headings = new Set(
+  [...doc.matchAll(/^#{2,3}\s+(\d+(?:\.\d+)?)\.?\s/gm)].map((m) => m[1]),
+);
+for (const m of doc.matchAll(/§(\d+(?:\.\d+)?)/g)) {
+  if (!headings.has(m[1])) failures.push(`dangling section reference: §${m[1]}`);
+}
+
+// ── 4. secrets ────────────────────────────────────────────────────────────────
 const forbidden = [
   [/BZ-PRIVATE module/i, "private-module sentinel"],
   [/\brcp_[A-Za-z0-9_-]{24,}/, "a token that looks real"],

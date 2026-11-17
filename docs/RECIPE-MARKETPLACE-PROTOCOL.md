@@ -1,7 +1,7 @@
 # Recipe Seal — Marketplace Protocol v1
 
 **Protocol string:** `recipe-seal/1` · **Wire surface:** `/api/recipes*` · **Licence:** MIT (this document and the code it cites)
-**Status:** live. Sealed bundles verify in production; publishing and paid runs are opt-in per deployment (see §11).
+**Status:** live. Sealed bundles verify in production; publishing and paid runs are opt-in per deployment (see §6).
 
 This is the contract, not the implementation. It says what a bundle is, what a licence
 is, which doors exist, what they answer, what is charged, and what an integrator can
@@ -9,7 +9,7 @@ check for themselves. Any part of it a third party needs in order to trust the s
 in this document or in the code it names.
 
 The commercial half — how a sealed method becomes a prompt, how a method is derived
-from finished work, how the money splits are decided — is deliberately absent. §12
+from finished work, how the money splits are decided — is deliberately absent. §8
 lists what is withheld and why, so that a gap in this document is a stated boundary
 rather than an oversight.
 
@@ -68,7 +68,7 @@ Its reasons are stable strings and are returned verbatim by `POST /api/recipes` 
 **Bundles are self-signed.** "Verified" means *self-consistent and signed by the key the
 manifest carries*. There is no key registry and no claim about who that key belongs to.
 Hosted uploads are custodially signed with the platform key and ownership is by
-`author.id` — see §5.6.
+`author.id` — see §4.9.
 
 ### 2.3 Manifest
 
@@ -240,7 +240,7 @@ Metering, in order, and each step is observable in the response or the ledger:
 4. If the pipeline throws **after the model was called**, the unit is charged and a ledger
    row with `C93` (`modelFailure`) is written. Release-on-throw would give a licensee
    unlimited free inference. This is consistent accounting; it is not proof of fairness —
-   see §12.4.
+   see §9.
 
 Quota failures: `402 quota_exhausted`, `403 license_revoked`, `403 license_expired`,
 `404 unknown_license`, `403 bundle_revoked`, `403 scope_missing`, `401 invalid_token`.
