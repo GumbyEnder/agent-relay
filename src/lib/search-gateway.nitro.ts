@@ -18,7 +18,7 @@
  * Brave is logged by count only, never by query text.
  */
 import { defineEventHandler, getQuery } from "h3";
-import { verifyInferenceToken } from "./buzzy/inferenceToken";
+import { verifyInferenceToken } from "./buzzy/public";
 
 const MAX_QUERY_CHARS = 400;
 const MAX_COUNT = 10;

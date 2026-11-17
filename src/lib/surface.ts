@@ -1,12 +1,19 @@
 /**
- * App surface: operator board (`app`) vs platform admin (`admin`).
+ * "What is this process?" — the two axes the deployment has.
  *
- * Production intent: two Railway services from the same repo
- * - app.devboards.ai  → DEVBOARDS_SURFACE=app (default)
- * - admin.devboards.ai → DEVBOARDS_SURFACE=admin
+ * 1. APP SURFACE (`DEVBOARDS_SURFACE`) — which console this is:
+ *    - app.devboards.ai   → `app` (default)
+ *    - admin.devboards.ai → `admin`
  *
- * Hostname heuristics also apply so a single deploy can route by Host
- * (useful before the second service is fully wired).
+ * 2. PRODUCT SURFACE (`BZ_SURFACE`) — which product this service serves:
+ *    - `all`     (default) one service, hostnames decide (the pre-split shape)
+ *    - `buzzy`   the BeeZilla service: consumer paths only, console paths 404
+ *    - `console` the Dev Boards service: BeeZilla pages 301 to the product domain
+ *
+ * Axes are independent on purpose: beezilla.net is `all`/`buzzy` with no app
+ * surface, admin.devboards.ai is `admin` + `console`/`all`. Keeping both in one
+ * file means there is exactly one place that answers "what am I" — `product-surface.ts`
+ * only decides "may I answer THIS request", and it reads the answer from here.
  */
 
 export type AppSurface = "app" | "admin";
@@ -46,6 +53,25 @@ export function resolveSurface(opts?: {
   if (fromHost) return fromHost;
 
   return "app";
+}
+
+/**
+ * PRODUCT SURFACE — which product this process serves.
+ *
+ * `all` is the default and preserves the single-service shape exactly. The value
+ * is read once per request by `product-surface.ts`; an unrecognised value falls
+ * back to `all` rather than guessing, because guessing wrong here either exposes
+ * the operator board on the consumer domain or 404s a paying customer.
+ */
+export type ProductSurface = "all" | "buzzy" | "console";
+
+export function productSurfaceFromEnv(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = typeof process !== "undefined"
+    ? process.env
+    : {},
+): ProductSurface {
+  const raw = (env.BZ_SURFACE ?? "").trim().toLowerCase();
+  return raw === "buzzy" || raw === "console" ? raw : "all";
 }
 
 /** Public URL of the admin host (for cross-links from the operator app). */
