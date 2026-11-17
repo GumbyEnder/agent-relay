@@ -16,7 +16,11 @@
  */
 
 import type { Sql } from "@/lib/db";
-import { boardOps } from "../board-server";
+// The one deliberate write path from the consumer product into the console: an
+// approved draft is cut into board work. Imported by alias, not `../board-server`,
+// so the boundary check can see it as an allowlisted dependency instead of an
+// escape — see scripts/check-buzzy-boundary.mjs.
+import { boardOps } from "@/lib/board-server";
 import { documentIdForJob } from "./documents";
 
 export interface ExecutionLink {
