@@ -14,6 +14,8 @@
  */
 import { readFileSync } from "node:fs";
 import { repairImageReply, deniesImageCapability, fakesImageAction, IMAGE_TURN_SENTENCE } from "../src/lib/buzzy/artReply";
+import { pickImageUrl, describePayload } from "../src/lib/buzzy/art";
+import { isImageRequest } from "../src/lib/buzzy/intent";
 
 let failures = 0;
 function expect(label: string, actual: boolean, want: boolean) {
@@ -69,6 +71,56 @@ console.log("the server repeats the fact after the owner's message:");
 const server = readFileSync(new URL("../src/lib/buzzy/server.ts", import.meta.url), "utf8");
 expect("a trailing note is pushed", /afterNotes\.length\) messages\.push\(\{ role: "system"/.test(server), true);
 expect("the picture turn is repaired", /if \(renderedImage\) \{\s*const repaired = repairImageReply/.test(server), true);
+
+console.log("the provider's envelope is not the only envelope:");
+const TINY = "A".repeat(80);
+const SHAPES: Array<[string, unknown]> = [
+  ["message.images[0].image_url.url", { choices: [{ message: { images: [{ type: "image_url", image_url: { url: `data:image/png;base64,${TINY}` } }] } }] }],
+  ["message.images[0].image_url as string", { choices: [{ message: { images: [{ image_url: `data:image/png;base64,${TINY}` }] } }] }],
+  ["message.images[0].url", { choices: [{ message: { images: [{ url: `https://cdn.example/x.png` }] } }] }],
+  ["message.images[0] bare base64", { choices: [{ message: { images: [TINY] } }] }],
+  ["content part image_url{url}", { choices: [{ message: { content: [{ type: "text", text: "here" }, { type: "image_url", image_url: { url: `data:image/webp;base64,${TINY}` } }] } }] }],
+  ["content part output_image url", { choices: [{ message: { content: [{ type: "output_image", url: `https://cdn.example/y.png` }] } }] }],
+  ["content part inline_data", { choices: [{ message: { content: [{ type: "image", inline_data: { mime_type: "image/jpeg", data: TINY } }] } }] }],
+  ["content string with data url", { choices: [{ message: { content: `Here you go: data:image/png;base64,${TINY}` } }] }],
+];
+for (const [label, body] of SHAPES) {
+  const got = pickImageUrl(body);
+  expect(`picked: ${label}`, typeof got.url === "string" && got.url.length > 10, true);
+}
+
+console.log("no image — the reason, never the payload:");
+const refused = pickImageUrl({ choices: [{ finish_reason: "stop", message: { content: "I can't do that.", refusal: "policy" } }] });
+expect("no url", Boolean(refused.url), false);
+expect("reason names the refusal", /policy/.test(String(refused.reason)), true);
+const shape = JSON.stringify(describePayload({ choices: [{ message: { content: "x".repeat(5000), images: [] } }] }));
+expect("shape has no payload", shape.includes("xxxx"), false);
+expect("shape names content length", /string\(5000\)/.test(shape), true);
+
+console.log("a scene described after the ask is still the ask:");
+const hist = [
+  { role: "user", content: "can you make me a picture of a house on the coast" },
+  { role: "assistant", content: "Here's the picture you asked for." },
+];
+for (const msg of ["a Spanish tile, a white house, terracotta roof", "the house with blue shutters and a red door"]) {
+  expect(`draws: ${msg.slice(0, 40)}…`, isImageRequest(msg, { history: hist }), true);
+}
+for (const msg of ["what style suits a white house?", "how do I clean terracotta tiles"]) {
+  expect(`does not draw: ${msg.slice(0, 40)}…`, isImageRequest(msg, { history: hist }), false);
+}
+expect("no context, no draw", isImageRequest("a Spanish tile, a white house", undefined), false);
+expect("make-phrasings still draw", isImageRequest("Make me a picture of a house"), true);
+expect("English verb + noun still draws", isImageRequest("Can you draw me a picture of a red sports car"), true);
+
+console.log("the server names the art time separately:");
+expect("artMs is declared", /let artMs = 0;/.test(server), true);
+expect("artMs is subtracted from extractMs", /Date\.now\(\) - extractStarted - artMs/.test(server), true);
+expect("artMs is in the timings", /timings: \{\s*extractMs,\s*artMs,/.test(server), true);
+expect("a failed draw names the real error", /artRefusal && \(deniesImageCapability/.test(server), true);
+
+console.log("the working line sits under the newest prompt:");
+expect("inserted after the prompt", /insertBefore\(thinkingEl, newestPrompt\.nextSibling\)/.test(talk), true);
+expect("no jump to the bottom of a newest-first thread", /messagesContainer\.scrollTop = messagesContainer\.scrollHeight/.test(talk), false);
 
 console.log("");
 if (failures) {

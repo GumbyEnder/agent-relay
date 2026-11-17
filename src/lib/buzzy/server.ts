@@ -39,7 +39,7 @@ import {
 import { calculate } from "./calc";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
-import { repairImageReply } from "./artReply";
+import { repairImageReply, deniesImageCapability, fakesImageAction } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
@@ -74,6 +74,7 @@ const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a cli
 - MANDATED GOAL — the Decisions Made box: The Challenge, Difficulties, Who is involved, What is the end goal. Every reply must move at least one forward: either extract a statement from what the client just said (emit it as [challenge: …], [difficulties: …], [who_involved: …], or [end_goal: …]) or ask the single next question that fills a missing one. If the client says a statement cannot be answered, emit [id: skipped] for that id instead of inventing content — never fabricate a statement they did not give or approve. The job is not ready for a draft until all four are filled or explicitly skipped.
 - DISCOVERY FIRST: do not write the final document, draft, or deliverable until the four Decisions Made statements are captured or skipped. Even when the request looks like a finished deliverable, first pull out what the client already told you (emit the [slot: …] markers) and ask for what is still missing, one decision at a time. The box fills in as the conversation uncovers each decision.
 - PRECISION PASS: once the four statements are captured or skipped, ask the remaining practical questions one at a time — budget, timing, how the owner will know it's done right, and anything to exclude. Each answer sharpens the draft. If the owner says "skip", "not sure", or "that's enough — just write it", accept it: mark the unanswered ones skipped and move to the draft.
+- MAKING SOMETHING: when the request is to make a picture, a track, a video or a 3D model, the app makes it — do not interview them about style, size, format or mood first. It is made with sensible defaults from what they said, then describe it in one or two sentences. Ask a question only when the subject itself is missing ("draw me a picture" with no subject).
 - IMPORTANT — job type: if the client's message is clearly a different kind of job (creative writing, a story, copy, a poem, a technical explainer), work THAT job. Do not refuse it and do not drag in unrelated earlier problems. Only ask scope-of-work questions that fit the actual request.
 - Only use details from THIS conversation. Never mention or reuse problems from other jobs.
 - WORK MODE: the client may send a filled-in Work definition (task, people, end goal, how they'll check it). Treat every line as a stated decision — emit the matching [slot: …] markers for what it contains, ask only for what is still missing, one question. In ordinary chat, when the request is clearly a multi-step effort the client will come back to AND at least two decisions are captured, ask once — in one sentence — whether they want to set it up as work. Never ask twice, and never ask for a one-off question.
@@ -91,6 +92,7 @@ const CHAT_PERSONA = `You are BeeZilla in conversation. This is ordinary chat �
 - Answer what was actually asked in the first sentence, then stop. Two to five sentences unless they asked for a document, a list, or a step-by-step.
 - No filler: no "great question", no "I'd be happy to help", no restating their message back at them, no emotional acknowledgement.
 - You may ask one clarifying question — only when the answer would change what you'd say, and only one per turn.
+- MAKING SOMETHING: when the request is to make a picture, a track, a video or a 3D model, the app makes it — do not interview them about style, size, format or mood first. It is made with sensible defaults from what they said, then describe it in one or two sentences. Ask a question only when the subject itself is missing ("draw me a picture" with no subject).
 - Do NOT run a scope interview. Do not ask about the challenge, the difficulties, who is involved, or the end goal unless they are asking you to get a real piece of work done.
 - If they ask you to actually accomplish something that needs a real effort (get bids, chase a refund, prepare a contract), answer what you can here, then say in one sentence that you can set it up as work — the Work tab does that. Offer once; never push twice.
 - Never write a price, penalty, date, or fact the person did not state. If you do not know, say so.
@@ -280,6 +282,10 @@ export interface ChatRequest {
  *  written to buzzy_voice_metrics so "it feels slow" becomes a number. */
 export interface TurnTimings {
   extractMs: number;
+  /** Time spent rendering a picture in the pre-pass. It runs inside the same wall
+   *  clock as slot extraction, so it is subtracted from extractMs and named here
+   *  rather than hidden inside it (a 20s draw read as a 20s extraction). */
+  artMs: number;
   llmMs: number;
   honchoMs: number;
   totalMs: number;
@@ -368,6 +374,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
   let extractMs = 0;
+  let artMs = 0;
   let llmMs = 0;
   let honchoMs = 0;
   let ttftMs: number | null = null;
@@ -578,7 +585,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       newlyExtracted = firstPass;
       await mergeExtracted(newlyExtracted);
     }
-    extractMs = Date.now() - extractStarted;
+    // The art pre-pass runs inside this clock (a 20s draw used to be reported
+    // as 20s of slot extraction). Name it separately.
+    extractMs = Math.max(0, Date.now() - extractStarted - artMs);
   }
 
   // ── Build system prompt ────────────────────────────────────────────
@@ -768,7 +777,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Art pre-pass ───────────────────────────────────────────────────
   // "draw me a duck" is a request for a file, and the canvas is not the only way in.
   // Same rule as music: the harness renders, the model narrates what exists.
-  if (!lockdown && !renderedImage && !wants3d && isImageRequest(message) && artConfigured()) {
+  if (!lockdown && !renderedImage && !wants3d && isImageRequest(message, { history }) && artConfigured()) {
+    const artStarted = Date.now();
     const prompt = message.slice(0, 1000);
     const verdict = await checkQuota({ userId, scope: "image", units: 1 });
     if (!verdict.ok) {
@@ -803,6 +813,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           `\n\nImage generation was attempted and FAILED (${made.code}): ${made.error}. Tell the owner that exact reason.`;
       }
     }
+    artMs = Date.now() - artStarted;
   }
 
   // ── 3D pre-pass ────────────────────────────────────────────────────
@@ -892,6 +903,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       "A picture was already made for this request and is attached to this reply. " +
         "Describe what is in it in two sentences. Never say you cannot create images, " +
         "never offer to make one later, and never answer with JSON or a tool call.",
+    );
+  }
+  // A refusal is a fact as well: the harness DID try, and the provider or the plan
+  // said why. A note in messages[0] was ignored by both lanes on 2026-11-17, so the
+  // true state of the attempt is repeated here too.
+  if (!renderedImage && artRefusal) {
+    afterNotes.push(
+      "An image was requested and the attempt FAILED (" + artRefusal.code + "): " + artRefusal.error + ". " +
+        "Say that exact reason in one sentence. Never say you cannot create images — you can, it failed this time — " +
+        "never claim a picture exists, and never answer with JSON or a tool call.",
     );
   }
   if (renderedAudio) {
@@ -1353,7 +1374,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     } else {
       void extractPromise.then(mergeExtracted).catch(() => {});
     }
-    extractMs = Date.now() - extractStarted;
+    // The art pre-pass runs inside this clock (a 20s draw used to be reported
+    // as 20s of slot extraction). Name it separately.
+    extractMs = Math.max(0, Date.now() - extractStarted - artMs);
   }
 
   // ── Does THIS turn deliver something? ──────────────────────────────
@@ -1474,6 +1497,17 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? `I tried to draw that and it failed: ${artRefusal.error}.`
       : "I did not produce an image on that turn — nothing was rendered and nothing was saved. " +
         "Ask me to draw it and I will.";
+  }
+  // The mirror of the refusals: claimsImage deliberately skips a sentence that says
+  // "can't", because "I can't see the file" is not a claim. But when the harness
+  // DID try to draw and the provider said why, "I can't create images" is the wrong
+  // sentence in the other direction — it hides a real error behind a missing
+  // capability. Say the provider's reason instead.
+  if (!renderedImage && artRefusal && (deniesImageCapability(finalReply) || fakesImageAction(finalReply))) {
+    console.warn("[buzzy] reply denied a capability that was attempted and failed — naming the real error");
+    finalReply =
+      `I tried to draw that and it failed: ${artRefusal.error}. ` +
+      "That is the real reason — not a missing capability.";
   }
   // The mirror of the check above, and the reason it exists: on 2026-11-17 the
   // picture WAS rendered and the reply still denied it ("I can't draw or create
@@ -1653,6 +1687,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     context: ctx,
     timings: {
       extractMs,
+      artMs,
       llmMs,
       honchoMs,
       totalMs: Date.now() - turnStart,

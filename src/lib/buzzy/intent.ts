@@ -222,11 +222,35 @@ export function isExplicitDocumentRequest(message: string): boolean {
  * "how do I draw a circle in CSS" asks a question; "draw me a duck in a pond" asks
  * for a file. The harness performs the render — the model cannot be relied on to
  * choose a tool, which is how the music lane produced four turns of promises.
+ *
+ * A scene described as a follow-up is the same request continued. Measured:
+ * "can you make me a picture…" then "a Spanish tile, a white house, terracotta
+ * roof" matched nothing here, so the harness never drew and the model only
+ * promised one. The second message has no make-verb by design — people describe
+ * after they have asked. So a short descriptive follow-up in a conversation that
+ * already asked for a picture counts as the ask.
  */
-export function isImageRequest(message: string): boolean {
+export function isImageRequest(
+  message: string,
+  opts?: { history?: Array<{ role?: string; content?: unknown }> },
+): boolean {
   const m = String(message || "");
   const NOUN = "(image|picture|illustration|drawing|logo|poster|artwork|art|thumbnail|icon|banner|mockup|render|scene)";
   if (new RegExp(`\\b(draw|paint|sketch|illustrate|render|generate|make|create|design)\\b[^.\\n]{0,40}\\b${NOUN}\\b`, "i").test(m)) return true;
   // "draw me a duck" — the noun is the subject, not the object of "of".
-  return /\b(draw|paint|sketch|illustrate)\s+(me\s+)?(a|an|the|some)\b[^.\n]{0,60}/i.test(m);
+  if (/\b(draw|paint|sketch|illustrate)\s+(me\s+)?(a|an|the|some)\b[^.\n]{0,60}/i.test(m)) return true;
+
+  // Follow-up scene description inside an image conversation.
+  const recent = (opts?.history ?? [])
+    .slice(-4)
+    .map((h) => String(h?.content ?? ""))
+    .join("\n");
+  if (!recent || !/\b(image|picture|pictures|draw|drawing|illustrat\w*|sketch\w*|render\w*|artwork|visual)\b/i.test(recent)) return false;
+  const trimmed = m.trim();
+  if (!trimmed || trimmed.length > 300) return false;
+  if (/\?\s*$/.test(trimmed)) return false; // a question is a question
+  if (/^\s*(what|why|how|who|when|where|which|could|would|should|do|does|did|is|are|can)\b/i.test(trimmed)) return false;
+  // Something to draw: a determiner plus at least three words of description.
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return words.length >= 3 && /\b(a|an|the|with|of|in|on)\b/i.test(trimmed);
 }
