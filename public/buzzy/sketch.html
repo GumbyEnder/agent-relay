@@ -32,7 +32,14 @@
      This rule travels with this page's stylesheet, which the shell enables only while
      Sketch is the active page. */
   #bzPage { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
-  #board { position:absolute; inset:0; touch-action:none; }
+  /* A canvas is a REPLACED element: `inset:0` pins its box but cannot stretch it, so its
+     CSS size falls back to the intrinsic size of its bitmap. resize() sets that bitmap to
+     stage x devicePixelRatio, so on any dpr>1 screen the board was displayed dpr times too
+     large and clipped by #stage's overflow. Strokes are drawn in CSS px (pt() maps the
+     pointer in CSS px, setTransform(dpr) scales to the bitmap), so the ink landed dpr times
+     away from the cursor — right at dpr 1, inches off everywhere else. Pin the box in CSS
+     and let the backing store follow the measurement. */
+  #board { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
   #layers { position:absolute; inset:0; pointer-events:none; }
   .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
   .img-wrap.selected { border-color: var(--bz-yellow); }

@@ -129,8 +129,15 @@
 
 /* ---------- masonry wall (CSS columns) ---------- */
 
+/* `column-count` is a MAXIMUM and `column-width` a MINIMUM: the browser takes
+ * whichever produces fewer columns. Without the floor, the wall is capped at
+ * ~840px inside the browse pane while the queries below still asked for six
+ * columns — 130px cards, and the headline font had to hyphenate "open-ing" and
+ * split "Desig/n" to fit. The floor keeps every card wide enough for the longest
+ * word in the six prompts at the size below. */
 .insp-wall {
   column-count: 2;
+  column-width: 160px;
   column-gap: 10px;
 }
 
@@ -318,23 +325,30 @@
   margin: 0;
   color: inherit;
   font-family: inherit;
-  font-size: 30px;
+  /* Whole words per line, always. `overflow-wrap:anywhere` + `word-break:break-word`
+   * + `hyphens:auto` split "Design" into "Desig/n" and "opening" into "open-/ing"
+   * to fill a narrow card, which reads as a typo rather than a headline. A card is
+   * sized so the longest word in the briefest line fits; only a single word wider
+   * than the card may break, and it never hyphenates. */
+  font-size: 22px;
   font-weight: 900;
-  line-height: 1.02;
+  line-height: 1.06;
   letter-spacing: -0.025em;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  hyphens: auto;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: manual;
+  -webkit-hyphens: manual;
+  text-wrap: pretty;
 }
 
 .insp-len-s .insp-type-text {
-  font-size: 42px;
+  font-size: 26px;
 }
 
 .insp-len-l .insp-type-text {
-  font-size: 22px;
+  font-size: 17px;
   font-weight: 800;
-  line-height: 1.12;
+  line-height: 1.15;
 }
 
 .insp-type--sun .insp-type-text {

@@ -53,25 +53,22 @@ const BUZZY = join(LIB, "buzzy");
 const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server"]);
 
 /**
- * Modules the console may import FROM `src/lib/buzzy` — the reverse direction.
+ * The console may import exactly one thing from `src/lib/buzzy`: the package
+ * surface, `buzzy/public`.
  *
- * Nine imports across six console files today, all of them the console enforcing
- * BeeZilla's own rules at its own gateways. They are recorded here as pre-split
- * debt rather than rewritten under a boundary check:
- *   buzzy/inferenceToken — mint/verify the capability token the gateways accept
- *   buzzy/entitlements  — whose plan allows which model / voice / minutes
- *   buzzy/music         — music generation behind the entitlements gate
- *   buzzy/modelPrefs    — the operator's saved model controls, read by agent-api
+ * It used to be four internals (`inferenceToken`, `entitlements`, `music`,
+ * `modelPrefs`) imported straight out of six console files. Stage 2 collapsed them
+ * behind `src/lib/buzzy/public.ts` — the contract the console actually needs (mint
+ * and verify capability tokens, read the plan and quotas, gate music, validate a
+ * model-prefs patch) — so stage 3 can copy that directory into another repo without
+ * six broken paths, and so a new dependency is an edit to the surface rather than an
+ * import that happens to resolve.
  *
- * A NEW console→buzzy module fails the check. Shrinking this set is the work of
- * stage 2, when those four become the surface of a package.
+ * No other module name is accepted. If the console needs something new from
+ * BeeZilla, it goes through the surface file first.
  */
-const ALLOWED_INBOUND = new Set([
-  "buzzy/inferenceToken",
-  "buzzy/entitlements",
-  "buzzy/music",
-  "buzzy/modelPrefs",
-]);
+const ALLOWED_INBOUND = new Set(["buzzy/public"]);
+
 
 
 /** Files under src/lib/buzzy that are scanned. */

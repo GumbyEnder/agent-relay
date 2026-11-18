@@ -22,6 +22,7 @@ import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } fr
 import { WEB_SEARCH_TOOL } from "./search";
 import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
+import { GENERATE_VIDEO_TOOL } from "./video";
 
 export type ToolGate = "always" | "draft";
 export type ToolCost = "free" | "metered";
@@ -127,6 +128,23 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     gate: "draft",
     offered: true,
     timeoutMs: 130_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "render-to-memory",
+  },
+  {
+    // A video costs minutes and a queue slot, so it is gated exactly like the
+    // other media tools. The harness ALSO starts it from intent (videoAsk) without
+    // the model: the kit brief says a video request must always start the job, and
+    // a model that is offered an optional tool treats it as optional.
+    name: "generate_video",
+    egress: true,
+    schema: GENERATE_VIDEO_TOOL,
+    gate: "draft",
+    offered: true,
+    // The tool starts the job and returns its id; the render itself is polled by
+    // GET /api/buzzy/video/<id>, never held open inside a turn.
+    timeoutMs: 40_000,
     maxResultBytes: 4_000,
     cost: "metered",
     sideEffects: "render-to-memory",

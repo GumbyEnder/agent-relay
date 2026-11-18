@@ -10,7 +10,7 @@
  */
 import { defineEventHandler } from "h3";
 import { handleCapabilityToken } from "./capability-token.server";
-import { inferenceEndpoint } from "./buzzy/inferenceToken";
+import { inferenceEndpoint } from "./buzzy/public";
 
 export default defineEventHandler((event) =>
   // One capsule for the desktop: inference (chat, ASR, voice) and music both spend

@@ -100,6 +100,10 @@
   // ── Copy this page's link, and say truthfully whether it worked ────────
   function copyLink() {
     var href = window.location.href;
+    // Say what was copied and what did NOT happen. "Link copied." next to a
+    // share-looking icon was ambiguous: the owner could not tell whether the
+    // page had just been shared with someone.
+    var done = "Copied this page's address. Nothing was shared or sent.";
     function fallback() {
       var ta = document.createElement("textarea");
       ta.value = href;
@@ -110,10 +114,10 @@
       var ok = false;
       try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
       document.body.removeChild(ta);
-      say(ok ? "Link copied." : "Couldn't copy here — the link is " + href);
+      say(ok ? done : "Couldn't copy here — the address is " + href);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(href).then(function () { say("Link copied."); }, fallback);
+      navigator.clipboard.writeText(href).then(function () { say(done); }, fallback);
     } else fallback();
   }
 

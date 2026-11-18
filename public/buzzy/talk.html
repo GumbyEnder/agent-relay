@@ -376,7 +376,13 @@
     .chat-main > p.muted:last-of-type { order: 9; }
 
     @media (max-width: 900px) {
-      .chat-layout { grid-template-columns: 1fr; }
+      /* minmax(0,…): a bare `1fr` track takes its MIN-CONTENT width, so one wide
+         child (the browse search field, a long mp3 filename) made the whole chat
+         column 404px inside a 342px screen and pushed its left edge off-canvas —
+         which is why the board title, the hint line and the first tab all lost
+         their left letters. The column may never be wider than the screen. */
+      .chat-layout { grid-template-columns: minmax(0, 1fr); }
+      .chat-main { min-width: 0; max-width: 100%; }
       .composer-card { border-radius: 10px; }
     }
     /* Mobile: the composer is the point of the page — strip the chrome that
@@ -733,6 +739,9 @@
     .media-card { flex-wrap: wrap; }
     .media-img { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 0.4rem; }
     .media-audio { display: block; width: 100%; margin-top: 0.4rem; }
+    .media-video { display: block; width: 100%; max-width: 360px; border-radius: 10px; margin-top: 0.4rem; background: #000; }
+    .media-post { display: block; white-space: pre-wrap; font-size: 0.86em; color: var(--dim, #9aa2ad); margin-top: 0.4rem; }
+    .media-review { display: block; font-size: 0.8em; color: var(--dim, #9aa2ad); margin-top: 0.3rem; }
     .paper-drop.hidden { display: none; }
     .paper-drop {
       margin-top: 0.8rem;
@@ -1677,8 +1686,14 @@
               <input id="bzSearch" type="search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"
                      aria-label="Search your work, skills and recipes, or enter a web address" />
               <span class="bz-search-tools">
-                <button type="button" id="bzCopy" class="bz-icon-btn" aria-label="Copy the link to this page" title="Copy the link to this page">
+                <!-- A share control that only copies a URL has to SAY so. The
+                     icon alone read as "share this" and left the owner guessing
+                     what left the page (nothing did). -->
+                <button type="button" id="bzCopy" class="bz-share-btn"
+                        aria-label="Copy a link to this page — nothing is shared or sent"
+                        title="Copies this page's address to your clipboard. Nothing is shared or sent.">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                  <span>Copy page link</span>
                 </button>
               </span>
             </div>
@@ -2494,6 +2509,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
     }
 
+    /**
+     * The first picture in a turn's artifacts. The server sends both a top-level
+     * `image` and an `artifacts` list; this is the fallback so a future shape change
+     * cannot silently drop the card again.
+     */
+    function firstImageArtifact(list) {
+      if (!Array.isArray(list)) return null;
+      for (var i = 0; i < list.length; i++) {
+        var a = list[i];
+        if (!a || !a.url) continue;
+        if (a.kind === "image" || /^image\//i.test(a.contentType || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(a.name || "")) {
+          return { url: a.url, name: a.name || "image.png", bytes: a.bytes || 0, type: a.contentType || "image/png" };
+        }
+      }
+      return null;
+    }
+
     function renderMediaCard(a) {
       var esc = function (v) { return String(v == null ? "" : v).replace(/</g, "&lt;").replace(/"/g, "&quot;"); };
       var name = esc(a.name || "file");
@@ -2502,8 +2534,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var isAudio = /^audio\//i.test(a.type || "") || /\.(mp3|wav|m4a|ogg)$/i.test(name);
       var isImage = /^image\//i.test(a.type || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
       var is3d = /\.(glb|gltf|obj|usdz)$/i.test(name);
+      // A video is the one deliverable that must play where it is announced: the
+      // person reviews it before posting, so a download link alone is not delivery.
+      var isVideo = /^video\//i.test(a.type || "") || /\.(mp4|webm|mov)$/i.test(name);
       var body = "";
-      if (isAudio) {
+      if (isVideo) {
+        body = '<video class="media-video" controls preload="metadata" playsinline' +
+          (a.poster ? ' poster="' + esc(a.poster) + '"' : "") +
+          ' src="' + url + '"></video>' +
+          (a.postText ? '<span class="media-post">' + esc(a.postText) + "</span>" : "") +
+          (a.reviewNote ? '<span class="media-review">' + esc(a.reviewNote) + "</span>" : "");
+      } else if (isAudio) {
         body = '<audio class="media-audio" controls preload="metadata" src="' + url + '"></audio>';
       } else if (isImage) {
         body = '<img class="media-img" src="' + url + '" alt="' + name + '" loading="lazy" />';
@@ -2513,7 +2554,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         body = '<span class="file-sub">3D model · download to open in any 3D viewer</span>';
       }
       return '<div class="file-card media-card">' +
-        '<span class="file-icon">' + (isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
+        '<span class="file-icon">' + (isVideo ? "\uD83C\uDFAC" : isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
         '<span class="file-meta">' +
           '<span class="file-name">' + name + "</span>" +
           '<span class="file-sub">' + (is3d ? "" : "Saved to your files") + size + "</span>" +
@@ -2522,11 +2563,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         '<a href="' + url + '" download="' + name + '">Download</a>' +
         // A track is not finished when it plays: it opens in the studio, where the
         // owner can see the plan, select a passage and tell BeeZilla what to change.
+        // A picture is finished, but it is a Library item: the card says where it lives
+        // instead of leaving the owner to guess.
         (isAudio
           ? '<a class="studio-link" href="/buzzy/studio?job=' +
             encodeURIComponent(chatState.jobId || "") +
             '">Open studio →</a>'
-          : "") +
+          : isImage && chatState.jobId
+            ? '<a class="studio-link" href="/buzzy/library?job=' +
+              encodeURIComponent(chatState.jobId) +
+              '">In your Library →</a>'
+            : "") +
       "</div>";
     }
 
@@ -2581,6 +2628,67 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (++misses >= 4) stop("Lost touch with the 3D model — check the connection.");
           });
       }, 4000);
+    }
+
+    // ── A video the chat started ─────────────────────────────────────────
+    // The kit renders on another machine and takes minutes, so the turn only starts
+    // the job and returns video { jobId, recipe, etaMinutes }. This polls until the
+    // server has stored the mp4 (plus thumbnail and post text), shows the ETA under
+    // the reply, then attaches the finished video to that same reply. Re-renders
+    // write in place, so audio already playing above is not interrupted.
+    function watchVideo(jobId, msg, info) {
+      var tries = 0;
+      var misses = 0;
+      var startedAt = Date.now();
+      var etaMin = Math.max(1, Number((info && info.etaMinutes) || 5));
+      msg.videoJobId = jobId;
+      function show(text) {
+        msg.progress = text;
+        var line = document.querySelector('[data-video="' + String(jobId).replace(/"/g, "") + '"]');
+        if (line) line.textContent = text;
+        else renderChatMessages();
+      }
+      function stop(text) {
+        clearInterval(tick);
+        msg.progress = text;
+        renderChatMessages();
+      }
+      function left() {
+        var mins = Math.max(0, Math.round(etaMin - (Date.now() - startedAt) / 60000));
+        return mins > 1 ? "about " + mins + " minutes left" : "almost done";
+      }
+      show("Making your video — " + left() + "…");
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/video/" + encodeURIComponent(jobId), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            if (p.video && p.video.url) {
+              clearInterval(tick);
+              msg.progress = "";
+              msg.asset = {
+                url: p.video.url,
+                name: p.video.name || "video.mp4",
+                bytes: p.video.bytes || 0,
+                type: p.video.type || "video/mp4",
+                poster: p.thumbnail && p.thumbnail.url ? p.thumbnail.url : "",
+                postText: p.postText || "",
+                reviewNote: p.reviewNote || "Review before posting — this video was made with AI"
+              };
+              renderChatMessages();
+              return;
+            }
+            if (p.state === "failed" || p.ok === false) {
+              return stop(p.message || p.error || "The video did not finish.");
+            }
+            if (tries > 240) return stop("The video is taking far longer than promised — ask again in a moment.");
+            if (p.state === "running" || p.state === "queued") show("Making your video — " + left() + "…");
+            misses = 0;
+          })
+          .catch(function () {
+            if (++misses >= 4) stop("Lost touch with the video service — check the connection.");
+          });
+      }, 8000);
     }
 
     // ── What happened ────────────────────────────────────────────────
@@ -2653,15 +2761,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Newest first, but each exchange still reads question-then-answer:
       // [u2, a2, u1, a1]. Your words and the reply stay at the top; older
       // turns and the work history drop below. No scroll games.
-      const ordered = (function oldestToNewestPairs(msgs) {
-        var out = [];
-        for (var i = msgs.length - 1; i >= 0; i--) out.push(msgs[i]);
-        for (var j = 0; j < out.length - 1; j++) {
-          if (out[j].role === "assistant" && out[j + 1].role === "user") {
-            var t = out[j]; out[j] = out[j + 1]; out[j + 1] = t;
-            j++;
-          }
+      //
+      // Grouped by TURN rather than by swapping neighbouring pairs: the old
+      // reverse-then-swap pass only fixed a pair when an assistant message sat
+      // immediately before its user message, so a turn whose reply arrived as a
+      // second message (or whose reply was still missing) left the previous pair
+      // reversed — the "messages briefly re-sort" the QA walk saw, and how a
+      // reply could end up above its own prompt.
+      const ordered = (function groupByTurn(msgs) {
+        var turns = [];
+        var cur = null;
+        for (var i = 0; i < msgs.length; i++) {
+          var m = msgs[i];
+          if (m.role === "user" || !cur) { cur = [m]; turns.push(cur); }
+          else cur.push(m);
         }
+        var out = [];
+        for (var t = turns.length - 1; t >= 0; t--) out.push.apply(out, turns[t]);
         return out;
       })(chatState.messages);
       const html = ordered.map((m) => {
@@ -2674,9 +2790,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (m.asset && m.asset.url) {
           bubble += renderMediaCard(m.asset);
         }
+        // The artifact envelope is the delivery list for this turn. Anything the
+        // turn produced but did not put on `document`/`asset` still gets a card
+        // here — a file that exists with no card in the conversation is exactly
+        // "the mp3 only shows up in the Work tab".
+        if (Array.isArray(m.artifacts) && m.artifacts.length) {
+          var already = {};
+          if (m.document && m.document.downloadUrl) already[m.document.downloadUrl] = 1;
+          if (m.asset && m.asset.url) already[m.asset.url] = 1;
+          m.artifacts.forEach(function (a) {
+            if (!a || !a.url || already[a.url]) return;
+            already[a.url] = 1;
+            bubble += renderMediaCard({ name: a.name, url: a.url, bytes: a.bytes, type: a.contentType });
+          });
+        }
         if (m.progress) {
-          bubble += '<div class="bz-what" data-model3d="' + String(m.model3dTask || "").replace(/"/g, "") + '">' +
-            String(m.progress).replace(/</g, "&lt;") + "</div>";
+          bubble += '<div class="bz-what"' +
+            (m.model3dTask ? ' data-model3d="' + String(m.model3dTask).replace(/"/g, "") + '"'
+              : m.videoJobId ? ' data-video="' + String(m.videoJobId).replace(/"/g, "") + '"' : "") +
+            '>' + String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
         return bubble;
@@ -5263,6 +5395,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     /**
+     * Where the live (streaming) bubble goes.
+     *
+     * The transcript reads newest turn first, and inside a turn question-then-
+     * answer: [u2, a2, u1, a1]. So the answer being streamed belongs directly
+     * UNDER the prompt it answers. It used to be inserted as the container's
+     * first child, which paints the reply ABOVE the question for the whole turn —
+     * invisible on a 2s chat turn, glaring on a music turn that composes for 25s.
+     */
+    function mountLiveBubble(node) {
+      var c = document.getElementById("chatMessages");
+      if (!c) return;
+      var prompts = c.querySelectorAll(".bubble.me");
+      var last = prompts.length ? prompts[prompts.length - 1] : null;
+      var think = document.getElementById("thinkingIndicator");
+      if (last && last.parentNode === c) c.insertBefore(node, last.nextSibling);
+      else if (think && think.parentNode === c) c.insertBefore(node, think);
+      else c.appendChild(node);
+    }
+
+    /**
      * One spoken turn. Same body as the text lane plus voice:true, consumed as
      * Server-Sent Events:
      *   text  → live transcript bubble (the answer appears as it is spoken)
@@ -5307,8 +5459,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (!liveBubble) {
               liveBubble = document.createElement("div");
               liveBubble.className = "bubble streaming";
-              var c = document.getElementById("chatMessages");
-              if (c) c.insertBefore(liveBubble, c.firstChild);
+              mountLiveBubble(liveBubble);
             }
             liveBubble.textContent = liveText;
           } else if (ev === "stage") {
@@ -5401,14 +5552,25 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (!dataLines.length) return;
           var payload;
           try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
-          if (ev === "text") {
+          if (ev === "stage") {
+            // The server names the work and how long it should take ("Composing
+            // 15s of audio"). This frame was silently dropped on the typed lane,
+            // so a 25-second music turn showed only dots and a bare clock — the
+            // owner could not tell "working" from "hung".
+            if (window.__bzStage) window.__bzStage(payload);
+          } else if (ev === "tool") {
+            if (window.__bzStage) {
+              window.__bzStage(payload.state === "running"
+                ? { label: "Working — " + String(payload.name || "a tool").replace(/_/g, " ") + "…" }
+                : { label: "Done — " + Math.round((payload.ms || 0) / 100) / 10 + "s. Writing the reply…" });
+            }
+          } else if (ev === "text") {
             if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
             liveText += payload.t || "";
             if (!liveBubble) {
               liveBubble = document.createElement("div");
               liveBubble.className = "bubble streaming";
-              var c = document.getElementById("chatMessages");
-              if (c) c.insertBefore(liveBubble, c.firstChild);
+              mountLiveBubble(liveBubble);
             }
             liveBubble.textContent = liveText;
           } else if (ev === "done") {
@@ -6514,8 +6676,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         '<span class="thinking-elapsed" id="thinkingElapsed"></span>' +
         '<div class="stage-line"><span class="stage-label" id="bzStageLabel"></span>' +
         '<span class="stage-bar" id="bzStageBar"><i></i></span></div>';
-      messagesContainer.appendChild(thinkingEl);
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      // The thread is newest-first, so appending put the "working" line at the
+      // BOTTOM of the page — under the oldest turn, not under the prompt just
+      // sent. It belongs directly beneath the newest prompt, where the owner is
+      // looking. Position 1 of the container is right after that bubble.
+      var newestPrompt = messagesContainer.firstElementChild;
+      if (newestPrompt && newestPrompt.classList.contains("me")) {
+        messagesContainer.insertBefore(thinkingEl, newestPrompt.nextSibling);
+      } else {
+        messagesContainer.insertBefore(thinkingEl, messagesContainer.firstChild);
+      }
+      // The indicator is at the top of a newest-first thread, so jumping the
+      // container to the bottom would scroll the very thing we just showed out of
+      // view. Bring it into view instead.
+      if (thinkingEl.scrollIntoView) thinkingEl.scrollIntoView({ block: "nearest" });
       var elapsedTimer = setInterval(function () {
         var el = document.getElementById("thinkingElapsed");
         if (!el) return;
@@ -6646,8 +6820,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           role: "assistant",
           content: data.reply,
           document: data.document || null,
-          // A track made this turn plays in the reply that announces it.
-          asset: data.audio || data.asset || null,
+          // A track made this turn plays in the reply that announces it; a picture
+          // made this turn shows in it the same way. `data.image` was sent by the
+          // server since the art pre-pass shipped and never read here — that is
+          // why a made image "did not appear" (production, 2026-11-17).
+          asset: data.audio || data.asset || data.image || firstImageArtifact(data.artifacts) || null,
           artifacts: data.artifacts || null,
           timings: data.timings || null,
           tools: data.tools || null,
@@ -6687,6 +6864,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (Array.isArray(data.actions) && data.actions.length && window.BeeZillaPilot) window.BeeZillaPilot.run(data.actions);
         // Asked for a 3D model: the turn started it, and it lands under this reply.
         if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
+        // Asked for a video: the turn started it, and it lands under this reply.
+        if (data.video && data.video.jobId) watchVideo(data.video.jobId, replyMsg, data.video);
         // A track spends plan minutes: show what is left now, not on the next send.
         if (data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
         // The turn's own numbers are authoritative — don't re-fetch over them.

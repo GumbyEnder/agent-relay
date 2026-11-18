@@ -115,12 +115,18 @@ export default defineEventHandler(async (event) => {
     if (!outcome.ok) {
       setResponseStatus(event, outcome.reason === "insufficient_funds" ? 402 : 409);
       const message =
-        outcome.reason === "free_recipe" ? "Claimed — this one is free"
-        : outcome.reason === "already_owned" ? "You already own this"
-        : "Not enough Honey Drops";
+        outcome.reason === "already_owned" ? "You already own this" : "Not enough Honey Drops";
       return { ok: false, error: message, code: outcome.reason, balance: outcome.balance };
     }
-    return { ok: true, hash, paid: outcome.price, balance: outcome.balanceAfter, currency: "honey_drops" };
+    return {
+      ok: true,
+      hash,
+      paid: outcome.price,
+      balance: outcome.balanceAfter,
+      currency: "honey_drops",
+      // A free recipe is claimed, not bought: same success, said differently.
+      ...(outcome.free ? { free: true } : {}),
+    };
   }
 
   // ── POST /api/wallet/grant (admin) ──────────────────────────────────────────
