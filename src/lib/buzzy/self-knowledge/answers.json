@@ -70,15 +70,15 @@
   {
     "id": "sk-005",
     "q": "What is the difference between Chat and Work?",
-    "a": "Chat is the normal way to talk it through. Work first collects the key details of the job in one go, then goes through the usual draft-and-approve steps. Switch between them in the ⋯ menu at the end of the Talk bar.",
+    "a": "There's one bar now, with no Chat or Work switch to pick. BeeZilla answers straight away and makes what you ask for. When a job needs real effort, it offers once to take it on as a piece of work, which collects the key details and then goes through the usual draft-and-approve steps.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Chat is the default. Work mode makes the harness delineate the task"
+        "symbol": "One bar, one question"
       },
       {
-        "file": "public/buzzy/talk.html",
-        "symbol": "<span class=\"tm-label\">Mode</span>"
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "offer once to take it on as a piece of work"
       }
     ],
     "surfaces": [
@@ -631,11 +631,19 @@
   {
     "id": "sk-033",
     "q": "What is the Whiteboard?",
-    "a": "A board for laying out a job. Add cards for your files, connect two cards by dragging from a corner of one to the other, and use Search the board to add things from your Library.",
+    "a": "It's where BeeZilla's work happens. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
-        "symbol": "Search the board"
+        "symbol": "the moment it reads the"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Create recipe"
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "onFlow?: (f: FlowStep) => void;"
       }
     ],
     "surfaces": [
@@ -645,11 +653,15 @@
   {
     "id": "sk-034",
     "q": "Is my Whiteboard saved to my account?",
-    "a": "Not yet. It is saved in this browser, one board per conversation, so another computer won't see it.",
+    "a": "The board itself is saved in this browser, one per conversation, so another computer won't see it yet. Recipes you make from it are saved to your account.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "bz.board."
+      },
+      {
+        "file": "src/lib/buzzy/boardRecipes.ts",
+        "symbol": "INSERT INTO buzzy_board_recipes"
       }
     ],
     "surfaces": [
@@ -660,15 +672,15 @@
   {
     "id": "sk-035",
     "q": "How does talking to BeeZilla by voice work?",
-    "a": "Press Talk to BeeZilla. The button itself shows that BeeZilla hears you: it says Listening… with a small live level, and your words appear in the box as you speak. The conversation and the Whiteboard open below it. Press the button again to stop.",
+    "a": "Press Talk to BeeZilla — that button is the voice switch. It says Listening… with a small live level, the face at the top left listens, and your words appear in the box as you speak. The whiteboard opens with the bar inside it. Press the button again to stop.",
     "sources": [
       {
         "file": "public/buzzy/voice-stage.js",
-        "symbol": "The Talk to BeeZilla button is the only voice signal."
+        "symbol": "We have a voice toggle. That does not need to be there."
       },
       {
         "file": "public/buzzy/voice-stage.js",
-        "symbol": "What BeeZilla hears appears in the box where you would type"
+        "symbol": "What BeeZilla hears, shown where you would type"
       },
       {
         "file": "public/buzzy/talk.html",
@@ -683,8 +695,12 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Turn on Speak replies in the ⋯ menu at the end of the Talk bar, and it reads its answers aloud.",
+    "a": "Yes. When you talk to it, it answers out loud. For typed messages, say or type \"read your replies out loud\" and it turns that on; \"stop reading your replies\" turns it off.",
     "sources": [
+      {
+        "file": "src/lib/buzzy/pilot.ts",
+        "symbol": "Turn on Speak replies"
+      },
       {
         "file": "public/buzzy/talk.html",
         "symbol": "<span class=\"vt-label\">Speak replies</span>"
@@ -698,7 +714,7 @@
   {
     "id": "sk-037",
     "q": "Can I give BeeZilla a document to read?",
-    "a": "Yes. Drag the file onto the Talk bar, or use Attach a file in the ⋯ menu. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "a": "Yes. Drag the file onto the Talk bar or onto the whiteboard, or use Attach a file under More, at the end of the row of places below the search bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -707,6 +723,10 @@
       {
         "file": "public/buzzy/talk.html",
         "symbol": "Attach a file</button>"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "A file from the computer goes to the person's Library first"
       },
       {
         "file": "src/lib/buzzy/paper.ts",
@@ -721,15 +741,15 @@
   {
     "id": "sk-038",
     "q": "Where are my past conversations?",
-    "a": "Under Conversations in the ⋯ menu at the end of the Talk bar. Pick one to reopen it, rename it or get a quick summary. You can start a new conversation there too.",
+    "a": "Under History, in the row of places below the search bar. Open one to carry on where it stopped. New conversation is there too.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Pick a past chat to reopen it, rename it, or get a quick summary."
+        "symbol": "data-tab=\"history\""
       },
       {
-        "file": "public/buzzy/talk.html",
-        "symbol": "type=\"button\">Conversations</button>"
+        "file": "public/buzzy/browse.js",
+        "symbol": "Past conversations, newest first"
       }
     ],
     "surfaces": [
