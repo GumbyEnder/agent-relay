@@ -70,6 +70,10 @@
     .msg.ok { background: #10251a; border: 1px solid #1f5b3a; color: #a9f0c4; }
     footer { padding: 1rem 1.5rem; text-align: center; color: #666; font-size: 0.8rem; border-top: 1px solid #222; }
     .hidden { display: none !important; }
+    /* Out of sight but still laid out, so any password manager can read the
+       email a new password belongs to. Chrome reads display:none fields too;
+       not every password manager does. */
+    .offscreen { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); opacity: 0; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -111,7 +115,7 @@
 
       <!-- After a link sign-in: choose a password. -->
       <form id="setForm" class="hidden" autocomplete="on" novalidate>
-        <input id="setEmail" name="username" type="email" autocomplete="username" class="hidden" tabindex="-1" aria-hidden="true" />
+        <input id="setEmail" name="username" type="email" autocomplete="username" class="offscreen" tabindex="-1" aria-hidden="true" />
         <div class="label-row">
           <label for="newPassword">Password</label>
           <button class="toggle" id="showNew" type="button" aria-controls="newPassword">Show</button>
@@ -147,6 +151,8 @@
       var checkTimer = null;
       var lastWrong = null;      // the password value already known to be wrong
       var linkEmail = "";        // where the last sign-in link went
+      var passwordFor = "";      // the email the password step was opened for
+      var accepted = false;      // the password was right: the next submit only goes in
       var blockedUntil = 0;      // after "too many tries": no password check before this time
       // Every request takes a ticket. Going back to the email step voids the
       // tickets in flight, so a late answer can neither keep "Next" dead nor
@@ -265,13 +271,17 @@
         submit.textContent = "Next";
         submit.disabled = false;
       }
-      function toPasswordStep() {
+      function toPasswordStep(addr) {
         step = "password";
+        passwordFor = addr;
         passwordRow.classList.remove("hidden");
         forgot.classList.remove("hidden");
         submit.textContent = "Log in";
         setSubtitle("Welcome back. Put in your password.");
         try { password.focus(); } catch (e) {}
+        // A password manager may already have filled the password (some fill
+        // it while the row is still hidden). Check it now: nobody is typing.
+        if (password.value) attemptPassword(true);
       }
       function toSentStep(addr, kind) {
         step = "sent";
@@ -316,7 +326,10 @@
               return;
             }
             submit.disabled = false;
-            if (res.data.hasPassword) return toPasswordStep();
+            // The address changed while we were checking: this answer is for
+            // the old one, so ask again.
+            if (currentEmail() !== addr) return toEmailStep();
+            if (res.data.hasPassword) return toPasswordStep(addr);
             // Known email without a password, or a new email: send a link.
             return sendLink(addr, res.data.exists ? "signin" : "new");
           })
@@ -382,7 +395,7 @@
             // not move the page, even if it succeeded: its cookie is set, and the
             // next sign-in on this page replaces it.
             if (!live(t)) return;
-            if (res.ok) { enter(); return; }
+            if (res.ok) { signedIn(fromTimer); return; }
             if (password.value !== pass) return; // typed on meanwhile
             if (res.status === 429) {
               blockedUntil = Date.now() + (res.retryAfter || 60) * 1000;
@@ -412,6 +425,19 @@
           });
       }
 
+      // Password managers offer to save a password when its form is sent.
+      // Chrome also notices the page moving on, but a check that ran by itself
+      // (2 s after typing stopped) sent no form at all, so anything waiting for
+      // one never offered to save. Send it once now that the password is known
+      // to be right; the submit handler then only goes in.
+      function signedIn(fromTimer) {
+        if (fromTimer && typeof form.requestSubmit === "function") {
+          accepted = true;
+          try { form.requestSubmit(); return; } catch (e) { /* go in anyway */ }
+        }
+        enter();
+      }
+
       password.addEventListener("input", function () {
         clearTimeout(checkTimer);
         wrongPassword(false);
@@ -421,12 +447,17 @@
       });
 
       email.addEventListener("input", function () {
+        // Password managers write the email again when they fill the password.
+        // The same address is not a new sign-in: going back to the email step
+        // here used to hide and wipe the password they had just filled.
+        if (step === "password" && currentEmail() === passwordFor) return;
         clearMsg();
         if (step === "password") toEmailStep();
       });
 
       form.addEventListener("submit", function (e) {
         e.preventDefault();
+        if (accepted) { enter(); return; }
         clearMsg();
         if (step === "email") { if (!busy) lookup(); return; }
         if (step === "password") attemptPassword(false);
