@@ -1,7 +1,9 @@
 # The video lane — BeeZilla ⇄ the Breadcrumbs video-recipes kit
 
-Status: **built, not deployed.** Writer/routing/executor/UX/safety are in code and
-tested; the render server, the kit token and the kit itself are still with Shane.
+Status: **built, rebased on the live main, and proven end-to-end against the real
+kit on BeeServer.** Not deployed: production needs `BZ_VIDEO_BASE`,
+`BZ_VIDEO_KIT_TOKEN` and a Google TTS key from Shane (6615), and the render box
+needs the three kit patches below applied by `beezilla-kit-patches.py`.
 
 ## Shane's decisions (2026-11-17, 15:46 ET — room 6615)
 
@@ -94,7 +96,47 @@ finished render look empty. Also surfaced: `cause`, `charge`, `attempt`,
   is exercised by the live E2E, not by the unit tests.
 - The Recipes-page card (questions from `recipe.asks`, queued → making → done
   with ETA) is not built yet; the chat path is.
-- Kit-side, still to do on the render server (not in this repo): `TEXT_MODEL=gemini-flash-latest`,
-  `DAILY_LIMIT_PER_USER=5`, and `--no-brand` on all four kind commands in
-  `worker.py` (all five scripts accept the flag; the QC window then stays at its
-  base length instead of +10 s).
+- Kit-side, still to do on the production render server (not in this repo):
+  `TEXT_MODEL=gemini-flash-latest`, `DAILY_LIMIT_PER_USER=5`, and the three
+  patches below applied by `beezilla-kit-patches.py`.
+
+## Proven against the real kit (2026-11-17, BeeServer, dev run)
+
+The kit was already unpacked on BeeServer (`~/video-kit`, bootstrap proof MP4
+30.0 s) — no password needed to test against it. Ran `serve.py` + `worker.py`
+from `beezilla-video-dev.sh` and drove them through **this repo's client**
+(`startKitJob` → `readVideoJob` → `fetchVideoFile`), not curl:
+
+| Run | Job | Wall | Result |
+|---|---|---|---|
+| chalkboard, "three months of cash" | `20261117-231007-7574c4` | 165 s | done, 3.24 MB MP4, 56.1 s, 1080x1350, audio, QC PASS, −16.0 LUFS, 0 blank frames, thumbnail 172 KB, post text 274 B, `branded: false` |
+| chart race, invented table | `20261117-231622-2b1409` | 24 s | done, 3.72 MB MP4, 30.0 s, 1080x1350, QC pass, `branded: false`, files `video.mp4/thumbnail.jpg/post.txt` — the role-keyed mapping that differs per kind |
+| chart race, 5-row table | `20261117-231553-e8b2d0` | 4 s | failed, `charge: false`, kit sentence "A race needs at least 6 dated rows; this file has 5." — the sentence now reaches the person (patch 3) |
+| chalkboard, dead writer key | `20261117-230925-c85aed` | 5 s | failed, `render_failed`, `attempt: 2`, `charge: false` — failures are never charged, client surfaced the kit's own sentence |
+
+Dev-run substitutions, both deliberate and both forbidden in production:
+`VOICE_PROVIDER=edge` (no Google TTS key yet — production is `google`, one
+voice rule) and the writer on an OpenAI-compatible endpoint
+(`google/gemini-3.8-flash`, the same family as Shane's `gemini-flash-latest`,
+until his Google key lands).
+
+## The three kit patches (`beezilla-kit-patches.py`, NAS `host-ops`)
+
+The kit is proprietary and outside git, so these live as a tracked, idempotent
+patch script (`.orig` kept beside each file, `--check` / `--revert`):
+
+1. **`worker.py` never passed `--no-brand`** — every per-recipe CLI accepts it,
+   but the only caller that launches a render did not, so every job carried the
+   10 s Breadcrumbs card. Now `--no-brand` on all four commands unless
+   `NO_END_CARD=0`. Verified: `branded: false` on both successful renders.
+2. **`make_chart.py` cannot start on Python 3.14** — `--unit` had
+   `help="... e.g. GW or %"` and argparse runs `help % params`, so every chart
+   job died in 0.2 s with `ValueError: badly formed help string`. Fixed the help
+   string; the recipe now renders in 24 s.
+3. **`worker.py` discarded the actionable failure sentence** — it replaced every
+   cause except `topic_refused` with a curated line, so "A race needs at least 6
+   dated rows" became "Making the video failed on our side." The recipe's own
+   sentence now wins whenever the worker has no curated one.
+
+QC needed no change for a missing card: `check_video.py` never looked for one —
+the max length simply stays 65 s instead of 75 s.
