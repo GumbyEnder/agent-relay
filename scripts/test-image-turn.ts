@@ -192,6 +192,18 @@ expect(
 );
 expect("an image turn echoes its project id", /response\.jobId = artJobId;/.test(server), true);
 
+console.log("a picture that arrives with a track still belongs to the job the card links to:");
+expect(
+  "the mixed turn records the image on the audio project",
+  /if \(renderedImage\) projectData\.image = renderedImage;/.test(server),
+  true,
+);
+expect(
+  "every deliverable asset is attached, not just the track",
+  /for \(const deliverable of \[renderedAudio, renderedImage\]\.filter\(Boolean\)/.test(server),
+  true,
+);
+
 console.log("");
 if (failures) {
   console.error(`${failures} failure(s)`);

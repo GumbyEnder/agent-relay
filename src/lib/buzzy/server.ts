@@ -1748,23 +1748,34 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Audio-only turns skip the draft path, but they are still work: without a
   // project the MP3 belongs to nobody, so the Library can show it while no work
   // item claims it. Record the project and attach the file to it.
+  //
+  // A turn can deliver a picture AND a track (voice replies on, "draw me a duck"):
+  // then `imageOnly` is false, this branch owns the project id, and the picture
+  // has to join it too. Measured 2026-11-18 on c15db66 — the card's "In your
+  // Library →" link opened job_bfdd625a51034bc3 ('Audio ready', no image) while
+  // asset 8303 sat with job_id NULL: the PNG was an orphan the Library could
+  // never show under the job the card links to.
   if (audioOnly && renderedAudio) {
     const audioJobId = musicProjectId || jobId || sessionId || `job_${Date.now()}`;
     const audioTitle = message.slice(0, 80);
+    const audioStatus = renderedImage ? "Deliverable ready" : "Audio ready";
+    const projectData: Record<string, unknown> = { audio: renderedAudio, slots: slotValues, approved: false };
+    if (renderedImage) projectData.image = renderedImage;
     try {
       await sql`
         INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
-        VALUES (${audioJobId}, ${userId}, null, ${audioTitle}, 'Audio ready', null,
-          ${JSON.stringify({ audio: renderedAudio, slots: slotValues, approved: false })}::jsonb, now())
+        VALUES (${audioJobId}, ${userId}, null, ${audioTitle}, ${audioStatus}, null,
+          ${JSON.stringify(projectData)}::jsonb, now())
         ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title, status = 'Audio ready',
+          title = EXCLUDED.title, status = EXCLUDED.status,
           data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()
       `;
-      const assetUrl = String(renderedAudio.url || "");
-      const assetId = Number(assetUrl.split("/").pop());
-      if (Number.isFinite(assetId) && assetId > 0) {
-        await sql`UPDATE buzzy_assets SET job_id = ${audioJobId}, session_id = ${sessionId}
-                  WHERE user_id = ${userId} AND id = ${assetId}`;
+      for (const deliverable of [renderedAudio, renderedImage].filter(Boolean) as Array<{ url?: string }>) {
+        const assetId = Number(String(deliverable.url || "").split("/").pop());
+        if (Number.isFinite(assetId) && assetId > 0) {
+          await sql`UPDATE buzzy_assets SET job_id = ${audioJobId}, session_id = ${sessionId}
+                    WHERE user_id = ${userId} AND id = ${assetId}`;
+        }
       }
       if (sessionId && !jobId) {
         await sql`UPDATE buzzy_sessions SET job_id = ${audioJobId} WHERE id = ${sessionId} AND user_id = ${userId}`;
