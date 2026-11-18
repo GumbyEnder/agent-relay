@@ -88,9 +88,49 @@ export function contextWindowFor(model: string | null | undefined): number {
   return 128000;
 }
 
+/** Every configured model id, comma/space separated in the BZ_* lists. */
+function configuredModels(): string[] {
+  const out: string[] = [];
+  for (const key of ["BZ_CHAT_MODELS", "BZ_VOICE_MODEL", "BZ_CHAT_MODEL", "BZ_ASR_MODEL"]) {
+    const raw = (process.env[key] ?? "").trim();
+    if (raw) out.push(...raw.split(/[,\s]+/).filter(Boolean));
+  }
+  return out;
+}
+
+/**
+ * The ONE total the context meter reports.
+ *
+ * A conversation is one history shared by several lanes: a typed turn answers on
+ * the chat model (gemini: 1M) and a spoken turn on the audio model (gpt-audio:
+ * 128k). Reporting each lane's own window made the meter flip between
+ * "1% · 7k / 1.0M" and "3% · 4k / 128k" for the same conversation, which reads as
+ * two different conversations. The binding limit is the SMALLEST window any lane
+ * can be handed, because that is the one compaction actually has to respect, so
+ * that is the total shown — consistently, whichever model answered last.
+ *
+ * Override with BZ_CONVERSATION_TOKENS on a deployment that pins one model.
+ */
+export function conversationWindowFor(): number {
+  const override = Number(process.env.BZ_CONVERSATION_TOKENS || 0);
+  if (Number.isFinite(override) && override > 0) return override;
+  const models = configuredModels();
+  if (!models.length) return contextWindowFor(process.env.BZ_CHAT_MODEL);
+  return Math.min(...models.map((m) => contextWindowFor(m)));
+}
+
 /** Fraction of the window where we start compacting, and where we warn. */
 export const CONTEXT_COMPACT_AT = 0.55;
 export const CONTEXT_WARN_AT = 0.75;
+
+/**
+ * The fixed allowance a turn pays before any words: tool schemas + protocol
+ * overhead, and the persona/brief instructions. Both the live turn and the
+ * idle `GET /api/buzzy/context` estimate must use the SAME numbers or the meter
+ * jumps the moment you reload the page.
+ */
+export const CONTEXT_TOOL_OVERHEAD_TOKENS = 1500;
+export const CONTEXT_PROMPT_OVERHEAD_TOKENS = 2200;
 
 export interface ContextState {
   used: number;

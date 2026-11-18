@@ -26,7 +26,20 @@
   button.primary { background:var(--bz-yellow); color:#111; font-weight:600; border-color:var(--bz-yellow); }
   button:disabled { opacity:0.5; cursor:default; }
   #stage { position:relative; flex:1; overflow:hidden; background:#141414; }
-  #board { position:absolute; inset:0; touch-action:none; }
+  /* nav.js moves body's children into #bzPage on the first soft hop, so #stage stops
+     being a flex item of body and `flex:1` resolves against an auto-height block:
+     the canvas collapsed to its content height (~83px) while a hard load looked fine.
+     This rule travels with this page's stylesheet, which the shell enables only while
+     Sketch is the active page. */
+  #bzPage { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+  /* A canvas is a REPLACED element: `inset:0` pins its box but cannot stretch it, so its
+     CSS size falls back to the intrinsic size of its bitmap. resize() sets that bitmap to
+     stage x devicePixelRatio, so on any dpr>1 screen the board was displayed dpr times too
+     large and clipped by #stage's overflow. Strokes are drawn in CSS px (pt() maps the
+     pointer in CSS px, setTransform(dpr) scales to the bitmap), so the ink landed dpr times
+     away from the cursor — right at dpr 1, inches off everywhere else. Pin the box in CSS
+     and let the backing store follow the measurement. */
+  #board { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
   #layers { position:absolute; inset:0; pointer-events:none; }
   .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
   .img-wrap.selected { border-color: var(--bz-yellow); }
@@ -35,7 +48,10 @@
                       border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
   footer { border-top:1px solid var(--bz-line); padding:0.6rem 1rem; display:flex; gap:0.6rem; align-items:center; }
   #status { color:var(--bz-muted); font-size:0.8rem; }
-  #result { position: relative; } position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
+  /* The closing brace used to sit at the end of the first declaration, so every rule
+     after it (`position:absolute; … display:none`) was dropped: the panel rendered on
+     every visit, over the canvas, with no render behind it. */
+  #result { position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
             border-radius:12px; padding:0.6rem; display:none; }
   #result img { width:100%; border-radius:8px; display:block; }
   #result a { color:var(--bz-yellow); font-size:0.8rem; text-decoration:none; display:inline-block; margin-top:0.4rem; }
@@ -202,10 +218,19 @@
     function resize() {
       var r = stage.getBoundingClientRect();
       var dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(r.width * dpr);
-      canvas.height = Math.round(r.height * dpr);
-      canvas.style.width = r.width + "px";
-      canvas.style.height = r.height + "px";
+      // The canvas BOX is CSS-owned (#board { inset:0 } inside #stage). Pinning
+      // style.width/height from a rect measured at parse time froze the box at whatever
+      // the stage measured before layout settled — 1034.6px against a 909.6px stage on a
+      // soft hop (this page's scripts run before #bzPage's flex applies), 979px against
+      // 910px on a hard load. #stage's overflow:hidden then clips the difference: the
+      // drawing surface is silently bigger than the board, its bottom cannot be reached,
+      // and the board's coordinate space depends on when the measurement ran (measure too
+      // early in the other direction and you get a dead strip below the canvas, which is
+      // BZ-26's collapse at its extreme). Only the backing store follows the measurement;
+      // ResizeObserver re-measures once layout settles (see the listener at the bottom).
+      var w = Math.max(1, Math.round(r.width * dpr));
+      var h = Math.max(1, Math.round(r.height * dpr));
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
       scale = dpr;
       redraw();
     }
@@ -830,6 +855,10 @@
     }
     if (!jobId) titleEl.textContent = "New board";
     window.addEventListener("resize", resize);
+    // A stage that changes size without a window resize (nav rows wrapping, fonts
+    // landing, #bzPage gaining its flex on a soft hop) must re-measure the backing
+    // store, or the canvas keeps the size it guessed at parse time.
+    if (window.ResizeObserver) new ResizeObserver(function () { resize(); }).observe(stage);
     load();
   })();
 </script>

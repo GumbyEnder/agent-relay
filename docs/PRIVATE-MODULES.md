@@ -18,6 +18,11 @@ Everything a buyer or an auditor needs to check a claim:
 | Manifest schema, the public promise and its stated limits | `docs/RECIPE-SEAL.md` |
 | Schema | `migrations/0039…0047` |
 
+The **wire contract** is public too, in `docs/RECIPE-MARKETPLACE-PROTOCOL.md`: every endpoint
+under `/api/recipes`, the licence and token model, the metering order of effects, the verdict
+codes, and the stated list of what is withheld and why. `scripts/check-protocol-doc.mjs` fails
+the build if that document names an endpoint or a code the tree does not answer with.
+
 The verify tier is public on purpose. "Your prose never leaves the server" and
 "this bundle was signed by us" are worth something only if a third party can run
 the same code. Closing the verifier would turn a protocol into a vendor promise.

@@ -71,7 +71,55 @@ export function isMusicRequest(message: string): boolean {
   // in the previous turn; this one only says "begin". A start verb plus a music noun
   // in the same sentence is the same instruction in fewer words.
   if (new RegExp(`\\b(let'?s (start|begin|do it|go)|start now|go ahead|do it now|make it now)\\b[^.\\n]{0,80}\\b${NOUN}\\b`, "i").test(m)) return true;
-  return false;
+  // "I want a song about my dog", "I need some background music for the shop".
+  // Talk has no Music button any more, so wanting the thing is asking for it. Only
+  // the plainly musical nouns, and only a few plain words between — "I need a theme
+  // for my site" is not a song, and "I want to learn music" is not an order.
+  const PLAIN = "(song|songs|music|jingle|soundtrack|instrumental|melody|lullaby|tune|ballad|anthem|beat)";
+  const FILLER = "((a|an|some|the|me|my|our|new|short|little|quick|original|custom|catchy|happy|sad|fun|calm|upbeat|relaxing|background|theme|birthday|wedding|holiday|christmas)\\s+){0,3}";
+  const NOT_AN_ORDER = "(?!\\s+(recommendations?|suggestions?|ideas?|names?|titles?|lyrics|list|playlists?|lessons?|teachers?|licen[cs]es?|licensing|rights))";
+  const WANT = new RegExp(`\\b(want|need|would like|[’']d like|can i (get|have)|could i (get|have)|play me|let me hear)\\s+${FILLER}${PLAIN}\\b${NOT_AN_ORDER}`, "i");
+  return orders(m).some((s) => WANT.test(s));
+}
+
+/** A question about a thing is not an order for it. "Can you make…" is an order. */
+const QUESTION = /^\s*(how|what|why|where|when|which|who|whose|is|are|was|were|does|do|did|should)\b/i;
+
+/** The sentences of a message that could be orders: questions are dropped. */
+function orders(message: string): string[] {
+  return String(message || "")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .filter((s) => s.trim() && !QUESTION.test(s));
+}
+
+/**
+ * A request to MAKE a 3D model — not to talk about 3D.
+ *
+ * Same discipline as music and pictures: a verb of making and "3D" in the same
+ * sentence. "make me a 3D model of a duck" asks for a file; "how do I make a 3D
+ * model in Blender?" and "write a post about 3D printing" do not. Talk has no 3D
+ * button any more, so this is the only way in: a miss here means the person asked
+ * and nothing was made.
+ */
+export function is3dRequest(message: string): boolean {
+  const D3 = "(3-?d|three[- ]d(imensional)?)";
+  // 3D as a subject or a device, not an object to make. Taken out before the
+  // request is read, so "make a document about 3D printing" is not a model and
+  // "make a 3D model of a 3D printer" still is.
+  // "Make the button look 3D" and "a 3D pie chart" are about how something looks.
+  const TOPIC = new RegExp(
+    `\\b${D3}\\s+(print(er|ers|ing)|glasses|movies?|films?|cinema|games?|gaming|software|apps?|programs?|modell?ing|animation|artists?|designers?|courses?|class(es)?|lessons?|tutorials?|scann(er|ers|ing)|tv|effects?|graphics)\\b` +
+      `|\\b${D3}\\s+(\\w+\\s+)?(charts?|graphs?|diagrams?|plots?)\\b` +
+      `|\\b(look|looks|feel|feels|seem|seems|appear|appears|more|less)\\s+${D3}\\b`,
+    "gi",
+  );
+  const MAKE = new RegExp(`\\b(make|create|generate|produce|build|design|sculpt|render|give me|get me)\\b.{0,60}\\b${D3}\\b`, "i");
+  const WANT = new RegExp(`\\b(want|need|would like|[’']d like|can i (get|have)|could i (get|have))\\s+((a|an|some|the|my|our|this|that)\\s+)?${D3}\\b`, "i");
+  // "3D model of a red sports car": the noun phrase alone is the order.
+  const NOUN_ONLY = new RegExp(`^\\s*((a|an)\\s+)?${D3}\\s+(model|object|asset|mesh|version|figure|figurine|sculpture|statue|character)\\b`, "i");
+  return orders(message)
+    .map((s) => s.replace(TOPIC, " "))
+    .some((s) => MAKE.test(s) || WANT.test(s) || NOUN_ONLY.test(s));
 }
 
 /** A deliverable request in the owner's own words (not only "file" phrasing). */
@@ -174,11 +222,35 @@ export function isExplicitDocumentRequest(message: string): boolean {
  * "how do I draw a circle in CSS" asks a question; "draw me a duck in a pond" asks
  * for a file. The harness performs the render — the model cannot be relied on to
  * choose a tool, which is how the music lane produced four turns of promises.
+ *
+ * A scene described as a follow-up is the same request continued. Measured:
+ * "can you make me a picture…" then "a Spanish tile, a white house, terracotta
+ * roof" matched nothing here, so the harness never drew and the model only
+ * promised one. The second message has no make-verb by design — people describe
+ * after they have asked. So a short descriptive follow-up in a conversation that
+ * already asked for a picture counts as the ask.
  */
-export function isImageRequest(message: string): boolean {
+export function isImageRequest(
+  message: string,
+  opts?: { history?: Array<{ role?: string; content?: unknown }> },
+): boolean {
   const m = String(message || "");
   const NOUN = "(image|picture|illustration|drawing|logo|poster|artwork|art|thumbnail|icon|banner|mockup|render|scene)";
   if (new RegExp(`\\b(draw|paint|sketch|illustrate|render|generate|make|create|design)\\b[^.\\n]{0,40}\\b${NOUN}\\b`, "i").test(m)) return true;
   // "draw me a duck" — the noun is the subject, not the object of "of".
-  return /\b(draw|paint|sketch|illustrate)\s+(me\s+)?(a|an|the|some)\b[^.\n]{0,60}/i.test(m);
+  if (/\b(draw|paint|sketch|illustrate)\s+(me\s+)?(a|an|the|some)\b[^.\n]{0,60}/i.test(m)) return true;
+
+  // Follow-up scene description inside an image conversation.
+  const recent = (opts?.history ?? [])
+    .slice(-4)
+    .map((h) => String(h?.content ?? ""))
+    .join("\n");
+  if (!recent || !/\b(image|picture|pictures|draw|drawing|illustrat\w*|sketch\w*|render\w*|artwork|visual)\b/i.test(recent)) return false;
+  const trimmed = m.trim();
+  if (!trimmed || trimmed.length > 300) return false;
+  if (/\?\s*$/.test(trimmed)) return false; // a question is a question
+  if (/^\s*(what|why|how|who|when|where|which|could|would|should|do|does|did|is|are|can)\b/i.test(trimmed)) return false;
+  // Something to draw: a determiner plus at least three words of description.
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return words.length >= 3 && /\b(a|an|the|with|of|in|on)\b/i.test(trimmed);
 }

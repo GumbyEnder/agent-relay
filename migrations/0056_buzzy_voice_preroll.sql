@@ -1,0 +1,11 @@
+-- The head of a barge-in turn is a number, not an opinion.
+--
+-- Residual (1): the first words of a turn spoken over the reply were not
+-- transcribed. The client has always known how many milliseconds of mic
+-- pre-roll it prepended and then thrown the number away, so a live walk could
+-- only report the symptom. Stored now, per turn:
+--   pre_roll_ms = 0/null  → the ring was empty; the head was never in the clip.
+--   pre_roll_ms > 0       → the head WAS in the clip; any loss is downstream
+--                           (transcriber), not the capture path.
+-- That single column is the difference between two weeks of guessing.
+ALTER TABLE buzzy_voice_metrics ADD COLUMN IF NOT EXISTS pre_roll_ms INTEGER;

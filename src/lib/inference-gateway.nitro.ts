@@ -37,8 +37,7 @@
  * nothing here logs a prompt or a key — counts, plan, status and timing only.
  */
 import { defineEventHandler } from "h3";
-import { verifyInferenceToken } from "./buzzy/inferenceToken";
-import { checkQuota, getEntitlement, recordUsage } from "./buzzy/entitlements";
+import { checkQuota, getEntitlement, recordUsage, verifyInferenceToken } from "./buzzy/public";
 
 /**
  * Body cap.

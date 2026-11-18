@@ -262,13 +262,10 @@
           .then(function (res) { return res.json().then(function (j) { return { s: res.status, j: j }; }); })
           .then(function (out) {
             if (out.s === 200 && out.j.ok) {
-              btn.textContent = "Opened ✓";
+              btn.textContent = out.j.free ? "Claimed ✓" : "Opened ✓";
               btn.style.background = "#2F6F4F";
               btn.style.color = "#E8F7EE";
               if (window.BZ_HONEY) window.BZ_HONEY.refresh();
-            } else if (out.j.code === "free_recipe") {
-              btn.textContent = "Claimed ✓";
-              btn.style.background = "#2F6F4F";
             } else if (out.j.code === "already_owned") {
               btn.textContent = "Already yours";
               btn.disabled = true;

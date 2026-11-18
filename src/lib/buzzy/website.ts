@@ -92,9 +92,12 @@ function isPrivateIp(ip: string): boolean {
  * SSRF check silently diverges.
  */
 export async function hostBlocked(host: string): Promise<"blocked" | "missing" | "ok"> {
-  if (isIP(host) && isPrivateIp(host)) return "blocked";
+  // `new URL("https://[::1]/").hostname` keeps the brackets, and `isIP` does
+  // not understand them — strip them or an IPv6 literal is treated as a name.
+  const bare = host.trim().replace(/^\[|\]$/g, "").toLowerCase();
+  if (isIP(bare) && isPrivateIp(bare)) return "blocked";
   try {
-    const found = await lookup(host, { all: true, verbatim: true });
+    const found = await lookup(bare, { all: true, verbatim: true });
     if (!found.length) return "missing";
     if (found.some((row) => isPrivateIp(row.address))) return "blocked";
     return "ok";

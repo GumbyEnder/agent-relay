@@ -16,8 +16,7 @@
  *   503  no music key or no signing secret on this deployment (fail closed)
  */
 import { defineEventHandler } from "h3";
-import { verifyInferenceToken } from "./buzzy/inferenceToken";
-import { gatedMusic, musicConfigured } from "./buzzy/music";
+import { gatedMusic, musicConfigured, verifyInferenceToken } from "./buzzy/public";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

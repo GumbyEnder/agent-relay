@@ -1,347 +1,363 @@
 {
-  "loop": "beezilla-improvement-loop",
-  "started": "2026-11-01",
-  "items": [
-    {
-      "id": "voice-browser-matrix",
-      "priority": "P0",
-      "status": "done",
-      "title": "Voice works only in Chrome; Firefox + Brave fail silently",
-      "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition in public/buzzy/talk.html startListening(). Firefox has no such API. Brave exposes it but returns service-not-allowed (Google speech service blocked by default). startListening used to return silently when SR was absent, so the mic lit up and nothing happened; error codes other than not-allowed were ignored.",
-      "shipped": [
-        "7403270 explicit unsupported-browser + error-code messages, honest exit from listen mode",
-        "<next> voice.note persists the message through paintVoice repaints (paintVoice was wiping it instantly)",
-        "e2069ee server ASR: POST /api/buzzy/transcribe (session-gated, raw WAV body, gpt-audio-mini, no new key)",
-        "e2069ee client recorder fallback: getUserMedia + ScriptProcessor -> 16k mono WAV -> transcribe -> same turn",
-        "7c7570c silence is never a transcript: SILENCE sentinel + refusal filter",
-        "b8c74ee client skips upload when RMS saw no speech; server drops meta-answers",
-        "feat: \u00a7asr_ms recorded with lane='asr' in buzzy_voice_metrics"
-      ],
-      "evidence": "Prod: transcribe 200 with exact transcript, asr_ms 917-1089 for a 6.5s clip; silence clip -> {\"text\":\"\"}; unauth -> 401. Browser matrix (authenticated): chrome-natural/brave-natural show 'Mic or speech service blocked'; noSR cases show the recorder taking over. Recorder E2E with a real spoken WAV as the fake mic: chrome 475KB -> correct transcript 1.37s; brave 480KB -> correct transcript 3.11s. Real Firefox (playwright firefox 151, no SpeechRecognition): recorder path opens the mic, posts, handles an empty transcript by re-arming, no JS errors from our code. Timing on a 6.55s utterance + 3s pad: VAD ends the clip 0.88s after speech stops, transcript lands 1.20s after the clip ends (asr_ms 1201). Ops read-back shows lane='asr', asr_ms 978.",
-      "next": "1) Prove a real Firefox page (install playwright firefox) takes the recorder path without JS errors. 2) Real end-of-speech timing: measure time from 'stop talking' to transcript for a normal 3-5s utterance. 3) Record asr_ms into buzzy_voice_metrics so ops can see it.",
-      "done_when": "Transcript -> SSE audio proven on Chromium and Firefox, or an explicit in-product statement that voice is Chrome/Edge-only with typed chat everywhere.",
-      "open": "A real Firefox microphone on Shane's machine is still unproven (headless fake streams are tone/silence, not speech). Everything else is verified."
-    },
-    {
-      "id": "public-repo-cleanup",
-      "priority": "P0",
-      "status": "done",
-      "title": "Scrub repo for public release",
-      "done_when": "Secret scan clean, clean-clone build passes, LICENSE/README/.env.example present.",
-      "evidence": "Working tree: 0 high-entropy tokens across all tracked files; ark_DATABASE_URL hits are doc placeholders and localhost test URLs; no .env ever tracked (.gitignore covers .env and .env.*). History: 0 hits for sk-/ghp_/github_pat_/xoxb-/AIza/ark_ key shapes across all 507 commits. Clean clone: git clone --depth 1 -b main -> npm ci (629 pkgs) -> npm run build exit 0, 'build complete'. .env.example: 91/91 env vars read by src/scripts are now documented (was 26). Hardcoded /home/gumbyender path removed from scripts/browser-money-check.mjs. LICENSE MIT, README/CONTRIBUTING/SECURITY/CODE_OF_CONDUCT present.",
-      "open": "History was scanned by key-shape patterns, not per-blob entropy; a full gitleaks pass before the repo is flipped public would be the belt-and-braces step."
-    },
-    {
-      "id": "bulk-skill-upload",
-      "priority": "P1",
-      "status": "done",
-      "title": "Bulk skills + 4,000 image upload path",
-      "done_when": "Archive import streams to storage, dedupes by hash, keeps structure, per-file report; proven with 4,000-file fixture.",
-      "evidence": "API benchmark with a generated 4,000-file corpus (3,900 images + 100 markdown): first pass 4,000 stored, 0 failed, 65.3s at 61.3 files/s concurrency 10; second pass 4,000 duplicates, 0 stored, 66.9s. GET /api/buzzy/assets reports files=4000 totalBytes=184256. Download of one asset: 200, content-type image/png, correct bytes; unauthenticated 401. UI: /buzzy/upload folder picker, 110 real files -> 110 POSTs -> 'Done. 0 new, 110 already here, 0 failed'; after touching one file -> '1 new, 109 already here, 0 failed'.",
-      "open": "Bytes live in Postgres bytea (25 MB/file cap). Fine for a corpus of thousands of small files; a corpus of large media would want object storage (S3/R2) with signed URLs. No zip import \u2014 the folder walk covers the same job and stays resumable."
-    },
-    {
-      "id": "install-new-ui",
-      "priority": "P1",
-      "status": "blocked",
-      "title": "Install the new UI he built",
-      "done_when": "Identify the UI, deploy it behind the #bzNav contract, E2E sweep clean.",
-      "blocked_on": "No UI artifact exists in this environment. Evidence: feat/beezilla-civilian-sow is 323 commits behind main and 0 ahead; open PRs are dependabot only; ~/agents/agent-relay{,-beezilla,-local,-contrib} all date to 2026-10-28 or earlier with no UI work; vault has no newer design note than BRAND-UI-BRIEF.md (49 lines).",
-      "asked": "Need the branch, zip or folder he means \u2014 or confirmation that 'the new UI' = applying docs/BRAND-UI-BRIEF.md to the /buzzy surfaces (today only src/components/auth-shell.tsx consumes public/brand/beezilla).",
-      "interim": "Ran a full 11-page authenticated sweep instead; found and fixed a real defect (see log n=7)."
-    },
-    {
-      "id": "music-3d",
-      "priority": "P2",
-      "status": "done",
-      "title": "Music + 3D surfaces",
-      "done_when": "Generated audio / 3D artifact ends as a downloadable file card in chat.",
-      "found": "Generation providers: the Nous gateway has 378 models \u2014 audio (gpt-audio) and image (gemini-3-pro-image) but NO music and NO 3D. FAL_KEY is present but returns 401 'invalid key credentials'. MINIMAX_API_KEY is empty. So nothing can generate music or 3D today.",
-      "shipped": "Dropped images/audio/.glb/.gltf now upload to the content-addressed asset store and render in the chat as a card: image preview, audio player, or a labelled 3D file, each with a working download (/api/buzzy/assets/:id).",
-      "evidence": "3D: Meshy text-to-3D end to end in production \u2014 POST task, polled 3%\u2192100% over ~45s, stored as /api/buzzy/assets/8223, download 200 model/gltf-binary 971944 bytes magic 'glTF', re-poll returns duplicate:true, anonymous 401. UI: composer 3D button showed 'Making the model\u2026 N%' then rendered the card model-01a19e84.glb with a working download; 0 console errors. Music: ElevenLabs key is valid but the account is on a FREE plan \u2014 /v1/music answers 402 paid_plan_required and library voices 402. The endpoint maps that to a plain sentence in the chat.",
-      "open": "Music needs an ElevenLabs paid plan (key also lacks scopes user_read, models_read, voices_read, sound_generation \u2014 tick them if we ever use TTS/SFX). The moment the plan is active, /api/buzzy/music and the Music button work with no code change. A real 3D viewer (three.js) is still not vendored: a .glb downloads, it does not spin on screen.",
-      "blocked_on": "ElevenLabs subscription tier"
-    },
-    {
-      "id": "orchestration-programme",
-      "priority": "P2",
-      "status": "done",
-      "title": "Node-graph orchestration in the whiteboard (6a-6e)",
-      "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost.",
-      "phases": {
-        "6a": "done \u2014 migration 0049 + save/list/read API proven in prod",
-        "6b": "done \u2014 frontier.json cached ranking, resolvePin/resolveReview, GET /api/buzzy/frontier",
-        "6c": "done (resolver level) \u2014 review pins resolve to a different provider; recording happens per node result in 6e",
-        "6d": "done \u2014 /buzzy/graph whiteboard: add/drag/link nodes, per-kind config, live resolution preview, save+version, reopen. Per-node status/cost needs a run (6e).",
-        "6e": "done \u2014 runner.ts: dependency order, bounded retries (2), per-attempt persistence, gate stop/resume, replay from stored outputs"
-      },
-      "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true. | Whiteboard E2E: 4 nodes added, 3 links drawn and persisted as n1->n2:data, n2->n3:review, n3->n4:gate, review node pinned to writing position 2 resolves to moonshotai/kimi-k3 in the inspector, saved v1, reopened from the list with 4 nodes and 3 edges, 0 console errors. | Resolver E2E: graph with agent+review+gate ran in 6913ms -> write done on google/gemini-3.1-flash-lite (900ms), critique done on moonshotai/kimi-k3 (5558ms, independent=true) with a real critique, gate awaiting_approval; approve -> run done, 3 results, read_back ok. Retry proven: a glm node failed on attempt 1 and succeeded on attempt 2 (3 result rows for 2 nodes). Spec freeze proven: after shrinking the authored graph to one node the finished run still reports its original 2 nodes and order. UI: Run renders per-node badges ('done \u00b7 google/gemini-3.1-flash-lite \u00b7 858 ms') and the Approve button appears on a gated run; 0 console errors. Anonymous run 401. | Refresh: writing position 1 changed google/gemini-3.1-flash-lite -> upstage/solar-pro4 with no deploy (61s after the refresh, past the memo); POST without the ops key 403; an empty category 400; the seed was restored and reads back as source=seed.",
-      "open": "Costs are real now (pricing.ts).  The ranking now lives in the database and can be replaced by POST /api/buzzy/frontier (ops key); the ranking is now derived (frontier flag + price) and refreshed by POST /api/buzzy/frontier/rebuild; an Arena scraper remains unbuilt."
-    },
-    {
-      "id": "frontier-refresh",
-      "priority": "P1",
-      "status": "done",
-      "title": "The frontier ranking is data, refreshable without a deploy"
-    },
-    {
-      "id": "real-costs",
-      "priority": "P1",
-      "status": "done",
-      "title": "A run's cost is a real number from the gateway's published prices"
-    },
-    {
-      "id": "derived-ranking",
-      "priority": "P1",
-      "status": "done",
-      "title": "The frontier ranking is derived from the gateway's frontier flag and prices, not hand-picked"
-    },
-    {
-      "id": "consolidation-audit",
-      "priority": "P0",
-      "status": "done",
-      "title": "Full-surface audit after the build",
-      "evidence": "12 pages swept authenticated: problems=0 (was 1 before the asset-URL fix). Rules: speechSynthesis hits 0 on /buzzy/talk, listen mode survives a reload (localStorage 1, title '\ud83c\udf99 BeeZilla \u2014 Listening', mic-btn on), nav links identical across 10 pages and the account label is common.js's own (name + separate Log out), /buzzy/graph loads with the canonical nav. Vault note written: BeeZilla/BUILD-2026-11-02-orchestration-assets-voice.md."
-    },
-    {
-      "id": "providers-3d-music",
-      "priority": "P0",
-      "status": "done",
-      "title": "3D (Meshy) live; music (ElevenLabs) wired and waiting on the plan",
-      "evidence": "BZ_MESHY_KEY and BZ_ELEVEN_KEY set on service agent-relay; keys never entered the repo."
-    },
-    {
-      "id": "desktop-parity",
-      "priority": "P0",
-      "status": "done",
-      "title": "Desktop line brought to parity with the web line",
-      "evidence": "Merged github/main into feat/local-runtime (7b94027): two conflicts (chat.nitro.ts took main's turn body; turn.ts removed as a stale duplicate move; recipe-seal kept both import sets). settings joined PAGES. Register now 26 both / 6 desktop-only / 0 web-only / 0 migrations apart; npm run parity PASS including the installed-bundle check. Proven on a fresh PGlite runtime: talk 224,095 b with #bzNav+recorder+listen, graph/library/settings 200, pricing/assets/graphs/frontier 200, transcribe 400 audio_too_short, 56 migrations at boot.",
-      "open": "Turn refactor (turn.ts) removed by the merge; re-extracting is a pure move."
-    },
-    {
-      "id": "desktop-release-pipeline",
-      "priority": "P1",
-      "status": "done",
-      "title": "Installer distribution \u2014 GitHub Releases + LAN mirror, one command",
-      "evidence": "desktop/release.mjs: build \u2192 tag desktop-v<version> \u2192 gh release \u2192 verify size+sha256. Refuses dirty tree, no pins, dev pin without --allow-dev-pin (forces prerelease), tag at a commit other than the built one. desktop-v0.2.0 published and found broken on launch (ERR_MODULE_NOT_FOUND resources\\scripts\\lib\\inference.mjs); desktop-v0.2.1 fixes it (paths.mjs absolute file URLs, logger.mjs \u2192 %APPDATA%\\BeeZilla\\logs\\main.log, PGLite staged at build, dist.mjs import gate), 179,649,563 b sha256 42bda1bf\u2026 verified against the GitHub download and the NAS mirror.",
-      "open": "Unsigned (SmartScreen) and dev publisher pin \u2014 both block a public release; no app icon."
-    },
-    {
-      "id": "desktop-connect-empty-window",
-      "priority": "P0",
-      "status": "done",
-      "title": "Desktop 'Connect BeeZilla account' opens an empty window",
-      "reported": "2026-11-03, owner: login from the app pops an empty box (browser session is irrelevant \u2014 the desktop window has its own cookie jar)",
-      "fixed_in": "BeeZilla Desktop 0.2.2",
-      "change": "CONNECT_PATH /connect \u2192 /login (same-origin sign-in on every deployment); added scripts/test-connect-path-live.mjs because the e2e fake served /connect and so was more capable than production",
-      "evidence": "0.2.2 published (179,651,067 b, sha256 5b4e74bf\u2026), mirrored to K:\\\u2026\\releases\\0.2.2, installed locally; CONNECT_PATH=/login verified inside the packaged asar; live probe PASS /login 200 2608b 271ms; connect e2e still passes (xvfb).",
-      "open": "Owner confirmation only: open Connect on Windows, sign in inside the window, Settings should show a token with an expiry."
-    },
-    {
-      "id": "desktop-managed-inference-gateway",
-      "priority": "P0",
-      "status": "done",
-      "title": "Desktop Connect \u2192 'not configured (BZ inference signing keys)'",
-      "reported": "2026-11-04 \u2014 owner signed in from the app and got a connect popup 503 not_configured",
-      "root_cause": "Two gaps, not one. (1) BZ_INFERENCE_SIGNING_KEY was never set on the deployment, so /api/inference-token failed closed with 503. (2) There was no gateway to spend a minted token: /api/inference did not exist anywhere, and the token was being handed the provider base URL, which cannot verify our HMAC \u2014 so even a successful connect would have 401'd on the first message. The desktop also defaulted to the demo deployment, which has neither.",
-      "change": "New src/lib/inference-gateway.nitro.ts (POST /api/inference: verify bz1 scope=inference, forward the chat body to OUR provider with OUR key, stream back unchanged, 256 KB cap, fails closed 503 without a provider key). Set BZ_INFERENCE_SIGNING_KEY (48 chars) + BZ_INFERENCE_BASE_URL on the agent-relay service. Desktop 0.2.3 defaults to https://app.devboards.ai.",
-      "evidence": "Production E2E: sign-in 200 \u2192 POST /api/inference-token 200 {token bz1\u2026, endpoint \u2026/api/inference} \u2192 POST /api/inference 200 in 2.93 s, reply 'gateway ok', usage cost 8.56e-06. Anonymous 401, wrong scope refused, /api/inference 404s on the demo and old beezilla-production hosts.",
-      "open": "Owner retries Connect in 0.2.3 (reinstall from K:). The BeeZilla-branded prod service still needs main deployed + the same two env vars before a branded default is possible."
-    },
-    {
-      "id": "chat-music-tool",
-      "priority": "P0",
-      "status": "done",
-      "title": "Chat could claim music but never make it",
-      "root_cause": "The chat loop had no music tool. generateMusic + /api/buzzy/music worked (200, real mp3), but nothing offered the capability to the model, so every 'the track is in your Library' was fabricated.",
-      "change": "GENERATE_MUSIC_TOOL in music.ts; one TOOL_POLICIES entry (gate draft, metered, 130s budget); executor branch that generates, reads length from the brief, stores to the asset shelf and sets response.audio; intent.ts treats song/track/jingle requests as deliverables; talk.html renders the audio through the existing media card; claim guard now permits an audio claim only when an asset was produced.",
-      "evidence": "Production: 'make me a 15-second ambient pad' -> TURN 8.3s, response.audio=/api/buzzy/assets/8229 (481,004 b, audio/mpeg, verified 200 + MPEG ADTS layer III), document: none, draft: none, Library 2 -> 3. Server-side music pre-pass fires because the model twice claimed a finished pad in <7s without calling the tool.",
-      "open": "Desktop line is another agent's; parity gate reports its drift (search-status route, bundle 1 migration behind)."
-    }
-  ],
-  "probes": {
-    "voice_matrix": "~/.hermes/profiles/buzzy/cache/scratch/bz-voice-matrix-auth.mjs (needs VERIFY_URL from /mnt/nas/host-ops/beezilla-magiclink-request.py, sourced from frodo .env)"
+ "loop": "beezilla-improvement-loop",
+ "started": "2026-11-01",
+ "items": [
+  {
+   "id": "voice-browser-matrix",
+   "priority": "P0",
+   "status": "done",
+   "title": "Voice works only in Chrome; Firefox + Brave fail silently",
+   "root_cause": "ASR is window.SpeechRecognition/webkitSpeechRecognition in public/buzzy/talk.html startListening(). Firefox has no such API. Brave exposes it but returns service-not-allowed (Google speech service blocked by default). startListening used to return silently when SR was absent, so the mic lit up and nothing happened; error codes other than not-allowed were ignored.",
+   "shipped": [
+    "7403270 explicit unsupported-browser + error-code messages, honest exit from listen mode",
+    "<next> voice.note persists the message through paintVoice repaints (paintVoice was wiping it instantly)",
+    "e2069ee server ASR: POST /api/buzzy/transcribe (session-gated, raw WAV body, gpt-audio-mini, no new key)",
+    "e2069ee client recorder fallback: getUserMedia + ScriptProcessor -> 16k mono WAV -> transcribe -> same turn",
+    "7c7570c silence is never a transcript: SILENCE sentinel + refusal filter",
+    "b8c74ee client skips upload when RMS saw no speech; server drops meta-answers",
+    "feat: §asr_ms recorded with lane='asr' in buzzy_voice_metrics"
+   ],
+   "evidence": "Prod: transcribe 200 with exact transcript, asr_ms 917-1089 for a 6.5s clip; silence clip -> {\"text\":\"\"}; unauth -> 401. Browser matrix (authenticated): chrome-natural/brave-natural show 'Mic or speech service blocked'; noSR cases show the recorder taking over. Recorder E2E with a real spoken WAV as the fake mic: chrome 475KB -> correct transcript 1.37s; brave 480KB -> correct transcript 3.11s. Real Firefox (playwright firefox 151, no SpeechRecognition): recorder path opens the mic, posts, handles an empty transcript by re-arming, no JS errors from our code. Timing on a 6.55s utterance + 3s pad: VAD ends the clip 0.88s after speech stops, transcript lands 1.20s after the clip ends (asr_ms 1201). Ops read-back shows lane='asr', asr_ms 978.",
+   "next": "1) Prove a real Firefox page (install playwright firefox) takes the recorder path without JS errors. 2) Real end-of-speech timing: measure time from 'stop talking' to transcript for a normal 3-5s utterance. 3) Record asr_ms into buzzy_voice_metrics so ops can see it.",
+   "done_when": "Transcript -> SSE audio proven on Chromium and Firefox, or an explicit in-product statement that voice is Chrome/Edge-only with typed chat everywhere.",
+   "open": "A real Firefox microphone on Shane's machine is still unproven (headless fake streams are tone/silence, not speech). Everything else is verified."
   },
-  "log": [
-    {
-      "n": 1,
-      "at": "2026-11-01",
-      "item": "voice-browser-matrix",
-      "found": "grep for getUserMedia across public/buzzy returned 0 \u2014 ASR is the browser SpeechRecognition API, Chrome-only by construction.",
-      "change": "stageNote() + unsupported/error branches (7403270)",
-      "gates": "tsc OK, build complete, blocks=4 errors=0",
-      "production_evidence": "new string present on served /buzzy/talk"
-    },
-    {
-      "n": 2,
-      "at": "2026-11-01",
-      "item": "voice-browser-matrix",
-      "found": "First fix was invisible: paintVoice repainted #voiceStatus right after stageNote wrote it, so the message never rendered. Matrix caught it (stage stayed 'Voice', status empty).",
-      "change": "voice.note on state; paintVoice renders it when idle; cleared on a fresh listen",
-      "gates": "tsc OK, build complete, blocks=4 errors=0, redeploy landed (voice.note x3 on served page)",
-      "production_evidence": "authenticated 4-case matrix: chrome-natural + brave-natural -> 'Mic or speech service blocked in this browser'; chrome-noSR + brave-noSR -> 'This browser can't transcribe speech'. Message visible (statusShown true), mic off, pref 0 in all cases."
-    },
-    {
-      "n": 3,
-      "at": "2026-11-01",
-      "item": "voice-browser-matrix",
-      "found": "Nous inference API has no /v1/audio/transcriptions (404 for whisper-1, gpt-4o-mini-transcribe), but openai/gpt-audio-mini accepts input_audio on /chat/completions and transcribes accurately. That is the only STT available on the existing key.",
-      "change": "asr.ts + POST /api/buzzy/transcribe + recorder fallback in talk.html (e2069ee)",
-      "gates": "tsc OK, build complete, blocks=4 errors=0, speechSynthesis count 0",
-      "production_evidence": "unauth 401; auth curl 200 {text exact, ms 2673}; chrome+brave recorder E2E posted real WAV and got the right transcript"
-    },
-    {
-      "n": 4,
-      "at": "2026-11-01",
-      "item": "voice-browser-matrix",
-      "found": "The audio model answers silence/meta-requests with prose ('I'm sorry, but I can't hear any speech\u2026', 'please provide the audio'), which was returned as a transcript and typed into the composer as if the owner had said it.",
-      "change": "SILENCE sentinel + refusal/meta-answer filter (7c7570c); client refuses to upload a clip with no speech (b8c74ee); asr_ms telemetry with lane='asr'",
-      "gates": "tsc OK, build OK, blocks=4 errors=0",
-      "production_evidence": "silence -> \"\"; speech -> exact text 978ms; ops endpoint shows lane=asr row"
-    },
-    {
-      "n": 5,
-      "at": "2026-11-01",
-      "item": "public-repo-cleanup",
-      "found": "Repo was already mostly publishable (LICENSE/README/SECURITY/.gitignore fine, no secrets in tree or history), but .env.example documented 26 of 91 variables and one script served files from a hardcoded home directory.",
-      "change": "Complete .env.example (94 documented entries), relative public root in browser-money-check.mjs, de-personalised comment, package.json description, README env table covers voice/ASR/tools",
-      "gates": "clean clone npm ci + npm run build exit 0",
-      "production_evidence": "n/a (docs/scripts only, no runtime behaviour changed)"
-    },
-    {
-      "n": 6,
-      "at": "2026-11-02",
-      "item": "bulk-skill-upload",
-      "found": "No file-upload path existed at all: upload.html only published recipes from a finished job, and the only way in was one chat attachment.",
-      "change": "migration 0048 buzzy_assets; POST/GET /api/buzzy/assets (content-addressed, 25MB cap, path sanitised); folder picker + concurrency 6 + retry on the Publish page",
-      "gates": "tsc OK, build complete, inline blocks 3/0 errors, migration ran at boot",
-      "production_evidence": "4,000 files in 65.3s, idempotent second pass, listing 4,000, download 200/401, UI folder upload with dedupe counts"
-    },
-    {
-      "n": 7,
-      "at": "2026-11-02",
-      "item": "install-new-ui",
-      "found": "11-page sweep: /buzzy and /buzzy/library requested /brand/revision6_expressions_16-smiling.png and /sow-pdf.js and got 404s, because ten pages used document-relative asset URLs that only resolve under /buzzy/<page>.",
-      "change": "All local asset refs in public/buzzy/*.html made absolute (/buzzy/...), 54b080e",
-      "gates": "tsc OK, build complete, every page's inline scripts parse",
-      "production_evidence": "re-sweep after deploy: SUMMARY pages=11 problems=0 (was problems=1)"
-    },
-    {
-      "n": 8,
-      "at": "2026-11-02",
-      "item": "music-3d",
-      "found": "Media dropped on the chat was reduced to a 'photo' paper with zero bytes. No provider exists for music or 3D generation.",
-      "change": "images/audio/glb/gltf upload to /api/buzzy/assets and render as playable/viewable cards with downloads",
-      "gates": "tsc OK, build complete, inline blocks 4/0",
-      "production_evidence": "2 real files -> 2 cards with audio element and working download links, no console errors"
-    },
-    {
-      "n": 9,
-      "at": "2026-11-02",
-      "item": "orchestration-programme",
-      "found": "No orchestration code or tables existed anywhere in the repo.",
-      "change": "migrations/0049_buzzy_graphs.sql \u2014 graphs, nodes, edges, runs, node_results; review is a first-class node kind with a recorded 'independent' flag",
-      "gates": "tsc OK, build OK, PGLite exec + insert + CHECK + cascade all pass",
-      "production_evidence": "health 200 durable, three pages 200 after boot migration"
-    },
-    {
-      "n": 10,
-      "at": "2026-11-02",
-      "item": "orchestration-programme",
-      "found": "First seed ranked families the deployment could not call, so every pin resolved to 'nothing reachable' \u2014 caught in production, not in tests.",
-      "change": "graphs API (save/list/read), frontier resolver + endpoint, clamp marked as substitution",
-      "gates": "tsc OK, build complete, deploys verified by served behaviour",
-      "production_evidence": "see evidence string: graph saved/read/versioned, 3 providers across positions, cross-provider review independent:true"
-    },
-    {
-      "n": 11,
-      "at": "2026-11-02",
-      "item": "orchestration-programme",
-      "found": "Link clicks landed on detached nodes because pointerdown redrew the canvas before the click was delivered; the first whiteboard build could not connect anything.",
-      "change": "public/buzzy/graph.html + route; pointerdown moves highlight in place instead of redrawing",
-      "gates": "tsc OK, build complete, inline blocks parse, deploy verified by served behaviour",
-      "production_evidence": "4 nodes / 3 edges persisted with typed kinds; resolver preview live; reopen works"
-    },
-    {
-      "n": 12,
-      "at": "2026-11-02",
-      "item": "orchestration-programme",
-      "found": "First resume implementation walked back into the gate it had just stopped at, so no run could ever get past an approval.",
-      "change": "runner.ts + /api/buzzy/graphs/:id/run, /api/buzzy/runs/:id, /api/buzzy/runs/:id/approve; whiteboard Run + per-node badges + Approve",
-      "gates": "tsc OK, build complete, inline blocks parse, 2 deploys verified by behaviour",
-      "production_evidence": "see evidence string"
-    },
-    {
-      "n": 13,
-      "at": "2026-11-02",
-      "item": "frontier-refresh",
-      "found": "The ranking was compiled into the deployed bundle, so 'position 3' meant 'position 3 as of the last release'.",
-      "change": "migration 0050 buzzy_frontier; getSnapshot/saveSnapshot/validateSnapshot; live resolvers; POST /api/buzzy/frontier guarded by BZ_OPS_KEY",
-      "gates": "tsc OK, build complete, SQL validated in PGLite",
-      "production_evidence": "position 1 rotated to upstage/solar-pro4 without a deploy, then restored to the seed"
-    },
-    {
-      "n": 14,
-      "at": "2026-11-02",
-      "item": "real-costs",
-      "found": "Every node recorded $0.0000 because the deployed catalog has no prices \u2014 a zero that reads as 'free' rather than 'unknown'. The gateway's /models payload carries per-token prices AND a frontier flag on 46 models.",
-      "change": "src/lib/buzzy/pricing.ts (10-minute memo), runner records costOf(), output.priced flag, GET /api/buzzy/pricing",
-      "gates": "tsc OK (after fixing a bad env import), build complete",
-      "production_evidence": "2-node run: gemini 1468ms priced, kimi/qwen review 7563ms $0.0024 independent=true; run total $0.0025. Prices: gemini 0.25/1.5, kimi-k3 0.192/15, qwen 0.45/3.5, glm 0.12/0.4, deepseek 0.115/4, solar 0.15/0.6 USD per MTok. Only kimi-k3 of the six reachable models is frontier-flagged."
-    },
-    {
-      "n": 15,
-      "at": "2026-11-02",
-      "item": "derived-ranking",
-      "found": "The ranking was hand-picked, and my first derived version dropped 'writing' and 'coding' entirely \u2014 which stranded every saved graph that pinned them.",
-      "change": "ranking.ts buildRanking(); fixed canonical category vocabulary with an explicit fallback to the whole ordering; POST /api/buzzy/frontier/rebuild",
-      "gates": "tsc OK, build complete, 2 deploys verified by behaviour",
-      "production_evidence": "rebuild: 6 reachable, kimi-k3 the only frontier-flagged, categories writing/coding/fast/general/reasoning/vision all resolve; writing pos1 -> moonshotai/kimi-k3, fast pos1 -> google/gemini-3.1-flash-lite; a writing-pinned graph then ran: write moonshotai/kimi-k3 $0.00970, review deepseek/deepseek-v4-pro-0813 independent=true $0.00050"
-    },
-    {
-      "n": 16,
-      "at": "2026-11-02",
-      "item": "consolidation-audit",
-      "found": "All green; confirmed the account link losing its href is common.js doing its job (name + separate Log out), not a dead link \u2014 checked before 'fixing' it.",
-      "change": "none needed; vault note written",
-      "gates": "n/a",
-      "production_evidence": "12 pages problems=0; three product rules verified in the browser"
-    },
-    {
-      "n": 17,
-      "at": "2026-11-02",
-      "item": "providers-3d-music",
-      "found": "ElevenLabs key authenticates but the account is free (music + library voices 402) and the key is missing four scopes. Meshy key works: 45s text-to-3D.",
-      "change": "music.ts, models3d.ts, /api/buzzy/music, /api/buzzy/model3d (task API), composer Music/3D buttons",
-      "gates": "tsc OK, build complete, inline blocks 4/0",
-      "production_evidence": "3D card with 971,944-byte glTF download; music refusal shown as a sentence in the chat"
-    },
-    {
-      "n": 18,
-      "at": "2026-11-03",
-      "item": "desktop-parity, desktop-release-pipeline, desktop-connect-empty-window",
-      "found": "The desktop line was 156 commits behind and its 37 commits had never been pushed; the Enter-the-account flow loaded a URL that 404s everywhere.",
-      "change": "merge 7b94027 \u00b7 release.mjs + v0.2.0/v0.2.1 \u00b7 register 26/6/0",
-      "gates": "tsc clean both trees, vite build complete, inline scripts 12/0, npm run parity PASS, installer downloaded back from GitHub and hash-matched",
-      "production_evidence": "local runtime probes above; GitHub release assets verified by size+sha256; installed Wine copy reads 0.2.1"
-    },
-    {
-      "n": 19,
-      "at": "2026-11-03",
-      "item": "desktop-connect-empty-window",
-      "found": "connectAccount opened ${cloud}/connect and no deployment serves it: demo 404, beezilla-production 404, app.devboards.ai 404 \u2014 the window showed the 404 app shell (a blank box) and polled it for 180s. The e2e test passed because its fake cloud served /connect.",
-      "change": "CONNECT_PATH=/login + live path probe (test-connect-path-live.mjs) + v0.2.2",
-      "gates": "connect e2e PASS (xvfb), live probe PASS, tsc/build clean, installer hash matched on GitHub download and NAS mirror",
-      "production_evidence": "https://github.com/GumbyEnder/agent-relay/releases/tag/desktop-v0.2.2 \u2014 prerelease, 4 files staged, CONNECT_PATH=/login inside the asar"
-    },
-    {
-      "n": 20,
-      "at": "2026-11-04",
-      "item": "desktop-managed-inference-gateway",
-      "found": "Mint had no spending half and no signing secret; the desktop pointed at a host with neither.",
-      "change": "inference-gateway.nitro.ts + 2 env vars + desktop 0.2.3 default host",
-      "gates": "tsc clean, vite build complete, deploy verified by served route, E2E mint\u2192gateway chat 200",
-      "production_evidence": "app.devboards.ai /api/inference 200 with bz1 token; installer 0.2.3 sha256 c1d2cde5\u2026 verified on GitHub + NAS"
-    }
-  ]
+  {
+   "id": "public-repo-cleanup",
+   "priority": "P0",
+   "status": "done",
+   "title": "Scrub repo for public release",
+   "done_when": "Secret scan clean, clean-clone build passes, LICENSE/README/.env.example present.",
+   "evidence": "Working tree: 0 high-entropy tokens across all tracked files; ark_DATABASE_URL hits are doc placeholders and localhost test URLs; no .env ever tracked (.gitignore covers .env and .env.*). History: 0 hits for sk-/ghp_/github_pat_/xoxb-/AIza/ark_ key shapes across all 507 commits. Clean clone: git clone --depth 1 -b main -> npm ci (629 pkgs) -> npm run build exit 0, 'build complete'. .env.example: 91/91 env vars read by src/scripts are now documented (was 26). Hardcoded /home/gumbyender path removed from scripts/browser-money-check.mjs. LICENSE MIT, README/CONTRIBUTING/SECURITY/CODE_OF_CONDUCT present.",
+   "open": "History was scanned by key-shape patterns, not per-blob entropy; a full gitleaks pass before the repo is flipped public would be the belt-and-braces step."
+  },
+  {
+   "id": "bulk-skill-upload",
+   "priority": "P1",
+   "status": "done",
+   "title": "Bulk skills + 4,000 image upload path",
+   "done_when": "Archive import streams to storage, dedupes by hash, keeps structure, per-file report; proven with 4,000-file fixture.",
+   "evidence": "API benchmark with a generated 4,000-file corpus (3,900 images + 100 markdown): first pass 4,000 stored, 0 failed, 65.3s at 61.3 files/s concurrency 10; second pass 4,000 duplicates, 0 stored, 66.9s. GET /api/buzzy/assets reports files=4000 totalBytes=184256. Download of one asset: 200, content-type image/png, correct bytes; unauthenticated 401. UI: /buzzy/upload folder picker, 110 real files -> 110 POSTs -> 'Done. 0 new, 110 already here, 0 failed'; after touching one file -> '1 new, 109 already here, 0 failed'.",
+   "open": "Bytes live in Postgres bytea (25 MB/file cap). Fine for a corpus of thousands of small files; a corpus of large media would want object storage (S3/R2) with signed URLs. No zip import — the folder walk covers the same job and stays resumable."
+  },
+  {
+   "id": "install-new-ui",
+   "priority": "P1",
+   "status": "blocked",
+   "title": "Install the new UI he built",
+   "done_when": "Identify the UI, deploy it behind the #bzNav contract, E2E sweep clean.",
+   "blocked_on": "No UI artifact exists in this environment. Evidence: feat/beezilla-civilian-sow is 323 commits behind main and 0 ahead; open PRs are dependabot only; ~/agents/agent-relay{,-beezilla,-local,-contrib} all date to 2026-10-28 or earlier with no UI work; vault has no newer design note than BRAND-UI-BRIEF.md (49 lines).",
+   "asked": "Need the branch, zip or folder he means — or confirmation that 'the new UI' = applying docs/BRAND-UI-BRIEF.md to the /buzzy surfaces (today only src/components/auth-shell.tsx consumes public/brand/beezilla).",
+   "interim": "Ran a full 11-page authenticated sweep instead; found and fixed a real defect (see log n=7)."
+  },
+  {
+   "id": "music-3d",
+   "priority": "P2",
+   "status": "done",
+   "title": "Music + 3D surfaces",
+   "done_when": "Generated audio / 3D artifact ends as a downloadable file card in chat.",
+   "found": "Generation providers: the Nous gateway has 378 models — audio (gpt-audio) and image (gemini-3-pro-image) but NO music and NO 3D. FAL_KEY is present but returns 401 'invalid key credentials'. MINIMAX_API_KEY is empty. So nothing can generate music or 3D today.",
+   "shipped": "Dropped images/audio/.glb/.gltf now upload to the content-addressed asset store and render in the chat as a card: image preview, audio player, or a labelled 3D file, each with a working download (/api/buzzy/assets/:id).",
+   "evidence": "3D: Meshy text-to-3D end to end in production — POST task, polled 3%→100% over ~45s, stored as /api/buzzy/assets/8223, download 200 model/gltf-binary 971944 bytes magic 'glTF', re-poll returns duplicate:true, anonymous 401. UI: composer 3D button showed 'Making the model… N%' then rendered the card model-01a19e84.glb with a working download; 0 console errors. Music: ElevenLabs key is valid but the account is on a FREE plan — /v1/music answers 402 paid_plan_required and library voices 402. The endpoint maps that to a plain sentence in the chat.",
+   "open": "Music needs an ElevenLabs paid plan (key also lacks scopes user_read, models_read, voices_read, sound_generation — tick them if we ever use TTS/SFX). The moment the plan is active, /api/buzzy/music and the Music button work with no code change. A real 3D viewer (three.js) is still not vendored: a .glb downloads, it does not spin on screen.",
+   "blocked_on": "ElevenLabs subscription tier"
+  },
+  {
+   "id": "orchestration-programme",
+   "priority": "P2",
+   "status": "done",
+   "title": "Node-graph orchestration in the whiteboard (6a-6e)",
+   "done_when": "Saved graph runs end to end; frontier-position model selection via cached Arena adapter; review node provably on a different provider; per-node status/cost.",
+   "phases": {
+    "6a": "done — migration 0049 + save/list/read API proven in prod",
+    "6b": "done — frontier.json cached ranking, resolvePin/resolveReview, GET /api/buzzy/frontier",
+    "6c": "done (resolver level) — review pins resolve to a different provider; recording happens per node result in 6e",
+    "6d": "done — /buzzy/graph whiteboard: add/drag/link nodes, per-kind config, live resolution preview, save+version, reopen. Per-node status/cost needs a run (6e).",
+    "6e": "done — runner.ts: dependency order, bounded retries (2), per-attempt persistence, gate stop/resume, replay from stored outputs"
+   },
+   "evidence": "Prod: POST /api/buzzy/graphs saved graph_x7j06212k666 (4 nodes incl. a review node and a gate, 3 typed edges), list shows nodes=4, read-back returns positions and the review config, resave bumped version to 2 with no duplicate rows, dangling edge and bad kind both 400, anonymous 401. Frontier: writing positions 1/2/3 -> google, moonshotai, qwen; pos 99 -> z-ai with substituted:true 'asked for position 99, took 5'; unknown category 400; cross-provider review of google/gemini-3.1-flash-lite on coding -> deepseek, independent:true. | Whiteboard E2E: 4 nodes added, 3 links drawn and persisted as n1->n2:data, n2->n3:review, n3->n4:gate, review node pinned to writing position 2 resolves to moonshotai/kimi-k3 in the inspector, saved v1, reopened from the list with 4 nodes and 3 edges, 0 console errors. | Resolver E2E: graph with agent+review+gate ran in 6913ms -> write done on google/gemini-3.1-flash-lite (900ms), critique done on moonshotai/kimi-k3 (5558ms, independent=true) with a real critique, gate awaiting_approval; approve -> run done, 3 results, read_back ok. Retry proven: a glm node failed on attempt 1 and succeeded on attempt 2 (3 result rows for 2 nodes). Spec freeze proven: after shrinking the authored graph to one node the finished run still reports its original 2 nodes and order. UI: Run renders per-node badges ('done · google/gemini-3.1-flash-lite · 858 ms') and the Approve button appears on a gated run; 0 console errors. Anonymous run 401. | Refresh: writing position 1 changed google/gemini-3.1-flash-lite -> upstage/solar-pro4 with no deploy (61s after the refresh, past the memo); POST without the ops key 403; an empty category 400; the seed was restored and reads back as source=seed.",
+   "open": "Costs are real now (pricing.ts).  The ranking now lives in the database and can be replaced by POST /api/buzzy/frontier (ops key); the ranking is now derived (frontier flag + price) and refreshed by POST /api/buzzy/frontier/rebuild; an Arena scraper remains unbuilt."
+  },
+  {
+   "id": "frontier-refresh",
+   "priority": "P1",
+   "status": "done",
+   "title": "The frontier ranking is data, refreshable without a deploy"
+  },
+  {
+   "id": "real-costs",
+   "priority": "P1",
+   "status": "done",
+   "title": "A run's cost is a real number from the gateway's published prices"
+  },
+  {
+   "id": "derived-ranking",
+   "priority": "P1",
+   "status": "done",
+   "title": "The frontier ranking is derived from the gateway's frontier flag and prices, not hand-picked"
+  },
+  {
+   "id": "consolidation-audit",
+   "priority": "P0",
+   "status": "done",
+   "title": "Full-surface audit after the build",
+   "evidence": "12 pages swept authenticated: problems=0 (was 1 before the asset-URL fix). Rules: speechSynthesis hits 0 on /buzzy/talk, listen mode survives a reload (localStorage 1, title '🎙 BeeZilla — Listening', mic-btn on), nav links identical across 10 pages and the account label is common.js's own (name + separate Log out), /buzzy/graph loads with the canonical nav. Vault note written: BeeZilla/BUILD-2026-11-02-orchestration-assets-voice.md."
+  },
+  {
+   "id": "providers-3d-music",
+   "priority": "P0",
+   "status": "done",
+   "title": "3D (Meshy) live; music (ElevenLabs) wired and waiting on the plan",
+   "evidence": "BZ_MESHY_KEY and BZ_ELEVEN_KEY set on service agent-relay; keys never entered the repo."
+  },
+  {
+   "id": "desktop-parity",
+   "priority": "P0",
+   "status": "done",
+   "title": "Desktop line brought to parity with the web line",
+   "evidence": "Merged github/main into feat/local-runtime (7b94027): two conflicts (chat.nitro.ts took main's turn body; turn.ts removed as a stale duplicate move; recipe-seal kept both import sets). settings joined PAGES. Register now 26 both / 6 desktop-only / 0 web-only / 0 migrations apart; npm run parity PASS including the installed-bundle check. Proven on a fresh PGlite runtime: talk 224,095 b with #bzNav+recorder+listen, graph/library/settings 200, pricing/assets/graphs/frontier 200, transcribe 400 audio_too_short, 56 migrations at boot.",
+   "open": "Turn refactor (turn.ts) removed by the merge; re-extracting is a pure move."
+  },
+  {
+   "id": "desktop-release-pipeline",
+   "priority": "P1",
+   "status": "done",
+   "title": "Installer distribution — GitHub Releases + LAN mirror, one command",
+   "evidence": "desktop/release.mjs: build → tag desktop-v<version> → gh release → verify size+sha256. Refuses dirty tree, no pins, dev pin without --allow-dev-pin (forces prerelease), tag at a commit other than the built one. desktop-v0.2.0 published and found broken on launch (ERR_MODULE_NOT_FOUND resources\\scripts\\lib\\inference.mjs); desktop-v0.2.1 fixes it (paths.mjs absolute file URLs, logger.mjs → %APPDATA%\\BeeZilla\\logs\\main.log, PGLite staged at build, dist.mjs import gate), 179,649,563 b sha256 42bda1bf… verified against the GitHub download and the NAS mirror.",
+   "open": "Unsigned (SmartScreen) and dev publisher pin — both block a public release; no app icon."
+  },
+  {
+   "id": "desktop-connect-empty-window",
+   "priority": "P0",
+   "status": "done",
+   "title": "Desktop 'Connect BeeZilla account' opens an empty window",
+   "reported": "2026-11-03, owner: login from the app pops an empty box (browser session is irrelevant — the desktop window has its own cookie jar)",
+   "fixed_in": "BeeZilla Desktop 0.2.2",
+   "change": "CONNECT_PATH /connect → /login (same-origin sign-in on every deployment); added scripts/test-connect-path-live.mjs because the e2e fake served /connect and so was more capable than production",
+   "evidence": "0.2.2 published (179,651,067 b, sha256 5b4e74bf…), mirrored to K:\\…\\releases\\0.2.2, installed locally; CONNECT_PATH=/login verified inside the packaged asar; live probe PASS /login 200 2608b 271ms; connect e2e still passes (xvfb).",
+   "open": "Owner confirmation only: open Connect on Windows, sign in inside the window, Settings should show a token with an expiry."
+  },
+  {
+   "id": "desktop-managed-inference-gateway",
+   "priority": "P0",
+   "status": "done",
+   "title": "Desktop Connect → 'not configured (BZ inference signing keys)'",
+   "reported": "2026-11-04 — owner signed in from the app and got a connect popup 503 not_configured",
+   "root_cause": "Two gaps, not one. (1) BZ_INFERENCE_SIGNING_KEY was never set on the deployment, so /api/inference-token failed closed with 503. (2) There was no gateway to spend a minted token: /api/inference did not exist anywhere, and the token was being handed the provider base URL, which cannot verify our HMAC — so even a successful connect would have 401'd on the first message. The desktop also defaulted to the demo deployment, which has neither.",
+   "change": "New src/lib/inference-gateway.nitro.ts (POST /api/inference: verify bz1 scope=inference, forward the chat body to OUR provider with OUR key, stream back unchanged, 256 KB cap, fails closed 503 without a provider key). Set BZ_INFERENCE_SIGNING_KEY (48 chars) + BZ_INFERENCE_BASE_URL on the agent-relay service. Desktop 0.2.3 defaults to https://app.devboards.ai.",
+   "evidence": "Production E2E: sign-in 200 → POST /api/inference-token 200 {token bz1…, endpoint …/api/inference} → POST /api/inference 200 in 2.93 s, reply 'gateway ok', usage cost 8.56e-06. Anonymous 401, wrong scope refused, /api/inference 404s on the demo and old beezilla-production hosts.",
+   "open": "Owner retries Connect in 0.2.3 (reinstall from K:). The BeeZilla-branded prod service still needs main deployed + the same two env vars before a branded default is possible."
+  },
+  {
+   "id": "chat-music-tool",
+   "priority": "P0",
+   "status": "done",
+   "title": "Chat could claim music but never make it",
+   "root_cause": "The chat loop had no music tool. generateMusic + /api/buzzy/music worked (200, real mp3), but nothing offered the capability to the model, so every 'the track is in your Library' was fabricated.",
+   "change": "GENERATE_MUSIC_TOOL in music.ts; one TOOL_POLICIES entry (gate draft, metered, 130s budget); executor branch that generates, reads length from the brief, stores to the asset shelf and sets response.audio; intent.ts treats song/track/jingle requests as deliverables; talk.html renders the audio through the existing media card; claim guard now permits an audio claim only when an asset was produced.",
+   "evidence": "Production: 'make me a 15-second ambient pad' -> TURN 8.3s, response.audio=/api/buzzy/assets/8229 (481,004 b, audio/mpeg, verified 200 + MPEG ADTS layer III), document: none, draft: none, Library 2 -> 3. Server-side music pre-pass fires because the model twice claimed a finished pad in <7s without calling the tool.",
+   "open": "Desktop line is another agent's; parity gate reports its drift (search-status route, bundle 1 migration behind)."
+  },
+  {
+   "id": "barge-head-preroll",
+   "priority": "P0",
+   "status": "in-progress",
+   "title": "A barge-in lost the head of the interrupting utterance",
+   "root_cause": "The recorder for the interrupting turn starts at DETECTION, not at speech onset: 350 ms reply grace + 3x80 ms loud frames + 80 ms poll, then startListening()/startCapture(). 'Hold on, skip the first one.' reached the transcriber as 'on. Skip the first one.'",
+   "shipped": [
+    "2593250 mic pre-roll ring (1800 ms) kept while the mic stream is open; preRollTake() seeds startCapture() and startRecording(), trimmed to the first speech (two 30 ms windows over 0.015 RMS, 80 ms lead-in); preRollStop() on listen end / mic release; state().preRollMs + console 'pre ms'",
+    "c941650 (live 22:14Z) the ring cannot die quietly: preRollStart() resumes a suspended mic AudioContext BEFORE the reuse check, a 1 s watchdog rebuilds a missing/stalled ring (no frames for 2 s) and resumes it while the mic is open, state().ring exposes {state,frames}, and preRollMs is POSTed to /api/buzzy/voice-metrics and stored (migration 0056, pre_roll_ms) so 0 = head never captured vs >0 = head in the clip",
+    "7bad961 the take happens at the gate, not after the hops: bargeArm() snapshots the ring the instant it is certain (preRollPending, 1.5 s freshness), preRollTake keeps a quiet-but-real onset (PRE_ROLL_LOW 0.003) when the 0.015 edge scan starts late, falls back to the gate-vouched 1.5 s window when nothing clears either edge, and never pads digital silence; state() returns preRollWhy (edge|edge-low|gate-tail|no-speech|no-ring|ring-deaf|ring-dead|rate-mismatch) plus ring {peak,last,rebuilds,deaf}; a ring that pumps frames but has only heard LSBs is rebuilt (deaf source node), max 3 times.",
+    "b48fcb2 (live 14:24Z) the barge gate votes on the ring: the detector used to own a second AudioContext + MediaStreamSource + AnalyserNode, which can be suspended or left bound to a released stream while the ring keeps hearing the room — on the 9:03 AM 7bad961 walk the ring recorded the interruption at peak 1.0008 and the reply was never cut (no user turn at all). The ring's frame callback now casts the vote (RMS per 42.7 ms frame, 3 consecutive frames > 0.02 after a 350 ms grace, 1200 ms cooldown, one fire per turn); (bargCtx/bargAn are gone). state().gate returns {armed,frames,peak,rms,hits,fires,why,sinceSpeakMs,lastFireAgoMs}.",
+    "6f7710a (branch fix/head-floor, NOT deployed) two fixed thresholds were the remaining bug: the 3187 walk kept headMs 249 (= one gate frame + the 80 ms lead, i.e. nothing above the 0.003 low edge earlier in the ring) with leadMs 21, clipPeak 1.001, gain 1 — a real canceller ducked the head below both the absolute low edge and polishSamples' 0.0015 per-sample silence, and the whole-clip lift (peak<0.25) could never fire. Now: low edge = 3x the ring's own 20th-percentile window RMS (floor 0.0004, cap 0.015); head bounded to PRE_ROLL_HEAD_MAX_MS 1200 before the loud onset (earlier is the reply through a leaky canceller); polishSamples(flat, rate, headSamples) trims relative to the clip's own peak and normalises head and body as two regions, lift boundary = the loud onset found INSIDE the head (the ring is taken at the gate, so the head's tail always carries the body's first syllable), 25 ms ramp, 400x cap, no lift within 3x of the body; telemetry gains headGain/splitMs/headPeak/bodyPeak/ringMs/ring (15 x 250 ms of the ring at the take) and state().preRollSamples, because headMs alone cannot separate a dropped head from a head that never reached the ring."
+   ],
+   "evidence": "Ops read-back (GET /api/buzzy/voice-metrics?days=1, ops key from the agent-relay service) settles the clip question: client rows 2026-11-11T21:59:33.189Z and 2026-11-12T02:09:45.263Z (the two long-lived virtual-mic walks) both carry pre_roll_ms=null, i.e. zero pre-roll on the turn that transcribed as 'Skip the first one.'; my 22:18:56.542Z walk carries 325 and transcribed verbatim. So the head was missing from the CLIP, not from the transcriber — and preRollTake() returned nothing while the ring was pumping (state().ring frames 3550 -> 7161 across the 9:09 PM walk). 2026-11-12 02:2xZ deploy 7bad961 (BUILDING->SUCCESS 02:28:25Z), served /buzzy/talk.html 272,915 B md5 fae232f2f5bf0bc5bc74750f79eefad0 with markers gate-tail/preRollWhy/edge-low/preRollPending x7. Local proof on the shipped file: preroll-take.test.mjs extracts the real preRollTake and 6/6 pass (edge, edge-low, gate-tail, no-speech, no-ring, recorder-edge); device-shaped rig (Chrome fake capture device fed 10 s digital silence then the hold-on clip, not a stubbed getUserMedia) gives preRollMs 281-311 and clip offset 0.00 vs the source, and the same rig after a 40 s idle still takes 264 ms. 2026-11-12 14:2xZ: 7bad961 failed WORSE than the head: no cut and no turn on the 9:03 AM walk while ring.peak was 1.0008 (bargeCtx/AnalyserNode deaf, ring live). b48fcb2 shipped as SUCCESS 14:24:53Z; served /buzzy/talk 274,910 B = blob 274,849 B + 61 B nav transform, markers bargeFeed x4 / bargeFire x2 / gateFires x3, bargeCtx 0 / bargAn 0. Headless Chrome + fake capture device fed 10 s digital silence then a 3 s 440 Hz burst: gate fires 107 ms after tone onset, audio cut, /api/buzzy/transcribe POSTed, clip 4,060 ms with leadSilence 81 ms (head intact); same rig after the ring was rebuilt 3x and marked deaf (rebuilds 3, deaf true) still fires and transcribes; 20 s of digital silence alone fires 0 (no false cut). 2026-11-12 17:0xZ: abc2ef4 deployed (SUCCESS 17:05:40Z) and the 3187 real-mic walk cut correctly but posted headMs 249 / why edge / leadMs 21 / clipPeak 1.001 / gain 1 and the bubble read 'Skip the first one.' — the head was below both fixed thresholds on that device. 6f7710a: new rig rig-head-floor (head at 0.0008 amp ~0.00057 RMS, 250 ms inter-phrase gap, body 0.4) fails on abc2ef4 (marker absent, headMs 201, why edge, gain 1) and passes on 6f7710a (marker 25 ms, amp 0.3165, headMs 891, why edge-low, headGain 400, clip 3098 ms); rig-ducked-head 0.006, rig-idle-head (52 s), rig-sr-idle-head and gate-head all still pass; tsc/build/inline-block checks clean. Live walk on 6f7710a is the remaining gate.",
+   "vault": "01_Projects/Dev Boards/BeeZilla/BZ-QA-Ledger.md (2026-11-11 14:45Z)"
+  }
+ ],
+ "probes": {
+  "voice_matrix": "~/.hermes/profiles/buzzy/cache/scratch/bz-voice-matrix-auth.mjs (needs VERIFY_URL from /mnt/nas/host-ops/beezilla-magiclink-request.py, sourced from frodo .env)"
+ },
+ "log": [
+  {
+   "n": 1,
+   "at": "2026-11-01",
+   "item": "voice-browser-matrix",
+   "found": "grep for getUserMedia across public/buzzy returned 0 — ASR is the browser SpeechRecognition API, Chrome-only by construction.",
+   "change": "stageNote() + unsupported/error branches (7403270)",
+   "gates": "tsc OK, build complete, blocks=4 errors=0",
+   "production_evidence": "new string present on served /buzzy/talk"
+  },
+  {
+   "n": 2,
+   "at": "2026-11-01",
+   "item": "voice-browser-matrix",
+   "found": "First fix was invisible: paintVoice repainted #voiceStatus right after stageNote wrote it, so the message never rendered. Matrix caught it (stage stayed 'Voice', status empty).",
+   "change": "voice.note on state; paintVoice renders it when idle; cleared on a fresh listen",
+   "gates": "tsc OK, build complete, blocks=4 errors=0, redeploy landed (voice.note x3 on served page)",
+   "production_evidence": "authenticated 4-case matrix: chrome-natural + brave-natural -> 'Mic or speech service blocked in this browser'; chrome-noSR + brave-noSR -> 'This browser can't transcribe speech'. Message visible (statusShown true), mic off, pref 0 in all cases."
+  },
+  {
+   "n": 3,
+   "at": "2026-11-01",
+   "item": "voice-browser-matrix",
+   "found": "Nous inference API has no /v1/audio/transcriptions (404 for whisper-1, gpt-4o-mini-transcribe), but openai/gpt-audio-mini accepts input_audio on /chat/completions and transcribes accurately. That is the only STT available on the existing key.",
+   "change": "asr.ts + POST /api/buzzy/transcribe + recorder fallback in talk.html (e2069ee)",
+   "gates": "tsc OK, build complete, blocks=4 errors=0, speechSynthesis count 0",
+   "production_evidence": "unauth 401; auth curl 200 {text exact, ms 2673}; chrome+brave recorder E2E posted real WAV and got the right transcript"
+  },
+  {
+   "n": 4,
+   "at": "2026-11-01",
+   "item": "voice-browser-matrix",
+   "found": "The audio model answers silence/meta-requests with prose ('I'm sorry, but I can't hear any speech…', 'please provide the audio'), which was returned as a transcript and typed into the composer as if the owner had said it.",
+   "change": "SILENCE sentinel + refusal/meta-answer filter (7c7570c); client refuses to upload a clip with no speech (b8c74ee); asr_ms telemetry with lane='asr'",
+   "gates": "tsc OK, build OK, blocks=4 errors=0",
+   "production_evidence": "silence -> \"\"; speech -> exact text 978ms; ops endpoint shows lane=asr row"
+  },
+  {
+   "n": 5,
+   "at": "2026-11-01",
+   "item": "public-repo-cleanup",
+   "found": "Repo was already mostly publishable (LICENSE/README/SECURITY/.gitignore fine, no secrets in tree or history), but .env.example documented 26 of 91 variables and one script served files from a hardcoded home directory.",
+   "change": "Complete .env.example (94 documented entries), relative public root in browser-money-check.mjs, de-personalised comment, package.json description, README env table covers voice/ASR/tools",
+   "gates": "clean clone npm ci + npm run build exit 0",
+   "production_evidence": "n/a (docs/scripts only, no runtime behaviour changed)"
+  },
+  {
+   "n": 6,
+   "at": "2026-11-02",
+   "item": "bulk-skill-upload",
+   "found": "No file-upload path existed at all: upload.html only published recipes from a finished job, and the only way in was one chat attachment.",
+   "change": "migration 0048 buzzy_assets; POST/GET /api/buzzy/assets (content-addressed, 25MB cap, path sanitised); folder picker + concurrency 6 + retry on the Publish page",
+   "gates": "tsc OK, build complete, inline blocks 3/0 errors, migration ran at boot",
+   "production_evidence": "4,000 files in 65.3s, idempotent second pass, listing 4,000, download 200/401, UI folder upload with dedupe counts"
+  },
+  {
+   "n": 7,
+   "at": "2026-11-02",
+   "item": "install-new-ui",
+   "found": "11-page sweep: /buzzy and /buzzy/library requested /brand/revision6_expressions_16-smiling.png and /sow-pdf.js and got 404s, because ten pages used document-relative asset URLs that only resolve under /buzzy/<page>.",
+   "change": "All local asset refs in public/buzzy/*.html made absolute (/buzzy/...), 54b080e",
+   "gates": "tsc OK, build complete, every page's inline scripts parse",
+   "production_evidence": "re-sweep after deploy: SUMMARY pages=11 problems=0 (was problems=1)"
+  },
+  {
+   "n": 8,
+   "at": "2026-11-02",
+   "item": "music-3d",
+   "found": "Media dropped on the chat was reduced to a 'photo' paper with zero bytes. No provider exists for music or 3D generation.",
+   "change": "images/audio/glb/gltf upload to /api/buzzy/assets and render as playable/viewable cards with downloads",
+   "gates": "tsc OK, build complete, inline blocks 4/0",
+   "production_evidence": "2 real files -> 2 cards with audio element and working download links, no console errors"
+  },
+  {
+   "n": 9,
+   "at": "2026-11-02",
+   "item": "orchestration-programme",
+   "found": "No orchestration code or tables existed anywhere in the repo.",
+   "change": "migrations/0049_buzzy_graphs.sql — graphs, nodes, edges, runs, node_results; review is a first-class node kind with a recorded 'independent' flag",
+   "gates": "tsc OK, build OK, PGLite exec + insert + CHECK + cascade all pass",
+   "production_evidence": "health 200 durable, three pages 200 after boot migration"
+  },
+  {
+   "n": 10,
+   "at": "2026-11-02",
+   "item": "orchestration-programme",
+   "found": "First seed ranked families the deployment could not call, so every pin resolved to 'nothing reachable' — caught in production, not in tests.",
+   "change": "graphs API (save/list/read), frontier resolver + endpoint, clamp marked as substitution",
+   "gates": "tsc OK, build complete, deploys verified by served behaviour",
+   "production_evidence": "see evidence string: graph saved/read/versioned, 3 providers across positions, cross-provider review independent:true"
+  },
+  {
+   "n": 11,
+   "at": "2026-11-02",
+   "item": "orchestration-programme",
+   "found": "Link clicks landed on detached nodes because pointerdown redrew the canvas before the click was delivered; the first whiteboard build could not connect anything.",
+   "change": "public/buzzy/graph.html + route; pointerdown moves highlight in place instead of redrawing",
+   "gates": "tsc OK, build complete, inline blocks parse, deploy verified by served behaviour",
+   "production_evidence": "4 nodes / 3 edges persisted with typed kinds; resolver preview live; reopen works"
+  },
+  {
+   "n": 12,
+   "at": "2026-11-02",
+   "item": "orchestration-programme",
+   "found": "First resume implementation walked back into the gate it had just stopped at, so no run could ever get past an approval.",
+   "change": "runner.ts + /api/buzzy/graphs/:id/run, /api/buzzy/runs/:id, /api/buzzy/runs/:id/approve; whiteboard Run + per-node badges + Approve",
+   "gates": "tsc OK, build complete, inline blocks parse, 2 deploys verified by behaviour",
+   "production_evidence": "see evidence string"
+  },
+  {
+   "n": 13,
+   "at": "2026-11-02",
+   "item": "frontier-refresh",
+   "found": "The ranking was compiled into the deployed bundle, so 'position 3' meant 'position 3 as of the last release'.",
+   "change": "migration 0050 buzzy_frontier; getSnapshot/saveSnapshot/validateSnapshot; live resolvers; POST /api/buzzy/frontier guarded by BZ_OPS_KEY",
+   "gates": "tsc OK, build complete, SQL validated in PGLite",
+   "production_evidence": "position 1 rotated to upstage/solar-pro4 without a deploy, then restored to the seed"
+  },
+  {
+   "n": 14,
+   "at": "2026-11-02",
+   "item": "real-costs",
+   "found": "Every node recorded $0.0000 because the deployed catalog has no prices — a zero that reads as 'free' rather than 'unknown'. The gateway's /models payload carries per-token prices AND a frontier flag on 46 models.",
+   "change": "src/lib/buzzy/pricing.ts (10-minute memo), runner records costOf(), output.priced flag, GET /api/buzzy/pricing",
+   "gates": "tsc OK (after fixing a bad env import), build complete",
+   "production_evidence": "2-node run: gemini 1468ms priced, kimi/qwen review 7563ms $0.0024 independent=true; run total $0.0025. Prices: gemini 0.25/1.5, kimi-k3 0.192/15, qwen 0.45/3.5, glm 0.12/0.4, deepseek 0.115/4, solar 0.15/0.6 USD per MTok. Only kimi-k3 of the six reachable models is frontier-flagged."
+  },
+  {
+   "n": 15,
+   "at": "2026-11-02",
+   "item": "derived-ranking",
+   "found": "The ranking was hand-picked, and my first derived version dropped 'writing' and 'coding' entirely — which stranded every saved graph that pinned them.",
+   "change": "ranking.ts buildRanking(); fixed canonical category vocabulary with an explicit fallback to the whole ordering; POST /api/buzzy/frontier/rebuild",
+   "gates": "tsc OK, build complete, 2 deploys verified by behaviour",
+   "production_evidence": "rebuild: 6 reachable, kimi-k3 the only frontier-flagged, categories writing/coding/fast/general/reasoning/vision all resolve; writing pos1 -> moonshotai/kimi-k3, fast pos1 -> google/gemini-3.1-flash-lite; a writing-pinned graph then ran: write moonshotai/kimi-k3 $0.00970, review deepseek/deepseek-v4-pro-0813 independent=true $0.00050"
+  },
+  {
+   "n": 16,
+   "at": "2026-11-02",
+   "item": "consolidation-audit",
+   "found": "All green; confirmed the account link losing its href is common.js doing its job (name + separate Log out), not a dead link — checked before 'fixing' it.",
+   "change": "none needed; vault note written",
+   "gates": "n/a",
+   "production_evidence": "12 pages problems=0; three product rules verified in the browser"
+  },
+  {
+   "n": 17,
+   "at": "2026-11-02",
+   "item": "providers-3d-music",
+   "found": "ElevenLabs key authenticates but the account is free (music + library voices 402) and the key is missing four scopes. Meshy key works: 45s text-to-3D.",
+   "change": "music.ts, models3d.ts, /api/buzzy/music, /api/buzzy/model3d (task API), composer Music/3D buttons",
+   "gates": "tsc OK, build complete, inline blocks 4/0",
+   "production_evidence": "3D card with 971,944-byte glTF download; music refusal shown as a sentence in the chat"
+  },
+  {
+   "n": 18,
+   "at": "2026-11-03",
+   "item": "desktop-parity, desktop-release-pipeline, desktop-connect-empty-window",
+   "found": "The desktop line was 156 commits behind and its 37 commits had never been pushed; the Enter-the-account flow loaded a URL that 404s everywhere.",
+   "change": "merge 7b94027 · release.mjs + v0.2.0/v0.2.1 · register 26/6/0",
+   "gates": "tsc clean both trees, vite build complete, inline scripts 12/0, npm run parity PASS, installer downloaded back from GitHub and hash-matched",
+   "production_evidence": "local runtime probes above; GitHub release assets verified by size+sha256; installed Wine copy reads 0.2.1"
+  },
+  {
+   "n": 19,
+   "at": "2026-11-03",
+   "item": "desktop-connect-empty-window",
+   "found": "connectAccount opened ${cloud}/connect and no deployment serves it: demo 404, beezilla-production 404, app.devboards.ai 404 — the window showed the 404 app shell (a blank box) and polled it for 180s. The e2e test passed because its fake cloud served /connect.",
+   "change": "CONNECT_PATH=/login + live path probe (test-connect-path-live.mjs) + v0.2.2",
+   "gates": "connect e2e PASS (xvfb), live probe PASS, tsc/build clean, installer hash matched on GitHub download and NAS mirror",
+   "production_evidence": "https://github.com/GumbyEnder/agent-relay/releases/tag/desktop-v0.2.2 — prerelease, 4 files staged, CONNECT_PATH=/login inside the asar"
+  },
+  {
+   "n": 20,
+   "at": "2026-11-04",
+   "item": "desktop-managed-inference-gateway",
+   "found": "Mint had no spending half and no signing secret; the desktop pointed at a host with neither.",
+   "change": "inference-gateway.nitro.ts + 2 env vars + desktop 0.2.3 default host",
+   "gates": "tsc clean, vite build complete, deploy verified by served route, E2E mint→gateway chat 200",
+   "production_evidence": "app.devboards.ai /api/inference 200 with bz1 token; installer 0.2.3 sha256 c1d2cde5… verified on GitHub + NAS"
+  }
+ ]
 }

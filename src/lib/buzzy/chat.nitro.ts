@@ -38,6 +38,7 @@ import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
+import { fetchPageText } from "./webpage";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
@@ -51,7 +52,12 @@ import {
   setPlan,
   type PlanName,
 } from "./entitlements";
-import { contextWindowFor, contextState } from "./context";
+import {
+  conversationWindowFor,
+  contextState,
+  CONTEXT_TOOL_OVERHEAD_TOKENS,
+  CONTEXT_PROMPT_OVERHEAD_TOKENS,
+} from "./context";
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
@@ -73,7 +79,7 @@ import { RECIPES, UNIVERSAL_STATEMENTS, getRecipe, validateRecipe, boundaryViola
 import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DELEGATABLE, authorize, type MemberRole } from "./team";
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 import { createHash } from "node:crypto";
-import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES } from "./asr";
+import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES, normalizeVocab } from "./asr";
 
 /**
  * Largest single file the bulk asset path will store. A skills corpus is
@@ -109,19 +115,21 @@ async function recordVoiceMetrics(
     spoken?: boolean;
     lane?: string | null;
     speechMs?: number | null;
+    preRollMs?: number | null;
   },
 ): Promise<void> {
   try {
     await sql`
       INSERT INTO buzzy_voice_metrics
         (user_id, job_id, session_id, source, mode, model, asr_ms, ttft_ms, ttfa_ms,
-         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane, speech_ms)
+         turn_ms, extract_ms, llm_ms, honcho_ms, reply_chars, audio_bytes, spoken, lane, speech_ms, pre_roll_ms)
       VALUES
         (${row.userId}, ${row.jobId ?? null}, ${row.sessionId ?? null}, ${row.source},
          ${row.mode ?? null}, ${row.model ?? null}, ${row.asrMs ?? null}, ${row.ttftMs ?? null},
          ${row.ttfaMs ?? null}, ${row.turnMs ?? null}, ${row.extractMs ?? null},
          ${row.llmMs ?? null}, ${row.honchoMs ?? null}, ${row.replyChars ?? null},
-         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null}, ${row.speechMs ?? null})
+         ${row.audioBytes ?? null}, ${row.spoken ?? false}, ${row.lane ?? null}, ${row.speechMs ?? null},
+         ${row.preRollMs ?? null})
     `;
   } catch (err) {
     // A lost metric must never break a turn.
@@ -388,10 +396,12 @@ export default defineEventHandler(async (event) => {
           : [];
     } catch { rows = []; }
     const label = modelParam || getModels()[0]?.label || "";
-    const modelId = getModels().find((m) => m.label === label)?.model || label;
-    const limit = contextWindowFor(modelId);
+    // One total for the whole conversation, not the window of whichever model
+    // answered last (see conversationWindowFor).
+    const limit = conversationWindowFor();
     const chars = rows.reduce((acc, r) => acc + String(r.content || "").length, 0);
-    const used = Math.ceil(chars / 4) + 1500 + 2200; // turns + tool schemas + persona
+    const used =
+      Math.ceil(chars / 4) + CONTEXT_TOOL_OVERHEAD_TOKENS + CONTEXT_PROMPT_OVERHEAD_TOKENS;
     return { ok: true, model: label, messages: rows.length, context: contextState(used, limit) };
   }
 
@@ -495,8 +505,56 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 413);
       return { ok: false, error: "That recording is too long — keep it under a minute.", code: "audio_too_large" };
     }
+    // BZ-22 — proper nouns. The model joins and mis-spells names it has no
+    // reason to know ("Honey Crumb" → "Honeycrumb", measured 2/2). The fix is a
+    // post-hoc rewrite over a vocabulary built from names this owner actually
+    // uses, never a prompt glossary: a glossary primes the model into hearing
+    // the words on silence (asr.ts carries the measurement).
+    const vocab: string[] = [];
+    const addVocab = (raw: unknown, minSquash = 3) => {
+      for (const term of normalizeVocab(raw, minSquash)) {
+        if (!vocab.some((v) => v.toLowerCase() === term.toLowerCase())) vocab.push(term);
+      }
+    };
+    // Most specific first: what the page sent, then the job this turn is about.
+    addVocab(queryValue(fullPath, "vocab"));
+    const asrJobId = queryValue(fullPath, "jobId");
     try {
-      const r = await transcribeAudio(audio, format);
+      const vocabSql = await getSql();
+      if (asrJobId) {
+        const jobRows = (await vocabSql`
+          SELECT j.title, c.name AS company_name
+          FROM buzzy_jobs j
+          LEFT JOIN buzzy_companies c ON c.id = j.company_id AND c.user_id = j.user_id
+          WHERE j.id = ${asrJobId} AND j.user_id = ${user.id}
+          LIMIT 1
+        `) as Array<{ title?: string | null; company_name?: string | null }>;
+        addVocab(jobRows[0]?.company_name);
+        addVocab(jobRows[0]?.title);
+      }
+      // Then the owner's own recent names. 5-char floor: a one-word job title
+      // like "Test" is a common word, and canonicalising every "test" in a
+      // transcript is noise, not a correction.
+      const titleRows = (await vocabSql`
+        SELECT title AS term FROM buzzy_jobs
+        WHERE user_id = ${user.id} AND title IS NOT NULL AND length(title) >= 5
+        ORDER BY updated_at DESC LIMIT 20
+      `) as Array<{ term?: string | null }>;
+      for (const r of titleRows) addVocab(r.term, 5);
+      const companyRows = (await vocabSql`
+        SELECT name AS term FROM buzzy_companies
+        WHERE user_id = ${user.id} AND name IS NOT NULL AND length(name) >= 5
+        ORDER BY updated_at DESC LIMIT 10
+      `) as Array<{ term?: string | null }>;
+      for (const r of companyRows) addVocab(r.term, 5);
+    } catch {
+      // A vocabulary is an improvement, never a precondition: if the read
+      // fails, transcribe with what we have.
+    }
+    // The product's own coinages, which no owner can be expected to have typed.
+    addVocab(["Honey Drops"]);
+    try {
+      const r = await transcribeAudio(audio, format, vocab);
       // Time to transcript is a product number, not a log line. Recorded with
       // lane "asr" so ops can tell the browser recognizer apart from this path.
       const sql = await getSql();
@@ -1014,6 +1072,9 @@ export default defineEventHandler(async (event) => {
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The Talk bar's privacy control. Unknown values mean the default (no change).
+    let privacy: "advocate" | "lockdown" | "open" | undefined =
+      body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
     // Voice lane: stream text + audio back over SSE so speech starts on the
     // first audio chunk instead of after the whole buffered reply.
     const voice = body.voice === true;
@@ -1021,6 +1082,16 @@ export default defineEventHandler(async (event) => {
     const surface: "text" | "voice" = voice ? "voice" : "text";
 
     const sql = await getSql();
+
+    // The account's privacy mode wins when it is Lockdown: a second device, or a
+    // page whose slider was never touched, must not run outside calls the owner
+    // turned off. (Table from migration 0057; absent on an older database.)
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${userId} LIMIT 1`;
+      const accountMode = pm[0]?.mode;
+      if (accountMode === "lockdown") privacy = "lockdown";
+      else if (!privacy && (accountMode === "advocate" || accountMode === "open")) privacy = accountMode;
+    } catch { /* no table yet: the request's own value stands */ }
 
     // ── Plan + quota, before any provider call ───────────────────────────────
     // The web app calls the provider from OUR server, not through /api/inference,
@@ -1149,6 +1220,7 @@ export default defineEventHandler(async (event) => {
         jobContext,
         mode,
         execute,
+        privacy,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,
@@ -1363,6 +1435,7 @@ export default defineEventHandler(async (event) => {
       spoken: body.spoken === true,
       lane: typeof body.lane === "string" ? body.lane.slice(0, 8) : null,
       speechMs: num("speechMs"),
+      preRollMs: num("preRollMs"),
     });
     return { ok: true };
   }
@@ -1478,7 +1551,8 @@ export default defineEventHandler(async (event) => {
     `) as Array<Record<string, unknown>>;
     const recent = (await sql`
       SELECT created_at, source, mode, model, lane, asr_ms, ttft_ms, ttfa_ms, turn_ms,
-             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id, speech_ms
+             extract_ms, llm_ms, reply_chars, spoken, session_id, user_id, speech_ms,
+             pre_roll_ms
       FROM buzzy_voice_metrics
       WHERE (${scopeAll} OR user_id = ${scopeUid})
       ORDER BY created_at DESC LIMIT 25
@@ -1517,6 +1591,7 @@ export default defineEventHandler(async (event) => {
         model: c.model ?? v.model ?? null,
         lane: c.lane ?? v.lane ?? null,
         speech_ms: c.speech_ms ?? v.speech_ms ?? null,
+        pre_roll_ms: c.pre_roll_ms ?? null,
         asr_ms: c.asr_ms ?? null,
         ttft_ms: c.ttft_ms ?? v.ttft_ms ?? null,
         ttfa_ms: c.ttfa_ms ?? v.ttfa_ms ?? null,
@@ -2026,6 +2101,79 @@ export default defineEventHandler(async (event) => {
       forgotten: rows.length,
       note: "Those remembered details are gone and won't be used again. Approved documents and your Library are untouched — delete a job or the account for that.",
     };
+  }
+
+  // ── GET /api/buzzy/read?url= — the reader view behind Talk's address bar ──
+  // A web address typed into "Search or enter a URL" opens here as text: title,
+  // readable text and the page's links, fetched by the same SSRF-guarded reader
+  // the chat uses (public http(s) pages only). Off in Lockdown.
+  if (method === "GET" && path === "/api/buzzy/read") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+      if (pm[0]?.mode === "lockdown") {
+        setResponseStatus(event, 403);
+        return { ok: false, error: "Reading web pages is off while privacy is set to Lockdown.", code: "lockdown" };
+      }
+    } catch { /* no table yet: not in Lockdown */ }
+    const url = (queryValue(fullPath, "url") ?? "").trim().slice(0, 2000);
+    if (!url) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Give me a web address to read.", code: "bad_url" };
+    }
+    const page = await fetchPageText(url);
+    if (!page.ok) {
+      setResponseStatus(event, 422);
+      return { ok: false, error: page.error, code: page.code };
+    }
+    const text = page.text ?? "";
+    return {
+      ok: true,
+      url: page.finalUrl ?? url,
+      title: page.title || "",
+      text: text.slice(0, 40_000),
+      truncated: text.length > 40_000,
+      links: (page.links ?? []).slice(0, 80),
+    };
+  }
+
+  // ── /api/buzzy/privacy — the owner's privacy mode, per account ─────────
+  // GET → { mode, saved, defaultMode }. Until the owner chooses, the mode is this
+  // deployment's default: Open on the hosted site, Advocate in the desktop app
+  // (BZ_RUNTIME=local) — roadmap phase 5. PUT { mode } → saves it. The chat reads
+  // the same row on every turn, so Lockdown holds on every device and page.
+  if (path === "/api/buzzy/privacy" && (method === "GET" || method === "PUT")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    if (method === "PUT") {
+      let body: Record<string, unknown> = {};
+      try {
+        const parsed = await event.req.json();
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+      } catch { /* handled below */ }
+      const mode = body.mode;
+      if (mode !== "advocate" && mode !== "lockdown" && mode !== "open") {
+        setResponseStatus(event, 400);
+        return { error: "mode must be advocate, lockdown or open", code: "bad_mode" };
+      }
+      await sql`
+        INSERT INTO buzzy_privacy_mode (user_id, mode, updated_at) VALUES (${user.id}, ${mode}, now())
+        ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode, updated_at = now()
+      `;
+      return { ok: true, mode };
+    }
+    const defaultMode = (process.env.BZ_RUNTIME ?? "").trim().toLowerCase() === "local" ? "advocate" : "open";
+    const rows = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+    return { ok: true, mode: rows[0]?.mode ?? defaultMode, saved: rows.length > 0, defaultMode };
   }
 
   // ── GET /api/buzzy/profile — account-scoped business profile + defaults ──
@@ -3143,12 +3291,13 @@ export default defineEventHandler(async (event) => {
     }
     const token = "sh_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
     const id = "shl_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    await sql`
+    const inserted = await sql`
       INSERT INTO buzzy_share_links (id, user_id, doc_id, version, token, expires_at)
       VALUES (${id}, ${user.id}, ${doc.id}, ${version}, ${token}, now() + (${ttlHours}::text || ' hours')::interval)
+      RETURNING expires_at
     `;
     setResponseStatus(event, 201);
-    return { ok: true, created: true, share: { id, token, expiresAt: null, url: `/api/buzzy/shared/${token}` } };
+    return { ok: true, created: true, share: { id, token, expiresAt: inserted[0]?.expires_at ?? null, url: `/api/buzzy/shared/${token}` } };
   }
 
   // ── GET /api/buzzy/shares — the recorded links on this account ──────────
@@ -3621,7 +3770,7 @@ export default defineEventHandler(async (event) => {
       member: { id: memberId, email, role, status: "invited" },
       // No mail channel is wired on this deployment — hand back the link and
       // say so, instead of claiming an email went out.
-      inviteUrl: `/buzzy/team/join?token=${token}`,
+      inviteUrl: `/buzzy/join?token=${token}`,
       note: "Invitation created. No email was sent (this deployment has no delivery channel) — send this link to them yourself. It expires in 7 days.",
       expiresInDays: 7,
     };

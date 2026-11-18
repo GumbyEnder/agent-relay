@@ -66,8 +66,115 @@ const ASR_SYSTEM =
 
 const ASR_USER_TEXT = "Transcribe the audio verbatim.";
 
-/** "Beezilla" / "bee zilla" / "Bee-Zilla" → the product's spelling. */
-const brandFix = (text: string) => text.replace(/\bbee[\s-]?zilla\b/gi, "BeeZilla");
+/**
+ * "Beezilla" / "bee zilla" / "Bee-Zilla" / "bezilla" → the product's spelling.
+ * The one-e spelling is what the live model actually returned on a QA clip
+ * (2026-11-10), so the prefix is optional and a single "l" is accepted.
+ */
+const brandFix = (text: string) =>
+  text.replace(/\b(?:b?ee?[\s-]?)?zil{1,2}a\b/gi, "BeeZilla");
+
+/**
+ * Squashed form of a term: letters and digits only, lowercase. This is what
+ * makes a rewrite *boundary-insensitive* — "Honey Crumb", "honeycrumb" and
+ * "Honey-Crumb" all squash to `honeycrumb`, so one comparison catches all three
+ * spellings without a list of separator variants.
+ */
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * The per-request vocabulary (BZ-22). NOT a prompt glossary.
+ *
+ * Measured 2026-11-10 on a spoken clip of "Add a bakery job for Honey Crumb,
+ * three locations, opening in spring.": the live model returns "Honeycrumb"
+ * 2/2 — it joins the two-word name. Adding "Honey Crumb" to the system prompt
+ * *or* to the user turn fixes that clip 2/2 and then makes a pure 1 kHz tone
+ * transcribe as "Honey Crumb, Honey Drops, BeeZilla" 2/2 — a phantom user turn,
+ * which is far worse than the miss (same priming trap the brand name hit).
+ *
+ * So the correction is post-hoc and one-directional: it only rewrites words the
+ * model already heard, and only when the transcript is non-empty. It can never
+ * introduce a word on silence.
+ */
+export function normalizeVocab(raw: unknown, minSquash = 3): string[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(",")
+      : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    const term = String(item ?? "").trim().replace(/\s+/g, " ");
+    if (term.length < 3 || term.length > 48) continue;
+    // Letters, digits, spaces and the punctuation a name actually carries. A
+    // term with a quote or a newline in it is not a name, it is an injection.
+    if (!/[a-z]/i.test(term) || /[^A-Za-z0-9 .'&-]/.test(term)) continue;
+    const key = squash(term);
+    if (key.length < minSquash || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+
+/**
+ * Rewrite every word run in `text` whose squashed form equals a vocabulary
+ * term's squashed form. Words are only joined across whitespace or hyphens, so
+ * "Honey, Crumb" is left alone — a comma is a different phrase, not a spelling.
+ */
+export function applyVocab(text: string, terms: string[]): string {
+  if (!text || terms.length === 0) return text;
+  const canonical = new Map<string, string>();
+  let longest = 0;
+  for (const term of terms) {
+    const key = squash(term);
+    if (!key) continue;
+    if (!canonical.has(key)) canonical.set(key, term);
+    longest = Math.max(longest, key.length);
+  }
+  if (canonical.size === 0) return text;
+
+  const words: Array<{ start: number; end: number }> = [];
+  const wordRe = /[A-Za-z0-9']+/g;
+  for (let m = wordRe.exec(text); m; m = wordRe.exec(text)) {
+    words.push({ start: m.index, end: m.index + m[0].length });
+  }
+  if (words.length === 0) return text;
+
+  let out = "";
+  let cursor = 0;
+  let i = 0;
+  while (i < words.length) {
+    let matched = false;
+    // Longest run first: "Honey Crumb Bakery" must not be eaten by "Honey".
+    const maxRun = Math.min(6, words.length - i);
+    for (let n = maxRun; n >= 1; n--) {
+      let gapOk = true;
+      for (let k = i; k < i + n - 1; k++) {
+        const gap = text.slice(words[k].end, words[k + 1].start);
+        if (!/^[\s-]*$/.test(gap)) {
+          gapOk = false;
+          break;
+        }
+      }
+      if (!gapOk) continue;
+      const span = text.slice(words[i].start, words[i + n - 1].end);
+      const key = squash(span);
+      if (key.length > longest) continue;
+      const want = canonical.get(key);
+      if (!want) continue;
+      out += text.slice(cursor, words[i].start) + want;
+      cursor = words[i + n - 1].end;
+      i += n;
+      matched = true;
+      break;
+    }
+    if (!matched) i += 1;
+  }
+  return out + text.slice(cursor);
+}
 
 /**
  * Transcribe one recorded clip. Throws on transport failure; an empty string is a
@@ -76,6 +183,7 @@ const brandFix = (text: string) => text.replace(/\bbee[\s-]?zilla\b/gi, "BeeZill
 export async function transcribeAudio(
   audio: Uint8Array,
   format: AsrFormat,
+  vocab: string[] = [],
 ): Promise<AsrResult> {
   if (!API_KEY) throw new Error("transcription is not configured (BZ_CHAT_KEY missing)");
   if (audio.byteLength === 0) throw new Error("no audio");
@@ -138,7 +246,11 @@ export async function transcribeAudio(
     /(provide|send|share) (the|some|your) (audio|speech|recording)/i.test(text) ||
     /you would like (me )?to transcribe/i.test(text) ||
     /^understood[.,]?\s+please\s+(provide|send|share)/i.test(text);
-  return { text: saidNothing ? "" : brandFix(text).slice(0, 4000), ms, model: ASR_MODEL };
+  return {
+    text: saidNothing ? "" : brandFix(applyVocab(text, vocab)).slice(0, 4000),
+    ms,
+    model: ASR_MODEL,
+  };
 }
 
 /** Content-Type → format, for the client that posts a raw audio body. */
