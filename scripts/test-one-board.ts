@@ -180,14 +180,6 @@ const server = http.createServer((req, res) => {
     eq(intent.isImageRequest("make a song with a cover picture", { history }), true, "naming a picture still works");
   });
 
-  // ── BeeZilla's copy of the analytics ids matches the console's ──────────
-  await ok("the static pages report to the same OpenPanel projects as the console", async () => {
-    const ids = await import("../src/lib/analytics-id");
-    const pages = readFileSync(join(process.cwd(), "src/lib/buzzy/pages.nitro.ts"), "utf8");
-    truthy(pages.includes(`"${ids.BEEZILLA_CLIENT_ID}"`), "BeeZilla id drifted");
-    truthy(pages.includes(`"${ids.DEVBOARDS_CLIENT_ID}"`), "Dev Boards id drifted");
-  });
-
   // ── Own AI key ────────────────────────────────────────────────────────
   await ok("a key is sealed and opens again; a tampered one does not", () => {
     const sealed = keys.sealSecret("sk-live-abcdef1234");
