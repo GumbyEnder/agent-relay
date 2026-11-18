@@ -123,10 +123,16 @@ const port = (server.address() as AddressInfo).port;
 process.env.BZ_VIDEO_BASE = `http://127.0.0.1:${port}`;
 const video = await import("../src/lib/buzzy/video");
 
-console.log("configuration defaults (Shane, 2026-11-17 15:46 ET):");
+console.log("configuration defaults (Shane, 2026-11-17 15:46 ET; quota 2026-11-18):");
 ok("writer is gemini-flash-latest", video.VIDEO_WRITER === "gemini-flash-latest", video.VIDEO_WRITER);
 ok("end card off by default", video.VIDEO_BRAND === false, video.VIDEO_BRAND);
-ok("daily limit is 5", video.VIDEO_DAILY_LIMIT === 5, video.VIDEO_DAILY_LIMIT);
+ok("pro plan gets 10 videos a day", video.videoDailyLimit("pro") === 10, video.videoDailyLimit("pro"));
+ok("free plan gets 1 video a day", video.videoDailyLimit("free") === 1, video.videoDailyLimit("free"));
+ok("starter keeps the old flat 5", video.videoDailyLimit("starter") === 5, video.videoDailyLimit("starter"));
+ok("an unknown plan falls back to the default plan", video.videoDailyLimit("gold") === video.videoDailyLimit(undefined), video.videoDailyLimit("gold"));
+process.env.BZ_VIDEO_DAILY_LIMIT_PRO = "12";
+ok("a per-plan env override wins", video.videoDailyLimit("pro") === 12, video.videoDailyLimit("pro"));
+delete process.env.BZ_VIDEO_DAILY_LIMIT_PRO;
 
 console.log("the five ids are the kit's own recipe ids:");
 const ids = video.VIDEO_RECIPES.map((r: { id: string }) => r.id);

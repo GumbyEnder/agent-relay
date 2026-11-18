@@ -29,6 +29,11 @@ export interface PlanRules {
   musicMaxSeconds: number;
   /** images rendered per day; 0 = the plan does not include art */
   imagesPerDay: number;
+  /** videos made per UTC day; 0 would mean the plan includes none. Shane,
+   *  2026-11-18: 10 on Pro, 1 on Free. `starter` is the undecided middle and
+   *  sits at the old flat number (5) until the owner says otherwise — change it
+   *  here, not in the three call sites that read it. */
+  videosPerDay: number;
   /** models this plan may name; null = the deployment's own default set */
   models: string[] | null;
 }
@@ -46,9 +51,9 @@ export const FREE_MODELS = (process.env.BZ_FREE_MODELS ?? "google/gemini-3.1-fla
 export const PLANS: Record<PlanName, PlanRules> = {
   // Music is the most expensive unit we buy, so it is a paid perk: a free account
   // gets chat on the cheap lane, not audio generation.
-  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, models: FREE_MODELS },
-  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 60, models: null },
-  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 400, models: null },
+  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, videosPerDay: 1, models: FREE_MODELS },
+  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 60, videosPerDay: 5, models: null },
+  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 400, videosPerDay: 10, models: null },
 };
 
 export const DEFAULT_PLAN: PlanName = ((): PlanName => {
