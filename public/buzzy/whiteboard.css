@@ -176,7 +176,8 @@
 /* Nothing covers anything: with the conversation open, the zoom bar and the
    shortcut list sit left of it. */
 .wb-panel:not(.wb-side-is-closed) .wb-zoom,
-.wb-panel:not(.wb-side-is-closed) .wb-keylist { right: 364px; }
+.wb-panel:not(.wb-side-is-closed) .wb-keylist,
+.wb-panel:not(.wb-side-is-closed) .wb-history { right: 364px; }
 .wb-zbtn, .wb-zlabel {
   min-height: 0;
   height: 32px;
@@ -212,6 +213,56 @@
 .wb-keyrow { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
 .wb-keyrow kbd { font: 600 11px/1.6 system-ui, sans-serif; padding: 0 6px; border-radius: 5px; border: 1px solid #3a3f47; background: #1c2026; white-space: nowrap; }
 .wb-keyclose { margin-top: 8px; width: 100%; min-height: 0; padding: 0.45rem; border-radius: 9px; border: 1px solid #3a3f47; background: transparent; color: #d9dde3; font: inherit; cursor: pointer; }
+
+/* History: this board's earlier versions in the account, by the zoom (bottom-right). */
+.wb-history {
+  position: absolute;
+  right: 12px;
+  bottom: 60px;
+  z-index: 7;
+  width: 320px;
+  max-width: calc(100% - 24px);
+  max-height: min(460px, calc(100% - 80px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #121418;
+  border: 1px solid #343a42;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  font-size: 0.85rem;
+  color: #d9dde3;
+}
+.wb-hist-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #eef1f4; }
+.wb-hist-x { min-height: 1.9rem; padding: 0 0.7rem; font-size: 0.8rem; }
+.wb-hist-sync { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--ob-muted); }
+.wb-hist-list { list-style: none; margin: 0; padding: 0; min-height: 0; flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.wb-hist-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: #1a1d22; border: 1px solid #2a2f37; }
+.wb-hist-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; color: #eef1f4; }
+.wb-hist-count { font-weight: 500; color: var(--ob-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wb-hist-titles { font-size: 0.8rem; color: var(--ob-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-hist-now { font-size: 0.78rem; color: var(--ob-out); }
+.wb-hist-tag { font-size: 0.78rem; color: var(--ob-yellow); }
+.wb-hist-go { align-self: flex-start; height: 30px; padding: 0 10px; border: 1px solid #3a3f47; font-size: 0.8rem; }
+.wb-hist-go:hover, .wb-hist-go:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); background: transparent; }
+.wb-hist-go:disabled { opacity: 0.6; cursor: default; }
+.wb-hist-empty { padding: 6px 2px; color: var(--ob-muted); }
+.wb-hist-note { margin: 0; font-size: 0.75rem; line-height: 1.4; color: var(--ob-muted); }
+/* Not saved to the account yet: a small amber dot on the History button. */
+.wb-zbtn { position: relative; }
+.wb-zbtn.wb-unsynced::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ob-yellow);
+  box-shadow: 0 0 0 2px #121418;
+}
 
 /* Cards */
 .wb-card {
@@ -442,7 +493,13 @@
   .wb-key { display: none; }
   .wb-side { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 40%; }
   .wb-panel:not(.wb-side-is-closed) .wb-zoom { right: 8px; bottom: calc(40% + 16px); }
-  .wb-panel:not(.wb-side-is-closed) .wb-keylist { right: 8px; bottom: calc(40% + 60px); }
+  .wb-panel:not(.wb-side-is-closed) .wb-keylist,
+  .wb-panel:not(.wb-side-is-closed) .wb-history { right: 8px; bottom: calc(40% + 60px); }
+  .wb-history { right: 8px; max-height: calc(100% - 120px); }
+  .wb-panel:not(.wb-side-is-closed) .wb-history { max-height: calc(60% - 120px); }
+  /* Little room on a phone: the list gets it, not the explainer. */
+  .wb-hist-note { display: none; }
+  .wb-history { gap: 6px; padding: 10px 12px; }
   .wb-side.wb-side-closed { left: auto; }
   .wb-zoom { right: 8px; bottom: 8px; }
   .wb-card { width: 180px; }

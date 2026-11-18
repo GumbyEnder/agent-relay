@@ -209,15 +209,15 @@
   }
   function hasConversation() { return !!(thread && thread.querySelector(".bubble.me")); }
   // The first message of a new conversation starts on a temporary board ("talk") and
-  // the conversation gets its id moments later: carry the cards drawn so far over.
+  // the conversation gets its id moments later: carry the cards drawn so far over,
+  // in this browser and in the account (whiteboard.js).
   function carryOver(from, to) {
-    if (from !== "talk" || !to || to === "talk") return;
-    try {
-      if (!localStorage.getItem("bz.board." + to) && localStorage.getItem("bz.board.talk")) {
-        localStorage.setItem("bz.board." + to, localStorage.getItem("bz.board.talk"));
-        localStorage.removeItem("bz.board.talk");
-      }
-    } catch (_) { /* best effort */ }
+    if (window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.carry) window.BeeZillaWhiteboard.carry(from, to);
+  }
+  // A board folded away still steers the next message (its instructions): keep this
+  // browser's copy up to date with the account, which another computer may have changed.
+  function refreshFolded(id) {
+    if (!board && window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.sync) window.BeeZillaWhiteboard.sync(id);
   }
   function mountBoard() {
     if (board && boardKey !== boardId()) { var was = boardKey; unmountBoard(); carryOver(was, boardId()); }
@@ -378,8 +378,15 @@
     lastKey = k;
     if (board) { unmountBoard(); carryOver(was, k); sync(); }
     else carryOver(was, k);
+    refreshFolded(k);
   }, 1500);
   sync();
+  refreshFolded(boardId());
+  // Boards from before they were saved to the account (and changes made offline
+  // and never sent) go up quietly, once the page has settled.
+  setTimeout(function () {
+    if (window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.sweep) window.BeeZillaWhiteboard.sweep();
+  }, 6000);
 
   // ── More (bottom row): everything that isn't talking ─────────────────
   var moreBtn = $("talkMoreBtn");

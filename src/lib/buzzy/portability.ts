@@ -111,6 +111,10 @@ const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_job_events: "DELETE FROM buzzy_job_events WHERE user_id = $1 RETURNING 1",
   buzzy_scheduled_jobs: "DELETE FROM buzzy_scheduled_jobs WHERE user_id = $1 RETURNING 1",
   buzzy_connections: "DELETE FROM buzzy_connections WHERE user_id = $1 RETURNING 1",
+  // The Talk whiteboards (0060): the history first (FK child; cascade covers it too,
+  // but the explicit pass keeps the receipt truthful), then the boards.
+  buzzy_whiteboard_versions: "DELETE FROM buzzy_whiteboard_versions WHERE user_id = $1 RETURNING 1",
+  buzzy_whiteboards: "DELETE FROM buzzy_whiteboards WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */
