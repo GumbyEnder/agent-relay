@@ -43,6 +43,8 @@ for (const p of PAGES) {
         clusterBox: box(document.querySelector(".bz-brandrow .bz-cluster")),
         acctBox: box(document.getElementById("accountLink")),
         gearBox: box(document.getElementById("bzGear")),
+        // CR-4: the links live IN the brand row; the separate .bz-navbar strip is gone.
+        navInBrandRow: !!document.querySelector(".bz-brandrow #bzNav"),
         navBars: document.querySelectorAll(".bz-navbar").length,
         tabsVisible: !!(() => { const t = document.getElementById("companyTabs"); return t && getComputedStyle(t).display !== "none"; })(),
         // nav anchors only: document/asset links legitimately open a new tab
@@ -60,7 +62,7 @@ const bits = {
   oneBrandText: [...new Set(pick("brandText"))],
   markSame: same("markBox"), clusterSame: same("clusterBox"),
   acctSame: same("acctBox"), gearSame: same("gearBox"),
-  oneNavBar: pick("navBars").every((n) => n === 1),
+  oneNavRow: pick("navInBrandRow").every(Boolean) && pick("navBars").every((n) => n === 0),
   noCompanyTabs: pick("tabsVisible").every((v) => v === false),
   noNavBlankTarget: pick("navBlanks").every((n) => n === 0),
   skeletons: rows.filter((r) => r.skeleton).map((r) => r.page),
@@ -69,7 +71,7 @@ const bits = {
 for (const r of rows) console.log(r.page.padEnd(13), JSON.stringify({ mark: r.markBox, cluster: r.clusterBox, acct: r.acctBox, gear: r.gearBox }));
 console.log(JSON.stringify(bits, null, 1));
 const pass = bits.oneBrandText.length === 1 && bits.markSame && bits.clusterSame &&
-  bits.acctSame && bits.gearSame && bits.oneNavBar && bits.noCompanyTabs &&
+  bits.acctSame && bits.gearSame && bits.oneNavRow && bits.noCompanyTabs &&
   bits.noNavBlankTarget && bits.skeletons.length === 0 && bits.pageErrors.length === 0;
 console.log("VERDICT:", pass ? "PASS" : "FAIL");
 await browser.close();
