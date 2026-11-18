@@ -209,10 +209,14 @@
     try { return localStorage.getItem("bz_session_id") || "talk"; } catch (_) { return "talk"; }
   }
   function hasConversation() { return !!(thread && thread.querySelector(".bubble.me")); }
-  // The first message of a new conversation starts on a temporary board ("talk") and
-  // the conversation gets its id moments later: carry the cards drawn so far over,
-  // in this browser and in the account (whiteboard.js).
+  // The first message sent from the board in front of a new conversation ("talk")
+  // gets the conversation its id just before the turn starts: carry the cards drawn
+  // there over, in this browser and in the account (whiteboard.js). Only then:
+  // opening an older conversation from the list leaves "talk" where it is.
+  var carryFor = null;  // the conversation this send just started from "talk"
   function carryOver(from, to) {
+    if (from !== "talk" || !to || carryFor !== to) return;
+    carryFor = null;
     if (window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.carry) window.BeeZillaWhiteboard.carry(from, to);
   }
   // A board folded away still steers the next message (its instructions): keep this
@@ -265,7 +269,14 @@
   }
 
   // ── The live process, from talk.html's stream readers ─────────────────
-  window.__bzTurnStart = function () { openBoard(); paintFace(); };
+  window.__bzTurnStart = function () {
+    // talk.html stores the new conversation's id just before this; the board still
+    // knows it was on "talk".
+    var was = board ? boardKey : lastKey;
+    if (was === "talk" && boardId() !== "talk") carryFor = boardId();
+    openBoard();
+    paintFace();
+  };
   window.__bzFlow = function (step) {
     if (!step || !step.id) return;
     openBoard();

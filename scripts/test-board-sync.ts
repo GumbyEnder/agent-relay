@@ -11,8 +11,10 @@
  *   - The browser code (public/buzzy/whiteboard.js) runs here too, in two sandboxes —
  *     two computers, each with its own localStorage — against the real route logic:
  *     an older board moves up, the other computer gets it, offline edits wait and
- *     then arrive, two computers' changes merge card by card, and the board in front
- *     of a new conversation joins it without drawing a step twice.
+ *     then arrive, two computers' changes merge card by card, the board in front of a
+ *     new conversation joins it without drawing a step twice, a shared computer never
+ *     mixes two people's boards, a late upload lands on its own card, going back keeps
+ *     what was drawn meanwhile, and failing saves wait longer each time.
  *
  * Hermetic: every migration on an in-memory PGlite and a local HTTP stand-in.
  *   npx tsx scripts/test-board-sync.ts
@@ -241,12 +243,14 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   // ── Two computers, running the real browser code ───────────────────────
   console.log("\nTwo computers — public/buzzy/whiteboard.js against the route\n");
 
+  const trouble = { failSaves: false };
   const server = http.createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const user = String(req.headers["x-test-user"] || "");
     const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
     if (!user) return send(401, { ok: false, code: "signed_out" });
+    if (trouble.failSaves && req.method === "PUT") return send(500, { ok: false, error: "boom" });
     const path = new URL(req.url || "/", "http://x").pathname;
     const prefix = "/api/buzzy/whiteboards/";
     if (!path.startsWith(prefix)) return send(404, { ok: false });
@@ -257,8 +261,18 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const code = readFileSync(join(process.cwd(), "public/buzzy/whiteboard.js"), "utf8");
+  const page = readFileSync(join(process.cwd(), "public/buzzy/whiteboard.js"), "utf8");
+  const HOOK = "  window.BeeZillaWhiteboard = {";
+  if (!page.includes(HOOK)) throw new Error("whiteboard.js no longer ends with window.BeeZillaWhiteboard = {");
+  // For the test only: a handle on the inner engine (the page exposes none of this).
+  const code = page.replace(HOOK, "  window.__test = { engine: engine, patchCard: patchCard, restoreVersion: restoreVersion };\n" + HOOK);
 
+  type Engine = { backoff: number; status: string; off: boolean };
+  type Inner = {
+    engine(id: string): Engine;
+    patchCard(board: string, card: string, fields: Record<string, unknown>): void;
+    restoreVersion(e: Engine, versionId: number): Promise<{ ok: boolean; error?: string }>;
+  };
   type Api = {
     sync(id: string): Promise<unknown>;
     carry(from: string, to: string): Promise<unknown>;
@@ -268,7 +282,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   };
   function computer(user: string | null, shared?: Map<string, string>) {
     const store = shared ?? new Map<string, string>();
-    const net = { online: true, calls: [] as string[] };
+    const net = { online: true, calls: [] as string[], during: null as null | ((call: string) => void) };
     const sandbox: Record<string, unknown> = {
       console,
       localStorage: {
@@ -284,6 +298,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
       fetch: (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
         net.calls.push(`${init.method || "GET"} ${url}`);
         if (!net.online) return Promise.reject(new TypeError("Failed to fetch"));
+        if (net.during) net.during(`${init.method || "GET"} ${url}`);
         const headers: Record<string, string> = { ...(init.headers || {}) };
         if (user) headers["x-test-user"] = user;
         return fetch(base + url, { method: init.method, headers, body: init.body });
@@ -293,8 +308,10 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     vm.createContext(sandbox);
     vm.runInContext(code, sandbox, { filename: "whiteboard.js" });
     const api = sandbox.BeeZillaWhiteboard as Api;
+    const inner = sandbox.__test as Inner;
     return {
       api,
+      inner,
       net,
       store,
       read(id: string): Board | null { const v = store.get("bz.board." + id); return v ? JSON.parse(v) : null; },
@@ -441,11 +458,19 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     await u2.api.sync("talk");
     const theirs = await account("u2", "talk");
     truthy(!ids(theirs).includes("unsaved-by-u1") && !ids(theirs).includes("saved-by-u1"), `u2's account: ${ids(theirs).join(", ")}`);
-    eq(ids(u2.read("talk")), ["saved-by-u1", "unsaved-by-u1"], "u1's unsaved card is still here for u1");
-    // u1 comes back: their card reaches their own account.
+    eq(ids(u2.read("talk")), ids(theirs), "u2 sees u2's own scratch board");
+    const aside = [...disk.keys()].filter((k) => k.startsWith("bz.board.talk~"));
+    eq(aside.length, 1, "u1's unsaved copy is set aside under u1's code");
+    eq(ids(JSON.parse(disk.get(aside[0]!)!)), ["saved-by-u1", "unsaved-by-u1"]);
+    // u2 starts a conversation: nothing of u1's goes with it.
+    u2.edit("talk", (b) => { b.cards.push(card("u2-first-turn")); });
+    await u2.api.carry("talk", "sess_b1");
+    truthy(!ids(await account("u2", "sess_b1")).some((x) => /u1/.test(x)), "u1's cards never reach u2's conversation");
+    // u1 comes back: their unsaved card reaches their own account.
     const back = computer("u1", disk);
     await back.api.sync("talk");
     eq(ids(await account("u1", "talk")), ["saved-by-u1", "unsaved-by-u1"]);
+    eq([...disk.keys()].filter((k) => k.startsWith("bz.board.talk~")).length, 0, "and nothing is set aside any more");
   });
   await ok("when the account no longer has a board this computer had saved, this copy follows", async () => {
     // B last saw "talk" with a card in it; it was carried into a conversation since.
@@ -461,6 +486,52 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     await C.api.sync("sess_a1");
     eq(ids(C.read("sess_a1")), ["signed-out"]);
     eq(C.net.calls, ["GET /api/buzzy/whiteboards/sess_a1"], "one read, no save");
+  });
+  await ok("an upload that finishes after its board was put away lands on its card only", async () => {
+    // A's copy is stale (B changed the board since) and holds a card still uploading.
+    A.edit("sess_a2", (b) => { b.cards.push(card("uploading", { state: "running", body: "Adding to your Library…" })); });
+    await A.api.sync("sess_a2");
+    await B.api.sync("sess_a2");
+    B.edit("sess_a2", (b) => { b.cards.push(card("from-B-later")); });
+    await B.api.sync("sess_a2");
+    A.inner.patchCard("sess_a2", "uploading", { url: "/api/buzzy/assets/77", state: "", body: "" });
+    await A.api.sync("sess_a2");
+    const got = (await account("u1", "sess_a2"))!.state;
+    const up = got.cards.find((c) => c.id === "uploading")!;
+    eq([up.url, up.state], ["/api/buzzy/assets/77", ""], "the upload landed");
+    truthy(got.cards.some((c) => c.id === "from-B-later"), "and B's newer card is still there");
+  });
+  await ok("going back keeps what was drawn while the request was out", async () => {
+    await db.query("UPDATE buzzy_whiteboard_versions SET started_at = now() - interval '10 minutes' WHERE user_id = 'u1' AND session_id = 'sess_a2'");
+    A.edit("sess_a2", (b) => { b.cards.push(card("later-version")); });
+    await A.api.sync("sess_a2");
+    const older = (await versions("u1", "sess_a2")).find((v) => !v.titles.includes("later-version"))!;
+    A.net.during = (call) => {
+      if (!/\/restore$/.test(call)) return;
+      A.net.during = null;
+      A.edit("sess_a2", (b) => { b.cards.push(card("drawn-meanwhile")); });
+    };
+    const r = await A.inner.restoreVersion(A.inner.engine("sess_a2"), older.id);
+    eq(r.ok, true);
+    const got = ids(await account("u1", "sess_a2"));
+    truthy(!got.includes("later-version"), "the board went back");
+    truthy(got.includes("drawn-meanwhile"), "and kept what was drawn meanwhile");
+    eq(A.read("sess_a2")!.sync!.dirty, false);
+  });
+  await ok("saves that keep failing wait longer each time, even when reads work", async () => {
+    trouble.failSaves = true;
+    A.edit("sess_a2", (b) => { b.cards.push(card("while-the-server-fails")); });
+    const e = A.inner.engine("sess_a2");
+    await A.api.sync("sess_a2");
+    const first = e.backoff;
+    await A.api.sync("sess_a2");
+    const second = e.backoff;
+    trouble.failSaves = false;
+    truthy(first > 0 && second > first, `waits ${first} then ${second} ms`);
+    eq(e.status, "offline");
+    await A.api.sync("sess_a2");
+    eq([e.backoff, e.status], [0, "saved"], "and starts over once it saves");
+    truthy(ids(await account("u1", "sess_a2")).includes("while-the-server-fails"));
   });
   await ok("the merge on its own: two copies that never met don't land on top of each other", () => {
     const m = A.api.merge(null, { cards: [card("mine", { x: 0, y: 0 })], links: [] }, { cards: [card("theirs", { x: 0, y: 0 })], links: [] });

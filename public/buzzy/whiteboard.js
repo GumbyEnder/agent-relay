@@ -308,8 +308,10 @@
       var c = copy(c0);
       var same = c.flow ? byFlow[c.flow] : null;
       if (same) {
-        var keepHere = { id: 1, x: 1, y: 1, user: 1 };
-        if (same.user) { keepHere.title = 1; keepHere.body = 1; }
+        // Its place stays; the person's words there stay unless new ones were written
+        // on this board (then those, still counted as theirs).
+        var keepHere = { id: 1, x: 1, y: 1 };
+        if (same.user && !c.user) { keepHere.title = 1; keepHere.body = 1; keepHere.user = 1; }
         Object.keys(c).forEach(function (k) { if (!keepHere[k]) same[k] = c[k]; });
         map[c0.id] = same.id;
         return;
@@ -344,10 +346,10 @@
 
   // Change a copy that isn't on screen, and note that the account hasn't seen it.
   function editDoc(doc, fn) {
-    var before = contentOf(doc);
+    var before = copy(contentOf(doc));      // a copy: fn may change cards in place
     fn(doc);
     if (canon(contentOf(doc)) === canon(before)) return false;
-    if (!doc.sync.dirty) { doc.sync.dirty = true; doc.sync.base = doc.sync.rev == null ? null : copy(before); }
+    if (!doc.sync.dirty) { doc.sync.dirty = true; doc.sync.base = doc.sync.rev == null ? null : before; }
     return true;
   }
 
@@ -378,7 +380,7 @@
         id: id, chain: Promise.resolve(), live: null,
         timer: 0, firstAt: 0, retryTimer: 0, backoff: 0, fails: 0,
         status: "", msg: "", stuck: null, pulledAt: 0, told: {}, keepalive: false,
-        cleanCopy: null, lastSig: null,
+        cleanCopy: null, lastSig: null, touched: false,
         // The account won't keep this board (another account's conversation, or a copy
         // someone else left unsaved here): it stays on this computer. Tried again on
         // the next page load, which may be that other person's.
@@ -470,6 +472,11 @@
     setStatus(e, "offline");
     retryLater(e);
   }
+  // In step with the account: the next trouble starts its waiting from the beginning.
+  function settled(e) {
+    wentWell(e);
+    setStatus(e, "saved");
+  }
 
   // Send this computer's changes to the account.
   function pushNow(e, round) {
@@ -508,9 +515,8 @@
         return;
       }
       if (res.status === 409 && j.board) {
-        wentWell(e);
         return mergeWith(e, j.board).then(function (again) {
-          if (!again) { setStatus(e, "saved"); return; }
+          if (!again) { settled(e); return; }
           if (round < 3) return pushNow(e, round + 1);
           schedulePush(e, 5000);
         });
@@ -541,42 +547,66 @@
 
   // What the account has, against what this computer has.
   function takeIn(e, board) {
+    return Promise.resolve(settleWith(e, board)).then(function () { return bringBack(e); });
+  }
+  function settleWith(e, board) {
     var doc = docOf(e);
     if (!doc) {
       if (!board) return;
       doc = blank();
     }
     if (e.off) { setStatus(e, "local"); return; }
+    if (!doc.sync.who && doc.sync.dirty && e.touched) ours(doc);   // changed on this page: this account's
     if (foreign(doc)) {
-      // Last saved to another account. Unsaved changes of theirs stay here for them
-      // (never sent to this account); a saved copy is safe in their account, so this
-      // account's own board takes its place.
-      if (doc.sync.dirty) { e.off = true; setStatus(e, "local"); return; }
+      // Last saved to another account: someone else was signed in on this computer.
+      // Their unsaved changes are set aside for them, never sent to this account (a
+      // saved copy is safe in their account), and this account's own board comes up.
+      if (doc.sync.dirty && !setAside(e.id, doc)) { e.off = true; setStatus(e, "local"); return; }
       adopt(e, doc, board ? contentOf(board.state) : { cards: [], links: [] }, board ? board.rev : null);
-      setStatus(e, "saved");
+      settled(e);
       return;
     }
     if (!board) {
       if (doc.sync.rev != null && !doc.sync.dirty) {
         // The account no longer has it (it moved on into its conversation): follow.
         adopt(e, doc, { cards: [], links: [] }, null);
-        setStatus(e, "saved");
+        settled(e);
         return;
       }
       if (doc.sync.dirty) return pushNow(e, 0);         // only here so far: send it up
-      setStatus(e, "saved");
+      settled(e);
       return;
     }
     if (board.rev === doc.sync.rev) {
       if (doc.sync.dirty) return pushNow(e, 0);
-      setStatus(e, "saved");
+      settled(e);
       return;
     }
-    if (!doc.sync.dirty) { adopt(e, doc, contentOf(board.state), board.rev); setStatus(e, "saved"); return; }
+    if (!doc.sync.dirty) { adopt(e, doc, contentOf(board.state), board.rev); settled(e); return; }
     return mergeWith(e, board).then(function (again) {
       if (again) return pushNow(e, 0);
-      setStatus(e, "saved");
+      settled(e);
     });
+  }
+  // Someone else's unsaved copy, kept under their account's code ("bz.board.<id>~<who>")
+  // until they are back on this computer.
+  function setAside(id, doc) { return save(keyFor(id) + "~" + doc.sync.who, doc); }
+  // This account's changes that were set aside while someone else was signed in here
+  // join the board again, and go to the account.
+  function bringBack(e) {
+    if (!whoNow || e.off) return;
+    var key = keyFor(e.id) + "~" + whoNow;
+    var mine = load(key);
+    if (!mine) return;
+    var doc = docOf(e) || blank();
+    var merged = merge3(mine.sync.base, contentOf(mine), contentOf(doc));
+    if (canon(merged) !== sigOf(doc)) {
+      if (!doc.sync.dirty) { doc.sync.dirty = true; doc.sync.base = doc.sync.rev == null ? null : copy(contentOf(doc)); }
+      ours(doc);
+      applyTo(e, doc, merged);
+    }
+    try { localStorage.removeItem(key); } catch (_) { /* best effort */ }
+    return pushNow(e, 0);
   }
   function pull(e) {
     return enqueue(e, function () {
@@ -584,7 +614,6 @@
       return request("GET", API + encodeURIComponent(e.id)).then(function (res) {
         if (res.status === 401) { setStatus(e, "signedout"); return; }
         if (res.status !== 200 || !res.json || !res.json.ok) throw new Error("status " + res.status);
-        wentWell(e);
         var board = res.json.board || null;
         return whenIdle(e).then(function () { return takeIn(e, board); });
       }).catch(function () { couldNotReach(e); });
@@ -606,11 +635,11 @@
         return request("POST", API + encodeURIComponent(e.id) + "/versions/" + encodeURIComponent(versionId) + "/restore", {}).then(function (res) {
           var j = res.json || {};
           if (res.status !== 200 || !j.ok || !j.board) return { ok: false, error: j.error || "" };
-          return whenIdle(e).then(function () {
-            var d = docOf(e) || blank();
-            adopt(e, d, contentOf(j.board.state), j.board.rev);
-            wentWell(e);
-            setStatus(e, "saved");
+          // Anything drawn while the request was out stays, on top of the version
+          // brought back (the same merge as two computers).
+          return mergeWith(e, j.board).then(function (again) {
+            if (again) return pushNow(e, 0).then(function () { return { ok: true }; });
+            settled(e);
             return { ok: true };
           });
         });
@@ -618,24 +647,50 @@
     }).catch(function () { return { ok: false, error: "Can't reach your account right now. Try again in a moment." }; });
   }
 
+  // A late result for one card of a board that is no longer on screen in this mount.
+  function patchCard(boardId, cardId, fields) {
+    var e = engine(boardId);
+    if (e.live) { e.live.patch(cardId, fields); return; }
+    var doc = load(keyFor(boardId));
+    if (!doc || foreign(doc)) return;
+    var changed = editDoc(doc, function (d) {
+      d.cards.forEach(function (c) { if (c.id === cardId) Object.keys(fields).forEach(function (k) { c[k] = fields[k]; }); });
+    });
+    if (changed && save(keyFor(boardId), doc)) push(e);
+  }
+
   // The board in front of a new conversation joins the conversation once it has an
   // id (voice-stage.js), here and in the account; "talk" is then empty again.
   function carry(from, to) {
-    if (from !== SCRATCH || !to || to === SCRATCH) return;
+    if (from !== SCRATCH || !to || to === SCRATCH) return Promise.resolve();
+    var se = engine(from), de = engine(to);
     var src = load(keyFor(from));
-    if (!src || !hasContent(src) || engine(to).live || engine(from).live) return;
-    var dst = load(keyFor(to)) || blank();
-    var was = hasContent(dst);
-    editDoc(dst, function (d) {
-      var g = graft(contentOf(d), contentOf(src));
-      d.cards = g.cards;
-      d.links = g.links;
-      if (!was) { d.view = src.view; if (src.viewSet) d.viewSet = true; }
-    });
-    save(keyFor(to), dst);
+    if (!src || !hasContent(src) || se.live) return Promise.resolve();
+    if (foreign(src)) return Promise.resolve();   // another account's copy never joins this one
+    var g;
+    if (de.live) {
+      // The conversation's board is already up (it opened as the turn started): the
+      // cards join it there, and it saves them.
+      var live = de.live.state;
+      g = graft(contentOf(live), contentOf(src));
+      if (!live.sync.dirty) { live.sync.dirty = true; live.sync.base = live.sync.rev == null ? null : copy(contentOf(live)); }
+      ours(live);
+      de.live.apply(g);
+    } else {
+      var dst = load(keyFor(to)) || blank();
+      var was = hasContent(dst);
+      editDoc(dst, function (d) {
+        g = graft(contentOf(d), contentOf(src));
+        d.cards = g.cards;
+        d.links = g.links;
+        if (!was) { d.view = src.view; if (src.viewSet) d.viewSet = true; }
+      });
+      if (!dst.sync.who) ours(dst);
+      if (!save(keyFor(to), dst)) return Promise.resolve();   // couldn't be written down: "talk" keeps it
+    }
     editDoc(src, function (s) { s.cards = []; s.links = []; });
     save(keyFor(from), src);
-    return Promise.all([push(engine(from)), syncBoard(engine(to))]);
+    return Promise.all([push(se), de.live ? push(de) : syncBoard(de)]);
   }
 
   // Boards from before the account kept them, and changes that never reached it (the
@@ -705,6 +760,11 @@
     var key = keyFor(boardId);
     var eng = engine(boardId);
     var local = load(key);
+    if (local && foreign(local)) {
+      // Last saved to another account (someone else signed in here): set aside for
+      // them if unsaved, and this account's own board is read instead.
+      if (!local.sync.dirty || setAside(boardId, local)) local = null;
+    }
     var state = local || blank();
     var view = state.view;
     var selected = {};          // card id → true
@@ -723,17 +783,13 @@
     function writeNow() {
       clearTimeout(saveTimer);
       saveTimer = 0;
-      if (gone) {
-        // Something that finished after the board was put away (an upload): it joins
-        // this browser's copy as a change, unless the board is on screen again.
-        if (eng.live) return;
-        var d = load(key) || blank();
-        if (editDoc(d, function (x) { x.cards = copy(state.cards); x.links = copy(state.links); })) { save(key, d); push(eng); }
-        return;
-      }
+      // Put away: this copy may be stale now. Late results go through settleCard.
+      if (gone) return;
       var sig = sigOf(state);
       if (sig !== eng.lastSig) {
         eng.lastSig = sig;
+        eng.touched = true;
+        if (!state.sync.who) ours(state);
         if (!state.sync.dirty) {
           state.sync.dirty = true;
           state.sync.base = state.sync.rev == null ? null : eng.cleanCopy;
@@ -1848,6 +1904,19 @@
     document.addEventListener("dragend", dragFinished);
     document.addEventListener("drop", dragFinished);
 
+    // A result that arrives later (an upload) lands on its own card, and only on it:
+    // here while the board is up; otherwise on the board as it is now, on screen in a
+    // newer mount or in this browser's copy (never this mount's older copy of it).
+    function settleCard(id, fields) {
+      if (gone) { patchCard(boardId, id, fields); return; }
+      var c = cardById(id);
+      if (!c) return;                      // removed meanwhile
+      Object.keys(fields).forEach(function (k) { c[k] = fields[k]; });
+      if (nodes[id]) fillCard(nodes[id], c);
+      drawLinks();
+      persist();
+    }
+
     // A file from the computer goes to the person's Library first, then onto the board.
     function uploadFiles(files, at) {
       Array.prototype.slice.call(files || [], 0, 12).forEach(function (f, i) {
@@ -1863,20 +1932,10 @@
         }).then(function (r) { return r.json(); })
           .then(function (j) {
             if (!j || !j.ok || !j.id) throw new Error((j && j.error) || "upload failed");
-            card.url = "/api/buzzy/assets/" + encodeURIComponent(j.id);
-            card.state = "";
-            card.body = "";
-            if (!nodes[card.id]) return;           // removed while it uploaded
-            fillCard(nodes[card.id], card);
-            drawLinks();
-            persist();
+            settleCard(card.id, { url: "/api/buzzy/assets/" + encodeURIComponent(j.id), state: "", body: "" });
           })
           .catch(function (err) {
-            card.state = "failed";
-            card.err = String(err && err.message || "It could not be added.").slice(0, 160);
-            if (!nodes[card.id]) return;
-            fillCard(nodes[card.id], card);
-            persist();
+            settleCard(card.id, { state: "failed", err: String(err && err.message || "It could not be added.").slice(0, 160) });
           });
       });
     }
@@ -2021,6 +2080,7 @@
       flush: function () { if (saveTimer) writeNow(); },
       write: function () { if (saveTimer) writeNow(); else save(key, state); },
       apply: applyRemote,
+      patch: settleCard,
       busy: function () { return pointerBusy || !!editor; },
       status: paintSync,
     };
