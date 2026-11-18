@@ -102,11 +102,14 @@ const root = resolve(import.meta.dirname, "..");
 const talk = readFileSync(resolve(root, "public/buzzy/talk.html"), "utf8");
 const browse = readFileSync(resolve(root, "public/buzzy/browse.js"), "utf8");
 const pilot = readFileSync(resolve(root, "public/buzzy/pilot.js"), "utf8");
-for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "sessionsToggle", "newSessionBtn", "voiceToggle", "micBtn"]) {
+for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newSessionBtn", "voiceToggle", "micBtn"]) {
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }
-for (const tab of ["inspiration", "library", "memory", "experts"]) check(talk.includes(`data-tab="${tab}"`), `talk.html has the ${tab} tab`);
+// History is a place in the row under the search bar now (owner, 2026-11-18), not a
+// button up top: "show my history" presses that tab.
+check(pilot.includes(`'[data-tab="history"]'`), "pilot.js presses the History place");
+for (const tab of ["inspiration", "history", "library", "memory", "experts", "recipes"]) check(talk.includes(`data-tab="${tab}"`), `talk.html has the ${tab} tab`);
 for (const mode of ["advocate", "lockdown", "open"]) check(talk.includes(`data-mode="${mode}"`), `talk.html has the ${mode} privacy choice`);
 for (const kind of ["all", "photo", "audio", "3d", "document"]) check(browse.includes(`"${kind}"`), `browse.js offers the ${kind} kind`);
 check(browse.includes("bz-insp-kinds"), "browse.js draws the kind choices pilot.js presses");

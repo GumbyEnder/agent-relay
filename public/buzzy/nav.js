@@ -767,8 +767,11 @@
     var a = document.createElement("a");
     a.className = "bz-brand";
     a.href = "/buzzy/talk";
+    // The real brand face, content by default (owner, 2026-11-18: "he has an apathetic
+    // face as his default face… it should be in the repo, the proper faces"). On Talk,
+    // voice-stage.js switches it to the face for what BeeZilla is doing.
     a.innerHTML =
-      '<img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="" /><strong>BeeZilla</strong>';
+      '<img class="bz-face" src="/buzzy/brand/revision6_expressions_12-content.png" alt="" /><strong>BeeZilla</strong>';
     return a;
   }
 
@@ -782,6 +785,9 @@
       if (!page || !page.contains(n)) n.remove();
     });
     var nav = ensureNav();
+    // Talk keeps its places along the bottom (owner: "put the top menu below everything
+    // else"), so the link row hides there; every other page keeps it.
+    document.documentElement.classList.toggle("bz-on-talk", section() === "talk");
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();

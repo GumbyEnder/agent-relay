@@ -41,6 +41,8 @@
   var grid = $("bzResultsGrid");
   var note = $("bzSearchNote");
   var tabs = $("bzTabs");
+  // The places and More share one row; a search or the reader hides the whole row.
+  var tabRow = (tabs && tabs.closest && tabs.closest(".bz-tabrow")) || tabs;
   var pane = $("bzPane");
   var recent = $("recentBelow");
 
@@ -139,6 +141,17 @@
       return cache.files;
     });
   }
+  function boardRecipes(force) {
+    if (cache.boardRecipes && !force) return Promise.resolve(cache.boardRecipes);
+    return getJSON("/api/buzzy/board-recipes").then(function (j) {
+      cache.boardRecipes = (j && Array.isArray(j.recipes)) ? j.recipes : [];
+      return cache.boardRecipes;
+    });
+  }
+  window.addEventListener("bz:recipes", function () {
+    cache.boardRecipes = null;
+    if (current === "recipes") select("recipes");
+  });
   function skills() {
     var out = [];
     (window.BZ_EXPERTS || []).forEach(function (e) {
@@ -164,6 +177,7 @@
       getJSON("/api/buzzy/search?q=" + encodeURIComponent(q)),
       files(),
       recipes(),
+      boardRecipes(),
     ]).then(function (r) {
       if (my !== seq) return; // a newer keystroke won
       var s = r[0] || {};
@@ -173,10 +187,23 @@
         list.push({ group: "documents", icon: k.icon, title: d.title || "Untitled document", type: k.label,
           sub: d.snippet || "", href: "/buzzy/library?job=" + encodeURIComponent(d.job_id || d.jobId || d.id) });
       });
-      (r[1] || []).filter(function (f) { return contains(f.filename || f.rel_path, ql); }).slice(0, 12).forEach(function (f) {
+      // Saved pictures, music, 3D and files, found by their search words (45+ per file,
+      // written when the file was saved), so "house" finds the house picture.
+      var seenAsset = {};
+      (s.assets || []).forEach(function (a) {
+        seenAsset[a.id] = 1;
+        var media = a.kind === "picture" ? "pictures" : a.kind === "music" ? "music" : a.kind === "3d" ? "models" : "documents";
+        var k = fileKind(a.filename, a.contentType);
+        list.push({ group: media, media: a.kind, icon: k.icon, title: a.description || a.filename || "File", type: k.label,
+          sub: a.description ? a.filename : "", href: a.url, url: a.url, contentType: a.contentType, name: a.filename, external: true });
+      });
+      (r[1] || []).filter(function (f) { return !seenAsset[f.id] && contains(f.filename || f.rel_path, ql); }).slice(0, 12).forEach(function (f) {
         var k = fileKind(f.filename || f.rel_path, f.content_type);
-        list.push({ group: "documents", icon: k.icon, title: f.filename || f.rel_path || "File", type: k.label,
-          sub: f.job_title ? "In " + f.job_title : "", href: "/api/buzzy/assets/" + encodeURIComponent(f.id), external: true });
+        var media = /^image\//.test(f.content_type || "") ? "pictures" : /^audio\//.test(f.content_type || "") ? "music" : /gltf|glb/.test(f.content_type || "") ? "models" : "documents";
+        list.push({ group: media, media: media === "pictures" ? "picture" : media === "music" ? "music" : media === "models" ? "3d" : "", icon: k.icon,
+          title: f.filename || f.rel_path || "File", type: k.label, sub: f.job_title ? "In " + f.job_title : "",
+          href: "/api/buzzy/assets/" + encodeURIComponent(f.id), url: "/api/buzzy/assets/" + encodeURIComponent(f.id),
+          contentType: f.content_type, name: f.filename, external: true });
       });
       (s.jobs || []).forEach(function (j) {
         list.push({ group: "documents", icon: "work", title: j.title || "Untitled work", type: "Work",
@@ -190,6 +217,9 @@
         list.push({ group: "skills", icon: "skill", title: x.skill, type: "Skill · " + x.expert.name,
           prompt: "I need help with " + x.skill.charAt(0).toLowerCase() + x.skill.slice(1) });
       });
+      (r[3] || []).filter(function (rc) { return contains(rc.name, ql) || contains(rc.instructions, ql); }).slice(0, 12).forEach(function (rc) {
+        list.push({ group: "recipes", icon: "recipe", title: rc.name, type: "Your recipe", sub: "From your whiteboard", boardRecipe: rc });
+      });
       (r[2] || []).filter(function (rc) { return contains(rc.name, ql) || contains(rc.outcome, ql); }).slice(0, 12).forEach(function (rc) {
         list.push({ group: "recipes", icon: "recipe", title: rc.name || rc.id, type: "Recipe",
           sub: rc.outcome || "", href: "/buzzy/recipes#" + encodeURIComponent(rc.id) });
@@ -201,31 +231,73 @@
   function show(list, q) {
     items = list;
     results.classList.remove("hidden");
-    tabs.classList.add("hidden");
+    tabRow.classList.add("hidden");
     pane.classList.add("hidden");
     paintChips();
     var visible = list.filter(function (it) { return filter === "all" || it.group === filter || it.group === "all"; });
     if (!visible.length) {
       grid.innerHTML = '<p class="bz-results-empty">' + (q.length < 2
         ? "Keep typing — two letters or more."
-        : "Nothing of yours matches “" + esc(q) + "”" + (filter === "all" ? "." : " in " + filter + ".")) + "</p>";
+        : "Nothing of yours matches “" + esc(q) + "”" + (filter === "all" ? "." : " in " + ({ pictures: "pictures", music: "music", models: "3D", documents: "documents", skills: "skills", recipes: "recipes" }[filter] || filter) + ".")) + "</p>";
       return;
     }
-    grid.innerHTML = visible.map(function (it) {
+    var pics = visible.filter(function (it) { return it.media === "picture"; });
+    var tracks = visible.filter(function (it) { return it.media === "music"; });
+    var rest = visible.filter(function (it) { return it.media !== "picture" && it.media !== "music"; });
+    var html = "";
+    if (pics.length) {
+      html += '<div class="bz-media-row">' + pics.map(function (it) {
+        var i = list.indexOf(it);
+        return '<a class="bz-hit-img" draggable="true" data-i="' + i + '" href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(it.title) + '">' +
+          '<img src="' + esc(it.url) + '" alt="' + esc(it.title) + '" loading="lazy" draggable="false" />' +
+          '<span class="bz-hit-cap">' + esc(it.title) + "</span>" +
+          '<span class="bz-hit-tools"><button type="button" data-board="' + i + '">Add to board</button></span></a>';
+      }).join("") + "</div>";
+    }
+    tracks.forEach(function (it) {
+      var i = list.indexOf(it);
+      html += '<div class="bz-hit-track" draggable="true" data-i="' + i + '"><span class="bz-hit-title">' + esc(it.title) + "</span>" +
+        '<span class="bz-hit-wave" data-wave="' + i + '"></span>' +
+        '<span class="bz-hit-tools"><button type="button" data-board="' + i + '">Add to board</button>' +
+        '<a href="' + esc(it.url) + '" download>Download</a></span></div>';
+    });
+    html += rest.map(function (it) {
       var i = list.indexOf(it);
       var tag = it.href ? "a" : "button";
       var attrs = it.href
         ? ' href="' + esc(it.href) + '"' + (it.external ? ' target="_blank" rel="noopener noreferrer"' : "")
         : ' type="button"';
-      return "<" + tag + ' class="bz-result" data-i="' + i + '"' + attrs + ">" +
+      return "<" + tag + ' class="bz-result" draggable="true" data-i="' + i + '"' + attrs + ">" +
         (ICON[it.icon] || ICON.file) +
         '<span class="bz-result-text"><span class="bz-result-title">' + esc(it.title) + "</span>" +
         '<span class="bz-result-type">' + esc(it.type) + (it.sub ? " · " + esc(it.sub) : "") + "</span></span></" + tag + ">";
     }).join("");
+    grid.innerHTML = html;
+    // Music always shows its sound.
+    grid.querySelectorAll("[data-wave]").forEach(function (slot) {
+      var it = list[Number(slot.getAttribute("data-wave"))];
+      if (it && window.BeeZillaWave) slot.appendChild(window.BeeZillaWave.player(it.url, { title: it.title }));
+    });
   }
 
+  // A result as a whiteboard card (drag it onto the board, or press Add to board).
+  function asCard(it) {
+    var kind = it.media === "picture" ? "image" : it.media === "music" ? "track" : it.media === "3d" ? "model" :
+      it.group === "skills" ? "skill" : it.icon === "word" ? "document" : it.icon === "sheet" ? "sheet" : it.icon === "pdf" ? "pdf" : "file";
+    return { kind: kind, title: it.name || it.title, url: it.url || (it.href && !/^\/buzzy\//.test(it.href) ? it.href : "") || it.href || "",
+      contentType: it.contentType || "", body: it.group === "skills" ? (it.prompt || "") : "" };
+  }
+  grid.addEventListener("dragstart", function (e) {
+    var el = e.target.closest ? e.target.closest("[data-i]") : null;
+    if (!el || !e.dataTransfer) return;
+    var it = items[Number(el.getAttribute("data-i"))];
+    if (!it) return;
+    e.dataTransfer.setData("application/x-beezilla-card", JSON.stringify(asCard(it)));
+    e.dataTransfer.effectAllowed = "copy";
+  });
+
   function paintChips() {
-    var counts = { all: items.length, documents: 0, skills: 0, recipes: 0 };
+    var counts = { all: items.length, pictures: 0, music: 0, models: 0, documents: 0, skills: 0, recipes: 0 };
     items.forEach(function (it) { if (counts[it.group] != null && it.group !== "all") counts[it.group]++; });
     results.querySelectorAll(".bz-chips [data-f]").forEach(function (b) {
       var f = b.getAttribute("data-f");
@@ -243,7 +315,7 @@
     results.classList.add("hidden");
     var rd = document.getElementById("bzReader");
     if (rd) { rd.classList.add("hidden"); }
-    tabs.classList.remove("hidden");
+    tabRow.classList.remove("hidden");
     pane.classList.remove("hidden");
     say("");
   }
@@ -271,6 +343,14 @@
     });
   });
   grid.addEventListener("click", function (e) {
+    var add = e.target.closest ? e.target.closest("[data-board]") : null;
+    if (add) {
+      e.preventDefault();
+      e.stopPropagation();
+      var hit = items[Number(add.getAttribute("data-board"))];
+      if (hit && window.bzAddToBoard) { window.bzAddToBoard(asCard(hit)); add.textContent = "On the board"; }
+      return;
+    }
     var el = e.target.closest ? e.target.closest(".bz-result") : null;
     if (!el) return;
     var it = items[Number(el.getAttribute("data-i"))];
@@ -278,6 +358,7 @@
     if (it.reader) { e.preventDefault(); openReader(it.reader); return; }
     if (it.session && window.bzOpenSession) { e.preventDefault(); closeSearch(); window.bzOpenSession(it.session); return; }
     if (it.prompt && window.bzPrompt) { e.preventDefault(); closeSearch(); window.bzPrompt(it.prompt); return; }
+    if (it.boardRecipe && window.bzPutRecipeOnBoard) { e.preventDefault(); closeSearch(); window.bzPutRecipeOnBoard(it.boardRecipe); return; }
     if (it.href && window.BeeZillaShell && !it.external && /^\/buzzy\//.test(it.href)) {
       e.preventDefault(); window.BeeZillaShell.go(it.href);
     }
@@ -302,7 +383,7 @@
       '<a class="bz-reader-out" target="_blank" rel="noopener noreferrer">Open the real page &#8599;</a>' +
     "</div>" +
     '<div class="bz-reader-body" aria-live="polite"></div>';
-  root.insertBefore(reader, tabs);
+  root.insertBefore(reader, tabRow);
   var trail = [];   // pages opened, oldest first
   var at = -1;      // index in trail being shown
   var readSeq = 0;
@@ -310,7 +391,7 @@
   function showReader(on) {
     reader.classList.toggle("hidden", !on);
     results.classList.add("hidden");
-    tabs.classList.toggle("hidden", on);
+    tabRow.classList.toggle("hidden", on);
     pane.classList.toggle("hidden", on);
   }
   function crumbs() {
@@ -453,6 +534,79 @@
       // Without the wall, finished work still has a home: show recent work.
       if (recent) { recent.classList.remove("bz-parked"); pane.appendChild(recent); }
     },
+    history: function () {
+      // Past conversations, newest first (owner: "History can move down to where
+      // library, memory, and experts is"). Open one to carry on where it stopped.
+      pane.innerHTML = '<div class="bz-pane-head"><h2>History</h2>' +
+        '<button type="button" class="ob-new" data-new="1">New conversation</button></div><div class="ob-list" aria-live="polite"><p class="ob-empty">Loading…</p></div>';
+      var listEl = pane.querySelector(".ob-list");
+      pane.querySelector("[data-new]").addEventListener("click", function () {
+        var b = document.getElementById("newSessionBtn");
+        if (b) b.click();
+        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { /* best effort */ }
+      });
+      getJSON("/api/buzzy/sessions").then(function (j) {
+        var sessions = (j && Array.isArray(j.sessions)) ? j.sessions : [];
+        if (!sessions.length) { listEl.innerHTML = '<p class="ob-empty">Nothing yet. Talk to BeeZilla and your conversations collect here.</p>'; return; }
+        listEl.innerHTML = sessions.slice(0, 60).map(function (c, i) {
+          var n = c.messageCount != null ? c.messageCount + " message" + (c.messageCount === 1 ? "" : "s") : "";
+          return '<div class="ob-item"><div class="ob-item-main"><p class="ob-item-title">' + esc(c.title || "Untitled conversation") + "</p>" +
+            '<p class="ob-item-sub">' + esc(c.summary || n) + "</p></div>" +
+            '<div class="ob-item-tools"><button type="button" class="ob-go" data-open="' + i + '">Open</button></div></div>';
+        }).join("");
+        listEl.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest("[data-open]") : null;
+          if (!b) return;
+          var c = sessions[Number(b.getAttribute("data-open"))];
+          if (c && window.bzOpenSession) {
+            window.bzOpenSession(c);
+            try { localStorage.setItem("bz_session_id", c.id); } catch (_) { /* best effort */ }
+            try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { /* best effort */ }
+          }
+        });
+      });
+    },
+    recipes: function () {
+      // Recipes you made from the whiteboard (select an area → Create recipe), then
+      // the ready-made ones. Run one, or put it back on the board to change it.
+      pane.innerHTML = '<div class="bz-pane-head"><h2>Recipes</h2>' + link("/buzzy/recipes", "Ready-made recipes") + "</div>" +
+        '<p class="ob-section">Yours</p><div class="ob-list ob-mine"><p class="ob-empty">Loading…</p></div>' +
+        '<p class="ob-section">Ready-made</p><div class="ob-list ob-ready"></div>';
+      var mine = pane.querySelector(".ob-mine"), ready = pane.querySelector(".ob-ready");
+      boardRecipes(true).then(function (list) {
+        if (!list.length) {
+          mine.innerHTML = '<p class="ob-empty">None yet. On the whiteboard, drag a box around your agent.md, skills and output, then choose Create recipe.</p>';
+          return;
+        }
+        mine.innerHTML = list.map(function (rc, i) {
+          var steps = (rc.graph && rc.graph.nodes || []).filter(function (n) { return n.kind === "skill"; }).length;
+          return '<div class="ob-item"><div class="ob-item-main"><p class="ob-item-title">' + esc(rc.name) + "</p>" +
+            '<p class="ob-item-sub">' + steps + " step" + (steps === 1 ? "" : "s") + " · made on your whiteboard</p></div>" +
+            '<div class="ob-item-tools"><button type="button" class="ob-go" data-run="' + i + '">Run</button>' +
+            '<button type="button" data-put="' + i + '">Put on board</button><button type="button" data-del="' + i + '">Delete</button></div></div>';
+        }).join("");
+        mine.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest("button") : null;
+          if (!b) return;
+          var idx = Number(b.getAttribute("data-run") || b.getAttribute("data-put") || b.getAttribute("data-del"));
+          var rc = list[idx];
+          if (!rc) return;
+          if (b.hasAttribute("data-run") && window.bzRunRecipe) window.bzRunRecipe(rc);
+          else if (b.hasAttribute("data-put") && window.bzPutRecipeOnBoard) window.bzPutRecipeOnBoard(rc);
+          else if (b.hasAttribute("data-del")) {
+            if (b.getAttribute("data-sure") !== "1") { b.setAttribute("data-sure", "1"); b.textContent = "Delete for good?"; return; }
+            fetch("/api/buzzy/board-recipes/" + encodeURIComponent(rc.id), { method: "DELETE", credentials: "same-origin" })
+              .then(function () { cache.boardRecipes = null; select("recipes"); });
+          }
+        });
+      });
+      recipes().then(function (list) {
+        ready.innerHTML = list.slice(0, 12).map(function (rc) {
+          return '<a class="ob-item" href="/buzzy/recipes#' + esc(rc.id) + '"><span class="ob-item-main"><span class="ob-item-title">' + esc(rc.name || rc.id) + "</span>" +
+            '<span class="ob-item-sub" style="display:block">' + esc(rc.outcome || "") + "</span></span></a>";
+        }).join("") || '<p class="ob-empty">No ready-made recipes on this server.</p>';
+      });
+    },
     library: function () {
       pane.innerHTML = '<div class="bz-pane-head"><h2>Library</h2>' + link("/buzzy/library", "Open the full Library") + "</div>";
       if (recent) { recent.classList.remove("bz-parked"); pane.appendChild(recent); }
@@ -502,6 +656,8 @@
     var next = all[(at + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length];
     if (next) { select(next.getAttribute("data-tab")); next.focus(); }
   });
+
+  window.bzBrowseSelect = function (name) { select(name); };
 
   // A privacy change can hide or show the wall.
   window.addEventListener("bz:privacy", function () { if (current === "inspiration") select("inspiration"); });

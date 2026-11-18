@@ -1,0 +1,235 @@
+/*
+ * The one board (owner, 2026-11-18). Loaded after talk.html's styles and calm.css.
+ *
+ *   "It's one narrow column on a wide screen. Why don't we take up the whole width?"
+ *   "I told you to put the top menu below everything else."
+ *   "The whiteboard by default should be distinct from its background… a blackboard
+ *    with a little bit of texture… more distinct than the dotted version."
+ *
+ * Top to bottom: the face and name · Talk to BeeZilla (inside the board when it is
+ * open) · the board · one search · the row of places (Inspiration, History, Library,
+ * Memory, Experts, Recipes, More) · what that place holds. Full width, 24px gutters.
+ * Six things on the first screen at most; nothing covers anything else.
+ */
+
+:root {
+  --ob-gutter: 24px;
+  --ob-slate: #262a30;
+  --ob-slate-edge: #3b4049;
+  --ob-card: #15171b;
+  --ob-card-edge: #2f343c;
+  --ob-text: #f2f2f2;
+  --ob-muted: #9aa0a8;
+  --ob-yellow: #ffc107;
+  --ob-skill: #9b8ec4;
+  --ob-out: #5baf6b;
+  --ob-red: #e07a7a;
+}
+
+/* ── Full width ─────────────────────────────────────────────────────── */
+html.bz-on-talk main { padding: 0 var(--ob-gutter) 40px; max-width: none; }
+.chat-layout,
+.chat-layout:has(.talk-ws:not(.hidden)) {
+  display: block !important;
+  max-width: none !important;
+  width: 100%;
+  margin: 0;
+}
+.chat-main { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+
+/* ── Header: the face top-left, the account top-right; the links moved down ── */
+html.bz-on-talk .bz-navbar { display: none !important; }
+html.bz-on-talk header { border-bottom: 0 !important; background: transparent !important; }
+.bz-brandrow .bz-brand img.bz-face,
+html.bz-on-talk .bz-brandrow .bz-brand img {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: contain;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 800; letter-spacing: 0.01em; }
+.bz-brand img.bz-face-swap { transform: scale(1.08); }
+@media (prefers-reduced-motion: reduce) { .bz-brand img.bz-face-swap { transform: none; } }
+
+/* ── Out of sight on the first screen ──────────────────────────────────
+   The weekly digest, the old header row, the footer line, the Chat/Work tabs and
+   the speak-replies switch (talking IS the voice switch). */
+#digestCard,
+.chat-header-row,
+#chatCompany,
+.bz-powered,
+#obParking,
+#talkWorkspace,
+.chat-mascot { display: none !important; }
+
+/* ── Talk to BeeZilla, on top while the board is folded ──────────────── */
+.ob-start { order: 1; margin-top: 4px; }
+.ob-start:empty { display: none; }
+.ob-start .talk-bar { padding: 0.6rem; }
+.ob-start .talk-btn { min-height: 3.4rem; font-size: 1.15rem; }
+
+/* ── The board's place on the page (its own look is in whiteboard.css) ── */
+.ob-board { order: 2; margin-top: 10px; height: clamp(520px, 72vh, 1100px); display: flex; }
+.ob-board.hidden { display: none; }
+.ob-board .wb-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  border: 1px solid var(--ob-slate-edge);
+  background: #1b1e23;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+/* ── Page order: Talk (or the board), anything waiting on you, then find & browse ── */
+.chat-main > * { order: 3; }
+.chat-main > .ob-start { order: 1; }
+.chat-main > .ob-board { order: 2; }
+.chat-main > #chatError { order: 4; }
+.chat-main > .bz-browse { order: 5; }
+.chat-main > #recentBelow { order: 6; }
+
+/* ── Below the board: one search, then the places ───────────────────── */
+.bz-browse { margin-top: 18px; }
+.bz-tabrow { display: flex; align-items: center; gap: 8px; }
+.bz-tabrow .bz-tabs { flex: 1 1 auto; min-width: 0; }
+.bz-tabrow .talk-more { flex: 0 0 auto; }
+.bz-pane-head .ob-new { min-height: 0; padding: 0.4rem 0.95rem; border-radius: 999px; border: 1px solid #6b5a1e; background: transparent; color: var(--ob-yellow); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+.bz-pane-head .ob-new:hover { background: #2a2204; }
+a.ob-item { text-decoration: none; }
+.bz-search { max-width: none; }
+.bz-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.bz-tabs > [role="tab"] { white-space: nowrap; }
+.bz-tabrow .talk-more { position: relative; }
+.bz-tabrow .talk-more-btn {
+  width: auto;
+  height: auto;
+  min-height: 2.2rem;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bz-tabrow .talk-more-btn .tm-dots { font-size: 1.1rem; line-height: 1; }
+.bz-tabrow .tm-sr { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+.talk-more-panel { max-height: 70vh; overflow: auto; }
+.talk-more-panel.up { top: auto; bottom: calc(100% + 10px); }
+.talk-more-panel > a {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 9px;
+  color: #e8e8e8;
+  text-decoration: none;
+  font-size: 0.93rem;
+}
+.talk-more-panel > a:hover, .talk-more-panel > a:focus-visible { background: #222; outline: none; }
+.tm-sep { height: 1px; margin: 4px 6px; background: #2a2a2a; }
+.tm-head { padding: 0.5rem 0.7rem 0.2rem; color: #8a8a8a; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
+#voiceToggle, #sessionsToggle, .tm-mode { display: none !important; }
+
+/* Search results: pictures look like pictures, music shows its waveform. */
+.bz-results-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.bz-media-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; grid-column: 1 / -1; }
+.bz-hit-img { position: relative; display: block; border-radius: 12px; overflow: hidden; background: #111; border: 1px solid #242424; aspect-ratio: 1 / 1; }
+.bz-hit-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bz-hit-img .bz-hit-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 10px 8px; font-size: 0.8rem; color: #fff; background: linear-gradient(transparent, rgba(0, 0, 0, 0.75)); }
+.bz-hit-track { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 14px; background: #141414; border: 1px solid #242424; }
+.bz-hit-track .bz-hit-title { font-weight: 700; font-size: 0.92rem; }
+.bz-hit-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.bz-hit-tools button, .bz-hit-tools a {
+  min-height: 0;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: transparent;
+  color: #d9d9d9;
+  font: inherit;
+  font-size: 0.78rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.bz-hit-tools button:hover, .bz-hit-tools a:hover { border-color: var(--ob-yellow); color: var(--ob-yellow); }
+.bz-hit-img .bz-hit-tools { position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity 0.15s; }
+.bz-hit-img:hover .bz-hit-tools, .bz-hit-img:focus-within .bz-hit-tools { opacity: 1; }
+.bz-hit-img .bz-hit-tools button { background: rgba(0, 0, 0, 0.6); border-color: rgba(255, 255, 255, 0.25); color: #fff; }
+
+/* History and Recipes in the bottom row */
+.ob-list { display: flex; flex-direction: column; gap: 8px; }
+.ob-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #141414;
+  border: 1px solid #242424;
+}
+.ob-item-main { flex: 1 1 auto; min-width: 0; }
+.ob-item-title { margin: 0; font-weight: 700; font-size: 0.95rem; color: #f2f2f2; }
+.ob-item-sub { margin: 3px 0 0; font-size: 0.85rem; color: #9a9a9a; line-height: 1.45; }
+.ob-item-tools { display: flex; gap: 6px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+.ob-item-tools button {
+  min-height: 0;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: transparent;
+  color: #e6e6e6;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.ob-item-tools button.ob-go { background: var(--ob-yellow); border-color: var(--ob-yellow); color: #141414; font-weight: 700; }
+.ob-item-tools button:hover { border-color: var(--ob-yellow); }
+.ob-section { margin: 18px 0 8px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.07em; color: #8a8a8a; }
+.ob-empty { color: #9a9a9a; font-size: 0.92rem; line-height: 1.5; }
+
+/* Your AI key */
+.ob-dialog { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.55); }
+.ob-dialog-box {
+  width: min(480px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: #151515;
+  border: 1px solid #2c2c2c;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ob-dialog-head { display: flex; align-items: center; justify-content: space-between; }
+.ob-dialog-head h2 { margin: 0; font-size: 1.1rem; }
+.ob-x { min-height: 0; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 1px solid #333; background: transparent; color: #ddd; cursor: pointer; }
+.ob-dialog-text, .ob-dialog-note { margin: 0; color: #a8a8a8; font-size: 0.88rem; line-height: 1.5; }
+.ob-key-now { margin: 0; font-size: 0.9rem; color: #e8e8e8; }
+.ob-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: #bdbdbd; }
+.ob-field[hidden] { display: none; }
+.ob-field input, .ob-field select { height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid #333; background: #0d0d0d; color: #fff; font: inherit; }
+.ob-key-msg { margin: 0; min-height: 1.2em; font-size: 0.88rem; color: #ffd54f; }
+.ob-dialog-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ob-primary { background: var(--ob-yellow); color: #141414; border: 0; border-radius: 999px; padding: 0.6rem 1.2rem; font-weight: 700; cursor: pointer; }
+.ob-forget { background: transparent; color: #e6e6e6; border: 1px solid #3a3a3a; border-radius: 999px; padding: 0.6rem 1.1rem; cursor: pointer; }
+.ob-forget[hidden] { display: none; }
+
+/* ── Phone width ──────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  :root { --ob-gutter: 16px; }
+  .ob-board { height: auto; min-height: 80vh; }
+  .ob-board .wb-panel { min-height: 80vh; }
+  .bz-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .bz-tabs::-webkit-scrollbar { display: none; }
+  .ob-item { flex-direction: column; }
+  .ob-item-tools { justify-content: flex-start; }
+}
+.bz-tabrow.hidden { display: none; }
+

@@ -1450,6 +1450,7 @@
   <link rel="stylesheet" href="/buzzy/voice-stage.css" />
   <link rel="stylesheet" href="/buzzy/whiteboard.css" />
   <link rel="stylesheet" href="/buzzy/calm.css" />
+  <link rel="stylesheet" href="/buzzy/oneboard.css" />
   <link rel="stylesheet" href="/buzzy/share.css" />
 </head>
 <body>
@@ -1508,7 +1509,6 @@
     </div>
   </header>
   <main>
-    <div id="digestCard" class="bz-digest hidden" style="display:none"></div>
     <div id="chatScreen">
       <div class="chat-layout">
         <div class="chat-main">
@@ -1546,6 +1546,11 @@
             </div>
             <div class="vs-board" id="vsBoard"></div>
           </div>
+          <!-- Talk to BeeZilla, above everything (owner, 2026-11-18: "a single button you
+               push called Talk to BeeZilla. With a single line chat bubble… That would be
+               above everything else"). While the whiteboard is open this same bar moves into
+               its top edge (voice-stage.js); folded, it waits here. -->
+          <div id="obStart" class="ob-start">
           <!-- One line to make anything: the docked Talk to BeeZilla button starts voice,
                the field takes typing, and a file or picture dropped anywhere on the bar
                is read like an attached paper. No plus button (owner's reference A6b7ky7). -->
@@ -1564,52 +1569,6 @@
                   <button id="chatSend" class="talk-send" disabled aria-label="Send" title="Send">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.6l-4.3-4.3 1.4-1.4L20.4 13l-6.7 6.7-1.4-1.4 4.3-4.3H4z"/></svg>
                   </button>
-                </div>
-              </div>
-              <!-- Everything that isn't talking lives behind one button (owner, 2026-11-17:
-                   "It should just be one. Talk to BeeZilla."). calm.css styles it. -->
-              <div class="talk-more" id="talkMore">
-                <button type="button" id="talkMoreBtn" class="talk-more-btn" aria-expanded="false" aria-controls="talkMorePanel" title="More">
-                  <span aria-hidden="true">&#8943;</span><span class="tm-sr">More</span>
-                </button>
-                <div class="talk-more-panel hidden" id="talkMorePanel" role="group" aria-label="More">
-                  <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New conversation</button>
-                  <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
-                  <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open the whiteboard">&#9638; Whiteboard</button>
-                  <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a file</button>
-                  <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read BeeZilla's replies aloud">
-                    <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Speak replies</span>
-                  </button>
-                  <div class="tm-row"><span class="tm-label">Mode</span>
-                    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-                      <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-                      <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
-                    </div>
-                  </div>
-                  <div class="tm-row"><span class="tm-label">Privacy</span>
-                    <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
-                    <div class="talk-privacy">
-                      <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
-                        <span class="pv-icons"></span>
-                      </button>
-                      <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
-                        <div class="pp-head">
-                          <strong>Privacy</strong>
-                          <span class="pp-tools">
-                            <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
-                            <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
-                          </span>
-                        </div>
-                        <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
-                          <span class="pp-thumb" aria-hidden="true"></span>
-                          <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
-                          <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
-                          <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
-                        </div>
-                        <p class="pp-desc" id="privacyDesc"></p>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
               <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
@@ -1631,18 +1590,26 @@
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
             </div>
-            <!-- The whiteboard opened from the bar while voice is off (voice-stage.js). -->
             <div id="boardSolo" class="board-solo"></div>
           </div>
+          </div>
 
-          <!-- The workspace (owner, 2026-11-17: "Talk to BeeZilla, and then it opens up the
-               whiteboard area"): the conversation on the left, the whiteboard on the right.
-               Talking, typing or opening the whiteboard opens it (voice-stage.js). -->
-          <div id="talkWorkspace" class="talk-ws hidden" aria-label="Workspace">
+          <!-- The whiteboard, full width (owner, 2026-11-18: "when you start talking to it, it
+               expands the whiteboard and puts the Talk to BeeZilla thing in the whiteboard").
+               The agent's work is drawn on it live: agent.md, a line to each skill, the
+               output. The conversation sits inside it on the right. -->
+          <div id="obBoard" class="ob-board hidden" aria-label="Whiteboard"></div>
+          <!-- Where the conversation and the old mode switch wait while the board is folded. -->
+          <div id="obParking" hidden>
             <div class="talk-ws-thread" id="talkWsThread">
               <div class="chat-messages" id="chatMessages"></div>
             </div>
-            <div class="talk-ws-board" id="talkWsBoard"></div>
+                  <div class="tm-row tm-mode"><span class="tm-label">Mode</span>
+                    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+                      <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+                      <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+                    </div>
+                  </div>
           </div>
 
           <!-- The brief is one line above the conversation, expandable in place.
@@ -1662,7 +1629,6 @@
             </div>
           </div>
 
-          <div class="chat-messages" id="chatMessages"></div>
           <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
           <div id="paperDrop" class="paper-drop hidden">
             <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
@@ -1708,8 +1674,8 @@
           <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
             <div class="bz-search" role="search">
               <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
-              <input id="bzSearch" type="search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"
-                     aria-label="Search your work, skills and recipes, or enter a web address" />
+              <input id="bzSearch" type="search" placeholder="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
+                     aria-label="Search your pictures, music, 3D, documents, skills and recipes, or enter a web address" />
               <span class="bz-search-tools">
                 <!-- A share control that only copies a URL has to SAY so. The
                      icon alone read as "share this" and left the owner guessing
@@ -1730,23 +1696,78 @@
               </div>
               <div class="bz-chips" role="tablist" aria-label="Show">
                 <button type="button" role="tab" data-f="all" class="on" aria-selected="true">All <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="pictures" aria-selected="false">Pictures <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="music" aria-selected="false">Music <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="models" aria-selected="false">3D <span class="bz-chip-n"></span></button>
                 <button type="button" role="tab" data-f="documents" aria-selected="false">Documents <span class="bz-chip-n"></span></button>
                 <button type="button" role="tab" data-f="skills" aria-selected="false">Skills <span class="bz-chip-n"></span></button>
                 <button type="button" role="tab" data-f="recipes" aria-selected="false">Recipes <span class="bz-chip-n"></span></button>
               </div>
               <div class="bz-results-grid" id="bzResultsGrid"></div>
             </div>
-            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Browse">
+            <!-- The places, below everything (owner: "the top menu below everything else… History
+                 can move down… left of library and right of inspiration… Recipes should be at
+                 the bottom as well… And the more button should be below as well"). -->
+            <div class="bz-tabrow">
+            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Places">
               <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
+              <button type="button" role="tab" data-tab="history" aria-selected="false" tabindex="-1">History</button>
               <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
               <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
               <button type="button" role="tab" data-tab="experts" aria-selected="false" tabindex="-1">Experts</button>
+              <button type="button" role="tab" data-tab="recipes" aria-selected="false" tabindex="-1">Recipes</button>
+            </div>
+              <div class="talk-more" id="talkMore">
+                <button type="button" id="talkMoreBtn" class="talk-more-btn" aria-expanded="false" aria-controls="talkMorePanel" title="More">
+                  <span class="tm-sr">More</span><span class="tm-dots" aria-hidden="true">&#8943;</span>
+                </button>
+                <div class="talk-more-panel hidden" id="talkMorePanel" role="group" aria-label="More">
+                  <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New conversation</button>
+                  <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open or fold the whiteboard">Whiteboard</button>
+                  <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">Attach a file</button>
+                  <button type="button" id="aiKeyBtn" class="talk-attach" title="Use your own AI account">Your AI key</button>
+                  <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
+                  <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read BeeZilla's replies aloud">
+                    <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Speak replies</span>
+                  </button>
+                  <div class="tm-row"><span class="tm-label">Privacy</span>
+                    <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
+                    <div class="talk-privacy">
+                      <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
+                        <span class="pv-icons"></span>
+                      </button>
+                      <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
+                        <div class="pp-head">
+                          <strong>Privacy</strong>
+                          <span class="pp-tools">
+                            <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
+                            <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
+                          </span>
+                        </div>
+                        <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
+                          <span class="pp-thumb" aria-hidden="true"></span>
+                          <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
+                          <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
+                          <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+                        </div>
+                        <p class="pp-desc" id="privacyDesc"></p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="tm-sep" role="separator"></div>
+                  <p class="tm-head">More places</p>
+                  <a href="/buzzy/sketch">Sketch</a>
+                  <a href="/buzzy/studio">Music studio</a>
+                  <a href="/buzzy/capabilities">What BeeZilla can do</a>
+                  <a href="/buzzy/wallet">Honey Drops</a>
+                  <a href="/buzzy/upload">Publish</a>
+                </div>
+              </div>
             </div>
             <div class="bz-pane" id="bzPane" role="tabpanel"></div>
           </section>
           <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
           <div id="chatError" class="chat-error hidden"></div>
-          <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
         </div>
       </div>
     </div>
@@ -2646,16 +2667,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function watchModel3d(taskId, msg) {
       var tries = 0;
       var misses = 0;
+      function onBoard(step) {
+        if (window.__bzFlow) window.__bzFlow(Object.assign({ kind: "output", id: "out:3d:" + taskId, title: "3D model", parent: "skill:model3d", contentType: "model/gltf-binary" }, step));
+      }
       function show(text) {
         msg.progress = text;
         var line = document.querySelector('[data-model3d="' + String(taskId).replace(/"/g, "") + '"]');
         if (line) line.textContent = text;
         else renderChatMessages();
+        onBoard({ state: "running", detail: text });
       }
       function stop(text) {
         clearInterval(tick);
         msg.progress = text;
         renderChatMessages();
+        onBoard({ state: "failed", detail: text });
       }
       msg.model3dTask = taskId;
       show("Building the 3D model…");
@@ -2670,6 +2696,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               msg.progress = "";
               msg.asset = p.asset;
               renderChatMessages();
+              onBoard({ state: "done", title: p.asset.name || "3D model", url: p.asset.url, contentType: p.asset.type || "model/gltf-binary", detail: "" });
               return;
             }
             if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
@@ -2702,16 +2729,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var startedAt = Date.now();
       var etaMin = Math.max(1, Number((info && info.etaMinutes) || 5));
       msg.videoJobId = jobId;
+      function onBoard(step) {
+        if (window.__bzFlow) window.__bzFlow(Object.assign({ kind: "output", id: "out:video:" + jobId, parent: "skill:video", contentType: "video/mp4" }, step));
+      }
       function show(text) {
         msg.progress = text;
         var line = document.querySelector('[data-video="' + String(jobId).replace(/"/g, "") + '"]');
         if (line) line.textContent = text;
         else renderChatMessages();
+        onBoard({ state: "running", detail: text });
       }
       function stop(text) {
         clearInterval(tick);
         msg.progress = text;
         renderChatMessages();
+        onBoard({ state: "failed", detail: text });
       }
       function left() {
         var mins = Math.max(0, Math.round(etaMin - (Date.now() - startedAt) / 60000));
@@ -2736,6 +2768,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 reviewNote: p.reviewNote || "Review before posting — this video was made with AI"
               };
               renderChatMessages();
+              onBoard({ state: "done", title: msg.asset.name, url: msg.asset.url, contentType: msg.asset.type, detail: "" });
               return;
             }
             if (p.state === "failed" || p.ok === false) {
@@ -2874,6 +2907,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return bubble;
       }).join("");
       container.innerHTML = html;
+      // Music always shows its sound: each track's player becomes the waveform player.
+      if (window.BeeZillaWave) {
+        container.querySelectorAll("audio.media-audio").forEach(function (a) {
+          var src = a.getAttribute("src");
+          if (src) a.replaceWith(window.BeeZillaWave.player(src, { title: "the track" }));
+        });
+      }
       // BZ-F011: expert handoff suggestion (never an auto-switch). Re-appended
       // after every render because this container is rebuilt from state.
       if (chatState.expertSuggestion && !chatState.expert) {
@@ -3267,9 +3307,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function setChatMascot(expr) {
-      // The mascot is a canvas now — map the brand expression names onto the
-      // avatar's animation states instead of swapping a PNG.
+      // The face top-left is the real brand art (voice-stage.js swaps the picture);
+      // the old drawn avatar only follows along for pages that still mount it.
       setAvatarState(AVATAR_STATES[expr] || "idle");
+      if (window.bzFace) window.bzFace(expr);
     }
 
     // ── Inline slot editing ─────────────────────────────────────
@@ -5548,6 +5589,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 metrics.spoken = true;
               }
             }
+          } else if (ev === "flow") {
+            // The live whiteboard: agent.md, each skill, each output, as it happens.
+            if (window.__bzFlow) window.__bzFlow(payload);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -5633,6 +5677,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               mountLiveBubble(liveBubble);
             }
             liveBubble.textContent = liveText;
+          } else if (ev === "flow") {
+            if (window.__bzFlow) window.__bzFlow(payload);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -5675,9 +5721,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       var input = document.getElementById("chatInput");
       if (input) {
-        input.placeholder = mode === "work"
-          ? "What are we going to accomplish together"
-          : "What do you want to talk about";
+        // One bar, one question (owner: "We don't need to have a difference between chat
+        // and work"). The mode only changes how BeeZilla steers, never what you see.
+        input.placeholder = "What would you like to make?";
       }
       var briefH = document.querySelector("#briefPanel h3");
       if (briefH) briefH.textContent = "Brief";
@@ -6778,6 +6824,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // reply instead of running (and charging for) the turn twice (QA-09/10).
         const attemptId =
           "att_" + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : String(Date.now()));
+        // The board opens the moment a turn starts, ready for its first step.
+        if (window.__bzTurnStart) window.__bzTurnStart(text);
         const sendBody = {
           jobId: chatState.jobId,
           sessionId: chatState.sessionId || undefined,
@@ -6790,6 +6838,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           attemptId: attemptId,
           // The Talk bar's privacy slider: Lockdown turns off web lookups and outside makers.
           privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
+          // The person's own edits to the process on the whiteboard (or a recipe they ran).
+          boardInstructions: (window.bzBoardInstructions && window.bzBoardInstructions()) || undefined,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
@@ -6850,7 +6900,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
 
         if (!data.ok) {
-          setChatMascot("18-unimpressed");
+          if (window.__bzTurnDone) window.__bzTurnDone(null);
+          setChatMascot("10-nervous");
           // FIX #5: show error and disable input if signed out
           if (data.code === "signed_out") {
             input.disabled = true;
@@ -6914,11 +6965,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (rpBtn) rpBtn.classList.remove("hidden");
           }
         } else {
-          setChatMascot("17-attentive");
+          setChatMascot("12-content");
         }
 
         renderChatMessages();
         renderSlotChecklist();
+        // Whatever the turn produced goes on the board, if the stream did not already put it there.
+        if (window.__bzTurnDone) window.__bzTurnDone(data);
         // Asked BeeZilla to do something on this page ("open the whiteboard"): it
         // does it where the owner can watch, with Stop at every step (pilot.js).
         if (Array.isArray(data.actions) && data.actions.length && window.BeeZillaPilot) window.BeeZillaPilot.run(data.actions);
@@ -7465,34 +7518,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   </script>
 
 <script>
-/* ── Your week with BeeZilla — activity digest (plan doc 23 #7) ────────
-   Skippable by design: any failure or an empty week renders nothing. */
-(function () {
-  var card = document.getElementById("digestCard");
-  if (!card) return;
-  fetch("/api/buzzy/digest", { credentials: "include" })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (data) {
-      if (!data || !data.ok || !data.digest) return;
-      var d = data.digest;
-      if (!d.turns && !d.draftsCreated) return; // quiet empty state
-      var bits = [];
-      bits.push(d.turns + " conversation" + (d.turns === 1 ? "" : "s"));
-      if (d.draftsCreated > 0) {
-        bits.push(d.draftsCreated + " draft" + (d.draftsCreated === 1 ? "" : "s") +
-          (d.draftsApproved > 0 ? " (" + d.draftsApproved + " approved)" : " ready for you"));
-      }
-      var money = "under a penny";
-      if (d.dollarsEstimate >= 0.005) money = "about $" + d.dollarsEstimate.toFixed(2);
-      bits.push(money + " this week");
-      card.textContent = "Your week with BeeZilla: " + bits.join(", ") + ".";
-      card.style.display = "block";
-    })
-    .catch(function () { /* never surface an error for the digest */ });
-})();
-</script>
-
-<script>
 /* ── Plan + remaining quota ────────────────────────────────────────────── */
 (function () {
   function render(d) {
@@ -7551,6 +7576,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/inspiration.js"></script>
 <script src="/buzzy/qr.js"></script>
 <script src="/buzzy/share.js"></script>
+<script src="/buzzy/waveform.js"></script>
 <script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>

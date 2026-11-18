@@ -67,14 +67,16 @@
           { sel: "#privacyClose", name: "Close", optional: true },
         ];
       case "mode":
-        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " tab" }];
+        // Chat and Work are one bar now; the switch stays in the page, out of sight.
+        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " setting", hiddenOk: true }];
       case "history":
-        return [{ sel: "#sessionsToggle, #sessionsPill", name: "History" }];
+        return [{ sel: '[data-tab="history"]', name: "History, under the search bar" }];
       case "newChat":
         // The chat header's New button; the draft banner and History drawer have their own.
         return [{ sel: "#newSessionBtn, #newChatBtn, #drawerNewChat", name: "the New chat button" }];
       case "speak":
-        return [{ sel: "#voiceToggle", name: "Speak replies", already: function (el) { return pressed(el) === (v === "on"); } }];
+        // Talking to BeeZilla is the voice switch; reading typed replies aloud stays a setting.
+        return [{ sel: "#voiceToggle", name: "Speak replies", hiddenOk: true, already: function (el) { return pressed(el) === (v === "on"); } }];
       case "voice":
         return [{ sel: "#micBtn", name: "the microphone button", already: pressed }];
       case "go":
@@ -268,10 +270,19 @@
   };
 
   Run.prototype.press = async function (p) {
-    await this.reveal(p.sel);
+    if (!p.hiddenOk) await this.reveal(p.sel);
     if (this.stopped) return "stopped";
-    var target = await find(p.sel, p.optional ? 600 : 2500);
+    var target = await find(p.sel, p.optional || p.hiddenOk ? 600 : 2500);
     if (this.stopped) return "stopped";
+    if (!target && p.hiddenOk) {
+      // A setting with no button on screen: change it directly, nothing to light up.
+      var quiet = document.querySelector(p.sel);
+      if (quiet) {
+        if (!(p.already && p.already(quiet))) quiet.click();
+        await wait(150);
+        return "ok";
+      }
+    }
     if (!target) {
       if (p.optional) return "ok";
       if (p.go) { location.assign(p.go); return "ok"; }
