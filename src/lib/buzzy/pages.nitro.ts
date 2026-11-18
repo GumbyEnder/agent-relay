@@ -13,17 +13,10 @@
  * Path is sanitized (no traversal); only known pages are served.
  */
 
-import { defineEventHandler, getMethod, sendRedirect, setResponseStatus } from "h3";
+import { defineEventHandler, getHeader, getMethod, sendRedirect, setResponseStatus } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-// OpenPanel write-client ids are public (safe in served HTML). BeeZilla keeps its own
-// copy because src/lib/buzzy may import only db, auth/verify.server,
-// operator-prefs.server and board-server (scripts/check-buzzy-boundary.mjs); the
-// console's copy is src/lib/analytics-id.ts. scripts/test-one-board.ts checks the two
-// stay equal. Same brand rule as there: BeeZilla traffic lands in BeeZilla's project.
-const BEEZILLA_CLIENT_ID = "ddc73803-6e93-42d5-ba20-eaf0e30b637f";
-const DEVBOARDS_CLIENT_ID = "875ba120-0402-42f8-aa19-b26a56c1c09b";
-const OPENPANEL_CLIENT_ID = process.env.BZ_BRAND === "beezilla" ? BEEZILLA_CLIENT_ID : DEVBOARDS_CLIENT_ID;
+import { openpanelClientId } from "@/lib/analytics-id";
 
 /**
  * Product analytics for the static pages.
@@ -39,13 +32,14 @@ const OPENPANEL_CLIENT_ID = process.env.BZ_BRAND === "beezilla" ? BEEZILLA_CLIEN
  * script-tag snippet verbatim — the queue-proxy shape matters, since op1.js drains
  * whatever window.op.q already holds before it initialises.
  */
-const OP_SNIPPET = [
-  "<script>",
-  "window.op=window.op||function(){var n=[];return new Proxy(function(){arguments.length&&n.push([].slice.call(arguments))},{get:function(t,r){return\"q\"===r?n:function(){n.push([r].concat([].slice.call(arguments)))}} ,has:function(t,r){return\"q\"===r}}) }();",
-  `window.op('init',{clientId:'${OPENPANEL_CLIENT_ID}',trackScreenViews:true,trackOutgoingLinks:false,trackAttributes:true});`,
-  "</script>",
-  '<script src="https://openpanel.dev/op1.js" defer async></script>',
-].join("");
+const opSnippet = (host: string | undefined) =>
+  [
+    "<script>",
+    "window.op=window.op||function(){var n=[];return new Proxy(function(){arguments.length&&n.push([].slice.call(arguments))},{get:function(t,r){return\"q\"===r?n:function(){n.push([r].concat([].slice.call(arguments)))}} ,has:function(t,r){return\"q\"===r}}) }();",
+    `window.op('init',{clientId:'${openpanelClientId(host)}',trackScreenViews:true,trackOutgoingLinks:false,trackAttributes:true});`,
+    "</script>",
+    '<script src="https://openpanel.dev/op1.js" defer async></script>',
+  ].join("");
 
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
@@ -222,7 +216,9 @@ export default defineEventHandler(async (event) => {
   // page already carries the snippet so a double-include cannot double-count.
   if (!page.includes("openpanel.dev/op1.js")) {
     const at = page.lastIndexOf("</body>");
-    if (at > 0) page = page.slice(0, at) + OP_SNIPPET + page.slice(at);
+    // Host, not the build: this one process answers beezilla.net and
+    // app.devboards.ai, and only the request knows which project it is.
+    if (at > 0) page = page.slice(0, at) + opSnippet(getHeader(event, "host")) + page.slice(at);
   }
   return out(page);
 });

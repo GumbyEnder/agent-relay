@@ -10,12 +10,13 @@
  * (same pattern as src/lib/brand.ts) rather than import.meta.env.
  */
 import { OpenPanel } from "@openpanel/web";
-import { OPENPANEL_CLIENT_ID } from "@/lib/analytics-id";
+import { openpanelClientId } from "@/lib/analytics-id";
 
 // IDs live in analytics-id.ts: the Nitro pages handler needs the same value and
 // must not import this module (it would pull the browser SDK into the server bundle).
 export const op = new OpenPanel({
-  clientId: OPENPANEL_CLIENT_ID,
+  // Browser only: location.host is the same answer the server gave the page.
+  clientId: openpanelClientId(typeof window === "undefined" ? null : window.location.host),
   trackScreenViews: true,
   trackOutgoingLinks: false,
   trackAttributes: true,
