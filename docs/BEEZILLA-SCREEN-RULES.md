@@ -16,8 +16,8 @@ Owner, 2026-11-18, in order of the page:
 3. "A single button you push called Talk to BeeZilla. With a single line chat bubble…
    above everything else." That button is the voice switch; there is no other.
 4. "When you start talking to it, it expands the whiteboard and puts the Talk to
-   BeeZilla thing in the whiteboard." The board is distinct from the page: a slate
-   surface with a fine grain.
+   BeeZilla thing in the whiteboard." The board (named the Idea Board since CR-4) is
+   distinct from the page: a slate surface with a fine grain.
 5. "The moment it reads the agent.md, it puts the agent.md on the whiteboard… draws a
    line from the agent.md to the skill, and the next skill… so that you can edit the
    process." Every step the agent takes is a card, drawn as it happens.

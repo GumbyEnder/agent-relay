@@ -102,10 +102,15 @@ const root = resolve(import.meta.dirname, "..");
 const talk = readFileSync(resolve(root, "public/buzzy/talk.html"), "utf8");
 const browse = readFileSync(resolve(root, "public/buzzy/browse.js"), "utf8");
 const pilot = readFileSync(resolve(root, "public/buzzy/pilot.js"), "utf8");
-for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newSessionBtn", "voiceToggle", "micBtn"]) {
+const navjs = readFileSync(resolve(root, "public/buzzy/nav.js"), "utf8");
+for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newSessionBtn", "micBtn"]) {
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }
+// One voice switch: the header control built by nav.js on other pages; on Talk the
+// Talk to BeeZilla button is that switch (owner, 2026-11-18).
+check(navjs.includes('mic.id = "bzVoiceMic"'), "nav.js builds the #bzVoiceMic voice switch");
+check(pilot.includes("#bzVoiceMic"), "pilot.js presses the one voice switch");
 // History is a place in the row under the search bar now (owner, 2026-11-18), not a
 // button up top: "show my history" presses that tab.
 check(pilot.includes(`'[data-tab="history"]'`), "pilot.js presses the History place");

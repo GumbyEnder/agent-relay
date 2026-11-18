@@ -19,6 +19,10 @@
 .privacy-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 2px; }
 .pv-icons { display: inline-flex; align-items: center; gap: 0.3rem; }
 .pv-icons svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* Icons alone were a guessing game (owner, Nov 2026): say the mode out loud.
+   Under 520px the word would squeeze the prompt bar, so the tooltip carries it. */
+.pv-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
+@media (max-width: 520px) { .pv-label { display: none; } }
 .privacy-btn[data-mode="lockdown"] { color: #FF8A80; }
 .privacy-btn[data-mode="advocate"] { color: #FFC107; }
 

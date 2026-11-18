@@ -47,7 +47,7 @@
   var KIND_NAME = { all: "All", photo: "Pictures", audio: "Music", "3d": "3D", document: "Documents" };
 
   // Each action as presses on this page's own controls. `already` says the press
-  // isn't needed (the Whiteboard is already open); `optional` never fails the run.
+  // isn't needed (the Idea Board is already open); `optional` never fails the run.
   function presses(a) {
     var v = a.value;
     switch (a.do) {
@@ -59,7 +59,7 @@
       case "tab":
         return [{ sel: '[data-tab="' + v + '"]', name: "the " + cap(v) + " tab" }];
       case "whiteboard":
-        return [{ sel: "#boardToggle", name: "the Whiteboard button", already: function (el) { return pressed(el) === (v === "open"); } }];
+        return [{ sel: "#boardToggle", name: "the Idea Board button", already: function (el) { return pressed(el) === (v === "open"); } }];
       case "privacy":
         return [
           { sel: "#privacyBtn", name: "the Privacy button", already: function () { var p = document.getElementById("privacyPop"); return !!p && !p.classList.contains("hidden"); } },
@@ -75,8 +75,10 @@
         // The chat header's New button; the draft banner and History drawer have their own.
         return [{ sel: "#newSessionBtn, #newChatBtn, #drawerNewChat", name: "the New chat button" }];
       case "speak":
-        // Talking to BeeZilla is the voice switch; reading typed replies aloud stays a setting.
-        return [{ sel: "#voiceToggle", name: "Speak replies", hiddenOk: true, already: function (el) { return pressed(el) === (v === "on"); } }];
+        // One voice switch: the header mic (#bzVoiceMic) on other pages; on Talk the
+        // Talk to BeeZilla button is that switch (owner, 2026-11-18). Both start
+        // listening and speak replies together, so "speak on" is that switch pressed.
+        return [{ sel: "#bzVoiceMic, #micBtn", name: "the voice switch", already: function (el) { return pressed(el) === (v === "on"); } }];
       case "voice":
         return [{ sel: "#micBtn", name: "the microphone button", already: pressed }];
       case "go":

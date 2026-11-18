@@ -38,7 +38,8 @@ html.bz-on-talk main { padding: 0 var(--ob-gutter) 40px; max-width: none; }
 .chat-main { display: flex; flex-direction: column; width: 100%; min-width: 0; }
 
 /* ── Header: the face top-left, the account top-right; the links moved down ── */
-html.bz-on-talk .bz-navbar { display: none !important; }
+html.bz-on-talk .bz-navbar,
+html.bz-on-talk #bzNav { display: none !important; } /* the places live under the search on Talk */
 html.bz-on-talk header { border-bottom: 0 !important; background: transparent !important; }
 .bz-brandrow .bz-brand img.bz-face,
 html.bz-on-talk .bz-brandrow .bz-brand img {
