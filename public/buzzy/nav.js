@@ -103,9 +103,12 @@
       "#bzMicLive .bz-mic-dot{width:8px;height:8px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 0 3px rgba(255,90,90,.2)}",
       "#bzMicLive.paused .bz-mic-dot{background:#9a9a9a;box-shadow:none}",
       "#bzMicLive.paused{padding-right:12px}",
-      "#bzMicStop{display:inline-flex;align-items:center;box-sizing:border-box;height:26px;min-height:0;min-width:0;margin:0;box-shadow:none;padding:0 10px;border-radius:999px;border:1px solid #5b1f24;background:#2a1214;color:#ffb4b4;font:inherit;font-size:12px;font-weight:700;cursor:pointer}",
+      "#bzMicLive button{display:inline-flex;align-items:center;box-sizing:border-box;height:26px;min-height:0;min-width:0;margin:0;box-shadow:none;padding:0 10px;border-radius:999px;font:inherit;font-size:12px;font-weight:700;letter-spacing:normal;text-transform:none;cursor:pointer}",
+      "#bzMicLive button:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
+      "#bzMicCut{border:1px solid #6b5a1e;background:#2a2306;color:#ffe680}",
+      "#bzMicCut:hover{background:#3a300a}",
+      "#bzMicStop{border:1px solid #5b1f24;background:#2a1214;color:#ffb4b4}",
       "#bzMicStop:hover{background:#3a171a}",
-      "#bzMicStop:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
       "#bzSettings{position:fixed;right:22px;bottom:78px;box-sizing:border-box;width:min(360px,calc(100vw - 32px));max-height:calc(100vh - 110px);overflow-y:auto;padding:14px 16px 16px;border-radius:14px;border:1px solid #2c2c2c;background:#121212;color:#e8e8e8;box-shadow:0 24px 60px rgba(0,0,0,.6);text-align:left}",
       "#bzSettings .bzs-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px}",
       "#bzSettings .bzs-title{font-size:15px;font-weight:700;color:#f2f2f2;margin:0}",
@@ -140,7 +143,7 @@
       "#bzSettings .bzs-muted{font-size:13px;color:#9a9a9a;margin:0}",
       // Phone width: the corner insets match the 16px page gutter, and the panel's
       // buttons grow to thumb size (Talk asks for 48px targets on a phone).
-      "@media (max-width:640px){#bzDock{right:16px;bottom:16px}#bzSettings{right:16px;bottom:72px;max-height:calc(100vh - 100px)}#bzSettings .bzs-close{width:40px;height:40px}#bzSettings .bzs-btn{min-height:40px;padding:8px 14px}#bzMicStop{height:32px}}",
+      "@media (max-width:640px){#bzDock{right:16px;bottom:16px}#bzSettings{right:16px;bottom:72px;max-height:calc(100vh - 100px)}#bzSettings .bzs-close{width:40px;height:40px}#bzSettings .bzs-btn{min-height:40px;padding:8px 14px}#bzMicLive button{height:32px}}",
       // The chrome renders inside eleven different page stylesheets, and three of
       // them set their own body font-size/line-height (sketch+studio 14px/1.5,
       // capabilities 15px/1.55, memory inherits the browser default). An inherited
@@ -792,6 +795,7 @@
     live.innerHTML =
       '<span class="bz-mic-dot" aria-hidden="true"></span>' +
       '<span class="bz-mic-label">Listening</span>' +
+      '<button type="button" id="bzMicCut" hidden>Interrupt</button>' +
       '<button type="button" id="bzMicStop">Stop</button>';
     dock.appendChild(live);
 
@@ -851,9 +855,23 @@
     function sec(name) { return q('[data-bzs="' + name + '"]'); }
     function isOpen() { return !panel.hidden; }
 
+    // The header is sticky above everything (z-index 800, about 126px, taller on a
+    // phone). Sized by the window alone, the panel slid its title and close button
+    // under it on a short window, so it stops 8px below whatever the header covers.
+    function fitPanel() {
+      var chromeEl = document.getElementById("bzChrome");
+      var header = chromeEl ? chromeEl.closest("header") : null;
+      var top = 16;
+      if (header) top = Math.max(top, header.getBoundingClientRect().bottom + 8);
+      var bottom = parseFloat(window.getComputedStyle(panel).bottom) || 0;
+      panel.style.maxHeight = Math.max(160, Math.floor(window.innerHeight - bottom - top)) + "px";
+    }
+    window.addEventListener("resize", function () { if (isOpen()) fitPanel(); });
+
     function open() {
       if (isOpen()) return;
       panel.hidden = false;
+      fitPanel();
       gear.setAttribute("aria-expanded", "true");
       load();
       q(".bzs-close").focus();
@@ -920,11 +938,11 @@
       var lim = d.limits || {};
       var left = d.remaining || {};
       var chats = Number(lim.inferencePerDay || 0);
-      meter("chats", chats > 0 ? num(left.inference) + " of " + num(chats) + " left today" : "Not in your plan",
+      meter("chats", chats > 0 ? num(left.inference) + " of " + num(chats) + " left" : "Not in your plan",
         chats > 0 ? Number(left.inference || 0) / chats : null);
       var music = Number(lim.musicSecondsPerDay || 0);
       meter("music", music > 0
-        ? Math.floor(Number(left.musicSeconds || 0) / 60) + " of " + Math.floor(music / 60) + " min left today"
+        ? Math.floor(Number(left.musicSeconds || 0) / 60) + " of " + Math.floor(music / 60) + " min left"
         : "Not in your plan",
         music > 0 ? Number(left.musicSeconds || 0) / music : null);
       sec("chats").hidden = false;
@@ -1022,12 +1040,20 @@
    * Listen used to sit in the header and doubled as the "BeeZilla can hear you"
    * light. The page shell keeps Talk's recogniser running while you move between
    * pages, so with Listen gone something still has to say the mic is live: this
-   * pill, beside the gear, on every page. It exists only while the mic does (idle,
-   * the corner holds nothing but the gear), and Stop ends the session in one click.
+   * pill, beside the gear, on every page. It exists only while a voice session
+   * does (idle, the corner holds nothing but the gear):
+   *   - Listening              · Stop ends the session in one click
+   *   - BeeZilla is talking    · Interrupt cuts the reply short and listens again
+   *                              (the one-click barge-in the header chip used to
+   *                              offer; Talk's own mic button ends the session)
+   *   - Mic paused             · after a reload the session waits, ARMED, for the
+   *                              next touch anywhere (talk.html) — said, not hidden
    */
   function micPill(live) {
     var label = live.querySelector(".bz-mic-label");
+    var cut = live.querySelector("#bzMicCut");
     var stop = live.querySelector("#bzMicStop");
+    cut.setAttribute("aria-label", "Interrupt BeeZilla and speak");
     stop.setAttribute("aria-label", "Stop listening");
     function engine() { return window.BeeZillaVoice || null; }
     function paint(st) {
@@ -1039,10 +1065,11 @@
       live.classList.toggle("paused", armed);
       label.textContent = speaking ? "BeeZilla is talking" : on ? "Listening" : "Mic paused";
       live.title = speaking
-        ? "Your mic is off while BeeZilla talks, then it listens again"
+        ? "Your mic is off while BeeZilla talks. Interrupt to speak now, or Stop to end"
         : on
           ? "BeeZilla can hear you on every page until you press Stop"
           : "Touch the page and BeeZilla listens again";
+      cut.hidden = !speaking;
       stop.hidden = !on;
       // The mic marker is a property of the TAB, not of the page: this is the
       // one writer for it, so a soft hop and a start/stop both land here.
@@ -1050,6 +1077,10 @@
     }
     // Talk publishes its state here (paintVoice); a page with no engine stays idle.
     window.BeeZillaVoiceChip = { update: paint };
+    cut.addEventListener("click", function () {
+      if (engine() && engine().interrupt) engine().interrupt();
+      paint();
+    });
     stop.addEventListener("click", function () {
       if (engine() && engine().stop) engine().stop();
       else { var b = document.getElementById("micBtn"); if (b) b.click(); }

@@ -5199,7 +5199,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       paintVoice();
       // One engine, addressable from the chrome on any page. The mic pill calls
-      // stop() instead of guessing at DOM buttons.
+      // stop() and interrupt() instead of guessing at DOM buttons.
       window.BeeZillaVoice = {
         toggle: toggleMic,
         stop: function () {
@@ -5212,8 +5212,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paintVoice();
         },
         // Cut the reply short and hand the mic back, without ending the session.
-        // The header's Listen chip offered this as a one-click barge-in; it left
-        // the header, and Talk's own mic button is the way to cut in now.
+        // The one-click barge-in: the mic pill beside the settings gear (nav.js)
+        // offers it as Interrupt while BeeZilla is talking. Talk's own mic button
+        // ends the session instead.
         interrupt: function () {
           voice.cutTurn = voice.turnSeq;
           voice.sending = false;
