@@ -13,7 +13,7 @@
  * Run: npx tsx scripts/test-image-turn.ts
  */
 import { readFileSync } from "node:fs";
-import { repairImageReply, deniesImageCapability, fakesImageAction, IMAGE_TURN_SENTENCE } from "../src/lib/buzzy/artReply";
+import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse, IMAGE_TURN_SENTENCE } from "../src/lib/buzzy/artReply";
 import { pickImageUrl, describePayload, normalizeImageUrl, fetchImageUrl } from "../src/lib/buzzy/art";
 import { isImageRequest } from "../src/lib/buzzy/intent";
 
@@ -172,6 +172,25 @@ expect("a failed draw names the real error", /artRefusal && \(deniesImageCapabil
 console.log("the working line sits under the newest prompt:");
 expect("inserted after the prompt", /insertBefore\(thinkingEl, newestPrompt\.nextSibling\)/.test(talk), true);
 expect("no jump to the bottom of a newest-first thread", /messagesContainer\.scrollTop = messagesContainer\.scrollHeight/.test(talk), false);
+
+// Measured live 2026-11-18 on e0d388b (production, beezilla.net, signed in):
+// "draw me a duck" stored asset 8294 (1408x768 PNG) and returned it in the
+// envelope, and the reply read "I did not actually produce anything that turn,
+// so nothing was saved to your Library." An image-only turn is not a
+// producesDeliverable() turn, so the delivery-claim guard fired on a sentence
+// that was true. The guard has to exempt the picture it just made, and the page
+// needs the project id it builds the Library link from.
+console.log("a picture turn's true sentence survives the delivery guard:");
+expect("nothing made → the claim is false", deliveryClaimIsFalse({ document: false, audio: false, image: false }), true);
+expect("a picture was made → the claim stands", deliveryClaimIsFalse({ document: false, audio: false, image: true }), false);
+expect("a track was made → the claim stands", deliveryClaimIsFalse({ document: false, audio: true, image: false }), false);
+expect("a document was made → the claim stands", deliveryClaimIsFalse({ document: true, audio: false, image: false }), false);
+expect(
+  "the guard asks that helper rather than re-deriving it",
+  /CLAIMS_DELIVERY\.test\(finalReply\) &&\s*deliveryClaimIsFalse\(\{ document: deliversThisTurn, audio: Boolean\(renderedAudio\), image: Boolean\(renderedImage\) \}\)/.test(server),
+  true,
+);
+expect("an image turn echoes its project id", /response\.jobId = artJobId;/.test(server), true);
 
 console.log("");
 if (failures) {

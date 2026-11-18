@@ -39,7 +39,7 @@ import {
 import { calculate } from "./calc";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
-import { repairImageReply, deniesImageCapability, fakesImageAction } from "./artReply";
+import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
@@ -1531,7 +1531,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       (musicConfigured()
         ? "Ask me to make the track and I'll generate it now."
         : "Music isn't configured on this deployment, so no track can be produced here.");
-  } else if (CLAIMS_DELIVERY.test(finalReply) && !deliversThisTurn && !renderedAudio) {
+  } else if (
+    CLAIMS_DELIVERY.test(finalReply) &&
+    deliveryClaimIsFalse({ document: deliversThisTurn, audio: Boolean(renderedAudio), image: Boolean(renderedImage) })
+  ) {
+    // `!renderedImage` is the same fix one medium over, and it was measured live
+    // the hour this shipped: an image-only turn is not a `producesDeliverable`
+    // turn, so a true "a copy is saved in your Library" (the job and the asset
+    // row both exist) was rewritten to "I did not actually produce anything that
+    // turn" with the 1408×768 PNG attached to the same bubble. A rendered
+    // picture IS the delivery; the sentence must not be denied below the card.
     // (A track made this turn IS a delivery: "I want a song about my dog" asks for
     // music without asking for a document, and its true "I've created the song"
     // was being replaced with "I did not actually produce anything".)
@@ -1726,6 +1735,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         await sql`UPDATE buzzy_assets SET job_id = ${artJobId}, session_id = ${sessionId}
                   WHERE user_id = ${userId} AND id = ${assetId}`;
       }
+      // The card's "In your Library →" link is built from `chatState.jobId`, which
+      // the page only learns from `response.jobId`. Without this an image turn in a
+      // fresh conversation showed the picture but no way to reach its Library copy
+      // (measured 2026-11-18: response keys were image/artifacts/reply/timings only).
+      response.jobId = artJobId;
     } catch (e) {
       console.error("art project record failed", (e as Error).message);
     }

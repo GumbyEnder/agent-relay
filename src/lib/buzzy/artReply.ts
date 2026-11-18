@@ -59,3 +59,23 @@ export function repairImageReply(reply: string): string | null {
   if (!reply.trim()) return IMAGE_TURN_SENTENCE;
   return deniesImageCapability(reply) || fakesImageAction(reply) ? IMAGE_TURN_SENTENCE : null;
 }
+
+/**
+ * True only when a "it's saved in your Library" sentence has nothing behind it.
+ *
+ * `producesDeliverable()` answers "did this turn produce a *document*", so an
+ * image-only or audio-only turn reads as no delivery — and the guard that
+ * replaces a false claim then replaced a true one. Measured on production
+ * e0d388b (2026-11-18, beezilla.net): "draw me a duck" stored a 1408×768 PNG and
+ * returned it in the envelope, and the bubble under the very same picture said
+ * "I did not actually produce anything that turn, so nothing was saved to your
+ * Library." A track or a picture is a delivery; only a turn with no artifact at
+ * all is allowed to be told it produced nothing.
+ */
+export function deliveryClaimIsFalse(turn: {
+  document: boolean;
+  audio: boolean;
+  image: boolean;
+}): boolean {
+  return !turn.document && !turn.audio && !turn.image;
+}
