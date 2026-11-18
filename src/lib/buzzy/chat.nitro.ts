@@ -69,6 +69,7 @@ import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 import { setDocumentAcceptance, materializeDraft, summarizeChanges } from "./documents";
 import { ensureExecutionBoard } from "./execution";
+import { checkFeedback, saveFeedback, listFeedback, feedbackScreenshot, userIdForEmail, isAdminEmail, type FeedbackInput } from "./feedback";
 import { renderTextPdf } from "./pdf";
 import { renderDocument } from "./artifact";
 import { TOOL_REGISTRY } from "./tools";
@@ -310,6 +311,13 @@ function opsAuthorized(event: any): boolean {
   if (!want) return false;
   const got = (headersFromEvent(event).get("x-bz-ops-key") || "").trim();
   return got.length > 0 && got === want;
+}
+
+/** The ops key, or a signed-in account listed in BZ_ADMIN_EMAILS (feedback.ts). */
+async function adminAuthorized(event: any): Promise<boolean> {
+  if (opsAuthorized(event)) return true;
+  const user = await getSessionUserFromHeaders(headersFromEvent(event));
+  return !!user && isAdminEmail(user.email ?? null);
 }
 
 export default defineEventHandler(async (event) => {
@@ -1451,26 +1459,67 @@ export default defineEventHandler(async (event) => {
     return { ok: true, ...(await describeEntitlement(user.id)) };
   }
 
-  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops only) ─────────
+  // ── POST /api/buzzy/feedback — "Send feedback" from the menu under your name ──
+  if (method === "POST" && path === "/api/buzzy/feedback") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const body = (await event.req.json().catch(() => ({}))) as FeedbackInput;
+    const check = checkFeedback(body);
+    if (!check.ok) {
+      setResponseStatus(event, 400);
+      return check;
+    }
+    const sql = await getSql();
+    const id = await saveFeedback(sql, user.id, check.report, getHeader(event, "user-agent") || "");
+    return { ok: true, id };
+  }
+
+  // ── GET /api/buzzy/admin/feedback — what testers reported (admins) ───────────
+  // ?id=N returns that report's screenshot; otherwise the newest 200 reports.
+  if (method === "GET" && path === "/api/buzzy/admin/feedback") {
+    if (!(await adminAuthorized(event))) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Only BeeZilla admins can read feedback.", code: "forbidden" };
+    }
+    const sql = await getSql();
+    const one = Number(queryValue(fullPath, "id") || 0);
+    if (one > 0) return { ok: true, id: one, screenshot: await feedbackScreenshot(sql, one) };
+    const rows = await listFeedback(sql);
+    return { ok: true, feedback: rows.map((r) => ({ ...r, id: Number(r.id) })) };
+  }
+
+  // ── POST /api/buzzy/admin/plan — put an account on a plan (admins) ───────────
   // The billing hook writes here. Stripe (or a manual grant) maps to one call, so
   // entitlement logic has exactly one writer and cannot drift from the invoice.
+  // An admin can name the account by the email it signed up with (testers).
   if (method === "POST" && path === "/api/buzzy/admin/plan") {
-    if (!opsAuthorized(event)) {
+    if (!(await adminAuthorized(event))) {
       setResponseStatus(event, 403);
-      return { ok: false, error: "Ops key required.", code: "forbidden" };
+      return { ok: false, error: "Ops key or admin account required.", code: "forbidden" };
     }
     const body = (await event.req.json().catch(() => ({}))) as {
       user?: string;
       userId?: string;
+      email?: string;
       plan?: string;
       planUntil?: string;
       note?: string;
     };
-    const userId = String(body.user ?? body.userId ?? "").trim();
+    let userId = String(body.user ?? body.userId ?? "").trim();
     const plan = String(body.plan ?? "").trim().toLowerCase();
+    if (!userId && body.email) {
+      userId = (await userIdForEmail(await getSql(), String(body.email))) || "";
+      if (!userId) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No account signed up with that email yet. Ask them to sign up first.", code: "no_account" };
+      }
+    }
     if (!userId) {
       setResponseStatus(event, 400);
-      return { ok: false, error: "which account? pass user=<id>", code: "no_user" };
+      return { ok: false, error: "which account? pass user=<id> or email=<address>", code: "no_user" };
     }
     if (plan !== "free" && plan !== "starter" && plan !== "pro") {
       setResponseStatus(event, 400);

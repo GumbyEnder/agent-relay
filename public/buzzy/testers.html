@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeeZilla — Testers</title>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+<style>
+  :root { --bz-bg:#0d0d0d; --bz-card:#151515; --bz-line:#242424; --bz-yellow:#ffd40d; --bz-text:#f2f2f2; --bz-muted:#8d8d8d; --bz-bad:#ff6b6b; --bz-good:#6ee7a8; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bz-bg); color:var(--bz-text); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; padding:0 1.1rem 4rem; }
+  header.top { max-width:860px; margin:0 auto; padding:1.2rem 0 .4rem; }
+  #bzNav { display:flex; flex-wrap:wrap; gap:.9rem; padding:0 0 1rem; }
+  #bzNav a { color:var(--bz-muted); text-decoration:none; font-size:.86rem; }
+  h1 { font-size:1.4rem; margin:.6rem 0 .2rem; }
+  .sub { color:var(--bz-muted); font-size:.9rem; margin:0 0 1.4rem; }
+  main { max-width:860px; margin:0 auto; }
+  h2 { font-size:1.05rem; margin:1.8rem 0 .7rem; }
+  .card { background:var(--bz-card); border:1px solid var(--bz-line); border-radius:14px; padding:1rem 1.1rem; margin-bottom:.7rem; }
+  form.grant { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:.6rem; align-items:end; }
+  label { display:flex; flex-direction:column; gap:.25rem; font-size:.82rem; color:var(--bz-muted); }
+  input, select { font:inherit; color:var(--bz-text); background:#0f0f0f; border:1px solid #333; border-radius:9px; padding:.5rem .6rem; }
+  button { font:inherit; border-radius:999px; padding:.5rem 1.1rem; border:1px solid #444; background:transparent; color:var(--bz-text); cursor:pointer; }
+  button.go { background:var(--bz-yellow); border-color:var(--bz-yellow); color:#0a0a0a; font-weight:650; }
+  .msg { margin:.7rem 0 0; font-size:.9rem; } .msg.ok { color:var(--bz-good); } .msg.bad { color:var(--bz-bad); }
+  .fb-meta { color:var(--bz-muted); font-size:.82rem; margin:0 0 .35rem; }
+  .fb-text { white-space:pre-wrap; margin:0; }
+  .fb-shot { margin-top:.6rem; } .fb-shot img { max-width:100%; border-radius:8px; border:1px solid var(--bz-line); }
+  @media (max-width:640px) { form.grant { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <nav id="bzNav">
+    <a href="/buzzy/talk" data-nav="talk">Talk</a>
+    <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+    <a href="/buzzy/studio" data-nav="studio">Studio</a>
+    <a href="/buzzy/library" data-nav="library">Library</a>
+    <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+    <a href="/buzzy/memory" data-nav="memory">Memory</a>
+    <a href="/buzzy/experts" data-nav="experts">Experts</a>
+    <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+    <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+    <a href="/buzzy/upload" data-nav="publish">Publish</a>
+    <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+  </nav>
+  <h1>Testers</h1>
+  <p class="sub">For BeeZilla admins: give a tester music and pictures (3D works on every plan), and read what testers reported with "Send feedback".</p>
+</header>
+<main>
+  <div id="denied" class="card" hidden>
+    <p style="margin:0">Only BeeZilla admins can use this page. An admin is an account whose email is listed in <code>BZ_ADMIN_EMAILS</code> on the server.</p>
+  </div>
+  <section id="admin" hidden>
+    <h2>Give a tester music and pictures</h2>
+    <div class="card">
+      <form class="grant" id="grant">
+        <label>Email they signed up with<input type="email" id="gEmail" required autocomplete="off" placeholder="name@example.com"></label>
+        <label>Plan<select id="gPlan"><option value="pro">Pro</option><option value="starter">Starter</option><option value="free">Back to Free</option></select></label>
+        <label>For<select id="gDays"><option value="14">2 weeks</option><option value="30" selected>30 days</option><option value="60">60 days</option></select></label>
+        <button type="submit" class="go">Give access</button>
+      </form>
+      <p class="msg" id="gMsg" role="status" aria-live="polite"></p>
+    </div>
+    <h2>What testers reported</h2>
+    <div id="fb"><p class="sub">Loading…</p></div>
+  </section>
+</main>
+<script>
+(function () {
+  function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+  function when(iso) { try { return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); } catch (e) { return iso; } }
+  var fbBox = document.getElementById("fb");
+  function load() {
+    fetch("/api/buzzy/admin/feedback", { credentials: "same-origin" })
+      .then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); })
+      .then(function (res) {
+        if (res.status === 403 || res.status === 401) { document.getElementById("denied").hidden = false; return; }
+        document.getElementById("admin").hidden = false;
+        var list = (res.d && res.d.feedback) || [];
+        if (!list.length) { fbBox.innerHTML = '<p class="sub">No reports yet.</p>'; return; }
+        fbBox.innerHTML = list.map(function (f) {
+          var who = f.name ? f.name + (f.email ? " (" + f.email + ")" : "") : (f.email || "someone");
+          return '<div class="card"><p class="fb-meta">' + esc(when(f.created_at)) + " · " + esc(who) + (f.page ? " · on " + esc(f.page) : "") + '</p>' +
+            '<p class="fb-text">' + esc(f.text) + "</p>" +
+            (f.has_screenshot ? '<div class="fb-shot"><button type="button" data-shot="' + Number(f.id) + '">See the screenshot</button></div>' : "") + "</div>";
+        }).join("");
+      })
+      .catch(function () { fbBox.innerHTML = '<p class="sub">The reports did not load. Try again in a moment.</p>'; });
+  }
+  fbBox.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-shot]") : null;
+    if (!b) return;
+    b.disabled = true;
+    fetch("/api/buzzy/admin/feedback?id=" + encodeURIComponent(b.getAttribute("data-shot")), { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.screenshot || !/^data:image\/(png|jpeg|webp);base64,/.test(d.screenshot)) { b.textContent = "No screenshot"; return; }
+        var img = document.createElement("img");
+        img.alt = "The tester's screenshot";
+        img.src = d.screenshot;
+        b.replaceWith(img);
+      })
+      .catch(function () { b.disabled = false; });
+  });
+  document.getElementById("grant").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var msg = document.getElementById("gMsg");
+    var email = document.getElementById("gEmail").value.trim();
+    var plan = document.getElementById("gPlan").value;
+    var days = Number(document.getElementById("gDays").value);
+    var until = plan === "free" ? null : new Date(Date.now() + days * 86400000).toISOString();
+    msg.className = "msg";
+    msg.textContent = "Working…";
+    fetch("/api/buzzy/admin/plan", {
+      method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: email, plan: plan, planUntil: until, note: "tester" }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) { msg.className = "msg bad"; msg.textContent = (d && d.error) || "That didn't work."; return; }
+        var name = plan.charAt(0).toUpperCase() + plan.slice(1);
+        msg.className = "msg ok";
+        msg.textContent = plan === "free" ? email + " is back on Free." : email + " is on " + name + " until " + new Date(until).toLocaleDateString(undefined, { dateStyle: "long" }) + ". They can make music and pictures now; 3D models work on every plan.";
+      })
+      .catch(function () { msg.className = "msg bad"; msg.textContent = "That didn't work. Try again."; });
+  });
+  load();
+})();
+</script>
+</body>
+</html>

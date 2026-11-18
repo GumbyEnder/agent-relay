@@ -175,6 +175,8 @@
       ".bz-account-menu .bz-acct-extras>*{margin:0!important;justify-content:flex-start}",
       ".bz-account-menu .bz-acct-extras .bz-co-wrap{display:flex;flex-direction:column;align-items:stretch;gap:4px}",
       ".bz-account-menu .bz-acct-extras select{width:100%}",
+      ".bz-account-menu .am-feedback{display:block;width:100%;margin:0 0 8px;padding:7px 10px;border:1px solid #3a3a3a;border-radius:8px;background:transparent;color:#e8e8e8;font:inherit;font-size:.85rem;cursor:pointer;text-align:left}",
+      ".bz-account-menu .am-feedback:hover{border-color:#ffc107;color:#ffc107}",
       ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
     ].join("");
     document.head.appendChild(s);
@@ -474,12 +476,26 @@
     function fillMenu(m) {
       if (!user) return;
       m.innerHTML = "";
+      // Refilling the menu must not throw away Honey Drops, the plan and the company.
+      if (acctExtrasEl) m.appendChild(acctExtrasEl);
       var n = document.createElement("div"); n.className = "am-name"; n.textContent = user.name;
       m.appendChild(n);
       if (user.email) {
         var em = document.createElement("div"); em.className = "am-email"; em.textContent = user.email;
         m.appendChild(em);
       }
+      // Testers tell the team what confused them or broke (feedback.js, loaded on first use).
+      var fb = document.createElement("button");
+      fb.type = "button"; fb.className = "am-feedback"; fb.textContent = "Send feedback";
+      fb.addEventListener("click", function () {
+        m.style.display = "none";
+        if (window.BeeZillaFeedback) { window.BeeZillaFeedback.open(); return; }
+        var sc = document.createElement("script");
+        sc.src = "/buzzy/feedback.js";
+        sc.onload = function () { if (window.BeeZillaFeedback) window.BeeZillaFeedback.open(); };
+        document.head.appendChild(sc);
+      });
+      m.appendChild(fb);
       var out = document.createElement("button");
       out.type = "button"; out.className = "am-signout"; out.textContent = "Log out";
       out.addEventListener("click", signOut);
@@ -772,6 +788,9 @@
     return a;
   }
 
+  // The top of the menu under your name: Honey Drops, the plan and the company.
+  var acctExtrasEl = null;
+
   function boot() {
     style();
     // The Ask panel lives outside the page wrapper, so a soft navigation would
@@ -868,6 +887,7 @@
     acctExtras.id = "bzAcctExtras";
     acctExtras.className = "bz-acct-extras";
     chrome.appendChild(acctExtras);
+    acctExtrasEl = acctExtras;
     honeyControl(acctExtras);
     planChip(acctExtras);
     if (section() !== "talk") voiceDock(chrome);
