@@ -104,7 +104,8 @@ const expected: [string, string][] = [
   ["Can I make music on the free plan?", "Can I make music on the free plan?"],
   ["how do I invite a teammate?", "How do I invite a teammate?"],
   ["How long does a public link last?", "How long does a public link last, and can I turn it off?"],
-  ["Is my whiteboard saved to my account?", "Is my Whiteboard saved to my account?"],
+  ["Is my whiteboard saved to my account?", "Is my Idea Board (formerly the Whiteboard) saved to my account?"],
+  ["What is the idea board?", "What is the Idea Board (formerly the Whiteboard)?"],
   ["Can BeeZilla send emails?", "Can BeeZilla send emails for me?"],
   ["what formats can I download?", "What file formats can I download?"],
 ];

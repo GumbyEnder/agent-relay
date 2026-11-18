@@ -38,7 +38,7 @@ const read = async () => page.evaluate(() => {
   return {
     dockLabel: mic ? mic.querySelector("span").textContent : null,
     dockPressed: mic ? mic.getAttribute("aria-pressed") : null,
-    stopVisible: stop ? stop.style.display !== "none" : null,
+    stopGone: !stop, // one switch: no separate stop button
     pageMicPressed: btn ? btn.getAttribute("aria-pressed") : null,
     title: document.title,
     state: window.BeeZillaVoice ? window.BeeZillaVoice.state() : null,
@@ -56,7 +56,7 @@ console.log(JSON.stringify({ origin: ORIGIN, afterReload, afterGesture, pageErro
 const pass =
   afterReload.dockLabel === "Resume" &&
   afterReload.dockPressed === "false" &&
-  afterReload.stopVisible === false &&
+  afterReload.stopGone === true &&
   afterReload.state && afterReload.state.mic === false &&
   afterGesture.state && afterGesture.state.mic === true &&
   afterGesture.dockPressed === "true";
