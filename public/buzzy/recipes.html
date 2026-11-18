@@ -229,7 +229,6 @@
     </footer>
   </main>
 
-  <script src="/buzzy/wallet-chip.js"></script>
   <script>
     (function () {
       var shelf = document.getElementById("shelf");
@@ -265,7 +264,6 @@
               btn.textContent = out.j.free ? "Claimed ✓" : "Opened ✓";
               btn.style.background = "#2F6F4F";
               btn.style.color = "#E8F7EE";
-              if (window.BZ_HONEY) window.BZ_HONEY.refresh();
             } else if (out.j.code === "already_owned") {
               btn.textContent = "Already yours";
               btn.disabled = true;

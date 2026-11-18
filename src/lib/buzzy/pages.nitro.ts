@@ -141,7 +141,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     return out("<h1>Not found</h1>", 404);
   }
-  // One chrome for every page: the shared nav (company dropdown + Ask panel) is
+  // One chrome for every page: the shared nav (company dropdown + settings gear) is
   // injected at serve time, so a new page inherits it and no page can drift.
   // Idempotent — a page that already includes it is left alone.
   // LAST "</body>", not the first: talk.html builds a Word export by concatenating

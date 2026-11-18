@@ -3624,7 +3624,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     function saveListenPref(on) {
       try { localStorage.setItem(LISTEN_KEY, on ? "1" : "0"); } catch (_) {}
-      // The tab title marker is written by the CHROME (nav.js voiceDock), not
+      // The tab title marker is written by the CHROME (nav.js micPill), not
       // here: it is the tab's state and it has to survive a soft hop, and a page
       // that writes it too would rename the Library tab "BeeZilla — Chat".
       // Only a page served without the chrome writes it itself.
@@ -3634,8 +3634,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function paintVoice() {
-      // The nav's voice control is a REMOTE for this engine: it shows mic state
-      // on every page and can stop the session with one click while you are
+      // The chrome's mic pill (nav.js) is a REMOTE for this engine: it shows mic
+      // state on every page and can stop the session with one click while you are
       // somewhere else. Publishing here (not polling the DOM) keeps the two in
       // step even while this page is cached behind another one.
       try {
@@ -4674,7 +4674,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     // Certain now: this is speech on the stream the ring signs for, and
     // everything from here to the recorder is async. Take the head here, then do
-    // the same cut the nav chip's one-click barge-in does: stop the buffers,
+    // the same cut BeeZillaVoice.interrupt() does: stop the buffers,
     // hand the mic back, keep the session alive.
     function bargeFire(at) {
       var gateMs = at - (voice.speakStartedAt || at);
@@ -5178,7 +5178,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function initVoice() {
       // Say which transcriber is actually running. A browser with no
       // SpeechRecognition (Firefox) records and posts the clip, but voice.asr
-      // stayed "sr" forever, so the voice-metrics lane and the nav chip
+      // stayed "sr" forever, so the voice-metrics lane and the chrome
       // reported a recogniser that does not exist. Measured on the 654fe95
       // walk: recorder path in use, state().asr said "sr".
       voice.asr = srAvailable() ? "sr" : "recorder";
@@ -5198,8 +5198,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         paintVoice();
       });
       paintVoice();
-      // One engine, addressable from the chrome on any page. The nav dock calls
-      // toggle()/stop() instead of guessing at DOM buttons.
+      // One engine, addressable from the chrome on any page. The mic pill calls
+      // stop() instead of guessing at DOM buttons.
       window.BeeZillaVoice = {
         toggle: toggleMic,
         stop: function () {
@@ -5212,7 +5212,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paintVoice();
         },
         // Cut the reply short and hand the mic back, without ending the session.
-        // This is the one-click barge-in the nav chip offers while speaking.
+        // The header's Listen chip offered this as a one-click barge-in; it left
+        // the header, and Talk's own mic button is the way to cut in now.
         interrupt: function () {
           voice.cutTurn = voice.turnSeq;
           voice.sending = false;
@@ -5339,7 +5340,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // refuse an ungestured start, and restarting the microphone because of
       // a stored flag — before the owner has done anything in this session —
       // is a defect (a silent mic that the chrome then claims is listening).
-      // So the intent comes back ARMED, not running: the dock says "Resume",
+      // So the intent comes back ARMED, not running: the mic pill says "Mic paused",
       // aria-pressed stays false because nothing is listening yet, and the
       // first gesture in this document starts it. One click, no lie.
       if (listenPref()) {
@@ -5352,7 +5353,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           document.removeEventListener("keydown", resume, true);
           voice.armed = false;
           // startListening() starts the recogniser; voice.mic is the declared
-          // state it publishes, so the chrome and the dock agree the moment the
+          // state it publishes, so the page and the mic pill agree the moment the
           // gesture lands. A refused permission comes back through rec.onerror,
           // which clears both the flag and the stored intent.
           if (!voice.mic) { voice.mic = true; startListening(); }
