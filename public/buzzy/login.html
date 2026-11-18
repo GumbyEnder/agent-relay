@@ -168,6 +168,22 @@
       }
       function enter() { window.location.replace(destination()); }
 
+      // After "Create account" the page stays here (the email still needs
+      // confirming) and clears the password. Chrome reads that as a failed
+      // sign-in and never offers to save the new password (its own log,
+      // chrome://password-manager-internals, says so), so people confirmed
+      // their email with no saved password to sign in with. Chrome, Edge and
+      // the other Chromium browsers can be asked directly; elsewhere this
+      // does nothing.
+      function offerToSave(addr, pass, name) {
+        try {
+          if (typeof window.PasswordCredential !== "function" || !navigator.credentials) return;
+          navigator.credentials
+            .store(new window.PasswordCredential({ id: addr, password: pass, name: name }))
+            .catch(function () {});
+        } catch (e) { /* saving is a courtesy; the account exists either way */ }
+      }
+
       // The address bar is part of the tab. Switching to Sign in used to leave
       // ?mode=register in the URL, so the page the user was looking at and the
       // page a reload/bookmark would bring back were two different tabs (BZ-6
@@ -237,10 +253,11 @@
             );
             done();
           }, 20000);
+          var displayName = (nameInput.value || "").trim() || addr.split("@")[0];
           api("/api/auth/sign-up/email", {
             email: addr,
             password: pass,
-            name: (nameInput.value || "").trim() || addr.split("@")[0],
+            name: displayName,
           }).then(function (res) {
             if (!res.ok) {
               var m = (res.data && (res.data.message || res.data.code)) || "";
@@ -257,6 +274,8 @@
               show("ok", "Account created. Check " + addr + " for the verification link, then sign in.");
               password.value = "";
               password.focus();
+              // Last, so nothing on the page clears the offer once it is up.
+              offerToSave(addr, pass, displayName);
             });
           }).catch(function () {
             show("error", "Network error — the account may already exist. Try signing in.");
