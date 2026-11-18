@@ -76,9 +76,10 @@
   function paint() {
     var mode = read();
     var m = MODES[mode];
-    btn.innerHTML = '<span class="pv-icons">' + iconsFor(mode) + "</span>";
+    btn.innerHTML = '<span class="pv-icons">' + iconsFor(mode) + "</span>" +
+      '<span class="pv-label">' + m.label + "</span>";
     btn.setAttribute("aria-label", "Privacy: " + m.long + " — change");
-    btn.title = "Privacy: " + m.long;
+    btn.title = "Privacy: " + m.long + " — tap to change";
     btn.setAttribute("data-mode", mode);
     if (desc) desc.textContent = m.desc;
     if (slider) slider.setAttribute("data-mode", mode);

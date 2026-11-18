@@ -118,8 +118,8 @@
     g.fill();
   }
 
-  // ── The whiteboard: beside the voice workspace while voice is on; under the
-  // Talk bar when opened from its "Whiteboard" button. One board at a time,
+  // ── The Idea Board: beside the voice workspace while voice is on; under the
+  // Talk bar when opened from its "Idea Board" button. One board at a time,
   // per conversation (the shared bz_session_id), saved in this browser.
   var boardSlot = document.getElementById("vsBoard");
   var soloSlot = document.getElementById("boardSolo");
@@ -128,10 +128,19 @@
   function boardId() {
     try { return localStorage.getItem("bz_session_id") || "talk"; } catch (_) { return "talk"; }
   }
+  // Widening the page column is the board's job, not the panel's: while a board
+  // exists the whole Talk column gets its width back (owner's screenshot, Nov
+  // 2026). The class is set from ONE place — here — so voice-off solo and
+  // voice-on beside cannot disagree.
+  function setLayout(hasBoard) {
+    var layout = document.querySelector(".chat-layout");
+    if (layout) layout.classList.toggle("has-board", !!hasBoard);
+  }
   function unmountBoard() {
     if (board) { try { board.destroy(); } catch (_) {} }
     board = null; boardWhere = null;
     stage.classList.add("vs-no-board");
+    setLayout(false);
   }
   function placeBoard() {
     if (!window.BeeZillaWhiteboard || !boardSlot) return;
@@ -154,6 +163,7 @@
     });
     boardWhere = where;
     if (where === "voice") stage.classList.remove("vs-no-board");
+    setLayout(true);
   }
   if (toggle) {
     toggle.addEventListener("click", function () {

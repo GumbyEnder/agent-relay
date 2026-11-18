@@ -116,12 +116,15 @@
       ".bz-brandrow .bz-brand img{width:26px;height:26px;border-radius:6px;display:block}",
       ".bz-brandrow .bz-brand strong{font-size:.98rem;letter-spacing:.01em}",
       ".bz-brandrow .bz-cluster{margin-left:auto;display:flex;align-items:center;gap:.7rem;min-width:0}",
-      // The link row is centred, not left-anchored: the brand owns the left edge and the
-      // identity cluster owns the right, so a left-hugging link row reads as a mistake.
-      // 'safe center' falls back to start the moment the row is wider than the bar, so
-      // centring can never clip the first link on a narrow window.
-      ".bz-navbar{display:flex;align-items:center;justify-content:safe center;gap:.9rem;height:48px;min-height:48px;border-bottom:1px solid #242424;background:#0d0d0d;overflow-x:auto;scrollbar-width:none;padding:0 8px}",
-      ".bz-navbar::-webkit-scrollbar{display:none}",
+      // The link row lives IN the brand row now (owner's markup, Nov 2026): the
+      // nav was a second full-width bar that cost a whole row of vertical space on
+      // every page. It sits between the brand and the identity cluster, centred,
+      // and shrinks (scrolls sideways) before the cluster does. `safe center` falls
+      // back to `start` the moment the row is wider than the bar, so centring can
+      // never clip the first link.
+      ".bz-brandrow #bzNav{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:safe center;gap:.9rem;overflow-x:auto;scrollbar-width:none;padding:0 4px}",
+      ".bz-brandrow #bzNav::-webkit-scrollbar{display:none}",
+      "#bzChrome{flex:0 0 auto}",
       // The chrome must style itself: /buzzy/landing has no nav CSS of its own, so
       // links fell back to the browser default (blue, underlined) on the one page
       // every visitor sees first. Page styles that are more specific still win.
@@ -137,6 +140,7 @@
       "#bzChrome .account-menu{position:absolute;top:100%;right:0;margin-top:.4rem;background:#141414;border:1px solid #2A2A2A;border-radius:6px;padding:.7rem .9rem;min-width:200px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);text-align:left}",
       "#bzChrome .account-menu .am-name{font-weight:600;color:#fff;font-size:.9rem}",
       "#bzChrome .account-menu .am-email{font-size:.75rem;color:#888;margin:.15rem 0 .6rem;word-break:break-all}",
+      "#bzChrome .account-menu .am-plan{font-size:.74rem;color:#b9b9b9;line-height:1.35;margin:0 0 .6rem;padding-top:.5rem;border-top:1px solid #2a2a2a}",
       "#bzChrome .account-menu .am-signout{width:100%;font-size:.8rem;padding:.4rem .6rem;background:#1b1b1b;color:#e8e8e8;border:1px solid #333;border-radius:6px;cursor:pointer}",
       "#bzChrome .bz-plan{display:inline-flex;align-items:center;border:1px solid #3a3a3a;border-radius:999px;padding:.1rem .5rem;font-size:.7rem;font-weight:800;letter-spacing:.06em;color:#cfcfcf;text-decoration:none;white-space:nowrap}",
       "#bzChrome .bz-plan-pro{background:#ffd40d;color:#111;border-color:#ffd40d}",
@@ -163,10 +167,14 @@
       "@media (max-width:640px){",
       ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.4rem;padding:.35rem 0}",
       ".bz-brandrow .bz-cluster{margin-left:0;width:100%;flex-wrap:wrap;row-gap:.4rem;gap:.5rem}",
+      // The link row keeps its place under the brand on a phone, but it is the
+      // SAME row as the brand (no second bar a page can style away).
+      ".bz-brandrow #bzNav{order:3;flex:1 1 100%;width:100%;flex-wrap:wrap!important;justify-content:flex-start;gap:.3rem .85rem;overflow-x:visible}",
       "#bzChrome{flex-wrap:wrap;row-gap:.35rem}",
       "#bzChrome .bz-co-wrap{flex:1 1 8rem;min-width:0}",
       "#bzChrome select.bz-co-select{max-width:100%;width:100%}",
-      ".bz-navbar{height:auto;min-height:44px;flex-wrap:wrap;justify-content:flex-start;gap:.3rem .85rem;padding:4px 8px 6px;overflow-x:visible}",
+      ".bz-navbar{display:none}",
+      ".bz-navbar::-webkit-scrollbar{display:none}",
       "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
       "}",
     ].join("");
@@ -205,12 +213,12 @@
     nav.style.fontFamily = CHROME_FONT;
     nav.style.fontSize = "16px";
     nav.style.lineHeight = "1.55";
-    // One strip, same height everywhere; page-specific header content stays below it.
-    if (!nav.closest(".bz-navbar")) {
-      var bar = document.createElement("div");
-      bar.className = "bz-navbar";
-      nav.parentNode.insertBefore(bar, nav);
-      bar.appendChild(nav);
+    // ONE row: the links sit in the brand row (boot()). Older builds wrapped them
+    // in a `.bz-navbar` strip of their own; unwrap on sight so a soft navigation
+    // cannot resurrect the second row.
+    if (nav.closest(".bz-navbar")) {
+      var old = nav.closest(".bz-navbar");
+      if (old.parentNode) old.parentNode.insertBefore(nav, old);
     }
 
     // REBUILD, don't append. Pages still hand-write their own <nav>, and they had
@@ -472,6 +480,12 @@
       if (user.email) {
         var em = document.createElement("div"); em.className = "am-email"; em.textContent = user.email;
         m.appendChild(em);
+      }
+      // Plan + remaining quota lives HERE, not under the composer (owner, Nov 2026).
+      var planText = planLineText(planInfo);
+      if (planText) {
+        var pl = document.createElement("div"); pl.className = "am-plan"; pl.textContent = planText;
+        m.appendChild(pl);
       }
       var out = document.createElement("button");
       out.type = "button"; out.className = "am-signout"; out.textContent = "Log out";
@@ -824,17 +838,16 @@
     var brandRow = document.createElement("div");
     brandRow.className = "bz-brandrow";
     brandRow.appendChild(brand);
+    // The links live between the brand and the identity cluster. One row, one bar:
+    // a nav on its own row spent 48px of every page's height on nothing (owner's
+    // marked-up screenshot, Nov 2026).
+    brandRow.appendChild(nav);
     var chrome = document.createElement("span");
     chrome.id = "bzChrome";
     chrome.className = "bz-cluster";
     brandRow.appendChild(chrome);
 
-    var bar = document.createElement("div");
-    bar.className = "bz-navbar";
-    bar.appendChild(nav);
-
     header.appendChild(brandRow);
-    header.appendChild(bar);
     // The header owns the two chrome rows and NOTHING else. Page toolbars used to be
     // appended into it, so the header measured 132px on Talk, 155 on Sketch and 219 on
     // Capabilities and the chrome read as a different component per page (BZ-11, frodo's
@@ -867,6 +880,40 @@
    * first; the response still wins, a failed round trip changes nothing, and an
    * authoritative "no plan" clears the cache so a signed-out page cannot show PRO.
    */
+  var planInfo = null;
+  // One line, in the account menu: "Pro plan · 1,234 chats left · 12 min music left".
+  // It used to sit under the Talk composer; a running total there was noise, and a
+  // plan belongs beside the name it applies to (owner, Nov 2026).
+  function planLineText(d) {
+    if (!d || !d.plan) return "";
+    var name = String(d.plan);
+    var bits = [name.charAt(0).toUpperCase() + name.slice(1) + " plan"];
+    var left = d.remaining || {};
+    bits.push(Number(left.inference || 0).toLocaleString() + " chats left");
+    var musicLeft = Number(left.musicSeconds || 0);
+    bits.push(musicLeft > 0 ? Math.floor(musicLeft / 60) + " min music left" : "no music on this plan");
+    if (name === "free") bits.push("upgrade for music");
+    return bits.join(" \u00b7 ");
+  }
+  function paintMenuPlan() {
+    var menus = document.querySelectorAll("#bzChrome .account-menu");
+    var text = planLineText(planInfo);
+    for (var i = 0; i < menus.length; i++) {
+      var m = menus[i];
+      var line = m.querySelector(".am-plan");
+      if (!line && text) {
+        line = document.createElement("div");
+        line.className = "am-plan";
+        var out = m.querySelector(".am-signout");
+        if (out) m.insertBefore(line, out); else m.appendChild(line);
+      }
+      if (line) {
+        line.textContent = text;
+        line.style.display = text ? "" : "none";
+      }
+    }
+  }
+
   function planChip(chrome) {
     if (document.getElementById("bzPlanChip")) return;
     var a = document.createElement("a");
@@ -897,6 +944,8 @@
       } catch (e) { /* private mode: the round trip is still the truth */ }
     }
     function paint(d) {
+      planInfo = d && d.plan ? d : null;
+      paintMenuPlan();
       if (!d || !d.plan) {
         a.textContent = "";
         a.style.display = "none";
@@ -915,20 +964,25 @@
     var cached = readCache();
     if (cached) paint(cached);
 
-    fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
-      // 401 is an answer (nobody is signed in), not an outage: clear the chip.
-      .then(function (r) { return r.status === 401 ? { ok: false } : r.ok ? r.json() : undefined; })
-      .then(function (d) {
-        if (!d || typeof d.ok === "undefined") return; // transport oddity: keep the cache
-        if (d.ok && d.plan) {
-          writeCache(d);
-          paint(d);
-        } else {
-          writeCache(null); // signed out, or no plan: the chip must not outlive it
-          paint(null);
-        }
-      })
-      .catch(function () { /* a plan chip is not worth an error toast */ });
+    function refresh() {
+      return fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
+        // 401 is an answer (nobody is signed in), not an outage: clear the chip.
+        .then(function (r) { return r.status === 401 ? { ok: false } : r.ok ? r.json() : undefined; })
+        .then(function (d) {
+          if (!d || typeof d.ok === "undefined") return; // transport oddity: keep the cache
+          if (d.ok && d.plan) {
+            writeCache(d);
+            paint(d);
+          } else {
+            writeCache(null); // signed out, or no plan: the chip must not outlive it
+            paint(null);
+          }
+        })
+        .catch(function () { /* a plan chip is not worth an error toast */ });
+    }
+    refresh();
+    // Talk asks for a refresh after a turn may have spent quota.
+    window.bzRefreshPlan = refresh;
   }
 
   /**
@@ -972,18 +1026,10 @@
     mic.id = "bzVoiceMic";
     mic.type = "button";
     mic.className = "bz-voice-mic";
-    mic.innerHTML = "&#127908; <span class=\"bz-voice-label\">Listen</span><span class=\"bz-voice-hint\" hidden>mic off</span>";
+    mic.innerHTML = "&#127908; <span class=\"bz-voice-label\">Voice</span><span class=\"bz-voice-hint\" hidden>mic off</span>";
     mic.setAttribute("aria-pressed", "false");
-    mic.title = "Talk to BeeZilla \u2014 the conversation continues as you navigate";
-    var stop = document.createElement("button");
-    stop.id = "bzVoiceStop";
-    stop.type = "button";
-    stop.className = "bz-voice-stop";
-    stop.innerHTML = "&#9632;";
-    stop.title = "Stop listening";
-    stop.style.display = "none";
+    mic.title = "Talk to BeeZilla \u2014 one switch: listening and spoken replies";
     dock.appendChild(mic);
-    dock.appendChild(stop);
     chrome.appendChild(dock);
 
     function engine() { return window.BeeZillaVoice || null; }
@@ -998,19 +1044,18 @@
       // false. The label carries the offer; the state stays honest.
       mic.setAttribute("aria-pressed", on ? "true" : "false");
       var label = mic.querySelector(".bz-voice-label");
-      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : armed ? "Resume" : "Listen";
+      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : armed ? "Resume" : "Voice";
       var hint = mic.querySelector(".bz-voice-hint");
       if (hint) hint.hidden = !(on && speaking);
       mic.title = on
         ? speaking
           ? "Mic is off while I talk \u2014 click to cut me off and speak"
-          : "Listening \u2014 click to stop"
+          : "Listening and speaking replies \u2014 click to turn voice off"
         : armed
           ? "Microphone paused after a reload \u2014 click to listen again"
-          : "Talk to BeeZilla \u2014 the conversation continues as you navigate";
+          : "Talk to BeeZilla \u2014 one switch: listening and spoken replies";
       mic.setAttribute("aria-label",
-        on ? (speaking ? "Speaking, microphone off" : "Listening") : armed ? "Resume listening" : "Listen");
-      stop.style.display = on ? "" : "none";
+        on ? (speaking ? "Speaking, microphone off" : "Listening") : armed ? "Resume listening" : "Voice off");
       // The mic marker is a property of the TAB, not of the page: this is the
       // one writer for it, so a soft hop and a start/stop both land here.
       bzTitle.apply();
@@ -1050,31 +1095,10 @@
       }
       startHere();
     });
-    stop.addEventListener("click", function () {
-      if (engine() && engine().stop) engine().stop();
-      else { var b = document.getElementById("micBtn"); if (b) b.click(); }
-      paint();
-    });
 
     // A session started on Talk before this chrome existed still shows up.
     paint();
     setInterval(function () { paint(); }, 1500);
-
-    // On Talk the page ships its own "Voice" pill, which toggles spoken replies.
-    // Two controls both labelled Voice is the confusion this work exists to end,
-    // so the page one says what it actually does.
-    if (section() === "talk") {
-      var t2 = setInterval(function () {
-        var vt = document.getElementById("voiceToggle");
-        var label = vt && vt.querySelector(".vt-label");
-        if (label) {
-          if (label.textContent !== "Speak replies") label.textContent = "Speak replies";
-          vt.title = "Read BeeZilla's replies aloud";
-          clearInterval(t2);
-        }
-      }, 300);
-      setTimeout(function () { clearInterval(t2); }, 15000);
-    }
   }
 
   window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed };

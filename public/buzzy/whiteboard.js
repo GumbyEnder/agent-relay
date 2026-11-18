@@ -1,5 +1,6 @@
 /**
- * The Whiteboard (owner's reference zMWSgG0, top right): a dotted board of file
+ * The Idea Board (owner's reference zMWSgG0, top right; renamed from
+ * "Whiteboard" in Nov 2026): a dotted board of file
  * cards — a picture shows its picture, a document its type glyph — each with four
  * yellow corner handles; drag from a handle to another card to connect them with a
  * yellow curve. "Search the board" finds cards already on it and the owner's own
@@ -59,14 +60,14 @@
     // ── Shell ──────────────────────────────────────────────────────────
     var root = el("section", "wb-panel");
     root.setAttribute("role", "region");
-    root.setAttribute("aria-label", "Whiteboard");
+    root.setAttribute("aria-label", "Idea Board");
     var head = el("div", "wb-head");
-    head.appendChild(el("h3", "wb-title", "Whiteboard"));
+    head.appendChild(el("h3", "wb-title", "Idea Board"));
     var tools = el("span", "wb-tools");
     var minBtn = el("button", "wb-btn", "–");
-    minBtn.type = "button"; minBtn.setAttribute("aria-label", "Minimise whiteboard"); minBtn.title = "Minimise";
+    minBtn.type = "button"; minBtn.setAttribute("aria-label", "Minimise Idea Board"); minBtn.title = "Minimise";
     var closeBtn = el("button", "wb-btn", "✕");
-    closeBtn.type = "button"; closeBtn.setAttribute("aria-label", "Close whiteboard"); closeBtn.title = "Close";
+    closeBtn.type = "button"; closeBtn.setAttribute("aria-label", "Close Idea Board"); closeBtn.title = "Close";
     tools.appendChild(minBtn); tools.appendChild(closeBtn);
     head.appendChild(tools);
     var canvas = el("div", "wb-canvas");
@@ -75,7 +76,7 @@
     svg.setAttribute("class", "wb-links");
     svg.setAttribute("aria-hidden", "true");
     canvas.appendChild(svg);
-    var hint = el("p", "wb-hint", "Drag work here, or search the board to add it.");
+    var hint = el("p", "wb-hint", "Drag work here, or search the Idea Board to add it.");
     canvas.appendChild(hint);
     var foot = el("div", "wb-foot");
     var search = el("input", "wb-search");
@@ -98,7 +99,7 @@
       minimised = !minimised;
       root.classList.toggle("wb-min", minimised);
       minBtn.textContent = minimised ? "▢" : "–";
-      minBtn.setAttribute("aria-label", minimised ? "Restore whiteboard" : "Minimise whiteboard");
+      minBtn.setAttribute("aria-label", minimised ? "Restore Idea Board" : "Minimise Idea Board");
       if (opts.onMinimise) opts.onMinimise(minimised);
     });
     closeBtn.addEventListener("click", function () { if (opts.onClose) opts.onClose(); });

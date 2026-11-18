@@ -102,10 +102,14 @@ const root = resolve(import.meta.dirname, "..");
 const talk = readFileSync(resolve(root, "public/buzzy/talk.html"), "utf8");
 const browse = readFileSync(resolve(root, "public/buzzy/browse.js"), "utf8");
 const pilot = readFileSync(resolve(root, "public/buzzy/pilot.js"), "utf8");
-for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "sessionsToggle", "newSessionBtn", "voiceToggle", "micBtn"]) {
+const navjs = readFileSync(resolve(root, "public/buzzy/nav.js"), "utf8");
+for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "sessionsToggle", "newSessionBtn", "micBtn"]) {
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }
+// One voice switch: the header control built by nav.js, not a page-level pill.
+check(navjs.includes('mic.id = "bzVoiceMic"'), "nav.js builds the #bzVoiceMic voice switch");
+check(pilot.includes("#bzVoiceMic"), "pilot.js presses the one voice switch");
 for (const tab of ["inspiration", "library", "memory", "experts"]) check(talk.includes(`data-tab="${tab}"`), `talk.html has the ${tab} tab`);
 for (const mode of ["advocate", "lockdown", "open"]) check(talk.includes(`data-mode="${mode}"`), `talk.html has the ${mode} privacy choice`);
 for (const kind of ["all", "photo", "audio", "3d", "document"]) check(browse.includes(`"${kind}"`), `browse.js offers the ${kind} kind`);
