@@ -49,8 +49,16 @@ const BUZZY = join(LIB, "buzzy");
  *                           console. After a split it has to become a board API
  *                           call; it is on this list so that day is a decision, not
  *                           a surprise.
+ *   analytics-id          — the public OpenPanel write client id, chosen by host
+ *                           (BeeZilla vs Dev Boards project). Leaf module: it
+ *                           imports only `@/lib/brand` and `@/lib/product-hosts`,
+ *                           holds no DB handle and names no `ar_*` table. It is on
+ *                           this list because pages.nitro.ts must not import
+ *                           `analytics.ts` — that would drag the browser SDK into
+ *                           the server bundle — and because the two projects must
+ *                           stay one mapping in one place.
  */
-const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server"]);
+const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server", "analytics-id"]);
 
 /**
  * The console may import exactly one thing from `src/lib/buzzy`: the package
