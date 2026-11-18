@@ -190,6 +190,7 @@
     placeBoard(open && !boardClosed);
     wasOpen = open;
     paintWords();
+    paintStatus();
     if (voiceOn() && !raf) raf = requestAnimationFrame(draw);
   }
   if (toggle) {
@@ -199,6 +200,43 @@
       sync();
     });
   }
+
+  // ── Where the work stands (owner: "Make it obvious whether an agent is working,
+  // finished, waiting for approval, or ready for feedback") ──────────────
+  // One line at the top of the conversation: working, or waiting for you.
+  var threadCol = document.getElementById("talkWsThread");
+  var status = document.createElement("div");
+  status.className = "talk-ws-status";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  if (threadCol) threadCol.insertBefore(status, threadCol.firstChild);
+  var lastStatus = "";
+  function paintStatus() {
+    var banner = document.getElementById("draftBanner");
+    var waiting = !!(banner && !banner.classList.contains("hidden"));
+    var working = !!document.getElementById("thinkingIndicator");
+    var now = working ? "working" : waiting ? "waiting" : "";
+    if (now === lastStatus) return;
+    lastStatus = now;
+    status.innerHTML = "";
+    if (!now) return;
+    var dot = document.createElement("span");
+    dot.className = "ws-dot " + (working ? "ws-busy" : "ws-wait");
+    status.appendChild(dot);
+    status.appendChild(document.createTextNode(working ? "BeeZilla is working on it\u2026" : "A draft is waiting for your approval."));
+    if (waiting) {
+      var go = document.createElement("button");
+      go.type = "button";
+      go.textContent = "Review it";
+      go.addEventListener("click", function () {
+        var b = document.getElementById("draftBanner");
+        if (b) b.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+      });
+      status.appendChild(go);
+    }
+  }
+  var draftBanner = document.getElementById("draftBanner");
+  if (draftBanner) new MutationObserver(paintStatus).observe(draftBanner, { attributes: true, attributeFilter: ["class"] });
 
   // paintVoice() rewrites the button's label and pressed state on every change in
   // the engine (listening, thinking, talking, off); renderChatMessages() rewrites
