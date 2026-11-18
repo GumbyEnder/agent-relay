@@ -49,8 +49,12 @@ const BUZZY = join(LIB, "buzzy");
  *                           console. After a split it has to become a board API
  *                           call; it is on this list so that day is a decision, not
  *                           a surprise.
+ *   analytics-id          — the public OpenPanel write client ids (constants, no SDK):
+ *                           pages.nitro.ts writes the id into the static /buzzy pages
+ *                           so BeeZilla traffic lands in the BeeZilla project
+ *                           (92fc65f). After a split it is a config value.
  */
-const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server"]);
+const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server", "analytics-id"]);
 
 /**
  * The console may import exactly one thing from `src/lib/buzzy`: the package
