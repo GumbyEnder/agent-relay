@@ -97,14 +97,14 @@ const RULES: Rule[] = [
       return kind ? { do: "inspiration", value: kind, say: KIND_SAY[kind]! } : null;
     },
   },
-  // ── The Whiteboard ───────────────────────────────────────────────────
+  // ── The Idea Board ───────────────────────────────────────────────────
   {
     re: /^(?:open|show|bring up|pull up|start|launch|give me)(?: up)?(?: me)?(?: the| my| a)? ?white ?board$/,
-    make: () => ({ do: "whiteboard", value: "open", say: "Open the Whiteboard" }),
+    make: () => ({ do: "whiteboard", value: "open", say: "Open the Idea Board" }),
   },
   {
     re: /^(?:close|hide|shut|put away|dismiss)(?: the| my)? ?white ?board$/,
-    make: () => ({ do: "whiteboard", value: "close", say: "Close the Whiteboard" }),
+    make: () => ({ do: "whiteboard", value: "close", say: "Close the Idea Board" }),
   },
   // ── The tabs under the Talk bar ──────────────────────────────────────
   {
@@ -201,7 +201,7 @@ export function appActionsNote(plan: AppAction[]): string {
   return (
     "ON-SCREEN ACTIONS — the owner asked BeeZilla to do something in BeeZilla itself, and the page is doing it now, " +
     `step by step where they can see it: ${steps}. Reply in one short sentence saying you are doing it ` +
-    '(for example "Opening the Whiteboard now."). Mention a step that waits for Allow. Do not explain how to do it ' +
+    '(for example "Opening the Idea Board now."). Mention a step that waits for Allow. Do not explain how to do it ' +
     "yourself, do not say it is already done, and add nothing else."
   );
 }

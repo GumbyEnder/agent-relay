@@ -182,7 +182,7 @@
   {
     "id": "sk-010",
     "q": "How many chats do I get?",
-    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. The line under the Talk bar shows how many you have left today.",
+    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. Open your account menu (your name in the top bar) and the line there shows your plan and how many chats you have left today.",
     "sources": [
       {
         "file": "src/lib/buzzy/entitlements.ts",
@@ -197,7 +197,7 @@
         "symbol": "inferencePerDay: 10000"
       },
       {
-        "file": "public/buzzy/talk.html",
+        "file": "public/buzzy/nav.js",
         "symbol": " chats left"
       }
     ],
@@ -605,7 +605,7 @@
   {
     "id": "sk-032",
     "q": "What is the Inspiration wall?",
-    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Whiteboard. It is hidden in Lockdown.",
+    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Idea Board. It is hidden in Lockdown.",
     "sources": [
       {
         "file": "public/buzzy/inspiration.js",
@@ -622,7 +622,7 @@
   },
   {
     "id": "sk-033",
-    "q": "What is the Whiteboard?",
+    "q": "What is the Idea Board (formerly the Whiteboard)?",
     "a": "A board for laying out a job. Add cards for your files, connect two cards by dragging from a corner of one to the other, and use Search the board to add things from your Library.",
     "sources": [
       {
@@ -636,7 +636,7 @@
   },
   {
     "id": "sk-034",
-    "q": "Is my Whiteboard saved to my account?",
+    "q": "Is my Idea Board (formerly the Whiteboard) saved to my account?",
     "a": "Not yet. It is saved in this browser, one board per conversation, so another computer won't see it.",
     "sources": [
       {
@@ -652,7 +652,7 @@
   {
     "id": "sk-035",
     "q": "How does talking to BeeZilla by voice work?",
-    "a": "Press Talk to BeeZilla. A big mic appears with a live sound level and your words as you speak, and the Whiteboard opens beside it. Press the mic again, or End voice, to stop.",
+    "a": "Press Talk to BeeZilla. A big mic appears with a live sound level and your words as you speak, and the Idea Board opens beside it. Press the mic again, or End voice, to stop.",
     "sources": [
       {
         "file": "public/buzzy/voice-stage.js",
@@ -671,11 +671,15 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Turn on Speak replies and it reads its answers aloud.",
+    "a": "Yes. Press Talk to BeeZilla: it listens and reads its answers aloud as one mode. Press it again to stop. While voice is on, a small Listening button beside the settings gear (bottom right) shows it on every page, with Stop.",
     "sources": [
       {
+        "file": "public/buzzy/talk.html",
+        "symbol": "toggleMic owns both halves of its state"
+      },
+      {
         "file": "public/buzzy/nav.js",
-        "symbol": "Speak replies"
+        "symbol": "live.id = \"bzMicLive\""
       }
     ],
     "surfaces": [
@@ -686,7 +690,7 @@
   {
     "id": "sk-037",
     "q": "Can I give BeeZilla a document to read?",
-    "a": "Yes. Use Attach a paper, or drag the file onto the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "a": "Yes. Use Attach file, or drag the file onto the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -694,7 +698,7 @@
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Attach a paper"
+        "symbol": "Attach file"
       },
       {
         "file": "src/lib/buzzy/paper.ts",
