@@ -12,7 +12,7 @@ needs the three kit patches below applied by `beezilla-kit-patches.py`.
 | Writer: Gemini Flash (`TEXT_MODEL=gemini-flash-latest`) | `BZ_VIDEO_TEXT_MODEL`, default `gemini-flash-latest` (`src/lib/buzzy/video.ts`) |
 | End card: none — `--no-brand` on every public video, and QC must not fail a job for a missing card | `brand: false` on every job body (`BZ_VIDEO_BRAND` defaults off); kit-side `--no-brand` / QC change is still owed by whoever runs the kit |
 | Thursday scope: all five recipes live | `VIDEO_RECIPES` — chalkboard, paper-cut tips, chart race, picture reel, narrated explainer; routing in `intent.ts` (`videoAsk`) |
-| `DAILY_LIMIT_PER_USER=5` | `BZ_VIDEO_DAILY_LIMIT`, default 5; pre-checked in `server.ts` before the kit is called, and the kit's own 429 is surfaced |
+| Quota: 10/day Pro, 1/day Free (2026-11-18) | the plan decides — 10/day Pro, 1/day Free (`PlanRules.videosPerDay`). `videoDailyLimit(plan)` gates the chat pre-pass, the tool and `GET /api/buzzy/video`; the kit's own 429 is the backstop. `starter` keeps 5 until Shane sets it. |
 
 ## What the code does
 
@@ -45,13 +45,16 @@ BZ_VIDEO_BASE=https://<render-host>      # no trailing slash
 BZ_VIDEO_KIT_TOKEN=<from Shane>          # server-side only
 BZ_VIDEO_TEXT_MODEL=gemini-flash-latest  # default matches Shane's decision
 BZ_VIDEO_BRAND=0                         # default: no Breadcrumbs end card
-BZ_VIDEO_DAILY_LIMIT=5                   # default matches Shane's decision
+BZ_VIDEO_DAILY_LIMIT_PRO=10              # optional per-plan override
+BZ_VIDEO_DAILY_LIMIT_FREE=1              # optional per-plan override
 ```
 
 Kit-side checklist (not ours to set, but ours to verify before calling this done):
 
 - `TEXT_MODEL=gemini-flash-latest` on the worker;
-- `DAILY_LIMIT_PER_USER=5` on `serve.py`;
+- `DAILY_LIMIT_PER_USER=10` on `serve.py` — the HIGHEST plan limit, because the kit
+  cannot see plans; BeeZilla's per-plan gate is the product rule and 429 is the
+  backstop. Setting it to 5 silently caps every Pro account at 5;
 - the end card disabled (`--no-brand`) for **all five** recipes, not just the
   chalkboard, and the QC gate no longer failing a job when the card is absent;
 - the five recipe ids on disk match `VIDEO_RECIPES` in `video.ts`;  ✓ confirmed 2026-11-17
@@ -97,7 +100,7 @@ finished render look empty. Also surfaced: `cause`, `charge`, `attempt`,
 - The Recipes-page card (questions from `recipe.asks`, queued → making → done
   with ETA) is not built yet; the chat path is.
 - Kit-side, still to do on the production render server (not in this repo):
-  `TEXT_MODEL=gemini-flash-latest`, `DAILY_LIMIT_PER_USER=5`, and the three
+  `TEXT_MODEL=gemini-flash-latest`, `DAILY_LIMIT_PER_USER=10`, and the three
   patches below applied by `beezilla-kit-patches.py`.
 
 ## Proven against the real kit (2026-11-17, BeeServer, dev run)
