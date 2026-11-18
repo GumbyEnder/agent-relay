@@ -200,6 +200,17 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     const again = await versions("u1", "sess_a1");
     eq([again[0]!.reason, again[1]!.reason], ["save", "restore"]);
   });
+  await ok("two saves that finish out of order never step the history back", async () => {
+    const latest = (await versions("u1", "sess_a1"))[0]!;
+    const late = wb.cleanWhiteboard(board([card("stale")]));
+    if (!late.ok) throw new Error("clean");
+    await wb.recordVersion(sql, "u1", "sess_a1", latest.rev - 1, JSON.stringify(late.state), late, "save");
+    const after = (await versions("u1", "sess_a1"))[0]!;
+    eq([after.id, after.rev, after.cards], [latest.id, latest.rev, latest.cards], "the newest entry is untouched");
+    eq((await versions("u1", "sess_a1")).length, (await versions("u1", "sess_a1")).length);
+    const n = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM buzzy_whiteboard_versions WHERE user_id = 'u1' AND session_id = 'sess_a1' AND titles = 'stale'");
+    eq(n.rows[0]!.n, 0, "and no entry was added for it");
+  });
   await ok("at most 30 entries are kept, and none older than 90 days", async () => {
     let rev = ((await route("u1", "GET", "sess_a1")).body.board as wb.StoredWhiteboard).rev;
     for (let i = 0; i < 35; i++) {

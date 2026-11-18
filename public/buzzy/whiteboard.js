@@ -1088,15 +1088,17 @@
         if (!r.ok) {
           btn.disabled = false;
           btn.textContent = "Go back to this";
+          btn.focus({ preventScroll: true });
           say(r.error || "That version couldn't be brought back. Try again in a moment.", 4200);
           return;
         }
         selected = {};
         paintSelection();
         requestAnimationFrame(function () { fit(); });
-        say("Back to the board from " + when(v.savedAt).replace(/^Today, /, "").replace(/^Yesterday/, "yesterday") +
-          ". The one you had is in History too.", 4200);
+        // The board you left is the next entry down in History.
+        say("Back to the board from " + when(v.savedAt).replace(/^Today, /, "").replace(/^Yesterday/, "yesterday") + ".", 3600);
         loadHistory();
+        if (!hist.hidden) histClose.focus({ preventScroll: true });   // the pressed button is gone: Esc still closes
       });
     }
 

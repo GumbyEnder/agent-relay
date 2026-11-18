@@ -245,9 +245,9 @@
 .wb-hist-titles { font-size: 0.8rem; color: var(--ob-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-hist-now { font-size: 0.78rem; color: var(--ob-out); }
 .wb-hist-tag { font-size: 0.78rem; color: var(--ob-yellow); }
-.wb-hist-go { align-self: flex-start; height: 30px; padding: 0 10px; border: 1px solid #3a3f47; font-size: 0.8rem; }
-.wb-hist-go:hover, .wb-hist-go:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); background: transparent; }
-.wb-hist-go:disabled { opacity: 0.6; cursor: default; }
+.wb-history .wb-hist-go { align-self: flex-start; height: 30px; padding: 0 10px; border: 1px solid #3a3f47; font-size: 0.8rem; }
+.wb-history .wb-hist-go:hover, .wb-history .wb-hist-go:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); background: transparent; }
+.wb-history .wb-hist-go:disabled { opacity: 0.6; cursor: default; }
 .wb-hist-empty { padding: 6px 2px; color: var(--ob-muted); }
 .wb-hist-note { margin: 0; font-size: 0.75rem; line-height: 1.4; color: var(--ob-muted); }
 /* Not saved to the account yet: a small amber dot on the History button. */

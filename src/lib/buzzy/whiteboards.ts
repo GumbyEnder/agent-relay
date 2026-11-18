@@ -213,8 +213,11 @@ export async function getWhiteboard(sql: Sql, userId: string, boardId: string): 
   return r ? { id: boardId, state: stateOf(r.state), rev: Number(r.rev), updatedAt: iso(r.updated_at) } : null;
 }
 
-/** Keep this save in the history, then trim the history to its limits. */
-async function recordVersion(
+/**
+ * Keep this save in the history, then trim the history to its limits. Two saves of
+ * one board can finish out of order; the history never steps back to the older one.
+ */
+export async function recordVersion(
   sql: Sql,
   userId: string,
   boardId: string,
@@ -226,19 +229,25 @@ async function recordVersion(
   if (reason === "save") {
     const merged = await sql`
       UPDATE buzzy_whiteboard_versions
-      SET state = ${json}::jsonb, rev = ${rev}, card_count = ${board.cards}, bytes = ${board.bytes},
-          titles = ${board.titles}, saved_at = now()
+      SET state = ${json}::jsonb, rev = ${rev}::int, card_count = ${board.cards}::int, bytes = ${board.bytes}::int,
+          titles = ${board.titles}::text, saved_at = now()
       WHERE id = (SELECT id FROM buzzy_whiteboard_versions
                   WHERE user_id = ${userId} AND session_id = ${boardId}
                   ORDER BY id DESC LIMIT 1)
         AND reason = 'save'
+        AND rev < ${rev}::int
         AND started_at > now() - ${VERSION_WINDOW_MINUTES}::int * interval '1 minute'
       RETURNING id`;
     if (merged.length) return;
   }
-  await sql`
+  const made = await sql`
     INSERT INTO buzzy_whiteboard_versions (user_id, session_id, rev, state, card_count, bytes, titles, reason)
-    VALUES (${userId}, ${boardId}, ${rev}, ${json}::jsonb, ${board.cards}, ${board.bytes}, ${board.titles}, ${reason})`;
+    SELECT ${userId}::text, ${boardId}::text, ${rev}::int, ${json}::jsonb, ${board.cards}::int, ${board.bytes}::int,
+           ${board.titles}::text, ${reason}::text
+    WHERE NOT EXISTS (SELECT 1 FROM buzzy_whiteboard_versions
+                      WHERE user_id = ${userId} AND session_id = ${boardId} AND rev >= ${rev}::int)
+    RETURNING id`;
+  if (!made.length) return;          // a later save is in the history already
   await sql`
     DELETE FROM buzzy_whiteboard_versions
     WHERE user_id = ${userId} AND session_id = ${boardId}
