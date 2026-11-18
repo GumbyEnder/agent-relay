@@ -38,6 +38,17 @@ import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
+import {
+  VIDEO_DAILY_LIMIT,
+  VIDEO_RECIPES,
+  fetchVideoFile,
+  noteVideoState,
+  readVideoJob,
+  storeVideoAsset,
+  videoConfigured,
+  videoJobOwnedBy,
+  videoJobsToday,
+} from "./video";
 import { fetchPageText } from "./webpage";
 import { resolvePinLive, resolveReviewLive, frontierAsOfLive, frontierAsOf, getSnapshot, saveSnapshot, validateSnapshot, providerOf, type ModelPin } from "./frontier";
 import { startRun, resumeRun, readRun } from "./runner";
@@ -575,6 +586,113 @@ export default defineEventHandler(async (event) => {
         code: "transcribe_failed",
       };
     }
+  }
+
+  // ── /api/buzzy/video — start a video recipe, poll it, keep the mp4 ─────
+  // The kit takes minutes per render, so this is a task API exactly like 3D:
+  // the chat turn starts the job and the page polls this route until the files
+  // are stored. Ownership is checked against buzzy_video_jobs on every poll —
+  // the kit's token can read ANY job, so a kit job id alone proves nothing.
+  if (path === "/api/buzzy/video" || path.startsWith("/api/buzzy/video/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const kitJobId = path.startsWith("/api/buzzy/video/") ? (path.split("/").pop() || "") : "";
+
+    if (method === "GET" && !kitJobId) {
+      return {
+        ok: true,
+        configured: videoConfigured(),
+        dailyLimit: VIDEO_DAILY_LIMIT,
+        used: await videoJobsToday(user.id),
+        recipes: VIDEO_RECIPES,
+      };
+    }
+    if (method !== "GET") {
+      setResponseStatus(event, 405);
+      return { ok: false, error: "Use GET to read a job; videos are started from the chat.", code: "method_not_allowed" };
+    }
+    if (!kitJobId) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Which job?", code: "no_job" };
+    }
+    // 404, not 403: whether some other person's job exists is not this caller's
+    // business.
+    if (!(await videoJobOwnedBy(user.id, kitJobId))) {
+      setResponseStatus(event, 404);
+      return { ok: false, error: "No such video job.", code: "not_found" };
+    }
+
+    const job = await readVideoJob(kitJobId);
+    if (!job.ok) {
+      // A queue that is full is temporary; a rejected token is not.
+      setResponseStatus(event, job.code === "not_configured" ? 503 : job.retryable ? 503 : 502);
+      return { ok: false, error: job.error, code: job.code, retryable: Boolean(job.retryable) };
+    }
+    await noteVideoState(kitJobId, job.state, job.message ?? null).catch(() => {});
+
+    if (job.state === "failed") {
+      return { ok: true, jobId: kitJobId, state: "failed", message: job.message || "The render failed. Nothing was charged." };
+    }
+    if (job.state !== "done" || !job.files?.video) {
+      return { ok: true, jobId: kitJobId, state: job.state, etaMinutes: job.etaMinutes, message: job.message };
+    }
+
+    // Done: pull the three outputs that matter and put them on the same asset
+    // shelf as every other file. Content-addressed, so a second poll (two tabs,
+    // a reload) stores nothing twice. `files` is an object keyed by role
+    // ({video, thumbnail, post}) — the kit names each file after the recipe, so
+    // the role is the only key that is stable across all five.
+    const pick = { video: job.files.video, thumb: job.files.thumbnail, postText: job.files.post };
+    if (!pick.video) {
+      await noteVideoState(kitJobId, "failed", "the kit finished without an mp4").catch(() => {});
+      return { ok: true, jobId: kitJobId, state: "failed", message: "The render finished but produced no video file. Nothing was charged." };
+    }
+    const stem = `video-${kitJobId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24)}`;
+    const got = await fetchVideoFile(kitJobId, pick.video);
+    if (!got.ok) {
+      setResponseStatus(event, 502);
+      return { ok: false, error: got.error, code: got.code };
+    }
+    const stored = await storeVideoAsset(user.id, got.bytes, `${stem}.mp4`, got.contentType || "video/mp4");
+    const out: Record<string, unknown> = {
+      ok: true,
+      jobId: kitJobId,
+      state: "done",
+      video: {
+        id: stored.id,
+        url: `/api/buzzy/assets/${stored.id}`,
+        name: `${stem}.mp4`,
+        bytes: stored.bytes,
+        type: "video/mp4",
+      },
+      // Shane's rule for every generated asset, on the asset itself: the person
+      // is told this was made by AI before they post it anywhere.
+      // The kit's own notice, word for word (recipes/*.recipe.json → review_notice),
+      // so the product and the render agree on what the person is told.
+      reviewNote: "Review before posting - this video was made with AI",
+    };
+    if (pick.thumb) {
+      const thumb = await fetchVideoFile(kitJobId, pick.thumb);
+      if (thumb.ok) {
+        const t = await storeVideoAsset(user.id, thumb.bytes, `${stem}${pick.thumb.match(/\.\w+$/)?.[0] || ".jpg"}`, thumb.contentType);
+        out.thumbnail = { id: t.id, url: `/api/buzzy/assets/${t.id}`, bytes: t.bytes, type: thumb.contentType };
+      }
+    }
+    if (pick.postText) {
+      const txt = await fetchVideoFile(kitJobId, pick.postText);
+      if (txt.ok) {
+        // The post text is short by design; anything longer is not a caption and
+        // is not worth an asset row.
+        const text = txt.bytes.toString("utf8").slice(0, 4000);
+        const t = await storeVideoAsset(user.id, Buffer.from(text, "utf8"), `${stem}.txt`, "text/plain; charset=utf-8");
+        out.postText = text;
+        out.postTextAsset = { id: t.id, url: `/api/buzzy/assets/${t.id}` };
+      }
+    }
+    return out;
   }
 
   // ── /api/buzzy/model3d — make a 3D model, poll it, keep the .glb ──────

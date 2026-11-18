@@ -739,6 +739,9 @@
     .media-card { flex-wrap: wrap; }
     .media-img { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 0.4rem; }
     .media-audio { display: block; width: 100%; margin-top: 0.4rem; }
+    .media-video { display: block; width: 100%; max-width: 360px; border-radius: 10px; margin-top: 0.4rem; background: #000; }
+    .media-post { display: block; white-space: pre-wrap; font-size: 0.86em; color: var(--dim, #9aa2ad); margin-top: 0.4rem; }
+    .media-review { display: block; font-size: 0.8em; color: var(--dim, #9aa2ad); margin-top: 0.3rem; }
     .paper-drop.hidden { display: none; }
     .paper-drop {
       margin-top: 0.8rem;
@@ -2591,8 +2594,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var isAudio = /^audio\//i.test(a.type || "") || /\.(mp3|wav|m4a|ogg)$/i.test(name);
       var isImage = /^image\//i.test(a.type || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
       var is3d = /\.(glb|gltf|obj|usdz)$/i.test(name);
+      // A video is the one deliverable that must play where it is announced: the
+      // person reviews it before posting, so a download link alone is not delivery.
+      var isVideo = /^video\//i.test(a.type || "") || /\.(mp4|webm|mov)$/i.test(name);
       var body = "";
-      if (isAudio) {
+      if (isVideo) {
+        body = '<video class="media-video" controls preload="metadata" playsinline' +
+          (a.poster ? ' poster="' + esc(a.poster) + '"' : "") +
+          ' src="' + url + '"></video>' +
+          (a.postText ? '<span class="media-post">' + esc(a.postText) + "</span>" : "") +
+          (a.reviewNote ? '<span class="media-review">' + esc(a.reviewNote) + "</span>" : "");
+      } else if (isAudio) {
         body = '<audio class="media-audio" controls preload="metadata" src="' + url + '"></audio>';
       } else if (isImage) {
         body = '<img class="media-img" src="' + url + '" alt="' + name + '" loading="lazy" />';
@@ -2602,7 +2614,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         body = '<span class="file-sub">3D model · download to open in any 3D viewer</span>';
       }
       return '<div class="file-card media-card">' +
-        '<span class="file-icon">' + (isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
+        '<span class="file-icon">' + (isVideo ? "\uD83C\uDFAC" : isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
         '<span class="file-meta">' +
           '<span class="file-name">' + name + "</span>" +
           '<span class="file-sub">' + (is3d ? "" : "Saved to your files") + size + "</span>" +
@@ -2676,6 +2688,67 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (++misses >= 4) stop("Lost touch with the 3D model — check the connection.");
           });
       }, 4000);
+    }
+
+    // ── A video the chat started ─────────────────────────────────────────
+    // The kit renders on another machine and takes minutes, so the turn only starts
+    // the job and returns video { jobId, recipe, etaMinutes }. This polls until the
+    // server has stored the mp4 (plus thumbnail and post text), shows the ETA under
+    // the reply, then attaches the finished video to that same reply. Re-renders
+    // write in place, so audio already playing above is not interrupted.
+    function watchVideo(jobId, msg, info) {
+      var tries = 0;
+      var misses = 0;
+      var startedAt = Date.now();
+      var etaMin = Math.max(1, Number((info && info.etaMinutes) || 5));
+      msg.videoJobId = jobId;
+      function show(text) {
+        msg.progress = text;
+        var line = document.querySelector('[data-video="' + String(jobId).replace(/"/g, "") + '"]');
+        if (line) line.textContent = text;
+        else renderChatMessages();
+      }
+      function stop(text) {
+        clearInterval(tick);
+        msg.progress = text;
+        renderChatMessages();
+      }
+      function left() {
+        var mins = Math.max(0, Math.round(etaMin - (Date.now() - startedAt) / 60000));
+        return mins > 1 ? "about " + mins + " minutes left" : "almost done";
+      }
+      show("Making your video — " + left() + "…");
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/video/" + encodeURIComponent(jobId), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            if (p.video && p.video.url) {
+              clearInterval(tick);
+              msg.progress = "";
+              msg.asset = {
+                url: p.video.url,
+                name: p.video.name || "video.mp4",
+                bytes: p.video.bytes || 0,
+                type: p.video.type || "video/mp4",
+                poster: p.thumbnail && p.thumbnail.url ? p.thumbnail.url : "",
+                postText: p.postText || "",
+                reviewNote: p.reviewNote || "Review before posting — this video was made with AI"
+              };
+              renderChatMessages();
+              return;
+            }
+            if (p.state === "failed" || p.ok === false) {
+              return stop(p.message || p.error || "The video did not finish.");
+            }
+            if (tries > 240) return stop("The video is taking far longer than promised — ask again in a moment.");
+            if (p.state === "running" || p.state === "queued") show("Making your video — " + left() + "…");
+            misses = 0;
+          })
+          .catch(function () {
+            if (++misses >= 4) stop("Lost touch with the video service — check the connection.");
+          });
+      }, 8000);
     }
 
     // ── What happened ────────────────────────────────────────────────
@@ -2792,8 +2865,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         }
         if (m.progress) {
-          bubble += '<div class="bz-what" data-model3d="' + String(m.model3dTask || "").replace(/"/g, "") + '">' +
-            String(m.progress).replace(/</g, "&lt;") + "</div>";
+          bubble += '<div class="bz-what"' +
+            (m.model3dTask ? ' data-model3d="' + String(m.model3dTask).replace(/"/g, "") + '"'
+              : m.videoJobId ? ' data-video="' + String(m.videoJobId).replace(/"/g, "") + '"' : "") +
+            '>' + String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
         return bubble;
@@ -6849,6 +6924,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (Array.isArray(data.actions) && data.actions.length && window.BeeZillaPilot) window.BeeZillaPilot.run(data.actions);
         // Asked for a 3D model: the turn started it, and it lands under this reply.
         if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
+        // Asked for a video: the turn started it, and it lands under this reply.
+        if (data.video && data.video.jobId) watchVideo(data.video.jobId, replyMsg, data.video);
         // A track spends plan minutes: show what is left now, not on the next send.
         if (data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
         // The turn's own numbers are authoritative — don't re-fetch over them.

@@ -56,10 +56,12 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote } from "./self-knowledge";
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
+import { VIDEO_DAILY_LIMIT, VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoJobsToday } from "./video";
+import type { VideoTopicInput } from "./video";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 
@@ -322,6 +324,12 @@ export interface ChatResponse {
    */
   model3d?: { taskId: string };
   /**
+   * A video this turn STARTED. The render takes minutes, so the page polls
+   * GET /api/buzzy/video/:jobId and shows the player, thumbnail and post text
+   * under the reply that announced it. `recipe` names which of the five ran.
+   */
+  video?: { jobId: string; recipe: string; etaMinutes: number; state: string };
+  /**
    * Everything this turn actually produced. The renderer draws these cards and
    * only these cards; a sentence claiming a file that is not in this list is a
    * bug in the reply, not a product feature. `document`/`audio` are kept for the
@@ -540,10 +548,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // reply only says it is on its way. Without this, "make a 3D model of a race
   // track" also read as a song ("make … track") and as a request for a document.
   const wants3d = is3dRequest(message);
+  // A video is its own deliverable and the most expensive thing the product can
+  // start, so it is recognised HERE, before the music and picture pre-passes: "make
+  // me a picture reel" must be a video job, not one PNG. The kit brief is explicit
+  // that the job always starts; the model never gets a vote.
+  const videoRequest = videoAsk(message);
+  const wantsVideo = Boolean(videoRequest);
   const lockdown = req.privacy === "lockdown";
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
-  const requestedDraft = !wants3d && (isDraftRequest(message) || req.execute === true);
+  const requestedDraft = !wants3d && !wantsVideo && (isDraftRequest(message) || req.execute === true);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -699,6 +713,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The 3D model this turn started, or why it could not be started.
   let model3dTask: { taskId: string } | null = null;
   let threeDRefusal: { code: string; error: string } | null = null;
+  // The video this turn started (kit job), or why it could not be started.
+  let videoJob: { jobId: string; recipe: string; etaMinutes: number; state: string } | null = null;
+  let videoRefusal: { code: string; error: string } | null = null;
 
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
@@ -719,7 +736,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // No gate on mode: a person who types "just make me a lullaby" in Chat mode
   // asked for a file, not a conversation about files. The quota check inside
   // gatedMusic is what decides whether this account may spend, not the UI tab.
-  if (!lockdown && !wants3d && isMusicRequest(message) && musicConfigured()) {
+  if (!lockdown && !wants3d && !wantsVideo && isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
@@ -774,10 +791,83 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   }
 
+  // ── Video pre-pass ────────────────────────────────────────────────────
+  // A video is minutes of work on another machine, so the turn STARTS it and says
+  // so; the page polls GET /api/buzzy/video/<id> until the files are stored. The
+  // rule from the kit brief is absolute: a video request always starts the job.
+  // The model is never asked whether to make it, and is told what to say.
+  if (lockdown) {
+    if (wantsVideo) {
+      videoRefusal = { code: "lockdown", error: "Videos are off in Lockdown" };
+      messages[0]!.content +=
+        "\n\nThe owner asked for a video, but they chose Lockdown, so nothing leaves BeeZilla. " +
+        "Say it is off in Lockdown and that the privacy control on the Talk bar switches it back. " +
+        "Do not describe the video.";
+    }
+  } else if (wantsVideo && videoRequest) {
+    const label = recipeById(videoRequest.recipe)?.label ?? "video";
+    if (!videoConfigured()) {
+      videoRefusal = { code: "not_configured", error: "The video service is not set up on this deployment" };
+      messages[0]!.content +=
+        "\n\nA video was requested but no video service is configured on this deployment, so none can be made here. " +
+        "Say exactly that in one sentence. Do not describe a video and do not offer to make one later.";
+    } else if ((await videoJobsToday(userId)) >= VIDEO_DAILY_LIMIT) {
+      videoRefusal = {
+        code: "daily_limit",
+        error: `Today's ${VIDEO_DAILY_LIMIT}-video limit is used up — it resets tomorrow.`,
+      };
+      messages[0]!.content +=
+        `\n\nA video was requested and REFUSED by the daily limit (${VIDEO_DAILY_LIMIT} per day). ` +
+        "Say exactly that in one sentence. Nothing was charged. Do not describe a video.";
+    } else if (videoRequest.needsTable) {
+      // The chart race is the one recipe a sentence cannot start: the kit's job
+      // body needs the table itself plus where the numbers came from. Asking here
+      // is honest; starting a job without them would be a 400 and a wasted turn.
+      videoRefusal = {
+        code: "needs_table",
+        error: "A chart race needs your numbers — the table plus where they came from.",
+      };
+      messages[0]!.content +=
+        "\n\nA chart race was requested, but that recipe needs the person's own table before it can start: " +
+        "the first column is dates (2005, 2024-01, 2024 Q2), then one column of numbers per competitor, at least " +
+        "six dated rows, and they must say where the numbers come from. Ask for exactly those two things in one " +
+        "or two sentences and say the chart card will take the table as a paste or a CSV file. Do NOT claim a job " +
+        "started and do NOT describe a chart.";
+    } else {
+      req.onStage?.({ phase: "video", label: `Making your ${label.toLowerCase()}`, etaMs: 8000 });
+      // `needsTable` was excluded above, so this is one of the four topic recipes.
+      const started = await createVideoJob(
+        topicJobInput({
+          recipe: videoRequest.recipe as VideoTopicInput["recipe"],
+          topic: videoRequest.topic,
+          userId,
+        }),
+      );
+      if (started.ok) {
+        videoJob = {
+          jobId: started.jobId,
+          recipe: videoRequest.recipe,
+          etaMinutes: started.etaMinutes,
+          state: started.state,
+        };
+        messages[0]!.content +=
+          `\n\nA ${label} video was STARTED this turn and is rendering now — it takes about ${started.etaMinutes} ` +
+          "minutes. It appears under this reply as a player the moment it is finished, and a copy is saved to their " +
+          "Library. Do not describe the finished video, do not say it is done or attached, and do not name a file. " +
+          "Say in one or two sentences that it is being made and when it will be ready, then stop.";
+      } else {
+        videoRefusal = { code: started.code, error: started.error };
+        messages[0]!.content +=
+          `\n\nVideo generation was attempted and FAILED (${started.code}): ${started.error} ` +
+          "Tell the owner that exact reason in one sentence. Nothing was charged. Do not claim any video exists.";
+      }
+    }
+  }
+
   // ── Art pre-pass ───────────────────────────────────────────────────
   // "draw me a duck" is a request for a file, and the canvas is not the only way in.
   // Same rule as music: the harness renders, the model narrates what exists.
-  if (!lockdown && !renderedImage && !wants3d && isImageRequest(message, { history }) && artConfigured()) {
+  if (!lockdown && !renderedImage && !wants3d && !wantsVideo && isImageRequest(message, { history }) && artConfigured()) {
     const artStarted = Date.now();
     const prompt = message.slice(0, 1000);
     const verdict = await checkQuota({ userId, scope: "image", units: 1 });
@@ -919,6 +1009,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     afterNotes.push(
       "The track was already made this turn and is attached to this reply. Describe it in one or two " +
         "sentences. Never say you cannot make audio and never answer with JSON or a tool call.",
+    );
+  }
+  if (videoJob) {
+    afterNotes.push(
+      `The ${recipeById(videoJob.recipe)?.label?.toLowerCase() ?? "video"} was already started this turn and ` +
+        `takes about ${videoJob.etaMinutes} minutes. Say only that it is being made and will appear under this ` +
+        "reply. Never say it is finished or attached, and never answer with JSON or a tool call.",
     );
   }
   if (model3dTask) {
@@ -1249,6 +1346,80 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 bytes: stored.bytes,
               };
             }
+            if (tc.name === "generate_video") {
+              // The harness usually starts a video before the model is asked (see the
+              // video pre-pass). This branch exists for the case the model is the one
+              // deciding: a follow-up in an open brief ("now one about volcanoes,
+              // paper-cut style"). Same job API, same limits, same ownership record.
+              const recipe = String(content.recipe ?? "").trim();
+              const topic = String(content.topic ?? "").trim();
+              const known = VIDEO_RECIPES.find((r) => r.id === recipe);
+              if (!known) {
+                return {
+                  message:
+                    `generate_video failed: ${recipe || "(no recipe)"} is not one of the five recipes. ` +
+                    `Use one of: ${VIDEO_RECIPES.map((r) => r.id).join(", ")}.`,
+                  errorCode: "bad_recipe",
+                };
+              }
+              if (!videoConfigured()) {
+                return {
+                  message: "generate_video failed: no video service is configured on this deployment.",
+                  errorCode: "not_configured",
+                };
+              }
+              if ((await videoJobsToday(userId)) >= VIDEO_DAILY_LIMIT) {
+                return {
+                  message: `generate_video failed: today's ${VIDEO_DAILY_LIMIT}-video limit is used up. Nothing was charged.`,
+                  errorCode: "daily_limit",
+                };
+              }
+              const started =
+                known.id === "chart-race-from-your-numbers"
+                  ? await createVideoJob({
+                      recipe: "chart-race-from-your-numbers",
+                      userId,
+                      chart: {
+                        question: String((content.chart as Record<string, unknown> | undefined)?.question ?? topic),
+                        dataCsv: String((content.chart as Record<string, unknown> | undefined)?.data_csv ?? ""),
+                        source: String((content.chart as Record<string, unknown> | undefined)?.source ?? ""),
+                        chart: (content.chart as Record<string, unknown> | undefined)?.chart === "line" ? "line" : "bar",
+                        unit: String((content.chart as Record<string, unknown> | undefined)?.unit ?? ""),
+                        format: (() => {
+                          const f = String((content.chart as Record<string, unknown> | undefined)?.format ?? "portrait");
+                          return f === "square" || f === "vertical" ? f : "portrait";
+                        })(),
+                        aiText: Boolean((content.chart as Record<string, unknown> | undefined)?.ai_text),
+                      },
+                    })
+                  : await createVideoJob(
+                      topicJobInput({
+                        recipe: known.id as VideoTopicInput["recipe"],
+                        topic,
+                        userId,
+                      }),
+                    );
+              if (!started.ok) {
+                return {
+                  message:
+                    `generate_video failed (${started.code}): ${started.error} ` +
+                    "Report this exact reason to the owner. Nothing was charged. Do NOT claim any video exists.",
+                  errorCode: started.code,
+                };
+              }
+              videoJob = {
+                jobId: started.jobId,
+                recipe: known.id,
+                etaMinutes: started.etaMinutes,
+                state: started.state,
+              };
+              return {
+                message:
+                  `generate_video started: ${known.label}, about ${started.etaMinutes} minutes. ` +
+                  "It appears under your reply as a player when it is finished and is saved to their Library. " +
+                  "Say it is being made — do not describe it, do not say it is done, and do not call the tool again.",
+              };
+            }
             if (["render_document", "render_presentation", "render_sheet"].includes(tc.name)) {
               const result =
                 tc.name === "render_document" ? await renderDocument(content)
@@ -1565,6 +1736,27 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       : `I couldn't make that 3D model: ${threeDRefusal?.error ?? "the 3D service did not start it"}.`;
   }
 
+  // A video turn's reply went through checks written for audio, pictures and 3D,
+  // and "the video" is none of those. A video is minutes away, so there is exactly
+  // one true sentence for the turn: it is being made, and it will appear here. Say
+  // that one instead of whatever the model wrote.
+  if (wantsVideo && !renderedAudio && !renderedImage && !renderedDocText) {
+    const lie =
+      /\b(your|the)\s+(video|infographic|reel|explainer|chalkboard)\b[^.\n]{0,100}\b(is ready|has been (made|saved|created|rendered|generated)|is in your library|here it is|attached|is done)\b/i.test(
+        finalReply,
+      );
+    if (videoJob) {
+      const label = recipeById(videoJob.recipe)?.label ?? "video";
+      if (lie || finalReply !== guardedReply) {
+        finalReply =
+          `I'm making that ${label.toLowerCase()} now — about ${videoJob.etaMinutes} minutes. ` +
+          "It will play right here the moment it is finished, and a copy goes to your Library.";
+      }
+    } else if (videoRefusal) {
+      finalReply = `I couldn't start that video: ${videoRefusal.error}`;
+    }
+  }
+
   // Strip a leading machine token before the reply becomes the answer. The model
   // learned the filename from project memory, so it survived removing it from the
   // prompt; and cleanReply is copied here, so stripping afterwards changed nothing.
@@ -1748,23 +1940,34 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Audio-only turns skip the draft path, but they are still work: without a
   // project the MP3 belongs to nobody, so the Library can show it while no work
   // item claims it. Record the project and attach the file to it.
+  //
+  // A turn can deliver a picture AND a track (voice replies on, "draw me a duck"):
+  // then `imageOnly` is false, this branch owns the project id, and the picture
+  // has to join it too. Measured 2026-11-18 on c15db66 — the card's "In your
+  // Library →" link opened job_bfdd625a51034bc3 ('Audio ready', no image) while
+  // asset 8303 sat with job_id NULL: the PNG was an orphan the Library could
+  // never show under the job the card links to.
   if (audioOnly && renderedAudio) {
     const audioJobId = musicProjectId || jobId || sessionId || `job_${Date.now()}`;
     const audioTitle = message.slice(0, 80);
+    const audioStatus = renderedImage ? "Deliverable ready" : "Audio ready";
+    const projectData: Record<string, unknown> = { audio: renderedAudio, slots: slotValues, approved: false };
+    if (renderedImage) projectData.image = renderedImage;
     try {
       await sql`
         INSERT INTO buzzy_jobs (id, user_id, template, title, status, company_id, data, updated_at)
-        VALUES (${audioJobId}, ${userId}, null, ${audioTitle}, 'Audio ready', null,
-          ${JSON.stringify({ audio: renderedAudio, slots: slotValues, approved: false })}::jsonb, now())
+        VALUES (${audioJobId}, ${userId}, null, ${audioTitle}, ${audioStatus}, null,
+          ${JSON.stringify(projectData)}::jsonb, now())
         ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title, status = 'Audio ready',
+          title = EXCLUDED.title, status = EXCLUDED.status,
           data = buzzy_jobs.data || EXCLUDED.data, updated_at = now()
       `;
-      const assetUrl = String(renderedAudio.url || "");
-      const assetId = Number(assetUrl.split("/").pop());
-      if (Number.isFinite(assetId) && assetId > 0) {
-        await sql`UPDATE buzzy_assets SET job_id = ${audioJobId}, session_id = ${sessionId}
-                  WHERE user_id = ${userId} AND id = ${assetId}`;
+      for (const deliverable of [renderedAudio, renderedImage].filter(Boolean) as Array<{ url?: string }>) {
+        const assetId = Number(String(deliverable.url || "").split("/").pop());
+        if (Number.isFinite(assetId) && assetId > 0) {
+          await sql`UPDATE buzzy_assets SET job_id = ${audioJobId}, session_id = ${sessionId}
+                    WHERE user_id = ${userId} AND id = ${assetId}`;
+        }
       }
       if (sessionId && !jobId) {
         await sql`UPDATE buzzy_sessions SET job_id = ${audioJobId} WHERE id = ${sessionId} AND user_id = ${userId}`;
@@ -1945,6 +2148,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (renderedImage) (response as { image?: typeof renderedImage }).image = renderedImage;
   // Not a file yet: the page polls this id and shows the model when it is stored.
   if (model3dTask) response.model3d = model3dTask;
+  // A video is minutes away: same contract as 3D, plus the recipe and the ETA so
+  // the card can say what is being made and how long it has left.
+  if (videoJob) response.video = videoJob;
+  // A refusal is never silent: the widget shows the reason it could not start.
+  if (videoRefusal) response.warning = response.warning || videoRefusal.error;
 
   // ── The artifact envelope ──────────────────────────────────────────
   // One list of what this turn actually produced. The client renders these and
