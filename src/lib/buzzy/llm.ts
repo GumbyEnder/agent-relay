@@ -11,6 +11,8 @@
  * If unset, defaults to a single "Marvin" entry.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 const env = (key: string): string => {
   const v = process.env[key]?.trim();
   return v ?? "";
@@ -19,6 +21,49 @@ const env = (key: string): string => {
 const BASE_URL = env("BZ_CHAT_BASE_URL") || "https://inference-api.nousresearch.com/v1";
 const API_KEY = env("BZ_CHAT_KEY");
 const DEFAULT_MODEL = env("BZ_CHAT_MODEL") || "z-ai/glm-5.3-flash";
+
+/**
+ * The person's own AI key (owner, 2026-11-18: "Even on the cloud mode, I need to be
+ * able to put in my own API key"). A turn that runs inside withLlmOverride() sends
+ * every completion to THEIR OpenAI-compatible endpoint with THEIR key and model,
+ * instead of the deployment's. Scoped per request with AsyncLocalStorage, so two
+ * people's turns running at once can never borrow each other's key.
+ */
+export interface LlmOverride {
+  baseUrl: string;
+  apiKey: string;
+  /** Their model id. When set it replaces the catalog model for the whole turn. */
+  model?: string | null;
+}
+const overrideStore = new AsyncLocalStorage<LlmOverride>();
+
+/** Run fn with every completion inside it sent to the person's own endpoint. */
+export function withLlmOverride<T>(o: LlmOverride | null | undefined, fn: () => Promise<T>): Promise<T> {
+  return o && o.baseUrl && o.apiKey ? overrideStore.run(o, fn) : fn();
+}
+
+/** True while the current turn is running on the person's own key. */
+export function usingOwnKey(): boolean {
+  return !!overrideStore.getStore();
+}
+
+/** Where this call goes: the person's endpoint inside an override, else the deployment's. */
+function endpoint(requestedModel?: string): { url: string; key: string; model: string } {
+  const o = overrideStore.getStore();
+  if (o) {
+    return {
+      url: o.baseUrl.replace(/\/+$/, "") + "/chat/completions",
+      key: o.apiKey,
+      // Their provider does not know the deployment's catalog ids.
+      model: (o.model && o.model.trim()) || requestedModel || DEFAULT_MODEL,
+    };
+  }
+  return {
+    url: BASE_URL.replace(/\/+$/, "") + "/chat/completions",
+    key: API_KEY,
+    model: requestedModel || DEFAULT_MODEL,
+  };
+}
 
 /**
  * A catalog entry. Only `label` and `model` are required; the rest are optional
@@ -127,12 +172,9 @@ export async function chatCompletionFull(
     toolChoice?: string | object;
   },
 ): Promise<FullCompletion> {
-  const model = opts?.model || DEFAULT_MODEL;
-  // BASE_URL may or may not end in "/v1" — join paths, never use new URL()
+  // BASE_URL may or may not end in "/v1" — endpoint() joins paths, never new URL()
   // (an absolute path would REPLACE the base path and drop "/v1").
-  const url = new URL(
-    BASE_URL.replace(/\/+$/, "") + "/chat/completions",
-  );
+  const model = endpoint(opts?.model).model;
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -181,12 +223,12 @@ export async function chatCompletionStream(
   opts: { model?: string; temperature?: number; maxTokens?: number } | undefined,
   onText: (delta: string) => void,
 ): Promise<FullCompletion> {
-  const model = opts?.model || DEFAULT_MODEL;
-  const url = BASE_URL.replace(/\/+$/, "") + "/chat/completions";
+  const ep = endpoint(opts?.model);
+  const model = ep.model;
   const started = Date.now();
-  const res = await fetch(url, {
+  const res = await fetch(ep.url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ep.key}` },
     body: JSON.stringify({
       model,
       messages,
@@ -241,16 +283,14 @@ export async function chatCompletionStream(
 }
 
 async function postCompletionFull(body: Record<string, unknown>): Promise<FullCompletion> {
-  const url = new URL(
-    BASE_URL.replace(/\/+$/, "") + "/chat/completions",
-  );
+  const ep = endpoint(typeof body.model === "string" ? body.model : undefined);
   const started = Date.now();
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(ep.url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: `Bearer ${ep.key}`,
     },
     body: JSON.stringify(body),
   });

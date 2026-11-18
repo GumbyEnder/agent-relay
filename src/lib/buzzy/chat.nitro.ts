@@ -28,7 +28,11 @@
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
-import { chatLoop } from "./server";
+import { chatLoop, type FlowStep } from "./server";
+import { withLlmOverride } from "./llm";
+import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
+import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
+import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
@@ -723,6 +727,17 @@ export default defineEventHandler(async (event) => {
         setResponseStatus(event, 502);
         return { ok: false, error: "Meshy finished but the file could not be fetched.", code: "download_failed" };
       }
+      if (!stored.duplicate) {
+        // Tag the model from the words that asked for it (kept since the turn started it).
+        const asked = recallPrompt("3d:" + taskId, user.id);
+        const sqlTags = await getSql();
+        if (asked?.sessionId) {
+          try {
+            await sqlTags`UPDATE buzzy_assets SET session_id = ${asked.sessionId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
+          } catch { /* older schema: the link is a bonus */ }
+        }
+        void enrichLater(sqlTags, user.id, stored.id, { prompt: asked?.prompt || "", filename: name, contentType: "model/gltf-binary" });
+      }
       return {
         ok: true,
         taskId,
@@ -877,6 +892,14 @@ export default defineEventHandler(async (event) => {
         sha256,
       };
     }
+    // Search words for the upload, from its name, its folder and any note the page
+    // sent about it (x-bz-note: what the person said the file is).
+    const note = Array.from(getHeader(event, "x-bz-note") || "", (ch) => (ch.charCodeAt(0) < 32 ? " " : ch)).join("").trim().slice(0, 600);
+    void enrichLater(sql, user.id, inserted[0]!.id, {
+      prompt: [note, relPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
+      filename,
+      contentType,
+    });
     return {
       ok: true,
       duplicate: false,
@@ -1190,6 +1213,11 @@ export default defineEventHandler(async (event) => {
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The person's own process from the whiteboard (edited agent.md, skills, output,
+    // or a recipe they ran). Their instructions; chatLoop caps and appends them.
+    const boardInstructions = typeof body.boardInstructions === "string"
+      ? body.boardInstructions.slice(0, 4000)
+      : null;
     // The Talk bar's privacy control. Unknown values mean the default (no change).
     let privacy: "advocate" | "lockdown" | "open" | undefined =
       body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
@@ -1322,13 +1350,17 @@ export default defineEventHandler(async (event) => {
 
     const turnStages: Array<{ phase: string; label: string; etaMs?: number; atMs: number }> = [];
     const turnTools: Array<{ name: string; state: string; ms?: number }> = [];
+    // Their own AI key, when they saved one: every completion in this turn goes to
+    // their provider instead of the deployment's (owner, 2026-11-18).
+    const ownKey = await overrideFor(sql, userId);
     const runTurn = (opts?: {
       speech?: VoiceHandlers;
       onText?: (t: string) => void;
       onTool?: (e: { name: string; state: "running" | "done" | "failed"; ms?: number }) => void;
       onStage?: (s: { phase: string; label: string; etaMs?: number }) => void;
+      onFlow?: (f: FlowStep) => void;
     }) =>
-      chatLoop({
+      withLlmOverride(ownKey, () => chatLoop({
         userId,
         jobId,
         sessionId,
@@ -1352,7 +1384,9 @@ export default defineEventHandler(async (event) => {
         // only a stream of events the page throws away.
         onTool: (e) => { turnTools.push(e); opts?.onTool?.(e); },
         onStage: (st) => { turnStages.push({ ...st, atMs: Date.now() - turnStarted }); opts?.onStage?.(st); },
-      }).then(async (result) => {
+        onFlow: opts?.onFlow,
+        boardInstructions,
+      })).then(async (result) => {
         try {
           await sql`
             INSERT INTO buzzy_turn_log (user_id, session_id, job_id, surface, model, latency_ms, stages, tools, artifacts)
@@ -1395,6 +1429,8 @@ export default defineEventHandler(async (event) => {
               onTool: (e) => send("tool", e),
               // stage {phase,label,etaMs} — what the turn is doing, and how long it should take.
               onStage: (st) => send("stage", st),
+              // flow {kind,id,title,parent,state,url} — the live whiteboard.
+              onFlow: (f) => send("flow", f),
             });
             send("done", result);
             if (result.timings) {
@@ -1461,6 +1497,7 @@ export default defineEventHandler(async (event) => {
               onText: (t) => send("text", { t }),
               onTool: (e) => send("tool", e),
               onStage: (st) => send("stage", st),
+              onFlow: (f) => send("flow", f),
             });
             send("done", result);
           } catch (err) {
@@ -2700,6 +2737,91 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── /api/buzzy/ai-key — the person's own AI key ─────────────────────
+  // Owner, 2026-11-18: "Even on the cloud mode, I need to be able to put in my own
+  // API key." GET shows what is saved (never the key: provider, model, last four),
+  // PUT saves or replaces it (optionally testing it first), DELETE forgets it.
+  if (path === "/api/buzzy/ai-key") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const providers = Object.entries(KEY_PROVIDERS).map(([id, p]) => ({ id, label: p.label }));
+    if (method === "GET") return { ok: true, key: await keySummary(sql, user.id), providers };
+    if (method === "PUT" || method === "POST") {
+      let body: Record<string, unknown> = {};
+      try { body = (await event.req.json()) as Record<string, unknown>; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { provider, apiKey, model, baseUrl }.", code: "bad_json" };
+      }
+      const saved = await saveKey(sql, user.id, body);
+      if (!saved.ok) {
+        setResponseStatus(event, 400);
+        return saved;
+      }
+      // "Does it work?" answered now, with one tiny call on their key, so a typo shows
+      // up here and not as a failed reply later.
+      let works: boolean | null = null;
+      let problem: string | null = null;
+      if (body.test === true) {
+        const o = await overrideFor(sql, user.id);
+        try {
+          await withLlmOverride(o, () => chatCompletion([{ role: "user", content: "Reply with the word ok." }], { maxTokens: 8, temperature: 0 }));
+          works = true;
+        } catch (err) {
+          works = false;
+          const m = err instanceof Error ? err.message : String(err);
+          const code = /\((\d{3})\)/.exec(m)?.[1];
+          problem = code === "401" || code === "403" ? "The provider refused that key."
+            : code === "404" ? "The provider doesn't know that model name."
+            : code === "429" ? "The provider says the key is out of credit or rate-limited."
+            : "The provider didn't answer.";
+        }
+      }
+      return { ok: true, key: saved.summary, works, problem };
+    }
+    if (method === "DELETE") {
+      await deleteKey(sql, user.id);
+      return { ok: true, key: { saved: false } };
+    }
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET, PUT or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── /api/buzzy/board-recipes — recipes made from a whiteboard selection ──
+  if (path === "/api/buzzy/board-recipes" || path.startsWith("/api/buzzy/board-recipes/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const id = path.startsWith("/api/buzzy/board-recipes/") ? decodeURIComponent(path.split("/").pop() || "") : "";
+    if (method === "GET" && !id) return { ok: true, recipes: await listBoardRecipes(sql, user.id) };
+    if (method === "POST" && !id) {
+      let body: Record<string, unknown> = {};
+      try { body = (await event.req.json()) as Record<string, unknown>; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { name, graph }.", code: "bad_json" };
+      }
+      const saved = await saveBoardRecipe(sql, user.id, body);
+      if (!saved.ok) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: saved.error, code: "bad_recipe" };
+      }
+      return { ok: true, recipe: saved.recipe };
+    }
+    if (method === "DELETE" && id) {
+      const gone = await deleteBoardRecipe(sql, user.id, id);
+      if (!gone) setResponseStatus(event, 404);
+      return { ok: gone };
+    }
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET, POST or DELETE.", code: "method_not_allowed" };
+  }
+
   // ── GET /api/buzzy/search — work search across ALL of the user's companies
   // Matches job titles, captured problem text, and chat message content, so a
   // user can find work by what was said in it, not just its title. Archived
@@ -2718,7 +2840,7 @@ export default defineEventHandler(async (event) => {
       return { error: "Type at least 2 characters to search.", code: "bad_query" };
     }
     if (raw.length === 0) {
-      return { ok: true, query: "", jobs: [], documents: [], sessions: [], totals: { jobs: 0, documents: 0, sessions: 0 } };
+      return { ok: true, query: "", jobs: [], documents: [], sessions: [], assets: [], totals: { jobs: 0, documents: 0, sessions: 0, assets: 0 } };
     }
     const statusFilter = queryValue(fullPath, "status");
     const typeFilter = queryValue(fullPath, "type"); // "jobs" | "documents" | null
@@ -2777,7 +2899,13 @@ export default defineEventHandler(async (event) => {
       ORDER BY d.updated_at DESC LIMIT 25
     `;
     const ql = raw.toLowerCase();
+    // Saved pictures, music, 3D and files, found by their search words (tags.ts):
+    // "house" finds the house picture, not only a file named house.png. Older files
+    // without words get them a few at a time as people search.
+    const assetHits = typeFilter === "jobs" ? [] : await searchTagged(sql, user.id, raw, 24);
+    void backfillTags(sql, user.id, 4).catch(() => {});
     return {
+      assets: assetHits,
       ok: true,
       query: raw,
       jobs: typeFilter === "documents" ? [] : jobRows.map((r) => ({
@@ -2811,7 +2939,7 @@ export default defineEventHandler(async (event) => {
           ...(snippet ? { snippet } : {}),
         };
       }),
-      totals: { jobs: typeFilter === "documents" ? 0 : jobRows.length, documents: docRows.length, sessions: sessionRows.length },
+      totals: { jobs: typeFilter === "documents" ? 0 : jobRows.length, documents: docRows.length, sessions: sessionRows.length, assets: assetHits.length },
     };
   }
 
