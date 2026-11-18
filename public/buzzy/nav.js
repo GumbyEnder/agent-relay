@@ -169,6 +169,13 @@
       ".bz-navbar{height:auto;min-height:44px;flex-wrap:wrap;justify-content:flex-start;gap:.3rem .85rem;padding:4px 8px 6px;overflow-x:visible}",
       "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
       "}",
+      // Honey Drops, plan and company: inside the menu under your name, never in the bar.
+      "#bzChrome>.bz-acct-extras{display:none}",
+      ".bz-account-menu .bz-acct-extras{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:10px 12px 12px;margin:0 0 6px;border-bottom:1px solid #2a2a2a}",
+      ".bz-account-menu .bz-acct-extras>*{margin:0!important;justify-content:flex-start}",
+      ".bz-account-menu .bz-acct-extras .bz-co-wrap{display:flex;flex-direction:column;align-items:stretch;gap:4px}",
+      ".bz-account-menu .bz-acct-extras select{width:100%}",
+      ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -542,7 +549,11 @@
         if (!menu) return;
         if (a === e.target || a.contains(e.target)) {
           e.preventDefault();
-          menu.style.display = menu.style.display === "none" ? "block" : "none";
+          var opening = menu.style.display === "none";
+          // Honey Drops, the plan and the company sit at the top of this menu.
+          var extras = document.getElementById("bzAcctExtras");
+          if (opening && extras && extras.parentNode !== menu) menu.insertBefore(extras, menu.firstChild);
+          menu.style.display = opening ? "block" : "none";
         }
       });
       document.addEventListener("click", function (e) {
@@ -850,12 +861,19 @@
     }
 
     loadCompanies();
-    honeyControl(chrome);
-    planChip(chrome);
-    voiceDock(chrome);
-    companyControl(chrome);
+    // Owner, 2026-11-17: "There's like 900 buttons around just interacting at the
+    // top." Honey Drops, the plan and the company live in the menu under your name;
+    // on Talk the page itself is the way to talk, so no Listen or Ask beside it.
+    var acctExtras = document.createElement("div");
+    acctExtras.id = "bzAcctExtras";
+    acctExtras.className = "bz-acct-extras";
+    chrome.appendChild(acctExtras);
+    honeyControl(acctExtras);
+    planChip(acctExtras);
+    if (section() !== "talk") voiceDock(chrome);
+    companyControl(acctExtras);
     accountControl(chrome);
-    askControl(chrome);
+    if (section() !== "talk") askControl(chrome);
   }
 
   /**

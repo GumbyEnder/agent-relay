@@ -70,11 +70,15 @@
   {
     "id": "sk-005",
     "q": "What is the difference between Chat and Work?",
-    "a": "Chat is the normal way to talk it through. Work first collects the key details of the job in one go, then goes through the usual draft-and-approve steps.",
+    "a": "Chat is the normal way to talk it through. Work first collects the key details of the job in one go, then goes through the usual draft-and-approve steps. Switch between them in the ⋯ menu at the end of the Talk bar.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
         "symbol": "Chat is the default. Work mode makes the harness delineate the task"
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "<span class=\"tm-label\">Mode</span>"
       }
     ],
     "surfaces": [
@@ -182,7 +186,7 @@
   {
     "id": "sk-010",
     "q": "How many chats do I get?",
-    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. The line under the Talk bar shows how many you have left today.",
+    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. The menu under your name shows your plan, and a line under the Talk bar appears when you are running low.",
     "sources": [
       {
         "file": "src/lib/buzzy/entitlements.ts",
@@ -198,7 +202,11 @@
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": " chats left"
+        "symbol": "The calm page shows this line only when chats are running low"
+      },
+      {
+        "file": "public/buzzy/nav.js",
+        "symbol": "Honey Drops, the plan and the company live in the menu under your name"
       }
     ],
     "surfaces": [
@@ -652,15 +660,19 @@
   {
     "id": "sk-035",
     "q": "How does talking to BeeZilla by voice work?",
-    "a": "Press Talk to BeeZilla. A big mic appears with a live sound level and your words as you speak, and the Whiteboard opens beside it. Press the mic again, or End voice, to stop.",
+    "a": "Press Talk to BeeZilla. The button itself shows that BeeZilla hears you: it says Listening… with a small live level, and your words appear in the box as you speak. The conversation and the Whiteboard open below it. Press the button again to stop.",
     "sources": [
       {
         "file": "public/buzzy/voice-stage.js",
-        "symbol": "Pressing the mic again ends voice"
+        "symbol": "The Talk to BeeZilla button is the only voice signal."
+      },
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "What BeeZilla hears appears in the box where you would type"
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "End voice"
+        "symbol": "Stop talking to BeeZilla"
       }
     ],
     "surfaces": [
@@ -671,11 +683,11 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Turn on Speak replies and it reads its answers aloud.",
+    "a": "Yes. Turn on Speak replies in the ⋯ menu at the end of the Talk bar, and it reads its answers aloud.",
     "sources": [
       {
-        "file": "public/buzzy/nav.js",
-        "symbol": "Speak replies"
+        "file": "public/buzzy/talk.html",
+        "symbol": "<span class=\"vt-label\">Speak replies</span>"
       }
     ],
     "surfaces": [
@@ -686,7 +698,7 @@
   {
     "id": "sk-037",
     "q": "Can I give BeeZilla a document to read?",
-    "a": "Yes. Use Attach a paper, or drag the file onto the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "a": "Yes. Drag the file onto the Talk bar, or use Attach a file in the ⋯ menu. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -694,7 +706,7 @@
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Attach a paper"
+        "symbol": "Attach a file</button>"
       },
       {
         "file": "src/lib/buzzy/paper.ts",
@@ -708,12 +720,16 @@
   },
   {
     "id": "sk-038",
-    "q": "What is History?",
-    "a": "Your past chats. Pick one to reopen it, rename it or get a quick summary. You can also start a new chat from there.",
+    "q": "Where are my past conversations?",
+    "a": "Under Conversations in the ⋯ menu at the end of the Talk bar. Pick one to reopen it, rename it or get a quick summary. You can start a new conversation there too.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
         "symbol": "Pick a past chat to reopen it, rename it, or get a quick summary."
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "type=\"button\">Conversations</button>"
       }
     ],
     "surfaces": [

@@ -1446,6 +1446,7 @@
   <link rel="stylesheet" href="/buzzy/inspiration.css" />
   <link rel="stylesheet" href="/buzzy/voice-stage.css" />
   <link rel="stylesheet" href="/buzzy/whiteboard.css" />
+  <link rel="stylesheet" href="/buzzy/calm.css" />
   <link rel="stylesheet" href="/buzzy/share.css" />
 </head>
 <body>
@@ -1519,11 +1520,6 @@
               </div>
             </div>
             <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
-            <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read replies aloud">
-              <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Voice</span>
-            </button>
-            <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New session</button>
-            <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
           </div>
           <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
 
@@ -1554,6 +1550,7 @@
             <div class="talk-bar" id="talkBar">
               <button id="micBtn" class="talk-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">
                 <svg class="tb-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+                <canvas class="tb-level" aria-hidden="true"></canvas>
                 <span class="tb-label">Talk to BeeZilla</span>
               </button>
               <div class="talk-field">
@@ -1566,42 +1563,60 @@
                   </button>
                 </div>
               </div>
-              <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
-              <div class="talk-privacy">
-                <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
-                  <span class="pv-icons"></span>
+              <!-- Everything that isn't talking lives behind one button (owner, 2026-11-17:
+                   "It should just be one. Talk to BeeZilla."). calm.css styles it. -->
+              <div class="talk-more" id="talkMore">
+                <button type="button" id="talkMoreBtn" class="talk-more-btn" aria-expanded="false" aria-controls="talkMorePanel" title="More">
+                  <span aria-hidden="true">&#8943;</span><span class="tm-sr">More</span>
                 </button>
-                <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
-                  <div class="pp-head">
-                    <strong>Privacy</strong>
-                    <span class="pp-tools">
-                      <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
-                      <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
-                    </span>
+                <div class="talk-more-panel hidden" id="talkMorePanel" role="group" aria-label="More">
+                  <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New conversation</button>
+                  <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
+                  <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open the whiteboard">&#9638; Whiteboard</button>
+                  <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a file</button>
+                  <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read BeeZilla's replies aloud">
+                    <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Speak replies</span>
+                  </button>
+                  <div class="tm-row"><span class="tm-label">Mode</span>
+                    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+                      <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+                      <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+                    </div>
                   </div>
-                  <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
-                    <span class="pp-thumb" aria-hidden="true"></span>
-                    <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
-                    <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
-                    <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+                  <div class="tm-row"><span class="tm-label">Privacy</span>
+                    <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
+                    <div class="talk-privacy">
+                      <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
+                        <span class="pv-icons"></span>
+                      </button>
+                      <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
+                        <div class="pp-head">
+                          <strong>Privacy</strong>
+                          <span class="pp-tools">
+                            <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
+                            <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
+                          </span>
+                        </div>
+                        <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
+                          <span class="pp-thumb" aria-hidden="true"></span>
+                          <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
+                          <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
+                          <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+                        </div>
+                        <p class="pp-desc" id="privacyDesc"></p>
+                      </div>
+                    </div>
                   </div>
-                  <p class="pp-desc" id="privacyDesc"></p>
                 </div>
               </div>
               <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
             </div>
             <div class="talk-sub">
-              <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-                <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-                <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
-              </div>
               <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
                    is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
                    dropped on the bar; this link is for a phone or a pasted letter. -->
               <span class="talk-sub-right">
-                <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open the whiteboard">&#9638; Whiteboard</button>
                 <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
-                <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a paper</button>
               </span>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
@@ -1615,6 +1630,16 @@
             </div>
             <!-- The whiteboard opened from the bar while voice is off (voice-stage.js). -->
             <div id="boardSolo" class="board-solo"></div>
+          </div>
+
+          <!-- The workspace (owner, 2026-11-17: "Talk to BeeZilla, and then it opens up the
+               whiteboard area"): the conversation on the left, the whiteboard on the right.
+               Talking, typing or opening the whiteboard opens it (voice-stage.js). -->
+          <div id="talkWorkspace" class="talk-ws hidden" aria-label="Workspace">
+            <div class="talk-ws-thread" id="talkWsThread">
+              <div class="chat-messages" id="chatMessages"></div>
+            </div>
+            <div class="talk-ws-board" id="talkWsBoard"></div>
           </div>
 
           <!-- The brief is one line above the conversation, expandable in place.
@@ -1663,7 +1688,7 @@
               <button type="button" id="downloadPdf" class="secondary">PDF</button>
               <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
               <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
-              <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+              <button type="button" id="newChatBtn" class="secondary new-chat-btn">New conversation</button>
             </div>
             <p id="draftSendNote" class="muted" role="status"></p>
             <div id="outwardConfirm" class="outward-confirm">
@@ -1725,21 +1750,21 @@
 
     <!-- Sessions drawer -->
     <div id="sessionsOverlay" class="sessions-overlay hidden" aria-hidden="true"></div>
-    <aside id="sessionsDrawer" aria-label="History" aria-hidden="true">
+    <aside id="sessionsDrawer" aria-label="Conversations" aria-hidden="true">
       <div class="drawer-header">
-        <h3>History</h3>
+        <h3>Conversations</h3>
         <span class="drawer-tools">
           <button id="sessionsMin" class="drawer-close" type="button" aria-label="Minimise history" title="Minimise">&ndash;</button>
           <button id="sessionsClose" class="drawer-close" type="button">Close</button>
         </span>
       </div>
       <div class="drawer-actions">
-        <button id="drawerNewChat" class="secondary" type="button">Start a new chat</button>
+        <button id="drawerNewChat" class="secondary" type="button">New conversation</button>
       </div>
       <p class="drawer-note">Pick a past chat to reopen it, rename it, or get a quick summary.</p>
       <div id="sessionsList"></div>
     </aside>
-    <button id="sessionsPill" class="sessions-pill hidden" type="button" aria-label="Open history again">History</button>
+    <button id="sessionsPill" class="sessions-pill hidden" type="button" aria-label="Open conversations again">Conversations</button>
   </main>
 
   <script src="/buzzy/companies.js"></script>
@@ -7405,6 +7430,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     if (name === "free") bits.push("upgrade for music");
     chip.textContent = bits.join(" · ");
     chip.classList.remove("hidden");
+    // The calm page shows this line only when chats are running low (calm.css).
+    chip.classList.toggle("plan-low", Number(left.inference || 0) < 10);
   }
   function refresh() {
     fetch("/api/buzzy/entitlement", { credentials: "include" })

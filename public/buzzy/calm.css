@@ -1,0 +1,175 @@
+/*
+ * The calm Talk page (owner, 2026-11-17): one Talk to BeeZilla, the workspace it
+ * opens, and everything else behind one More button. "There's like 900 buttons
+ * around just interacting at the top that are all fighting for attention. It should
+ * just be one." Loaded after talk.html's own styles; voice-stage.js drives it.
+ */
+
+/* ── Out of sight: the mascot and "Working for" heading, the big voice panel and
+   its labels, the status lines under the bar, the old row under it, the context
+   meter. The plan line returns only when chats are running low. ── */
+.chat-mascot,
+.chat-company-head,
+#chatCompany,
+#voiceStage,
+#voiceStatus,
+.talk-sub,
+#ctxMeter,
+#boardSolo { display: none !important; }
+#planChip:not(.plan-low) { display: none !important; }
+.chat-header-row { padding: 0; min-height: 0; }
+.chat-header-row:has(#backToRecent.hidden) { display: none; }
+
+/* ── The bar: one button, one box, one More ── */
+.talk-btn {
+  min-height: 2.9rem;
+  padding: 0 1.25rem 0 1.05rem;
+  font-size: 1rem;
+  filter: none;
+}
+.talk-btn:hover { filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.45)); }
+.talk-btn.on { animation: none; } /* the level inside says it hears you; no glow */
+.talk-btn .tb-level { display: none; width: 26px; height: 18px; flex: 0 0 auto; }
+.talk-btn[aria-pressed="true"] .tb-mic { display: none; }
+.talk-btn[aria-pressed="true"] .tb-level { display: block; }
+.composer-card .talk-field #chatInput.tb-heard::placeholder { color: #f2f2f2; opacity: 0.85; }
+
+.talk-more { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
+.talk-more-btn {
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 50%;
+  border: 1px solid #2a2a2a;
+  background: #0d0d0d;
+  color: #c9cdd2;
+  font: inherit;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.talk-more-btn:hover,
+.talk-more-btn[aria-expanded="true"] { color: #ffc107; border-color: #6b5a1e; }
+.talk-more-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.tm-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.talk-more-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 60;
+  width: 18rem;
+  max-width: calc(100vw - 32px);
+  padding: 0.4rem;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.talk-more-panel.hidden { display: none; }
+.talk-more-panel > button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #e8e8e8;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.talk-more-panel > button:hover,
+.talk-more-panel > button:focus-visible { background: #222; outline: none; }
+.talk-more-panel > button[aria-pressed="true"] { color: #ffc107; }
+.talk-more-panel .voice-toggle .vt-icon { font-size: 0.95rem; }
+.tm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  margin-top: 2px;
+  border-top: 1px solid #222;
+}
+.tm-label { color: #9a9a9a; font-size: 0.85rem; }
+.tm-row .mode-tabs { margin: 0; }
+.tm-row .talk-privacy { position: static; }
+.talk-more-panel .privacy-pop {
+  position: static;
+  width: 100%;
+  margin-top: 0.4rem;
+  box-shadow: none;
+}
+
+/* ── The workspace: the conversation beside the whiteboard ── */
+.chat-layout:has(.talk-ws:not(.hidden)) {
+  max-width: 1240px;
+  grid-template-columns: minmax(0, 1200px);
+}
+.talk-ws {
+  order: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 0.9rem;
+  margin-top: 0.9rem;
+  height: min(68vh, 680px);
+}
+.talk-ws.hidden { display: none; }
+.talk-ws.ws-no-board { grid-template-columns: minmax(0, 1fr); }
+.talk-ws-thread {
+  min-height: 0;
+  display: flex;
+  border: 1px solid #222;
+  border-radius: 14px;
+  background: #0f0f0f;
+  overflow: hidden;
+}
+.talk-ws-thread .chat-messages {
+  flex: 1 1 auto;
+  max-height: none;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0.5rem 0.85rem;
+}
+.talk-ws-board { min-height: 0; display: flex; }
+.talk-ws-board:empty { display: none; }
+.talk-ws-board .wb-panel { flex: 1 1 auto; min-height: 0; height: 100%; }
+
+@media (max-width: 760px) {
+  .talk-ws { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .talk-ws-thread { max-height: 55vh; }
+  .talk-ws-board .wb-panel { min-height: 18rem; }
+  .talk-more-btn { width: 2.6rem; height: 2.6rem; }
+}
+
+/* ── Quiet details ── */
+/* Before the first word, the conversation column says what it is for. */
+.talk-ws-thread .chat-messages:empty::before {
+  content: "Say what you'd like to make. The conversation shows up here; the work goes on the whiteboard.";
+  display: block;
+  padding: 1rem 0.2rem;
+  color: #7a7a7a;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+/* The numbers under a reply (model, time, tools): there when you look, quiet otherwise. */
+.talk-ws .bz-what { opacity: 0; transition: opacity 0.15s; }
+.talk-ws .bz-what:hover { opacity: 0.85; }
+/* "Copy page link" copies this page's own address; the browser already does that. */
+#bzCopy { display: none; }
