@@ -49,7 +49,8 @@
 
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function state() { return window.bzVoice || {}; }
-  function voiceOn() { var v = state(); return !!(v.mic || v.speaking || v.sending); }
+  // "armed": a voice session is on and waiting for you between turns (talk.html).
+  function voiceOn() { var v = state(); return !!(v.mic || v.armed || v.speaking || v.sending); }
 
   // ── What BeeZilla hears, shown where you would type ──────────────────
   var heard = "";
@@ -170,7 +171,7 @@
     if (v.speaking) return "talking";
     if (Object.keys(running).length) return "working";
     if (v.sending || $("thinkingIndicator")) return "thinking";
-    if (v.mic) return "listening";
+    if (v.mic || v.armed) return "listening";
     return "idle";
   }
   function paintFace() {

@@ -186,7 +186,7 @@
   {
     "id": "sk-010",
     "q": "How many chats do I get?",
-    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. The menu under your name shows your plan, and a line under the Talk bar appears when you are running low.",
+    "a": "Free: 100 a day. Starter: 1,000 a day. Pro: 10,000 a day. Open your account menu (your name in the top bar) and the line there shows your plan and how many chats you have left today.",
     "sources": [
       {
         "file": "src/lib/buzzy/entitlements.ts",
@@ -201,12 +201,8 @@
         "symbol": "inferencePerDay: 10000"
       },
       {
-        "file": "public/buzzy/talk.html",
-        "symbol": "The calm page shows this line only when chats are running low"
-      },
-      {
         "file": "public/buzzy/nav.js",
-        "symbol": "Honey Drops, the plan and the company live in the menu under your name"
+        "symbol": " chats left"
       }
     ],
     "surfaces": [
@@ -613,7 +609,7 @@
   {
     "id": "sk-032",
     "q": "What is the Inspiration wall?",
-    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Whiteboard. It is hidden in Lockdown.",
+    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Idea Board. It is hidden in Lockdown.",
     "sources": [
       {
         "file": "public/buzzy/inspiration.js",
@@ -630,8 +626,8 @@
   },
   {
     "id": "sk-033",
-    "q": "What is the Whiteboard?",
-    "a": "It's where BeeZilla's work happens. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe.",
+    "q": "What is the Idea Board (formerly the Whiteboard)?",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -652,8 +648,8 @@
   },
   {
     "id": "sk-034",
-    "q": "Is my Whiteboard saved to my account?",
-    "a": "Yes. Each conversation's board is saved to your account a moment after every change, so it follows you to any computer you sign in on. This browser keeps a copy too, so nothing is lost if the connection drops: it catches up when you're back online. History, the clock by the zoom buttons, keeps earlier versions (the last 30, for up to 90 days), and Go back to this brings one back. Recipes you make from it are saved to your account as well.",
+    "q": "Is my Idea Board (formerly the Whiteboard) saved to my account?",
+    "a": "Yes. Each conversation's Idea Board is saved to your account a moment after every change, so it follows you to any computer you sign in on. This browser keeps a copy too, so nothing is lost if the connection drops: it catches up when you're back online. History, the clock by the zoom buttons, keeps earlier versions (the last 30, for up to 90 days), and Go back to this brings one back. Recipes you make from it are saved to your account as well.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -688,7 +684,7 @@
   {
     "id": "sk-035",
     "q": "How does talking to BeeZilla by voice work?",
-    "a": "Press Talk to BeeZilla — that button is the voice switch. It says Listening… with a small live level, the face at the top left listens, and your words appear in the box as you speak. The whiteboard opens with the bar inside it. Press the button again to stop.",
+    "a": "Press Talk to BeeZilla — that button is the voice switch. It says Listening… with a small live level, the face at the top left listens, and your words appear in the box as you speak. The Idea Board opens with the bar inside it. Press the button again to stop.",
     "sources": [
       {
         "file": "public/buzzy/voice-stage.js",
@@ -711,15 +707,15 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. When you talk to it, it answers out loud. For typed messages, say or type \"read your replies out loud\" and it turns that on; \"stop reading your replies\" turns it off.",
+    "a": "Yes. When you talk to BeeZilla it answers out loud: on Talk, the Talk to BeeZilla button is the voice switch. On other pages the mic beside your name in the top bar does the same, listening and reading answers aloud as one mode.",
     "sources": [
       {
-        "file": "src/lib/buzzy/pilot.ts",
-        "symbol": "Turn on Speak replies"
+        "file": "public/buzzy/nav.js",
+        "symbol": "bzVoiceMic"
       },
       {
-        "file": "public/buzzy/talk.html",
-        "symbol": "<span class=\"vt-label\">Speak replies</span>"
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "We have a voice toggle. That does not need to be there."
       }
     ],
     "surfaces": [
@@ -730,7 +726,7 @@
   {
     "id": "sk-037",
     "q": "Can I give BeeZilla a document to read?",
-    "a": "Yes. Drag the file onto the Talk bar or onto the whiteboard, or use Attach a file under More, at the end of the row of places below the search bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "a": "Yes. Drag the file onto the Talk bar or onto the Idea Board, or use Attach file under More, at the end of the row of places below the search bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -738,7 +734,7 @@
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Attach a file</button>"
+        "symbol": "Attach file</button>"
       },
       {
         "file": "public/buzzy/whiteboard.js",

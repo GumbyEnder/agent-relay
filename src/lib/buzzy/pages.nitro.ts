@@ -16,6 +16,36 @@
 import { defineEventHandler, getMethod, sendRedirect, setResponseStatus } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+// OpenPanel write-client ids are public (safe in served HTML). BeeZilla keeps its own
+// copy because src/lib/buzzy may import only db, auth/verify.server,
+// operator-prefs.server and board-server (scripts/check-buzzy-boundary.mjs); the
+// console's copy is src/lib/analytics-id.ts. scripts/test-one-board.ts checks the two
+// stay equal. Same brand rule as there: BeeZilla traffic lands in BeeZilla's project.
+const BEEZILLA_CLIENT_ID = "ddc73803-6e93-42d5-ba20-eaf0e30b637f";
+const DEVBOARDS_CLIENT_ID = "875ba120-0402-42f8-aa19-b26a56c1c09b";
+const OPENPANEL_CLIENT_ID = process.env.BZ_BRAND === "beezilla" ? BEEZILLA_CLIENT_ID : DEVBOARDS_CLIENT_ID;
+
+/**
+ * Product analytics for the static pages.
+ *
+ * Every page a human actually uses (Talk, Library, Wallet, landing…) is served
+ * from public/buzzy/*.html by this handler, NOT by React — and @/lib/analytics is
+ * imported only by the React routes (__root/login/register). So the BeeZilla
+ * OpenPanel project saw nothing from beezilla.net: zero signups on 2026-11-17
+ * were visible in analytics while the project looked "installed" in the dashboard.
+ *
+ * Injected here, once, for the same reason the nav is: 18 pages cannot each be
+ * trusted to keep their own copy honest. The shim is OpenPanel's documented
+ * script-tag snippet verbatim — the queue-proxy shape matters, since op1.js drains
+ * whatever window.op.q already holds before it initialises.
+ */
+const OP_SNIPPET = [
+  "<script>",
+  "window.op=window.op||function(){var n=[];return new Proxy(function(){arguments.length&&n.push([].slice.call(arguments))},{get:function(t,r){return\"q\"===r?n:function(){n.push([r].concat([].slice.call(arguments)))}} ,has:function(t,r){return\"q\"===r}}) }();",
+  `window.op('init',{clientId:'${OPENPANEL_CLIENT_ID}',trackScreenViews:true,trackOutgoingLinks:false,trackAttributes:true});`,
+  "</script>",
+  '<script src="https://openpanel.dev/op1.js" defer async></script>',
+].join("");
 
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
@@ -187,6 +217,12 @@ export default defineEventHandler(async (event) => {
     if (at > 0) {
       page = page.slice(0, at) + '<script src="/buzzy/nav.js" defer></script>' + page.slice(at);
     }
+  }
+  // Analytics rides the same serve-time seam as nav.js, and is skipped when the
+  // page already carries the snippet so a double-include cannot double-count.
+  if (!page.includes("openpanel.dev/op1.js")) {
+    const at = page.lastIndexOf("</body>");
+    if (at > 0) page = page.slice(0, at) + OP_SNIPPET + page.slice(at);
   }
   return out(page);
 });

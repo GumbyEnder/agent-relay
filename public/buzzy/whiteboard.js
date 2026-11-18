@@ -758,9 +758,10 @@
     // ── Shell ────────────────────────────────────────────────────────────
     var root = el("section", "wb-panel");
     root.setAttribute("role", "region");
-    root.setAttribute("aria-label", "Whiteboard");
+    root.setAttribute("aria-label", "Idea Board");
     var head = el("div", "wb-head");
-    var title = el("h3", "wb-title", "Whiteboard");
+    // Named "Idea Board" since CR-4 (main, 2026-11-18); it is the same whiteboard.
+    var title = el("h3", "wb-title", "Idea Board");
     head.appendChild(title);
     var dock = el("div", "wb-dock");            // the page puts the Talk bar here
     head.appendChild(dock);
@@ -769,8 +770,8 @@
     foldBtn.type = "button";
     foldBtn.appendChild(icon("fold"));
     foldBtn.appendChild(el("span", "wb-btn-label", "Fold away"));
-    foldBtn.setAttribute("aria-label", "Fold the whiteboard away");
-    foldBtn.title = "Fold the whiteboard away (it keeps everything)";
+    foldBtn.setAttribute("aria-label", "Fold the Idea Board away");
+    foldBtn.title = "Fold the Idea Board away (it keeps everything)";
     tools.appendChild(foldBtn);
     head.appendChild(tools);
 

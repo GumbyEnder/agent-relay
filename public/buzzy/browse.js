@@ -218,7 +218,7 @@
           prompt: "I need help with " + x.skill.charAt(0).toLowerCase() + x.skill.slice(1) });
       });
       (r[3] || []).filter(function (rc) { return contains(rc.name, ql) || contains(rc.instructions, ql); }).slice(0, 12).forEach(function (rc) {
-        list.push({ group: "recipes", icon: "recipe", title: rc.name, type: "Your recipe", sub: "From your whiteboard", boardRecipe: rc });
+        list.push({ group: "recipes", icon: "recipe", title: rc.name, type: "Your recipe", sub: "From your Idea Board", boardRecipe: rc });
       });
       (r[2] || []).filter(function (rc) { return contains(rc.name, ql) || contains(rc.outcome, ql); }).slice(0, 12).forEach(function (rc) {
         list.push({ group: "recipes", icon: "recipe", title: rc.name || rc.id, type: "Recipe",
@@ -575,13 +575,13 @@
       var mine = pane.querySelector(".ob-mine"), ready = pane.querySelector(".ob-ready");
       boardRecipes(true).then(function (list) {
         if (!list.length) {
-          mine.innerHTML = '<p class="ob-empty">None yet. On the whiteboard, drag a box around your agent.md, skills and output, then choose Create recipe.</p>';
+          mine.innerHTML = '<p class="ob-empty">None yet. On the Idea Board, drag a box around your agent.md, skills and output, then choose Create recipe.</p>';
           return;
         }
         mine.innerHTML = list.map(function (rc, i) {
           var steps = (rc.graph && rc.graph.nodes || []).filter(function (n) { return n.kind === "skill"; }).length;
           return '<div class="ob-item"><div class="ob-item-main"><p class="ob-item-title">' + esc(rc.name) + "</p>" +
-            '<p class="ob-item-sub">' + steps + " step" + (steps === 1 ? "" : "s") + " · made on your whiteboard</p></div>" +
+            '<p class="ob-item-sub">' + steps + " step" + (steps === 1 ? "" : "s") + " · made on your Idea Board</p></div>" +
             '<div class="ob-item-tools"><button type="button" class="ob-go" data-run="' + i + '">Run</button>' +
             '<button type="button" data-put="' + i + '">Put on board</button><button type="button" data-del="' + i + '">Delete</button></div></div>';
         }).join("");
