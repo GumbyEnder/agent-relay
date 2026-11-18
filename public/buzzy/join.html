@@ -47,8 +47,8 @@
       <h1 id="head">Opening your invitation…</h1>
       <p id="text"></p>
       <div class="actions hidden" id="signedOut">
-        <a class="btn btn-primary" href="/login">Sign in</a>
-        <a class="btn" href="/register">Create an account</a>
+        <a class="btn btn-primary" id="signInLink" href="/buzzy/login">Sign in</a>
+        <a class="btn" id="registerLink" href="/buzzy/login?mode=register">Create an account</a>
       </div>
       <div class="actions hidden" id="signedIn">
         <button type="button" class="btn btn-primary" id="joinBtn">Join the team</button>
@@ -100,6 +100,14 @@
         var user = s && s.user ? s.user : null;
         head.textContent = "You've been invited to a BeeZilla team";
         if (!user) {
+          // BeeZilla's own sign-in, with `next` so signing in (or signing up) comes
+          // back to this invitation. /login and /register are console pages: on
+          // beezilla.net they bounce to Talk, then to the landing page, and the
+          // invitation was lost. The token is already out of the address bar and
+          // kept in this browser, so `next` is just this page.
+          var back = encodeURIComponent(location.pathname + location.search);
+          document.getElementById("signInLink").href = "/buzzy/login?next=" + back;
+          document.getElementById("registerLink").href = "/buzzy/login?mode=register&next=" + back;
           text.textContent = "Sign in, or create an account, with the email address this invitation was sent to. Then open the invitation link again — or come back to this page — to join.";
           show("signedOut");
           return;
