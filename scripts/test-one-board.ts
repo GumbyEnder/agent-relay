@@ -68,7 +68,7 @@ const server = http.createServer((req, res) => {
   const recipes = await import("../src/lib/buzzy/boardRecipes");
 
   const db = new PGlite();
-  for (const f of ["0048_buzzy_assets.sql", "0052_buzzy_project_deliverables.sql", "0059_buzzy_one_board.sql"]) {
+  for (const f of ["0048_buzzy_assets.sql", "0052_buzzy_project_deliverables.sql", "0060_buzzy_one_board.sql"]) {
     await db.exec(readFileSync(join(process.cwd(), "migrations", f), "utf8"));
   }
   // The tagged-template + .query() surface src/lib/db.ts gives the app.

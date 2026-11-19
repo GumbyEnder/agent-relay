@@ -115,7 +115,7 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   // pass, and no "snapshot" that outlives the user — closing an account is not
   // consent to a 24-month archive. The receipt counts the rows it removed.
   buzzy_feedback: "DELETE FROM buzzy_feedback WHERE user_id = $1 RETURNING 1",
-  // The one board (0059_buzzy_one_board): the person's own AI key (sealed), the
+  // The one board (0060_buzzy_one_board): the person's own AI key (sealed), the
   // recipes they made from the Idea Board and the search words on their files.
   buzzy_user_ai_keys: "DELETE FROM buzzy_user_ai_keys WHERE user_id = $1 RETURNING 1",
   buzzy_board_recipes: "DELETE FROM buzzy_board_recipes WHERE user_id = $1 RETURNING 1",
