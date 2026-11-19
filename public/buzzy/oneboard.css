@@ -97,6 +97,14 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
 .bz-browse { margin-top: 18px; }
 .bz-tabrow { display: flex; align-items: center; gap: 8px; }
 .bz-tabrow .bz-tabs { flex: 1 1 auto; min-width: 0; }
+/* The settings gear (#326) owns the bottom-right corner of every page. On Talk the
+   search, the places and everything listed under them keep its column clear (44px
+   gear, its 22px inset, a gap), so the gear never sits on a control there. */
+html.bz-on-talk .bz-browse { padding-right: 80px; }
+/* On Talk, Talk to BeeZilla is the one voice switch (owner, 2026-11-18: "There
+   shouldn't be 2"). The live-mic pill beside the gear shows a running session on
+   the other pages. */
+html.bz-on-talk #bzMicLive { display: none !important; }
 .bz-tabrow .talk-more { flex: 0 0 auto; }
 .bz-pane-head .ob-new { min-height: 0; padding: 0.4rem 0.95rem; border-radius: 999px; border: 1px solid #6b5a1e; background: transparent; color: var(--ob-yellow); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
 .bz-pane-head .ob-new:hover { background: #2a2204; }
@@ -229,6 +237,7 @@ a.ob-item { text-decoration: none; }
   .ob-board .wb-panel { min-height: 80vh; }
   .bz-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .bz-tabs::-webkit-scrollbar { display: none; }
+  html.bz-on-talk .bz-browse { padding-right: 68px; } /* the gear sits 16px from the corner on a phone */
   .ob-item { flex-direction: column; }
   .ob-item-tools { justify-content: flex-start; }
 }
