@@ -42,7 +42,7 @@ import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music"
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
 import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
-import { checkQuota, recordUsage } from "./entitlements";
+import { checkQuota, getEntitlement, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
@@ -61,7 +61,7 @@ import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteComm
 import { selfKnowledgeNote } from "./self-knowledge";
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
-import { VIDEO_DAILY_LIMIT, VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoJobsToday } from "./video";
+import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday } from "./video";
 import type { VideoTopicInput } from "./video";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
@@ -899,18 +899,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   } else if (wantsVideo && videoRequest) {
     const label = recipeById(videoRequest.recipe)?.label ?? "video";
+    // One flat cap for every plan (room 6615: DAILY_LIMIT_PER_USER=5). No
+    // entitlement read — the number must not vary by plan, by construction.
+    const videoLimit = videoDailyLimit();
     if (!videoConfigured()) {
       videoRefusal = { code: "not_configured", error: "The video service is not set up on this deployment" };
       messages[0]!.content +=
         "\n\nA video was requested but no video service is configured on this deployment, so none can be made here. " +
         "Say exactly that in one sentence. Do not describe a video and do not offer to make one later.";
-    } else if ((await videoJobsToday(userId)) >= VIDEO_DAILY_LIMIT) {
+    } else if ((await videoJobsToday(userId)) >= videoLimit) {
       videoRefusal = {
         code: "daily_limit",
-        error: `Today's ${VIDEO_DAILY_LIMIT}-video limit is used up — it resets tomorrow.`,
+        error: `Today's ${videoLimit}-video limit is used up — it resets tomorrow.`,
       };
       messages[0]!.content +=
-        `\n\nA video was requested and REFUSED by the daily limit (${VIDEO_DAILY_LIMIT} per day). ` +
+        `\n\nA video was requested and REFUSED by the daily limit (${videoLimit} per day, the same flat number on every plan). ` +
         "Say exactly that in one sentence. Nothing was charged. Do not describe a video.";
     } else if (videoRequest.needsTable) {
       // The chart race is the one recipe a sentence cannot start: the kit's job
@@ -1491,9 +1494,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                   errorCode: "not_configured",
                 };
               }
-              if ((await videoJobsToday(userId)) >= VIDEO_DAILY_LIMIT) {
+              if ((await videoJobsToday(userId)) >= videoDailyLimit()) {
                 return {
-                  message: `generate_video failed: today's ${VIDEO_DAILY_LIMIT}-video limit is used up. Nothing was charged.`,
+                  message: "generate_video failed: today's video limit is used up. Nothing was charged.",
                   errorCode: "daily_limit",
                 };
               }
