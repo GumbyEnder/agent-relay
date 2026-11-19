@@ -149,6 +149,23 @@ export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, befor
       return { cleared: kind, ...restartInfo, status: describe() };
     },
 
+    /**
+     * "Log out" on a desktop install.
+     *
+     * There is no better-auth session in this process to end: the page's session
+     * comes from the local owner row, and `/api/auth/sign-out` cannot un-provision
+     * it. What a person means by log out here is "stop using my BeeZilla account on
+     * this machine", which is exactly the managed credential pair (inference +
+     * search). Both go in one pass so one restart covers it, and the app is left in
+     * a state the UI can describe honestly: nothing configured, BYOK still possible.
+     */
+    async signOut() {
+      clearInference(dataDir());
+      clearSearchKey(dataDir());
+      const restartInfo = await restart();
+      return { cleared: ["inference", "search"], ...restartInfo, status: describe() };
+    },
+
     /** Exposed for doctor-style surfaces that need the raw state. */
     raw: () => loadInference(dataDir(), cipher),
     expired: () => isExpired(loadInference(dataDir(), cipher)),
