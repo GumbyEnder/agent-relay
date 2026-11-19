@@ -289,7 +289,7 @@
         const inf = state?.inference;
         $("inference-current").innerHTML = inf
           ? `Now: <strong>${inf.provider === "beezilla" ? "BeeZilla inference" : "your own key"}</strong> · ${inf.key}` +
-            (inf.expired ? ' · <span style="color:#a4262c">expired — add a new one</span>' : "") +
+            (inf.expired ? ' · <span style="color:#a4262c">session expired — press “Connect BeeZilla account…” to renew</span>' : "") +
             (inf.encrypted === false ? " · stored unencrypted" : "")
           : selectionNote(state);
         // Nothing to remove when nothing is configured.

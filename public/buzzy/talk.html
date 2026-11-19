@@ -7270,8 +7270,29 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           } catch (firstErr) {
             resp = await postOnce(); // bounded: exactly one retry, same attemptId
           }
-          data = await resp.json();
+          const out = await resp.json();
           metrics.turnMs = Math.round(performance.now() - sendStarted);
+          return out;
+        };
+
+        let data = await sendTurn();
+
+        // A managed token is good for 15 minutes. The desktop shell can mint a new
+        // one from the cloud session it already holds, so an expiry mid-session is
+        // recovered here — silently, then the same turn is sent once more — instead
+        // of telling the owner to go find Settings. Only when that session is gone
+        // too do we open the sign-in window, which is the one case a person must act.
+        if (data && data.ok === false && data.code === "managed_expired" && window.beezilla && window.beezilla.account) {
+          var minted = await window.beezilla.account.refresh();
+          var mintedData = minted && minted.ok ? minted.data : null;
+          if (mintedData && mintedData.ok) {
+            if (window.beezilla.app && window.beezilla.app.log) {
+              window.beezilla.app.log("managed token re-minted after expiry (expires " + (mintedData.expiresAt || "unknown") + ")");
+            }
+            data = await sendTurn();
+          } else if (mintedData && mintedData.needsSignIn) {
+            await window.beezilla.account.signin();
+          }
         }
 
         if (!data.ok) {

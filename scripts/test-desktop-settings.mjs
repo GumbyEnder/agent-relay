@@ -84,6 +84,19 @@ const cleared = await handlers.clear("search");
 check("clearing search removes it", cleared.status.search === null && resolveSearch(dataDir) === null);
 check("clearing inference removes it", (await handlers.clear("inference")).status.inference === null && resolveInference(dataDir) === null);
 
+// Log out is the desktop's real sign-out: one pass clears the managed credential
+// pair (inference AND search) and restarts once, because the page's own
+// `/api/auth/sign-out` cannot end a local-owner session (the P1 "can't log out").
+{
+  await handlers.saveInference({ provider: "beezilla", key: "bz1.probe.token", expiresAt: new Date(Date.now() - 60_000).toISOString() });
+  await handlers.saveManagedSearch({ token: "search-probe-token", gateway: "https://gateway.invalid" });
+  const startsBefore = calls.start;
+  const out = await handlers.signOut();
+  check("sign out clears inference and search in one pass", out.status.inference === null && out.status.search === null, JSON.stringify(out.cleared));
+  check("sign out restarts the runtime exactly once", calls.start === startsBefore + 1, `start ${startsBefore} -> ${calls.start}`);
+  check("sign out leaves nothing for the resolver", resolveInference(dataDir) === null && resolveSearch(dataDir) === null);
+}
+
 // ── 2. real bridge in a sandboxed renderer ──────────────────────────────────
 const hasXvfb = (() => {
   try {
