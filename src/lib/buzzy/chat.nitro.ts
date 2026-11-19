@@ -25,6 +25,10 @@
  *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
  *   POST /api/buzzy/money-check — compare a draft to the paper and the brief
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
+ *   GET  /api/buzzy/whiteboards/:id — the Talk whiteboard kept in the account (null if none)
+ *   PUT  /api/buzzy/whiteboards/:id — save it ({ state, baseRev }; 409 + the account's copy on a clash)
+ *   GET  /api/buzzy/whiteboards/:id/versions — its history, newest first
+ *   POST /api/buzzy/whiteboards/:id/versions/:vid/restore — go back to an earlier version
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
@@ -33,6 +37,7 @@ import { withLlmOverride } from "./llm";
 import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
 import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
 import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
+import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
@@ -3078,6 +3083,40 @@ export default defineEventHandler(async (event) => {
     }
     setResponseStatus(event, 405);
     return { ok: false, error: "Use GET, POST or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── /api/buzzy/whiteboards/:id — the Talk page's whiteboard, kept in the account ──
+  // Asked 2026-11-18: the board follows the person to any computer, with a simple
+  // history to go back to. The person's own boards only; whiteboards.ts has the rules
+  // (GET/PUT the board, GET its versions, POST versions/:vid/restore).
+  if (path.startsWith("/api/buzzy/whiteboards/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let body: unknown = undefined;
+    if (method === "PUT" || method === "POST") {
+      const tooBig = () => {
+        setResponseStatus(event, 413);
+        return { ok: false, error: `A board saved to your account is up to ${WHITEBOARD_MAX_BYTES / 1048576} MB. Remove a few cards, then it saves again.`, code: "too_big" };
+      };
+      if (Number(getHeader(event, "content-length") || 0) > WHITEBOARD_MAX_REQUEST_BYTES) return tooBig();
+      let raw = "";
+      try { raw = await event.req.text(); } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "The board could not be read.", code: "bad_body" };
+      }
+      if (new TextEncoder().encode(raw).length > WHITEBOARD_MAX_REQUEST_BYTES) return tooBig();
+      try { body = raw ? JSON.parse(raw) : {}; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { state, baseRev }.", code: "bad_json" };
+      }
+    }
+    const sql = await getSql();
+    const out = await whiteboardRoute(sql, user.id, method, path.slice("/api/buzzy/whiteboards/".length), body);
+    setResponseStatus(event, out.status);
+    return out.body;
   }
 
   // ── GET /api/buzzy/search — work search across ALL of the user's companies

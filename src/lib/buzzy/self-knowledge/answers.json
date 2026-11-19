@@ -631,7 +631,7 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -640,6 +640,10 @@
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "Create recipe"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Also on the board:"
       },
       {
         "file": "src/lib/buzzy/server.ts",
@@ -653,11 +657,27 @@
   {
     "id": "sk-034",
     "q": "Is my Idea Board (formerly the Whiteboard) saved to my account?",
-    "a": "The board itself is saved in this browser, one per conversation, so another computer won't see it yet. Recipes you make from it are saved to your account.",
+    "a": "Yes. Each conversation's Idea Board is saved to your account a moment after every change, so it follows you to any computer you sign in on. This browser keeps a copy too, so nothing is lost if the connection drops: it catches up when you're back online. History, the clock by the zoom buttons, keeps earlier versions (the last 30, for up to 90 days), and Go back to this brings one back. Recipes you make from it are saved to your account as well.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
-        "symbol": "bz.board."
+        "symbol": "var API = \"/api/buzzy/whiteboards/\";"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Go back to this"
+      },
+      {
+        "file": "src/lib/buzzy/whiteboards.ts",
+        "symbol": "export const VERSIONS_KEPT = 30;"
+      },
+      {
+        "file": "src/lib/buzzy/whiteboards.ts",
+        "symbol": "export const VERSIONS_MAX_DAYS = 90;"
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "if (path.startsWith(\"/api/buzzy/whiteboards/\")) {"
       },
       {
         "file": "src/lib/buzzy/boardRecipes.ts",
@@ -667,7 +687,7 @@
     "surfaces": [
       "website"
     ],
-    "limits": "Saving boards to your account is not built yet."
+    "limits": "Going back to an earlier version needs a connection. A board saved to your account is up to 1 MB."
   },
   {
     "id": "sk-035",
