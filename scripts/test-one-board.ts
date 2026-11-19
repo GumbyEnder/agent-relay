@@ -303,6 +303,28 @@ const server = http.createServer((req, res) => {
     eq(await recipes.deleteBoardRecipe(sql, "u1", saved.recipe.id), true);
   });
 
+  // ── Closing the account ───────────────────────────────────────────────
+  await ok("closing an account removes its own key, recipes and search words, and no one else's", async () => {
+    const { DELETION_STATEMENTS } = await import("../src/lib/buzzy/portability");
+    const tables = ["buzzy_user_ai_keys", "buzzy_board_recipes", "buzzy_asset_tags"];
+    for (const who of ["u8", "u9"]) {
+      truthy((await keys.saveKey(sql, who, { provider: "custom", baseUrl: base, apiKey: "sk-close-key-4321" })).ok, `${who} key`);
+      truthy((await recipes.saveBoardRecipe(sql, who, { name: "Gig poster", graph })).ok, `${who} recipe`);
+      const id = (await db.query<{ id: number }>(
+        "INSERT INTO buzzy_assets (user_id, sha256, filename, rel_path, content_type, bytes, body) VALUES ($1,$2,$3,$3,$4,1,$5) RETURNING id",
+        [who, (who === "u8" ? "8" : "9").repeat(64), "art.png", "image/png", Buffer.from([8])])).rows[0]!.id;
+      await tags.saveTags(sql, who, id, tags.wordTags({ prompt: "a house", filename: "art.png", contentType: "image/png" }));
+    }
+    for (const t of tables) {
+      truthy(DELETION_STATEMENTS[t], `${t} is not removed with the account`);
+      await sql.query(DELETION_STATEMENTS[t]!, ["u9"]);
+      const count = async (who: string) =>
+        (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${t} WHERE user_id = $1`, [who])).rows[0]!.n;
+      eq(await count("u9"), 0, `${t} left behind:`);
+      eq(await count("u8"), 1, `${t} someone else's rows:`);
+    }
+  });
+
   server.close();
   await db.close();
   console.log(`\n${pass} passed, ${fail} failed\n`);
