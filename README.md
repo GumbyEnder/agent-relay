@@ -6,10 +6,10 @@
 |---|---|---|
 | **Who it's for** | AI coding agents and the humans who supervise them | Non-technical people who need work done |
 | **What it is** | A durable mission board agents poll, claim, and deliver against | A consumer orchestrator that interviews you, drafts the work, and waits for your approval |
-| **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla-production.up.railway.app](https://beezilla-production.up.railway.app) · demo: [beezilla-demo-production-c069.up.railway.app](https://beezilla-demo-production-c069.up.railway.app) |
+| **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla.net](https://beezilla.net) |
 | **Entry point** | `/api/agent` (HTTP — no browser login for agents) | `/buzzy/` (branded web app) |
 
-Both share the same **Postgres** storage, **Better Auth** identities, and Nitro/TanStack server. One env flag, `BZ_BRAND=beezilla`, skins and routes a deployment as BeeZilla; without it the same build is Dev Boards. Nothing is forked.
+One **service**, one **Postgres**, one bucket of identities. `beezilla.net` is the `agent-relay` service: the same build, the same database, the same Better Auth users and the same Nitro/TanStack server, with the consumer surface chosen by hostname (`BZ_CONSUMER_HOSTS`) and the console's `/buzzy/*` paths 301ing there (`BZ_MOVE_BUZZY=1`). `BZ_BRAND=beezilla` still skins a dedicated deployment; nothing is forked.
 
 ---
 

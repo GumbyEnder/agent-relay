@@ -388,9 +388,11 @@ export default defineEventHandler(async (event) => {
   if (method === "POST" && path === "/api/buzzy/feedback") {
     const pepper = feedbackPepper();
     if (!pepper) {
-      // 7318: both services share one pepper, and a deployment without it cannot
-      // hash an address. Refuse rather than insert a raw-IP-derived value or a
-      // placeholder that would make every anonymous report the same reporter.
+      // 7318: one service, one bucket — the consumer surface runs in this same
+      // process, so one BZ_FEEDBACK_PEPPER covers every report. A deployment
+      // without it cannot hash an address: refuse rather than insert a
+      // raw-IP-derived value or a placeholder that would make every anonymous
+      // report look like the same reporter.
       setResponseStatus(event, 503);
       return { ok: false, error: "Feedback is not configured on this deployment.", code: "feedback_unavailable" };
     }
@@ -431,8 +433,8 @@ export default defineEventHandler(async (event) => {
     const sql = await getSql();
     const userId = user?.id ?? null;
 
-    // Limits are counted from the table, so they survive a restart and hold
-    // across both services. Both arms are scoped to the window FIRST: a row whose
+    // Limits are counted from the table, so they survive a restart and hold for
+    // every report this service writes. Both arms are scoped to the window FIRST: a row whose
     // ip_hash was nulled at 90 days can never be compared against this request.
     let retryAfter = 3600;
     if (userId) {
