@@ -145,18 +145,25 @@ ok("BZ_VIDEO_DAILY_LIMIT is the only override, and it is flat", video.videoDaily
 delete process.env.BZ_VIDEO_DAILY_LIMIT;
 ok("no override means 5 again", video.videoDailyLimit() === 5, video.videoDailyLimit());
 
-console.log("the five ids are the kit's own recipe ids:");
+console.log("the five ids are the kit's own recipe ids; four of them are offered today:");
 const ids = video.VIDEO_RECIPES.map((r: { id: string }) => r.id);
-ok("five recipes registered", ids.length === 5, ids);
+const catalogue = video.ALL_VIDEO_RECIPES.map((r: { id: string }) => r.id);
+ok("the catalogue still has the kit's five recipes", catalogue.length === 5, catalogue);
+ok("four recipes are offered (CR-1: picture-reel later)", ids.length === 4, ids);
 for (const want of [
   "explain-on-a-chalkboard",
   "ai-creator-tips-paper-cut",
   "chart-race-from-your-numbers",
-  "picture-reel",
   "narrated-explainer",
 ]) {
-  ok(`${want} is registered`, ids.includes(want), ids);
+  ok(`${want} is offered`, ids.includes(want), ids);
 }
+ok("picture-reel is held back, not deleted", !ids.includes("picture-reel") && catalogue.includes("picture-reel"), ids);
+ok("the held-back list names picture-reel only", JSON.stringify(video.HELD_BACK_RECIPES) === JSON.stringify(["picture-reel"]), video.HELD_BACK_RECIPES);
+ok("a held-back recipe still labels an old job row", video.recipeById("picture-reel")?.label === "Picture reel", video.recipeById("picture-reel"));
+// The product gate runs before any HTTP call, so this is safe with no kit behind it.
+const held = await video.createVideoJob({ recipe: "picture-reel", topic: "a reel about our shop", userId: "u1" });
+ok("createVideoJob refuses the held-back recipe without touching the kit", held.ok === false && held.code === "recipe_unavailable", held);
 ok(
   "each recipe names the kit kind it runs",
   video.VIDEO_RECIPES.every((r: { kind: string }) => ["tips", "chart", "reel", "explainer"].includes(r.kind)),

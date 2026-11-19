@@ -11,8 +11,20 @@ needs the three kit patches below applied by `beezilla-kit-patches.py`.
 |---|---|
 | Writer: Gemini Flash (`TEXT_MODEL=gemini-flash-latest`) | `BZ_VIDEO_TEXT_MODEL`, default `gemini-flash-latest` (`src/lib/buzzy/video.ts`) |
 | End card: none — `--no-brand` on every public video, and QC must not fail a job for a missing card | `brand: false` on every job body (`BZ_VIDEO_BRAND` defaults off); kit-side `--no-brand` / QC change is still owed by whoever runs the kit |
-| Thursday scope: all five recipes live | `VIDEO_RECIPES` — chalkboard, paper-cut tips, chart race, picture reel, narrated explainer; routing in `intent.ts` (`videoAsk`) |
+| Thursday scope: all five recipes in the kit; **CR-1 ships four** (picture reel later) | `ALL_VIDEO_RECIPES` is the kit's five (chalkboard, paper-cut tips, chart race, picture reel, narrated explainer). `VIDEO_RECIPES` is what BeeZilla offers = the catalogue minus `HELD_BACK_RECIPES` (`picture-reel`, Shane 2026-11-19: "4 of 5 recipes, picture-reel later"). The Recipes page, the `generate_video` enum and the chat pre-pass all read `VIDEO_RECIPES`; `createVideoJob` refuses a held-back id with one sentence before any HTTP call. Routing in `intent.ts` (`videoAsk`) still recognises all five so the refusal can name the recipe. |
 | Quota: `DAILY_LIMIT_PER_USER=5` | ONE flat cap, every plan: `DAILY_LIMIT_PER_USER` in `src/lib/buzzy/video.ts`, returned by `videoDailyLimit()` — it gates the chat pre-pass, the tool and `GET /api/buzzy/video`; the kit's own 429 is the backstop. There is no plan split and no `videosPerDay` field: a per-plan table (10 Pro / 1 Free) was a product change with an invented citation and was corrected back to 6615. |
+
+## CR-1: four of five, picture reel held back (2026-11-19)
+
+Shane, 2026-11-19: "CR-1 ships today with 4 of 5 recipes, picture-reel later."
+The reason is the kit's own behaviour: with no seeded picture library it refuses
+with `pictures_unavailable` instead of half-rendering (reproduced 2026-11-19 on a
+13 MB JPEG-only library), so offering it would turn a person's request into a
+failure minutes later. To switch it on, remove `"picture-reel"` from
+`HELD_BACK_RECIPES` in `src/lib/buzzy/video.ts`; nothing else changes.
+`DAILY_LIMIT_PER_USER` stays 5, one flat cap for every plan. The deployment stays
+unconfigured (`BZ_VIDEO_BASE` / `BZ_VIDEO_KIT_TOKEN` unset) until Shane stamps
+the sha.
 
 ## What the code does
 
