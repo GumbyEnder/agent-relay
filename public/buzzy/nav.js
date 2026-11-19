@@ -1023,6 +1023,10 @@
     }
 
     function open() {
+      // The panel belongs on <body>. Anything that detached it, or carried it into a
+      // page wrapper (a stashed page is display:none), would leave this button opening
+      // a panel nobody can see, so put it back first.
+      if (panel.parentNode !== document.body) document.body.appendChild(panel);
       mount();
       refs();
       panel.classList.add("open");
@@ -1166,13 +1170,6 @@
 
   function boot() {
     style();
-    // The Feedback panel lives outside the page wrapper, so a soft navigation would
-    // otherwise leave the previous page's panel in the document with the same id
-    // and a dead mount. One panel at a time.
-    Array.prototype.forEach.call(document.querySelectorAll("#bzFeedback"), function (n) {
-      var page = document.getElementById("bzPage");
-      if (!page || !page.contains(n)) n.remove();
-    });
     // Before the early return below: the dock outlives soft navigations, and each
     // page it lands on decides whether the gear shows (not on the sign-in pages).
     settingsDock();
@@ -1183,8 +1180,19 @@
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();
+      // The chrome survived this hop, so its Feedback button survives, and so must the
+      // panel that button opens. The stale-panel sweep used to run above this return:
+      // it deleted the live panel on every hop that kept the chrome, and the yellow pill
+      // stayed wired to the deleted node. After Talk → Sketch → Talk, Feedback did
+      // nothing on any page until a reload (owner report, 19 Nov 2026).
       return;
     }
+    // The chrome is rebuilt below and feedbackControl() makes a new panel for the new
+    // button, so any older panel (on <body>, or carried into a stashed page by
+    // ensurePageWrapper) belongs to a button that no longer exists. One panel at a time.
+    Array.prototype.forEach.call(document.querySelectorAll("#bzFeedback"), function (n) {
+      n.remove();
+    });
     var header = nav.closest("header") || document.querySelector("header") || document.body;
     chromeBleedHeader = header;
 
@@ -1980,6 +1988,30 @@
     }
   }
 
+  // What a page's own scripts hang directly on <body> belongs to that page, not to the
+  // document: Talk's back-to-top button (browse.js), the Inspiration viewer and its
+  // minimised pill, the share sheet, a Recipes backdrop. Left on <body>, those nodes
+  // outlived their page AND its stylesheet (a page's CSS is switched off with it), so
+  // every later page drew them unstyled. Talk's back-to-top chevron became a black
+  // "half a diamond" the width of the window, and as a flex item of Sketch's 100vh
+  // body it squeezed the drawing area to 0px: no board, nothing to draw on, only the
+  // colour swatch showing above it (owner report, 19 Nov 2026: open Sketch, go to
+  // Talk, come back). Leaving a page now takes them along, so a kept-alive page
+  // (Talk) gets them back on restore and every other page drops them with its DOM.
+  // Left on <body>: the shell's own nodes, the chrome (its header, the settings dock,
+  // the Feedback panel), BeeZilla's step-by-step card (pilot.js styles itself and
+  // follows its own "go" steps across pages), and tags that draw nothing.
+  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback"];
+  function adoptStrays(page) {
+    if (!page) return;
+    Array.prototype.slice.call(document.body.children).forEach(function (n) {
+      if (n === page || DOCUMENT_OWNED.indexOf(n.id) >= 0) return;
+      if (/^(HEADER|SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META)$/.test(n.tagName)) return;
+      if (n.classList && n.classList.contains("bz-pilot")) return;
+      page.appendChild(n);
+    });
+  }
+
   function restore(key) {
     var entry = cache[key];
     var page = entry.el;
@@ -2002,6 +2034,7 @@
     ensurePageWrapper();
     var target = document.getElementById("bzPage");
     if (target) target.setAttribute("data-bz-path", currentKey);
+    adoptStrays(target);
     stashCurrent();
     currentKey = key;
     // Default is to push; only popstate passes push:false (history already moved).
