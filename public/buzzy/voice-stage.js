@@ -62,6 +62,24 @@
     if (isFinal) heardTimer = setTimeout(function () { heard = ""; paintWords(); }, 4000);
     paintWords();
   };
+  // The field is one line, so a long sentence would show only its first words while
+  // the newest ones, the ones being said, stay out of sight. Keep the end in view the
+  // way dictation does: "…" and as many of the last words as fit.
+  var measure = null;
+  function tailThatFits(text) {
+    if (!input || !text) return text;
+    var cs = getComputedStyle(input);
+    var room = input.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - 6;
+    if (room < 60) return text;
+    try {
+      measure = measure || document.createElement("canvas").getContext("2d");
+      measure.font = [cs.fontStyle, cs.fontWeight, cs.fontSize, cs.fontFamily].join(" ");
+    } catch { return text; }
+    if (measure.measureText(text).width <= room) return text;
+    var words = text.split(/\s+/);
+    while (words.length > 1 && measure.measureText("\u2026 " + words.join(" ")).width > room) words.shift();
+    return "\u2026 " + words.join(" ");
+  }
   function paintWords() {
     if (!input) return;
     var v = state();
@@ -76,7 +94,7 @@
     }
     if (restingPlaceholder === null) restingPlaceholder = input.getAttribute("placeholder") || "";
     var words = heard
-      ? heard
+      ? tailThatFits(heard)
       : v.speaking ? "BeeZilla is talking. Press the button to cut in."
         : v.sending ? "Thinking…" : "Listening. Just talk.";
     if (input.getAttribute("placeholder") !== words) input.setAttribute("placeholder", words);

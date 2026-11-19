@@ -113,6 +113,15 @@ for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newS
 check(!navjs.includes('"bzVoiceMic"'), "nav.js builds no header voice switch");
 check(navjs.includes('live.id = "bzMicLive"'), "nav.js builds the live-mic pill");
 check(!pilot.includes("#bzVoiceMic"), "pilot.js presses no header voice switch");
+// Live words in every browser (owner, 2026-11-19: "the text is literally showing up as
+// I'm speaking"). Chrome's recogniser streams its guesses; the recorder lane (Brave,
+// Firefox, the desktop app) asks the transcriber about the clip so far while the person
+// talks, and the route keeps those guesses out of the time-to-transcript numbers.
+const chatRoutes = readFileSync(resolve(root, "src/lib/buzzy/chat.nitro.ts"), "utf8");
+const voiceStage = readFileSync(resolve(root, "public/buzzy/voice-stage.js"), "utf8");
+check(talk.includes("if (speechSeen) liveWords(recState);") && talk.includes('"partial=1"'), "the recorder lane shows live words while the person talks");
+check(/const partial = queryValue\(fullPath, "partial"\) === "1";[\s\S]{0,600}if \(!partial\) \{\s*const sql = await getSql\(\);\s*await recordVoiceMetrics/.test(chatRoutes), "live guesses are not counted as time to transcript");
+check(voiceStage.includes("tailThatFits(heard)"), "a long sentence keeps its newest words in view");
 // History is a place in the row under the search bar now (owner, 2026-11-18), not a
 // button up top: "show my history" presses that tab.
 check(pilot.includes(`'[data-tab="history"]'`), "pilot.js presses the History place");

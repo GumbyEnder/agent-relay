@@ -4070,6 +4070,50 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var REC_RATE = 16000;
     var recState = null;
 
+    // ── Live words in the recorder lane ───────────────────────────────────
+    // Owner, 2026-11-19: "when I voice to text, the text is literally showing up as
+    // I'm speaking, kind of like it does with Claude currently." Chrome's recogniser
+    // streams its guesses (rec.onresult → bzVoiceWords), but Brave, Firefox and the
+    // desktop app record a clip that the server transcribes only once the person
+    // stops, so their field said "Listening. Just talk." until the reply came. While
+    // they talk, the clip so far is transcribed again every LIVE_EVERY_MS, one
+    // request at a time, and shown where they would type. Display only: the turn is
+    // still the one final clip (finishRecording), so a guess is never sent as if it
+    // had been said, and partial=1 keeps these out of the time-to-transcript numbers.
+    var LIVE_EVERY_MS = 1200;
+    var LIVE_MIN_MS = 700;
+    function liveWords(r) {
+      if (!r || r.liveBusy || !window.bzVoiceWords) return;
+      var now = Date.now();
+      if (r.liveAt && now - r.liveAt < LIVE_EVERY_MS) return;
+      var total = 0;
+      for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
+      if (total < r.rate * (LIVE_MIN_MS / 1000)) return;
+      var flat = new Float32Array(total);
+      var off = 0;
+      for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
+      r.liveAt = now;
+      r.liveBusy = true;
+      var q = asrQueryString();
+      fetch("/api/buzzy/transcribe" + q + (q ? "&" : "?") + "partial=1", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: encodeWav(downsampleTo16k(flat, r.rate)),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          r.liveBusy = false;
+          // Once this recording has ended, the final clip owns the field.
+          if (recState !== r || !data || !data.ok) return;
+          var text = jobNameFix(brandName(data.text)).trim();
+          if (text) window.bzVoiceWords(text, false);
+        })
+        .catch(function () { r.liveBusy = false; });
+    }
+    function liveWordsShow(text, isFinal) {
+      try { if (window.bzVoiceWords) window.bzVoiceWords(text, isFinal); } catch (_) {}
+    }
+
     function srAvailable() {
       return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     }
@@ -4927,6 +4971,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (rms > 0.02) { speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
+            // Live words: the clip so far, shown while the person is still talking.
+            if (speechSeen) liveWords(recState);
             var elapsed = Date.now() - startedAt;
             // End of speech: ~0.9s of quiet after talking. Hard caps keep a
             // forgotten mic from uploading a minute of silence.
@@ -4940,6 +4986,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           src.connect(proc);
           proc.connect(ctx.destination);
           recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false };
+          // A new turn: last turn's words leave the field.
+          liveWordsShow("", false);
           voice.note = "";
           setAvatarState("listening");
           paintVoice();
@@ -5211,6 +5259,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         .then(function (data) {
           voice.sending = false;
           if (!data || !data.ok) {
+            liveWordsShow("", true);
             stageNote((data && data.error) || "Couldn't transcribe that — try again.");
             rearmListening();
             return;
@@ -5220,11 +5269,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // cannot see the title of.
           var text = jobNameFix(brandName(data.text)).trim();
           if (!text) {
+            liveWordsShow("", true);
             stageNote("Didn't catch that — try again.");
             rearmListening();
             return;
           }
           voice.note = "";
+          // The words that drive the reply replace the live guesses in the field.
+          liveWordsShow(text, true);
           var input = document.getElementById("chatInput");
           if (input) input.value = text;
           voice.lastSpeechEnd = performance.now();
@@ -5235,6 +5287,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         })
         .catch(function () {
           voice.sending = false;
+          liveWordsShow("", true);
           stageNote("Couldn't reach the transcriber — check the connection.");
           rearmListening();
         });
