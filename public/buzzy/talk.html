@@ -233,6 +233,7 @@
     .talk-btn:active { transform: scale(0.98); }
     .talk-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
     .talk-btn .tb-mic { width: 1.35rem; height: 1.35rem; fill: currentColor; flex: 0 0 auto; }
+    .talk-btn .tb-pause { display: none; width: 1.35rem; height: 1.35rem; fill: currentColor; flex: 0 0 auto; }
     .talk-btn.on { animation: talkPulse 1.6s ease-in-out infinite; }
     @keyframes talkPulse {
       0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.45)); }
@@ -1537,6 +1538,8 @@
   <link rel="stylesheet" href="/buzzy/inspiration.css" />
   <link rel="stylesheet" href="/buzzy/voice-stage.css" />
   <link rel="stylesheet" href="/buzzy/whiteboard.css" />
+  <link rel="stylesheet" href="/buzzy/calm.css" />
+  <link rel="stylesheet" href="/buzzy/oneboard.css" />
   <link rel="stylesheet" href="/buzzy/share.css" />
 </head>
 <body>
@@ -1595,10 +1598,6 @@
     </div>
   </header>
   <main>
-    <div id="digestCard" class="bz-digest hidden" style="display:none">
-      <span class="bz-digest-text" id="digestText"></span>
-      <button type="button" class="bz-digest-close" id="digestClose" aria-label="Dismiss this week's summary" title="Dismiss for this week">&#10005;</button>
-    </div>
     <div id="chatScreen">
       <div class="chat-layout">
         <div class="chat-main">
@@ -1611,29 +1610,7 @@
                 <h1 class="chat-company-name" id="chatCompanyName">No company yet</h1>
               </div>
             </div>
-            <div class="hero-actions">
-              <!-- ONE voice control: Talk to BeeZilla (#micBtn, on the bar below):
-                   on = listening AND replies spoken, off = neither. The old "Speak
-                   replies" pill here was a second switch for half the same thing
-                   (owner, Nov 2026), so it is gone, and the header's voice switch
-                   left with the owner's 2026-11-18 top-bar cleanup. The chrome's
-                   mic pill (nav.js) shows a live session on every page and stops it. -->
-              <!-- Recent work, History, New session and the Idea Board left the
-                   hero line (owner's screenshot, Nov 2026): buttons for utilities
-                   out-shouted the company name. Same ids, same handlers. -->
-              <div class="hero-more">
-                <button id="heroMoreBtn" class="hero-more-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="heroMoreMenu" aria-label="Recent work, history, new session and the Idea Board" title="More — recent work, history, new session, Idea Board">&#8943;</button>
-                <div class="hero-more-menu" id="heroMoreMenu" role="menu" hidden>
-                  <button id="backToRecent" class="hero-menu-item hidden" type="button" role="menuitem">&#8592; Recent work</button>
-                  <button id="sessionsToggle" class="hero-menu-item" type="button" role="menuitem">History</button>
-                  <button id="newSessionBtn" class="hero-menu-item" type="button" role="menuitem" title="Start a clean conversation">New session</button>
-                  <!-- The board lost its own toolbar button (owner, Nov 2026 —
-                       the board belongs to the voice workspace). It stays reachable
-                       here so the voice-off board and pilot runs still work. -->
-                  <button id="boardToggle" class="hero-menu-item" type="button" role="menuitem" aria-pressed="false" title="Open the Idea Board">&#9638; Idea Board</button>
-                </div>
-              </div>
-            </div>
+            <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
           </div>
           <!-- No company tagline line under the hero: the name is the header, a
                one-liner underneath was the third thing saying the same thing
@@ -1660,14 +1637,21 @@
             </div>
             <div class="vs-board" id="vsBoard"></div>
           </div>
+          <!-- Talk to BeeZilla, above everything (owner, 2026-11-18: "a single button you
+               push called Talk to BeeZilla. With a single line chat bubble… That would be
+               above everything else"). While the whiteboard is open this same bar moves into
+               its top edge (voice-stage.js); folded, it waits here. -->
+          <div id="obStart" class="ob-start">
           <!-- One line to make anything: the docked Talk to BeeZilla button starts voice,
                the field takes typing, and a file or picture dropped anywhere on the bar
                is read like an attached paper. No plus button (owner's reference A6b7ky7). -->
           <div class="composer-card talk-card" id="composerCard">
             <div class="talk-bar" id="talkBar">
-              <button id="micBtn" class="talk-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk — BeeZilla listens, answers out loud, then listens again">
+              <button id="micBtn" class="talk-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk to BeeZilla: it listens and your words collect in the box. Pause whenever you like; send when you're ready.">
                 <svg class="tb-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+                <svg class="tb-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z"/></svg>
                 <span class="tb-label">Talk to BeeZilla</span>
+                <canvas class="tb-level" aria-hidden="true"></canvas>
               </button>
               <div class="talk-field">
                 <textarea id="chatInput" rows="1" placeholder="What would you like to make?" aria-label="What would you like to make?" disabled></textarea>
@@ -1679,41 +1663,14 @@
                   </button>
                 </div>
               </div>
-              <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
-              <div class="talk-privacy">
-                <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
-                  <span class="pv-icons"></span>
-                </button>
-                <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
-                  <div class="pp-head">
-                    <strong>Privacy</strong>
-                    <span class="pp-tools">
-                      <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
-                      <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
-                    </span>
-                  </div>
-                  <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
-                    <span class="pp-thumb" aria-hidden="true"></span>
-                    <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
-                    <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
-                    <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
-                  </div>
-                  <p class="pp-desc" id="privacyDesc"></p>
-                </div>
-              </div>
               <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
             </div>
             <div class="talk-sub">
-              <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-                <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-                <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
-              </div>
               <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
                    is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
                    dropped on the bar; this link is for a phone or a pasted letter. -->
               <span class="talk-sub-right">
                 <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
-                <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false" title="Attach a file for BeeZilla to read">📎 Attach file</button>
               </span>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
@@ -1724,8 +1681,26 @@
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
             </div>
-            <!-- The Idea Board opened from the bar while voice is off (voice-stage.js). -->
             <div id="boardSolo" class="board-solo"></div>
+          </div>
+          </div>
+
+          <!-- The whiteboard, full width (owner, 2026-11-18: "when you start talking to it, it
+               expands the whiteboard and puts the Talk to BeeZilla thing in the whiteboard").
+               The agent's work is drawn on it live: agent.md, a line to each skill, the
+               output. The conversation sits inside it on the right. -->
+          <div id="obBoard" class="ob-board hidden" aria-label="Idea Board"></div>
+          <!-- Where the conversation and the old mode switch wait while the board is folded. -->
+          <div id="obParking" hidden>
+            <div class="talk-ws-thread" id="talkWsThread">
+              <div class="chat-messages" id="chatMessages"></div>
+            </div>
+                  <div class="tm-row tm-mode"><span class="tm-label">Mode</span>
+                    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+                      <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+                      <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+                    </div>
+                  </div>
           </div>
 
           <!-- The brief is one line above the conversation, expandable in place.
@@ -1745,7 +1720,6 @@
             </div>
           </div>
 
-          <div class="chat-messages" id="chatMessages"></div>
           <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
           <div id="paperDrop" class="paper-drop hidden">
             <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
@@ -1774,7 +1748,7 @@
               <button type="button" id="downloadPdf" class="secondary">PDF</button>
               <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
               <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
-              <button type="button" id="newChatBtn" class="secondary new-chat-btn">Start a new chat</button>
+              <button type="button" id="newChatBtn" class="secondary new-chat-btn">New conversation</button>
             </div>
             <p id="draftSendNote" class="muted" role="status"></p>
             <div id="outwardConfirm" class="outward-confirm">
@@ -1791,8 +1765,8 @@
           <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
             <div class="bz-search" role="search">
               <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
-              <input id="bzSearch" type="search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"
-                     aria-label="Search your work, skills and recipes, or enter a web address" />
+              <input id="bzSearch" type="search" placeholder="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
+                     aria-label="Search your pictures, music, 3D, documents, skills and recipes, or enter a web address" />
               <span class="bz-search-tools">
                 <!-- A share control that only copies a URL has to SAY so. The
                      icon alone read as "share this" and left the owner guessing
@@ -1813,44 +1787,96 @@
               </div>
               <div class="bz-chips" role="tablist" aria-label="Show">
                 <button type="button" role="tab" data-f="all" class="on" aria-selected="true">All <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="pictures" aria-selected="false">Pictures <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="music" aria-selected="false">Music <span class="bz-chip-n"></span></button>
+                <button type="button" role="tab" data-f="models" aria-selected="false">3D <span class="bz-chip-n"></span></button>
                 <button type="button" role="tab" data-f="documents" aria-selected="false">Documents <span class="bz-chip-n"></span></button>
                 <button type="button" role="tab" data-f="skills" aria-selected="false">Skills <span class="bz-chip-n"></span></button>
                 <button type="button" role="tab" data-f="recipes" aria-selected="false">Recipes <span class="bz-chip-n"></span></button>
               </div>
               <div class="bz-results-grid" id="bzResultsGrid"></div>
             </div>
-            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Browse">
+            <!-- The places, below everything (owner: "the top menu below everything else… History
+                 can move down… left of library and right of inspiration… Recipes should be at
+                 the bottom as well… And the more button should be below as well"). -->
+            <div class="bz-tabrow">
+            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Places">
               <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
+              <button type="button" role="tab" data-tab="history" aria-selected="false" tabindex="-1">History</button>
               <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
               <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
               <button type="button" role="tab" data-tab="experts" aria-selected="false" tabindex="-1">Experts</button>
+              <button type="button" role="tab" data-tab="recipes" aria-selected="false" tabindex="-1">Recipes</button>
+            </div>
+              <div class="talk-more" id="talkMore">
+                <button type="button" id="talkMoreBtn" class="talk-more-btn" aria-expanded="false" aria-controls="talkMorePanel" title="More">
+                  <span class="tm-sr">More</span><span class="tm-dots" aria-hidden="true">&#8943;</span>
+                </button>
+                <div class="talk-more-panel hidden" id="talkMorePanel" role="group" aria-label="More">
+                  <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New conversation</button>
+                  <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open or fold the Idea Board">Idea Board</button>
+                  <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">Attach file</button>
+                  <button type="button" id="aiKeyBtn" class="talk-attach" title="Use your own AI account">Your AI key</button>
+                  <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
+                  <div class="tm-row"><span class="tm-label">Privacy</span>
+                    <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
+                    <div class="talk-privacy">
+                      <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
+                        <span class="pv-icons"></span>
+                      </button>
+                      <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
+                        <div class="pp-head">
+                          <strong>Privacy</strong>
+                          <span class="pp-tools">
+                            <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
+                            <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
+                          </span>
+                        </div>
+                        <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
+                          <span class="pp-thumb" aria-hidden="true"></span>
+                          <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
+                          <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
+                          <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+                        </div>
+                        <p class="pp-desc" id="privacyDesc"></p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="tm-sep" role="separator"></div>
+                  <p class="tm-head">More places</p>
+                  <a href="/buzzy/sketch">Sketch</a>
+                  <a href="/buzzy/studio">Music studio</a>
+                  <a href="/buzzy/capabilities">What BeeZilla can do</a>
+                  <a href="/buzzy/wallet">Honey Drops</a>
+                  <a href="/buzzy/upload">Publish</a>
+                </div>
+              </div>
             </div>
             <div class="bz-pane" id="bzPane" role="tabpanel"></div>
           </section>
           <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
           <div id="chatError" class="chat-error hidden"></div>
-          <p class="muted" style="margin-top:0.8rem;text-align:center">Powered by BeeZilla — plain talk, no jargon.</p>
         </div>
       </div>
     </div>
 
     <!-- Sessions drawer -->
     <div id="sessionsOverlay" class="sessions-overlay hidden" aria-hidden="true"></div>
-    <aside id="sessionsDrawer" aria-label="History" aria-hidden="true">
+    <aside id="sessionsDrawer" aria-label="Conversations" aria-hidden="true">
       <div class="drawer-header">
-        <h3>History</h3>
+        <h3>Conversations</h3>
         <span class="drawer-tools">
           <button id="sessionsMin" class="drawer-close" type="button" aria-label="Minimise history" title="Minimise">&ndash;</button>
           <button id="sessionsClose" class="drawer-close" type="button">Close</button>
         </span>
       </div>
       <div class="drawer-actions">
-        <button id="drawerNewChat" class="secondary" type="button">Start a new chat</button>
+        <button id="drawerNewChat" class="secondary" type="button">New conversation</button>
       </div>
       <p class="drawer-note">Pick a past chat to reopen it, rename it, or get a quick summary.</p>
       <div id="sessionsList"></div>
     </aside>
-    <button id="sessionsPill" class="sessions-pill hidden" type="button" aria-label="Open history again">History</button>
+    <button id="sessionsPill" class="sessions-pill hidden" type="button" aria-label="Open conversations again">Conversations</button>
   </main>
 
   <script src="/buzzy/companies.js"></script>
@@ -2729,16 +2755,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function watchModel3d(taskId, msg) {
       var tries = 0;
       var misses = 0;
+      function onBoard(step) {
+        if (window.__bzFlow) window.__bzFlow(Object.assign({ kind: "output", id: "out:3d:" + taskId, title: "3D model", parent: "skill:model3d", contentType: "model/gltf-binary" }, step));
+      }
       function show(text) {
         msg.progress = text;
         var line = document.querySelector('[data-model3d="' + String(taskId).replace(/"/g, "") + '"]');
         if (line) line.textContent = text;
         else renderChatMessages();
+        onBoard({ state: "running", detail: text });
       }
       function stop(text) {
         clearInterval(tick);
         msg.progress = text;
         renderChatMessages();
+        onBoard({ state: "failed", detail: text });
       }
       msg.model3dTask = taskId;
       show("Building the 3D model…");
@@ -2753,6 +2784,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               msg.progress = "";
               msg.asset = p.asset;
               renderChatMessages();
+              onBoard({ state: "done", title: p.asset.name || "3D model", url: p.asset.url, contentType: p.asset.type || "model/gltf-binary", detail: "" });
               return;
             }
             if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
@@ -2785,16 +2817,21 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var startedAt = Date.now();
       var etaMin = Math.max(1, Number((info && info.etaMinutes) || 5));
       msg.videoJobId = jobId;
+      function onBoard(step) {
+        if (window.__bzFlow) window.__bzFlow(Object.assign({ kind: "output", id: "out:video:" + jobId, parent: "skill:video", contentType: "video/mp4" }, step));
+      }
       function show(text) {
         msg.progress = text;
         var line = document.querySelector('[data-video="' + String(jobId).replace(/"/g, "") + '"]');
         if (line) line.textContent = text;
         else renderChatMessages();
+        onBoard({ state: "running", detail: text });
       }
       function stop(text) {
         clearInterval(tick);
         msg.progress = text;
         renderChatMessages();
+        onBoard({ state: "failed", detail: text });
       }
       function left() {
         var mins = Math.max(0, Math.round(etaMin - (Date.now() - startedAt) / 60000));
@@ -2819,6 +2856,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 reviewNote: p.reviewNote || "Review before posting — this video was made with AI"
               };
               renderChatMessages();
+              onBoard({ state: "done", title: msg.asset.name, url: msg.asset.url, contentType: msg.asset.type, detail: "" });
               return;
             }
             if (p.state === "failed" || p.ok === false) {
@@ -2957,6 +2995,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         return bubble;
       }).join("");
       container.innerHTML = html;
+      // Music always shows its sound: each track's player becomes the waveform player.
+      if (window.BeeZillaWave) {
+        container.querySelectorAll("audio.media-audio").forEach(function (a) {
+          var src = a.getAttribute("src");
+          if (src) a.replaceWith(window.BeeZillaWave.player(src, { title: "the track" }));
+        });
+      }
       // BZ-F011: expert handoff suggestion (never an auto-switch). Re-appended
       // after every render because this container is rebuilt from state.
       if (chatState.expertSuggestion && !chatState.expert) {
@@ -3350,9 +3395,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function setChatMascot(expr) {
-      // The mascot is a canvas now — map the brand expression names onto the
-      // avatar's animation states instead of swapping a PNG.
+      // The face top-left is the real brand art (voice-stage.js swaps the picture);
+      // the old drawn avatar only follows along for pages that still mount it.
       setAvatarState(AVATAR_STATES[expr] || "idle");
+      if (window.bzFace) window.bzFace(expr);
     }
 
     // ── Inline slot editing ─────────────────────────────────────
@@ -3757,13 +3803,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (m) {
         m.classList.toggle("on", voice.mic);
         m.setAttribute("aria-pressed", voice.mic ? "true" : "false");
-        // The docked Talk to BeeZilla button says what the mic is doing; the
-        // second press ends voice (the same toggleMic as before).
+        // The button says what the next press does (owner, 2026-11-19): the first
+        // press listens and the button becomes Pause; Pause keeps your words and it
+        // becomes Continue; Continue listens again. Sending is the box's own act.
         var lab = m.querySelector(".tb-label");
-        var word = voice.mic ? (voice.speaking ? "BeeZilla is talking" : "Listening\u2026") : "Talk to BeeZilla";
+        var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to BeeZilla";
         if (lab) lab.textContent = word;
-        else m.textContent = voice.mic ? (voice.speaking ? "\uD83D\uDD0A" : "\uD83C\uDF99") : "\uD83C\uDFA4";
-        m.setAttribute("aria-label", voice.mic ? "Stop talking to BeeZilla" : "Talk to BeeZilla");
+        else m.textContent = voice.mic ? "\u23F8" : "\uD83C\uDFA4";
+        m.classList.toggle("paused", !voice.mic && !!voice.paused);
+        m.setAttribute("aria-label", voice.mic
+          ? "Pause: BeeZilla stops listening and your words stay in the box"
+          : voice.paused ? "Continue talking to BeeZilla" : "Talk to BeeZilla");
       }
       var s = document.getElementById("voiceStatus");
       if (s) {
@@ -3884,12 +3934,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       if (!srAvailable() || voice.asr === "recorder") { startRecording(); return; }
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       var rec = new SR();
+      // One stretch of listening = one piece of the box's text (see dictation).
+      var myUtt = voice.uttId = (voice.uttSeq = (voice.uttSeq || 0) + 1);
+      dictCloseStale(myUtt);
       rec.lang = "en-US";
       rec.continuous = false;
       rec.interimResults = true;
       voice.rec = rec;
       voice.firstInterimAt = 0;
       rec.onresult = function (e) {
+        // A window already finished by Pause or Send has handed its words over.
+        if (rec._bzStale) return;
         // Speaking window: first recognised sound → final transcript. This is
         // the owner's own talk time, separate from our processing time.
         if (!voice.firstInterimAt && e.results && e.results.length) {
@@ -3904,8 +3959,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
           heardSoFar += e.results[i][0].transcript;
         }
-        // The voice workspace shows the words as they are heard.
-        if (window.bzVoiceWords) window.bzVoiceWords(heardSoFar.trim(), !!finalText.trim());
+        // The words show in the box as they are heard.
+        dictLive(myUtt, heardSoFar.trim());
         if (finalText.trim()) {
           voice.userSpeechMs = voice.firstInterimAt
             ? Math.round(performance.now() - voice.firstInterimAt)
@@ -3928,9 +3983,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // Timestamp the moment the owner stopped talking: time-to-talk is
           // measured from here, not from when we happened to send.
           voice.lastSpeechEnd = performance.now();
-          // The recogniser only decided that the turn ended. Its words are not
-          // the words (see sendHeardTurn).
-          sendHeardTurn(finalText);
+          // The recogniser only decided that this stretch of speech ended. Its
+          // words are not the words (see sendHeardTurn).
+          sendHeardTurn(finalText, myUtt);
         }
       };
       rec.onerror = function (e) {
@@ -4025,6 +4080,48 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // Everything here is getUserMedia + WebAudio, which every browser has.
     var REC_RATE = 16000;
     var recState = null;
+
+    // ── Live words in the recorder lane ───────────────────────────────────
+    // Owner, 2026-11-19: "when I voice to text, the text is literally showing up as
+    // I'm speaking, kind of like it does with Claude currently." Chrome's recogniser
+    // streams its guesses (rec.onresult → dictLive), but Brave, Firefox and the
+    // desktop app record a clip that the server transcribes only once the person
+    // stops, so their field said "Listening. Just talk." until the reply came. While
+    // they talk, the clip so far is transcribed again every LIVE_EVERY_MS, one
+    // request at a time, and shown where they would type. Display only: the turn is
+    // still the one final clip (finishRecording), so a guess is never sent as if it
+    // had been said, and partial=1 keeps these out of the time-to-transcript numbers.
+    var LIVE_EVERY_MS = 1200;
+    var LIVE_MIN_MS = 700;
+    function liveWords(r) {
+      if (!r || r.liveBusy) return;
+      var now = Date.now();
+      if (r.liveAt && now - r.liveAt < LIVE_EVERY_MS) return;
+      var total = 0;
+      for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
+      if (total < r.rate * (LIVE_MIN_MS / 1000)) return;
+      var flat = new Float32Array(total);
+      var off = 0;
+      for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
+      r.liveAt = now;
+      r.liveBusy = true;
+      var q = asrQueryString();
+      fetch("/api/buzzy/transcribe" + q + (q ? "&" : "?") + "partial=1", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: encodeWav(downsampleTo16k(flat, r.rate)),
+        signal: AbortSignal.timeout(8000),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          r.liveBusy = false;
+          // Once this recording has ended, the final clip owns the field.
+          if (recState !== r || !data || !data.ok) return;
+          var text = jobNameFix(brandName(data.text)).trim();
+          if (text) dictLive(r.uttId, text);
+        })
+        .catch(function () { r.liveBusy = false; });
+    }
 
     function srAvailable() {
       return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -4883,6 +4980,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (rms > 0.02) { speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
+            // Live words: the clip so far, shown while the person is still talking.
+            if (speechSeen) liveWords(recState);
             var elapsed = Date.now() - startedAt;
             // End of speech: ~0.9s of quiet after talking. Hard caps keep a
             // forgotten mic from uploading a minute of silence.
@@ -4895,7 +4994,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // nothing, so this is silent.
           src.connect(proc);
           proc.connect(ctx.destination);
-          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false };
+          recState = { ctx: ctx, stream: stream, src: src, proc: proc, chunks: chunks, rate: ctx.sampleRate, speechSeen: false,
+                       uttId: (voice.uttId = (voice.uttSeq = (voice.uttSeq || 0) + 1)) };
+          dictCloseStale(recState.uttId);
           voice.note = "";
           setAvatarState("listening");
           paintVoice();
@@ -4943,7 +5044,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Speech was already required to reach here (the !speechSeen and <0.3 s
       // returns above), so speechSeen/kept are facts of this path, not claims.
       freezeMoment("rec-clip", { speechSeen: true, kept: true, bytes: wav.size });
-      sendForTranscription(wav);
+      sendForTranscription(wav, r.uttId, liveOf(r.uttId));
+      // Dictation keeps listening: the next stretch of speech adds to the box.
+      rearmListening();
     }
 
     function cancelRecording() {
@@ -5080,7 +5183,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // A recognised turn: the clip is the evidence, the recogniser's text is the
     // guess. Send the guess only when the clip cannot be transcribed — a Listen
     // mode that swallows the turn is worse than one that mishears a name.
-    function sendHeardTurn(srText) {
+    function sendHeardTurn(srText, uttId) {
+      var id = uttId || voice.uttId;
       var seen = !!(capState && capState.speechSeen);
       var bargeWin = !!(voice.bargeClip || voice.bargeWasClip);
       var wav = finishCapture();
@@ -5091,38 +5195,30 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // are all there is.
       freezeMoment(wav ? "sr-clip" : "sr-text",
         { speechSeen: seen || bargeWin, bargeWindow: bargeWin, kept: !!wav, bytes: wav ? wav.byteLength : null });
-      if (!wav) { submitHeard(fallback); return; }
-      // Claim the turn now: the recogniser's onend fires while this fetch is in
-      // flight and would otherwise re-arm the mic over its own turn.
-      voice.sending = true;
-      setAvatarState("thinking");
-      paintVoice();
+      if (!wav) { submitHeard(fallback, id); return; }
+      // Dictation: this stretch keeps its place in the box (the recogniser's words
+      // stand in) while the transcriber writes the real ones, and listening goes on
+      // (the recogniser's onend re-arms) so nothing said meanwhile is lost.
+      dictLive(id, fallback);
+      dictHold(id);
       fetch("/api/buzzy/transcribe" + asrQueryString(), {
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav,
+        signal: AbortSignal.timeout(20000),
       })
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (d) {
           var text = d && d.ok && d.text ? jobNameFix(brandName(d.text)).trim() : "";
-          submitHeard(text || fallback);
+          submitHeard(text || fallback, id);
         })
-        .catch(function () { submitHeard(fallback); });
+        .catch(function () { submitHeard(fallback, id); });
     }
 
-    function submitHeard(text) {
-      if (!text) {
-        voice.sending = false;
-        stageNote("Didn't catch that — try again.");
-        rearmListening();
-        return;
-      }
-      var input = document.getElementById("chatInput");
-      if (input) input.value = text;
-      voice.sending = true;
-      setAvatarState("thinking");
+    function submitHeard(text, id) {
+      if (text) voice.note = "";
+      dictFinal(id || voice.uttId, text || "");
       paintVoice();
-      sendChatMessage();
     }
 
     // A turn whose audio measured as speech posts its clip even when the
@@ -5147,13 +5243,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.lastSpeechEnd = performance.now();
       freezeMoment(bargeWin ? "clip-barge" : "clip-late",
         { speechSeen: seen, bargeWindow: bargeWin, kept: true, bytes: wav.byteLength });
-      sendForTranscription(wav);
+      sendForTranscription(wav, voice.uttId, liveOf(voice.uttId));
       return true;
     }
 
-    function sendForTranscription(wav) {
-      voice.sending = true;
-      setAvatarState("thinking");
+    // A stretch of speech, transcribed into its place in the box. Nothing is sent:
+    // the person sends the box when they are ready (sendFromBox). `fallback` is what
+    // was already showing for this stretch (live words), kept if the transcriber
+    // hears nothing or cannot be reached.
+    function sendForTranscription(wav, uttId, fallback) {
+      var id = uttId || voice.uttId;
+      dictHold(id);
       paintVoice();
       // BZ-22: tell the transcriber the names this turn is about. The server
       // also reads the job back by id and the owner's recent names, so this is
@@ -5162,68 +5262,241 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         method: "POST",
         headers: { "Content-Type": "audio/wav" },
         body: wav,
+        // A transcriber that never answers must not hold the box (or a Send) forever.
+        signal: AbortSignal.timeout(20000),
       })
         .then(function (res) { return res.json(); })
         .then(function (data) {
-          voice.sending = false;
-          if (!data || !data.ok) {
-            stageNote((data && data.error) || "Couldn't transcribe that — try again.");
-            rearmListening();
-            return;
-          }
           // The server already applied the job/company vocabulary it knows; this
           // adds the job the page is in, for the cold ?job= open the server
           // cannot see the title of.
-          var text = jobNameFix(brandName(data.text)).trim();
-          if (!text) {
-            stageNote("Didn't catch that — try again.");
-            rearmListening();
-            return;
-          }
-          voice.note = "";
-          var input = document.getElementById("chatInput");
-          if (input) input.value = text;
-          voice.lastSpeechEnd = performance.now();
-          voice.sending = true;
-          setAvatarState("thinking");
+          var text = data && data.ok ? jobNameFix(brandName(data.text)).trim() : "";
+          if (!text && fallback) text = fallback;
+          if (!text && (!data || !data.ok)) stageNote((data && data.error) || "Couldn't transcribe that — try again.");
+          else if (text) voice.note = "";
+          dictFinal(id, text);
           paintVoice();
-          sendChatMessage();
         })
         .catch(function () {
-          voice.sending = false;
-          stageNote("Couldn't reach the transcriber — check the connection.");
-          rearmListening();
+          if (!fallback) stageNote("Couldn't reach the transcriber — check the connection.");
+          dictFinal(id, fallback || "");
+          paintVoice();
         });
+    }
+
+    // ── Dictation: what you say collects in the box until you send it ─────
+    // Owner, 2026-11-19: "When you click on it the first time, it should switch to
+    // a pause button. You can click on that pause anytime, think as much as you
+    // want, and then continue clicking on it and dictate it, and then pause it
+    // again, so that you have complete control in that way." So a pause in speech
+    // no longer ends the turn. Each stretch of speech (one recogniser window, or
+    // one recording) is a piece of the box's text: live words while it is heard,
+    // the transcriber's words when they arrive, always in the order spoken.
+    // Nothing reaches BeeZilla until the person sends the box.
+    var dict = { base: null, segs: [], sendWhenDone: false, closed: {} };
+    function dictSeg(id, make) {
+      for (var i = 0; i < dict.segs.length; i++) if (dict.segs[i].id === id) return dict.segs[i];
+      // A stretch whose words are already in the box never comes back as a new one.
+      if (!make || !id || dict.closed[id]) return null;
+      if (dict.base === null) {
+        var box = document.getElementById("chatInput");
+        dict.base = box ? box.value : "";
+      }
+      var seg = { id: id, text: "", done: false, posted: false };
+      dict.segs.push(seg);
+      return seg;
+    }
+    // Stretches that ended without going to the transcriber (the recogniser stopped
+    // with guesses but no final words, a clip too short to send) keep the words they
+    // showed, so nothing waits on them. `keepId` is the stretch still being heard.
+    function dictCloseStale(keepId) {
+      var changed = false;
+      for (var i = 0; i < dict.segs.length; i++) {
+        var seg = dict.segs[i];
+        if (!seg.done && !seg.posted && seg.id !== keepId) { seg.done = true; changed = true; }
+      }
+      if (changed) dictSettle();
+    }
+    function liveOf(id) { var seg = dictSeg(id); return seg ? seg.text : ""; }
+    function dictRender() {
+      if (dict.base === null) return;
+      var box = document.getElementById("chatInput");
+      if (!box) return;
+      var parts = [];
+      var b = dict.base.replace(/\s+$/, "");
+      if (b) parts.push(b);
+      for (var i = 0; i < dict.segs.length; i++) if (dict.segs[i].text) parts.push(dict.segs[i].text);
+      box.value = parts.join(" ");
+      // While words are still arriving the box is being written; Pause to edit it.
+      box.readOnly = dict.segs.length > 0;
+      try { box.scrollTop = box.scrollHeight; } catch (_) {}
+    }
+    // Live words for a stretch still being heard (or on its way to the transcriber).
+    function dictLive(id, text) {
+      var t = String(text || "").trim();
+      var seg = dictSeg(id, !!t);
+      if (!seg || seg.done) return;
+      seg.text = t;
+      dictRender();
+    }
+    // A stretch is on its way to the transcriber: hold its place in the order.
+    function dictHold(id) {
+      var seg = dictSeg(id, true);
+      if (seg) seg.posted = true;
+      dictRender();
+    }
+    // The words that count for a stretch ("" when nothing was said).
+    function dictFinal(id, text) {
+      var seg = dictSeg(id, !!text);
+      if (seg) { seg.text = String(text || "").trim(); seg.done = true; }
+      dictSettle();
+    }
+    function dictSettle() {
+      while (dict.segs.length && dict.segs[0].done) {
+        var f = dict.segs.shift();
+        dict.closed[f.id] = true;
+        if (f.text) {
+          var b = (dict.base || "").replace(/\s+$/, "");
+          dict.base = b ? b + " " + f.text : f.text;
+        }
+      }
+      dictRender();
+      if (dict.segs.length) return;
+      dict.base = null;
+      var box = document.getElementById("chatInput");
+      if (box) box.readOnly = false;
+      if (dict.sendWhenDone) { dict.sendWhenDone = false; sendNow(); }
+    }
+    // Is anything said still on its way into the box?
+    function dictBusy() {
+      if (dict.segs.length) return true;
+      if (recState && recState.speechSeen) return true;
+      return !!(voice.rec && ((capState && capState.speechSeen) || liveOf(voice.uttId)));
+    }
+    // End the stretch being heard now, keeping its words: its clip goes to the
+    // transcriber, or its live words stand when there is no clip.
+    function dictFinishWindow() {
+      if (recState) {
+        if (recState.speechSeen) finishRecording();
+        else quietWindow();
+      }
+      if (voice.rec) {
+        var id = voice.uttId;
+        var live = liveOf(id);
+        try { voice.rec._bzStale = true; voice.rec.stop(); } catch (_) {}
+        voice.rec = null;
+        var wav = capState && capState.speechSeen ? finishCapture() : null;
+        dropCapture();
+        if (wav) sendForTranscription(wav, id, live);
+        else if (live) dictFinal(id, live);
+      }
+      dictCloseStale(null);
+    }
+    // Stop listening for now without keeping anything (nothing was being said) and
+    // without letting go of the microphone (the next listen reuses it).
+    function quietWindow() {
+      if (recState) {
+        var r = recState;
+        recState = null;
+        try { r.proc.disconnect(); r.src.disconnect(); } catch (_) {}
+      }
+      if (voice.rec) {
+        try { voice.rec._bzStale = true; voice.rec.stop(); } catch (_) {}
+        voice.rec = null;
+      }
+      dropCapture();
+    }
+    // Sending is the person's own act: the Send arrow, Enter or Do it. Words still
+    // being heard or transcribed belong to this message, so they are finished first.
+    function sendFromBox() {
+      if (dictBusy()) {
+        dict.sendWhenDone = true;
+        // No new stretch of listening starts while the last words come in.
+        if (voice.mic) voice.sending = true;
+        dictFinishWindow();
+        dictSettle();
+        paintVoice();
+        return;
+      }
+      sendNow();
+    }
+    function sendNow() {
+      var box = document.getElementById("chatInput");
+      if (!box || !box.value.trim()) {
+        if (voice.mic && voice.sending && !document.getElementById("thinkingIndicator")) {
+          voice.sending = false;
+          rearmListening();
+          paintVoice();
+        }
+        return;
+      }
+      // While BeeZilla answers the mic waits, so the answer never lands in the box;
+      // it listens again when the answer is done (finishSpeaking / the turn's end).
+      if (voice.mic) { voice.sending = true; quietWindow(); }
+      // There is no "stopped talking → sent" gap to time any more: the person sent it.
+      voice.lastSpeechEnd = 0;
+      var turn = voice.turnSeq;
+      var after = function () {
+        // A send that never became a turn (a pasted paper, signed out) must not
+        // leave the mic waiting for an answer that is not coming.
+        if (voice.turnSeq === turn && voice.sending) { voice.sending = false; rearmListening(); paintVoice(); }
+      };
+      Promise.resolve(sendChatMessage()).then(after, after);
     }
 
     function toggleMic() {
       voice.armed = false;
-      voice.mic = !voice.mic;
-      saveListenPref(voice.mic);
-      if (voice.mic) {
-        // A fresh listen clears whatever the last failure said.
-        voice.note = "";
-        voice.bargeClip = false;
-        voice.bargeSent = false;
-        // A cut belongs to a turn id, so there is nothing global to clear here:
-        // the next turn gets a new id and plays normally.
-        // A spoken conversation needs spoken answers.
-        if (!voice.replies) { voice.replies = true; saveVoicePref(true); }
-        startListening();
-      } else {
-        stopListening();
-        stopSpeaking();
-        // One switch, one state: OFF also means "do not read replies aloud".
-        // Before the merge the hero pill could leave replies on after voice ended,
-        // so the switch said off while the next typed reply still spoke.
-        if (voice.replies) { voice.replies = false; saveVoicePref(false); }
-        // Turning Listen OFF must release the microphone, not just stop using it.
-        // This branch used to leave micStream and the probe stream live, so the
-        // browser's mic indicator stayed lit and a stopped session still showed
-        // three RecordStreams on the device — the owner's own privacy signal
-        // said "recording" while the product said "not listening".
-        releaseMic();
-      }
+      if (voice.mic) { pauseVoice(); return; }
+      // The first press, or Continue after a pause: the person's turn to talk, so
+      // BeeZilla stops if it is still reading an answer out.
+      if (voice.speaking) { voice.cutTurn = voice.turnSeq; stopSpeaking(); }
+      voice.paused = false;
+      voice.mic = true;
+      saveListenPref(true);
+      // A fresh listen clears whatever the last failure said.
+      voice.note = "";
+      voice.bargeClip = false;
+      voice.bargeSent = false;
+      // A cut belongs to a turn id, so there is nothing global to clear here:
+      // the next turn gets a new id and plays normally.
+      // A spoken conversation needs spoken answers.
+      voice.replies = true;
+      saveVoicePref(true);
+      startListening();
+      paintVoice();
+    }
+
+    // Pause: think as long as you like. What was already said is kept (the stretch
+    // being heard is finished, not dropped), the microphone is let go, and BeeZilla
+    // stops talking if it was. Answers are still read aloud while the session is
+    // paused, but a reload comes back as plain Talk to BeeZilla.
+    function pauseVoice() {
+      dictFinishWindow();
+      voice.mic = false;
+      voice.paused = true;
+      saveListenPref(false);
+      saveVoicePref(false);
+      if (voice.speaking || voice.sending) { voice.cutTurn = voice.turnSeq; stopSpeaking(); }
+      stopListening();
+      // Turning Listen OFF must release the microphone, not just stop using it:
+      // the browser's mic light is the owner's own privacy signal.
+      releaseMic();
+      paintVoice();
+    }
+
+    // Voice off altogether (the Stop on the Listening pill on other pages): words
+    // already said still land in the box.
+    function endVoice() {
+      dictFinishWindow();
+      voice.mic = false;
+      voice.armed = false;
+      voice.paused = false;
+      saveListenPref(false);
+      stopListening();
+      stopSpeaking();
+      // The switch is ONE state: ending voice also ends spoken replies.
+      if (voice.replies) { voice.replies = false; saveVoicePref(false); }
+      releaseMic();
       paintVoice();
     }
 
@@ -5295,31 +5568,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var m = document.getElementById("micBtn");
       if (m) m.addEventListener("click", toggleMic);
       var end = document.getElementById("voiceStageEnd");
-      if (end) end.addEventListener("click", function () {
-        voice.mic = false;
-        saveListenPref(false);
-        stopListening();
-        stopSpeaking();
-        if (voice.replies) { voice.replies = false; saveVoicePref(false); }
-        releaseMic();
-        paintVoice();
-      });
+      if (end) end.addEventListener("click", endVoice);
       paintVoice();
       // One engine, addressable from the chrome on any page. The mic pill calls
       // stop() and interrupt() instead of guessing at DOM buttons.
       window.BeeZillaVoice = {
         toggle: toggleMic,
-        stop: function () {
-          voice.mic = false;
-          voice.armed = false;
-          saveListenPref(false);
-          stopListening();
-          stopSpeaking();
-          // The switch is ONE state: ending voice also ends spoken replies.
-          if (voice.replies) { voice.replies = false; saveVoicePref(false); }
-          releaseMic();
-          paintVoice();
-        },
+        stop: endVoice,
         // Cut the reply short and hand the mic back, without ending the session.
         // The one-click barge-in: the mic pill beside the settings gear (nav.js)
         // offers it as Interrupt while BeeZilla is talking. Talk's own mic button
@@ -5634,6 +5889,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 metrics.spoken = true;
               }
             }
+          } else if (ev === "flow") {
+            // The live whiteboard: agent.md, each skill, each output, as it happens.
+            if (window.__bzFlow) window.__bzFlow(payload);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -5719,6 +5977,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               mountLiveBubble(liveBubble);
             }
             liveBubble.textContent = liveText;
+          } else if (ev === "flow") {
+            if (window.__bzFlow) window.__bzFlow(payload);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -5761,9 +6021,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
       var input = document.getElementById("chatInput");
       if (input) {
-        input.placeholder = mode === "work"
-          ? "What are we going to accomplish together"
-          : "What do you want to talk about";
+        // One bar, one question (owner: "We don't need to have a difference between chat
+        // and work"). The mode only changes how BeeZilla steers, never what you see.
+        input.placeholder = "What would you like to make?";
       }
       var briefH = document.querySelector("#briefPanel h3");
       if (briefH) briefH.textContent = "Brief";
@@ -6864,6 +7124,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // reply instead of running (and charging for) the turn twice (QA-09/10).
         const attemptId =
           "att_" + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : String(Date.now()));
+        // The board opens the moment a turn starts, ready for its first step.
+        if (window.__bzTurnStart) window.__bzTurnStart(text);
         const sendBody = {
           jobId: chatState.jobId,
           sessionId: chatState.sessionId || undefined,
@@ -6876,6 +7138,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           attemptId: attemptId,
           // The Talk bar's privacy slider: Lockdown turns off web lookups and outside makers.
           privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
+          // The person's own edits to the process on the whiteboard (or a recipe they ran).
+          boardInstructions: (window.bzBoardInstructions && window.bzBoardInstructions()) || undefined,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
@@ -6936,7 +7200,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
 
         if (!data.ok) {
-          setChatMascot("18-unimpressed");
+          if (window.__bzTurnDone) window.__bzTurnDone(null);
+          setChatMascot("10-nervous");
           // FIX #5: show error and disable input if signed out
           if (data.code === "signed_out") {
             input.disabled = true;
@@ -7000,11 +7265,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (rpBtn) rpBtn.classList.remove("hidden");
           }
         } else {
-          setChatMascot("17-attentive");
+          setChatMascot("12-content");
         }
 
         renderChatMessages();
         renderSlotChecklist();
+        // Whatever the turn produced goes on the board, if the stream did not already put it there.
+        if (window.__bzTurnDone) window.__bzTurnDone(data);
         // Asked BeeZilla to do something on this page ("open the whiteboard"): it
         // does it where the owner can watch, with Stop at every step (pilot.js).
         if (Array.isArray(data.actions) && data.actions.length && window.BeeZillaPilot) window.BeeZillaPilot.run(data.actions);
@@ -7111,13 +7378,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     // Wire up chat events
-    document.getElementById("chatSend").onclick = sendChatMessage;
+    document.getElementById("chatSend").onclick = sendFromBox;
     var doItBtn = document.getElementById("chatDoIt");
     doItBtn.onclick = function () {
       var el = document.getElementById("chatInput");
       if (!el.value.trim()) { el.focus(); return; }
       pendingExecute = true;
-      sendChatMessage();
+      sendFromBox();
     };
     // The button lives and dies with Send: same disabled state, no dead control.
     var sendObserver = new MutationObserver(function () {
@@ -7268,7 +7535,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        sendChatMessage();
+        sendFromBox();
       }
     });
     document.getElementById("approveDraft").onclick = onApproveDraft;
@@ -7584,76 +7851,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   </script>
 
 <script>
-/* ── Your week with BeeZilla — one slim, dismissible line (plan doc 23 #7) ────
-   Skippable by design: any failure or an empty week renders nothing. The X
-   remembers the dismissal PER USER PER WEEK (ISO week + identity cached by the
-   chrome), so it comes back next Monday and not before. */
-(function () {
-  var card = document.getElementById("digestCard");
-  var text = document.getElementById("digestText");
-  var close = document.getElementById("digestClose");
-  if (!card || !text || !close) return;
-
-  var DISMISS_KEY = "bz_digest_dismissed";
-  function who() {
-    try {
-      var v = JSON.parse(localStorage.getItem("bz_identity") || "null");
-      return (v && (v.email || v.name)) || "anon";
-    } catch (_) { return "anon"; }
-  }
-  function isoWeek(d) {
-    // ISO week number: the week belongs to the year of its Thursday.
-    var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    var day = t.getUTCDay() || 7;
-    t.setUTCDate(t.getUTCDate() + 4 - day);
-    var year = t.getUTCFullYear();
-    var week = Math.ceil(((t - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
-    return year + "-W" + week;
-  }
-  var WEEK = isoWeek(new Date());
-  // Identity is read at the moment of use, never once at parse time: the chrome
-  // writes bz_identity AFTER this inline script runs, so a cached-at-parse value
-  // was "anon" on the first visit and the user's own dismissal never matched.
-  function dismissed() {
-    try {
-      var v = JSON.parse(localStorage.getItem(DISMISS_KEY) || "null");
-      return !!(v && v.who === who() && v.week === WEEK);
-    } catch (_) { return false; }
-  }
-  function remember() {
-    try { localStorage.setItem(DISMISS_KEY, JSON.stringify({ who: who(), week: WEEK })); } catch (_) {}
-  }
-  if (dismissed()) return;
-  close.addEventListener("click", function () {
-    remember();
-    card.style.display = "none";
-    card.classList.add("hidden");
-  });
-
-  fetch("/api/buzzy/digest", { credentials: "include" })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (data) {
-      if (!data || !data.ok || !data.digest) return;
-      var d = data.digest;
-      if (!d.turns && !d.draftsCreated) return; // quiet empty state
-      var bits = [];
-      bits.push(d.turns + " conversation" + (d.turns === 1 ? "" : "s"));
-      if (d.draftsCreated > 0) {
-        bits.push(d.draftsCreated + " draft" + (d.draftsCreated === 1 ? "" : "s") +
-          (d.draftsApproved > 0 ? " (" + d.draftsApproved + " approved)" : " ready for you"));
-      }
-      var money = "under a penny";
-      if (d.dollarsEstimate >= 0.005) money = "about $" + d.dollarsEstimate.toFixed(2);
-      bits.push(money + " this week");
-      text.textContent = "Your week with BeeZilla: " + bits.join(", ") + ".";
-      card.classList.remove("hidden");
-      card.style.display = "flex";
-    })
-    .catch(function () { /* never surface an error for the digest */ });
-})();
-</script>
-
-<script>
 /* ── Plan + remaining quota lives in the account menu now (nav.js) ────────
    The running total under the composer was noise; the plan belongs beside the
    name it applies to (owner, Nov 2026). nav.js owns the entitlement read and
@@ -7694,6 +7891,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/inspiration.js"></script>
 <script src="/buzzy/qr.js"></script>
 <script src="/buzzy/share.js"></script>
+<script src="/buzzy/waveform.js"></script>
 <script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>

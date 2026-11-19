@@ -124,6 +124,13 @@
   }
 
   function makeAudio(url, cls) {
+    // Music always shows its sound (owner, 2026-11-18): the shared waveform player
+    // when it is on the page, the browser's own player otherwise.
+    if (global.BeeZillaWave && global.BeeZillaWave.player) {
+      var wave = global.BeeZillaWave.player(url, {});
+      wave.className += ' ' + cls;
+      return wave;
+    }
     var audio = document.createElement('audio');
     audio.className = cls;
     audio.controls = true;
@@ -685,7 +692,7 @@
       return;
     }
     // Native controls inside a card (the audio player, links) keep their own clicks.
-    if (el.closest('audio, video, a, input, select, textarea, button, label')) return;
+    if (el.closest('audio, video, a, input, select, textarea, button, label, .bzw')) return;
     if (item.kind === 'document') {
       goTo(item.libraryUrl, e);
       return;
