@@ -28,6 +28,7 @@ import {
   documentToMarkdown,
 } from "./artifact";
 import { playbookGuidance, playbookChecks } from "./playbooks";
+import { enrichLater, rememberPrompt } from "./tags";
 import { buildJobEstimate } from "./digest";
 import {
   lookupMarketRate,
@@ -96,7 +97,7 @@ const CHAT_PERSONA = `You are BeeZilla in conversation. This is ordinary chat �
 - You may ask one clarifying question — only when the answer would change what you'd say, and only one per turn.
 - MAKING SOMETHING: when the request is to make a picture, a track, a video or a 3D model, the app makes it — do not interview them about style, size, format or mood first. It is made with sensible defaults from what they said, then describe it in one or two sentences. Ask a question only when the subject itself is missing ("draw me a picture" with no subject).
 - Do NOT run a scope interview. Do not ask about the challenge, the difficulties, who is involved, or the end goal unless they are asking you to get a real piece of work done.
-- If they ask you to actually accomplish something that needs a real effort (get bids, chase a refund, prepare a contract), answer what you can here, then say in one sentence that you can set it up as work — the Work tab does that. Offer once; never push twice.
+- If they ask you to actually accomplish something that needs a real effort (get bids, chase a refund, prepare a contract), answer what you can here, then offer in one sentence to take it on as a piece of work. Offer once; never push twice.
 - Never write a price, penalty, date, or fact the person did not state. If you do not know, say so.
 - WEB: you can search the live web and read any public page. If the person asks "what's the current X", "look up Y", or gives you a link, that is your job — the tools exist. Never say you "can't browse", "can't search the web", "don't have internet access" or "can't check that online"; doing so is false. If a lookup genuinely fails, say the lookup failed, not that you lack the ability. Cite the page you actually read.
 - Only use details from THIS conversation.
@@ -278,6 +279,51 @@ export interface ChatRequest {
    * nothing here yet (Open does not publish anything automatically).
    */
   privacy?: "advocate" | "lockdown" | "open";
+  /**
+   * The live whiteboard (owner, 2026-11-18): "the moment it reads the agent.md, it puts
+   * the agent.md on the whiteboard. And then the moment it goes to your first skill, it
+   * draws a line from the agent.md to the skill… You're seeing what the agent is doing
+   * in real time so that you can edit the process." Each step is sent as it happens.
+   */
+  onFlow?: (f: FlowStep) => void;
+  /**
+   * The person's own edits to the process, compiled from their whiteboard: changed
+   * agent.md text, skills they added, the output they defined, or a recipe they ran.
+   * Their instructions for this conversation — appended to the system prompt, capped.
+   */
+  boardInstructions?: string | null;
+}
+
+/** One step of a turn, as the whiteboard draws it. */
+export interface FlowStep {
+  kind: "agent" | "memory" | "skill" | "output";
+  /** Stable within a conversation: the same skill used twice is one card. */
+  id: string;
+  title: string;
+  detail?: string;
+  /** The card this one hangs from (agent.md for a skill, the skill for an output). */
+  parent?: string;
+  state?: "running" | "done" | "failed";
+  url?: string;
+  contentType?: string;
+  /** A 3D model or video still being made: the page watches it and fills the card. */
+  taskId?: string;
+  videoJobId?: string;
+}
+
+/** Plain names for the tools the agent calls, as skill cards on the board. */
+const TOOL_SKILL_NAMES: Record<string, string> = {
+  web_search: "Search the web",
+  read_web_page: "Read a web page",
+  fetch_website: "Read a website",
+  render_document: "Write the document",
+  generate_music: "Music maker",
+  generate_image: "Picture maker",
+  calculate: "Calculator",
+};
+export function toolSkillTitle(name: string): string {
+  const n = String(name || "");
+  return TOOL_SKILL_NAMES[n] || n.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
 
 /** Per-turn latency breakdown. Product metric — surfaced to the client and
@@ -631,7 +677,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
     : requestedDraft
     ? `\n\nThey asked for the deliverable now. Produce it — fold in everything captured so far and mark anything still unknown rather than inventing it.${knownCompany}${typeHint}`
-    : `\n\nCONVERSATION MODE — this is ordinary chat, not a scope interview. Answer their message directly. Do not ask about the challenge, difficulties, who is involved, or the end goal. If they want something actually done, help as far as chat allows and mention that the Work tab can set it up as a work effort.${knownCompany}`;
+    : `\n\nCONVERSATION MODE — this is ordinary chat, not a scope interview. Answer their message directly. Do not ask about the challenge, difficulties, who is involved, or the end goal. If they want something actually done, help as far as you can now and offer once to take it on as a piece of work.${knownCompany}`;
 
   const guidance = mode === "work" ? (hasExistingDraft
     ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
@@ -692,8 +738,44 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       "the URLs you actually opened, one per line, and your reply must name the source you relied on. Never cite a page " +
       "you did not open, and never present a search snippet as confirmation."
     : "";
+  // The person's own process from the whiteboard. Their instructions, capped, and
+  // never able to switch off the rules above (it is appended, not substituted).
+  const boardText = typeof req.boardInstructions === "string"
+    ? req.boardInstructions.split(String.fromCharCode(0)).join("").trim().slice(0, 4000)
+    : "";
+  const boardSection = boardText
+    ? "\n\nTHE OWNER'S WHITEBOARD — the process they drew or edited for this conversation: their changes to " +
+      "agent.md, the skills they want used and in what order, and the output they defined. Follow it as their " +
+      "instructions for how to do the work. If a step asks for something unsafe or something you cannot do, say so " +
+      "plainly instead of pretending:\n" + boardText
+    : "";
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock;
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection;
+
+  // ── The live whiteboard: what the agent read, before it does anything else ──
+  req.onFlow?.({
+    kind: "agent",
+    id: "agent",
+    title: "agent.md",
+    detail: persona.replace(/\s+/g, " ").trim().slice(0, 600),
+    state: "done",
+  });
+  if (factsText.length) {
+    req.onFlow?.({
+      kind: "memory", id: "memory", title: "Memory", parent: "agent", state: "done",
+      detail: `${factsText.length} thing${factsText.length === 1 ? "" : "s"} it already knows about this work`,
+    });
+  }
+  if (boardText) {
+    req.onFlow?.({ kind: "skill", id: "board", title: "Your board", parent: "agent", state: "done", detail: boardText.slice(0, 400) });
+  }
+  if (mode === "work" && playbookBlock) {
+    req.onFlow?.({
+      kind: "skill", id: "skill:" + jobType, parent: "agent", state: "done",
+      title: jobType.charAt(0).toUpperCase() + jobType.slice(1) + " playbook",
+      detail: playbookBlock.replace(/\s+/g, " ").trim().slice(0, 400),
+    });
+  }
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
@@ -751,12 +833,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       label: `Composing ${seconds}s of audio`,
       etaMs: Math.min(120_000, 4000 + seconds * 150),
     });
+    req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "running", detail: brief.slice(0, 240) });
     const made = await gatedMusic(userId, brief, seconds * 1000);
+    if (!(made.ok && made.bytes)) {
+      req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "failed", detail: String(made.error ?? "No audio came back") });
+    }
     if (made.ok && made.bytes) {
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const name = `music-${stamp}.mp3`;
       req.onStage?.({ phase: "saving", label: "Saving the track", etaMs: 1500 });
       const stored = await storeAudio(userId, made.bytes, name, made.contentType || "audio/mpeg");
+      // Search words for the track, written from the brief (never blocks the reply).
+      void enrichLater(sql, userId, stored.id, { prompt: brief, filename: name, contentType: made.contentType || "audio/mpeg" });
       // Name the project the deliverable belongs to. Null job_id meant the Library
       // could show a file that no work item claimed, and a work item could offer a
       // download that did not exist.
@@ -770,6 +858,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         bytes: stored.bytes,
         type: made.contentType || "audio/mpeg",
       };
+      req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "done" });
+      req.onFlow?.({
+        kind: "output", id: "out:" + stored.id, title: name, parent: "skill:music", state: "done",
+        url: renderedAudio.url, contentType: renderedAudio.type,
+      });
       // A track born in chat is a studio track: register the plan and the first
       // change so /buzzy/studio?job=… opens on it instead of an empty page.
       try {
@@ -838,6 +931,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "started and do NOT describe a chart.";
     } else {
       req.onStage?.({ phase: "video", label: `Making your ${label.toLowerCase()}`, etaMs: 8000 });
+      req.onFlow?.({ kind: "skill", id: "skill:video", title: "Video maker", parent: "agent", state: "running", detail: label });
       // `needsTable` was excluded above, so this is one of the four topic recipes.
       const started = await createVideoJob(
         topicJobInput({
@@ -853,6 +947,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           etaMinutes: started.etaMinutes,
           state: started.state,
         };
+        req.onFlow?.({ kind: "skill", id: "skill:video", title: "Video maker", parent: "agent", state: "done" });
+        req.onFlow?.({
+          kind: "output", id: "out:video:" + started.jobId, title: `${label} (about ${started.etaMinutes} min)`,
+          parent: "skill:video", state: "running", contentType: "video/mp4", videoJobId: started.jobId,
+        });
         messages[0]!.content +=
           `\n\nA ${label} video was STARTED this turn and is rendering now — it takes about ${started.etaMinutes} ` +
           "minutes. It appears under this reply as a player the moment it is finished, and a copy is saved to their " +
@@ -860,6 +959,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           "Say in one or two sentences that it is being made and when it will be ready, then stop.";
       } else {
         videoRefusal = { code: started.code, error: started.error };
+        req.onFlow?.({ kind: "skill", id: "skill:video", title: "Video maker", parent: "agent", state: "failed", detail: started.error });
         messages[0]!.content +=
           `\n\nVideo generation was attempted and FAILED (${started.code}): ${started.error} ` +
           "Tell the owner that exact reason in one sentence. Nothing was charged. Do not claim any video exists.";
@@ -881,6 +981,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "Say exactly that. Do not claim any picture exists and do not offer to draw it later.";
     } else {
       req.onStage?.({ phase: "art", label: "Drawing your image", etaMs: 20_000 });
+      req.onFlow?.({ kind: "skill", id: "skill:art", title: "Picture maker", parent: "agent", state: "running", detail: prompt.slice(0, 240) });
       const made = await generateImage(prompt);
       await recordUsage({
         userId, scope: "image", units: made.ok ? 1 : 0, ms: made.ms ?? 0,
@@ -891,6 +992,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         const name = `art-${stamp}.png`;
         const stored = await storeImage(userId, made.bytes, name, made.contentType || "image/png");
         renderedImage = { url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: made.contentType || "image/png" };
+        // "If I search house, it should bring up the picture of a house I asked."
+        void enrichLater(sql, userId, stored.id, { prompt, filename: name, contentType: renderedImage.type });
+        req.onFlow?.({ kind: "skill", id: "skill:art", title: "Picture maker", parent: "agent", state: "done" });
+        req.onFlow?.({
+          kind: "output", id: "out:" + stored.id, title: name, parent: "skill:art", state: "done",
+          url: renderedImage.url, contentType: renderedImage.type,
+        });
         try {
           await sql`UPDATE buzzy_assets SET session_id = ${sessionId}
                     WHERE user_id = ${userId} AND id = ${stored.id}`;
@@ -902,6 +1010,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           "Do not name a file and do not say you will make one later; describe what is in the picture in two sentences and stop.";
       } else {
         artRefusal = { code: made.code ?? "image_failed", error: made.error ?? "the provider refused" };
+        req.onFlow?.({ kind: "skill", id: "skill:art", title: "Picture maker", parent: "agent", state: "failed", detail: artRefusal.error });
         messages[0]!.content +=
           `\n\nImage generation was attempted and FAILED (${made.code}): ${made.error}. Tell the owner that exact reason.`;
       }
@@ -930,15 +1039,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "Say exactly that in one sentence. Do not describe a model and do not offer to make one later.";
     } else {
       req.onStage?.({ phase: "model3d", label: "Starting your 3D model", etaMs: 4000 });
+      req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "running", detail: message.slice(0, 240) });
       const started = await createModelTask(message);
       if (started.ok) {
         model3dTask = { taskId: started.taskId };
+        rememberPrompt("3d:" + started.taskId, { userId, prompt: message, sessionId });
+        req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "done" });
+        req.onFlow?.({
+          kind: "output", id: "out:3d:" + started.taskId, title: "3D model", parent: "skill:model3d",
+          state: "running", contentType: "model/gltf-binary", taskId: started.taskId,
+        });
         messages[0]!.content +=
           "\n\nA 3D model was STARTED this turn and is being built now; it takes a minute or two. It appears in this " +
           "conversation as a download the moment it is finished. Do not say it is finished, attached or saved, and do not " +
           "describe the finished model. Say in one short sentence that you are making it, and stop.";
       } else {
         threeDRefusal = { code: started.code, error: started.error };
+        req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "failed", detail: started.error });
         messages[0]!.content +=
           `\n\n3D model generation was attempted and FAILED (${started.code}): ${started.error} ` +
           "Tell the owner that exact reason in one sentence. Do not claim any model exists.";
@@ -1230,6 +1347,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         }
 
         req.onTool?.({ name: tc.name, state: "running" });
+        req.onFlow?.({ kind: "skill", id: "tool:" + tc.name, title: toolSkillTitle(tc.name), parent: "agent", state: "running" });
         // Every tool runs inside its declared wall clock (toolRegistry).
         // A slow tool becomes a named failure instead of a stalled turn.
         const run = await withToolBudget(
@@ -1334,6 +1452,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 bytes: stored.bytes,
                 type: made.contentType || "audio/mpeg",
               };
+              void enrichLater(sql, userId, stored.id, { prompt: brief, filename: name, contentType: renderedAudio.type });
+              req.onFlow?.({
+                kind: "output", id: "out:" + stored.id, title: name, parent: "tool:generate_music", state: "done",
+                url: renderedAudio.url, contentType: renderedAudio.type,
+              });
               try {
                 await registerChatTrack(userId, musicProject(), {
                   brief, seconds, assetId: stored.id, bytes: stored.bytes,
@@ -1454,6 +1577,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
         toolLog.push({ name: tc.name, ms: run.ms ?? 0, ok: run.ok, code: run.ok ? undefined : "failed" });
         req.onTool?.({ name: tc.name, state: run.ok ? "done" : "failed", ms: run.ms ?? 0 });
+        req.onFlow?.({ kind: "skill", id: "tool:" + tc.name, title: toolSkillTitle(tc.name), parent: "agent", state: run.ok ? "done" : "failed" });
         if (!run.ok) {
           followUpMessages.push({
             role: "user",
@@ -2134,6 +2258,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         downloadUrl: `/api/buzzy/documents/${encodeURIComponent(docId)}?format=${fmt}`,
         libraryUrl: `/buzzy/library?job=${encodeURIComponent(recordId)}`,
       };
+      req.onFlow?.({
+        kind: "output", id: "out:doc:" + docId, title: response.document.filename,
+        parent: renderedDoc ? "tool:render_document" : "agent", state: "done",
+        url: response.document.libraryUrl, contentType: response.document.contentType,
+      });
     }
   }
 

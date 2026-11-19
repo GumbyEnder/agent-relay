@@ -401,6 +401,8 @@
       ".bz-navbar::-webkit-scrollbar{display:none}",
       "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
       "}",
+      // Honey Drops, plan and company: inside the menu under your name, never in the bar.
+      ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -783,7 +785,8 @@
         if (!menu) return;
         if (a === e.target || a.contains(e.target)) {
           e.preventDefault();
-          menu.style.display = menu.style.display === "none" ? "block" : "none";
+          var opening = menu.style.display === "none";
+          menu.style.display = opening ? "block" : "none";
         }
       });
       document.addEventListener("click", function (e) {
@@ -1153,8 +1156,11 @@
     var a = document.createElement("a");
     a.className = "bz-brand";
     a.href = "/buzzy/talk";
+    // The real brand face, content by default (owner, 2026-11-18: "he has an apathetic
+    // face as his default face… it should be in the repo, the proper faces"). On Talk,
+    // voice-stage.js switches it to the face for what BeeZilla is doing.
     a.innerHTML =
-      '<img src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="" /><strong>BeeZilla</strong>';
+      '<img class="bz-face" src="/buzzy/brand/revision6_expressions_12-content.png" alt="" /><strong>BeeZilla</strong>';
     return a;
   }
 
@@ -1171,6 +1177,9 @@
     // page it lands on decides whether the gear shows (not on the sign-in pages).
     settingsDock();
     var nav = ensureNav();
+    // Talk keeps its places along the bottom (owner: "put the top menu below everything
+    // else"), so the link row hides there; every other page keeps it.
+    document.documentElement.classList.toggle("bz-on-talk", section() === "talk");
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();

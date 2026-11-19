@@ -386,6 +386,10 @@ export function isImageRequest(
   if (!recent || !/\b(image|picture|pictures|draw|drawing|illustrat\w*|sketch\w*|render\w*|artwork|visual)\b/i.test(recent)) return false;
   const trimmed = m.trim();
   if (!trimmed || trimmed.length > 300) return false;
+  // A song, a 3D model or a video asked for right after a picture is that thing, not
+  // another picture ("make me a short happy song" drew a house, 2026-11-18). Naming a
+  // picture outright ("a song with a cover picture") is caught by the rule above.
+  if (isMusicRequest(trimmed) || is3dRequest(trimmed)) return false;
   if (/\?\s*$/.test(trimmed)) return false; // a question is a question
   if (/^\s*(what|why|how|who|when|where|which|could|would|should|do|does|did|is|are|can)\b/i.test(trimmed)) return false;
   // Something to draw: a determiner plus at least three words of description.

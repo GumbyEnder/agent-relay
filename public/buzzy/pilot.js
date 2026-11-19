@@ -67,9 +67,10 @@
           { sel: "#privacyClose", name: "Close", optional: true },
         ];
       case "mode":
-        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " tab" }];
+        // Chat and Work are one bar now; the switch stays in the page, out of sight.
+        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " setting", hiddenOk: true }];
       case "history":
-        return [{ sel: "#sessionsToggle, #sessionsPill", name: "History" }];
+        return [{ sel: '[data-tab="history"]', name: "History, under the search bar" }];
       case "newChat":
         // The chat header's New button; the draft banner and History drawer have their own.
         return [{ sel: "#newSessionBtn, #newChatBtn, #drawerNewChat", name: "the New chat button" }];
@@ -208,6 +209,12 @@
 
   Run.prototype.end = function (text) {
     this.finished = true;
+    // Fold the More menu away again if this run opened it.
+    var panel = document.getElementById("talkMorePanel");
+    if (this.openedMore && panel && !panel.classList.contains("hidden")) {
+      var more = document.getElementById("talkMoreBtn");
+      if (more) more.click();
+    }
     this.status.textContent = text;
     this.stopBtn.textContent = "Close";
     var self = this;
@@ -245,9 +252,39 @@
     });
   };
 
+  // Controls that aren't talking live behind the Talk bar's More button: open it
+  // first, lit like any other press, so the owner sees where the control is.
+  Run.prototype.reveal = async function (sel) {
+    var panel = document.getElementById("talkMorePanel");
+    var more = document.getElementById("talkMoreBtn");
+    if (!panel || !more || !panel.classList.contains("hidden")) return;
+    var inside = panel.querySelector(sel);
+    if (!inside) return;
+    more.classList.add("bz-pilot-target");
+    this.lit = more;
+    await wait(LIT_MS);
+    more.classList.remove("bz-pilot-target");
+    this.lit = null;
+    if (this.stopped) return;
+    more.click();
+    this.openedMore = true;
+    await wait(200);
+  };
+
   Run.prototype.press = async function (p) {
-    var target = await find(p.sel, p.optional ? 600 : 2500);
+    if (!p.hiddenOk) await this.reveal(p.sel);
     if (this.stopped) return "stopped";
+    var target = await find(p.sel, p.optional || p.hiddenOk ? 600 : 2500);
+    if (this.stopped) return "stopped";
+    if (!target && p.hiddenOk) {
+      // A setting with no button on screen: change it directly, nothing to light up.
+      var quiet = document.querySelector(p.sel);
+      if (quiet) {
+        if (!(p.already && p.already(quiet))) quiet.click();
+        await wait(150);
+        return "ok";
+      }
+    }
     if (!target) {
       if (p.optional) return "ok";
       if (p.go) { location.assign(p.go); return "ok"; }
