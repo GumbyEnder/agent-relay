@@ -21,10 +21,10 @@ const errs = [];
 p.on("pageerror", (e) => errs.push(String(e.message).slice(0, 160)));
 
 await p.goto(`${ORIGIN}/buzzy/talk`, { waitUntil: "load", timeout: 45000 });
-await p.waitForSelector("#bzVoiceMic", { timeout: 25000 });
+await p.waitForSelector("#micBtn", { timeout: 25000 });
 await p.waitForTimeout(1500);
 await p.evaluate(() => { window.__docMark = "bz19-" + Math.random().toString(36).slice(2, 7); });
-await p.click("#bzVoiceMic");
+await p.click("#micBtn");
 await p.waitForTimeout(2500);
 const started = await p.evaluate(() => ({ mark: window.__docMark, state: window.BeeZillaVoice && window.BeeZillaVoice.state() }));
 

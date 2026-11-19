@@ -1,5 +1,5 @@
 /**
- * The site chrome: one nav, one company switcher, one way to talk.
+ * The site chrome: one nav, one company switcher, one settings gear.
  *
  * Three problems this file exists to end:
  *
@@ -7,9 +7,11 @@
  *     It cost a whole line of vertical space on every page and grew horizontally
  *     with every company. It is a `<select>` in the nav now — one control, same
  *     height as the links, and it cannot overflow.
- *  2. **Chat lived only on /buzzy/talk.** Talking to BeeZilla is the product, so it
- *     is anchored to the nav on every page: the Ask button opens the same component
- *     (chat.js) in a panel, sharing the session cookie and bz_session_id.
+ *  2. **The header was crowded with personal things.** A Honey Drops chip, a plan
+ *     chip, Listen and Ask sat beside the company switcher. The owner asked for
+ *     them to go: the header keeps the company and your name, and everything
+ *     personal (account, plan, usage, Honey Drops) lives behind one gear in the
+ *     bottom-right corner of every page (settingsDock).
  *  3. **Every page hand-wrote its own nav and they drifted.** This builds the nav
  *     from one list, computes the active link from the path, and adds anything a
  *     page is missing — by id, never by index.
@@ -238,11 +240,72 @@
       "#bzChrome .bz-co-wrap{display:flex;align-items:center;gap:.3rem;min-width:0}",
       "#bzChrome .bz-co-label{color:#8d8d8d;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}",
       "#bzChrome select.bz-co-select{appearance:none;background:#101010;color:#f2f2f2;border:1px solid #2c2c2c;border-radius:8px;padding:.28rem 1.5rem .28rem .5rem;font:inherit;font-size:.82rem;max-width:15rem;text-overflow:ellipsis;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,#8d8d8d 50%),linear-gradient(135deg,#8d8d8d 50%,transparent 50%);background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}",
+      // ── Settings dock (settingsDock): the gear, its panel and the live-mic pill ──
+      // Pinned to the bottom-right corner. z-index 45 sits above page content and the
+      // back-to-top button (40) but UNDER every pop-up a page opens — account menus and
+      // the recipe purchase modal (50), the History drawer (60/61), share and the
+      // Inspiration viewer (10000) — so a dialog always covers the gear, never the reverse.
+      // Every rule is id-scoped and names its own box: pages style bare `button` and `a`
+      // (filled yellow buttons, page link colours), and the dock must look the same on all.
+      "#bzDock{position:fixed;right:22px;bottom:22px;z-index:45;display:flex;align-items:center;gap:10px;font-family:system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;font-size:16px;line-height:1.4}",
+      "#bzDock [hidden]{display:none!important}",
+      "#bzGear{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:44px;height:44px;min-width:0;min-height:0;margin:0;padding:0;border-radius:50%;border:1px solid #3a3a3a;background:#161616;color:#d6d6d6;box-shadow:0 6px 18px rgba(0,0,0,.45);cursor:pointer;transition:color .15s,border-color .15s}",
+      "#bzGear svg{width:22px;height:22px;display:block;transition:transform .25s}",
+      "#bzGear:hover,#bzGear[aria-expanded='true']{color:#ffd40d;border-color:#ffd40d;background:#161616}",
+      "#bzGear[aria-expanded='true'] svg{transform:rotate(45deg)}",
+      "#bzGear:focus-visible{outline:2px solid #ffd40d;outline-offset:3px}",
+      "@media (prefers-reduced-motion:reduce){#bzGear svg,#bzSettings .bzs-bar span{transition:none}}",
+      "#bzMicLive{display:inline-flex;align-items:center;gap:8px;box-sizing:border-box;height:36px;padding:0 6px 0 12px;border-radius:999px;border:1px solid #5b4a10;background:#1a1606;color:#ffe680;font-size:13px;font-weight:700;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.45)}",
+      "#bzMicLive .bz-mic-dot{width:8px;height:8px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 0 3px rgba(255,90,90,.2)}",
+      "#bzMicLive.paused .bz-mic-dot{background:#9a9a9a;box-shadow:none}",
+      "#bzMicLive.paused{padding-right:12px}",
+      "#bzMicLive button{display:inline-flex;align-items:center;box-sizing:border-box;height:26px;min-height:0;min-width:0;margin:0;box-shadow:none;padding:0 10px;border-radius:999px;font:inherit;font-size:12px;font-weight:700;letter-spacing:normal;text-transform:none;cursor:pointer}",
+      "#bzMicLive button:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
+      "#bzMicCut{border:1px solid #6b5a1e;background:#2a2306;color:#ffe680}",
+      "#bzMicCut:hover{background:#3a300a}",
+      "#bzMicStop{border:1px solid #5b1f24;background:#2a1214;color:#ffb4b4}",
+      "#bzMicStop:hover{background:#3a171a}",
+      "#bzSettings{position:fixed;right:22px;bottom:78px;box-sizing:border-box;width:min(360px,calc(100vw - 32px));max-height:calc(100vh - 110px);overflow-y:auto;padding:14px 16px 16px;border-radius:14px;border:1px solid #2c2c2c;background:#121212;color:#e8e8e8;box-shadow:0 24px 60px rgba(0,0,0,.6);text-align:left}",
+      "#bzSettings .bzs-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px}",
+      "#bzSettings .bzs-title{font-size:15px;font-weight:700;color:#f2f2f2;margin:0}",
+      "#bzSettings .bzs-close{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;min-height:0;min-width:0;margin:0;box-shadow:none;padding:0;border:0;border-radius:8px;background:none;color:#8d8d8d;font:inherit;font-size:20px;line-height:1;cursor:pointer}",
+      "#bzSettings .bzs-close:hover{color:#ffd40d;background:#1c1c1c}",
+      "#bzSettings .bzs-sec{padding:12px 0;border-top:1px solid #232323}",
+      "#bzSettings .bzs-sec:last-child{padding-bottom:0}",
+      "#bzSettings .bzs-h{margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8d8d8d}",
+      "#bzSettings .bzs-name{font-size:15px;font-weight:600;color:#f2f2f2;word-break:break-word}",
+      "#bzSettings .bzs-email{font-size:13px;color:#9a9a9a;margin-top:2px;word-break:break-all}",
+      "#bzSettings .bzs-row{display:flex;align-items:center;justify-content:space-between;gap:10px}",
+      "#bzSettings .bzs-name + .bzs-row,#bzSettings .bzs-email + .bzs-row{margin-top:12px}",
+      "#bzSettings a.bzs-link{color:#ffd40d;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap}",
+      "#bzSettings a.bzs-link:hover{text-decoration:underline}",
+      "#bzSettings .bzs-btn{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:0;min-width:0;margin:0;box-shadow:none;padding:6px 12px;border-radius:8px;border:1px solid #333;background:#1b1b1b;color:#e8e8e8;font:inherit;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer}",
+      "#bzSettings .bzs-btn:hover{border-color:#ffd40d;color:#ffd40d;background:#1b1b1b}",
+      "#bzSettings .bzs-btn.primary{background:#ffd40d;border-color:#ffd40d;color:#111}",
+      "#bzSettings .bzs-btn.primary:hover{background:#ffe14d;color:#111}",
+      "#bzSettings a:focus-visible,#bzSettings button:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
+      "#bzSettings .bzs-plan{display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:800;letter-spacing:.04em;border:1px solid #3a3a3a;color:#cfcfcf}",
+      "#bzSettings .bzs-plan.pro{background:#ffd40d;color:#111;border-color:#ffd40d}",
+      "#bzSettings .bzs-plan.starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
+      "#bzSettings .bzs-renew{font-size:12px;color:#9a9a9a}",
+      "#bzSettings .bzs-meter{margin-top:12px}",
+      "#bzSettings .bzs-meter-top{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#cfcfcf}",
+      "#bzSettings .bzs-meter-top b{font-weight:600;color:#f2f2f2}",
+      "#bzSettings .bzs-bar{height:6px;margin-top:6px;border-radius:999px;background:#262626;overflow:hidden}",
+      "#bzSettings .bzs-bar span{display:block;height:100%;width:0;border-radius:999px;background:#ffd40d;transition:width .3s}",
+      "#bzSettings .bzs-bar.low span{background:#ff7a59}",
+      "#bzSettings .bzs-note{margin:10px 0 0;font-size:12px;color:#7d7d7d}",
+      "#bzSettings .bzs-honey{font-size:15px;font-weight:700;color:#ffd40d}",
+      "#bzSettings .bzs-muted{font-size:13px;color:#9a9a9a;margin:0}",
+      // Phone width: the corner insets match the 16px page gutter, and the panel's
+      // buttons grow to thumb size (Talk asks for 48px targets on a phone).
+      "@media (max-width:640px){#bzDock{right:16px;bottom:16px}#bzSettings{right:16px;bottom:72px;max-height:calc(100vh - 100px)}#bzSettings .bzs-close{width:40px;height:40px}#bzSettings .bzs-btn{min-height:40px;padding:8px 14px}#bzMicLive button{height:32px}}",
+      // The Feedback pill (CR-6) wears the class the Ask pill had, and its panel opens
+      // under the header. Minimised it docks bottom-LEFT, the app's corner for folded
+      // panels (share, Inspiration): bottom-right is the settings gear's.
       "#bzChrome button.bz-ask{display:inline-flex;align-items:center;gap:.35rem;background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-ask[aria-expanded='true']{background:#fff0a8}",
-      "#bzChrome button.bz-chatbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;font-size:.9rem;line-height:1;cursor:pointer;padding:0}",
-      "#bzChrome button.bz-chatbtn:hover{border-color:#ffd40d}",
-      "#bzChrome button.bz-chatbtn:focus-visible,#bzChrome button.bz-ask:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
+      "#bzChrome button.bz-ask:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
       "#bzFeedback{position:fixed;right:1rem;top:64px;width:min(440px,calc(100vw - 2rem));max-height:min(640px,calc(100vh - 88px));background:#101010;border:1px solid #2c2c2c;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;z-index:900;padding:.7rem}",
       "#bzFeedback.open{display:flex}",
       "#bzFeedback .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .5rem;font-size:.85rem;color:#c9c9c9}",
@@ -270,20 +333,7 @@
       "#bzFeedback .bz-fb-done p{margin:.25rem 0;font-size:.88rem;color:#e6e6e6}",
       "#bzFeedback .bz-fb-done code{background:#1b1b1b;border-radius:6px;padding:.1rem .35rem;color:#ffd40d}",
       "@media (max-width:560px){#bzFeedback{left:.5rem;right:.5rem;top:56px;width:auto;max-height:calc(100vh - 68px)}}",
-      "#bzChrome button.bz-voice{display:inline-flex;align-items:center;gap:.35rem;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}",
-      "#bzChrome button.bz-voice[aria-pressed='true']{background:#ffd40d;color:#111;border-color:#ffd40d}",
-      "#bzChrome button.bz-voice:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
-      "#bzPanel{position:fixed;right:1rem;top:64px;width:min(420px,calc(100vw - 2rem));height:min(560px,calc(100vh - 88px));background:#101010;border:1px solid #2c2c2c;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;z-index:900;padding:.6rem}",
-      "#bzPanel.open{display:flex}",
-      "#bzPanel .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .45rem;font-size:.82rem;color:#8d8d8d}",
-      "#bzPanel .bz-panel-body{flex:1;min-height:0}",
-      "#bzPanel .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
-      "#bzPanel .bz-panel-tools{display:flex;align-items:center;gap:.35rem}",
-      "#bzPanel .bz-panel-close:hover{color:#ffd40d}",
-      "#bzPanel .bz-panel-close:focus-visible{outline:2px solid #ffd40d;outline-offset:2px;border-radius:4px}",
-      "#bzPanel.min{height:auto;top:auto;bottom:1rem;width:auto;min-width:230px;padding:.5rem .7rem}",
-      "#bzPanel.min .bz-panel-body{display:none}",
-      "#bzPanel.min .bz-panel-head{padding:0;color:#e6e6e6;cursor:pointer}",
+      "#bzFeedback.min{left:1rem;right:auto}",
       // The chrome renders inside eleven different page stylesheets, and three of
       // them set their own body font-size/line-height (sketch+studio 14px/1.5,
       // capabilities 15px/1.55, memory inherits the browser default). An inherited
@@ -328,22 +378,10 @@
       "#bzChrome .account-menu .am-email{font-size:.75rem;color:#888;margin:.15rem 0 .6rem;word-break:break-all}",
       "#bzChrome .account-menu .am-plan{font-size:.74rem;color:#b9b9b9;line-height:1.35;margin:0 0 .6rem;padding-top:.5rem;border-top:1px solid #2a2a2a}",
       "#bzChrome .account-menu .am-signout{width:100%;font-size:.8rem;padding:.4rem .6rem;background:#1b1b1b;color:#e8e8e8;border:1px solid #333;border-radius:6px;cursor:pointer}",
-      "#bzChrome .bz-plan{display:inline-flex;align-items:center;border:1px solid #3a3a3a;border-radius:999px;padding:.1rem .5rem;font-size:.7rem;font-weight:800;letter-spacing:.06em;color:#cfcfcf;text-decoration:none;white-space:nowrap}",
-      "#bzChrome .bz-plan-pro{background:#ffd40d;color:#111;border-color:#ffd40d}",
-      "#bzChrome .bz-plan-starter{background:#1d2b22;color:#a9f0c4;border-color:#2c5138}",
-      "#bzChrome .bz-voice{display:inline-flex;align-items:center;gap:.3rem}",
-      "#bzChrome button.bz-voice-mic{display:inline-flex;align-items:center;gap:.3rem;background:#141414;color:#e8e8e8;border:1px solid #2c2c2c;border-radius:999px;padding:.28rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
-      // Half-duplex is a promise the owner has to be able to SEE. While a reply
-      // is playing the mic is not being listened to, and a chip that just says
-      // "Speaking" reads as "busy", not "you are not being heard".
-      "#bzChrome .bz-voice-hint{margin-left:.35rem;font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.8}",
-      "@media (max-width:900px){#bzChrome .bz-voice-hint{display:none}}",
-      "#bzChrome button.bz-voice-mic.on{background:#ffd40d;color:#111;border-color:#ffd40d}",
-      "#bzChrome button.bz-voice-stop{background:#2a1214;color:#ffb4b4;border:1px solid #5b1f24;border-radius:999px;padding:.28rem .55rem;font:inherit;font-size:.8rem;cursor:pointer}",
       ".bz-chrome-scroll::-webkit-scrollbar{display:none}",
       // ── Phone width (≤640px) ─────────────────────────────────────────────
-      // At 390px the identity cluster (honey · plan · Listen · mic · company ·
-      // account · Ask) is wider than the screen, so it pushed the document to
+      // At 390px the identity cluster (then honey · plan · Listen · mic · company ·
+      // account · Ask) was wider than the screen, so it pushed the document to
       // 571px and clipped every label on the right: "Recip", "Mor", and a company
       // select hanging off the edge. Wrapping the cluster and the link row keeps
       // each label whole; the bars grow taller instead of the page growing wider.
@@ -578,6 +616,57 @@
     fill();
   }
 
+  /**
+   * Last known identity, so the header never lies for a round trip.
+   *
+   * The page ships `Sign in` in its markup and the chrome only painted after
+   * /api/auth/get-session answered, so a signed-in reader watched "Sign in"
+   * flash on every page (loudest on Sketch, whose header is otherwise empty).
+   * `undefined` = never cached, `null` = known signed out, object = identity.
+   * The response always wins; this only covers the gap before it lands.
+   */
+  function readIdentityCache() {
+    try {
+      var raw = window.localStorage.getItem("bz_identity");
+      if (raw === null) return undefined;
+      if (raw === "null") return null;
+      var v = JSON.parse(raw);
+      return v && (v.name || v.email) ? v : null;
+    } catch (e) {
+      return undefined;
+    }
+  }
+  function writeIdentityCache(u) {
+    try {
+      window.localStorage.setItem(
+        "bz_identity",
+        u ? JSON.stringify({ name: u.name || "", email: u.email || "" }) : "null",
+      );
+    } catch (e) { /* private mode: fall back to the round trip */ }
+  }
+
+  /** Log out. The header's account menu and the settings panel both end here. */
+  function signOut(e) {
+    if (e) e.preventDefault();
+    writeIdentityCache(null); // next page must not paint the name we just dropped
+    // The account menu's plan line caches its last answer under bz_plan; the Honey
+    // Drops chip that used to sit in the header cached under bz_honey. A signed-out
+    // page must paint neither, so a sign-out drops both.
+    try {
+      window.localStorage.removeItem("bz_plan");
+      window.localStorage.removeItem("bz_honey");
+    } catch (err) { /* private mode: nothing was stored */ }
+    fetch("/api/auth/sign-out", {
+      method: "POST", credentials: "same-origin",
+      headers: { "content-type": "application/json" }, body: "{}",
+    }).then(function () {
+      // Sign-out is the one place a hard load is correct: the session is gone,
+      // so the engine in this document MUST die with it. Everything else in
+      // /buzzy/* navigates through the shell (BZ-16).
+      window.location.href = "/buzzy/";
+    });
+  }
+
   /** Who is signed in? One place, right beside the logo. */
   function accountControl(chrome) {
     // The identity is ALWAYS a visible name link owned by the chrome. Talk and Library
@@ -607,56 +696,8 @@
     }
     var user = null;
 
-    /**
-     * Last known identity, so the header never lies for a round trip.
-     *
-     * The page ships `Sign in` in its markup and the chrome only painted after
-     * /api/auth/get-session answered, so a signed-in reader watched "Sign in"
-     * flash on every page (loudest on Sketch, whose header is otherwise empty).
-     * `undefined` = never cached, `null` = known signed out, object = identity.
-     * The response always wins; this only covers the gap before it lands.
-     */
-    function readIdentityCache() {
-      try {
-        var raw = window.localStorage.getItem("bz_identity");
-        if (raw === null) return undefined;
-        if (raw === "null") return null;
-        var v = JSON.parse(raw);
-        return v && (v.name || v.email) ? v : null;
-      } catch (e) {
-        return undefined;
-      }
-    }
-    function writeIdentityCache(u) {
-      try {
-        window.localStorage.setItem(
-          "bz_identity",
-          u ? JSON.stringify({ name: u.name || "", email: u.email || "" }) : "null",
-        );
-      } catch (e) { /* private mode: fall back to the round trip */ }
-    }
     var cached = readIdentityCache();
     if (cached !== undefined) paint(cached ? cached.name : null, cached ? cached.email : null);
-
-    function signOut(e) {
-      if (e) e.preventDefault();
-      writeIdentityCache(null); // next page must not paint the name we just dropped
-      // The plan and balance chips are cached for the same reason; a signed-out page
-      // that paints PRO and a Honey balance is the same lie in a different chip.
-      try {
-        window.localStorage.setItem("bz_plan", "null");
-        window.localStorage.setItem("bz_honey", "null");
-      } catch (err) { /* private mode: the next load's 401 clears them anyway */ }
-      fetch("/api/auth/sign-out", {
-        method: "POST", credentials: "same-origin",
-        headers: { "content-type": "application/json" }, body: "{}",
-      }).then(function () {
-        // Sign-out is the one place a hard load is correct: the session is gone,
-        // so the engine in this document MUST die with it. Everything else in
-        // /buzzy/* navigates through the shell (BZ-16).
-        window.location.href = "/buzzy/";
-      });
-    }
 
     function fillMenu(m) {
       if (!user) return;
@@ -766,176 +807,6 @@
       });
       if (tries > 24) clearInterval(watch);
     }, 250);
-  }
-
-  /** Honey Drops: the balance, in the chrome, on every page. */
-  function honeyControl(chrome) {
-    // pages that still ship wallet-chip.js inserted a chip beside the nav; one chip only
-    Array.prototype.forEach.call(document.querySelectorAll("header .hd-chip"), function (c) { c.remove(); });
-    var chip = document.createElement("a");
-    chip.id = "bzHoneyChip";
-    chip.className = "hd-chip";
-    chip.href = "/buzzy/wallet";
-    chip.setAttribute("aria-label", "Your Honey Drops wallet");
-    chip.textContent = "\u25c8";           // mark only, no "…" placeholder
-    chip.style.minWidth = "3.6rem";
-    chrome.appendChild(chip);
-
-    // Same rule as the plan chip and the identity: paint the last known balance
-    // before the round trip, or a signed-in reader watches the header assemble
-    // itself chip by chip on every load (BZ-15 residual). The response wins; a
-    // failed call changes nothing; an authoritative answer with no balance clears
-    // the cache so a stale number cannot outlive the session.
-    var CACHE = "bz_honey";
-    function paint(n) {
-      if (typeof n === "number") {
-        chip.textContent = "\u25c8 " + Number(n).toLocaleString();
-        chip.title = Number(n).toLocaleString() + " Honey Drops";
-      } else {
-        chip.textContent = "\u25c8";
-        chip.title = "";
-      }
-    }
-    try {
-      var raw = window.localStorage.getItem(CACHE);
-      if (raw !== null) {
-        if (raw === "null") paint(null);
-        else paint(Number(raw));
-      }
-    } catch (e) { /* private mode: the round trip is still the truth */ }
-
-    fetch("/api/wallet", { credentials: "same-origin" })
-      // 401 is an answer (nobody is signed in), not an outage: clear the chip.
-      .then(function (r) { return r.status === 401 ? { balance: null } : r.ok ? r.json() : undefined; })
-      .then(function (d) {
-        if (d === undefined) return; // inconclusive: keep whatever we painted
-        if (d && typeof d.balance === "number") {
-          paint(d.balance);
-          try { window.localStorage.setItem(CACHE, String(d.balance)); } catch (e) {}
-        } else {
-          paint(null);
-          try { window.localStorage.setItem(CACHE, "null"); } catch (e) {}
-        }
-      })
-      .catch(function () { /* keep whatever we painted */ });
-  }
-
-  /** Chat: the icon bubble immediately LEFT of Feedback, on every page. */
-  function askControl(nav) {
-    var btn = document.createElement("button");
-    // CR-6 (#7318): Feedback owns the yellow pill; chat keeps its own entry as
-    // an icon so replacing the pill does not delete "talk to the assistant from
-    // any page".
-    btn.className = "bz-chatbtn";
-    btn.type = "button";
-    btn.setAttribute("aria-expanded", "false");
-    btn.setAttribute("aria-controls", "bzPanel");
-    btn.setAttribute("aria-label", "Talk to BeeZilla");
-    btn.title = "Talk to BeeZilla";
-    btn.innerHTML = "&#128172;";
-    nav.appendChild(btn);
-
-    // On Talk the chat is the page. Opening a second chat engine in a panel over it
-    // would be two composers and two sessions on one screen, so the nav control
-    // takes you to the one that exists.
-    if (section() === "talk") {
-      btn.title = "Talk to BeeZilla";
-      btn.addEventListener("click", function () {
-        var input = document.getElementById("chatInput");
-        if (input) {
-          input.scrollIntoView({ block: "center", behavior: "smooth" });
-          input.focus();
-        }
-      });
-      return;
-    }
-
-    var panel = document.createElement("div");
-    panel.id = "bzPanel";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "Ask BeeZilla");
-    var head = document.createElement("div");
-    head.className = "bz-panel-head";
-    var title = document.createElement("span");
-    title.textContent = "Ask BeeZilla";
-    var close = document.createElement("button");
-    close.className = "bz-panel-close";
-    close.type = "button";
-    close.setAttribute("aria-label", "Close");
-    close.innerHTML = "&times;";
-    // Every pop-up has close and minimise (roadmap phase 3). Minimised, the panel
-    // folds to its title bar at the bottom right and keeps the conversation.
-    var min = document.createElement("button");
-    min.className = "bz-panel-close bz-panel-min";
-    min.type = "button";
-    var tools = document.createElement("span");
-    tools.className = "bz-panel-tools";
-    tools.appendChild(min);
-    tools.appendChild(close);
-    head.appendChild(title);
-    head.appendChild(tools);
-    var body = document.createElement("div");
-    body.className = "bz-panel-body";
-    panel.appendChild(head);
-    panel.appendChild(body);
-    document.body.appendChild(panel);
-
-    var mounted = false;
-    function mountChat() {
-      if (mounted) return;
-      mounted = true;
-      var boot = function () {
-        if (!window.BeeZillaChat) return;
-        window.BeeZillaChat.mount(body, { title: "BeeZilla", placeholder: "Ask anything — or say what to make" });
-      };
-      if (window.BeeZillaChat) return boot();
-      var s = document.createElement("script");
-      s.src = "/buzzy/chat.js";
-      s.onload = boot;
-      document.head.appendChild(s);
-    }
-
-    function setMin(on) {
-      panel.classList.toggle("min", on);
-      min.textContent = on ? "\u25A1" : "\u2013";
-      min.setAttribute("aria-label", on ? "Restore Ask BeeZilla" : "Minimise Ask BeeZilla");
-      min.title = on ? "Restore" : "Minimise";
-      btn.setAttribute("aria-expanded", panel.classList.contains("open") && !on ? "true" : "false");
-    }
-    function focusInput() {
-      var input = body.querySelector(".bzc-in");
-      if (input) input.focus();
-    }
-    function open() {
-      panel.classList.add("open");
-      setMin(false);
-      mountChat();
-      focusInput();
-    }
-    function shut() {
-      panel.classList.remove("open");
-      setMin(false);
-      btn.setAttribute("aria-expanded", "false");
-    }
-    setMin(false);
-    btn.addEventListener("click", function () {
-      // A minimised panel comes back; an open one closes.
-      if (panel.classList.contains("open") && !panel.classList.contains("min")) shut();
-      else open();
-    });
-    close.addEventListener("click", function (e) { e.stopPropagation(); shut(); });
-    min.addEventListener("click", function (e) {
-      e.stopPropagation();
-      var folding = !panel.classList.contains("min");
-      setMin(folding);
-      if (folding) btn.focus(); else focusInput();
-    });
-    head.addEventListener("click", function () {
-      if (panel.classList.contains("min")) { setMin(false); focusInput(); }
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && panel.classList.contains("open") && !panel.classList.contains("min")) shut();
-    });
   }
 
   /**
@@ -1289,13 +1160,16 @@
 
   function boot() {
     style();
-    // The Ask panel lives outside the page wrapper, so a soft navigation would
+    // The Feedback panel lives outside the page wrapper, so a soft navigation would
     // otherwise leave the previous page's panel in the document with the same id
     // and a dead mount. One panel at a time.
-    Array.prototype.forEach.call(document.querySelectorAll("#bzPanel, #bzFeedback"), function (n) {
+    Array.prototype.forEach.call(document.querySelectorAll("#bzFeedback"), function (n) {
       var page = document.getElementById("bzPage");
       if (!page || !page.contains(n)) n.remove();
     });
+    // Before the early return below: the dock outlives soft navigations, and each
+    // page it lands on decides whether the gear shows (not on the sign-in pages).
+    settingsDock();
     var nav = ensureNav();
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
@@ -1375,23 +1249,22 @@
     }
 
     loadCompanies();
-    honeyControl(chrome);
-    planChip(chrome);
-    voiceDock(chrome);
     companyControl(chrome);
     accountControl(chrome);
-    askControl(chrome);
+    menuPlanLine();
     feedbackControl(chrome);
   }
 
   /**
-   * Which plan am I on? Visible everywhere, not just under the Talk composer.
+   * Which plan am I on? One line in the account menu, beside your name.
    *
-   * The chip only appeared once /api/buzzy/entitlement answered, so a signed-in
-   * reader saw the header snap from no chip to PRO a round trip after paint (loudest
-   * on Sketch, which ships an empty header). The last answer is cached and painted
-   * first; the response still wins, a failed round trip changes nothing, and an
-   * authoritative "no plan" clears the cache so a signed-out page cannot show PRO.
+   * The PRO chip that sat in the header left with the owner's 2026-11-18 cleanup
+   * (the settings gear reads the plan fresh for its own panel). What stays is the
+   * account-menu line and the refresh Talk asks for after a turn that may have
+   * spent quota. The last answer is cached and painted first, so an opened menu
+   * never waits on the round trip; the response still wins, a failed round trip
+   * changes nothing, and an authoritative "no plan" clears the cache so a
+   * signed-out page cannot show a plan.
    */
   var planInfo = null;
   // One line, in the account menu: "Pro plan · 1,234 chats left · 12 min music left".
@@ -1427,16 +1300,7 @@
     }
   }
 
-  function planChip(chrome) {
-    if (document.getElementById("bzPlanChip")) return;
-    var a = document.createElement("a");
-    a.id = "bzPlanChip";
-    a.className = "bz-plan";
-    a.href = "/buzzy/profile";
-    a.textContent = "";
-    a.style.display = "none";
-    chrome.appendChild(a);
-
+  function menuPlanLine() {
     var CACHE = "bz_plan";
     function readCache() {
       try {
@@ -1459,19 +1323,6 @@
     function paint(d) {
       planInfo = d && d.plan ? d : null;
       paintMenuPlan();
-      if (!d || !d.plan) {
-        a.textContent = "";
-        a.style.display = "none";
-        return;
-      }
-      var label = d.plan === "pro" ? "PRO" : d.plan === "starter" ? "STARTER" : "FREE";
-      a.textContent = label;
-      a.title =
-        d.plan.charAt(0).toUpperCase() + d.plan.slice(1) + " plan" +
-        (d.remaining ? " \u00b7 " + Number(d.remaining.inference || 0).toLocaleString() + " chats left" : "") +
-        (d.planUntil ? " \u00b7 renews " + String(d.planUntil).slice(0, 10) : "");
-      a.className = "bz-plan bz-plan-" + d.plan;
-      a.style.display = "";
     }
 
     var cached = readCache();
@@ -1479,7 +1330,7 @@
 
     function refresh() {
       return fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
-        // 401 is an answer (nobody is signed in), not an outage: clear the chip.
+        // 401 is an answer (nobody is signed in), not an outage: clear the line.
         .then(function (r) { return r.status === 401 ? { ok: false } : r.ok ? r.json() : undefined; })
         .then(function (d) {
           if (!d || typeof d.ok === "undefined") return; // transport oddity: keep the cache
@@ -1487,28 +1338,19 @@
             writeCache(d);
             paint(d);
           } else {
-            writeCache(null); // signed out, or no plan: the chip must not outlive it
+            writeCache(null); // signed out, or no plan: the line must not outlive it
             paint(null);
           }
         })
-        .catch(function () { /* a plan chip is not worth an error toast */ });
+        .catch(function () { /* a plan line is not worth an error toast */ });
     }
     refresh();
     // Talk asks for a refresh after a turn may have spent quota.
     window.bzRefreshPlan = refresh;
   }
 
-  /**
-   * The voice control, anchored in the nav on EVERY page.
-   *
-   * The engine lives on Talk (one voice, one recogniser), so this control is a
-   * remote for it: it shows the live state, can stop it with one click, and can
-   * start it from any page (navigating to Talk first when Talk has not been
-   * mounted in this session yet). The page shell keeps Talk's DOM alive while
-   * you navigate, which is what makes the session survive the click.
-   */
   // The tab title has TWO inputs: the page's own name and the live-mic marker.
-  // One authority, in the CHROME's scope, because the dock repaints the marker
+  // One authority, in the CHROME's scope, because the mic pill repaints the marker
   // and the shell sets the page name from another IIFE. Before this, a soft hop
   // to Library renamed the tab "BeeZilla \u2014 Library" while the mic was still
   // running — QA caught it, and the marker only came back on the hop to Talk.
@@ -1530,85 +1372,348 @@
   };
   window.BeeZillaTitle = bzTitle;
 
-  function voiceDock(chrome) {
-    if (document.getElementById("bzVoiceDock")) return;
-    var dock = document.createElement("span");
-    dock.id = "bzVoiceDock";
-    dock.className = "bz-voice";
-    var mic = document.createElement("button");
-    mic.id = "bzVoiceMic";
-    mic.type = "button";
-    mic.className = "bz-voice-mic";
-    mic.innerHTML = "&#127908; <span class=\"bz-voice-label\">Voice</span><span class=\"bz-voice-hint\" hidden>mic off</span>";
-    mic.setAttribute("aria-pressed", "false");
-    mic.title = "Talk to BeeZilla \u2014 one switch: listening and spoken replies";
-    dock.appendChild(mic);
-    chrome.appendChild(dock);
+  /**
+   * Settings: one gear in the bottom-right corner of every page.
+   *
+   * The header used to carry a Honey Drops chip, a plan chip, Listen and Ask. The
+   * owner asked for all four to go and for one gear, bottom right, to hold "all
+   * your personal settings, including usage": who is signed in, the plan and what
+   * is left of it today, the Honey Drops balance, and the way to the business
+   * profile, the wallet and Log out.
+   *
+   * Every number is read fresh each time the panel opens (session, entitlement,
+   * wallet) and nothing is cached, so the panel cannot show a plan or a balance
+   * that is no longer true, and a closed panel costs no requests at all.
+   *
+   * The dock is a child of <body>, outside the page shell's #bzPage
+   * (ensurePageWrapper skips it), so a soft navigation never stashes or deletes
+   * it: one gear for the life of the document.
+   */
+  var GEAR_SVG =
+    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="' +
+    "M9.59 4.37L9.98 1.59A10.6 10.6 0 0 1 14.02 1.59L14.41 4.37A8 8 0 0 1 15.69 4.9L17.93 3.21A10.6 10.6 0 0 1 20.79 6.07" +
+    "L19.1 8.31A8 8 0 0 1 19.63 9.59L22.41 9.98A10.6 10.6 0 0 1 22.41 14.02L19.63 14.41A8 8 0 0 1 19.1 15.69L20.79 17.93" +
+    "A10.6 10.6 0 0 1 17.93 20.79L15.69 19.1A8 8 0 0 1 14.41 19.63L14.02 22.41A10.6 10.6 0 0 1 9.98 22.41L9.59 19.63" +
+    "A8 8 0 0 1 8.31 19.1L6.07 20.79A10.6 10.6 0 0 1 3.21 17.93L4.9 15.69A8 8 0 0 1 4.37 14.41L1.59 14.02" +
+    "A10.6 10.6 0 0 1 1.59 9.98L4.37 9.59A8 8 0 0 1 4.9 8.31L3.21 6.07A10.6 10.6 0 0 1 6.07 3.21L8.31 4.9" +
+    "A8 8 0 0 1 9.59 4.37ZM15.1 12A3.1 3.1 0 1 0 8.9 12A3.1 3.1 0 1 0 15.1 12Z" +
+    '"/></svg>';
 
+  // The pages whose whole job is signing in. There is nothing personal to set
+  // there yet, so the gear stays out of the way (the mic pill still shows if the
+  // microphone is somehow live).
+  function onSignInPage() {
+    return /^\/buzzy\/(landing|login)(\.html)?\/?$/.test(location.pathname);
+  }
+
+  function settingsDock() {
+    var dock = document.getElementById("bzDock");
+    if (dock) {
+      dock.syncPage();
+      return;
+    }
+    dock = document.createElement("div");
+    dock.id = "bzDock";
+
+    var live = document.createElement("div");
+    live.id = "bzMicLive";
+    live.setAttribute("role", "status");
+    live.hidden = true;
+    live.innerHTML =
+      '<span class="bz-mic-dot" aria-hidden="true"></span>' +
+      '<span class="bz-mic-label">Listening</span>' +
+      '<button type="button" id="bzMicCut" hidden>Interrupt</button>' +
+      '<button type="button" id="bzMicStop">Stop</button>';
+    dock.appendChild(live);
+
+    var gear = document.createElement("button");
+    gear.type = "button";
+    gear.id = "bzGear";
+    gear.title = "Settings";
+    gear.setAttribute("aria-label", "Settings");
+    gear.setAttribute("aria-haspopup", "dialog");
+    gear.setAttribute("aria-expanded", "false");
+    gear.setAttribute("aria-controls", "bzSettings");
+    gear.innerHTML = GEAR_SVG;
+    dock.appendChild(gear);
+
+    // Divs and spans, never h2/p/section: pages style those for their own content
+    // and none of it may leak in. The few buttons and links name every property
+    // they show (the #bzSettings rules), for the same reason.
+    var panel = document.createElement("div");
+    panel.id = "bzSettings";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-labelledby", "bzSettingsTitle");
+    panel.hidden = true;
+    panel.innerHTML = [
+      '<div class="bzs-head">',
+      '<div class="bzs-title" id="bzSettingsTitle" role="heading" aria-level="2">Settings</div>',
+      '<button type="button" class="bzs-close" aria-label="Close settings">&times;</button>',
+      "</div>",
+      '<div class="bzs-sec" data-bzs="out" hidden>',
+      '<div class="bzs-muted">You\u2019re not signed in.</div>',
+      '<div class="bzs-row" style="margin-top:12px"><a class="bzs-btn primary" href="/buzzy/landing">Sign in</a></div>',
+      "</div>",
+      '<div class="bzs-sec" data-bzs="account">',
+      '<div class="bzs-h" role="heading" aria-level="3">Account</div>',
+      '<div class="bzs-name"></div>',
+      '<div class="bzs-email"></div>',
+      '<div class="bzs-row">',
+      '<a class="bzs-link" href="/buzzy/profile">About your business</a>',
+      '<button type="button" class="bzs-btn" data-bzs="signout">Log out</button>',
+      "</div>",
+      "</div>",
+      '<div class="bzs-sec" data-bzs="plan">',
+      '<div class="bzs-h" role="heading" aria-level="3">Plan &amp; usage</div>',
+      '<div class="bzs-row"><span class="bzs-plan"></span><span class="bzs-renew"></span></div>',
+      '<div class="bzs-meter" data-bzs="chats"><div class="bzs-meter-top"><span>Chats</span><b></b></div><div class="bzs-bar"><span></span></div></div>',
+      '<div class="bzs-meter" data-bzs="music"><div class="bzs-meter-top"><span>Music</span><b></b></div><div class="bzs-bar"><span></span></div></div>',
+      '<div class="bzs-note">Counted over the last 24 hours.</div>',
+      "</div>",
+      '<div class="bzs-sec" data-bzs="honey">',
+      '<div class="bzs-h" role="heading" aria-level="3">Honey Drops</div>',
+      '<div class="bzs-row"><span class="bzs-honey"></span><a class="bzs-link" href="/buzzy/wallet">Open wallet</a></div>',
+      "</div>",
+    ].join("");
+    dock.appendChild(panel);
+    document.body.appendChild(dock);
+
+    function q(sel) { return panel.querySelector(sel); }
+    function sec(name) { return q('[data-bzs="' + name + '"]'); }
+    function isOpen() { return !panel.hidden; }
+
+    // After a soft navigation the header is sticky above everything (z-index 800,
+    // and several rows tall on a phone). Sized by the window alone, the panel slid
+    // its title and close button under it on a short window, so it stops 8px below
+    // whatever the header covers.
+    function fitPanel() {
+      var chromeEl = document.getElementById("bzChrome");
+      var header = chromeEl ? chromeEl.closest("header") : null;
+      var top = 16;
+      if (header) top = Math.max(top, header.getBoundingClientRect().bottom + 8);
+      var bottom = parseFloat(window.getComputedStyle(panel).bottom) || 0;
+      panel.style.maxHeight = Math.max(160, Math.floor(window.innerHeight - bottom - top)) + "px";
+    }
+    window.addEventListener("resize", function () { if (isOpen()) fitPanel(); });
+
+    function open() {
+      if (isOpen()) return;
+      panel.hidden = false;
+      fitPanel();
+      gear.setAttribute("aria-expanded", "true");
+      load();
+      q(".bzs-close").focus();
+    }
+    function close(giveFocusBack) {
+      if (!isOpen()) return;
+      panel.hidden = true;
+      gear.setAttribute("aria-expanded", "false");
+      if (giveFocusBack) gear.focus();
+    }
+
+    gear.addEventListener("click", function () {
+      if (isOpen()) close(false);
+      else open();
+    });
+    q(".bzs-close").addEventListener("click", function () { close(true); });
+    sec("signout").addEventListener("click", signOut);
+    // Its links go somewhere (the shell soft-navigates /buzzy/ links), so the panel
+    // has done its job and closes instead of hanging over the next page.
+    panel.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest("a[href]")) close(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && isOpen()) close(true);
+    });
+    document.addEventListener("click", function (e) {
+      if (isOpen() && !dock.contains(e.target)) close(false);
+    });
+    window.addEventListener("popstate", function () { close(false); });
+
+    // ── What the panel shows ───────────────────────────────────────────
+    function showSignedIn(on) {
+      sec("out").hidden = on;
+      sec("account").hidden = !on;
+      sec("plan").hidden = !on;
+      sec("honey").hidden = !on;
+    }
+    function paintAccount(name, email) {
+      q(".bzs-name").textContent = name || "";
+      q(".bzs-email").textContent = email && email !== name ? email : "";
+    }
+    function num(n) { return Number(n || 0).toLocaleString(); }
+    function meter(name, text, fraction) {
+      var m = sec(name);
+      m.querySelector("b").textContent = text;
+      var bar = m.querySelector(".bzs-bar");
+      bar.hidden = fraction === null;
+      if (fraction !== null) {
+        var f = Math.max(0, Math.min(1, fraction));
+        bar.querySelector("span").style.width = (f * 100).toFixed(1) + "%";
+        bar.classList.toggle("low", f <= 0.1);
+      }
+    }
+    function paintPlan(d) {
+      var name = String(d.plan || "free");
+      var badge = q(".bzs-plan");
+      badge.hidden = false;
+      badge.textContent = name.charAt(0).toUpperCase() + name.slice(1) + " plan";
+      badge.className = "bzs-plan " + name;
+      var until = d.planUntil ? new Date(d.planUntil) : null;
+      q(".bzs-renew").textContent = until && !isNaN(until.getTime())
+        ? "Paid through " + until.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+        : "";
+      var lim = d.limits || {};
+      var left = d.remaining || {};
+      var chats = Number(lim.inferencePerDay || 0);
+      meter("chats", chats > 0 ? num(left.inference) + " of " + num(chats) + " left" : "Not in your plan",
+        chats > 0 ? Number(left.inference || 0) / chats : null);
+      var music = Number(lim.musicSecondsPerDay || 0);
+      meter("music", music > 0
+        ? Math.floor(Number(left.musicSeconds || 0) / 60) + " of " + Math.floor(music / 60) + " min left"
+        : "Not in your plan",
+        music > 0 ? Number(left.musicSeconds || 0) / music : null);
+      sec("chats").hidden = false;
+      sec("music").hidden = false;
+      q(".bzs-note").textContent = "Counted over the last 24 hours.";
+    }
+    function planUnavailable() {
+      q(".bzs-plan").hidden = true;
+      q(".bzs-renew").textContent = "";
+      sec("chats").hidden = true;
+      sec("music").hidden = true;
+      q(".bzs-note").textContent = "Your usage couldn\u2019t be loaded just now. Open this again in a moment.";
+    }
+    function planLoading() {
+      var badge = q(".bzs-plan");
+      badge.hidden = false;
+      badge.className = "bzs-plan";
+      badge.textContent = "\u2026";
+      q(".bzs-renew").textContent = "";
+      meter("chats", "\u2026", null);
+      meter("music", "\u2026", null);
+    }
+
+    // One answer per opening: a slow response from an earlier opening must not
+    // repaint over a newer one.
+    var seq = 0;
+    function getJSON(url) {
+      return fetch(url, { credentials: "same-origin" })
+        .then(function (r) {
+          if (r.status === 401) return { signedOut: true };
+          return r.ok ? r.json() : undefined;
+        })
+        .catch(function () { return undefined; });
+    }
+    function load() {
+      var mine = ++seq;
+      var cached = readIdentityCache();
+      if (cached) {
+        showSignedIn(true);
+        paintAccount(cached.name, cached.email);
+      } else if (cached === null) {
+        showSignedIn(false);
+      }
+      planLoading();
+      q(".bzs-honey").textContent = "\u2026";
+
+      // Plan and balance belong to an account: asked for at once when this browser
+      // last saw one signed in, otherwise only after the session says there is one.
+      var asked = false;
+      function loadNumbers() {
+        if (asked) return;
+        asked = true;
+        getJSON("/api/buzzy/entitlement").then(function (d) {
+          if (mine !== seq) return;
+          if (d && d.signedOut) { showSignedIn(false); return; }
+          if (d && d.ok && d.plan) paintPlan(d);
+          else planUnavailable();
+        });
+        getJSON("/api/wallet").then(function (d) {
+          if (mine !== seq) return;
+          if (d && d.signedOut) { showSignedIn(false); return; }
+          q(".bzs-honey").textContent = d && typeof d.balance === "number"
+            ? "\u25c8 " + num(d.balance)
+            : "Couldn\u2019t load your balance";
+        });
+      }
+      if (cached) loadNumbers();
+
+      getJSON("/api/auth/get-session").then(function (res) {
+        if (mine !== seq) return;
+        if (res === undefined) { loadNumbers(); return; } // outage: keep the name, try the rest
+        var u = res && res.user;
+        if (u && (u.name || u.email)) {
+          showSignedIn(true);
+          paintAccount(u.name || u.email, u.email || "");
+          loadNumbers();
+        } else {
+          showSignedIn(false);
+        }
+      });
+    }
+
+    dock.syncPage = function () {
+      var hide = onSignInPage();
+      gear.hidden = hide;
+      if (hide) close(false);
+    };
+    dock.syncPage();
+    micPill(live);
+  }
+
+  /**
+   * The microphone, while it is on.
+   *
+   * Listen used to sit in the header and doubled as the "BeeZilla can hear you"
+   * light. The page shell keeps Talk's recogniser running while you move between
+   * pages, so with Listen gone something still has to say the mic is live: this
+   * pill, beside the gear, on every page. It exists only while a voice session
+   * does (idle, the corner holds nothing but the gear):
+   *   - Listening              · Stop ends the session in one click
+   *   - BeeZilla is talking    · Interrupt cuts the reply short and listens again
+   *                              (the one-click barge-in the header chip used to
+   *                              offer; Talk's own mic button ends the session)
+   *   - Mic paused             · after a reload the session waits, ARMED, for the
+   *                              next touch anywhere (talk.html) — said, not hidden
+   */
+  function micPill(live) {
+    var label = live.querySelector(".bz-mic-label");
+    var cut = live.querySelector("#bzMicCut");
+    var stop = live.querySelector("#bzMicStop");
+    cut.setAttribute("aria-label", "Interrupt BeeZilla and speak");
+    stop.setAttribute("aria-label", "Stop listening");
     function engine() { return window.BeeZillaVoice || null; }
     function paint(st) {
       st = st || (engine() && engine().state ? engine().state() : null);
       var on = !!(st && st.mic);
-      var armed = !!(st && st.armed);
-      var speaking = !!(st && st.speaking);
-      mic.classList.toggle("on", on);
-      mic.classList.toggle("armed", armed && !on);
-      // aria-pressed means "the mic is running", so an armed (paused) session is
-      // false. The label carries the offer; the state stays honest.
-      mic.setAttribute("aria-pressed", on ? "true" : "false");
-      var label = mic.querySelector(".bz-voice-label");
-      if (label) label.textContent = on ? (speaking ? "Speaking" : "Listening") : armed ? "Resume" : "Voice";
-      var hint = mic.querySelector(".bz-voice-hint");
-      if (hint) hint.hidden = !(on && speaking);
-      mic.title = on
-        ? speaking
-          ? "Mic is off while I talk \u2014 click to cut me off and speak"
-          : "Listening and speaking replies \u2014 click to turn voice off"
-        : armed
-          ? "Microphone paused after a reload \u2014 click to listen again"
-          : "Talk to BeeZilla \u2014 one switch: listening and spoken replies";
-      mic.setAttribute("aria-label",
-        on ? (speaking ? "Speaking, microphone off" : "Listening") : armed ? "Resume listening" : "Voice off");
+      var armed = !on && !!(st && st.armed);
+      var speaking = on && !!(st && st.speaking);
+      live.hidden = !(on || armed);
+      live.classList.toggle("paused", armed);
+      label.textContent = speaking ? "BeeZilla is talking" : on ? "Listening" : "Mic paused";
+      live.title = speaking
+        ? "Your mic is off while BeeZilla talks. Interrupt to speak now, or Stop to end"
+        : on
+          ? "BeeZilla can hear you on every page until you press Stop"
+          : "Touch the page and BeeZilla listens again";
+      cut.hidden = !speaking;
+      stop.hidden = !on;
       // The mic marker is a property of the TAB, not of the page: this is the
       // one writer for it, so a soft hop and a start/stop both land here.
       bzTitle.apply();
     }
-    // Talk publishes its state here; a page with no engine leaves the dock idle.
+    // Talk publishes its state here (paintVoice); a page with no engine stays idle.
     window.BeeZillaVoiceChip = { update: paint };
-
-    function startHere() {
-      if (engine() && engine().toggle) { engine().toggle(); paint(); return; }
-      var btn = document.getElementById("micBtn");
-      if (btn) { btn.click(); paint(); return; }
-      // Talk is not mounted in this session: go there, then start.
-      if (window.BeeZillaShell) {
-        window.BeeZillaShell.go("/buzzy/talk").then(function () {
-          setTimeout(function () {
-            if (engine() && engine().toggle) engine().toggle();
-            else { var b = document.getElementById("micBtn"); if (b) b.click(); }
-            paint();
-          }, 250);
-        });
-      }
-    }
-
-    mic.addEventListener("click", function () {
-      var st = engine() && engine().state ? engine().state() : null;
-      if (st && st.mic && st.speaking) {
-        // Manual barge-in: one click cuts the reply short and hands the mic
-        // back without ending the session. Killing the whole listen session
-        // because the owner wanted to talk over me is the wrong trade.
-        if (engine() && engine().interrupt) { engine().interrupt(); paint(); return; }
-      }
-      if (st && st.mic) {
-        if (engine() && engine().stop) engine().stop();
-        else { var b = document.getElementById("micBtn"); if (b) b.click(); }
-        paint();
-        return;
-      }
-      startHere();
+    cut.addEventListener("click", function () {
+      if (engine() && engine().interrupt) engine().interrupt();
+      paint();
     });
-
+    stop.addEventListener("click", function () {
+      if (engine() && engine().stop) engine().stop();
+      else { var b = document.getElementById("micBtn"); if (b) b.click(); }
+      paint();
+    });
     // A session started on Talk before this chrome existed still shows up.
     paint();
     setInterval(function () { paint(); }, 1500);
@@ -1684,6 +1789,9 @@
       var kids = Array.prototype.slice.call(document.body.children);
       kids.forEach(function (k) {
         if (k.id === "bzPageCache") return;
+        // The settings dock belongs to the document, not to the first page: wrapped
+        // in here it would be stashed with Talk or deleted with any other page.
+        if (k.id === "bzDock") return;
         page.appendChild(k);
       });
       document.body.appendChild(page);
@@ -1793,8 +1901,7 @@
   // (toolbars, search boxes), so the page does not lose its controls.
   var CHROME_OWNED = [
     "#bzNav", ".bz-navbar", ".bz-brandrow", ".bz-brand", ".brand", ".brand-link",
-    "#accountLink", ".account-link", ".account-menu", ".hd-chip", "#bzVoiceDock",
-    "#bzPlanChip", "#bzHoneyChip", "#bzPanel",
+    "#accountLink", ".account-link", ".account-menu", "#bzDock",
   ].join(",");
   function stripChrome(root) {
     Array.prototype.forEach.call(root.querySelectorAll(CHROME_OWNED), function (n) {
@@ -1843,7 +1950,7 @@
     var key = page.getAttribute("data-bz-path") || currentKey;
     if (keepAlive(key)) {
       // The chrome is rebuilt on restore, so the cached copy must not keep a
-      // second #bzNav / #bzVoiceDock / #bzPlanChip alive: duplicate ids make
+      // second #bzNav / #accountLink alive: duplicate ids make
       // getElementById return the hidden copy and the visible control "vanish".
       var staleHeader = page.querySelector("header");
       if (staleHeader) staleHeader.remove();

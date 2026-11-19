@@ -50,7 +50,9 @@
   .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none; }
   .img-wrap .handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--bz-yellow);
                       border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
-  footer { border-top:1px solid var(--bz-line); padding:0.5rem 1rem; display:flex; gap:0.6rem; align-items:center; }
+  /* The right padding keeps the bar's last words clear of the settings gear, which
+     nav.js pins to the bottom-right corner of every page (44px, 22px in). */
+  footer { border-top:1px solid var(--bz-line); padding:0.5rem 80px 0.5rem 1rem; display:flex; gap:0.6rem; align-items:center; }
   #status { color:var(--bz-muted); font-size:0.8rem; }
   #result { position:absolute; right:12px; top:12px; width:210px; background:var(--bz-card); border:1px solid var(--bz-line);
             border-radius:12px; padding:0.6rem; display:none; z-index:5; }
