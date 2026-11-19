@@ -18,7 +18,7 @@
  */
 import { createServer } from "node:http";
 import { execFileSync, execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,20 @@ if (!hasXvfb) {
   check("503 is reported as our configuration problem", /not configured|not available/.test(interpretMintResult({ status: 503, body: { code: "not_configured", error: "inference tokens are not configured" } }).error ?? ""));
   check("a token is accepted with its expiry", interpretMintResult({ status: 200, body: { ok: true, token: "bz1.x.y", expiresAt: "2030-01-01T00:00:00.000Z" } }).expiresAt === "2030-01-01T00:00:00.000Z");
   check("garbage is refused, not crashed", interpretMintResult("not json").ok === false);
+}
+
+// ── a window that leaves the mint origin must say so (the 19 Nov host split) ──
+{
+  const { connectAccount } = await import("../desktop/connect.mjs");
+  const moved = await connectAccount({
+    baseUrl: "https://app.devboards.ai",
+    open: async () => {},
+    evaluate: async () =>
+      JSON.stringify({ status: 200, origin: "https://beezilla.net", url: "https://beezilla.net/buzzy/talk", body: { ok: false, error: "not JSON from https://beezilla.net: <!DOCTYPE html>" } }),
+    close: () => {},
+    signInDeadlineMs: 0,
+  });
+  check("a window that leaves the mint origin names both hosts", moved.ok === false && moved.offOrigin === true && /beezilla\.net/.test(moved.error) && /app\.devboards\.ai/.test(moved.error), moved.error);
 }
 
 // ── the cloud address a shipped app uses (pure) ────────────────────────────
@@ -132,7 +146,7 @@ const cloud = createServer((req, res) => {
       return;
     }
     // First attempt is signed out; the second (after our fake "sign-in") works.
-    if (mintCalls === 1) {
+    if (mintCalls === 1 && mode !== "direct") {
       res.writeHead(401, { "content-type": "application/json" }).end(
         JSON.stringify({ ok: false, code: "unauthenticated", error: "sign in to use BeeZilla inference" }),
       );
@@ -284,6 +298,97 @@ let dataDir = mkdtempSync(join(tmpdir(), "bz-connect-"));
   check("the app says so in its log", /search is not enabled/.test(out), "logged");
 }
 searchMode = "ok";
+
+// ── 4. an expired token re-mints itself on launch, with no user ────────────
+// The P1: tokens last 15 minutes, the store kept the old one, and the only mint
+// was a manual Connect. This seeds an EXPIRED managed credential and proves the
+// launch path replaces it silently (hidden window, no sign-in prompt).
+{
+  mintCalls = 0;
+  mode = "direct";
+  dataDir = mkdtempSync(join(tmpdir(), "bz-refresh-"));
+  writeFileSync(
+    join(dataDir, "inference.json"),
+    JSON.stringify(
+      {
+        provider: "beezilla",
+        baseUrl: "https://inference-api.nousresearch.com/v1",
+        model: "z-ai/glm-5.3-flash",
+        expiresAt: new Date(Date.now() - 3_600_000).toISOString(),
+        encrypted: false,
+        keyCipher: "bz1.expired.payload",
+        updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+  const { out } = await new Promise((resolveRun) => {
+    execFile(
+      "xvfb-run",
+      ["-a", ELECTRON, "desktop", "--no-sandbox", "--disable-gpu"],
+      {
+        cwd: ROOT,
+        timeout: 150_000,
+        env: {
+          ...process.env,
+          BZ_DATA_DIR: dataDir,
+          BZ_REFRESH_TEST: "1",
+          BZ_CLOUD_URL: cloudBase,
+          BZ_CONNECT_DEADLINE_MS: "0",
+          ELECTRON_ENABLE_LOGGING: "0",
+        },
+      },
+      (err, stdout, stderr) => resolveRun({ out: `${stdout}\n${stderr}` }),
+    );
+  });
+  const line = out.split("\n").find((l) => l.includes("REFRESH_RESULT:")) ?? "";
+  let result = null;
+  try {
+    result = JSON.parse(line.slice(line.indexOf("REFRESH_RESULT:") + "REFRESH_RESULT:".length));
+  } catch {}
+  const stored = readStore(dataDir);
+  const storedExpiry = stored?.expiresAt ? Date.parse(stored.expiresAt) : 0;
+  check("an expired managed token re-mints on launch, no prompt", result?.ok === true && result?.needsSignIn !== true, result?.error ?? line.slice(0, 80));
+  check("the store now holds a token that is genuinely fresh", storedExpiry > Date.now(), stored?.expiresAt ?? "none");
+  check("the credential is the one the cloud just minted", stored?.expiresAt !== "2026-11-19T00:00:00.000Z" && typeof stored?.keyCipher === "string" && stored.keyCipher.length > 0, "encrypted at rest");
+}
+
+// ── 5. the cloud session is gone: say "sign in", do not pretend ────────────
+{
+  mintCalls = 0;
+  mode = "signin"; // first mint answers 401, and a silent attempt never polls
+  dataDir = mkdtempSync(join(tmpdir(), "bz-refresh-401-"));
+  writeFileSync(
+    join(dataDir, "inference.json"),
+    JSON.stringify({
+      provider: "beezilla",
+      baseUrl: "https://inference-api.nousresearch.com/v1",
+      model: "m",
+      expiresAt: new Date(Date.now() - 3_600_000).toISOString(),
+      encrypted: false,
+      keyCipher: "bz1.expired.payload",
+      updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    }),
+  );
+  const { out } = await new Promise((resolveRun) => {
+    execFile(
+      "xvfb-run",
+      ["-a", ELECTRON, "desktop", "--no-sandbox", "--disable-gpu"],
+      {
+        cwd: ROOT,
+        timeout: 150_000,
+        env: { ...process.env, BZ_DATA_DIR: dataDir, BZ_REFRESH_TEST: "1", BZ_CLOUD_URL: cloudBase, BZ_CONNECT_DEADLINE_MS: "0", ELECTRON_ENABLE_LOGGING: "0" },
+      },
+      (err, stdout, stderr) => resolveRun({ out: `${stdout}\n${stderr}` }),
+    );
+  });
+  const line = out.split("\n").find((l) => l.includes("REFRESH_RESULT:")) ?? "";
+  let result = null;
+  try { result = JSON.parse(line.slice(line.indexOf("REFRESH_RESULT:") + "REFRESH_RESULT:".length)); } catch {}
+  check("a silent refresh with no cloud session reports 'sign in needed'", result?.ok === false && result?.needsSignIn === true, result?.error ?? line.slice(0, 80));
+  check("a failed refresh does not invent a credential", readStore(dataDir)?.keyCipher === "bz1.expired.payload", "store untouched");
+}
 
 cloud.close();
 rmSync(dataDir, { recursive: true, force: true });
