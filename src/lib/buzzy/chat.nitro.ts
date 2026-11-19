@@ -91,6 +91,17 @@ import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DE
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 import { createHash } from "node:crypto";
 import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES, normalizeVocab } from "./asr";
+import {
+  checkFeedback,
+  saveFeedback,
+  clientIp,
+  ipHash,
+  takeSlot,
+  wavDurationSeconds,
+  IP_LIMIT,
+  FEEDBACK_AUDIO_MAX_BYTES,
+  FEEDBACK_AUDIO_MAX_SECONDS,
+} from "./feedback";
 
 /**
  * Largest single file the bulk asset path will store. A skills corpus is
@@ -479,6 +490,111 @@ export default defineEventHandler(async (event) => {
       })),
       slots,
     };
+  }
+
+  // ── POST /api/buzzy/feedback — the nav pill, on every page ───────────
+  // 7318: a person who is confused must be able to say so without hunting for a
+  // page, and a visitor who cannot sign in is exactly the person most likely to
+  // be stuck. So the report does not require a session; the per-ip cap is what
+  // keeps that safe, and a signed-in report carries the user_id so the account
+  // deletion receipt counts it.
+  if (method === "POST" && path === "/api/buzzy/feedback") {
+    const parsed = (await event.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const check = checkFeedback(parsed);
+    if (!check.ok) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: check.error, code: check.code };
+    }
+    if (!check.report.userAgent) {
+      check.report.userAgent = String(getHeader(event, "user-agent") || "").slice(0, 300);
+    }
+    const sessionUser = await getSessionUserFromHeaders(headersFromEvent(event)).catch(() => null);
+    const ip = clientIp({
+      "x-forwarded-for": getHeader(event, "x-forwarded-for"),
+      "x-real-ip": getHeader(event, "x-real-ip"),
+    });
+    try {
+      const sql = await getSql();
+      const saved = await saveFeedback(sql, sessionUser?.id ?? null, check.report, ip);
+      if (!saved.ok) {
+        setResponseStatus(event, saved.code === "rate_limited" ? 429 : 503);
+        if (saved.retryAfter) setResponseHeader(event, "retry-after", String(saved.retryAfter));
+        return { ok: false, error: saved.error, code: saved.code };
+      }
+      return { ok: true, reference: saved.saved.reference };
+    } catch {
+      // A person's report must never look sent when it is not: the panel keeps
+      // the text and shows this sentence.
+      setResponseStatus(event, 500);
+      return { ok: false, error: "Feedback could not be saved just now. Nothing was lost — try again.", code: "save_failed" };
+    }
+  }
+
+  // ── POST /api/buzzy/feedback/transcribe — anonymous, own handler ─────
+  // 7318 rules this is NOT the session-gated /api/buzzy/transcribe behind a
+  // flag. It is its own handler because four things are different by rule:
+  //   - no session, so no user to attribute anything to;
+  //   - an EMPTY vocabulary (the signed-in one is built from that person's jobs
+  //     and companies; there is no person here to build it from);
+  //   - 60 s decoded and 8 MB on the wire, refused on decoded duration — a byte
+  //     cap alone lets a 10 s 192 kHz stereo clip through;
+  //   - no voice_metrics row. That table measures the product's voice lane per
+  //     user; an anonymous dictation has no lane and no user.
+  if (method === "POST" && path === "/api/buzzy/feedback/transcribe") {
+    const format = formatFromContentType(getHeader(event, "content-type"));
+    if (format !== "wav") {
+      setResponseStatus(event, 415);
+      return { ok: false, error: "Send the clip as audio/wav.", code: "bad_audio_type" };
+    }
+    const ip = clientIp({
+      "x-forwarded-for": getHeader(event, "x-forwarded-for"),
+      "x-real-ip": getHeader(event, "x-real-ip"),
+    });
+    let audio: Uint8Array;
+    try {
+      audio = new Uint8Array(await event.req.arrayBuffer());
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The recording could not be read.", code: "bad_audio" };
+    }
+    if (audio.byteLength > FEEDBACK_AUDIO_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: "That recording is too big — keep it under a minute.", code: "audio_too_large" };
+    }
+    const seconds = wavDurationSeconds(audio);
+    if (seconds === null) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That recording could not be read.", code: "bad_audio" };
+    }
+    if (seconds > FEEDBACK_AUDIO_MAX_SECONDS) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: "Keep the recording under a minute.", code: "audio_too_long" };
+    }
+    if (audio.byteLength < 1200) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That recording was too short to hear anything.", code: "audio_too_short" };
+    }
+    try {
+      const sql = await getSql();
+      const key = ipHash(ip);
+      if (key) {
+        const n = await takeSlot(sql, `${key}#asr`, IP_LIMIT);
+        if (n > IP_LIMIT) {
+          setResponseStatus(event, 429);
+          setResponseHeader(event, "retry-after", "3600");
+          return { ok: false, error: "That is a lot of dictation in one hour. Type it instead.", code: "rate_limited" };
+        }
+      }
+      const r = await transcribeAudio(audio, format, []);
+      return { ok: true, text: r.text, ms: r.ms, model: r.model };
+    } catch (e) {
+      setResponseStatus(event, 502);
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "transcription failed",
+        code: "transcribe_failed",
+      };
+    }
   }
 
   // ── POST /api/buzzy/transcribe — session-gated ───────────────────────

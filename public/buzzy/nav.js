@@ -19,6 +19,50 @@
 (function () {
   "use strict";
 
+  /**
+   * Diagnostics ring buffer — what the Feedback panel OFFERS to attach, and what
+   * the person can read before they send it (7318). It is installed once, here,
+   * because a console error on page load is exactly the kind a person reports and
+   * cannot reproduce. Nothing leaves the browser unless they tick the box.
+   */
+  var BZ_DIAG = { errors: [], failed: [] };
+  window.__bzDiag = BZ_DIAG;
+  (function hookDiag() {
+    var push = function (arr, item) {
+      try {
+        arr.push(String(item).slice(0, 400));
+        while (arr.length > 50) arr.shift();
+      } catch (e) { /* never let diagnostics break a page */ }
+    };
+    var origError = console.error;
+    console.error = function () {
+      push(BZ_DIAG.errors, Array.prototype.join.call(arguments, " "));
+      return origError.apply(console, arguments);
+    };
+    window.addEventListener("error", function (e) {
+      push(BZ_DIAG.errors, (e && e.message ? e.message : "error") + (e && e.filename ? " @ " + e.filename : ""));
+    });
+    window.addEventListener("unhandledrejection", function (e) {
+      push(BZ_DIAG.errors, "unhandled: " + (e && e.reason ? e.reason : "rejection"));
+    });
+    if (window.fetch) {
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var url = typeof input === "string" ? input : (input && input.url) || "";
+        return origFetch.apply(this, arguments).then(
+          function (r) {
+            if (!r.ok) push(BZ_DIAG.failed, (init && init.method ? init.method : "GET") + " " + url + " -> " + r.status);
+            return r;
+          },
+          function (err) {
+            push(BZ_DIAG.failed, "NETWORK " + url + " " + (err && err.message ? err.message : "failed"));
+            throw err;
+          },
+        );
+      };
+    }
+  })();
+
   var LINKS = [
     // The owner's roadmap names five main places: Talk, Library, Memory, Experts,
     // Recipes. Everything else stays one click away under "More" (`more: true`).
@@ -84,6 +128,26 @@
       "#bzChrome select.bz-co-select{appearance:none;background:#101010;color:#f2f2f2;border:1px solid #2c2c2c;border-radius:8px;padding:.28rem 1.5rem .28rem .5rem;font:inherit;font-size:.82rem;max-width:15rem;text-overflow:ellipsis;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,#8d8d8d 50%),linear-gradient(135deg,#8d8d8d 50%,transparent 50%);background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}",
       "#bzChrome button.bz-ask{display:inline-flex;align-items:center;gap:.35rem;background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-ask[aria-expanded='true']{background:#fff0a8}",
+      // 7318: Feedback is the SAME yellow pill (button.bz-ask, #ffd40d). It is a
+      // second element with the same class, not a restyle of Ask — Ask keeps the
+      // chat icon in the left slot and stays where it is.
+      "#bzChrome button.bz-feedback{margin-left:.35rem}",
+      "#bzFeedback{position:fixed;right:1rem;top:64px;width:min(390px,calc(100vw - 2rem));max-height:min(620px,calc(100vh - 88px));overflow:auto;background:#101010;border:1px solid #2c2c2c;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;gap:.5rem;z-index:900;padding:.7rem}",
+      "#bzFeedback.open{display:flex}",
+      "#bzFeedback .bz-fb-head{display:flex;align-items:center;justify-content:space-between;font-size:.85rem;color:#e6e6e6;font-weight:700}",
+      "#bzFeedback label.bz-fb-kind{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:#9a9a9a}",
+      "#bzFeedback select,#bzFeedback textarea,#bzFeedback input[type=text]{background:#0b0b0b;color:#f2f2f2;border:1px solid #2c2c2c;border-radius:9px;padding:.45rem .55rem;font:inherit;font-size:.85rem;width:100%;box-sizing:border-box}",
+      "#bzFeedback textarea{min-height:7.5rem;resize:vertical}",
+      "#bzFeedback .bz-fb-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}",
+      "#bzFeedback .bz-fb-btn{background:#1c1c1c;color:#f2f2f2;border:1px solid #343434;border-radius:999px;padding:.32rem .7rem;font:inherit;font-size:.8rem;font-weight:600;cursor:pointer}",
+      "#bzFeedback .bz-fb-btn.on{background:#5b1f24;color:#ffb4b4;border-color:#7a2b31}",
+      "#bzFeedback .bz-fb-send{background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.42rem .9rem;font:inherit;font-size:.85rem;font-weight:700;cursor:pointer}",
+      "#bzFeedback .bz-fb-send[disabled]{opacity:.55;cursor:default}",
+      "#bzFeedback .bz-fb-note{font-size:.74rem;color:#8d8d8d;line-height:1.4}",
+      "#bzFeedback .bz-fb-diag{display:none;background:#0b0b0b;border:1px solid #242424;border-radius:9px;padding:.5rem;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9c9c9;white-space:pre-wrap;max-height:11rem;overflow:auto}",
+      "#bzFeedback .bz-fb-diag.open{display:block}",
+      "#bzFeedback .bz-fb-ok{color:#9be89b;font-size:.85rem;line-height:1.5}",
+      "#bzFeedback .bz-fb-err{color:#ffb4b4;font-size:.82rem;line-height:1.4}",
       "#bzChrome button.bz-voice{display:inline-flex;align-items:center;gap:.35rem;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-voice[aria-pressed='true']{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome button.bz-voice:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
@@ -747,6 +811,352 @@
     });
   }
 
+
+  /**
+   * Feedback: the same yellow pill as Ask, beside it, on every page (7318).
+   *
+   * Why this exists at all: a confused person is on the page where they got
+   * confused, and asking them to navigate to a "Contact" page first loses most of
+   * them. Asking them to sign in loses the rest — the report route accepts an
+   * anonymous body, so the panel does not require a session either.
+   *
+   * Dictation: the panel can record a spoken report. It does NOT use the chat's
+   * voice lane — same microphone, same WAV format, a different endpoint
+   * (/api/buzzy/feedback/transcribe, own handler, empty vocabulary, no metrics
+   * row). The transcript lands in the textarea as editable text; nothing is sent
+   * until they press Send.
+   *
+   * No screenshot in v1 (7318). The diagnostics block is text the person can read
+   * before sending, and it is off by default.
+   */
+  function feedbackControl(chrome) {
+    var btn = document.createElement("button");
+    btn.className = "bz-ask bz-feedback";
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", "bzFeedback");
+    btn.textContent = "Feedback";
+    btn.title = "Tell us what is confusing or broken";
+    chrome.appendChild(btn);
+
+    var panel = document.createElement("div");
+    panel.id = "bzFeedback";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", "Send feedback");
+
+    var head = document.createElement("div");
+    head.className = "bz-fb-head";
+    var titleEl = document.createElement("span");
+    titleEl.textContent = "Send feedback";
+    var close = document.createElement("button");
+    close.className = "bz-panel-close";
+    close.type = "button";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = "&times;";
+    head.appendChild(titleEl);
+    head.appendChild(close);
+
+    var kindRow = document.createElement("label");
+    kindRow.className = "bz-fb-kind";
+    kindRow.appendChild(document.createTextNode("Type"));
+    var kind = document.createElement("select");
+    [["general", "General"], ["bug", "Something is broken"], ["confusing", "Something is confusing"], ["idea", "An idea"]]
+      .forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p[0];
+        o.textContent = p[1];
+        kind.appendChild(o);
+      });
+    kindRow.appendChild(kind);
+
+    var text = document.createElement("textarea");
+    text.placeholder = "What happened? The more specific, the faster we can fix it.";
+    text.setAttribute("aria-label", "Your feedback");
+
+    var row = document.createElement("div");
+    row.className = "bz-fb-row";
+    var mic = document.createElement("button");
+    mic.className = "bz-fb-btn";
+    mic.type = "button";
+    mic.innerHTML = "&#127908; Say it";
+    var status = document.createElement("span");
+    status.className = "bz-fb-note";
+    row.appendChild(mic);
+    row.appendChild(status);
+
+    var diagLabel = document.createElement("label");
+    diagLabel.className = "bz-fb-kind";
+    var diagBox = document.createElement("input");
+    diagBox.type = "checkbox";
+    diagLabel.appendChild(diagBox);
+    diagLabel.appendChild(document.createTextNode("Include diagnostics"));
+    var diagToggle = document.createElement("button");
+    diagToggle.className = "bz-fb-btn";
+    diagToggle.type = "button";
+    diagToggle.textContent = "See what's included";
+    var diagBoxOut = document.createElement("div");
+    diagBoxOut.className = "bz-fb-diag";
+    var diagRow = document.createElement("div");
+    diagRow.className = "bz-fb-row";
+    diagRow.appendChild(diagLabel);
+    diagRow.appendChild(diagToggle);
+
+    var send = document.createElement("button");
+    send.className = "bz-fb-send";
+    send.type = "button";
+    send.textContent = "Send feedback";
+
+    var note = document.createElement("div");
+    note.className = "bz-fb-note";
+    note.textContent =
+      "No screenshot is taken. Diagnostics are pages you are on, timings and error lines — never your password, your chats or your files.";
+
+    var result = document.createElement("div");
+
+    panel.appendChild(head);
+    panel.appendChild(kindRow);
+    panel.appendChild(text);
+    panel.appendChild(row);
+    panel.appendChild(diagRow);
+    panel.appendChild(diagBoxOut);
+    panel.appendChild(send);
+    panel.appendChild(note);
+    panel.appendChild(result);
+    document.body.appendChild(panel);
+
+    function buildSha() {
+      var m = document.querySelector('meta[name="bz-build"]');
+      return m ? String(m.getAttribute("content") || "") : "";
+    }
+    function diagnostics() {
+      var d = window.__bzDiag || { errors: [], failed: [] };
+      return {
+        page: location.href,
+        at: new Date().toISOString(),
+        build: buildSha(),
+        browser: navigator.userAgent,
+        screen: window.screen ? window.screen.width + "x" + window.screen.height : "",
+        viewport: window.innerWidth + "x" + window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+        language: navigator.language || "",
+        identity: (function () {
+          try {
+            var raw = window.localStorage.getItem("bz_identity");
+            if (!raw || raw === "null") return "anonymous";
+            var v = JSON.parse(raw);
+            return v && v.email ? v.email : "anonymous";
+          } catch (e) { return "anonymous"; }
+        })(),
+        consoleErrors: d.errors.slice(-50),
+        failedRequests: d.failed.slice(-50),
+      };
+    }
+    function diagText() {
+      var d = diagnostics();
+      var lines = [
+        "page: " + d.page,
+        "at: " + d.at,
+        "build: " + (d.build || "(unknown)"),
+        "browser: " + d.browser,
+        "screen: " + d.screen + "  viewport: " + d.viewport + "  dpr: " + d.dpr,
+        "signed in as: " + d.identity,
+        "",
+        "console errors (" + d.consoleErrors.length + "):",
+      ].concat(d.consoleErrors.length ? d.consoleErrors : ["(none captured)"]);
+      lines.push("", "failed requests (" + d.failedRequests.length + "):");
+      return lines.concat(d.failedRequests.length ? d.failedRequests : ["(none captured)"]).join("\n");
+    }
+    diagToggle.addEventListener("click", function () {
+      var on = diagBoxOut.classList.toggle("open");
+      if (on) diagBoxOut.textContent = diagText();
+      diagToggle.textContent = on ? "Hide" : "See what's included";
+    });
+
+    var rec = null;
+    /** 16-bit mono WAV from a float buffer — the format the ASR route reads. */
+    function encodeWav(samples, rate) {
+      var buf = new ArrayBuffer(44 + samples.length * 2);
+      var dv = new DataView(buf);
+      var ws = function (o, s) { for (var i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+      ws(0, "RIFF");
+      dv.setUint32(4, 36 + samples.length * 2, true);
+      ws(8, "WAVE");
+      ws(12, "fmt ");
+      dv.setUint32(16, 16, true);
+      dv.setUint16(20, 1, true);
+      dv.setUint16(22, 1, true);
+      dv.setUint32(24, rate, true);
+      dv.setUint32(28, rate * 2, true);
+      dv.setUint16(32, 2, true);
+      dv.setUint16(34, 16, true);
+      ws(36, "data");
+      dv.setUint32(40, samples.length * 2, true);
+      var o = 44;
+      for (var i = 0; i < samples.length; i++) {
+        var s = Math.max(-1, Math.min(1, samples[i]));
+        dv.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        o += 2;
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    }
+    function downsample(frames, from, to) {
+      if (from === to) return frames;
+      var ratio = from / to;
+      var out = new Float32Array(Math.floor(frames.length / ratio));
+      for (var i = 0; i < out.length; i++) {
+        var start = Math.floor(i * ratio);
+        var end = Math.min(frames.length, Math.floor((i + 1) * ratio));
+        var sum = 0;
+        for (var j = start; j < end; j++) sum += frames[j];
+        out[i] = sum / Math.max(1, end - start);
+      }
+      return out;
+    }
+    function stopRec() {
+      var r = rec;
+      rec = null;
+      if (!r) return;
+      try { r.proc.disconnect(); } catch (e) {}
+      try { r.src.disconnect(); } catch (e) {}
+      try { r.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      try { r.ctx.close(); } catch (e) {}
+      mic.classList.remove("on");
+      mic.innerHTML = "&#127908; Say it";
+      var frames = r.frames;
+      if (r.timer) clearTimeout(r.timer);
+      if (frames.length < 8000) {
+        status.textContent = "That was too short — hold on for a second longer.";
+        return;
+      }
+      var pcm = downsample(frames, r.rate, 16000);
+      status.textContent = "Transcribing\u2026";
+      fetch("/api/buzzy/feedback/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "audio/wav" },
+        body: encodeWav(pcm, 16000),
+      })
+        .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+        .then(function (r2) {
+          if (r2.ok && r2.body && r2.body.text) {
+            text.value = (text.value ? text.value.replace(/\s+$/, "") + " " : "") + r2.body.text;
+            status.textContent = "";
+            text.focus();
+          } else {
+            status.textContent = (r2.body && r2.body.error) || "That could not be transcribed — type it instead.";
+          }
+        })
+        .catch(function () {
+          status.textContent = "That could not be transcribed — type it instead.";
+        });
+    }
+    mic.addEventListener("click", function () {
+      if (rec) { stopRec(); return; }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        status.textContent = "This browser cannot record. Type it instead.";
+        return;
+      }
+      status.textContent = "Starting\u2026";
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        var ctx = new Ctx();
+        var src = ctx.createMediaStreamSource(stream);
+        var proc = ctx.createScriptProcessor(4096, 1, 1);
+        var chunks = [];
+        var total = 0;
+        rec = { ctx: ctx, stream: stream, src: src, proc: proc, frames: [], rate: ctx.sampleRate, timer: null };
+        proc.onaudioprocess = function (e) {
+          var data = e.inputBuffer.getChannelData(0);
+          var copy = new Float32Array(data.length);
+          copy.set(data);
+          rec.frames.push(copy);
+          total += data.length;
+          if (total > ctx.sampleRate * 60) stopRec();
+        };
+        src.connect(proc);
+        proc.connect(ctx.destination);
+        mic.classList.add("on");
+        mic.innerHTML = "&#9632; Stop";
+        status.textContent = "Recording — up to a minute.";
+        rec.timer = setTimeout(stopRec, 61000);
+      }).catch(function () {
+        status.textContent = "The microphone was not allowed. Type it instead.";
+      });
+    });
+
+    function shut() {
+      panel.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+      if (rec) stopRec();
+    }
+    function open() {
+      panel.classList.add("open");
+      btn.setAttribute("aria-expanded", "true");
+      result.textContent = "";
+      send.disabled = false;
+      diagBoxOut.textContent = diagBoxOut.classList.contains("open") ? diagText() : "";
+      text.focus();
+    }
+    btn.addEventListener("click", function () {
+      if (panel.classList.contains("open")) shut();
+      else open();
+    });
+    close.addEventListener("click", function (e) {
+      e.stopPropagation();
+      shut();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && panel.classList.contains("open")) shut();
+    });
+
+    send.addEventListener("click", function () {
+      var msg = String(text.value || "").trim();
+      result.className = "";
+      result.textContent = "";
+      if (!msg) {
+        result.className = "bz-fb-err";
+        result.textContent = "Say what happened, in a sentence.";
+        return;
+      }
+      send.disabled = true;
+      send.textContent = "Sending\u2026";
+      var body = {
+        message: msg,
+        kind: kind.value,
+        pageUrl: location.href,
+        buildSha: buildSha(),
+        viewport: window.innerWidth + "x" + window.innerHeight,
+        diagnostics: diagBox.checked ? diagnostics() : null,
+      };
+      fetch("/api/buzzy/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+        .then(function (res) { return res.json().then(function (b) { return { ok: res.ok, body: b }; }); })
+        .then(function (r) {
+          if (r.ok && r.body && r.body.reference) {
+            result.className = "bz-fb-ok";
+            result.textContent =
+              "Thank you \u2014 that is in. Your reference is " + r.body.reference + ". Quote it if you need to follow up.";
+            text.value = "";
+            send.textContent = "Sent";
+            return;
+          }
+          result.className = "bz-fb-err";
+          // The text stays in the box: a report that did not save must not look sent.
+          result.textContent = (r.body && r.body.error) || "That did not send. Your words are still here — try again.";
+          send.disabled = false;
+          send.textContent = "Send feedback";
+        })
+        .catch(function () {
+          result.className = "bz-fb-err";
+          result.textContent = "That did not send. Your words are still here — try again.";
+          send.disabled = false;
+          send.textContent = "Send feedback";
+        });
+    });
+  }
+
   function loadCompanies() {
     if (window.BZCompanies) return;
     if (document.querySelector('script[src="/buzzy/companies.js"]')) return;
@@ -869,6 +1279,7 @@
     companyControl(chrome);
     accountControl(chrome);
     askControl(chrome);
+    feedbackControl(chrome);
   }
 
   /**

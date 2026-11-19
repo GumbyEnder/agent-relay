@@ -111,6 +111,10 @@ const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_job_events: "DELETE FROM buzzy_job_events WHERE user_id = $1 RETURNING 1",
   buzzy_scheduled_jobs: "DELETE FROM buzzy_scheduled_jobs WHERE user_id = $1 RETURNING 1",
   buzzy_connections: "DELETE FROM buzzy_connections WHERE user_id = $1 RETURNING 1",
+  // 7319: feedback is the person's words, so deleting the account deletes their
+  // reports and the receipt counts them. Anonymous rows have no user_id and are
+  // never reachable from here — that is why there is no account_email column.
+  buzzy_feedback: "DELETE FROM buzzy_feedback WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */
