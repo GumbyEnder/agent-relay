@@ -15,9 +15,9 @@
  *  · The client never states who it is or what build it is running. The session
  *    names the user and the server stamps the sha (7318).
  *  · The anonymous ASR route is a money path with no session, so it is capped
- *    per address AND across the whole route, in the one feedback table this
- *    process owns, and it rejects by decoded WAV duration rather than by
- *    Content-Length.
+ *    per address AND across the whole route, in the one feedback table both
+ *    services write (they share the database), and it rejects by decoded WAV
+ *    duration rather than by Content-Length.
  */
 import { createHash, randomUUID } from "node:crypto";
 
@@ -330,9 +330,10 @@ export function wavDurationSeconds(bytes: Uint8Array): number | null {
 }
 
 /**
- * Config: the pepper is required. One service, one bucket — BeeZilla is served
- * by this same process (beezilla.net is agent-relay), so a single
- * `BZ_FEEDBACK_PEPPER` here covers every report and every ip_hash.
+ * Config: the pepper is required, and the same on every service that can serve
+ * the consumer host — `beezilla.net` is `beezilla-web`, `app.devboards.ai` is
+ * `agent-relay`, and both write the one feedback table in the one database. A
+ * different pepper on the other service would not match an existing ip_hash.
  */
 export function feedbackPepper(): string | null {
   const v = (process.env.BZ_FEEDBACK_PEPPER || "").trim();

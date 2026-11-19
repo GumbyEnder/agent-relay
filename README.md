@@ -9,7 +9,7 @@
 | **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla.net](https://beezilla.net) |
 | **Entry point** | `/api/agent` (HTTP — no browser login for agents) | `/buzzy/` (branded web app) |
 
-One **service**, one **Postgres**, one bucket of identities. `beezilla.net` is the `agent-relay` service: the same build, the same database, the same Better Auth users and the same Nitro/TanStack server, with the consumer surface chosen by hostname (`BZ_CONSUMER_HOSTS`) and the console's `/buzzy/*` paths 301ing there (`BZ_MOVE_BUZZY=1`). `BZ_BRAND=beezilla` still skins a dedicated deployment; nothing is forked.
+Two **services**, one **Postgres**, one bucket of identities. `app.devboards.ai` is served by `agent-relay` and `beezilla.net` by `beezilla-web`: one repo, one Dockerfile, one database, so the same Better Auth users and one feedback table. Each service is told which surface it answers by hostname (`BZ_CONSUMER_HOSTS`), and the console's `/buzzy/*` paths 301 to the consumer host (`BZ_MOVE_BUZZY=1`). Because either service can be pointed at the consumer host, `BZ_FEEDBACK_PEPPER` and `BZ_KEY_SEAL_SECRET` must hold the same value on both — one table, one hash, whichever process writes the row. Nothing is forked.
 
 ---
 
