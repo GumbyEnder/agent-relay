@@ -2145,10 +2145,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           menu.innerHTML =
             '<div class="am-name">' + bzDisplayName + "</div>" +
             '<div class="am-email">' + (user.email || "") + "</div>" +
+            '<button type="button" class="am-signin">Sign in to BeeZilla</button>' +
             '<button type="button" class="am-signout">Log out</button>';
           var out = menu.querySelector(".am-signout");
           out.addEventListener("click", function (e) {
             e.preventDefault();
+            // Desktop: there is no better-auth session on the local runtime, so
+            // POSTing sign-out there ends nothing and the chip comes straight back
+            // (the P1 "can't log out"). The credential the app actually holds is the
+            // managed token pair, so that is what the shell clears.
+            if (window.beezilla && window.beezilla.account) {
+              window.beezilla.account.signout().then(function () { window.location.reload(); });
+              return;
+            }
             fetch("/api/auth/sign-out", {
               method: "POST",
               credentials: "same-origin",
@@ -2156,6 +2165,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               body: "{}",
             }).then(function () { window.location.href = "/buzzy/"; });
           });
+          var signin = menu.querySelector(".am-signin");
+          if (!(window.beezilla && window.beezilla.account)) {
+            // A browser has a real /login; the button would be a second confusing
+            // path there, so it exists only where the shell can mint.
+            signin.style.display = "none";
+          } else {
+            signin.addEventListener("click", function (e) {
+              e.preventDefault();
+              menu.style.display = "none";
+              window.beezilla.account.signin().then(function (res) {
+                if (res && res.ok && res.data && res.data.ok) window.location.reload();
+              });
+            });
+          }
           link.parentNode.insertBefore(menu, link.nextSibling);
           link.addEventListener("click", function (e) {
             e.preventDefault();
@@ -4935,21 +4958,44 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         voice.lastSpeechEnd = 0;
         voice.userSpeechMs = 0;
 
-        let data;
-        if (useVoiceLane) {
-          data = await streamVoiceTurn(sendBody, metrics, sendStarted);
-        } else if (typeof ReadableStream !== "undefined") {
-          data = await streamTextTurn(sendBody, metrics, sendStarted);
-          metrics.turnMs = Math.round(performance.now() - sendStarted);
-        } else {
+        const sendTurn = async function () {
+          if (useVoiceLane) {
+            return streamVoiceTurn(sendBody, metrics, sendStarted);
+          }
+          if (typeof ReadableStream !== "undefined") {
+            const out = await streamTextTurn(sendBody, metrics, sendStarted);
+            metrics.turnMs = Math.round(performance.now() - sendStarted);
+            return out;
+          }
           let resp;
           try {
             resp = await postOnce();
           } catch (firstErr) {
             resp = await postOnce(); // bounded: exactly one retry, same attemptId
           }
-          data = await resp.json();
+          const out = await resp.json();
           metrics.turnMs = Math.round(performance.now() - sendStarted);
+          return out;
+        };
+
+        let data = await sendTurn();
+
+        // A managed token is good for 15 minutes. The desktop shell can mint a new
+        // one from the cloud session it already holds, so an expiry mid-session is
+        // recovered here — silently, then the same turn is sent once more — instead
+        // of telling the owner to go find Settings. Only when that session is gone
+        // too do we open the sign-in window, which is the one case a person must act.
+        if (data && data.ok === false && data.code === "managed_expired" && window.beezilla && window.beezilla.account) {
+          var minted = await window.beezilla.account.refresh();
+          var mintedData = minted && minted.ok ? minted.data : null;
+          if (mintedData && mintedData.ok) {
+            if (window.beezilla.app && window.beezilla.app.log) {
+              window.beezilla.app.log("managed token re-minted after expiry (expires " + (mintedData.expiresAt || "unknown") + ")");
+            }
+            data = await sendTurn();
+          } else if (mintedData && mintedData.needsSignIn) {
+            await window.beezilla.account.signin();
+          }
         }
 
         if (!data.ok) {

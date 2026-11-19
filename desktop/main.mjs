@@ -11,7 +11,7 @@
  * produces a window where every API call 401s while the preload "looks right".
  */
 import { app, BrowserWindow, Menu, session, shell, dialog, safeStorage, ipcMain, systemPreferences } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RuntimeSupervisor } from "./supervisor.mjs";
@@ -238,7 +238,13 @@ function registerSettingsIpc() {
       return { ok: true };
     }));
     // "Connect BeeZilla account" from the Settings screen: same flow as the menu item.
-    ipcMain.handle("beezilla:settings:connect", wrap(() => connectManagedAccount()));
+    ipcMain.handle("beezilla:settings:connect", wrap(() => refreshManagedAccount({ interactive: true })));
+    // The chat page's own recovery path: a turn came back `managed_expired`, so the
+    // page asks the shell to mint. Silent while the cloud session is alive; when it
+    // is not, `needsSignIn` tells the page to open the sign-in window instead.
+    ipcMain.handle("beezilla:account:refresh", wrap(() => refreshManagedAccount({ interactive: false })));
+    ipcMain.handle("beezilla:account:signin", wrap(() => refreshManagedAccount({ interactive: true })));
+    ipcMain.handle("beezilla:account:signout", wrap(() => signOutManagedAccount()));
     // Diagnostics from the UI: one click to the folder that holds main.log.
     ipcMain.handle("beezilla:app:openLogs", wrap(async () => {
       const { dir } = logPaths();
@@ -295,7 +301,7 @@ function installMenu() {
             // On by default: a normal install must be able to connect. Only an explicit
             // BZ_CONNECT_DISABLED=1 turns it off (air-gapped or white-label builds).
             enabled: process.env.BZ_CONNECT_DISABLED !== "1",
-            click: () => void connectManagedAccount(),
+            click: () => void refreshManagedAccount({ interactive: true }),
           },
           { type: "separator" },
           {
@@ -352,23 +358,30 @@ function settingsWindowFor(url) {
 }
 
 /**
- * Connect a BeeZilla account so the app can use OUR inference.
+ * Mint a managed credential into the store.
  *
- * The token is minted inside our own page (session cookie stays there) and handed
- * straight to the credential store; the store restart then puts it in the runtime's
- * environment. Nothing about the account itself is copied locally.
+ * `interactive` is the difference between a person connecting and the app keeping
+ * itself alive: a visible window waits for a sign-in, a hidden one attempts exactly
+ * one mint with the cloud session Electron already holds and gives up immediately.
+ * Either way the token is minted inside our own page, so the session cookie never
+ * enters this process.
  */
-async function connectManagedAccount() {
+let accountBusy = null;
+
+async function mintManagedCredential({ interactive }) {
   const win = new BrowserWindow({
     width: 520,
     height: 760,
+    show: interactive,
     title: "Connect BeeZilla",
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   win.setMenuBarVisibility(false);
 
-  const outcome = await connectAccount({
+  // A hidden window still needs a load to finish before executeJavaScript runs; the
+  // outcome is the same either way, so the flow does not branch on visibility.
+  return connectAccount({
     // undefined lets connectAccount resolve the baked default; an env value overrides.
     baseUrl: process.env.BZ_CLOUD_URL || undefined,
     open: (url) => win.loadURL(url),
@@ -377,66 +390,142 @@ async function connectManagedAccount() {
     close: () => {
       if (!win.isDestroyed()) win.destroy();
     },
-    signInDeadlineMs: Number(process.env.BZ_CONNECT_DEADLINE_MS ?? 180_000),
+    // Silent: one attempt, no polling — the caller decided the user is not watching.
+    signInDeadlineMs: interactive ? Number(process.env.BZ_CONNECT_DEADLINE_MS ?? 180_000) : 0,
+    pollMs: interactive ? 2_000 : 0,
   });
-
-  if (!outcome.ok) {
-    console.warn(`[desktop] connect: ${outcome.error}`);
-    // Never leave a blank BeeZilla window behind after a failed load.
-    if (!win.isDestroyed()) win.destroy();
-    if (!process.env.BZ_CONNECT_TEST && mainWindow && !mainWindow.isDestroyed()) {
-      void dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "BeeZilla inference",
-        message: outcome.unreachable
-          ? "BeeZilla is not reachable."
-          : outcome.needsSignIn
-            ? "Sign-in did not complete."
-            : "Could not connect.",
-        detail: `${outcome.error}\n\nYou can still use your own key: BeeZilla → Settings.`,
-      });
-    }
-    return outcome;
-  }
-
-  // Who signed in — saved before the credential so the restart that follows picks
-  // the name up in the same pass.
-  if (outcome.account) saveIdentity(outcome.account);
-
-  const saved = await settingsHandlers.saveInference({
-    provider: "beezilla",
-    key: outcome.token,
-    baseUrl: outcome.baseUrl,
-    model: outcome.model,
-    expiresAt: outcome.expiresAt,
-  });
-  console.log(
-    `[desktop] connect: BeeZilla inference connected (expires ${outcome.expiresAt ?? "unknown"}), runtime ${saved.started ? "started" : "restarted"}`,
-  );
-
-  // Search is a second capability and is allowed to be missing. Saying so once, at
-  // connect time, is better than a user discovering it later in a chat turn.
-  let searchSaved = null;
-  if (outcome.search?.ok) {
-    try {
-      const res = await settingsHandlers.saveManagedSearch({
-        token: outcome.search.token,
-        gateway: outcome.search.endpoint,
-        expiresAt: outcome.search.expiresAt,
-      });
-      searchSaved = res.saved;
-      console.log(`[desktop] connect: BeeZilla search connected (expires ${outcome.search.expiresAt ?? "unknown"})`);
-    } catch (err) {
-      console.warn(`[desktop] connect: search token not stored — ${err instanceof Error ? err.message : err}`);
-    }
-  } else if (outcome.search?.notDeployed) {
-    console.log("[desktop] connect: BeeZilla search is not enabled on this deployment — BYOK search only");
-  } else if (outcome.search?.error) {
-    console.warn(`[desktop] connect: search token unavailable — ${outcome.search.error}`);
-  }
-
-  return { ...outcome, token: undefined, search: { ...outcome.search, token: undefined, saved: searchSaved }, savedTo: saved.saved?.key };
 }
+
+/**
+ * Re-mint the managed token and put it in the runtime's environment.
+ *
+ * Why this exists: managed tokens are 15 minutes by design (see
+ * `src/lib/buzzy/inferenceToken.ts`), and the runtime reads `BZ_CHAT_KEY` once at
+ * spawn. Before this, the ONLY mint was a manual Connect, so 15 minutes after
+ * connecting the app answered every turn with "your sign-in has expired" and the
+ * only way back was to find Settings again. Now the app mints for itself: silently
+ * while the cloud session is alive (launch and on demand), and with the sign-in
+ * window when it is not. One restart carries the new token into the runtime.
+ */
+async function refreshManagedAccount({ interactive = false } = {}) {
+  if (accountBusy) return { ok: false, busy: true, needsSignIn: false, error: "a sign-in is already open" };
+  let release;
+  accountBusy = new Promise((r) => (release = r));
+  try {
+    const outcome = await mintManagedCredential({ interactive });
+
+    if (!outcome.ok) {
+      console.warn(
+        `[desktop] ${interactive ? "connect" : "refresh"}: ${outcome.error}${outcome.needsSignIn ? " (needs sign-in)" : ""}`,
+      );
+      if (interactive && !process.env.BZ_CONNECT_TEST && mainWindow && !mainWindow.isDestroyed()) {
+        void dialog.showMessageBox(mainWindow, {
+          type: "info",
+          title: "BeeZilla inference",
+          message: outcome.unreachable
+            ? "BeeZilla is not reachable."
+            : outcome.needsSignIn
+              ? "Sign-in did not complete."
+              : "Could not connect.",
+          detail: `${outcome.error}\n\nYou can still use your own key: BeeZilla → Settings.`,
+        });
+      }
+      return {
+        ok: false,
+        needsSignIn: Boolean(outcome.needsSignIn),
+        unreachable: Boolean(outcome.unreachable),
+        error: outcome.error,
+      };
+    }
+
+    // Who signed in — saved before the credential so the restart that follows picks
+    // the name up in the same pass.
+    if (outcome.account) saveIdentity(outcome.account);
+
+    const saved = await settingsHandlers.saveInference({
+      provider: "beezilla",
+      key: outcome.token,
+      baseUrl: outcome.baseUrl,
+      model: outcome.model,
+      expiresAt: outcome.expiresAt,
+    });
+    logLine(
+      `[desktop] ${interactive ? "connect" : "refresh"}: BeeZilla inference minted (expires ${outcome.expiresAt ?? "unknown"}), runtime ${saved.started ? "started" : "restarted"}`,
+    );
+
+    // Search is a second capability and is allowed to be missing: a 503 must never
+    // undo a working inference credential.
+    let searchSaved = null;
+    if (outcome.search?.ok) {
+      try {
+        const res = await settingsHandlers.saveManagedSearch({
+          token: outcome.search.token,
+          gateway: outcome.search.endpoint,
+          expiresAt: outcome.search.expiresAt,
+        });
+        searchSaved = res.saved;
+        logLine(`[desktop] ${interactive ? "connect" : "refresh"}: BeeZilla search minted (expires ${outcome.search.expiresAt ?? "unknown"})`);
+      } catch (err) {
+        console.warn(`[desktop] connect: search token not stored — ${err instanceof Error ? err.message : err}`);
+      }
+    } else if (outcome.search?.notDeployed) {
+      logLine("[desktop] connect: BeeZilla search is not enabled on this deployment — BYOK search only");
+    } else if (outcome.search?.error) {
+      console.warn(`[desktop] connect: search token unavailable — ${outcome.search.error}`);
+    }
+
+    return {
+      ok: true,
+      expiresAt: outcome.expiresAt ?? null,
+      restarted: saved.restarted ?? false,
+      started: saved.started ?? false,
+      savedTo: saved.saved?.key,
+      searchSaved,
+      // Kept in the shape the connect E2E test parses: a connect that silently
+      // drops the search half must look different from one that never asked.
+      search: {
+        ok: outcome.search?.ok === true,
+        notDeployed: outcome.search?.notDeployed === true,
+        error: outcome.search?.error ?? null,
+      },
+      account: outcome.account ?? null,
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.warn(`[desktop] refresh failed: ${error}`);
+    return { ok: false, needsSignIn: false, error };
+  } finally {
+    release();
+    accountBusy = null;
+  }
+}
+
+/**
+ * Log out of the BeeZilla account on this machine.
+ *
+ * The page's "Log out" used to POST `/api/auth/sign-out` to the LOCAL runtime, which
+ * has no better-auth session to end — it answered nothing, the page reloaded, and
+ * the account chip came straight back. The credential a desktop install actually
+ * holds is the managed token pair, so that is what logging out removes, along with
+ * the adopted name/email. The app stays usable: nothing configured, BYOK available.
+ */
+async function signOutManagedAccount() {
+  const identityDeleted = (() => {
+    try {
+      rmSync(identityFile(), { force: true });
+      delete process.env.BZ_LOCAL_OWNER_NAME;
+      delete process.env.BZ_LOCAL_OWNER_EMAIL;
+      return true;
+    } catch (err) {
+      console.warn("[desktop] could not remove identity.json:", err instanceof Error ? err.message : err);
+      return false;
+    }
+  })();
+  const res = await settingsHandlers.signOut();
+  logLine(`[desktop] sign out: managed credential cleared (identity ${identityDeleted ? "removed" : "kept"}), runtime restarted=${res.restarted}`);
+  return { ok: true, cleared: res.cleared, identityDeleted, restarted: res.restarted ?? false, status: res.status ?? null };
+}
+
 
 async function openSettings() {
   if (settingsWindow) {
@@ -545,7 +634,7 @@ async function createWindow() {
   if (process.env.BZ_CONNECT_TEST) {
     // Drive the real flow (window -> mint inside the page -> credential store) and
     // report it in one parseable line for scripts/test-desktop-connect.mjs.
-    const outcome = await connectManagedAccount();
+    const outcome = await refreshManagedAccount({ interactive: true });
     console.log(
       `CONNECT_RESULT:${JSON.stringify({
         ok: outcome.ok,
@@ -806,6 +895,24 @@ app.whenReady().then(async () => {
     await applyStoredInferenceToEnv();
     await applyStoredMusicToEnv();
     settingsHandlers = await registerSettingsIpc();
+    // A stored managed token lapses 15 minutes after it was minted, so a launch the
+    // next morning always starts expired. Try to mint a fresh one with the cloud
+    // session Electron still holds BEFORE the window opens: the ordinary case then
+    // never shows the owner an expiry at all. A silent attempt (hidden window, one
+    // try, no polling) — if the session is gone, the page offers sign-in instead.
+    if (process.env.BZ_MANAGED_EXPIRED === "1") {
+      logLine("[desktop] managed token expired — attempting a silent re-mint before the window opens");
+      const refreshed = await refreshManagedAccount({ interactive: false });
+      if (refreshed.ok) logLine(`[desktop] silent re-mint ok (expires ${refreshed.expiresAt ?? "unknown"})`);
+      else logLine(`[desktop] silent re-mint unavailable: ${refreshed.error}${refreshed.needsSignIn ? " (sign-in needed)" : ""}`);
+      if (process.env.BZ_REFRESH_TEST) {
+        // Headless probe: the launch path above IS the behaviour under test, so the
+        // result is reported from here rather than by re-running it.
+        console.log(`REFRESH_RESULT:${JSON.stringify({ ok: refreshed.ok, needsSignIn: refreshed.needsSignIn ?? false, expiresAt: refreshed.expiresAt ?? null, error: refreshed.error ?? null })}`);
+        setTimeout(() => app.quit(), 500);
+        return;
+      }
+    }
     await createWindow();
   } catch (err) {
     const detail = err instanceof Error ? err.stack || err.message : String(err);
@@ -840,5 +947,10 @@ app.on("before-quit", async (event) => {
 });
 
 app.on("window-all-closed", () => {
+  // A hidden mint window is the only window during a launch-time refresh, and
+  // destroying it (which the sign-in flow always does) must not be read as "the
+  // user closed the app": that quits the process mid-mint and skips the store
+  // write. Observed as a half-refreshed launch that exited 0 with no token.
+  if (accountBusy) return;
   if (process.platform !== "darwin") app.quit();
 });

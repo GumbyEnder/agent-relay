@@ -37,10 +37,25 @@ export const MINT_SCRIPT = `(async () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     });
-    const body = await res.json().catch(() => ({}));
-    return JSON.stringify({ status: res.status, body });
+    // Read the TEXT first: a host that answers a redirect or an HTML page (the
+    // consumer domain does exactly that for a path it does not own) used to surface
+    // as "the window returned something unreadable" with no way to tell what was
+    // reached. The origin travels with the answer for the same reason.
+    const text = await res.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { ok: false, error: "not JSON from " + location.origin + ": " + text.slice(0, 120).replace(/\\s+/g, " ") };
+    }
+    return JSON.stringify({ status: res.status, body, origin: location.origin, url: location.href });
   } catch (err) {
-    return JSON.stringify({ status: 0, body: { ok: false, error: String(err && err.message || err) } });
+    return JSON.stringify({
+      status: 0,
+      body: { ok: false, error: String(err && err.message || err) },
+      origin: location.origin,
+      url: location.href,
+    });
   }
 })()`;
 
@@ -159,16 +174,17 @@ export function interpretMintResult(raw) {
   }
   const status = Number(parsed?.status ?? 0);
   const body = parsed?.body ?? {};
+  const origin = typeof parsed?.origin === "string" ? parsed.origin : null;
 
   if (status === 401 || body.code === "unauthenticated") {
-    return { ok: false, needsSignIn: true, error: "sign in to your BeeZilla account to use BeeZilla inference" };
+    return { ok: false, needsSignIn: true, origin, error: "sign in to your BeeZilla account to use BeeZilla inference" };
   }
   if (status === 503 || body.code === "not_configured") {
     // Configuration problem on our side — do not blame the user's account.
-    return { ok: false, error: String(body.error ?? "BeeZilla inference is not available on this deployment yet") };
+    return { ok: false, origin, error: String(body.error ?? "BeeZilla inference is not available on this deployment yet") };
   }
   if (status !== 200 || body.ok !== true || typeof body.token !== "string" || !body.token) {
-    return { ok: false, error: String(body.error ?? `BeeZilla answered ${status || "nothing"}`) };
+    return { ok: false, origin, error: String(body.error ?? `BeeZilla answered ${status || "nothing"}`) };
   }
   return {
     ok: true,
@@ -176,6 +192,7 @@ export function interpretMintResult(raw) {
     expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : undefined,
     baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
     model: typeof body.model === "string" ? body.model : undefined,
+    origin,
   };
 }
 
@@ -210,9 +227,29 @@ export async function connectAccount(deps) {
 
   let outcome;
   let search = null;
+  const baseOrigin = (() => {
+    try {
+      return new URL(base).origin;
+    } catch {
+      return base;
+    }
+  })();
+  // A mint is only valid on the origin whose cookie it rode. When the sign-in page
+  // navigates somewhere else (the console 301s its BeeZilla pages to the product
+  // domain since the 19 Nov split), the fetch runs on the wrong host, and the only
+  // honest answer is to name both hosts rather than report "unreadable".
+  const offOrigin = (result) =>
+    result && !result.ok && result.origin && result.origin !== baseOrigin
+      ? {
+          ...result,
+          offOrigin: true,
+          needsSignIn: false,
+          error: `the sign-in window left ${baseOrigin} for ${result.origin}; the app mints from ${baseOrigin}. Set BZ_CLOUD_URL to the host that serves BeeZilla sign-in. (${result.error})`,
+        }
+      : result;
   try {
     try {
-      outcome = interpretMintResult(await deps.evaluate(MINT_SCRIPT));
+      outcome = offOrigin(interpretMintResult(await deps.evaluate(MINT_SCRIPT)));
     } catch (err) {
       if (isUnreachable(err)) return { ok: false, unreachable: true, error: unreachableMessage(base) };
       throw err;
@@ -228,7 +265,7 @@ export async function connectAccount(deps) {
       await new Promise((r) => setTimeout(r, pollMs));
       if (deps.isOpen && !deps.isOpen()) break;
       try {
-        outcome = interpretMintResult(await deps.evaluate(MINT_SCRIPT));
+        outcome = offOrigin(interpretMintResult(await deps.evaluate(MINT_SCRIPT)));
       } catch (err) {
         if (isUnreachable(err)) {
           return { ok: false, unreachable: true, error: unreachableMessage(base) };

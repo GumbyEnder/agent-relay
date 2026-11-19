@@ -30,6 +30,20 @@ contextBridge.exposeInMainWorld("beezilla", {
     /** sign in on our site and store the short-lived inference token */
     connect: () => call("settings:connect"),
   },
+  /**
+   * The account itself — the thing a person thinks "log out" and "sign in" refer to.
+   *
+   * A desktop install's session is the local owner row: `/api/auth/sign-out` on this
+   * runtime has nothing to end, so the page cannot log out with a fetch. These three
+   * channels are the honest version: `refresh` re-mints silently (used automatically
+   * when a turn says the token expired), `signin` opens the sign-in window, and
+   * `signout` drops the managed credential and the adopted name.
+   */
+  account: {
+    refresh: () => call("account:refresh"),
+    signin: () => call("account:signin"),
+    signout: () => call("account:signout"),
+  },
   updates: {
     /** installed version, what is available, download progress, last error */
     status: () => call("update:status"),
