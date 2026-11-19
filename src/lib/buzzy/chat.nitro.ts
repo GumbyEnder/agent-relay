@@ -606,9 +606,9 @@ export default defineEventHandler(async (event) => {
       return {
         ok: true,
         configured: videoConfigured(),
-        // Per plan: 10 on Pro, 1 on Free (Shane, 2026-11-18). The page shows this
-        // number, so it must be the same one the chat turn enforces.
-        dailyLimit: videoDailyLimit((await getEntitlement(user.id)).plan),
+        // One flat cap for every plan (room 6615). The page shows this number,
+        // so it must be the same one the chat turn enforces.
+        dailyLimit: videoDailyLimit(),
         used: await videoJobsToday(user.id),
         recipes: VIDEO_RECIPES,
       };

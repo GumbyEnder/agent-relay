@@ -806,10 +806,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   } else if (wantsVideo && videoRequest) {
     const label = recipeById(videoRequest.recipe)?.label ?? "video";
-    // Read the plan once: the limit is per plan (10 Pro / 1 Free, Shane
-    // 2026-11-18), and a second entitlement read inside the branch would be the
-    // kind of double query that makes two numbers disagree later.
-    const videoLimit = videoDailyLimit((await getEntitlement(userId)).plan);
+    // One flat cap for every plan (room 6615: DAILY_LIMIT_PER_USER=5). No
+    // entitlement read — the number must not vary by plan, by construction.
+    const videoLimit = videoDailyLimit();
     if (!videoConfigured()) {
       videoRefusal = { code: "not_configured", error: "The video service is not set up on this deployment" };
       messages[0]!.content +=
@@ -1372,7 +1371,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                   errorCode: "not_configured",
                 };
               }
-              if ((await videoJobsToday(userId)) >= videoDailyLimit((await getEntitlement(userId)).plan)) {
+              if ((await videoJobsToday(userId)) >= videoDailyLimit()) {
                 return {
                   message: "generate_video failed: today's video limit for this plan is used up. Nothing was charged.",
                   errorCode: "daily_limit",

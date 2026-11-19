@@ -29,7 +29,6 @@
  */
 import { createHash } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { DEFAULT_PLAN, PLANS, type PlanName } from "./entitlements";
 
 const env = (k: string) => (process.env[k] ?? "").trim();
 
@@ -43,23 +42,23 @@ export const VIDEO_WRITER = env("BZ_VIDEO_TEXT_MODEL") || "gemini-flash-latest";
 export const VIDEO_BRAND = env("BZ_VIDEO_BRAND") === "1";
 
 /**
- * Videos a user may make per UTC day, by plan (Shane, 2026-11-18: 10 on Pro,
- * 1 on Free). This used to be one flat number, which meant a Pro account hit the
- * same wall as a free one.
+ * Videos a user may make per UTC day. ONE flat cap, identical on free, starter
+ * and pro (room 6615, Shane, 2026-11-17 15:46 ET: `DAILY_LIMIT_PER_USER=5`; 6874
+ * restates it as "5 videos per user per day"). There is no plan split and there
+ * never was one — a per-plan table here was a product change with an invented
+ * citation, and it is gone.
  *
- * The kit itself enforces a SINGLE per-user cap (`DAILY_LIMIT_PER_USER` on
- * serve.py) because it has no idea what a BeeZilla plan is. So the render
- * service is configured at the highest plan limit, and the plan-specific gate
- * lives here — the kit's 429 is the backstop, never the product rule.
- *
- * `BZ_VIDEO_DAILY_LIMIT_<PLAN>` overrides one plan without a deploy of the
- * others; `BZ_VIDEO_DAILY_LIMIT` is deliberately gone, because a flat override
- * is the bug this replaces.
+ * The kit enforces the same flat number (`DAILY_LIMIT_PER_USER` on serve.py)
+ * because it has no idea what a BeeZilla plan is; its 429 is the backstop, never
+ * the product rule. `BZ_VIDEO_DAILY_LIMIT` is the only override, for ops. Never
+ * reintroduce a plan argument: the signature takes one only so existing callers
+ * cannot silently disagree with the kit.
  */
-export function videoDailyLimit(plan: PlanName | string | null | undefined): number {
-  const p: PlanName = plan === "free" || plan === "starter" || plan === "pro" ? plan : DEFAULT_PLAN;
-  const override = Number(env(`BZ_VIDEO_DAILY_LIMIT_${p.toUpperCase()}`) || 0);
-  return Math.max(1, override > 0 ? override : PLANS[p].videosPerDay);
+export const DAILY_LIMIT_PER_USER = 5;
+
+export function videoDailyLimit(): number {
+  const override = Number(env("BZ_VIDEO_DAILY_LIMIT") || 0);
+  return Math.max(1, override > 0 ? override : DAILY_LIMIT_PER_USER);
 }
 
 /**
