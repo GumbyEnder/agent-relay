@@ -26,7 +26,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import * as wb from "../src/lib/buzzy/whiteboards";
-import { deleteAccountData } from "../src/lib/buzzy/portability";
+import { deleteAccountData, DELETION_STATEMENTS } from "../src/lib/buzzy/portability";
 import type { Sql } from "../src/lib/db";
 
 let pass = 0;
@@ -232,12 +232,25 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     const left = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM buzzy_whiteboard_versions WHERE id = $1", [oldest.id]);
     eq(left.rows[0]!.n, 0, "and the next save clears it out");
   });
-  await ok("deleting the account deletes its boards and their history", async () => {
-    await route("u3", "PUT", "talk", { state: board([card("bye")]), baseRev: null });
+  await ok("closing an account removes its boards and their history, and no one else's", async () => {
+    const tables = ["buzzy_whiteboard_versions", "buzzy_whiteboards"];
+    const order = Object.keys(DELETION_STATEMENTS);
+    for (const t of tables) truthy(DELETION_STATEMENTS[t], `${t} is not removed with the account`);
+    truthy(order.indexOf("buzzy_whiteboard_versions") < order.indexOf("buzzy_whiteboards"), "the history goes first");
+    for (const who of ["u3", "u4"]) {
+      eq((await route(who, "PUT", "talk", { state: board([card("bye-" + who)]), baseRev: null })).status, 200, who);
+    }
+    const count = async (t: string, who: string) =>
+      (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${t} WHERE user_id = $1`, [who])).rows[0]!.n;
+    const othersBefore = await Promise.all(tables.map((t) => count(t, "u1")));
     const receipt = await deleteAccountData(sql, "u3");
-    eq([receipt.buzzy_whiteboards, receipt.buzzy_whiteboard_versions], [1, 1]);
+    eq([receipt.buzzy_whiteboard_versions, receipt.buzzy_whiteboards], [1, 1], "the receipt counts them");
+    for (const t of tables) {
+      eq(await count(t, "u3"), 0, `${t} left behind:`);
+      eq(await count(t, "u4"), 1, `${t} someone else's rows:`);
+    }
+    eq(await Promise.all(tables.map((t) => count(t, "u1"))), othersBefore, "and u1's untouched");
     eq((await route("u3", "GET", "talk")).body.board, null);
-    truthy(((await route("u1", "GET", "sess_a1")).body.board), "someone else's boards are untouched");
   });
 
   // ── Two computers, running the real browser code ───────────────────────
