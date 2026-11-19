@@ -80,6 +80,35 @@
   #colorS { left:14px; top:9px; }
   #palette { display:flex; flex-wrap:wrap; gap:2px; max-width:250px; }
   #palette button { width:15px; height:15px; padding:0; border-radius:3px; border:1px solid #333; }
+  #textbar { display:flex; visibility:hidden; align-items:center; gap:0.4rem; flex-wrap:wrap;
+             padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
+  #textbar.on { visibility:visible; }
+  #textbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  #fontSize { width:64px; background:#101010; border:1px solid var(--bz-line); color:var(--bz-text);
+              border-radius:8px; padding:0.25rem; font-size:0.8rem; }
+  .text-edit { position:absolute; z-index:6; outline:1px dashed var(--bz-yellow); outline-offset:2px;
+               min-width:24px; white-space:pre; cursor:text; padding:0; margin:0; border:0;
+               line-height:1.3; caret-color:var(--bz-yellow); }
+  #selbar { display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;
+            padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
+  @media (max-width: 640px) { #selHint, #textbar .hint { display:none; } }
+  #selbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  #canvasPanel { position:absolute; z-index:8; right:12px; top:12px; width:250px; display:none;
+                 background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
+                 padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
+  #canvasPanel.on { display:block; }
+  #canvasPanel .row { margin-bottom:0.4rem; }
+  #canvasPanel label { color:var(--bz-muted); font-size:0.78rem; width:88px; display:inline-block; }
+  #canvasPanel input[type="number"] { width:74px; background:#101010; border:1px solid var(--bz-line);
+                                      color:var(--bz-text); border-radius:6px; padding:0.2rem 0.3rem; font-size:0.78rem; }
+  #transformPanel { position:absolute; z-index:8; right:12px; top:12px; width:230px; display:none;
+                    background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
+                    padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
+  #transformPanel.on { display:block; }
+  #transformPanel .row { margin-bottom:0.4rem; }
+  #transformPanel label { color:var(--bz-muted); font-size:0.78rem; width:78px; }
+  #transformPanel input { width:70px; background:#101010; border:1px solid var(--bz-line);
+                          color:var(--bz-text); border-radius:6px; padding:0.2rem 0.3rem; font-size:0.78rem; }
   select { background:#101010; border:1px solid var(--bz-line); color:var(--bz-text); border-radius:8px;
            padding:0.3rem; font-size:0.8rem; }
 </style>
@@ -112,7 +141,9 @@
 </header>
 
 <div id="toolbar">
-  <button class="tool on" data-tool="select" title="Select / move (S)"><span class="glyph">▣</span></button>
+  <button class="tool on" data-tool="select" title="Select / move a mark (S)"><span class="glyph">▣</span></button>
+  <button class="tool" data-tool="selrect" title="Rectangle select (M)"><span class="glyph">⬚</span></button>
+  <button class="tool" data-tool="selfree" title="Free-form select (N)"><span class="glyph">⬡</span></button>
   <button class="tool" data-tool="pencil" title="Pencil — hard edge (P)"><span class="glyph">✏</span></button>
   <button class="tool" data-tool="brush" title="Brush (B)"><span class="glyph">🖌</span></button>
   <button class="tool" data-tool="eraser" title="Eraser — erases pixels (E)"><span class="glyph">◻</span></button>
@@ -131,6 +162,8 @@
   <button class="tool" data-tool="arrow" title="Arrow (9)"><span class="glyph">➔</span></button>
   <button class="tool" data-tool="bubble" title="Speech bubble (6)"><span class="glyph">💬</span></button>
   <button class="tool" data-tool="text" title="Text — click to place a text box (T)"><span class="glyph">T</span></button>
+  <button class="tool" data-tool="zoom" title="Zoom (Z) — click to zoom in, Alt-click out"><span class="glyph">⌕</span></button>
+  <button class="tool" data-tool="pan" title="Pan (H) — drag the board"><span class="glyph">✥</span></button>
   <span class="sep"></span>
   <div id="sizeWrap"><span>Size</span><input id="size" type="range" min="1" max="50" value="6" /><span id="sizeVal">6</span></div>
   <div id="tolWrap"><span>Fill tol.</span><input id="tol" type="range" min="0" max="120" value="24" /><span id="tolVal">24</span></div>
@@ -140,6 +173,16 @@
     <input id="colorS" type="color" value="#ffffff" />
   </div>
   <div id="palette"></div>
+  <span class="sep"></span>
+  <select id="zoomSel" title="Zoom">
+    <option value="0.25">25%</option><option value="0.5">50%</option><option value="0.75">75%</option>
+    <option value="1" selected>100%</option><option value="2">200%</option><option value="4">400%</option>
+    <option value="8">800%</option>
+  </select>
+  <button id="zoomFit" title="Fit the board in the window">Fit</button>
+  <button id="gridBtn" title="Gridlines">Grid</button>
+  <button id="rulerBtn" title="Rulers">Rulers</button>
+  <button id="canvasBtn" title="Canvas size, background, open, file to the Library">Canvas…</button>
   <select id="op" title="Shape style">
     <option value="outline">Outline</option>
     <option value="fill">Fill</option>
@@ -147,10 +190,75 @@
   </select>
 </div>
 
+<div id="textbar">
+  <span class="lbl">Text</span>
+  <select id="fontFamily" title="Font">
+    <option value="Inter, 'Segoe UI', sans-serif">Inter (default)</option>
+    <option value="Arial, Helvetica, sans-serif">Arial</option>
+    <option value="Verdana, Geneva, sans-serif">Verdana</option>
+    <option value="Georgia, 'Times New Roman', serif">Georgia</option>
+    <option value="'Times New Roman', Times, serif">Times New Roman</option>
+    <option value="'Courier New', Courier, monospace">Courier New</option>
+    <option value="Impact, 'Arial Black', sans-serif">Impact</option>
+    <option value="'Comic Sans MS', 'Comic Sans', cursive">Comic Sans</option>
+  </select>
+  <input id="fontSize" type="number" min="6" max="240" step="1" value="20" title="Text size" />
+  <button id="tBold" title="Bold"><b>B</b></button>
+  <button id="tItalic" title="Italic"><i>I</i></button>
+  <button id="tUnder" title="Underline"><u>U</u></button>
+  <label class="lbl" style="display:flex;align-items:center;gap:0.3rem">
+    <input type="checkbox" id="tBg" /> Background
+  </label>
+  <input id="tBgColor" type="color" value="#000000" title="Text background" />
+  <span class="hint">Click the board to type. Double-click text to edit it; Esc finishes.</span>
+</div>
+
+<div id="selbar">
+  <span class="lbl">Selection</span>
+  <button id="selAll" title="Select all (Ctrl/Cmd+A)">Select all</button>
+  <button id="selCopy" title="Copy (Ctrl/Cmd+C)">Copy</button>
+  <button id="selCut" title="Cut (Ctrl/Cmd+X)">Cut</button>
+  <button id="selPaste" title="Paste (Ctrl/Cmd+V)">Paste</button>
+  <button id="selDel" title="Delete the selected area (Delete)">Delete</button>
+  <button id="selCrop" title="Crop the canvas to the selection">Crop</button>
+  <span class="sep" style="width:1px;height:20px;background:var(--bz-line);margin:0 0.3rem"></span>
+  <button id="selResize" title="Resize / skew the selection, or the whole canvas when nothing is selected">Resize / skew…</button>
+  <button id="rotL" title="Rotate 90° left">⟲ 90°</button>
+  <button id="rotR" title="Rotate 90° right">⟳ 90°</button>
+  <button id="rot180" title="Rotate 180°">180°</button>
+  <button id="flipH" title="Flip horizontal">Flip H</button>
+  <button id="flipV" title="Flip vertical">Flip V</button>
+  <span class="hint" id="selHint">Drag a box, or a free shape, then move / copy / cut / crop it.</span>
+</div>
+
 <div id="work">
   <div id="stage">
     <canvas id="board"></canvas>
     <div id="layers"></div>
+    <div id="canvasPanel">
+      <div class="row" style="display:flex;justify-content:space-between;align-items:center"><b>Canvas</b><button id="canvasClose">Close</button></div>
+      <div class="row"><label>Width</label><input id="cvW" type="number" min="1" max="8000" value="1000" /> px</div>
+      <div class="row"><label>Height</label><input id="cvH" type="number" min="1" max="8000" value="700" /> px</div>
+      <div class="row"><label>Background</label><input id="cvBg" type="color" value="#141414" /></div>
+      <div class="row"><button id="cvApply" class="primary">Apply size</button></div>
+      <div class="row" style="gap:0.4rem;display:flex;flex-wrap:wrap;margin-top:0.5rem">
+        <button id="cvOpen" title="Open an image from disk and edit it here">Open image…</button>
+        <button id="cvLibrary" title="File the board as a picture in this project's Library">Save to Library</button>
+        <button id="cvJpg" title="Download a JPG of the board">Export JPG</button>
+      </div>
+      <input id="cvFile" type="file" accept="image/*" style="display:none" />
+      <div class="hint" id="cvStatus" style="margin-top:0.4rem"></div>
+    </div>
+    <div id="transformPanel">
+      <div class="row" style="display:flex;align-items:center;justify-content:space-between"><b>Resize / skew</b><span class="hint" id="rsTarget"></span></div>
+      <div class="row" style="display:flex;align-items:center"><label>Width %</label><input id="rsW" type="number" value="100" min="1" max="2000" /></div>
+      <div class="row" style="display:flex;align-items:center"><label>Height %</label><input id="rsH" type="number" value="100" min="1" max="2000" /></div>
+      <div class="row" style="display:flex;align-items:center"><label>Skew X °</label><input id="rsSx" type="number" value="0" min="-80" max="80" /></div>
+      <div class="row" style="display:flex;align-items:center"><label>Skew Y °</label><input id="rsSy" type="number" value="0" min="-80" max="80" /></div>
+      <div class="row" style="display:flex;gap:0.4rem;justify-content:flex-end">
+        <button id="rsCancel">Cancel</button><button class="primary" id="rsApply">Apply</button>
+      </div>
+    </div>
     <div id="result">
       <img id="resultImg" alt="" />
       <!-- Region edit: drag a box on the picture, say what should change inside it.
@@ -336,6 +444,13 @@
 
     // One renderer for screen, PNG, JPG and the model's reference: the exported file
     // cannot drift from the board by having a second drawing routine.
+    // A text mark anchored to another mark rides on it; the stored x1/y1 is the
+    // fallback for when that mark is gone (deleting the road must not delete the note).
+    function textPos(s) {
+      if (s.anchor) { var a = anchorPoint(s.anchor); if (a) return { x: a.x, y: a.y }; }
+      return { x: s.x1, y: s.y1 };
+    }
+
     function drawMark(g, s, isDraft) {
       var w = s.width || 3;
       g.save();
@@ -362,7 +477,7 @@
           }
         }
       } else if (s.tool === "text") {
-        var at = { x: s.x1, y: s.y1 };
+        var at = textPos(s);
         g.font = fontFor(s);
         g.textBaseline = "top";
         g.fillStyle = stroke;
@@ -430,7 +545,8 @@
       if (s.tool === "text") {
         var lines = String(s.text || "").split("\n");
         var fs = s.size || 20;
-        return { x: s.x1 - 4, y: s.y1 - 3, w: Math.max(20, (s.w || 90)) , h: lines.length * fs * 1.3 + 6 };
+        var at = textPos(s);
+        return { x: at.x - 4, y: at.y - 3, w: Math.max(20, s.w || measureTextWidth(s)), h: lines.length * fs * 1.3 + 6 };
       }
       if (s.tool === "polygon") {
         var ps = s.points || [];
@@ -445,7 +561,31 @@
       return { x: x, y: y, w: w, h: h };
     }
 
-    function paintOverlays() { /* stage 3 adds the selection marquee */ }
+    // Marching-ants chrome lives in screen space: it must not move or scale with the
+    // document, and it must never be part of an export.
+    function paintOverlays(g) {
+      var z = view.zoom, px = view.panX, py = view.panY;
+      function box(x, y, w, h) { g.strokeRect(x * z + px, y * z + py, w * z, h * z); }
+      function poly(pts) {
+        g.beginPath();
+        pts.forEach(function (p, i) { var x = p.x * z + px, y = p.y * z + py; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+      }
+      g.save();
+      g.lineWidth = 1.5;
+      g.setLineDash([6, 4]);
+      g.strokeStyle = "rgba(255,212,13,0.95)";
+      if (marquee) {
+        var m = marquee;
+        box(Math.min(m.x1, m.x2), Math.min(m.y1, m.y2), Math.abs(m.x2 - m.x1), Math.abs(m.y2 - m.y1));
+      }
+      if (sel) {
+        if (sel.path) { poly(sel.path); g.closePath(); g.stroke(); }
+        else box(sel.x, sel.y, sel.w, sel.h);
+      }
+      if (floating) box(floating.x, floating.y, floating.w, floating.h);
+      if (polySelPath && polySelPath.length > 1) { poly(polySelPath); g.stroke(); }
+      g.restore();
+    }
 
     function paint() {
       var dpr = window.devicePixelRatio || 1;
@@ -465,15 +605,21 @@
       g.save();
       g.beginPath(); g.rect(0, 0, doc.w, doc.h); g.clip();
       if (rasterCv) g.drawImage(rasterCv, 0, 0, doc.w, doc.h);
-      doc.strokes.forEach(function (st) { drawMark(g, st, false); });
+      doc.strokes.forEach(function (st) { if (st !== editingMark) drawMark(g, st, false); });
       if (draft) drawMark(g, draft, true);
+      if (floating) g.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
+      // Gridlines go ON TOP of the art. Under the raster they were invisible the moment
+      // there was a pixel layer, which on this board is always (the paper is painted).
+      if (showGrid) drawGrid(g);
       g.restore();
       // paper edge
       g.save(); g.strokeStyle = "rgba(255,255,255,0.09)"; g.lineWidth = 1 / view.zoom;
       g.strokeRect(0.5 / view.zoom, 0.5 / view.zoom, doc.w, doc.h); g.restore();
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       paintOverlays(g);
+      if (showRulers) drawRulers(g);
       syncImages();
+      positionEditor();
     }
 
     // Screen (CSS px inside #stage) → document coordinates.
@@ -564,13 +710,29 @@
       if (!jobId) return;
       if (saving) { saveAgain = true; return; }
       saving = true;
-      var body = JSON.stringify({ action: "save", jobId: jobId, board: boardJson() });
+      var body;
+      try {
+        body = JSON.stringify({ action: "save", jobId: jobId, board: boardJson() });
+      } catch (e) {
+        // A saver that wedges on one bad snapshot is worse than a failed save: it
+        // silently stops persisting everything after it.
+        saving = false; saveAgain = false;
+        setSaved(false);
+        console.error("[sketch] board serialise failed:", e && e.message);
+        setStatus("Could not serialise the board: " + e.message);
+        return;
+      }
       // Chromium refuses a keepalive request whose body is over 64 KiB, and a board
       // with a pixel layer is far past that: every save would fail silently. Keep the
       // unload guarantee only for boards that fit, and let the ordinary fetch carry
       // the big ones (the 1.2s autosave is what persists those).
+      // No `keepalive`. Chromium caps a keepalive request at 64 KiB for the whole
+      // request, not just the body, and a board with a pixel layer crosses it easily —
+      // measured: a 45 KB body throws `TypeError: Failed to fetch` and the save is
+      // silently lost. The 1.2s autosave is what actually persists a board; a plain
+      // fetch is what makes it land.
       fetch("/api/buzzy/art", {
-        method: "POST", credentials: "same-origin", keepalive: body.length < 60000,
+        method: "POST", credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: body,
       }).then(function (r) { if (!r.ok) throw new Error("save failed"); setSaved(true); })
@@ -675,6 +837,492 @@
       setStatus("Picked " + hex + (secondary ? " as secondary." : " as primary."));
     }
 
+    // ── text ──────────────────────────────────────────────────────────
+    // Paint's text tool is a box you type into, not a prompt that hides the board.
+    // The mark stays editable for the life of the document: double-click re-opens
+    // the same box, in place, at the same font.
+    var editingMark = null, editEl = null, markDrag = null;
+
+    function measureTextWidth(m) {
+      var fs = m.size || 20;
+      ctx.save();
+      ctx.font = fontFor(m);
+      var w = 24;
+      String(m.text || "").split("\n").forEach(function (ln) { w = Math.max(w, ctx.measureText(ln).width); });
+      ctx.restore();
+      return w + 8;
+    }
+    function barOpts() {
+      var fam = document.getElementById("fontFamily");
+      var sz = document.getElementById("fontSize");
+      return {
+        font: fam ? fam.value : "Inter, 'Segoe UI', sans-serif",
+        size: Math.max(6, Math.min(240, Number(sz && sz.value) || 20)),
+        bold: document.getElementById("tBold").classList.contains("on"),
+        italic: document.getElementById("tItalic").classList.contains("on"),
+        underline: document.getElementById("tUnder").classList.contains("on"),
+        bg: document.getElementById("tBg").checked ? document.getElementById("tBgColor").value : null,
+      };
+    }
+    function adoptTextStyle(m) {
+      document.getElementById("fontFamily").value = m.font || "Inter, 'Segoe UI', sans-serif";
+      document.getElementById("fontSize").value = m.size || 20;
+      document.getElementById("tBold").classList.toggle("on", !!m.bold);
+      document.getElementById("tItalic").classList.toggle("on", !!m.italic);
+      document.getElementById("tUnder").classList.toggle("on", !!m.underline);
+      document.getElementById("tBg").checked = !!m.bg;
+      if (m.bg) document.getElementById("tBgColor").value = m.bg;
+    }
+    function syncTextBar() {
+      var sel = null;
+      for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) sel = doc.strokes[i];
+      var show = tool === "text" || (sel && sel.tool === "text");
+      document.getElementById("textbar").classList.toggle("on", !!show);
+      if (sel && sel.tool === "text") adoptTextStyle(sel);
+      else if (tool === "text") {
+        // keep the bar's own values, but reflect the current colour
+      }
+    }
+
+    function editorFont(m) {
+      return (m.italic ? "italic " : "") + (m.bold ? "700 " : "400 ") +
+        Math.max(1, (m.size || 20) * view.zoom) + "px " + (m.font || "Inter, 'Segoe UI', sans-serif");
+    }
+    function positionEditor() {
+      if (!editEl || !editingMark) return;
+      var at = textPos(editingMark);
+      editEl.style.left = (at.x * view.zoom + view.panX) + "px";
+      editEl.style.top = (at.y * view.zoom + view.panY) + "px";
+      editEl.style.font = editorFont(editingMark);
+      editEl.style.color = editingMark.color || colorP;
+      editEl.style.background = editingMark.bg || "transparent";
+    }
+    function openTextEditor(mark, isNew) {
+      if (editEl) closeTextEditor();
+      editingMark = mark;
+      var el = document.createElement("div");
+      el.className = "text-edit";
+      el.setAttribute("contenteditable", "true");
+      el.setAttribute("autocorrect", "off");
+      el.setAttribute("autocapitalize", "off");
+      el.spellcheck = false;
+      el.textContent = mark.text || "";
+      stage.appendChild(el);
+      editEl = el;
+      positionEditor();
+      el.addEventListener("input", function () {
+        mark.text = el.textContent || "";
+        mark.w = measureTextWidth(mark);
+        positionEditor();
+        paint();
+      });
+      el.addEventListener("keydown", function (e) {
+        e.stopPropagation();
+        if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+          e.preventDefault();
+          closeTextEditor();
+        }
+      });
+      el.addEventListener("blur", function () { if (editEl === el) closeTextEditor(); });
+      el.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      el.focus();
+      if (!isNew) {
+        var rg = document.createRange();
+        rg.selectNodeContents(el);
+        rg.collapse(false);
+        var sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(rg);
+      }
+      setStatus(isNew ? "Type, then click away or press Esc." : "Editing — Esc finishes.");
+      paint();
+    }
+    function closeTextEditor() {
+      if (!editEl) { editingMark = null; return; }
+      var el = editEl, m = editingMark;
+      editEl = null; editingMark = null;
+      if (m) {
+        m.text = String(el.textContent || "").replace(/\u00a0/g, " ");
+        if (!m.text.trim()) doc.strokes = doc.strokes.filter(function (x) { return x !== m; });
+        else { m.w = measureTextWidth(m); if (m.anchor && !anchorPoint(m.anchor)) m.anchor = null; }
+      }
+      if (el.parentNode) el.parentNode.removeChild(el);
+      paint();
+      syncTextBar();
+      autoSave();
+      setStatus(doc.strokes.length + " marks on the board");
+    }
+    function editTextMark(hit) {
+      snapshot();
+      adoptTextStyle(hit);
+      selectedStroke = hit.id;
+      syncTextBar();
+      openTextEditor(hit, false);
+    }
+    // Bar values apply to the mark already selected, so restyling is one click.
+    (function wireTextBar() {
+      function apply() {
+        var sel = null;
+        for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) sel = doc.strokes[i];
+        if (!sel || sel.tool !== "text") return;
+        var o = barOpts();
+        sel.font = o.font; sel.size = o.size; sel.bold = o.bold; sel.italic = o.italic;
+        sel.underline = o.underline; sel.bg = o.bg;
+        sel.w = measureTextWidth(sel);
+        paint(); autoSave();
+      }
+      ["fontFamily", "fontSize", "tBgColor"].forEach(function (id) {
+        document.getElementById(id).addEventListener("input", apply);
+        document.getElementById(id).addEventListener("change", apply);
+      });
+      ["tBold", "tItalic", "tUnder"].forEach(function (id) {
+        document.getElementById(id).addEventListener("click", function () {
+          document.getElementById(id).classList.toggle("on");
+          apply();
+        });
+      });
+      document.getElementById("tBg").addEventListener("change", apply);
+    })();
+
+    // ── view: zoom, pan, rulers, gridlines ───────────────────────────
+    var showGrid = false, showRulers = false, spaceDown = false;
+
+    // Zoom keeps the document point under the cursor fixed. Every pointer conversion
+    // goes through pt(), so the only thing a zoom changes is the transform and the pan.
+    function setZoom(z, atClient) {
+      z = Math.max(0.05, Math.min(8, z));
+      var r = canvas.getBoundingClientRect();
+      var sx = atClient ? atClient.x - r.left : r.width / 2;
+      var sy = atClient ? atClient.y - r.top : r.height / 2;
+      var docX = (sx - view.panX) / view.zoom, docY = (sy - view.panY) / view.zoom;
+      view.zoom = z;
+      view.panX = sx - docX * z;
+      view.panY = sy - docY * z;
+      var zoomEl = document.getElementById("zoomSel");
+      if (zoomEl) {
+        var fixed = ["0.25", "0.5", "0.75", "1", "2", "4", "8"];
+        zoomEl.value = fixed.indexOf(String(Math.round(z * 100) / 100)) >= 0 ? String(Math.round(z * 100) / 100) : "";
+      }
+      paint(); syncSelBar();
+    }
+    function zoomToFit() {
+      var r = canvas.getBoundingClientRect();
+      var z = Math.min(1, Math.min((r.width - 40) / Math.max(1, doc.w), (r.height - 40) / Math.max(1, doc.h)));
+      view.zoom = Math.max(0.05, z);
+      view.panX = Math.round((r.width - doc.w * view.zoom) / 2);
+      view.panY = Math.round((r.height - doc.h * view.zoom) / 2);
+      paint();
+    }
+    function drawGrid(g) {
+      g.save();
+      g.strokeStyle = "rgba(255,255,255,0.07)";
+      g.lineWidth = 1 / view.zoom;
+      g.beginPath();
+      for (var x = 40; x < doc.w; x += 40) { g.moveTo(x, 0); g.lineTo(x, doc.h); }
+      for (var y = 40; y < doc.h; y += 40) { g.moveTo(0, y); g.lineTo(doc.w, y); }
+      g.stroke();
+      g.restore();
+    }
+    // Rulers are drawn in screen space: they measure the document but belong to the
+    // window, so they do not scale, move with the pan, or appear in an export.
+    function drawRulers(g) {
+      var band = 20, w = stage.clientWidth, h = stage.clientHeight;
+      g.save();
+      g.fillStyle = "rgba(12,12,12,0.92)";
+      g.fillRect(0, 0, w, band); g.fillRect(0, 0, band, h);
+      g.strokeStyle = "rgba(255,255,255,0.12)"; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(0, band + 0.5); g.lineTo(w, band + 0.5);
+      g.moveTo(band + 0.5, 0); g.lineTo(band + 0.5, h); g.stroke();
+      g.fillStyle = "rgba(200,200,200,0.75)";
+      g.font = "9px Inter, sans-serif";
+      var stepDoc = 50;
+      while (stepDoc * view.zoom < 46) stepDoc *= 2;
+      for (var x = Math.ceil((-view.panX / view.zoom) / stepDoc) * stepDoc; x * view.zoom + view.panX < w; x += stepDoc) {
+        var sx = x * view.zoom + view.panX;
+        if (sx < band) continue;
+        g.fillRect(sx, band - 4, 1, 4);
+        g.fillText(String(x), sx + 2, band - 7);
+      }
+      for (var y = Math.ceil((-view.panY / view.zoom) / stepDoc) * stepDoc; y * view.zoom + view.panY < h; y += stepDoc) {
+        var sy = y * view.zoom + view.panY;
+        if (sy < band) continue;
+        g.fillRect(band - 4, sy, 4, 1);
+        g.save(); g.translate(band - 7, sy + 2); g.rotate(-Math.PI / 2); g.fillText(String(y), 0, 0); g.restore();
+      }
+      g.restore();
+    }
+
+    // ── selection and transforms ──────────────────────────────────────
+    // A selection is a rectangle (or a lasso path) over the paint layer. Everything
+    // that moves pixels has to see one picture, so any selection operation first
+    // flattens the board: vector marks and image wraps are baked into `rasterCv` and
+    // the objects are dropped. One snapshot is taken before that, so undo brings the
+    // objects — not just the picture — back.
+    var marquee = null;              // {x1,y1,x2,y2} while dragging
+    var sel = null;                  // {x,y,w,h,path,buf}
+    var floating = null;             // {x,y,w,h,buf,path} lifted, waiting to be dropped
+    var lastSelBuf = null;           // the clipboard for Copy / Paste inside the page
+    var polySelPath = null;          // collecting lasso points
+
+    function layerImg(id) {
+      var wrap = layers.querySelector('[data-id="' + id + '"]');
+      return wrap ? wrap.querySelector("img") : null;
+    }
+    function flattenAll() {
+      if (!doc.strokes.length && !doc.images.length) { ensureRaster(); return; }
+      ensureRaster();
+      var c = document.createElement("canvas");
+      c.width = rasterCv.width; c.height = rasterCv.height;
+      var g = c.getContext("2d");
+      g.drawImage(rasterCv, 0, 0);
+      doc.strokes.forEach(function (st) { drawMark(g, st, false); });
+      doc.images.forEach(function (im) {
+        var el = layerImg(im.id);
+        if (el) { try { g.drawImage(el, im.x, im.y, im.w, im.h); } catch (e) { /* not decoded yet */ } }
+      });
+      doc.strokes = [];
+      doc.images = [];
+      selectedStroke = null;
+      selected = null;
+      rasterCv = c;
+      renderImages();
+    }
+    function pathFor(g, path, ox, oy) {
+      g.beginPath();
+      path.forEach(function (pt, i) {
+        var x = pt.x - ox, y = pt.y - oy;
+        i ? g.lineTo(x, y) : g.moveTo(x, y);
+      });
+      g.closePath();
+    }
+    function pathBBox(path) {
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      path.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+    function captureSel(rect, path) {
+      var w = Math.max(1, Math.round(rect.w)), h = Math.max(1, Math.round(rect.h));
+      var c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      var g = c.getContext("2d");
+      g.save();
+      if (path) { pathFor(g, path, rect.x, rect.y); g.clip(); }
+      // Paint's default selection is opaque: it carries the paper with it.
+      g.fillStyle = doc.bg;
+      g.fillRect(0, 0, w, h);
+      g.drawImage(rasterCv, rect.x, rect.y, rect.w, rect.h, 0, 0, w, h);
+      g.restore();
+      return c;
+    }
+    function clearRegion(rect, path) {
+      ensureRaster();
+      var g = rasterCv.getContext("2d");
+      g.save();
+      g.globalCompositeOperation = "destination-out";
+      if (path) { pathFor(g, path, 0, 0); g.clip(); }
+      g.fillRect(rect.x, rect.y, rect.w, rect.h);
+      g.restore();
+      paint();
+    }
+    function makeSelection(rect, path) {
+      snapshot();
+      flattenAll();
+      sel = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, path: path || null, buf: captureSel(rect, path) };
+      syncSelBar();
+      paint();
+      setStatus(Math.round(rect.w) + "×" + Math.round(rect.h) + " selected — drag it, or use Copy / Cut / Crop.");
+    }
+    function dropFloating() {
+      if (!floating) return;
+      ensureRaster();
+      var g = rasterCv.getContext("2d");
+      g.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
+      sel = { x: floating.x, y: floating.y, w: floating.w, h: floating.h, path: floating.path, buf: floating.buf };
+      floating = null;
+      paint(); autoSave(); syncSelBar();
+    }
+    function liftSelection() {
+      var fx = sel;
+      floating = { x: fx.x, y: fx.y, w: fx.w, h: fx.h, buf: fx.buf, path: fx.path };
+      clearRegion(fx, fx.path);
+      sel = null;
+    }
+    function insideSel(p) {
+      if (!sel) return false;
+      if (sel.path) {
+        // point-in-polygon for the lasso
+        var c = false, pts = sel.path;
+        for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          if (((pts[i].y > p.y) !== (pts[j].y > p.y)) &&
+              (p.x < (pts[j].x - pts[i].x) * (p.y - pts[i].y) / (pts[j].y - pts[i].y) + pts[i].x)) c = !c;
+        }
+        return c;
+      }
+      return p.x >= sel.x && p.x <= sel.x + sel.w && p.y >= sel.y && p.y <= sel.y + sel.h;
+    }
+    function selectAll() {
+      if (doc.w < 2) return;
+      makeSelection({ x: 0, y: 0, w: doc.w, h: doc.h }, null);
+    }
+    function copySel() {
+      if (!sel) { setStatus("Nothing selected — drag a box first."); return; }
+      lastSelBuf = sel.buf;
+      lastSelBuf._w = sel.w; lastSelBuf._h = sel.h;
+      if (navigator.clipboard && window.ClipboardItem) {
+        sel.buf.toBlob(function (b) {
+          try { navigator.clipboard.write([new ClipboardItem({ "image/png": b })]).catch(function () {}); } catch (e) { /* clipboard is a bonus, not the feature */ }
+        }, "image/png");
+      }
+      setStatus("Copied " + Math.round(sel.w) + "×" + Math.round(sel.h) + ".");
+    }
+    function cutSel() {
+      if (!sel) { setStatus("Nothing selected — drag a box first."); return; }
+      copySel();
+      snapshot();
+      flattenAll();
+      clearRegion(sel, sel.path);
+      sel = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Cut.");
+    }
+    function deleteSel() {
+      if (!sel) { deleteSelected(); return; }
+      snapshot();
+      flattenAll();
+      clearRegion(sel, sel.path);
+      sel = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Deleted the selected area.");
+    }
+    function pasteSel() {
+      if (!lastSelBuf) { setStatus("Copy something first, or paste an image from the clipboard."); return; }
+      snapshot();
+      flattenAll();
+      if (sel) dropFloating();
+      floating = { x: Math.round((doc.w - (lastSelBuf._w || lastSelBuf.width)) / 2),
+                   y: Math.round((doc.h - (lastSelBuf._h || lastSelBuf.height)) / 2),
+                   w: lastSelBuf._w || lastSelBuf.width, h: lastSelBuf._h || lastSelBuf.height,
+                   buf: lastSelBuf, path: null };
+      setStatus("Pasted — drag it into place with the rectangle-select tool.");
+      paint();
+      syncSelBar();
+    }
+    function cropSel() {
+      if (!sel) { setStatus("Select the area to keep, then Crop."); return; }
+      snapshot();
+      flattenAll();
+      var x = Math.max(0, Math.round(sel.x)), y = Math.max(0, Math.round(sel.y));
+      var w = Math.max(1, Math.round(Math.min(sel.w, doc.w - x))), h = Math.max(1, Math.round(Math.min(sel.h, doc.h - y)));
+      var c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(rasterCv, x, y, w, h, 0, 0, w, h);
+      doc.w = w; doc.h = h;
+      rasterCv = c;
+      sel = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Cropped to " + w + "×" + h + ".");
+    }
+    // Whole-canvas pixel transforms. They flatten first (undo restores the objects).
+    function transformed(src, sw, sh, sx, sy, skewX, skewY) {
+      var tx = Math.tan((skewX || 0) * Math.PI / 180), ty = Math.tan((skewY || 0) * Math.PI / 180);
+      var w = Math.max(1, Math.ceil(sw * sx + Math.abs(tx) * sh));
+      var h = Math.max(1, Math.ceil(sh * sy + Math.abs(ty) * sw));
+      var c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      var g = c.getContext("2d");
+      // shift the origin when the skew pushes content negative
+      var ox = tx < 0 ? -tx * sh : 0, oy = ty < 0 ? -ty * sw : 0;
+      g.setTransform(sx, ty, tx, sy, ox, oy);
+      g.drawImage(src, 0, 0, sw, sh);
+      return c;
+    }
+    function transformWhole(how) {
+      snapshot();
+      flattenAll();
+      var c;
+      if (how === "rot90" || how === "rot270") {
+        c = document.createElement("canvas");
+        c.width = doc.h; c.height = doc.w;
+        var g = c.getContext("2d");
+        if (how === "rot90") { g.translate(doc.h, 0); g.rotate(Math.PI / 2); }
+        else { g.translate(0, doc.w); g.rotate(-Math.PI / 2); }
+        g.drawImage(rasterCv, 0, 0);
+        doc.w = c.width; doc.h = c.height;
+      } else if (how === "rot180") {
+        c = document.createElement("canvas");
+        c.width = doc.w; c.height = doc.h;
+        var g2 = c.getContext("2d");
+        g2.translate(doc.w, doc.h); g2.rotate(Math.PI);
+        g2.drawImage(rasterCv, 0, 0);
+      } else if (how === "flipH" || how === "flipV") {
+        c = document.createElement("canvas");
+        c.width = doc.w; c.height = doc.h;
+        var g3 = c.getContext("2d");
+        if (how === "flipH") { g3.translate(doc.w, 0); g3.scale(-1, 1); }
+        else { g3.translate(0, doc.h); g3.scale(1, -1); }
+        g3.drawImage(rasterCv, 0, 0);
+      }
+      rasterCv = c;
+      sel = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Canvas transformed (" + how + "). Undo restores the objects.");
+    }
+    function transformSelection(how) {
+      if (!sel) { transformWhole(how); return; }
+      snapshot();
+      var b = sel.buf, w = b.width, h = b.height, c, g;
+      if (how === "rot90" || how === "rot270") {
+        c = document.createElement("canvas"); c.width = h; c.height = w;
+        g = c.getContext("2d");
+        if (how === "rot90") { g.translate(h, 0); g.rotate(Math.PI / 2); } else { g.translate(0, w); g.rotate(-Math.PI / 2); }
+        g.drawImage(b, 0, 0);
+      } else if (how === "rot180") {
+        c = document.createElement("canvas"); c.width = w; c.height = h;
+        g = c.getContext("2d"); g.translate(w, h); g.rotate(Math.PI); g.drawImage(b, 0, 0);
+      } else {
+        c = document.createElement("canvas"); c.width = w; c.height = h;
+        g = c.getContext("2d");
+        if (how === "flipH") { g.translate(w, 0); g.scale(-1, 1); } else { g.translate(0, h); g.scale(1, -1); }
+        g.drawImage(b, 0, 0);
+      }
+      // clear the old spot, then keep the transformed pixels floating in place
+      clearRegion(sel, sel.path);
+      floating = { x: sel.x + (sel.w - c.width) / 2, y: sel.y + (sel.h - c.height) / 2,
+                   w: c.width, h: c.height, buf: c, path: null };
+      sel = null;
+      setStatus("Selection transformed — click the board to drop it.");
+      paint(); syncSelBar();
+    }
+    function applyResize() {
+      var sw = Number(document.getElementById("rsW").value) / 100;
+      var sh = Number(document.getElementById("rsH").value) / 100;
+      var kx = Number(document.getElementById("rsSx").value) || 0;
+      var ky = Number(document.getElementById("rsSy").value) || 0;
+      if (!(sw > 0) || !(sh > 0)) { setStatus("Width and height must be positive."); return; }
+      document.getElementById("transformPanel").classList.remove("on");
+      if (!sel) {
+        snapshot(); flattenAll();
+        var t = transformed(rasterCv, doc.w, doc.h, sw, sh, kx, ky);
+        doc.w = t.width; doc.h = t.height;
+        rasterCv = t;
+        paint(); autoSave(); syncSelBar();
+        setStatus("Canvas resized to " + doc.w + "×" + doc.h + ".");
+        return;
+      }
+      snapshot();
+      var nt = transformed(sel.buf, sel.buf.width, sel.buf.height, sw, sh, kx, ky);
+      clearRegion(sel, sel.path);
+      floating = { x: sel.x, y: sel.y, w: nt.width, h: nt.height, buf: nt, path: null };
+      sel = null;
+      paint(); syncSelBar();
+      setStatus("Selection resized — click the board to drop it.");
+    }
+    function syncSelBar() {
+      document.getElementById("selHint").textContent = floating
+        ? "Lifted — drag or click the board to drop it."
+        : sel ? Math.round(sel.w) + "×" + Math.round(sel.h) + " selected."
+              : "Drag a box, or a free shape, then move / copy / cut / crop it.";
+    }
+
     // ── pointer ───────────────────────────────────────────────────────
     var mode = null;          // what the current gesture is doing
     var sprayTimer = null;
@@ -684,13 +1332,88 @@
 
     canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
+    // Trackpad pinch arrives as a ctrl+wheel, so it zooms; a plain wheel pans a zoomed
+    // board instead of scrolling the page away from the drawing.
+    stage.addEventListener("wheel", function (e) {
+      if (e.ctrlKey || e.metaKey || tool === "zoom") {
+        e.preventDefault();
+        setZoom(view.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), { x: e.clientX, y: e.clientY });
+        syncSelBar();
+        return;
+      }
+      if (view.zoom > 1 || view.panX || view.panY) {
+        e.preventDefault();
+        view.panX -= e.deltaX; view.panY -= e.deltaY;
+        paint(); syncSelBar();
+      }
+    }, { passive: false });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === " " && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "")) {
+        if (!spaceDown) { spaceDown = true; canvas.style.cursor = "grab"; }
+        e.preventDefault();
+      }
+    });
+    window.addEventListener("keyup", function (e) {
+      if (e.key === " ") { spaceDown = false; canvas.style.cursor = tool === "pan" ? "grab" : "crosshair"; }
+    });
+
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button === 2) rightBtn = true;
+      // pointerdown runs before blur, so a click on the board while the text box is
+      // open would otherwise create the next mark and then have blur close THAT one.
+      if (editEl) closeTextEditor();
       var p = pt(e);
+
+      if (tool === "zoom") {
+        e.preventDefault();
+        setZoom(view.zoom * (e.altKey || e.button === 2 ? 0.8 : 1.25), { x: e.clientX, y: e.clientY });
+        setStatus("Zoom " + Math.round(view.zoom * 100) + "%.");
+        return;
+      }
+      if (tool === "pan" || spaceDown) {
+        e.preventDefault();
+        mode = "pan";
+        panFrom = { x: e.clientX, y: e.clientY, px: view.panX, py: view.panY };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      if (tool === "selrect" || tool === "selfree") {
+        e.preventDefault();
+        if (floating) {
+          mode = "selmove";
+          selMoveFrom = { x: p.x, y: p.y, ox: floating.x, oy: floating.y };
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
+        if (sel && insideSel(p)) {
+          snapshot();
+          liftSelection();
+          mode = "selmove";
+          selMoveFrom = { x: p.x, y: p.y, ox: floating.x, oy: floating.y };
+          canvas.setPointerCapture(e.pointerId);
+          paint();
+          return;
+        }
+        sel = null;
+        if (tool === "selrect") { marquee = { x1: p.x, y1: p.y, x2: p.x, y2: p.y }; mode = "marquee"; }
+        else { polySelPath = [p]; mode = "lasso"; }
+        canvas.setPointerCapture(e.pointerId);
+        syncSelBar();
+        paint();
+        return;
+      }
 
       if (tool === "select") {
         var hit = hitTest(p);
         selectedStroke = hit ? hit.id : null;
+        if (hit) {
+          // Any mark can be dragged; text is the one that has to be (Paint's text
+          // box is movable after you type in it).
+          markDrag = { id: hit.id, sx: p.x, sy: p.y, ox: hit.x1, oy: hit.y1, moved: false };
+          canvas.setPointerCapture(e.pointerId);
+        }
+        syncTextBar();
         paint();
         return;
       }
@@ -704,16 +1427,20 @@
         return;
       }
       if (tool === "text") {
-        var t = window.prompt("Text:");
-        if (t) {
-          snapshot();
-          var hit2 = hitTest(p);
-          doc.strokes.push({ id: newId(), tool: "text", color: e.button === 2 ? colorS : colorP,
-                             x1: p.x, y1: p.y, text: t, size: 20, anchor: hit2 ? hit2.id : null });
-          paint();
-          setStatus(hit2 ? "Text attached to that mark." : "Text added.");
-          autoSave();
-        }
+        // Keep focus: the default action of the press would move it to the document
+        // and blur the box we are about to open, closing it on the first keystroke.
+        e.preventDefault();
+        var hit2 = hitTest(p);
+        if (hit2 && hit2.tool === "text") { editTextMark(hit2); return; }
+        snapshot();
+        var m = { id: newId(), tool: "text", color: e.button === 2 ? colorS : colorP,
+                  x1: p.x, y1: p.y, text: "", w: 24, anchor: hit2 ? hit2.id : null };
+        var o = barOpts();
+        m.font = o.font; m.size = o.size; m.bold = o.bold; m.italic = o.italic;
+        m.underline = o.underline; m.bg = o.bg;
+        doc.strokes.push(m);
+        selectedStroke = m.id;
+        openTextEditor(m, true);
         return;
       }
 
@@ -761,7 +1488,9 @@
       var col = e.button === 2 ? colorS : colorP;
       if (tool === "pencil" || tool === "brush") {
         mode = "draw";
-        draft = { tool: tool, color: col, width: size, points: [withPressure(p, e)] };
+        // Pencil is Paint's pencil: one device pixel, hard edge. The size slider is the
+        // brush's; letting it widen the pencil turns it into a second brush.
+        draft = { tool: tool, color: col, width: tool === "pencil" ? 1 : size, points: [withPressure(p, e)] };
       } else {
         mode = "shape";
         draft = { tool: tool, color: col, width: size, op: op,
@@ -779,6 +1508,8 @@
 
     var lastPoint = { x: 0, y: 0 };
     var erasePrev = null;
+    var selMoveFrom = null;
+    var panFrom = null;
     canvas.addEventListener("pointermove", function (e) {
       var p = pt(e);
       lastPoint = p;
@@ -786,12 +1517,43 @@
         curvePending.cx = p.x; curvePending.cy = p.y;
         draft = curvePending; paint(); return;
       }
+      if (markDrag) {
+        if (!inDoc(p) && !markDrag.moved) return;
+        var mk = null;
+        for (var q = 0; q < doc.strokes.length; q++) if (doc.strokes[q].id === markDrag.id) mk = doc.strokes[q];
+        if (!mk) { markDrag = null; return; }
+        if (!markDrag.moved) { if (Math.abs(p.x - markDrag.sx) + Math.abs(p.y - markDrag.sy) < 2) return; snapshot(); markDrag.moved = true; }
+        mk.x1 = markDrag.ox + (p.x - markDrag.sx);
+        mk.y1 = markDrag.oy + (p.y - markDrag.sy);
+        if (mk.anchor && anchorPoint(mk.anchor)) { mk.anchor = null; }   // moving detaches the note
+        paint();
+        return;
+      }
       if (polyDraft && !mode) {
         // live rubber band from the last corner
         draft = { tool: "polygon", color: polyDraft.color, width: polyDraft.width, op: polyDraft.op,
                   fillColor: polyDraft.fillColor, closed: false,
                   points: polyDraft.points.concat([p]) };
         paint(); return;
+      }
+      if (mode === "pan") {
+        view.panX = panFrom.px + (e.clientX - panFrom.x);
+        view.panY = panFrom.py + (e.clientY - panFrom.y);
+        paint();
+        return;
+      }
+      if (mode === "selmove") {
+        floating.x = selMoveFrom.ox + (p.x - selMoveFrom.x);
+        floating.y = selMoveFrom.oy + (p.y - selMoveFrom.y);
+        paint();
+        return;
+      }
+      if (mode === "marquee") { marquee.x2 = p.x; marquee.y2 = p.y; paint(); return; }
+      if (mode === "lasso") {
+        var lp = polySelPath[polySelPath.length - 1];
+        if (Math.abs(p.x - lp.x) + Math.abs(p.y - lp.y) > 2) polySelPath.push(p);
+        paint();
+        return;
       }
       if (!mode) return;
       if (mode === "erase") { eraseAt(erasePrev, p); erasePrev = p; return; }
@@ -805,6 +1567,28 @@
     });
 
     canvas.addEventListener("pointerup", function (e) {
+      if (mode === "pan") { mode = null; panFrom = null; return; }
+      if (mode === "selmove") {
+        mode = null; selMoveFrom = null;
+        dropFloating();
+        return;
+      }
+      if (mode === "marquee") {
+        mode = null;
+        var m = marquee; marquee = null;
+        if (m && Math.abs(m.x2 - m.x1) > 3 && Math.abs(m.y2 - m.y1) > 3) {
+          makeSelection({ x: Math.min(m.x1, m.x2), y: Math.min(m.y1, m.y2), w: Math.abs(m.x2 - m.x1), h: Math.abs(m.y2 - m.y1) }, null);
+        } else { sel = null; paint(); syncSelBar(); }
+        return;
+      }
+      if (mode === "lasso") {
+        mode = null;
+        var path = polySelPath; polySelPath = null;
+        if (path && path.length > 3) makeSelection(pathBBox(path), path);
+        else { sel = null; paint(); syncSelBar(); }
+        return;
+      }
+      if (markDrag) { var moved = markDrag.moved; markDrag = null; if (moved) autoSave(); return; }
       if (mode === "spray") { clearInterval(sprayTimer); sprayTimer = null; mode = null; autoSave(); return; }
       if (mode === "erase") { mode = null; autoSave(); return; }
       if (mode === "draw" || mode === "shape") {
@@ -836,8 +1620,10 @@
     });
 
     // A polygon stays open until a double-click or Enter closes it.
-    canvas.addEventListener("dblclick", function () {
-      if (polyDraft) closePolygon();
+    canvas.addEventListener("dblclick", function (e) {
+      if (polyDraft) { closePolygon(); return; }
+      var hit = hitTest(pt(e));
+      if (hit && hit.tool === "text") editTextMark(hit);
     });
     function closePolygon() {
       if (!polyDraft) return;
@@ -931,12 +1717,14 @@
     });
     window.addEventListener("paste", function (e) {
       var items = (e.clipboardData && e.clipboardData.items) || [];
+      var foundImage = false;
       for (const it of items) {
         if (it.type.indexOf("image") === 0) {
           var f = it.getAsFile();
-          if (f) addImage(URL.createObjectURL(f), { x: 40 + doc.images.length * 20, y: 40 + doc.images.length * 20 });
+          if (f) { foundImage = true; addImage(URL.createObjectURL(f), { x: 40 + doc.images.length * 20, y: 40 + doc.images.length * 20 }); }
         }
       }
+      if (!foundImage && lastSelBuf) { e.preventDefault(); pasteSel(); }
     });
 
     // ── toolbar wiring ────────────────────────────────────────────────
@@ -947,7 +1735,11 @@
       document.querySelectorAll("[data-tool]").forEach(function (b) {
         b.classList.toggle("on", b.getAttribute("data-tool") === t);
       });
-      canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy" : "crosshair";
+      canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy"
+        : t === "text" ? "text" : t === "pan" ? "grab" : t === "zoom" ? "zoom-in" : "crosshair";
+      if (t !== "text" && editEl) closeTextEditor();
+      syncTextBar();
+      syncSelBar();
       setStatus(toolHint(t));
       paint();
     }
@@ -1015,19 +1807,28 @@
     window.addEventListener("keydown", function (e) {
       var tag = (e.target && e.target.tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); return; }
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (sel || floating) deleteSel(); else deleteSelected(); return; }
       var meta = e.metaKey || e.ctrlKey;
       if (meta) {
         if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
         else if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); redo(); }
+        else if (e.key === "a") { e.preventDefault(); selectAll(); }
+        else if (e.key === "c") { e.preventDefault(); if (sel) copySel(); }
+        else if (e.key === "x") { e.preventDefault(); if (sel) cutSel(); }
+        else if (e.key === "v") { e.preventDefault(); pasteSel(); }
         return;
       }
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(view.zoom * 1.25); return; }
+      if (e.key === "-" || e.key === "_") { e.preventDefault(); setZoom(view.zoom / 1.25); return; }
+      if (e.key === "0") { e.preventDefault(); setZoom(1); return; }
       if (e.key === "Enter" && polyDraft) { e.preventDefault(); closePolygon(); return; }
       if (e.key === "Escape") {
+        if (floating) { dropFloating(); return; }
+        if (sel) { sel = null; paint(); syncSelBar(); return; }
         if (polyDraft) { polyDraft = null; draft = null; paint(); return; }
         if (curvePending) { curvePending = null; draft = null; paint(); return; }
       }
-      var keys = { s: "select", p: "pencil", b: "brush", e: "eraser", f: "fill", i: "picker", a: "airbrush",
+      var keys = { s: "select", m: "selrect", n: "selfree", p: "pencil", z: "zoom", h: "pan", b: "brush", e: "eraser", f: "fill", i: "picker", a: "airbrush",
                    l: "line", c: "curve", r: "rect", o: "ellipse", v: "triangle", y: "polygon",
                    t: "text", "5": "star", "6": "bubble", "9": "arrow" };
       if (e.shiftKey && e.key === "R") { setTool("rrect"); return; }
@@ -1040,6 +1841,122 @@
       snapshot();
       doc.strokes = []; clearRaster(); selectedStroke = null;
       paint(); setStatus("Canvas cleared."); autoSave();
+    });
+
+    document.getElementById("selAll").addEventListener("click", selectAll);
+    document.getElementById("selCopy").addEventListener("click", copySel);
+    document.getElementById("selCut").addEventListener("click", cutSel);
+    document.getElementById("selPaste").addEventListener("click", pasteSel);
+    document.getElementById("selDel").addEventListener("click", deleteSel);
+    document.getElementById("selCrop").addEventListener("click", cropSel);
+    document.getElementById("selResize").addEventListener("click", function () {
+      var panel = document.getElementById("transformPanel");
+      document.getElementById("rsTarget").textContent = sel ? "selection" : "whole canvas";
+      panel.classList.toggle("on");
+    });
+    document.getElementById("rsCancel").addEventListener("click", function () {
+      document.getElementById("transformPanel").classList.remove("on");
+    });
+    document.getElementById("rsApply").addEventListener("click", applyResize);
+    document.getElementById("rotL").addEventListener("click", function () { transformSelection("rot270"); });
+    document.getElementById("rotR").addEventListener("click", function () { transformSelection("rot90"); });
+    document.getElementById("rot180").addEventListener("click", function () { transformSelection("rot180"); });
+    document.getElementById("flipH").addEventListener("click", function () { transformSelection("flipH"); });
+    document.getElementById("flipV").addEventListener("click", function () { transformSelection("flipV"); });
+
+    // ── canvas panel: size, background, open, file to the Library ────
+    document.getElementById("zoomSel").addEventListener("change", function (e) {
+      if (e.target.value) setZoom(Number(e.target.value));
+    });
+    document.getElementById("zoomFit").addEventListener("click", zoomToFit);
+    document.getElementById("gridBtn").addEventListener("click", function () {
+      showGrid = !showGrid;
+      this.classList.toggle("on", showGrid);
+      paint();
+    });
+    document.getElementById("rulerBtn").addEventListener("click", function () {
+      showRulers = !showRulers;
+      this.classList.toggle("on", showRulers);
+      paint();
+    });
+    var cvPanel = document.getElementById("canvasPanel");
+    function openCanvasPanel() {
+      document.getElementById("cvW").value = Math.round(doc.w);
+      document.getElementById("cvH").value = Math.round(doc.h);
+      document.getElementById("cvBg").value = doc.bg;
+      cvPanel.classList.toggle("on");
+    }
+
+    document.getElementById("canvasBtn").addEventListener("click", openCanvasPanel);
+    document.getElementById("canvasClose").addEventListener("click", function () { cvPanel.classList.remove("on"); });
+    document.getElementById("cvApply").addEventListener("click", function () {
+      var w = Math.max(1, Math.min(8000, Math.round(Number(document.getElementById("cvW").value) || doc.w)));
+      var h = Math.max(1, Math.min(8000, Math.round(Number(document.getElementById("cvH").value) || doc.h)));
+      snapshot();
+      flattenAll();
+      var c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(rasterCv, 0, 0);
+      rasterCv = c;
+      doc.w = w; doc.h = h;
+      sel = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Canvas is now " + w + "×" + h + ".");
+      document.getElementById("cvStatus").textContent = "Canvas " + w + "×" + h;
+    });
+    document.getElementById("cvBg").addEventListener("input", function (e) {
+      doc.bg = e.target.value;
+      paint(); autoSave();
+    });
+    document.getElementById("cvFile").addEventListener("change", function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var im = new Image();
+        im.onload = function () {
+          // Opening a picture replaces the canvas with it, the way Paint's Open does:
+          // you are now editing that picture, not drawing on top of another board.
+          snapshot();
+          var w = Math.min(im.naturalWidth || 1200, 4096), h = Math.min(im.naturalHeight || 800, 4096);
+          doc.w = w; doc.h = h;
+          doc.strokes = []; doc.images = []; selectedStroke = null; selected = null;
+          rasterCv = document.createElement("canvas");
+          rasterCv.width = w; rasterCv.height = h;
+          rasterCv.getContext("2d").drawImage(im, 0, 0, w, h);
+          sel = null; floating = null;
+          renderImages(); zoomToFit(); autoSave(); syncSelBar();
+          setStatus("Opened " + f.name + " — " + w + "×" + h + ".");
+          document.getElementById("cvStatus").textContent = "Opened " + f.name;
+        };
+        im.onerror = function () { setStatus("That file is not an image this browser can read."); };
+        im.src = String(reader.result);
+      };
+      reader.readAsDataURL(f);
+      e.target.value = "";
+    });
+    document.getElementById("cvOpen").addEventListener("click", function () { document.getElementById("cvFile").click(); });
+    document.getElementById("cvJpg").addEventListener("click", function () {
+      renderBoard(1, "image/jpeg").then(function (url) {
+        var a = document.createElement("a");
+        a.href = url; a.download = "sketch-" + Date.now() + ".jpg"; a.click();
+      });
+    });
+    document.getElementById("cvLibrary").addEventListener("click", function () {
+      var note = document.getElementById("cvStatus");
+      note.textContent = "Filing the board…";
+      ensureJob().then(function (id) {
+        return renderBoard(1, "image/png").then(function (dataUrl) {
+          return fetch("/api/buzzy/art", {
+            method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "file", jobId: id, dataUrl: dataUrl, name: "board-" + Date.now() + ".png" }),
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d, status: r.status }; }); });
+        });
+      }).then(function (res) {
+        if (!res.ok) { note.textContent = res.d.error || "Could not file it."; setStatus(res.d.error || "Could not file the board."); return; }
+        note.textContent = "Saved to the Library as " + res.d.image.name + ".";
+        setStatus("Board filed to the Library.");
+      }).catch(function (e) { note.textContent = "Failed: " + e.message; });
     });
 
     function setStatus(t) { statusEl.textContent = t; }
@@ -1406,6 +2323,17 @@
       });
       return jobPromise;
     }
+    // Diagnostics for the E2E probe: the page is one IIFE, so without a handle there is
+    // no way to ask it what it thinks its document size or save state is.
+    window.__bzSketch = {
+      board: boardJson, save: flushSave,
+      state: function () {
+        return { jobId: jobId, saving: saving, saveAgain: saveAgain, w: doc.w, h: doc.h,
+                 zoom: view.zoom, panX: view.panX, panY: view.panY, bg: doc.bg,
+                 strokes: doc.strokes.length, images: doc.images.length,
+                 sel: sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null, floating: !!floating };
+      },
+    };
     if (!jobId) titleEl.textContent = "New board";
     window.addEventListener("resize", paint);
     // A stage that changes size without a window resize (nav rows wrapping, fonts
