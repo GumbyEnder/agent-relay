@@ -58,6 +58,7 @@ import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote } from "./self-knowledge";
+import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, type MadeThing } from "./pictureChange";
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
 import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday } from "./video";
@@ -692,8 +693,42 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       "the URLs you actually opened, one per line, and your reply must name the source you relied on. Never cite a page " +
       "you did not open, and never present a search snippet as confirmation."
     : "";
+  // ── What this conversation made ─────────────────────────────────────
+  // Owner, 2026-11-19: "anything you've created with it in the same session, it should
+  // be able to see as context." Oldest first, with the person's words that asked for
+  // each: a file is stored by its pre-pass before that turn's message is saved, so the
+  // asking message is the first one at or after it.
+  let madeThings: MadeThing[] = [];
+  if (sessionId) {
+    try {
+      const made = await sql<{ id: number; filename: string; content_type: string | null; created_at: string; brief: string | null }>`
+        SELECT a.id, a.filename, a.content_type, a.created_at,
+               (SELECT m.content FROM buzzy_chat_messages m
+                 WHERE m.user_id = a.user_id AND m.session_id = a.session_id AND m.role = 'user'
+                   AND m.created_at >= a.created_at
+                 ORDER BY m.created_at ASC LIMIT 1) AS brief
+        FROM buzzy_assets a
+        WHERE a.user_id = ${userId} AND a.session_id = ${sessionId}
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT 12
+      `;
+      madeThings = made.reverse().map((r) => ({
+        id: Number(r.id), filename: r.filename, contentType: r.content_type, createdAt: r.created_at, brief: r.brief,
+      }));
+    } catch (_) { /* an older schema without session_id: the list helps, it never gates */ }
+  }
+  // "make the sky darker" right after a picture is a change to THAT picture: the
+  // picture maker draws the new version from it (owner: "I can iterate on that image
+  // by just talking about the image"). Only when the newest thing made is a picture.
+  const newestMade = madeThings.length ? madeThings[madeThings.length - 1]! : null;
+  const pictureToChange =
+    newestMade && String(newestMade.contentType || "").toLowerCase().startsWith("image/") &&
+    !isNewPictureAsk(message) && isPictureChange(message)
+      ? newestMade
+      : null;
+
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock;
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + madeThingsSection(madeThings);
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
@@ -870,9 +905,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Art pre-pass ───────────────────────────────────────────────────
   // "draw me a duck" is a request for a file, and the canvas is not the only way in.
   // Same rule as music: the harness renders, the model narrates what exists.
-  if (!lockdown && !renderedImage && !wants3d && !wantsVideo && isImageRequest(message, { history }) && artConfigured()) {
+  if (!lockdown && !renderedImage && !wants3d && !wantsVideo && (isImageRequest(message, { history }) || pictureToChange) && artConfigured()) {
     const artStarted = Date.now();
-    const prompt = message.slice(0, 1000);
+    let prompt = message.slice(0, 1000);
+    // A change is drawn from the picture it changes, sent along as the reference.
+    let referenceImages: string[] | undefined;
+    if (pictureToChange) {
+      try {
+        const pic = await sql<{ body: Uint8Array; content_type: string | null }>`
+          SELECT body, content_type FROM buzzy_assets WHERE user_id = ${userId} AND id = ${pictureToChange.id} LIMIT 1
+        `;
+        const ref = pictureDataUrl(pic[0]?.body, pic[0]?.content_type);
+        if (ref) {
+          referenceImages = [ref];
+          prompt = changePrompt(message);
+        }
+      } catch (_) { /* no reference: drawn from the words alone, as before */ }
+    }
     const verdict = await checkQuota({ userId, scope: "image", units: 1 });
     if (!verdict.ok) {
       artRefusal = { code: verdict.code ?? "refused", error: verdict.error ?? "quota refused" };
@@ -880,8 +929,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         `\n\nAn image was requested and REFUSED by the plan: ${verdict.error}. ` +
         "Say exactly that. Do not claim any picture exists and do not offer to draw it later.";
     } else {
-      req.onStage?.({ phase: "art", label: "Drawing your image", etaMs: 20_000 });
-      const made = await generateImage(prompt);
+      req.onStage?.({ phase: "art", label: referenceImages ? "Changing your picture" : "Drawing your image", etaMs: 20_000 });
+      const made = await generateImage(prompt, referenceImages ? { referenceImages } : undefined);
       await recordUsage({
         userId, scope: "image", units: made.ok ? 1 : 0, ms: made.ms ?? 0,
         status: made.ok ? "ok" : "failed", code: made.ok ? null : made.code ?? "failed", model: imageModel(),
@@ -897,9 +946,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         } catch (_) { /* the link is an improvement, not a gate */ }
         // No filename in the note: the model copies whatever identifier it is handed
         // and the reply opened with "art-2026-11-07-06-11-32.png The image depicts…".
-        messages[0]!.content +=
-          "\n\nAn image has ALREADY been rendered this turn and is attached to your reply. " +
-          "Do not name a file and do not say you will make one later; describe what is in the picture in two sentences and stop.";
+        messages[0]!.content += referenceImages
+          ? "\n\nThe picture has ALREADY been changed this turn: a new version, drawn from the previous one, is attached " +
+            "to your reply (the previous one is still in their Library). Do not name a file; say in one or two sentences " +
+            "what changed in the picture and stop."
+          : "\n\nAn image has ALREADY been rendered this turn and is attached to your reply. " +
+            "Do not name a file and do not say you will make one later; describe what is in the picture in two sentences and stop.";
       } else {
         artRefusal = { code: made.code ?? "image_failed", error: made.error ?? "the provider refused" };
         messages[0]!.content +=
