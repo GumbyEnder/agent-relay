@@ -1,0 +1,18 @@
+EXAMPLE DATA — FICTIONAL. Not a real property, tenant, lender or address.
+
+FOR SALE: Maple Court Retail Center (fictional)
+123 Example Avenue, Springfield, XX 00000 (fictional)
+Asking price: $2,600,000
+Property type: Neighborhood retail strip, single story, built 1998, renovated 2019
+Building: 13,500 SF on 1.6 acres; 62 surface parking spaces
+Occupancy: 81% (3 of 4 suites leased); Suite 130 (2,500 SF) vacant
+Leases: all NNN. Tenants reimburse taxes, insurance and CAM.
+2025 operating expenses (seller-reported): taxes $36,000; insurance $14,000; CAM $22,000; management $6,000. Total $78,000.
+2025 expense reimbursements collected: $54,000.
+Notes from the offering memorandum:
+- Demo Fitness (Suite 120) lease includes a co-tenancy provision tied to occupancy of the center
+  and may reduce rent if occupancy falls below a stated level.
+- Sample Dental (Suite 110) holds a right of first refusal to purchase the property.
+- Title commitment shows a recorded access easement across the north parking field in favor of the
+  adjacent parcel, and an open mechanic's lien of $18,400 recorded 2026-08-12 (seller to cure).
+- Phase I environmental report dated 2024; no recognized environmental conditions reported.
