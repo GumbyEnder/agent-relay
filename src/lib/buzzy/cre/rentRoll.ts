@@ -30,6 +30,8 @@ export interface RentRollRow {
   leaseEnd: string | null;
   leaseType: string;
   vacant: boolean;
+  /** 1-based line in the source file (or row in the sheet). Locator for citations. */
+  sourceRow: number | null;
 }
 
 export type RentRollIssueCode =
@@ -81,7 +83,8 @@ export function parseRentRollCsv(text: string): ParsedRentRoll {
   const issues: RentRollIssue[] = [];
   const seenSuites = new Set<string>();
 
-  for (const raw of table.rows) {
+  for (const [index, raw] of table.rows.entries()) {
+    const sourceRow = table.lines[index] ?? null;
     const suite = (raw.suite ?? "").trim();
     const tenant = (raw.tenant ?? "").trim();
     const vacant = isVacantTenant(tenant) || /^(true|yes|1)$/i.test((raw.vacant ?? "").trim());
@@ -144,6 +147,7 @@ export function parseRentRollCsv(text: string): ParsedRentRoll {
       leaseEnd,
       leaseType: (raw.lease_type ?? "").trim(),
       vacant,
+      sourceRow,
     });
   }
 

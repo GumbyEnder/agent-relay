@@ -35,6 +35,8 @@ export interface Comp {
   propertyType: string;
   transactionType: string;
   source: string;
+  /** 1-based line in the source file. Locator for citations. */
+  sourceRow: number | null;
 }
 
 export type CompExclusionReason =
@@ -153,6 +155,7 @@ export function parseCompsCsv(text: string): ParsedComps {
       propertyType: (raw.property_type ?? "").trim(),
       transactionType: (raw.transaction_type ?? "").trim(),
       source: (raw.source ?? "").trim(),
+      sourceRow: table.lines[index] ?? null,
     });
   });
 

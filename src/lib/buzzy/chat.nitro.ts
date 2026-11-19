@@ -41,6 +41,7 @@ import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } f
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
+import { bindRole, DEAL_ROLES, isDealRole, readPhoto } from "./cre/intake";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
@@ -1119,13 +1120,47 @@ export default defineEventHandler(async (event) => {
         code: "file_too_large",
       };
     }
-    const sha256 = createHash("sha256").update(body).digest("hex");
+    // x-bz-role binds the file to a deal-memo input. When it is present the
+    // upload is checked against that role's allowlist (magic bytes, not the
+    // extension) and a photo has its metadata removed BEFORE hashing — so the
+    // sha256 describes exactly the bytes that get stored.
+    const rawRole = (getHeader(event, "x-bz-role") || "").trim();
+    let storedRelPath = relPath;
+    let storedBody = body;
+    let storedSha: string;
+    let roleEcho: string | null = null;
+    let stripped: string[] = [];
+    if (rawRole) {
+      if (!isDealRole(rawRole)) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: `Unknown role "${rawRole.slice(0, 24)}".`, code: "bad_role", roles: Object.keys(DEAL_ROLES) };
+      }
+      const bound = bindRole({ role: rawRole, filename: relPath, bytes: body });
+      if (!bound.ok) {
+        setResponseStatus(event, bound.code === "file_too_large" ? 413 : 400);
+        return { ok: false, error: bound.message, code: bound.code, role: rawRole };
+      }
+      if (rawRole === "photos") {
+        const photo = readPhoto(body, bound.kind);
+        storedBody = photo.bytes;
+        storedSha = photo.sha256;
+        stripped = photo.removed;
+      } else {
+        storedSha = bound.sha256;
+      }
+      storedRelPath = `deals/${rawRole}/${relPath}`;
+      roleEcho = rawRole;
+    } else {
+      storedSha = createHash("sha256").update(body).digest("hex");
+    }
+    const sha256 = storedSha;
+    const body2 = storedBody;
     const filename = relPath.split("/").pop() || relPath;
     const contentType = (getHeader(event, "content-type") || "application/octet-stream").slice(0, 120);
     const sql = await getSql();
     const inserted = await sql<{ id: number; rel_path: string }>`
       INSERT INTO buzzy_assets (user_id, sha256, filename, rel_path, content_type, bytes, body)
-      VALUES (${user.id}, ${sha256}, ${filename}, ${relPath}, ${contentType}, ${body.byteLength}, ${Buffer.from(body)})
+      VALUES (${user.id}, ${sha256}, ${filename}, ${storedRelPath}, ${contentType}, ${body2.byteLength}, ${Buffer.from(body2)})
       ON CONFLICT (user_id, sha256) DO NOTHING
       RETURNING id, rel_path
     `;
@@ -1139,16 +1174,17 @@ export default defineEventHandler(async (event) => {
         ok: true,
         duplicate: true,
         id: prior[0]?.id ?? null,
-        path: prior[0]?.rel_path ?? relPath,
-        bytes: prior[0]?.bytes ?? body.byteLength,
+        path: prior[0]?.rel_path ?? storedRelPath,
+        bytes: prior[0]?.bytes ?? body2.byteLength,
         sha256,
+        role: roleEcho,
       };
     }
     // Search words for the upload, from its name, its folder and any note the page
     // sent about it (x-bz-note: what the person said the file is).
     const note = Array.from(getHeader(event, "x-bz-note") || "", (ch) => (ch.charCodeAt(0) < 32 ? " " : ch)).join("").trim().slice(0, 600);
     void enrichLater(sql, user.id, inserted[0]!.id, {
-      prompt: [note, relPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
+      prompt: [note, storedRelPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
       filename,
       contentType,
     });
@@ -1157,8 +1193,10 @@ export default defineEventHandler(async (event) => {
       duplicate: false,
       id: inserted[0]!.id,
       path: inserted[0]!.rel_path,
-      bytes: body.byteLength,
+      bytes: body2.byteLength,
       sha256,
+      role: roleEcho,
+      stripped,
     };
   }
 

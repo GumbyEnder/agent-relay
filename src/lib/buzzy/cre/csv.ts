@@ -16,6 +16,8 @@
 export interface CsvTable {
   headers: string[];
   rows: Record<string, string>[];
+  /** 1-based file line of each row, parallel to `rows`. Locators for citations. */
+  lines: number[];
   problems: { line: number; reason: string }[];
 }
 
@@ -76,7 +78,7 @@ export function parseCsvTable(text: string): CsvTable {
       break;
     }
   }
-  if (headerLine === -1) return { headers: [], rows: [], problems: [{ line: 1, reason: "empty_file" }] };
+  if (headerLine === -1) return { headers: [], rows: [], lines: [], problems: [{ line: 1, reason: "empty_file" }] };
 
   const seen = new Set<string>();
   for (const h of headers) {
@@ -89,6 +91,7 @@ export function parseCsvTable(text: string): CsvTable {
   }
 
   const rows: Record<string, string>[] = [];
+  const rowLines: number[] = [];
   for (let i = headerLine + 1; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim() === "") continue;
@@ -101,6 +104,7 @@ export function parseCsvTable(text: string): CsvTable {
       if (cells.length > headers.length) continue;
     }
     rows.push({});
+    rowLines.push(i + 1);
     const row = rows[rows.length - 1];
     for (let c = 0; c < headers.length; c++) {
       if (!headers[c]) continue;
@@ -108,7 +112,7 @@ export function parseCsvTable(text: string): CsvTable {
     }
   }
 
-  return { headers, rows, problems };
+  return { headers, rows, lines: rowLines, problems };
 }
 
 /** Fields the caller cannot proceed without. Returns null when all are present. */
