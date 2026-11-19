@@ -74,6 +74,7 @@ BeeZilla (alias **Buzzy**, permanently) is the consumer front door on the same e
 | `/buzzy/library` | Documents vault: a folder per job; open or download `.md` / `.doc` / `.pdf`, plus CSV for tables |
 | `/buzzy/profile` | Company profiles and confirmed facts |
 | `/buzzy/landing` | Signed-out branded entry (Log in / Register). Unauthenticated visitors always land here, never on the raw login form |
+| `/buzzy/download` | Windows installer. The button is resolved live from the release feed, so it always names the build an installed copy would update to |
 
 **Multi-company.** One account can hold several companies — facts, profile lines and work are scoped to the active company, while search spans all of them.
 
@@ -82,6 +83,26 @@ BeeZilla (alias **Buzzy**, permanently) is the consumer front door on the same e
 **Models.** The picker shows roles, not model IDs, and defaults to the cheapest model likely to succeed (Marvin / `z-ai/glm-5.3-flash`), escalating only when a job needs it. The catalog and routing live in [`src/lib/buzzy/llm.ts`](src/lib/buzzy/llm.ts) and `BZ_CHAT_MODELS`.
 
 **Team spaces.** An account can share a space with scoped roles and delegated approvals with spend caps — [`src/lib/buzzy/team.ts`](src/lib/buzzy/team.ts), migrations `0037`/`0038`.
+
+---
+
+## Download / Install
+
+**Hosted — nothing to install.** [beezilla.net/buzzy/talk](https://beezilla.net/buzzy/talk) for BeeZilla, [app.devboards.ai](https://app.devboards.ai) for Dev Boards.
+
+**Desktop app — Windows 10 / 11, 64-bit.** One installer; the app carries its own local runtime (Nitro + embedded PGlite), so there is no server to run beside it.
+
+| | |
+|---|---|
+| Download | <https://beezilla.net/buzzy/download> — the button is read from the release feed, so it always names the current build |
+| All builds | <https://github.com/GumbyEnder/agent-relay/releases?q=desktop-v> |
+| Update feed | `releases/download/desktop-channel/latest.yml` — what every installed copy reads |
+
+Run `BeeZilla-Setup-<version>.exe`, pick a folder, then **Connect BeeZilla account…** from the app menu — or paste your own provider key in Settings. Your data lives in `%APPDATA%\BeeZilla\data`. New builds are offered in-app from the same feed; nothing is emailed to you.
+
+Desktop builds are **not code-signed yet**, so Windows SmartScreen warns on first run — *More info → Run anyway*. Until a signing certificate and the production recipe-publisher key exist, desktop releases ship as GitHub **pre-releases**.
+
+Installers are GitHub Release assets only: this repository never carries a binary, and the download page links straight at GitHub rather than hosting a second copy.
 
 ---
 
