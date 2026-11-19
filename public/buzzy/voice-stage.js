@@ -14,6 +14,13 @@
  *   "History can move down to where library, memory, and experts is… The more button
  *    should be below as well."
  *
+ * Owner, 2026-11-19:
+ *   "When you click on it the first time, it should switch to a pause button. You can
+ *    click on that pause anytime, think as much as you want, and then continue clicking
+ *    on it and dictate it, and then pause it again, so that you have complete control."
+ *
+ *  - Talk to BeeZilla → Pause → Continue → Pause …: what you say collects in the box
+ *    (talk.html's dictation) and nothing is sent until you send it yourself.
  *  - Folded: the Talk bar sits alone at the top of the page (#obStart).
  *  - Talking, sending, or a live step from the agent opens the whiteboard full width;
  *    the Talk bar moves INTO its top edge and the conversation into its right side.
@@ -29,7 +36,6 @@
  * talk.html owns the voice engine and lends this file:
  *   window.bzVoice             — the engine's state (read-only here)
  *   window.bzVoiceOut(level)   — the reply's playback level, 0..1
- *   window.bzVoiceWords(t, f)  — what the recogniser heard
  */
 (function () {
   "use strict";
@@ -52,35 +58,27 @@
   // "armed": a voice session is on and waiting for you between turns (talk.html).
   function voiceOn() { var v = state(); return !!(v.mic || v.armed || v.speaking || v.sending); }
 
-  // ── What BeeZilla hears, shown where you would type ──────────────────
-  var heard = "";
-  var heardTimer = 0;
+  // ── What the voice is doing, said where you would type ──────────────
+  // The words themselves go into the box (talk.html's dictation); while it is empty
+  // the hint says what is happening and what the button does next.
   var restingPlaceholder = null;
-  window.bzVoiceWords = function (text, isFinal) {
-    heard = String(text || "");
-    clearTimeout(heardTimer);
-    if (isFinal) heardTimer = setTimeout(function () { heard = ""; paintWords(); }, 4000);
-    paintWords();
-  };
   function paintWords() {
     if (!input) return;
     var v = state();
-    if (!voiceOn()) {
+    if (!voiceOn() && !v.paused) {
       if (restingPlaceholder !== null) {
         input.setAttribute("placeholder", restingPlaceholder);
         restingPlaceholder = null;
       }
-      input.classList.remove("tb-heard");
-      heard = "";
       return;
     }
     if (restingPlaceholder === null) restingPlaceholder = input.getAttribute("placeholder") || "";
-    var words = heard
-      ? heard
-      : v.speaking ? "BeeZilla is talking. Press the button to cut in."
-        : v.sending ? "Thinking…" : "Listening. Just talk.";
+    var words = v.note ? v.note
+      : v.speaking ? "BeeZilla is talking. Press Pause to stop it."
+        : v.sending ? "Thinking…"
+          : v.paused ? "Paused. Press Continue when you're ready."
+            : "Listening. Just talk.";
     if (input.getAttribute("placeholder") !== words) input.setAttribute("placeholder", words);
-    input.classList.toggle("tb-heard", !!heard);
   }
 
   // ── The live level inside the Talk button ─────────────────────────────
@@ -246,7 +244,8 @@
   }
   var wasOpen = false;
   function sync() {
-    var want = voiceOn() || hasConversation() || wanted;
+    // A paused session keeps its board: the words wait in the box beside it.
+    var want = voiceOn() || !!state().paused || hasConversation() || wanted;
     if (want && !wasOpen && voiceOn()) folded = false; // Talk opens the whiteboard
     var open = want && !folded;
     if (open) mountBoard(); else unmountBoard();

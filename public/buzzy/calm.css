@@ -31,8 +31,12 @@
 .talk-btn.on { animation: none; } /* the level inside says it hears you; no glow */
 .talk-btn .tb-level { display: none; width: 26px; height: 18px; flex: 0 0 auto; }
 .talk-btn[aria-pressed="true"] .tb-mic { display: none; }
+.talk-btn[aria-pressed="true"] .tb-pause { display: block; }
 .talk-btn[aria-pressed="true"] .tb-level { display: block; }
-.composer-card .talk-field #chatInput.tb-heard::placeholder { color: #f2f2f2; opacity: 0.85; }
+/* A phone shows the signs only (no label): keep the pause sign and the level apart. */
+@media (max-width: 640px) { .talk-btn[aria-pressed="true"] { gap: 0.35rem; } }
+/* Words still arriving from the mic: the box is being written (Pause to edit it). */
+.composer-card .talk-field #chatInput[readonly] { caret-color: transparent; }
 
 .talk-more { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
 .talk-more-btn {

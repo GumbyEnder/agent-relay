@@ -812,19 +812,25 @@ export default defineEventHandler(async (event) => {
     }
     // The product's own coinages, which no owner can be expected to have typed.
     addVocab(["Honey Drops"]);
+    // partial=1: a live guess at the words while the person is still talking (the
+    // recorder lane shows it in the field, talk.html liveWords). Only a turn's final
+    // clip is a time-to-transcript number, so guesses are not recorded.
+    const partial = queryValue(fullPath, "partial") === "1";
     try {
       const r = await transcribeAudio(audio, format, vocab);
       // Time to transcript is a product number, not a log line. Recorded with
       // lane "asr" so ops can tell the browser recognizer apart from this path.
-      const sql = await getSql();
-      await recordVoiceMetrics(sql, {
-        userId: user.id,
-        source: "server",
-        mode: "voice",
-        model: r.model,
-        asrMs: r.ms,
-        lane: "asr",
-      });
+      if (!partial) {
+        const sql = await getSql();
+        await recordVoiceMetrics(sql, {
+          userId: user.id,
+          source: "server",
+          mode: "voice",
+          model: r.model,
+          asrMs: r.ms,
+          lane: "asr",
+        });
+      }
       return { ok: true, text: r.text, ms: r.ms, model: r.model };
     } catch (e) {
       setResponseStatus(event, 502);
