@@ -39,7 +39,8 @@ interface BoardState {
     | "agents"
     | "protocol"
     | "journal"
-    | "analytics";
+    | "analytics"
+    | "feedback";
   panel:
     | "none"
     | "mission"

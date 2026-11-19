@@ -456,6 +456,22 @@ async function resolveCallerListScope(
   return { scope: "all", projectId: null, allowedProjectIds: allowed };
 }
 
+/**
+ * resolveCallerListScope for a board read route: `pref` narrows to one board, and
+ * a signed-in admin may add ?all=1 to read past their own boards.
+ */
+async function resolveCallerReadScope(
+  req: Request,
+  machineAuth: MachineAuth,
+  url: URL,
+  pref: string | null | undefined,
+): Promise<CallerListScope | Response> {
+  const ctx = await loadOperatorContext(req);
+  return resolveCallerListScope(req, machineAuth, pref, {
+    adminAll: ctx.role === "admin" && url.searchParams.get("all") === "1",
+  });
+}
+
 /** Poll allow-list for ark keys and operator sessions (GET /missions and POST /v1 poll). */
 async function resolvePollAllowedProjectIds(
   req: Request,
@@ -717,9 +733,19 @@ function lanesEnforceEnvEnabled(): boolean {
   return lanesEnforceEnvEnabledShared();
 }
 
-/** `projectId === null` means every board (scoped then equals global). */
-export async function laneGateReport(projectId: string | null): Promise<LaneGateReport> {
+/**
+ * `projectId === null` means every board (scoped then equals global). When
+ * `allowedProjectIds` is a list (a caller who may only see some boards), every
+ * number and problem comes from those boards alone: `global` is the caller's own
+ * boards and `null_project_id` is 0, so the report says nothing about anyone else's.
+ */
+export async function laneGateReport(
+  projectId: string | null,
+  opts: { allowedProjectIds?: string[] | null } = {},
+): Promise<LaneGateReport> {
   const sql = await getSql();
+  const allow = opts.allowedProjectIds != null ? new Set(opts.allowedProjectIds) : null;
+  const visible = (id: string | null) => !allow || (id != null && allow.has(id));
 
   const counts = (
     await sql.query<{ global: number; null_project_id: number; scoped: number }>(
@@ -731,40 +757,46 @@ export async function laneGateReport(projectId: string | null): Promise<LaneGate
     )
   )[0] ?? { global: 0, null_project_id: 0, scoped: 0 };
 
-  const violations = await sql.query<LaneGateViolation>(
-    `SELECT mission_id, project_id, rule_code, detail
-       FROM ar_mission_lane_violations
-      WHERE ($1::text IS NULL OR project_id = $1)
-      ORDER BY project_id NULLS FIRST, mission_id, rule_code`,
-    [projectId],
-  );
+  // A limited caller's totals cover all of their boards, so read every row and keep theirs.
+  const violations = (
+    await sql.query<LaneGateViolation>(
+      `SELECT mission_id, project_id, rule_code, detail
+         FROM ar_mission_lane_violations
+        WHERE ($1::text IS NULL OR project_id = $1)
+        ORDER BY project_id NULLS FIRST, mission_id, rule_code`,
+      [allow ? null : projectId],
+    )
+  ).filter((v) => visible(v.project_id));
+  const shown = projectId ? violations.filter((v) => v.project_id === projectId) : violations;
 
   let perBoard = false;
   try {
-    const rows = await sql.query<{ enforce: boolean }>(
-      `SELECT COALESCE(bool_or(lanes_enforce), false) AS enforce
+    const rows = await sql.query<{ id: string; enforce: boolean }>(
+      `SELECT id, COALESCE(lanes_enforce, false) AS enforce
          FROM ar_projects
         WHERE ($1::text IS NULL OR id = $1)`,
       [projectId],
     );
-    perBoard = rows[0]?.enforce === true;
+    perBoard = rows.some((r) => r.enforce === true && visible(r.id));
   } catch (error) {
     // 42703 = undefined_column: 0053 not applied here. Degrade to false.
     if ((error as { code?: string })?.code !== "42703") throw error;
     perBoard = false;
   }
 
-  const scoped = projectId ? counts.scoped : counts.global;
+  const global = allow ? violations.length : counts.global;
+  const nullProject = allow ? 0 : counts.null_project_id;
+  const scoped = projectId ? (allow ? shown.length : counts.scoped) : global;
   return {
-    ok: projectId ? scoped === 0 && counts.null_project_id === 0 : counts.global === 0,
+    ok: projectId ? scoped === 0 && nullProject === 0 : global === 0,
     project_id: projectId,
     counts: {
       scoped,
-      null_project_id: counts.null_project_id,
-      global: counts.global,
+      null_project_id: nullProject,
+      global,
     },
     enforce_active: perBoard && lanesEnforceEnvEnabled(),
-    violations: violations.map((v) => ({
+    violations: shown.map((v) => ({
       mission_id: v.mission_id,
       project_id: v.project_id,
       rule_code: v.rule_code,
@@ -854,11 +886,22 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     }
 
     // GET /lane-gate[?project_id=<id>] — read-only mission-lane violation report (P2).
-    // Same shape as `node scripts/lane-gate.mjs --json`; no project_id = all boards.
+    // Same shape as `node scripts/lane-gate.mjs --json`; no project_id = every board
+    // the caller may see (an agent key: its boards; a person: the boards they can open).
     // No writes, no lane history, no audit rows: this surface only reports.
     if (parts.length === 1 && parts[0] === "lane-gate" && req.method === "GET") {
-      const projectId = url.searchParams.get("project_id")?.trim() || null;
-      return json(await laneGateReport(projectId), 200, req.headers.get("origin"));
+      const scoped = await resolveCallerReadScope(
+        req,
+        machineAuth,
+        url,
+        url.searchParams.get("project_id")?.trim() || null,
+      );
+      if (scoped instanceof Response) return scoped;
+      return json(
+        await laneGateReport(scoped.projectId, { allowedProjectIds: scoped.allowedProjectIds }),
+        200,
+        req.headers.get("origin"),
+      );
     }
 
     // GET /client-guide | /docs | /docs/guide — humans get HTML; agents get markdown
@@ -1472,9 +1515,15 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return fromEngine(result);
     }
 
-    // GET /calls
+    // GET /calls — human calls on the boards this caller may see. ?project= narrows
+    // to one board; ?open=0 adds the answered ones. (Until 2026-11-18 this read every
+    // board, so one board's agent key could read every other board's questions.)
     if (parts.length === 1 && parts[0] === "calls" && req.method === "GET") {
-      const snap = await boardOps.snapshot();
+      const scoped = await resolveCallerReadScope(req, machineAuth, url, projectRef(url));
+      if (scoped instanceof Response) return scoped;
+      const snap = await boardOps.adminSnapshot(scoped.projectId ?? "all", {
+        allowedProjectIds: scoped.allowedProjectIds,
+      });
       const openOnly = url.searchParams.get("open") !== "0";
       const calls = openOnly ? snap.calls.filter((c) => !c.resolvedAt) : snap.calls;
       return json({ ok: true, calls });
@@ -1613,9 +1662,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
       return json({ ok: true, ...summary });
     }
 
-    // GET /stale — list stale running missions (ops reliability)
+    // GET /stale — stale running missions on the boards this caller may see (ops reliability)
     if (parts.length === 1 && parts[0] === "stale" && req.method === "GET") {
-      const snap = await boardOps.snapshot(projectRef(url));
+      const scoped = await resolveCallerReadScope(req, machineAuth, url, projectRef(url));
+      if (scoped instanceof Response) return scoped;
+      const snap = await boardOps.adminSnapshot(scoped.projectId ?? "all", {
+        allowedProjectIds: scoped.allowedProjectIds,
+      });
       const policy = policyFromEnv();
       const now = Date.now();
       const summary = staleSummary(snap.missions, now, policy);
@@ -1630,20 +1683,13 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
     // GET /events/stream — SSE for Live (server-side delta; client reconnects)
     if (parts.length === 2 && parts[0] === "events" && parts[1] === "stream" && req.method === "GET") {
       const pref = url.searchParams.get("project") ?? url.searchParams.get("board");
-      const wantAll = !pref || pref === "all" || pref === "*" || pref === "__all__";
-      const ctx = await loadOperatorContext(req);
-      const adminAll =
-        ctx.role === "admin" && url.searchParams.get("all") === "1";
-      let allowedProjectIds: string[] | null = null;
-      if (ctx.authRequired && ctx.user) {
-        allowedProjectIds = await resolveReadableProjectIds(ctx, { adminAll });
-      }
-      let scopedProject: string | null = null;
-      if (!wantAll && pref) {
-        const access = await requireOperatorProjectAccess(req, pref, { adminAll });
-        if (access instanceof Response) return access;
-        scopedProject = access;
-      }
+      // Same gate as the other board reads: an agent key streams its own boards and
+      // signed out is 401 (a signed-out caller used to get every board's stream).
+      const scoped = await resolveCallerReadScope(req, machineAuth, url, pref);
+      if (scoped instanceof Response) return scoped;
+      const wantAll = scoped.scope === "all";
+      const scopedProject = scoped.projectId;
+      const allowedProjectIds = scoped.allowedProjectIds;
       const encoder = new TextEncoder();
       let closed = false;
       let lastSig = "";
@@ -2439,6 +2485,73 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         return err(status, msg, status === 409 ? "conflict" : "bad_request");
       }
     }
+    // ── CR-6 admin triage: GET/PATCH /admin/feedback ──────────────────
+    // The only read path for a feedback row. The consumer host has no GET at
+    // all, and this one requires an operator session with an admin capability.
+    if (parts.length === 2 && parts[0] === "admin" && parts[1] === "feedback" && req.method === "GET") {
+      const gate = await requireOperatorCap(req, "manage_settings");
+      if (gate) return gate;
+      const status = str(url.searchParams.get("status"));
+      const limitRaw = Number(url.searchParams.get("limit") ?? 50);
+      const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 50, 1), 200);
+      const before = str(url.searchParams.get("before"));
+      if (status && !["new", "triaged", "fixed", "wontfix", "duplicate"].includes(status)) {
+        return err(400, "unknown status filter", "bad_request");
+      }
+      const sql = await getSql();
+      const rows = await sql.query<Record<string, unknown>>(
+        `SELECT id, ref, created_at, user_id, body, page_url, route, app_sha, diag,
+                diag_redactions, status, admin_note, ip_hash, ua, updated_at
+           FROM buzzy_feedback
+          WHERE ($1::text IS NULL OR status = $1)
+            AND ($2::timestamptz IS NULL OR created_at < $2)
+          ORDER BY created_at DESC
+          LIMIT $3`,
+        [status, before, limit],
+      );
+      return json({
+        ok: true,
+        feedback: rows.map((r) => ({
+          ...r,
+          // A hash prefix is enough to spot a repeat reporter; the full hash is
+          // a stable per-address identifier and does not belong on a screen.
+          ip_hash: typeof r.ip_hash === "string" ? r.ip_hash.slice(0, 12) : null,
+        })),
+        next_before: rows.length === limit ? rows[rows.length - 1]?.created_at ?? null : null,
+      });
+    }
+    if (
+      parts.length === 3 &&
+      parts[0] === "admin" &&
+      parts[1] === "feedback" &&
+      req.method === "PATCH"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_settings");
+      if (gate) return gate;
+      const ref = parts[2]!;
+      const status = str(body.status);
+      const note = body.admin_note === undefined ? undefined : str(body.admin_note);
+      if (status !== undefined && !["new", "triaged", "fixed", "wontfix", "duplicate"].includes(status)) {
+        return err(400, "unknown status", "bad_request");
+      }
+      if (status === undefined && note === undefined) {
+        return err(400, "nothing to update", "bad_request");
+      }
+      if (note && note.length > 4000) return err(400, "admin_note too long", "bad_request");
+      const sql = await getSql();
+      const rows = await sql.query<{ ref: string }>(
+        `UPDATE buzzy_feedback
+            SET status = COALESCE($2, status),
+                admin_note = CASE WHEN $3::boolean THEN $4 ELSE admin_note END,
+                updated_at = now()
+          WHERE ref = $1
+          RETURNING ref, status, admin_note, updated_at`,
+        [ref, status ?? null, note !== undefined, note ?? null],
+      );
+      if (!rows[0]) return err(404, "feedback not found", "not_found");
+      return json({ ok: true, feedback: rows[0] });
+    }
+
     // POST /admin/users/:id/disable | /enable
     if (
       parts.length === 4 &&

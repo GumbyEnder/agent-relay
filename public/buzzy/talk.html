@@ -156,6 +156,13 @@
       max-width: 920px;
       margin: 0 auto;
     }
+    /* The board is the reason someone opened this row: while it is mounted the whole
+       column widens (owner's screenshot, Nov 2026) so the board gets the width, and
+       the voice panel stays a narrow 300px strip beside it. */
+    .chat-layout.has-board {
+      grid-template-columns: minmax(0, 1240px);
+      max-width: 1240px;
+    }
 
     /* Composer: the top-of-page presence on the landing screen. */
     .composer-card {
@@ -396,7 +403,6 @@
         padding: 0.15rem 0.6rem;
         font-size: 0.75rem;
       }
-      .chat-main > #chatCompany:empty { display: none; }
       .composer-card { padding: 0.6rem 0.7rem 0.55rem; }
       .composer-card #chatInput { font-size: 16px; }
     }
@@ -430,6 +436,59 @@
       gap: 0.75rem;
       min-width: 0;
     }
+    /* Hero utilities: Speak replies stays visible; Recent work / History / New
+       session fold into one menu so the company name owns the line. */
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-left: auto;
+      flex: 0 0 auto;
+    }
+    .hero-more { position: relative; }
+    .hero-more-btn {
+      min-height: 0;
+      padding: 0.15rem 0.6rem;
+      font-size: 1.05rem;
+      line-height: 1.1;
+      border: 1px solid #2A2A2A;
+      border-radius: 999px;
+      background: transparent;
+      color: #BDBDBD;
+      cursor: pointer;
+    }
+    .hero-more-btn:hover,
+    .hero-more-btn[aria-expanded="true"] { color: var(--bz-yellow); border-color: #6B5A1E; }
+    .hero-more-btn:focus-visible { outline: 2px solid var(--bz-yellow); outline-offset: 2px; }
+    .hero-more-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 0.35rem);
+      z-index: 60;
+      min-width: 11rem;
+      display: flex;
+      flex-direction: column;
+      padding: 0.3rem;
+      border: 1px solid #2A2A2A;
+      border-radius: 10px;
+      background: #141414;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    .hero-more-menu[hidden] { display: none; }
+    .hero-more-menu .hero-menu-item {
+      min-height: 0;
+      padding: 0.45rem 0.6rem;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: #E8E8E8;
+      font: inherit;
+      font-size: 0.82rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .hero-more-menu .hero-menu-item:hover { background: #1E1E1E; color: var(--bz-yellow); }
+    .hero-more-menu .hero-menu-item.hidden { display: none; }
     .chat-company-kicker {
       margin: 0;
       font-size: 0.68rem;
@@ -739,6 +798,9 @@
     .media-card { flex-wrap: wrap; }
     .media-img { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 0.4rem; }
     .media-audio { display: block; width: 100%; margin-top: 0.4rem; }
+    .media-video { display: block; width: 100%; max-width: 360px; border-radius: 10px; margin-top: 0.4rem; background: #000; }
+    .media-post { display: block; white-space: pre-wrap; font-size: 0.86em; color: var(--dim, #9aa2ad); margin-top: 0.4rem; }
+    .media-review { display: block; font-size: 0.8em; color: var(--dim, #9aa2ad); margin-top: 0.3rem; }
     .paper-drop.hidden { display: none; }
     .paper-drop {
       margin-top: 0.8rem;
@@ -1285,26 +1347,55 @@
     }
     #promiseCheck.hidden { display: none; }
 
-    /* ── Activity digest — centered on the chat column, never full-bleed left ──
-       #digestCard is a direct child of <main>, so it must carry its own
+    /* ── Activity digest — one slim line, dismissible per user per week ──
+       #digestCard is a direct child of <main>, so it carries its own
        max-width + auto margins or its text pins to the viewport edge. */
     .bz-digest {
       max-width: 760px;
-      margin: 0 auto 0.9rem;
-      padding: 10px 14px;
+      margin: 0 auto 0.5rem;
+      padding: 4px 6px 4px 11px;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
       background: var(--bz-panel);
       border: 1px solid var(--bz-col);
       border-left: 3px solid var(--bz-yellow);
       border-radius: 6px;
-      color: var(--bz-silver);
-      font-size: 0.92rem;
-      line-height: 1.45;
+      color: #9A9A9A;
+      font-size: 0.78rem;
+      line-height: 1.3;
+      min-width: 0;
     }
+    .bz-digest-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .bz-digest-close {
+      flex: 0 0 auto;
+      min-height: 0;
+      min-width: 0;
+      width: 1.5rem;
+      height: 1.5rem;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: #8A8A8A;
+      font: inherit;
+      font-size: 0.8rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .bz-digest-close:hover { background: #222; color: var(--bz-yellow); }
+    .bz-digest-close:focus-visible { outline: 2px solid var(--bz-yellow); outline-offset: 1px; }
 
 /* ── Mobile/async pass (plan doc 23): one-thumb approval + legibility ── */
 @media (max-width: 640px) {
   button, [role="button"] { min-height: 48px; min-width: 48px; font-size: 16px; }
-  .bz-digest { font-size: 15px; padding: 10px 12px; }
+  .bz-digest { font-size: 13px; padding: 4px 6px 4px 10px; }
 }
 .bz-approve-bar { position: sticky; bottom: 0; background: var(--bz-panel, #141414); padding: 10px; display: flex; gap: 8px; }
 .bz-approve-bar button { flex: 1; min-height: 52px; }
@@ -1504,7 +1595,10 @@
     </div>
   </header>
   <main>
-    <div id="digestCard" class="bz-digest hidden" style="display:none"></div>
+    <div id="digestCard" class="bz-digest hidden" style="display:none">
+      <span class="bz-digest-text" id="digestText"></span>
+      <button type="button" class="bz-digest-close" id="digestClose" aria-label="Dismiss this week's summary" title="Dismiss for this week">&#10005;</button>
+    </div>
     <div id="chatScreen">
       <div class="chat-layout">
         <div class="chat-main">
@@ -1514,22 +1608,39 @@
                 <canvas id="chatMascot" width="64" height="63" aria-label="BeeZilla"></canvas>
               </div>
               <div class="chat-company-head">
-                <p class="chat-company-kicker" id="chatCompanyKicker">Working for</p>
                 <h1 class="chat-company-name" id="chatCompanyName">No company yet</h1>
               </div>
             </div>
-            <button id="backToRecent" class="secondary back-recent hidden" type="button">← Recent work</button>
-            <button id="voiceToggle" class="voice-toggle" type="button" aria-pressed="false" title="Read replies aloud">
-              <span class="vt-icon" aria-hidden="true">&#128266;</span><span class="vt-label">Voice</span>
-            </button>
-            <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New session</button>
-            <button id="sessionsToggle" class="secondary sessions-toggle" type="button">History</button>
+            <div class="hero-actions">
+              <!-- ONE voice control. The header's #bzVoiceMic (nav.js) is it: on =
+                   listening AND replies spoken, off = neither. The old "Speak
+                   replies" pill here was a second switch for half the same thing
+                   (owner, Nov 2026), so it is gone. -->
+              <!-- Recent work, History, New session and the Idea Board left the
+                   hero line (owner's screenshot, Nov 2026): buttons for utilities
+                   out-shouted the company name. Same ids, same handlers. -->
+              <div class="hero-more">
+                <button id="heroMoreBtn" class="hero-more-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="heroMoreMenu" aria-label="Recent work, history, new session and the Idea Board" title="More — recent work, history, new session, Idea Board">&#8943;</button>
+                <div class="hero-more-menu" id="heroMoreMenu" role="menu" hidden>
+                  <button id="backToRecent" class="hero-menu-item hidden" type="button" role="menuitem">&#8592; Recent work</button>
+                  <button id="sessionsToggle" class="hero-menu-item" type="button" role="menuitem">History</button>
+                  <button id="newSessionBtn" class="hero-menu-item" type="button" role="menuitem" title="Start a clean conversation">New session</button>
+                  <!-- The board lost its own toolbar button (owner, Nov 2026 —
+                       the board belongs to the voice workspace). It stays reachable
+                       here so the voice-off board and pilot runs still work. -->
+                  <button id="boardToggle" class="hero-menu-item" type="button" role="menuitem" aria-pressed="false" title="Open the Idea Board">&#9638; Idea Board</button>
+                </div>
+              </div>
+            </div>
           </div>
-          <p id="chatCompany" class="muted" style="margin:0.15rem 0 0.6rem;font-size:0.9rem"></p>
+          <!-- No company tagline line under the hero: the name is the header, a
+               one-liner underneath was the third thing saying the same thing
+               (owner, Nov 2026). -->
+
 
           <!-- Voice workspace (owner's reference zMWSgG0, top): only while voice is on.
                A big mic with the live level, the words as they are heard, and the
-               whiteboard beside it (voice-stage.js). Pressing the mic ends voice. -->
+               Idea Board beside it (voice-stage.js). Pressing the mic ends voice. -->
           <div id="voiceStage" class="voice-stage vs-workspace vs-no-board hidden">
             <div class="vs-panel">
               <div class="vs-mic-col">
@@ -1599,21 +1710,19 @@
                    is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
                    dropped on the bar; this link is for a phone or a pasted letter. -->
               <span class="talk-sub-right">
-                <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open the whiteboard">&#9638; Whiteboard</button>
                 <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
-                <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">📎 Attach a paper</button>
+                <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false" title="Attach a file for BeeZilla to read">📎 Attach file</button>
               </span>
             </div>
             <p id="voiceStatus" class="voice-status hidden" role="status"></p>
-            <!-- Plan + remaining quota, read from /api/buzzy/entitlement. A refusal
-                 ("music is part of the paid plans") belongs next to the button that
-                 took it, and a plan you cannot see is a plan nobody trusts. -->
-            <p id="planChip" class="voice-status hidden" role="status" title="Your plan and what is left today"></p>
+            <!-- The plan/quota line lives in the account menu now (nav.js): a
+                 running total under the composer was noise, and the plan belongs
+                 beside the name it applies to (owner, Nov 2026). -->
             <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
               <div class="ctx-bar"><span id="ctxFill"></span></div>
               <span id="ctxText" class="ctx-text">Context 0%</span>
             </div>
-            <!-- The whiteboard opened from the bar while voice is off (voice-stage.js). -->
+            <!-- The Idea Board opened from the bar while voice is off (voice-stage.js). -->
             <div id="boardSolo" class="board-solo"></div>
           </div>
 
@@ -2566,8 +2675,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var isAudio = /^audio\//i.test(a.type || "") || /\.(mp3|wav|m4a|ogg)$/i.test(name);
       var isImage = /^image\//i.test(a.type || "") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name);
       var is3d = /\.(glb|gltf|obj|usdz)$/i.test(name);
+      // A video is the one deliverable that must play where it is announced: the
+      // person reviews it before posting, so a download link alone is not delivery.
+      var isVideo = /^video\//i.test(a.type || "") || /\.(mp4|webm|mov)$/i.test(name);
       var body = "";
-      if (isAudio) {
+      if (isVideo) {
+        body = '<video class="media-video" controls preload="metadata" playsinline' +
+          (a.poster ? ' poster="' + esc(a.poster) + '"' : "") +
+          ' src="' + url + '"></video>' +
+          (a.postText ? '<span class="media-post">' + esc(a.postText) + "</span>" : "") +
+          (a.reviewNote ? '<span class="media-review">' + esc(a.reviewNote) + "</span>" : "");
+      } else if (isAudio) {
         body = '<audio class="media-audio" controls preload="metadata" src="' + url + '"></audio>';
       } else if (isImage) {
         body = '<img class="media-img" src="' + url + '" alt="' + name + '" loading="lazy" />';
@@ -2577,7 +2695,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         body = '<span class="file-sub">3D model · download to open in any 3D viewer</span>';
       }
       return '<div class="file-card media-card">' +
-        '<span class="file-icon">' + (isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
+        '<span class="file-icon">' + (isVideo ? "\uD83C\uDFAC" : isAudio ? "\uD83C\uDFB5" : isImage ? "\uD83D\uDDBC\uFE0F" : is3d ? "\uD83E\uDDED" : "\uD83D\uDCCE") + "</span>" +
         '<span class="file-meta">' +
           '<span class="file-name">' + name + "</span>" +
           '<span class="file-sub">' + (is3d ? "" : "Saved to your files") + size + "</span>" +
@@ -2651,6 +2769,67 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             if (++misses >= 4) stop("Lost touch with the 3D model — check the connection.");
           });
       }, 4000);
+    }
+
+    // ── A video the chat started ─────────────────────────────────────────
+    // The kit renders on another machine and takes minutes, so the turn only starts
+    // the job and returns video { jobId, recipe, etaMinutes }. This polls until the
+    // server has stored the mp4 (plus thumbnail and post text), shows the ETA under
+    // the reply, then attaches the finished video to that same reply. Re-renders
+    // write in place, so audio already playing above is not interrupted.
+    function watchVideo(jobId, msg, info) {
+      var tries = 0;
+      var misses = 0;
+      var startedAt = Date.now();
+      var etaMin = Math.max(1, Number((info && info.etaMinutes) || 5));
+      msg.videoJobId = jobId;
+      function show(text) {
+        msg.progress = text;
+        var line = document.querySelector('[data-video="' + String(jobId).replace(/"/g, "") + '"]');
+        if (line) line.textContent = text;
+        else renderChatMessages();
+      }
+      function stop(text) {
+        clearInterval(tick);
+        msg.progress = text;
+        renderChatMessages();
+      }
+      function left() {
+        var mins = Math.max(0, Math.round(etaMin - (Date.now() - startedAt) / 60000));
+        return mins > 1 ? "about " + mins + " minutes left" : "almost done";
+      }
+      show("Making your video — " + left() + "…");
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/video/" + encodeURIComponent(jobId), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            if (p.video && p.video.url) {
+              clearInterval(tick);
+              msg.progress = "";
+              msg.asset = {
+                url: p.video.url,
+                name: p.video.name || "video.mp4",
+                bytes: p.video.bytes || 0,
+                type: p.video.type || "video/mp4",
+                poster: p.thumbnail && p.thumbnail.url ? p.thumbnail.url : "",
+                postText: p.postText || "",
+                reviewNote: p.reviewNote || "Review before posting — this video was made with AI"
+              };
+              renderChatMessages();
+              return;
+            }
+            if (p.state === "failed" || p.ok === false) {
+              return stop(p.message || p.error || "The video did not finish.");
+            }
+            if (tries > 240) return stop("The video is taking far longer than promised — ask again in a moment.");
+            if (p.state === "running" || p.state === "queued") show("Making your video — " + left() + "…");
+            misses = 0;
+          })
+          .catch(function () {
+            if (++misses >= 4) stop("Lost touch with the video service — check the connection.");
+          });
+      }, 8000);
     }
 
     // ── What happened ────────────────────────────────────────────────
@@ -2767,8 +2946,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         }
         if (m.progress) {
-          bubble += '<div class="bz-what" data-model3d="' + String(m.model3dTask || "").replace(/"/g, "") + '">' +
-            String(m.progress).replace(/</g, "&lt;") + "</div>";
+          bubble += '<div class="bz-what"' +
+            (m.model3dTask ? ' data-model3d="' + String(m.model3dTask).replace(/"/g, "") + '"'
+              : m.videoJobId ? ' data-video="' + String(m.videoJobId).replace(/"/g, "") + '"' : "") +
+            '>' + String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
         return bubble;
@@ -3570,11 +3751,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         }
       } catch (_) {}
-      var t = document.getElementById("voiceToggle");
-      if (t) {
-        t.classList.toggle("on", voice.replies);
-        t.setAttribute("aria-pressed", voice.replies ? "true" : "false");
-      }
       var m = document.getElementById("micBtn");
       if (m) {
         m.classList.toggle("on", voice.mic);
@@ -3599,10 +3775,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         s.textContent = msg;
         s.classList.toggle("hidden", !msg);
       }
-      // The stage is the face of the conversation: only while it is live.
+      // The stage is the face of the conversation: only while voice is live.
+      // `voice.replies` alone no longer counts — replies only exist inside a
+      // session now, so a leftover preference cannot pop the panel open.
       var stage = document.getElementById("voiceStage");
-      var live = voice.mic || voice.speaking || voice.sending || voice.replies;
+      var live = voice.mic || voice.armed || voice.speaking || voice.sending;
       if (stage) stage.classList.toggle("hidden", !live);
+      // 'End voice' is an action on a live session, so it only exists while one
+      // is live (owner, Nov 2026). A dead button on an idle page taught nothing.
+      var endBtn = document.getElementById("voiceStageEnd");
+      if (endBtn) endBtn.classList.toggle("hidden", !(voice.mic || voice.armed || voice.speaking || voice.sending));
       var st = document.getElementById("voiceStageState");
       if (st) {
         st.textContent = voice.speaking ? "Speaking" : voice.sending ? "Thinking" : voice.mic ? "Listening" : "Voice";
@@ -5029,6 +5211,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       } else {
         stopListening();
         stopSpeaking();
+        // One switch, one state: OFF also means "do not read replies aloud".
+        // Before the merge the hero pill could leave replies on after voice ended,
+        // so the switch said off while the next typed reply still spoke.
+        if (voice.replies) { voice.replies = false; saveVoicePref(false); }
         // Turning Listen OFF must release the microphone, not just stop using it.
         // This branch used to leave micStream and the probe stream live, so the
         // browser's mic indicator stayed lit and a stopped session still showed
@@ -5036,13 +5222,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // said "recording" while the product said "not listening".
         releaseMic();
       }
-      paintVoice();
-    }
-
-    function toggleVoiceReplies() {
-      voice.replies = !voice.replies;
-      saveVoicePref(voice.replies);
-      if (!voice.replies) stopSpeaking();
       paintVoice();
     }
 
@@ -5109,8 +5288,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.asr = srAvailable() ? "sr" : "recorder";
       voice.replies = voicePref();
       mountAvatars();
-      var t = document.getElementById("voiceToggle");
-      if (t) t.addEventListener("click", toggleVoiceReplies);
+      // There is no page-level "Speak replies" pill any more: the nav's #bzVoiceMic
+      // is the single voice switch, and toggleMic owns both halves of its state.
       var m = document.getElementById("micBtn");
       if (m) m.addEventListener("click", toggleMic);
       var end = document.getElementById("voiceStageEnd");
@@ -5119,6 +5298,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         saveListenPref(false);
         stopListening();
         stopSpeaking();
+        if (voice.replies) { voice.replies = false; saveVoicePref(false); }
         releaseMic();
         paintVoice();
       });
@@ -5133,6 +5313,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           saveListenPref(false);
           stopListening();
           stopSpeaking();
+          // The switch is ONE state: ending voice also ends spoken replies.
+          if (voice.replies) { voice.replies = false; saveVoicePref(false); }
           releaseMic();
           paintVoice();
         },
@@ -6824,6 +7006,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (Array.isArray(data.actions) && data.actions.length && window.BeeZillaPilot) window.BeeZillaPilot.run(data.actions);
         // Asked for a 3D model: the turn started it, and it lands under this reply.
         if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
+        // Asked for a video: the turn started it, and it lands under this reply.
+        if (data.video && data.video.jobId) watchVideo(data.video.jobId, replyMsg, data.video);
         // A track spends plan minutes: show what is left now, not on the next send.
         if (data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
         // The turn's own numbers are authoritative — don't re-fetch over them.
@@ -6991,7 +7175,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       submitPaper({ filename: "", fileKind: "paste", text: pasted });
     };
     // The bar is a drop target too: a file or picture dropped on it takes the same
-    // path as Attach a paper (papers are read, pictures/sound/3D are kept).
+    // path as Attach file (papers are read, pictures/sound/3D are kept).
     (function wireTalkBar() {
       var bar = document.getElementById("talkBar");
       var input = document.getElementById("chatInput");
@@ -7296,6 +7480,39 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     document.getElementById("newChatBtn").onclick = () => { startNewChat(); };
     document.getElementById("sessionsToggle").onclick = () => { openSessionsDrawer(); };
     document.getElementById("backToRecent").onclick = goBackToRecent;
+
+    // The hero menu (Recent work · History · New session). Open/close without
+    // leaking listeners on a soft navigation: the handlers are installed once per
+    // document, and the elements are looked up at click time.
+    if (!document.body.hasAttribute("data-bz-heromenu")) {
+      document.body.setAttribute("data-bz-heromenu", "1");
+      document.addEventListener("click", function (e) {
+        var moreBtn = document.getElementById("heroMoreBtn");
+        var menu = document.getElementById("heroMoreMenu");
+        if (!moreBtn || !menu) return;
+        var inside = menu.contains(e.target);
+        if (e.target === moreBtn || moreBtn.contains(e.target)) {
+          var open = menu.hidden;
+          menu.hidden = !open;
+          moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+          return;
+        }
+        if (!inside && !menu.hidden) {
+          menu.hidden = true;
+          moreBtn.setAttribute("aria-expanded", "false");
+        }
+      });
+      document.addEventListener("keydown", function (e) {
+        var moreBtn = document.getElementById("heroMoreBtn");
+        var menu = document.getElementById("heroMoreMenu");
+        if (!moreBtn || !menu || menu.hidden) return;
+        if (e.key === "Escape") {
+          menu.hidden = true;
+          moreBtn.setAttribute("aria-expanded", "false");
+          moreBtn.focus();
+        }
+      });
+    }
     document.getElementById("sessionsClose").onclick = () => {
       closeSessionsDrawer();
       document.getElementById("sessionsPill").classList.add("hidden");
@@ -7322,16 +7539,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var nameEl = document.getElementById("chatCompanyName");
       var kicker = document.getElementById("chatCompanyKicker");
       var briefCo = document.getElementById("briefCompany");
-      var line = document.getElementById("chatCompany");
       var name = co && co.name ? co.name : "";
       if (nameEl) nameEl.textContent = name || "";
-      if (kicker) kicker.textContent = name ? "Working for" : "";
+      // No "Working for" kicker: the company name stands on its own (owner's
+      // marked-up screenshot, Nov 2026).
+      if (kicker) kicker.remove();
       // Without a company the tab bar already says "No company yet" — don't
       // say it twice. Hide the whole name block and leave the mascot.
       var head = nameEl ? nameEl.closest(".chat-company-head") : null;
       if (head) head.classList.toggle("hidden", !name);
       if (briefCo) briefCo.textContent = name ? "For " + name : "";
-      if (line) line.textContent = co && co.oneLiner ? co.oneLiner : "";
       var id = co ? co.id : null;
       if (chatState.boundCompanyId && id && chatState.boundCompanyId !== id) {
         chatState.boundCompanyId = id;
@@ -7363,11 +7580,52 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
   </script>
 
 <script>
-/* ── Your week with BeeZilla — activity digest (plan doc 23 #7) ────────
-   Skippable by design: any failure or an empty week renders nothing. */
+/* ── Your week with BeeZilla — one slim, dismissible line (plan doc 23 #7) ────
+   Skippable by design: any failure or an empty week renders nothing. The X
+   remembers the dismissal PER USER PER WEEK (ISO week + identity cached by the
+   chrome), so it comes back next Monday and not before. */
 (function () {
   var card = document.getElementById("digestCard");
-  if (!card) return;
+  var text = document.getElementById("digestText");
+  var close = document.getElementById("digestClose");
+  if (!card || !text || !close) return;
+
+  var DISMISS_KEY = "bz_digest_dismissed";
+  function who() {
+    try {
+      var v = JSON.parse(localStorage.getItem("bz_identity") || "null");
+      return (v && (v.email || v.name)) || "anon";
+    } catch (_) { return "anon"; }
+  }
+  function isoWeek(d) {
+    // ISO week number: the week belongs to the year of its Thursday.
+    var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    var day = t.getUTCDay() || 7;
+    t.setUTCDate(t.getUTCDate() + 4 - day);
+    var year = t.getUTCFullYear();
+    var week = Math.ceil(((t - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
+    return year + "-W" + week;
+  }
+  var WEEK = isoWeek(new Date());
+  // Identity is read at the moment of use, never once at parse time: the chrome
+  // writes bz_identity AFTER this inline script runs, so a cached-at-parse value
+  // was "anon" on the first visit and the user's own dismissal never matched.
+  function dismissed() {
+    try {
+      var v = JSON.parse(localStorage.getItem(DISMISS_KEY) || "null");
+      return !!(v && v.who === who() && v.week === WEEK);
+    } catch (_) { return false; }
+  }
+  function remember() {
+    try { localStorage.setItem(DISMISS_KEY, JSON.stringify({ who: who(), week: WEEK })); } catch (_) {}
+  }
+  if (dismissed()) return;
+  close.addEventListener("click", function () {
+    remember();
+    card.style.display = "none";
+    card.classList.add("hidden");
+  });
+
   fetch("/api/buzzy/digest", { credentials: "include" })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (data) {
@@ -7383,39 +7641,24 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var money = "under a penny";
       if (d.dollarsEstimate >= 0.005) money = "about $" + d.dollarsEstimate.toFixed(2);
       bits.push(money + " this week");
-      card.textContent = "Your week with BeeZilla: " + bits.join(", ") + ".";
-      card.style.display = "block";
+      text.textContent = "Your week with BeeZilla: " + bits.join(", ") + ".";
+      card.classList.remove("hidden");
+      card.style.display = "flex";
     })
     .catch(function () { /* never surface an error for the digest */ });
 })();
 </script>
 
 <script>
-/* ── Plan + remaining quota ────────────────────────────────────────────── */
+/* ── Plan + remaining quota lives in the account menu now (nav.js) ────────
+   The running total under the composer was noise; the plan belongs beside the
+   name it applies to (owner, Nov 2026). nav.js owns the entitlement read and
+   exposes window.bzRefreshPlan, so this only asks for a refresh after a turn. */
 (function () {
-  function render(d) {
-    var chip = document.getElementById("planChip");
-    if (!chip || !d || !d.ok) return;
-    var name = String(d.plan || "free");
-    var bits = [name.charAt(0).toUpperCase() + name.slice(1) + " plan"];
-    var left = d.remaining || {};
-    bits.push(Number(left.inference || 0).toLocaleString() + " chats left");
-    var musicLeft = Number(left.musicSeconds || 0);
-    bits.push(musicLeft > 0 ? Math.floor(musicLeft / 60) + " min music left" : "no music on this plan");
-    if (name === "free") bits.push("upgrade for music");
-    chip.textContent = bits.join(" · ");
-    chip.classList.remove("hidden");
-  }
-  function refresh() {
-    fetch("/api/buzzy/entitlement", { credentials: "include" })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(render)
-      .catch(function () { /* a plan chip is not worth an error toast */ });
-  }
-  refresh();
-  window.bzRefreshPlan = refresh;
   var send = document.getElementById("chatSend");
-  if (send) send.addEventListener("click", function () { setTimeout(refresh, 2500); });
+  if (send) send.addEventListener("click", function () {
+    setTimeout(function () { if (window.bzRefreshPlan) window.bzRefreshPlan(); }, 2500);
+  });
 })();
 </script>
 

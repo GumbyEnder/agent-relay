@@ -37,10 +37,19 @@ export default defineEventHandler(async (event) => {
   // AGENT_RELAY_ADMIN_EMAILS) gets the model and the base URL they need to
   // debug it. Everything else — what is on, what is missing — stays visible to
   // everyone, because that is the question this endpoint exists to answer.
+  // `resolveOperatorContext` reports role "admin" for a deployment that runs with
+  // human auth OFF (AGENT_RELAY_HUMAN_AUTH=0 / VITE_AUTH_ENABLED=false): that is
+  // a dev convenience for the write paths, not a human with a session. Taking it
+  // as admin here handed the whole deployment inventory — env var names, model
+  // ids, provider endpoints — to an anonymous GET on any deployment where auth
+  // is not enforced (verified: a local build with auth off returned BZ_ELEVEN_KEY,
+  // BZ_BRAVE_KEY, BZ_ASR_MODEL and the chat model id to an unauthenticated
+  // caller). Wiring requires a real session plus the admin role, so gate on
+  // authRequired as well and fail closed everywhere else.
   let isAdmin = false;
   try {
     const ctx = await resolveOperatorContext(headersFromEvent(event));
-    isAdmin = ctx.role === "admin";
+    isAdmin = ctx.authRequired === true && ctx.role === "admin";
   } catch {
     isAdmin = false;
   }

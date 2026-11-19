@@ -216,6 +216,144 @@ export function isExplicitDocumentRequest(message: string): boolean {
 }
 
 /**
+ * Is this a request to MAKE A VIDEO — and which of the five recipes?
+ *
+ * The kit brief is explicit about why this exists: "Make me an infographic /
+ * chalkboard video / explain X on a chalkboard" must ALWAYS start the job; the
+ * model must never talk itself out of it. A video costs minutes and a queue slot,
+ * so a model that hedges ("I can describe how one would look") burns the person's
+ * turn and produces nothing.
+ *
+ * Same discipline as music and pictures — a verb of making plus a video noun, or
+ * a recipe named as the object of the sentence — with two differences:
+ *   - a recipe name is enough on its own ("chalkboard video of mitosis"), because
+ *     naming the product IS the order; and
+ *   - questions are dropped first, so "how do I make a chart race in matplotlib?"
+ *     stays a question.
+ *
+ * This returns the recipe as well as yes/no, because the harness has to start the
+ * right one without asking a second question.
+ */
+export type VideoAskRecipe =
+  | "explain-on-a-chalkboard"
+  | "ai-creator-tips-paper-cut"
+  | "chart-race-from-your-numbers"
+  | "picture-reel"
+  | "narrated-explainer";
+
+/** Ordered: the first hint that matches wins, so specific phrases come first. */
+const VIDEO_RECIPE_HINTS: Array<{ recipe: VideoAskRecipe; re: RegExp }> = [
+  { recipe: "chart-race-from-your-numbers", re: /\b(chart[-\s]?race|racing (bar )?chart|bar chart race|race chart)\b/i },
+  { recipe: "ai-creator-tips-paper-cut", re: /\bpaper[-\s]?cut(out)?s?\b/i },
+  { recipe: "picture-reel", re: /\b(picture|photo|image)s? reel\b|\breel of (pictures|photos|images)\b/i },
+  { recipe: "narrated-explainer", re: /\b(narrated explainer|explainer video|narrated video|voice[-\s]?over)\b/i },
+  // The chalkboard is the flagship and "infographic" is what most people type for
+  // it. "Whiteboard animation" is the same product in different words.
+  { recipe: "explain-on-a-chalkboard", re: /\b(chalk[-\s]?board|infographic|whiteboard (animation|video))\b/i },
+];
+
+/** A video noun that is not specific enough to name a recipe. */
+const VIDEO_NOUN = /\b(video|clip|reel|animation|explainer)\b/i;
+
+/** Verbs that make a sentence an order rather than a description. */
+const VIDEO_MAKE =
+  /\b(make|create|generate|produce|build|render|give me|i want|i need|i'?d like|would like|can you (make|do|create)|can i (get|have)|turn (this|that|it) into)\b/i;
+
+/**
+ * Recipe + topic, or null. The topic is what the person wants explained, with the
+ * request scaffolding stripped, so the kit is not asked to render "make me an
+ * infographic about".
+ */
+export function videoAsk(
+  message: string,
+): { recipe: VideoAskRecipe; topic: string; needsTable: boolean } | null {
+  const m = String(message || "").trim();
+  if (!m) return null;
+
+  const hint = VIDEO_RECIPE_HINTS.find((h) => h.re.test(m));
+  const hasVideoNoun = VIDEO_NOUN.test(m);
+  const hasMake = VIDEO_MAKE.test(m);
+
+  // A question about the craft ("how do I make a chart race?", "what is an
+  // infographic?") is not an order. A sentence that OPENS with a question word is a
+  // question even when it contains "make" — "how do I make a chart race in
+  // matplotlib?" is someone learning, not ordering. Checked first so the answer
+  // stays a conversation.
+  if (/^\s*(how|what|why|where|when|which|who|whose|is|are|was|were|does|do|did|should)\b/i.test(m)) return null;
+
+  // A 3D model that happens to be OF a chalkboard is a 3D model. "make a 3D model
+  // of a chalkboard" must not start a video render.
+  if (is3dRequest(m)) return null;
+
+  // Naming a recipe is an order on its own when the message is short: someone
+  // typing "chalkboard video: photosynthesis" has already said everything.
+  const recipeNamed = Boolean(hint) && (hasMake || m.length <= 120);
+  if (!recipeNamed && !(hasVideoNoun && hasMake)) return null;
+
+  // "make a video about X" with no recipe named: the narrated explainer is the
+  // one that makes no stylistic assumption, so that is the honest default.
+  const recipe: VideoAskRecipe = hint ? hint.recipe : "narrated-explainer";
+  // The chart race is the one recipe a sentence cannot supply: POST /jobs wants a
+  // table and a source alongside the question. The harness must ask for the
+  // numbers instead of starting a job that the kit will refuse in a second.
+  return { recipe, topic: videoTopicFrom(m, hint?.re), needsTable: recipe === "chart-race-from-your-numbers" };
+}
+
+export function isVideoRequest(message: string): boolean {
+  return videoAsk(message) !== null;
+}
+
+/** The request scaffolding, longest first, so "make me an" goes before "make". */
+const VIDEO_SCAFFOLD = [
+  /^(please\s+)/i,
+  /^(can|could)\s+you\s+(please\s+)?/i,
+  /^(i\s+(want|need|would like)|i'?d\s+like)\s+(you\s+to\s+)?/i,
+  /^(make|create|generate|produce|build|render|give)\s+(me\s+)?/i,
+  /^(a|an|the|some|one)\s+/i,
+  /^(short\s+|quick\s+|little\s+)?/i,
+  /^(explain|explaining|teach me|show me)\s+/i,
+];
+
+/**
+ * The topic, not the request. "Make me an infographic about the water cycle"
+ * becomes "the water cycle"; "explain photosynthesis on a chalkboard" becomes
+ * "photosynthesis". The recipe phrase is removed first, so "on a chalkboard"
+ * cannot be mistaken for the "about/on" separator.
+ */
+export function videoTopicFrom(message: string, recipeRe?: RegExp): string {
+  let t = String(message || "").trim();
+  // The recipe phrase WITH its preposition goes first: "on a chalkboard", "as an
+  // infographic", "in paper-cut style". Removing the noun alone leaves the
+  // preposition behind, and "explain photosynthesis on a chalkboard" came out as
+  // the topic "a".
+  const RECIPE_WORDS =
+    "chalk[\\s-]?board|paper[\\s-]?cut|chart[\\s-]?race|picture reel|narrated explainer|infographic|whiteboard animation";
+  t = t.replace(
+    new RegExp(`\\b(as|in|on|into|using)\\s+(a|an|the)?\\s*(${RECIPE_WORDS})\\b(\\s+(style|format|video|clip|reel|template))?`, "gi"),
+    " ",
+  );
+  if (recipeRe) t = t.replace(new RegExp(recipeRe.source, "gi"), " ");
+  // Any leftover generic product noun ("chalkboard video: mitosis" leaves "video:").
+  t = t.replace(/\b(video|clip|reel|animation|explainer)\b/gi, " ");
+  // Strip leading scaffolding repeatedly: "make me an …" is three layers deep.
+  for (let i = 0; i < 6; i += 1) {
+    const before = t;
+    for (const re of VIDEO_SCAFFOLD) t = t.replace(re, "");
+    t = t.trim();
+    if (t === before) break;
+  }
+  // A leading "tips" survives "paper-cut tips": the product, not the topic.
+  t = t.replace(/^\s*tips?\b\s*/i, "");
+  t = t.replace(/^[\s:–—-]+/, "");
+  // "about X" / "on X" / "of X" / "covering X" at the START is the separator. Only
+  // at the start: "the history of jazz" is a topic, not "jazz".
+  const lead = /^(about|on|of|covering|that explains|explaining)\b\s+(.+)$/i.exec(t);
+  if (lead && lead[2]) t = lead[2];
+  t = t.replace(/^[\s:–—-]+/, "").replace(/[\s.!?]+$/, "").trim();
+  return t.slice(0, 300) || String(message || "").trim().slice(0, 300);
+}
+
+/**
  * Is this a request to DRAW something?
  *
  * Same discipline as music: a verb of making plus an image noun in the same clause.
