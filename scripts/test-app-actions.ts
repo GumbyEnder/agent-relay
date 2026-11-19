@@ -121,7 +121,14 @@ const chatRoutes = readFileSync(resolve(root, "src/lib/buzzy/chat.nitro.ts"), "u
 const voiceStage = readFileSync(resolve(root, "public/buzzy/voice-stage.js"), "utf8");
 check(talk.includes("if (speechSeen) liveWords(recState);") && talk.includes('"partial=1"'), "the recorder lane shows live words while the person talks");
 check(/const partial = queryValue\(fullPath, "partial"\) === "1";[\s\S]{0,600}if \(!partial\) \{\s*const sql = await getSql\(\);\s*await recordVoiceMetrics/.test(chatRoutes), "live guesses are not counted as time to transcript");
-check(voiceStage.includes("tailThatFits(heard)"), "a long sentence keeps its newest words in view");
+// Talk → Pause → Continue (owner, 2026-11-19: "You can click on that pause anytime, think
+// as much as you want, and then continue clicking on it and dictate it"). What is said
+// collects in the box; only the person's own send reaches BeeZilla.
+check(talk.includes('var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to BeeZilla";'), "the button reads Talk to BeeZilla, then Pause, then Continue");
+check((talk.match(/(?<!function )sendChatMessage\(\)/g) || []).length === 1 && talk.includes("Promise.resolve(sendChatMessage()).then(after, after);"), "only the person's own send reaches BeeZilla (no voice path sends by itself)");
+check(talk.includes('document.getElementById("chatSend").onclick = sendFromBox;'), "the Send arrow finishes the words still coming, then sends");
+check(talk.includes("function pauseVoice()") && /function pauseVoice\(\) \{\s*dictFinishWindow\(\);/.test(talk), "Pause keeps the words already said");
+check(voiceStage.includes("!!state().paused"), "a paused session keeps its Idea Board open");
 // History is a place in the row under the search bar now (owner, 2026-11-18), not a
 // button up top: "show my history" presses that tab.
 check(pilot.includes(`'[data-tab="history"]'`), "pilot.js presses the History place");

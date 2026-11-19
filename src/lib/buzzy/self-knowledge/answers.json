@@ -672,19 +672,19 @@
   {
     "id": "sk-035",
     "q": "How does talking to BeeZilla by voice work?",
-    "a": "Press Talk to BeeZilla — that button is the voice switch. It says Listening… with a small live level, the face at the top left listens, and your words appear in the box as you speak. The Idea Board opens with the bar inside it. Press the button again to stop.",
+    "a": "Press Talk to BeeZilla. The Idea Board opens with the bar inside it, the face at the top left listens, and your words appear in the box as you speak, in every browser. Stopping to think doesn't send anything: the button has become Pause, so press it whenever you like, press Continue to keep talking, and press Send (or Enter) when your message is ready.",
     "sources": [
       {
-        "file": "public/buzzy/voice-stage.js",
-        "symbol": "We have a voice toggle. That does not need to be there."
-      },
-      {
-        "file": "public/buzzy/voice-stage.js",
-        "symbol": "What BeeZilla hears, shown where you would type"
+        "file": "public/buzzy/talk.html",
+        "symbol": "Dictation: what you say collects in the box until you send it"
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Stop talking to BeeZilla"
+        "symbol": "Sending is the person's own act"
+      },
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "We have a voice toggle. That does not need to be there."
       }
     ],
     "surfaces": [
@@ -695,7 +695,7 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Press Talk to BeeZilla: it listens and reads its answers aloud as one mode. Press it again to stop. While voice is on, a small Listening button beside the settings gear (bottom right) shows it on every other page, with Stop.",
+    "a": "Yes. Press Talk to BeeZilla: it listens, and BeeZilla reads its answers aloud. Press Pause for quiet to think (it also stops BeeZilla mid-answer) and Continue to talk again. While it's listening, a small Listening button beside the settings gear (bottom right) shows it on every other page, with Stop.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
