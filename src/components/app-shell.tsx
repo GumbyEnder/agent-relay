@@ -8,6 +8,7 @@ import {
   Bot,
   CircleHelp,
   Download,
+  Inbox,
   LayoutDashboard,
   MessageSquareWarning,
   Palette,
@@ -24,6 +25,7 @@ import { AgentStrip } from "@/components/agent-strip";
 import { AgentProfilePanel } from "@/components/agent-profile-panel";
 import { AgentsPanel } from "@/components/agents-panel";
 import { AnalyticsPanel } from "@/components/analytics-panel";
+import { FeedbackPanel } from "@/components/feedback-panel";
 import { JournalPanel } from "@/components/journal-panel";
 import { UserProfilePanel } from "@/components/user-profile-panel";
 import { BoardColumn } from "@/components/board-column";
@@ -63,7 +65,8 @@ type MainView =
   | "agents"
   | "protocol"
   | "journal"
-  | "analytics";
+  | "analytics"
+  | "feedback";
 
 const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
   { id: "board", label: "Board", icon: LayoutDashboard },
@@ -73,6 +76,9 @@ const VIEWS: { id: MainView; label: string; icon: typeof Activity }[] = [
   { id: "protocol", label: "Protocol", icon: BookOpen },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "journal", label: "Journal", icon: BookMarked },
+  // CR-6 triage. Admin-only: the list is hard-gated server-side too, and the tab
+  // is hidden rather than shown-then-403'd.
+  { id: "feedback", label: "Feedback", icon: Inbox },
 ];
 
 export function AppShell({
@@ -132,6 +138,8 @@ export function AppShell({
   const [newBoardBusy, setNewBoardBusy] = useState(false);
   const [newMissionColumn, setNewMissionColumn] = useState<MissionColumn>("inbox");
   const { role, can } = useOperatorMe();
+  // The triage tab exists only for an admin; the API refuses everyone else.
+  const viewTabs = VIEWS.filter((v) => v.id !== "feedback" || role === "admin");
 
   const openNewMission = (column: MissionColumn = "inbox") => {
     setNewMissionColumn(column);
@@ -637,7 +645,7 @@ export function AppShell({
               {staleRunning.length} stale
             </button>
           )}
-          {VIEWS.map((v) => {
+          {viewTabs.map((v) => {
             const Icon = v.icon;
             const active = mainView === v.id;
             return (
@@ -1011,6 +1019,11 @@ export function AppShell({
           {mainView === "journal" && (
             <div className="min-h-0 flex-1 overflow-hidden">
               <JournalPanel />
+            </div>
+          )}
+          {mainView === "feedback" && (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <FeedbackPanel />
             </div>
           )}
         </div>

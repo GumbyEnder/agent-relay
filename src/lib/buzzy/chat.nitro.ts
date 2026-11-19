@@ -92,6 +92,23 @@ import { resolveActingAccount, guard, canPerform, denialReason, TEAM_ACTIONS, DE
 import { STATEMENT_IDS, DEEPENING_IDS } from "./questions";
 import { createHash } from "node:crypto";
 import { transcribeAudio, formatFromContentType, ASR_MAX_BYTES, normalizeVocab } from "./asr";
+import {
+  ASR_MAX_SECONDS,
+  ASR_PER_IP_HOUR,
+  ASR_ROUTE_PER_HOUR,
+  FEEDBACK_BODY_MAX,
+  FEEDBACK_DIAG_MAX_BYTES,
+  LIMITS,
+  appSha,
+  clientIp,
+  feedbackPepper,
+  anonIpHash,
+  makeRef,
+  newFeedbackId,
+  pathOnly,
+  sanitizeDiag,
+  wavDurationSeconds,
+} from "./feedback";
 
 /**
  * Largest single file the bulk asset path will store. A skills corpus is
@@ -363,6 +380,227 @@ export default defineEventHandler(async (event) => {
       content: link.content,
       note: "Shared by the owner as a read-only link. It expires and can be turned off at any time.",
     };
+  }
+
+  // ── CR-6 feedback — POST /api/buzzy/feedback, anonymous and signed in ──
+  // The consumer host keeps no GET for feedback at all; the row is readable only
+  // through the admin triage API on the console host.
+  if (method === "POST" && path === "/api/buzzy/feedback") {
+    const pepper = feedbackPepper();
+    if (!pepper) {
+      // 7318: both services share one pepper, and a deployment without it cannot
+      // hash an address. Refuse rather than insert a raw-IP-derived value or a
+      // placeholder that would make every anonymous report the same reporter.
+      setResponseStatus(event, 503);
+      return { ok: false, error: "Feedback is not configured on this deployment.", code: "feedback_unavailable" };
+    }
+    const headers = headersFromEvent(event);
+    const user = await getSessionUserFromHeaders(headers).catch(() => null);
+    // Always a key: an unknown address lands in the shared "unknown" bucket
+    // rather than skipping the anonymous caps (frodo F1, 7331). The arm below
+    // used to be `else if (hashed)`, which made a header miss a free pass on a
+    // public write door.
+    const hashed = anonIpHash(clientIp(headers), pepper);
+    let raw: any;
+    try {
+      raw = await event.req.json();
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send a JSON body.", code: "bad_json" };
+    }
+    const body = typeof raw?.body === "string" ? raw.body.trim() : "";
+    if (body.length < 1) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Tell us what happened first.", code: "empty" };
+    }
+    if (body.length > FEEDBACK_BODY_MAX) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: `Keep it under ${FEEDBACK_BODY_MAX} characters.`, code: "too_long" };
+    }
+    let diagBytes = 0;
+    try {
+      diagBytes = Buffer.byteLength(JSON.stringify(raw?.diag ?? null), "utf8");
+    } catch {
+      diagBytes = FEEDBACK_DIAG_MAX_BYTES + 1;
+    }
+    if (diagBytes > FEEDBACK_DIAG_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: "The diagnostic is too large to accept.", code: "diag_too_large" };
+    }
+    const clean = sanitizeDiag(raw?.diag ?? null);
+    const sql = await getSql();
+    const userId = user?.id ?? null;
+
+    // Limits are counted from the table, so they survive a restart and hold
+    // across both services. Both arms are scoped to the window FIRST: a row whose
+    // ip_hash was nulled at 90 days can never be compared against this request.
+    let retryAfter = 3600;
+    if (userId) {
+      const rows = (await sql`
+        SELECT count(*)::int AS n, min(created_at) AS oldest
+        FROM buzzy_feedback
+        WHERE user_id = ${userId} AND created_at > now() - interval '1 hour'
+      `) as Array<{ n: number; oldest: string | null }>;
+      if ((rows[0]?.n ?? 0) >= LIMITS.userHour) {
+        const oldest = rows[0]?.oldest ? new Date(rows[0].oldest).getTime() : Date.now();
+        retryAfter = Math.max(60, Math.ceil((oldest + 3600_000 - Date.now()) / 1000));
+      } else retryAfter = 0;
+    } else {
+      const hour = (await sql`
+        SELECT count(*)::int AS n, min(created_at) AS oldest
+        FROM buzzy_feedback
+        WHERE ip_hash = ${hashed} AND created_at > now() - interval '1 hour'
+      `) as Array<{ n: number; oldest: string | null }>;
+      const day = (await sql`
+        SELECT count(*)::int AS n
+        FROM buzzy_feedback
+        WHERE ip_hash = ${hashed} AND created_at > now() - interval '1 day'
+      `) as Array<{ n: number }>;
+      if ((hour[0]?.n ?? 0) >= LIMITS.anonHour || (day[0]?.n ?? 0) >= LIMITS.anonDay) {
+        const oldest = hour[0]?.oldest ? new Date(hour[0].oldest).getTime() : Date.now();
+        retryAfter = Math.max(60, Math.ceil((oldest + 3600_000 - Date.now()) / 1000));
+      } else retryAfter = 0;
+    }
+    if (retryAfter > 0) {
+      setResponseHeader(event, "Retry-After", String(retryAfter));
+      setResponseStatus(event, 429);
+      return {
+        ok: false,
+        code: "rate_limited",
+        error: `Too many reports from this connection — try again in ${Math.ceil(retryAfter / 60)} minutes.`,
+        retryAfter,
+      };
+    }
+
+    const diag = clean.diag
+      ? {
+          ...clean.diag,
+          page: { ...(clean.diag.page as Record<string, unknown>), app_sha: appSha() },
+          account: { signed_in: Boolean(userId), user_id: userId },
+          redactions: { count: clean.redactions, kinds: clean.kinds },
+        }
+      : null;
+    const pageUrl = pathOnly(raw?.page_url ?? (clean.diag?.page as any)?.url ?? null);
+    const route = (typeof raw?.route === "string" ? raw.route.trim().slice(0, 40) : null) || null;
+    const ua = (getHeader(event, "user-agent") || "").slice(0, 400) || null;
+
+    let ref = "";
+    let id = "";
+    let receivedAt = new Date().toISOString();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      ref = makeRef();
+      id = newFeedbackId();
+      try {
+        const inserted = (await sql`
+          INSERT INTO buzzy_feedback
+            (id, ref, user_id, body, page_url, route, app_sha, diag, diag_redactions, ip_hash, ua)
+          VALUES (${id}, ${ref}, ${userId}, ${body}, ${pageUrl}, ${route}, ${appSha()},
+                  ${diag ? JSON.stringify(diag) : null}::jsonb, ${clean.redactions}, ${hashed}, ${ua})
+          RETURNING ref, created_at
+        `) as Array<{ ref: string; created_at: string }>;
+        if (inserted[0]) {
+          ref = inserted[0].ref;
+          receivedAt = new Date(inserted[0].created_at).toISOString();
+        }
+        attempt = 99;
+      } catch (e) {
+        // A ref collision is the only recoverable case; anything else is a real
+        // failure and must not be retried into five copies of the same report.
+        const msg = String((e as Error)?.message || e);
+        if (!/duplicate key|unique/i.test(msg)) throw e;
+      }
+    }
+    setResponseStatus(event, 201);
+    return { ok: true, ref, received_at: receivedAt };
+  }
+
+  // ── CR-6 — POST /api/buzzy/feedback/transcribe, anonymous ─────────────
+  // Own handler on purpose: /api/buzzy/transcribe is session-gated, and logging
+  // out to leave feedback was the blocker. No client vocabulary (the account
+  // vocabulary is tenant data), no voice_metrics row (user_id is NOT NULL there),
+  // no file and no row: the clip lives in memory for the length of this call.
+  if (method === "POST" && path === "/api/buzzy/feedback/transcribe") {
+    const pepper = feedbackPepper();
+    if (!pepper) {
+      setResponseStatus(event, 503);
+      return { ok: false, error: "Feedback is not configured on this deployment.", code: "feedback_unavailable" };
+    }
+    if (queryValue(fullPath, "vocab")) {
+      // 7318: "refuse a client vocab". A glossary in ASR is how a pure tone came
+      // back as a phantom sentence; the feedback route has no vocabulary at all.
+      setResponseStatus(event, 400);
+      return { ok: false, error: "This route does not accept a vocabulary.", code: "vocab_not_allowed" };
+    }
+    const format = formatFromContentType(getHeader(event, "content-type"));
+    if (format !== "wav") {
+      setResponseStatus(event, 415);
+      return { ok: false, error: "Record as WAV — the feedback transcriber needs the header to measure the clip.", code: "bad_audio_type" };
+    }
+    let audio: Uint8Array;
+    try {
+      audio = new Uint8Array(await event.req.arrayBuffer());
+    } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "The recording could not be read.", code: "bad_audio" };
+    }
+    if (audio.byteLength < 1200) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "That recording was too short to hear anything.", code: "audio_too_short" };
+    }
+    if (audio.byteLength > ASR_MAX_BYTES) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: "That recording is too long — keep it under a minute.", code: "audio_too_large" };
+    }
+    // Duration from the WAV header, not Content-Length. A 60 s cap that trusts a
+    // header the client chooses is not a cap.
+    const seconds = wavDurationSeconds(audio);
+    if (seconds === null) {
+      setResponseStatus(event, 415);
+      return { ok: false, error: "That file is not a readable WAV.", code: "bad_audio" };
+    }
+    if (seconds > ASR_MAX_SECONDS) {
+      setResponseStatus(event, 413);
+      return { ok: false, error: `That clip is ${seconds.toFixed(0)}s — feedback audio is capped at ${ASR_MAX_SECONDS}s.`, code: "audio_too_long", seconds: Math.round(seconds * 10) / 10 };
+    }
+    const headers = headersFromEvent(event);
+    const hashed = anonIpHash(clientIp(headers), pepper);
+    const sql = await getSql();
+    // One durable hit row, then count including it. Two services share the
+    // table, so the route cap is a route cap, not a per-process cap.
+    const hit = (await sql`
+      INSERT INTO buzzy_feedback_asr_hits (ip_hash) VALUES (${hashed}) RETURNING id
+    `) as Array<{ id: number | string }>;
+    const hitId = hit[0]?.id;
+    const perIp = (await sql`
+      SELECT count(*)::int AS n FROM buzzy_feedback_asr_hits
+      WHERE ip_hash = ${hashed} AND created_at > now() - interval '1 hour'
+    `) as Array<{ n: number }>;
+    const whole = (await sql`
+      SELECT count(*)::int AS n FROM buzzy_feedback_asr_hits
+      WHERE created_at > now() - interval '1 hour'
+    `) as Array<{ n: number }>;
+    if ((perIp[0]?.n ?? 0) > ASR_PER_IP_HOUR || (whole[0]?.n ?? 0) > ASR_ROUTE_PER_HOUR) {
+      if (hitId !== undefined) {
+        await sql`DELETE FROM buzzy_feedback_asr_hits WHERE id = ${hitId}`;
+      }
+      setResponseStatus(event, 429);
+      setResponseHeader(event, "Retry-After", "3600");
+      return {
+        ok: false,
+        code: "rate_limited",
+        error: "Too many voice notes from this connection — type the feedback or try again later.",
+        retryAfter: 3600,
+      };
+    }
+    try {
+      // Empty vocabulary and no voice-metrics insert: nothing to attribute an
+      // anonymous clip to, and no text of it is logged anywhere.
+      const result = await transcribeAudio(audio, "wav", []);
+      return { ok: true, text: result.text };
+    } catch {
+      setResponseStatus(event, 502);
+      return { ok: false, error: "The transcriber did not answer — type your feedback instead.", code: "transcribe_failed" };
+    }
   }
 
   // ── GET /api/buzzy/tools — the declared capability surface (BZ-F013) ────
