@@ -1,6 +1,7 @@
 // Ruling 5 gate: a hard reload must not restart the microphone on a stored
-// flag. The persisted intent comes back ARMED — dock label "Resume",
-// aria-pressed=false (nothing is listening), and the first gesture starts it.
+// flag. The persisted intent comes back ARMED — the mic pill beside the settings
+// gear says "Mic paused" with no Stop (nothing is listening), Talk's own mic is
+// aria-pressed=false, and the first gesture starts it.
 // usage: node probe-listen-resume.mjs [origin]
 import { createRequire } from "node:module";
 const require = createRequire("/home/gumbyender/agents/agent-relay/node_modules/");
@@ -32,13 +33,13 @@ await page.reload({ waitUntil: "networkidle" });
 await page.waitForTimeout(2500);
 
 const read = async () => page.evaluate(() => {
-  const mic = document.getElementById("bzVoiceMic");
-  const stop = document.getElementById("bzVoiceStop");
+  const pill = document.getElementById("bzMicLive");
+  const stop = document.getElementById("bzMicStop");
   const btn = document.getElementById("micBtn");
   return {
-    dockLabel: mic ? mic.querySelector("span").textContent : null,
-    dockPressed: mic ? mic.getAttribute("aria-pressed") : null,
-    stopGone: !stop, // one switch: no separate stop button
+    pillShown: pill ? !pill.hidden : null,
+    pillLabel: pill ? pill.querySelector(".bz-mic-label").textContent : null,
+    stopVisible: stop ? !stop.hidden : null,
     pageMicPressed: btn ? btn.getAttribute("aria-pressed") : null,
     title: document.title,
     state: window.BeeZillaVoice ? window.BeeZillaVoice.state() : null,
@@ -54,11 +55,13 @@ const afterGesture = await read();
 await browser.close();
 console.log(JSON.stringify({ origin: ORIGIN, afterReload, afterGesture, pageErrors: errors }, null, 2));
 const pass =
-  afterReload.dockLabel === "Resume" &&
-  afterReload.dockPressed === "false" &&
-  afterReload.stopGone === true &&
+  afterReload.pillShown === true &&
+  afterReload.pillLabel === "Mic paused" &&
+  afterReload.stopVisible === false &&
+  afterReload.pageMicPressed === "false" &&
   afterReload.state && afterReload.state.mic === false &&
   afterGesture.state && afterGesture.state.mic === true &&
-  afterGesture.dockPressed === "true";
+  afterGesture.pillLabel === "Listening" &&
+  afterGesture.stopVisible === true;
 console.log("VERDICT:", pass ? "PASS" : "FAIL");
 process.exit(pass ? 0 : 1);

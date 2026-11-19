@@ -75,10 +75,10 @@
         // The chat header's New button; the draft banner and History drawer have their own.
         return [{ sel: "#newSessionBtn, #newChatBtn, #drawerNewChat", name: "the New chat button" }];
       case "speak":
-        // One voice switch: the header mic (#bzVoiceMic) on other pages; on Talk the
-        // Talk to BeeZilla button is that switch (owner, 2026-11-18). Both start
-        // listening and speak replies together, so "speak on" is that switch pressed.
-        return [{ sel: "#bzVoiceMic, #micBtn", name: "the voice switch", already: function (el) { return pressed(el) === (v === "on"); } }];
+        // One voice switch: Talk to BeeZilla (#micBtn) starts listening and speaks
+        // replies together, and turns both off (toggleMic), so "speak on" is that
+        // button pressed. The header's voice switch is gone (owner, 2026-11-18).
+        return [{ sel: "#micBtn", name: "the Talk to BeeZilla button", already: function (el) { return pressed(el) === (v === "on"); } }];
       case "voice":
         return [{ sel: "#micBtn", name: "the microphone button", already: pressed }];
       case "go":

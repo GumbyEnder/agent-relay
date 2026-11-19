@@ -1167,6 +1167,10 @@ export default defineEventHandler(async (event) => {
     const prefix = (qs.get("prefix") || "").slice(0, 200);
     const want = Math.min(Math.max(Number(qs.get("limit") || 200), 1), 1000);
     const offset = Math.max(Number(qs.get("offset") || 0), 0);
+    // ?order=newest: the Library lists finished work newest first, and with a
+    // limit the newest files must be the ones that come back. Path order stays
+    // the default for the folder views that rely on it.
+    const newest = qs.get("order") === "newest";
     const sql = await getSql();
     const totals = await sql<{ files: string; total_bytes: string }>`
       SELECT COUNT(*)::text AS files, COALESCE(SUM(bytes), 0)::text AS total_bytes
@@ -1187,7 +1191,9 @@ export default defineEventHandler(async (event) => {
       LEFT JOIN buzzy_jobs j ON j.id = a.job_id
       WHERE a.user_id = ${user.id}
         AND (${prefix} = '' OR a.rel_path LIKE ${prefix + "%"})
-      ORDER BY a.rel_path ASC
+      ORDER BY (CASE WHEN ${newest}::boolean THEN a.created_at END) DESC NULLS LAST,
+               (CASE WHEN ${newest}::boolean THEN a.id END) DESC NULLS LAST,
+               a.rel_path ASC
       LIMIT ${want} OFFSET ${offset}
     `;
     return {

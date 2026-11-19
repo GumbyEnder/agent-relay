@@ -234,7 +234,7 @@
   {
     "id": "sk-012",
     "q": "Where are my files saved?",
-    "a": "In your Library. Every draft BeeZilla writes is saved there as a document, and every change becomes a new version. Older versions are kept.",
+    "a": "In your Library. It lists what BeeZilla finished for you, newest first: documents, pictures, audio and video. Keep working on it reopens the conversation that made a piece. Every change to a document becomes a new version, and older versions are kept.",
     "sources": [
       {
         "file": "src/lib/buzzy/documents.ts",
@@ -243,6 +243,10 @@
       {
         "file": "public/buzzy/talk.html",
         "symbol": "Saved to your Library"
+      },
+      {
+        "file": "public/buzzy/library.html",
+        "symbol": "Keep working on it"
       }
     ],
     "surfaces": [
@@ -707,11 +711,15 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. When you talk to BeeZilla it answers out loud: on Talk, the Talk to BeeZilla button is the voice switch. On other pages the mic beside your name in the top bar does the same, listening and reading answers aloud as one mode.",
+    "a": "Yes. Press Talk to BeeZilla: it listens and reads its answers aloud as one mode. Press it again to stop. While voice is on, a small Listening button beside the settings gear (bottom right) shows it on every other page, with Stop.",
     "sources": [
       {
+        "file": "public/buzzy/talk.html",
+        "symbol": "toggleMic owns both halves of its state"
+      },
+      {
         "file": "public/buzzy/nav.js",
-        "symbol": "bzVoiceMic"
+        "symbol": "live.id = \"bzMicLive\""
       },
       {
         "file": "public/buzzy/voice-stage.js",

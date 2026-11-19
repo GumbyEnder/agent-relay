@@ -107,10 +107,12 @@ for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newS
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }
-// One voice switch: the header control built by nav.js on other pages; on Talk the
-// Talk to BeeZilla button is that switch (owner, 2026-11-18).
-check(navjs.includes('mic.id = "bzVoiceMic"'), "nav.js builds the #bzVoiceMic voice switch");
-check(pilot.includes("#bzVoiceMic"), "pilot.js presses the one voice switch");
+// One voice switch: Talk to BeeZilla (#micBtn, checked above), not a page-level pill
+// and, since the owner's 2026-11-18 top-bar cleanup, not a header control either.
+// nav.js keeps only the live-mic pill that shows and stops a running session.
+check(!navjs.includes('"bzVoiceMic"'), "nav.js builds no header voice switch");
+check(navjs.includes('live.id = "bzMicLive"'), "nav.js builds the live-mic pill");
+check(!pilot.includes("#bzVoiceMic"), "pilot.js presses no header voice switch");
 // History is a place in the row under the search bar now (owner, 2026-11-18), not a
 // button up top: "show my history" presses that tab.
 check(pilot.includes(`'[data-tab="history"]'`), "pilot.js presses the History place");
