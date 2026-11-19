@@ -214,12 +214,17 @@
 .wb-keyrow kbd { font: 600 11px/1.6 system-ui, sans-serif; padding: 0 6px; border-radius: 5px; border: 1px solid #3a3f47; background: #1c2026; white-space: nowrap; }
 .wb-keyclose { margin-top: 8px; width: 100%; min-height: 0; padding: 0.45rem; border-radius: 9px; border: 1px solid #3a3f47; background: transparent; color: #d9dde3; font: inherit; cursor: pointer; }
 
-/* History: this board's earlier versions in the account, by the zoom (bottom-right). */
+/* History: this board's earlier versions in the account, by the zoom (bottom-right).
+   On a short window, or a phone on its side, it reaches the settings gear's corner
+   (nav.js #bzDock: fixed, z-index 45, with back-to-top at 40 above it). A panel covers
+   the gear, never the reverse, so History and what the board shows above it (the
+   selection bar, the editor, a message: 47–49) sit just over 45 and under the page's
+   own menus and drawers (50 and up). */
 .wb-history {
   position: absolute;
   right: 12px;
   bottom: 60px;
-  z-index: 7;
+  z-index: 46;
   width: 320px;
   max-width: calc(100% - 24px);
   max-height: min(460px, calc(100% - 80px));
@@ -365,7 +370,7 @@
 /* The bar over a selection, and the editor beside a card. */
 .wb-selbar {
   position: absolute;
-  z-index: 8;
+  z-index: 47;   /* over History (46), as before; see .wb-history */
   display: flex;
   align-items: center;
   gap: 4px;
@@ -404,7 +409,7 @@
 .wb-namer-in { width: 200px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid #3a3f47; background: #0d0f12; color: #fff; font: inherit; font-size: 0.88rem; }
 .wb-editor {
   position: absolute;
-  z-index: 9;
+  z-index: 48;
   width: 320px;
   padding: 12px;
   border-radius: 14px;
@@ -425,7 +430,7 @@
   left: 50%;
   bottom: 16px;
   transform: translateX(-50%);
-  z-index: 10;
+  z-index: 49;
   padding: 9px 16px;
   border-radius: 999px;
   background: #121418;

@@ -15,6 +15,7 @@
  *     new conversation joins it without drawing a step twice, a shared computer never
  *     mixes two people's boards, a late upload lands on its own card, going back keeps
  *     what was drawn meanwhile, and failing saves wait longer each time.
+ *   - History covers the settings gear's corner, never the reverse.
  *
  * Hermetic: every migration on an in-memory PGlite and a local HTTP stand-in.
  *   npx tsx scripts/test-board-sync.ts
@@ -551,6 +552,26 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     const mine = m.cards.find((c) => c.id === "mine")!;
     const theirs = m.cards.find((c) => c.id === "theirs")!;
     truthy(Number(mine.y) >= Number(theirs.y) + 160, `moved below (${mine.y})`);
+  });
+
+  // The settings gear (#326) sits fixed in the bottom-right corner of every page, and on
+  // a short window History reaches that corner. A panel covers the gear, never the
+  // reverse; the page's own menus still cover the board.
+  await ok("History covers the settings gear, and the page's menus still cover History", () => {
+    const read = (f: string) => readFileSync(join(process.cwd(), "public/buzzy", f), "utf8");
+    const css = read("whiteboard.css");
+    const z = (sel: string) => {
+      const m = css.match(new RegExp("(?:^|\\n)" + sel.replace(/\./g, "\\.") + " \\{[^}]*?z-index: (\\d+)"));
+      if (!m) throw new Error(`no z-index for ${sel}`);
+      return Number(m[1]);
+    };
+    const gear = Number((read("nav.js").match(/#bzDock\{[^}]*z-index:(\d+)/) || [])[1]);
+    const menu = Number((read("talk.html").match(/\.account-menu \{[^}]*z-index: (\d+)/) || [])[1]);
+    truthy(gear > 0 && menu > 0, `found the gear (${gear}) and the account menu (${menu})`);
+    const [hist, selbar, editor, toast] = [".wb-history", ".wb-selbar", ".wb-editor", ".wb-toast"].map(z);
+    truthy(hist > gear, `History (${hist}) over the gear (${gear})`);
+    truthy(hist < selbar && selbar < editor && editor < toast, `the board's order is kept: History ${hist} < selection bar ${selbar} < editor ${editor} < message ${toast}`);
+    truthy(toast < menu, `all under the account menu (${menu})`);
   });
 
   server.close();
