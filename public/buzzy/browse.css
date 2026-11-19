@@ -225,10 +225,13 @@
 .bz-expert-blurb { color: #9A9A9A; font-size: 0.85rem; }
 
 /* ── Back to top ────────────────────────────────────────────────────── */
+/* The bottom-right corner belongs to the settings gear (nav.js: 44px, 22px in from
+   the right and bottom; 16px on a phone). This sits directly above it, centred on
+   the same line, so the two never overlap. */
 .bz-totop {
   position: fixed;
-  right: 1.4rem;
-  bottom: 1.4rem;
+  right: calc(44px - 1.65rem);
+  bottom: 78px;
   z-index: 40;
   display: inline-flex;
   align-items: center;
@@ -258,6 +261,7 @@
   .bz-results { padding: 1rem; }
   .bz-results-grid { grid-template-columns: 1fr; }
   .bz-tabs { gap: 1.3rem; }
+  .bz-totop { right: calc(38px - 1.65rem); bottom: 72px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bz-totop, .bz-search { transition: none; }

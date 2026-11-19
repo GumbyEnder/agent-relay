@@ -675,11 +675,15 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Turn on the voice switch in the top bar (the mic beside your name) and it listens and reads its answers aloud as one mode. Press it again to stop.",
+    "a": "Yes. Press Talk to BeeZilla: it listens and reads its answers aloud as one mode. Press it again to stop. While voice is on, a small Listening button beside the settings gear (bottom right) shows it on every page, with Stop.",
     "sources": [
       {
+        "file": "public/buzzy/talk.html",
+        "symbol": "toggleMic owns both halves of its state"
+      },
+      {
         "file": "public/buzzy/nav.js",
-        "symbol": "bzVoiceMic"
+        "symbol": "live.id = \"bzMicLive\""
       }
     ],
     "surfaces": [

@@ -107,9 +107,12 @@ for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "sess
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }
-// One voice switch: the header control built by nav.js, not a page-level pill.
-check(navjs.includes('mic.id = "bzVoiceMic"'), "nav.js builds the #bzVoiceMic voice switch");
-check(pilot.includes("#bzVoiceMic"), "pilot.js presses the one voice switch");
+// One voice switch: Talk to BeeZilla (#micBtn, checked above), not a page-level pill
+// and, since the owner's 2026-11-18 top-bar cleanup, not a header control either.
+// nav.js keeps only the live-mic pill that shows and stops a running session.
+check(!navjs.includes('"bzVoiceMic"'), "nav.js builds no header voice switch");
+check(navjs.includes('live.id = "bzMicLive"'), "nav.js builds the live-mic pill");
+check(!pilot.includes("#bzVoiceMic"), "pilot.js presses no header voice switch");
 for (const tab of ["inspiration", "library", "memory", "experts"]) check(talk.includes(`data-tab="${tab}"`), `talk.html has the ${tab} tab`);
 for (const mode of ["advocate", "lockdown", "open"]) check(talk.includes(`data-mode="${mode}"`), `talk.html has the ${mode} privacy choice`);
 for (const kind of ["all", "photo", "audio", "3d", "document"]) check(browse.includes(`"${kind}"`), `browse.js offers the ${kind} kind`);
