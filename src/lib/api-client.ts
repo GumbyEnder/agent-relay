@@ -373,6 +373,40 @@ export const agentApi = {
       `/admin/users/${encodeURIComponent(userId)}/disable`,
       { reason },
     ),
+  listFeedback: (params: { status?: string; limit?: number; before?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.limit) q.set("limit", String(params.limit));
+    if (params.before) q.set("before", params.before);
+    const qs = q.toString();
+    return req<{
+      ok: true;
+      feedback: Array<{
+        id: string;
+        ref: string;
+        created_at: string;
+        user_id: string | null;
+        body: string;
+        page_url: string | null;
+        route: string | null;
+        app_sha: string | null;
+        diag: Record<string, unknown> | null;
+        diag_redactions: number;
+        status: string;
+        admin_note: string | null;
+        ip_hash: string | null;
+        ua: string | null;
+        updated_at: string;
+      }>;
+      next_before: string | null;
+    }>("GET", `/admin/feedback${qs ? `?${qs}` : ""}`);
+  },
+  updateFeedback: (ref: string, patch: { status?: string; admin_note?: string }) =>
+    req<{ ok: true; feedback: { ref: string; status: string; admin_note: string | null } }>(
+      "PATCH",
+      `/admin/feedback/${encodeURIComponent(ref)}`,
+      patch,
+    ),
   adminEnableUser: (userId: string) =>
     req<{ ok: true; userId: string; disabled: boolean }>(
       "POST",
