@@ -19,6 +19,162 @@
 (function () {
   "use strict";
 
+  /**
+   * CR-6 diagnostic ring buffer. Ships with the nav so every page that has the
+   * header has it, and lives only in memory: nothing is written to storage and
+   * nothing is transmitted unless the user ticks the box.
+   *
+   * The failure worth reporting usually happened BEFORE the panel was clicked,
+   * which is why this is always-on rather than panel-only. Only three sources:
+   * console.error, window.onerror and unhandledrejection. Never console.log,
+   * never request bodies, never response bodies.
+   */
+  var bzDiagLog = { errors: [], requests: [] };
+  function bzPush(list, item, cap) {
+    list.push(item);
+    if (list.length > cap) list.splice(0, list.length - cap);
+  }
+  (function () {
+    var MAX = 50;
+    var origError = console.error;
+    console.error = function () {
+      try {
+        var parts = [];
+        for (var i = 0; i < arguments.length; i++) {
+          var a = arguments[i];
+          parts.push(typeof a === "string" ? a : a && a.message ? String(a.message) : String(a));
+        }
+        bzPush(bzDiagLog.errors, {
+          at: new Date().toISOString(),
+          kind: "error",
+          message: parts.join(" ").slice(0, 500),
+          source: (document.currentScript && document.currentScript.src) || location.pathname,
+        }, MAX);
+      } catch (e) { /* never break logging */ }
+      return origError.apply(console, arguments);
+    };
+    window.addEventListener("error", function (ev) {
+      bzPush(bzDiagLog.errors, {
+        at: new Date().toISOString(),
+        kind: "onerror",
+        message: String((ev && ev.message) || "script error").slice(0, 500),
+        source: ev && ev.filename ? ev.filename + ":" + (ev.lineno || 0) : location.pathname,
+      }, MAX);
+    });
+    window.addEventListener("unhandledrejection", function (ev) {
+      var r = ev && ev.reason;
+      bzPush(bzDiagLog.errors, {
+        at: new Date().toISOString(),
+        kind: "unhandledrejection",
+        message: String((r && (r.message || r)) || "unhandled rejection").slice(0, 500),
+        source: location.pathname,
+      }, MAX);
+    });
+    if (window.fetch) {
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var started = Date.now();
+        var method = (init && init.method) || (input && input.method) || "GET";
+        var url = typeof input === "string" ? input : (input && input.url) || "";
+        return origFetch.apply(this, arguments).then(function (res) {
+          if (!res.ok && res.status !== 401) {
+            bzPush(bzDiagLog.requests, {
+              at: new Date().toISOString(),
+              method: String(method).toUpperCase(),
+              url: url,
+              status: res.status,
+              ms: Date.now() - started,
+            }, MAX);
+          }
+          return res;
+        }, function (err) {
+          bzPush(bzDiagLog.requests, {
+            at: new Date().toISOString(),
+            method: String(method).toUpperCase(),
+            url: url,
+            status: 0,
+            ms: Date.now() - started,
+          }, MAX);
+          throw err;
+        });
+      };
+    }
+  })();
+
+  /**
+   * Client-side twin of src/lib/buzzy/feedback.ts's redaction list. It runs over
+   * the diagnostic object before the expander renders it, so the preview IS the
+   * payload. The server runs the same rules again before insert — belt and
+   * braces, because "we redacted in the browser" is a claim about a client we
+   * do not control.
+   */
+  function bzRedact(value) {
+    var count = 0;
+    var kinds = {};
+    var rules = [
+      ["bearer_token", /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, null],
+      ["api_key", /\b(?:sk|rk|ark|pk|ghp|gho|ghu|ghs|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}/g, null],
+      ["aws_key", /\bAKIA[0-9A-Z]{16}\b/g, null],
+      ["jwt", /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/g, null],
+      ["key_query_param", /([?&](?:token|key|api_?key|secret|password|passwd|code|sig|signature|access_token)=)[^&#\s"']+/gi, "$1[redacted]"],
+      ["high_entropy", /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{40,}(?![A-Za-z0-9+/=_-])/g, null]
+    ];
+    function clean(s) {
+      var text = String(s);
+      for (var i = 0; i < rules.length; i++) {
+        var kind = rules[i][0], re = rules[i][1], repl = rules[i][2];
+        text = text.replace(re, function () {
+          count += 1;
+          kinds[kind] = true;
+          if (repl) return repl.replace("$1", arguments[1] || arguments[0]);
+          return "[redacted]";
+        });
+      }
+      return text;
+    }
+    function walk(v, key) {
+      if (typeof v === "string") return clean(v);
+      if (Array.isArray(v)) return v.map(function (x) { return walk(x); });
+      if (v && typeof v === "object") {
+        var out = {};
+        for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) out[k] = walk(v[k], k);
+        return out;
+      }
+      return v;
+    }
+    var result = walk(value);
+    return { value: result, count: count, kinds: Object.keys(kinds).sort() };
+  }
+
+  /** The object the expander renders and the POST carries — one builder. */
+  function bzDiagPayload(signedIn) {
+    var d = {
+      captured_at: new Date().toISOString(),
+      page: {
+        // Path only. The server strips the query and fragment again; doing it
+        // here is what makes the preview honest.
+        url: location.pathname,
+        route: section(),
+      },
+      browser: {
+        user_agent: navigator.userAgent,
+        platform: navigator.platform || "",
+        language: navigator.language || "",
+      },
+      display: {
+        screen: (screen.width || 0) + "x" + (screen.height || 0),
+        viewport: (window.innerWidth || 0) + "x" + (window.innerHeight || 0),
+        device_pixel_ratio: window.devicePixelRatio || 1,
+      },
+      account: { signed_in: Boolean(signedIn), user_id: null },
+      console_errors: bzDiagLog.errors.slice(-50),
+      failed_requests: bzDiagLog.requests.slice(-50).map(function (r) {
+        return { at: r.at, method: r.method, url: r.url.split(/[?#]/)[0], status: r.status, ms: r.ms };
+      }),
+    };
+    return bzRedact(d);
+  }
+
   var LINKS = [
     // The owner's roadmap names five main places: Talk, Library, Memory, Experts,
     // Recipes. Everything else stays one click away under "More" (`more: true`).
@@ -84,6 +240,36 @@
       "#bzChrome select.bz-co-select{appearance:none;background:#101010;color:#f2f2f2;border:1px solid #2c2c2c;border-radius:8px;padding:.28rem 1.5rem .28rem .5rem;font:inherit;font-size:.82rem;max-width:15rem;text-overflow:ellipsis;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,#8d8d8d 50%),linear-gradient(135deg,#8d8d8d 50%,transparent 50%);background-position:calc(100% - 14px) 52%,calc(100% - 9px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}",
       "#bzChrome button.bz-ask{display:inline-flex;align-items:center;gap:.35rem;background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-ask[aria-expanded='true']{background:#fff0a8}",
+      "#bzChrome button.bz-chatbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;font-size:.9rem;line-height:1;cursor:pointer;padding:0}",
+      "#bzChrome button.bz-chatbtn:hover{border-color:#ffd40d}",
+      "#bzChrome button.bz-chatbtn:focus-visible,#bzChrome button.bz-ask:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
+      "#bzFeedback{position:fixed;right:1rem;top:64px;width:min(440px,calc(100vw - 2rem));max-height:min(640px,calc(100vh - 88px));background:#101010;border:1px solid #2c2c2c;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;z-index:900;padding:.7rem}",
+      "#bzFeedback.open{display:flex}",
+      "#bzFeedback .bz-panel-head{display:flex;align-items:center;justify-content:space-between;padding:0 .2rem .5rem;font-size:.85rem;color:#c9c9c9}",
+      "#bzFeedback .bz-panel-close{background:none;border:0;color:#8d8d8d;font-size:1rem;cursor:pointer;padding:0 .2rem}",
+      "#bzFeedback .bz-panel-close:hover{color:#ffd40d}",
+      "#bzFeedback .bz-panel-tools{display:flex;align-items:center;gap:.35rem}",
+      "#bzFeedback.min{max-height:60px;top:auto;bottom:1rem;width:auto;min-width:220px}",
+      "#bzFeedback.min .bz-panel-body{display:none}",
+      "#bzFeedback .bz-fb-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:.55rem;padding:0 .1rem .2rem}",
+      "#bzFeedback .bz-fb-label{font-size:.8rem;color:#c9c9c9}",
+      "#bzFeedback .bz-fb-text{width:100%;box-sizing:border-box;background:#0b0b0b;color:#f2f2f2;border:1px solid #333;border-radius:10px;padding:.6rem .7rem;font:inherit;font-size:.9rem;resize:vertical;min-height:96px}",
+      "#bzFeedback .bz-fb-text:focus{outline:2px solid #ffd40d;outline-offset:1px}",
+      "#bzFeedback .bz-fb-row{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}",
+      "#bzFeedback .bz-fb-mic{background:#1b1b1b;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.32rem .75rem;font:inherit;font-size:.82rem;cursor:pointer}",
+      "#bzFeedback .bz-fb-mic[aria-pressed='true']{background:#ffd40d;color:#111;border-color:#ffd40d}",
+      "#bzFeedback .bz-fb-hint{font-size:.75rem;color:#8d8d8d}",
+      "#bzFeedback .bz-fb-check{display:flex;align-items:center;gap:.45rem;font-size:.82rem;color:#c9c9c9}",
+      "#bzFeedback .bz-fb-link{background:none;border:0;color:#ffd40d;font:inherit;font-size:.8rem;cursor:pointer;padding:0;text-align:left}",
+      "#bzFeedback .bz-fb-diag{margin:0;max-height:220px;overflow:auto;background:#070707;border:1px solid #262626;border-radius:8px;padding:.5rem;font-size:.7rem;line-height:1.35;color:#bdbdbd;white-space:pre-wrap;word-break:break-word}",
+      "#bzFeedback .bz-fb-never{font-size:.72rem;line-height:1.4;color:#7d7d7d;margin:0}",
+      "#bzFeedback .bz-fb-actions{display:flex;justify-content:flex-end}",
+      "#bzFeedback .bz-fb-send{background:#ffd40d;color:#111;border:0;border-radius:999px;padding:.45rem 1rem;font:inherit;font-size:.85rem;font-weight:700;cursor:pointer}",
+      "#bzFeedback .bz-fb-send:disabled{opacity:.55;cursor:default}",
+      "#bzFeedback .bz-fb-status{font-size:.78rem;color:#c9c9c9;margin:0;min-height:1em}",
+      "#bzFeedback .bz-fb-done p{margin:.25rem 0;font-size:.88rem;color:#e6e6e6}",
+      "#bzFeedback .bz-fb-done code{background:#1b1b1b;border-radius:6px;padding:.1rem .35rem;color:#ffd40d}",
+      "@media (max-width:560px){#bzFeedback{left:.5rem;right:.5rem;top:56px;width:auto;max-height:calc(100vh - 68px)}}",
       "#bzChrome button.bz-voice{display:inline-flex;align-items:center;gap:.35rem;background:#161616;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.3rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;white-space:nowrap}",
       "#bzChrome button.bz-voice[aria-pressed='true']{background:#ffd40d;color:#111;border-color:#ffd40d}",
       "#bzChrome button.bz-voice:focus-visible{outline:2px solid #ffd40d;outline-offset:2px}",
@@ -645,14 +831,19 @@
       .catch(function () { /* keep whatever we painted */ });
   }
 
-  /** Ask: the chat, on every page, in a panel anchored to the nav. */
+  /** Chat: the icon bubble immediately LEFT of Feedback, on every page but Talk (there the page is the chat and Talk to BeeZilla is the one way in). */
   function askControl(nav) {
     var btn = document.createElement("button");
-    btn.className = "bz-ask";
+    // CR-6 (#7318): Feedback owns the yellow pill; chat keeps its own entry as
+    // an icon so replacing the pill does not delete "talk to the assistant from
+    // any page".
+    btn.className = "bz-chatbtn";
     btn.type = "button";
     btn.setAttribute("aria-expanded", "false");
     btn.setAttribute("aria-controls", "bzPanel");
-    btn.innerHTML = "&#128172; Ask";
+    btn.setAttribute("aria-label", "Talk to BeeZilla");
+    btn.title = "Talk to BeeZilla";
+    btn.innerHTML = "&#128172;";
     nav.appendChild(btn);
 
     // On Talk the chat is the page. Opening a second chat engine in a panel over it
@@ -758,6 +949,327 @@
     });
   }
 
+  /**
+   * Feedback — the yellow pill (CR-6). One panel, `#bzFeedback`, anchored the
+   * same way as the chat panel: full-width sheet at 390px, top-right at 1280px.
+   *
+   * The reference number is the anonymous user's only handle, so it is shown on
+   * the confirmation and nowhere else. Nothing is sent until Send is pressed;
+   * the mic only fills the textarea.
+   */
+  function feedbackControl(nav) {
+    var btn = document.createElement("button");
+    btn.className = "bz-ask";
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", "bzFeedback");
+    btn.innerHTML = "Feedback";
+    nav.appendChild(btn);
+
+    var panel = document.createElement("div");
+    panel.id = "bzFeedback";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", "Send feedback");
+    var head = document.createElement("div");
+    head.className = "bz-panel-head";
+    var title = document.createElement("span");
+    title.textContent = "Send feedback";
+    var close = document.createElement("button");
+    close.className = "bz-panel-close";
+    close.type = "button";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = "&times;";
+    var min = document.createElement("button");
+    min.className = "bz-panel-close bz-panel-min";
+    min.type = "button";
+    var tools = document.createElement("span");
+    tools.className = "bz-panel-tools";
+    tools.appendChild(min);
+    tools.appendChild(close);
+    head.appendChild(title);
+    head.appendChild(tools);
+    var body = document.createElement("div");
+    body.className = "bz-panel-body bz-fb-body";
+    panel.appendChild(head);
+    panel.appendChild(body);
+    document.body.appendChild(panel);
+
+    var mounted = false;
+    var sending = false;
+    var recorder = null;
+
+    function signedIn() {
+      try {
+        return Boolean(window.BZIdentity && window.BZIdentity.email);
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function mount() {
+      if (mounted) return;
+      mounted = true;
+      body.innerHTML = [
+        '<label class="bz-fb-label" for="bzFbText">What happened, or what would help?</label>',
+        '<textarea id="bzFbText" class="bz-fb-text" maxlength="5000" rows="4" placeholder="The more concrete the better — what you did, what you expected, what happened."></textarea>',
+        '<div class="bz-fb-row">',
+        '  <button type="button" id="bzFbMic" class="bz-fb-mic" aria-pressed="false">&#127908; Speak</button>',
+        '  <span class="bz-fb-hint" id="bzFbHint">Up to 60 seconds.</span>',
+        '</div>',
+        '<label class="bz-fb-check"><input type="checkbox" id="bzFbDiag" /> Include a diagnostic file</label>',
+        '<button type="button" id="bzFbSee" class="bz-fb-link" aria-expanded="false">See what\u2019s included</button>',
+        '<pre id="bzFbDiagBox" class="bz-fb-diag" hidden></pre>',
+        '<p class="bz-fb-never" id="bzFbStamped" hidden>The server stamps this record with its build sha, shown in the report as \u201cstamped by the server\u201d. Nothing else is added to the preview above.</p>',
+        '<p class="bz-fb-never">Never included: cookies, session or auth tokens, passwords, API keys, request or response bodies, chat text or history, audio, localStorage, other tabs, or your IP address.</p>',
+        '<div class="bz-fb-actions"><button type="button" id="bzFbSend" class="bz-fb-send">Send feedback</button></div>',
+        '<p class="bz-fb-status" id="bzFbStatus" role="status"></p>'
+      ].join("");
+    }
+
+    var text, diagBox, diagSee, mic, hint, send, status;
+    function refs() {
+      if (text) return;
+      text = body.querySelector("#bzFbText");
+      diagBox = body.querySelector("#bzFbDiagBox");
+      diagSee = body.querySelector("#bzFbSee");
+      mic = body.querySelector("#bzFbMic");
+      hint = body.querySelector("#bzFbHint");
+      send = body.querySelector("#bzFbSend");
+      status = body.querySelector("#bzFbStatus");
+    }
+
+    // ── WAV recording: the feedback transcriber measures the header, so the
+    // page must record WAV rather than let MediaRecorder pick webm. ─────────
+    function encodeWav(samples, rate) {
+      var buf = new ArrayBuffer(44 + samples.length * 2);
+      var view = new DataView(buf);
+      var writeStr = function (off, s) {
+        for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+      };
+      writeStr(0, "RIFF");
+      view.setUint32(4, 36 + samples.length * 2, true);
+      writeStr(8, "WAVE");
+      writeStr(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, rate, true);
+      view.setUint32(28, rate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, "data");
+      view.setUint32(40, samples.length * 2, true);
+      var off = 44;
+      for (var i = 0; i < samples.length; i++, off += 2) {
+        var s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return new Blob([buf], { type: "audio/wav" });
+    }
+
+    function downsample(input, from, to) {
+      if (from === to) return input;
+      var ratio = from / to;
+      var out = new Float32Array(Math.round(input.length / ratio));
+      var pos = 0;
+      for (var i = 0; i < out.length; i++) {
+        var start = Math.round(i * ratio);
+        var end = Math.min(Math.round((i + 1) * ratio), input.length);
+        var sum = 0, n = 0;
+        for (var j = start; j < end; j++) { sum += input[j]; n++; }
+        out[i] = n ? sum / n : 0;
+      }
+      return out;
+    }
+
+    function stopRecording() {
+      if (!recorder) return;
+      var r = recorder;
+      recorder = null;
+      try { r.stop(); } catch (e) { /* already stopped */ }
+      mic.setAttribute("aria-pressed", "false");
+      mic.innerHTML = "&#127908; Speak";
+      hint.textContent = "Transcribing\u2026";
+      var chunks = r.chunks;
+      var rate = r.rate;
+      if (r.ctx && r.ctx.state !== "closed") { try { r.ctx.close(); } catch (e) {} }
+      if (r.stream) { r.stream.getTracks().forEach(function (t) { t.stop(); }); }
+      var total = 0;
+      chunks.forEach(function (c) { total += c.length; });
+      if (total < rate * 0.4) {
+        hint.textContent = "Too short to hear \u2014 try again.";
+        return;
+      }
+      var merged = new Float32Array(total);
+      var at = 0;
+      chunks.forEach(function (c) { merged.set(c, at); at += c.length; });
+      var wav = encodeWav(downsample(merged, rate, 16000), 16000);
+      fetch("/api/buzzy/feedback/transcribe", {
+        method: "POST",
+        headers: { "content-type": "audio/wav" },
+        body: wav,
+      }).then(function (res) { return res.json().then(function (j) { return { res: res, j: j }; }); })
+        .then(function (out) {
+          if (out.res.ok && out.j && out.j.text) {
+            var t = out.j.text.trim();
+            text.value = (text.value ? text.value.replace(/\s*$/, " ") : "") + t;
+            hint.textContent = "Said what you wanted? You can edit it.";
+          } else {
+            hint.textContent = (out.j && out.j.error) || "Could not transcribe \u2014 type it instead.";
+          }
+        })
+        .catch(function () { hint.textContent = "Could not transcribe \u2014 type it instead."; });
+    }
+
+    function startRecording() {
+      if (recorder) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        hint.textContent = "This browser will not record \u2014 type your feedback.";
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        var ctx = new AC();
+        var src = ctx.createMediaStreamSource(stream);
+        var proc = ctx.createScriptProcessor(4096, 1, 1);
+        var chunks = [];
+        var started = Date.now();
+        proc.onaudioprocess = function (ev) {
+          chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+          if (Date.now() - started > 60000) stopRecording();
+        };
+        src.connect(proc);
+        proc.connect(ctx.destination);
+        recorder = { ctx: ctx, stream: stream, proc: proc, chunks: chunks, rate: ctx.sampleRate, stop: function () {
+          try { proc.disconnect(); } catch (e) {}
+          try { src.disconnect(); } catch (e) {}
+        } };
+        mic.setAttribute("aria-pressed", "true");
+        mic.innerHTML = "&#9632; Stop";
+        hint.textContent = "Listening\u2026 up to 60 seconds.";
+      }).catch(function () {
+        hint.textContent = "Microphone blocked \u2014 type your feedback instead.";
+      });
+    }
+
+    function paintDiag() {
+      var d = bzDiagPayload(signedIn());
+      diagBox.textContent = JSON.stringify(d.value, null, 2);
+      if (d.count) diagSee.textContent = "See what\u2019s included (" + d.count + " redaction" + (d.count === 1 ? "" : "s") + ")";
+      return d;
+    }
+
+    function open() {
+      mount();
+      refs();
+      panel.classList.add("open");
+      panel.classList.remove("min");
+      min.textContent = "\u2013";
+      btn.setAttribute("aria-expanded", "true");
+      text.focus();
+    }
+    function shut() {
+      panel.classList.remove("open");
+      panel.classList.remove("min");
+      btn.setAttribute("aria-expanded", "false");
+    }
+
+    btn.addEventListener("click", function () {
+      if (panel.classList.contains("open") && !panel.classList.contains("min")) shut();
+      else open();
+    });
+    close.addEventListener("click", function (e) { e.stopPropagation(); shut(); });
+    min.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var folding = !panel.classList.contains("min");
+      panel.classList.toggle("min", folding);
+      min.textContent = folding ? "\u25A1" : "\u2013";
+      btn.setAttribute("aria-expanded", folding ? "false" : "true");
+    });
+    head.addEventListener("click", function () {
+      if (panel.classList.contains("min")) { panel.classList.remove("min"); min.textContent = "\u2013"; text && text.focus(); }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && panel.classList.contains("open") && !panel.classList.contains("min")) shut();
+    });
+
+    // Event delegation: the body is re-rendered on success, so per-element
+    // listeners added at mount would die with the old nodes.
+    body.addEventListener("click", function (e) {
+      refs();
+      var el = e.target;
+      if (!el || !el.id) return;
+      if (el.id === "bzFbMic") {
+        if (recorder) stopRecording();
+        else startRecording();
+      } else if (el.id === "bzFbSee") {
+        var openNow = diagBox.hidden;
+        if (openNow) paintDiag();
+        diagBox.hidden = !openNow;
+        var stamped = body.querySelector("#bzFbStamped");
+        if (stamped) stamped.hidden = !openNow;
+        el.setAttribute("aria-expanded", openNow ? "true" : "false");
+      } else if (el.id === "bzFbSend") {
+        submit();
+      }
+    });
+
+    function submit() {
+      if (sending) return;
+      refs();
+      var words = (text.value || "").trim();
+      if (!words) {
+        status.textContent = "Tell us what happened first.";
+        text.focus();
+        return;
+      }
+      var withDiag = Boolean(body.querySelector("#bzFbDiag") && body.querySelector("#bzFbDiag").checked);
+      var payload = {
+        body: words,
+        page_url: location.pathname,
+        route: section(),
+      };
+      if (withDiag) {
+        var d = paintDiag();
+        payload.diag = d.value;
+        payload.diag.redactions = { count: d.count, kinds: d.kinds };
+      }
+      sending = true;
+      send.disabled = true;
+      status.textContent = "Sending\u2026";
+      fetch("/api/buzzy/feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(function (res) {
+        return res.json().then(function (j) { return { res: res, j: j }; });
+      }).then(function (out) {
+        sending = false;
+        if (out.res.ok && out.j && out.j.ok) {
+          body.innerHTML =
+            '<div class="bz-fb-done"><p><strong>Thank you \u2014 that reached us.</strong></p>' +
+            '<p>Your reference is <code>' + out.j.ref + "</code>.</p>" +
+            '<p class="bz-fb-hint">Keep it if you follow up; it is how we find your report.</p>' +
+            '<button type="button" class="bz-fb-link" id="bzFbAgain">Send another</button></div>';
+          body.querySelector("#bzFbAgain").addEventListener("click", function () {
+            mounted = false;
+            body.innerHTML = "";
+            mount();
+            refs();
+            text.focus();
+          });
+        } else {
+          send.disabled = false;
+          status.textContent = (out.j && out.j.error) || "Could not send \u2014 try again in a moment.";
+        }
+      }).catch(function () {
+        sending = false;
+        send.disabled = false;
+        status.textContent = "Could not send \u2014 check your connection and try again.";
+      });
+    }
+  }
+
   function loadCompanies() {
     if (window.BZCompanies) return;
     if (document.querySelector('script[src="/buzzy/companies.js"]')) return;
@@ -794,7 +1306,7 @@
     // The Ask panel lives outside the page wrapper, so a soft navigation would
     // otherwise leave the previous page's panel in the document with the same id
     // and a dead mount. One panel at a time.
-    Array.prototype.forEach.call(document.querySelectorAll("#bzPanel"), function (n) {
+    Array.prototype.forEach.call(document.querySelectorAll("#bzPanel, #bzFeedback"), function (n) {
       var page = document.getElementById("bzPage");
       if (!page || !page.contains(n)) n.remove();
     });
@@ -882,7 +1394,8 @@
     loadCompanies();
     // Owner, 2026-11-17: "There's like 900 buttons around just interacting at the
     // top." Honey Drops, the plan and the company live in the menu under your name;
-    // on Talk the page itself is the way to talk, so no Listen or Ask beside it.
+    // on Talk the page itself is the way to talk, so no Listen or chat icon beside
+    // it. Feedback (CR-6) is not a way to talk and stays on every page.
     var acctExtras = document.createElement("div");
     acctExtras.id = "bzAcctExtras";
     acctExtras.className = "bz-acct-extras";
@@ -893,6 +1406,7 @@
     companyControl(acctExtras);
     accountControl(chrome);
     if (section() !== "talk") askControl(chrome);
+    feedbackControl(chrome);
   }
 
   /**

@@ -88,7 +88,7 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
  *  and the embedded PGLite dialect, where sql(table) parametrizes instead of
  *  quoting an identifier. buzzy_action_authority is a global constant table
  *  with no user data and is intentionally absent. */
-const DELETION_STATEMENTS: Record<string, string> = {
+export const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_chat_messages: "DELETE FROM buzzy_chat_messages WHERE user_id = $1 RETURNING 1",
   buzzy_user_memory: "DELETE FROM buzzy_user_memory WHERE user_id = $1 RETURNING 1",
   buzzy_jobs: "DELETE FROM buzzy_jobs WHERE user_id = $1 RETURNING 1",
@@ -111,6 +111,15 @@ const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_job_events: "DELETE FROM buzzy_job_events WHERE user_id = $1 RETURNING 1",
   buzzy_scheduled_jobs: "DELETE FROM buzzy_scheduled_jobs WHERE user_id = $1 RETURNING 1",
   buzzy_connections: "DELETE FROM buzzy_connections WHERE user_id = $1 RETURNING 1",
+  // CR-6: a feedback row belongs to the account that wrote it. No second nulling
+  // pass, and no "snapshot" that outlives the user — closing an account is not
+  // consent to a 24-month archive. The receipt counts the rows it removed.
+  buzzy_feedback: "DELETE FROM buzzy_feedback WHERE user_id = $1 RETURNING 1",
+  // The one board (0059_buzzy_one_board): the person's own AI key (sealed), the
+  // recipes they made from the Idea Board and the search words on their files.
+  buzzy_user_ai_keys: "DELETE FROM buzzy_user_ai_keys WHERE user_id = $1 RETURNING 1",
+  buzzy_board_recipes: "DELETE FROM buzzy_board_recipes WHERE user_id = $1 RETURNING 1",
+  buzzy_asset_tags: "DELETE FROM buzzy_asset_tags WHERE user_id = $1 RETURNING 1",
   // The Talk whiteboards (0060): the history first (FK child; cascade covers it too,
   // but the explicit pass keeps the receipt truthful), then the boards.
   buzzy_whiteboard_versions: "DELETE FROM buzzy_whiteboard_versions WHERE user_id = $1 RETURNING 1",

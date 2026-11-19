@@ -40,9 +40,26 @@ const TOKEN = env("BZ_VIDEO_KIT_TOKEN");
 export const VIDEO_WRITER = env("BZ_VIDEO_TEXT_MODEL") || "gemini-flash-latest";
 /** End card OFF by default: public videos carry no Breadcrumbs brand. */
 export const VIDEO_BRAND = env("BZ_VIDEO_BRAND") === "1";
-/** Five videos per user per UTC day. The kit enforces it; we count too so the
- *  refusal is instant and the person never spends a queue slot learning it. */
-export const VIDEO_DAILY_LIMIT = Math.max(1, Number(env("BZ_VIDEO_DAILY_LIMIT") || 5));
+
+/**
+ * Videos a user may make per UTC day. ONE flat cap, identical on free, starter
+ * and pro (room 6615, Shane, 2026-11-17 15:46 ET: `DAILY_LIMIT_PER_USER=5`; 6874
+ * restates it as "5 videos per user per day"). There is no plan split and there
+ * never was one — a per-plan table here was a product change with an invented
+ * citation, and it is gone.
+ *
+ * The kit enforces the same flat number (`DAILY_LIMIT_PER_USER` on serve.py)
+ * because it has no idea what a BeeZilla plan is; its 429 is the backstop, never
+ * the product rule. `BZ_VIDEO_DAILY_LIMIT` is the only override, for ops. Never
+ * reintroduce a plan argument: the signature takes one only so existing callers
+ * cannot silently disagree with the kit.
+ */
+export const DAILY_LIMIT_PER_USER = 5;
+
+export function videoDailyLimit(): number {
+  const override = Number(env("BZ_VIDEO_DAILY_LIMIT") || 0);
+  return Math.max(1, override > 0 ? override : DAILY_LIMIT_PER_USER);
+}
 
 /**
  * The five recipe ids are the kit's own: the `recipe` string in each
@@ -443,7 +460,7 @@ function explain(status: number, body: string): KitFailure {
       ok: false,
       code: "daily_limit",
       retryable: true,
-      error: message || `That is today's ${VIDEO_DAILY_LIMIT}-video limit — it resets tomorrow.`,
+      error: message || "That is today's video limit — it resets tomorrow.",
     };
   }
   if (status === 503) {
