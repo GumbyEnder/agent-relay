@@ -35,6 +35,25 @@ function isConsoleHost(host: string): boolean {
   );
 }
 
+export type AnalyticsProject = "beezilla" | "devboards";
+
+/**
+ * Which product project a hostname belongs to, or `null` when it is neither a
+ * consumer host nor the console's.
+ *
+ * This is exported and separate from the id on purpose: with BZ_BRAND unset the
+ * fallback id and the console id are the same string, so an assertion on the ID
+ * alone cannot tell "classified as the console" from "not classified at all".
+ * The tests assert THIS function, which can.
+ */
+export function analyticsProjectForHost(host?: string | null): AnalyticsProject | null {
+  const h = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "");
+  if (!h) return null;
+  if (isConsumerHost(h)) return "beezilla";
+  if (isConsoleHost(h)) return "devboards";
+  return null;
+}
+
 /**
  * The OpenPanel write client id for the host that served the request.
  *
@@ -42,8 +61,8 @@ function isConsoleHost(host: string): boolean {
  * there is unchanged.
  */
 export function openpanelClientId(host?: string | null): string {
-  const h = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "");
-  if (h && isConsumerHost(h)) return BEEZILLA_CLIENT_ID;
-  if (h && isConsoleHost(h)) return DEVBOARDS_CLIENT_ID;
+  const project = analyticsProjectForHost(host);
+  if (project === "beezilla") return BEEZILLA_CLIENT_ID;
+  if (project === "devboards") return DEVBOARDS_CLIENT_ID;
   return BZ_BRAND ? BEEZILLA_CLIENT_ID : DEVBOARDS_CLIENT_ID;
 }
