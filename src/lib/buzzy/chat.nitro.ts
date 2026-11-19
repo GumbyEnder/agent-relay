@@ -39,13 +39,13 @@ import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import {
-  VIDEO_DAILY_LIMIT,
   VIDEO_RECIPES,
   fetchVideoFile,
   noteVideoState,
   readVideoJob,
   storeVideoAsset,
   videoConfigured,
+  videoDailyLimit,
   videoJobOwnedBy,
   videoJobsToday,
 } from "./video";
@@ -58,6 +58,7 @@ import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profil
 import {
   checkQuota,
   describeEntitlement,
+  getEntitlement,
   recordUsage,
   revokeTokens,
   setPlan,
@@ -605,7 +606,9 @@ export default defineEventHandler(async (event) => {
       return {
         ok: true,
         configured: videoConfigured(),
-        dailyLimit: VIDEO_DAILY_LIMIT,
+        // One flat cap for every plan (room 6615). The page shows this number,
+        // so it must be the same one the chat turn enforces.
+        dailyLimit: videoDailyLimit(),
         used: await videoJobsToday(user.id),
         recipes: VIDEO_RECIPES,
       };
