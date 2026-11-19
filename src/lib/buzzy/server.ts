@@ -41,7 +41,7 @@ import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music"
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
 import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
-import { checkQuota, getEntitlement, recordUsage } from "./entitlements";
+import { checkQuota, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
