@@ -2439,6 +2439,73 @@ export async function handleAgentApiRequest(req: Request): Promise<Response> {
         return err(status, msg, status === 409 ? "conflict" : "bad_request");
       }
     }
+    // ── CR-6 admin triage: GET/PATCH /admin/feedback ──────────────────
+    // The only read path for a feedback row. The consumer host has no GET at
+    // all, and this one requires an operator session with an admin capability.
+    if (parts.length === 2 && parts[0] === "admin" && parts[1] === "feedback" && req.method === "GET") {
+      const gate = await requireOperatorCap(req, "manage_settings");
+      if (gate) return gate;
+      const status = str(url.searchParams.get("status"));
+      const limitRaw = Number(url.searchParams.get("limit") ?? 50);
+      const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 50, 1), 200);
+      const before = str(url.searchParams.get("before"));
+      if (status && !["new", "triaged", "fixed", "wontfix", "duplicate"].includes(status)) {
+        return err(400, "unknown status filter", "bad_request");
+      }
+      const sql = await getSql();
+      const rows = await sql.query<Record<string, unknown>>(
+        `SELECT id, ref, created_at, user_id, body, page_url, route, app_sha, diag,
+                diag_redactions, status, admin_note, ip_hash, ua, updated_at
+           FROM buzzy_feedback
+          WHERE ($1::text IS NULL OR status = $1)
+            AND ($2::timestamptz IS NULL OR created_at < $2)
+          ORDER BY created_at DESC
+          LIMIT $3`,
+        [status, before, limit],
+      );
+      return json({
+        ok: true,
+        feedback: rows.map((r) => ({
+          ...r,
+          // A hash prefix is enough to spot a repeat reporter; the full hash is
+          // a stable per-address identifier and does not belong on a screen.
+          ip_hash: typeof r.ip_hash === "string" ? r.ip_hash.slice(0, 12) : null,
+        })),
+        next_before: rows.length === limit ? rows[rows.length - 1]?.created_at ?? null : null,
+      });
+    }
+    if (
+      parts.length === 3 &&
+      parts[0] === "admin" &&
+      parts[1] === "feedback" &&
+      req.method === "PATCH"
+    ) {
+      const gate = await requireOperatorCap(req, "manage_settings");
+      if (gate) return gate;
+      const ref = parts[2]!;
+      const status = str(body.status);
+      const note = body.admin_note === undefined ? undefined : str(body.admin_note);
+      if (status !== undefined && !["new", "triaged", "fixed", "wontfix", "duplicate"].includes(status)) {
+        return err(400, "unknown status", "bad_request");
+      }
+      if (status === undefined && note === undefined) {
+        return err(400, "nothing to update", "bad_request");
+      }
+      if (note && note.length > 4000) return err(400, "admin_note too long", "bad_request");
+      const sql = await getSql();
+      const rows = await sql.query<{ ref: string }>(
+        `UPDATE buzzy_feedback
+            SET status = COALESCE($2, status),
+                admin_note = CASE WHEN $3::boolean THEN $4 ELSE admin_note END,
+                updated_at = now()
+          WHERE ref = $1
+          RETURNING ref, status, admin_note, updated_at`,
+        [ref, status ?? null, note !== undefined, note ?? null],
+      );
+      if (!rows[0]) return err(404, "feedback not found", "not_found");
+      return json({ ok: true, feedback: rows[0] });
+    }
+
     // POST /admin/users/:id/disable | /enable
     if (
       parts.length === 4 &&
