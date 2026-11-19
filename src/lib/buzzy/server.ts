@@ -61,7 +61,7 @@ import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteComm
 import { selfKnowledgeNote } from "./self-knowledge";
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
-import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday } from "./video";
+import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday, videoRecipeHeldBack } from "./video";
 import type { VideoTopicInput } from "./video";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
@@ -902,7 +902,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // One flat cap for every plan (room 6615: DAILY_LIMIT_PER_USER=5). No
     // entitlement read — the number must not vary by plan, by construction.
     const videoLimit = videoDailyLimit();
-    if (!videoConfigured()) {
+    if (videoRecipeHeldBack(videoRequest.recipe)) {
+      // CR-1 (Shane, 2026-11-19): four of five recipes ship today; the picture
+      // reel is held back until its library is seeded. Say so plainly — a job
+      // sent anyway would come back `pictures_unavailable` minutes later.
+      videoRefusal = {
+        code: "recipe_unavailable",
+        error: "The picture reel is not switched on yet — the other four recipes are ready today.",
+      };
+      messages[0]!.content +=
+        "\n\nA picture reel was requested, but that recipe is not switched on yet; the other four " +
+        "video recipes are. Say exactly that in one sentence, offer one of the other four, and do not " +
+        "describe a video. Nothing was started and nothing was charged.";
+    } else if (!videoConfigured()) {
       videoRefusal = { code: "not_configured", error: "The video service is not set up on this deployment" };
       messages[0]!.content +=
         "\n\nA video was requested but no video service is configured on this deployment, so none can be made here. " +
@@ -1483,7 +1495,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
               if (!known) {
                 return {
                   message:
-                    `generate_video failed: ${recipe || "(no recipe)"} is not one of the five recipes. ` +
+                    `generate_video failed: ${recipe || "(no recipe)"} is not one of the recipes BeeZilla offers today. ` +
                     `Use one of: ${VIDEO_RECIPES.map((r) => r.id).join(", ")}.`,
                   errorCode: "bad_recipe",
                 };
