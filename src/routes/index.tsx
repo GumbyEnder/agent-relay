@@ -19,6 +19,7 @@ const searchSchema = z.object({
       "protocol",
       "journal",
       "analytics",
+      "feedback",
     ])
     .optional()
     .catch(undefined),

@@ -123,10 +123,27 @@ const port = (server.address() as AddressInfo).port;
 process.env.BZ_VIDEO_BASE = `http://127.0.0.1:${port}`;
 const video = await import("../src/lib/buzzy/video");
 
-console.log("configuration defaults (Shane, 2026-11-17 15:46 ET):");
+console.log("configuration defaults (Shane, 2026-11-17 15:46 ET, room 6615):");
 ok("writer is gemini-flash-latest", video.VIDEO_WRITER === "gemini-flash-latest", video.VIDEO_WRITER);
 ok("end card off by default", video.VIDEO_BRAND === false, video.VIDEO_BRAND);
-ok("daily limit is 5", video.VIDEO_DAILY_LIMIT === 5, video.VIDEO_DAILY_LIMIT);
+
+// The cap is ONE flat number for every plan (6615 DAILY_LIMIT_PER_USER=5,
+// restated in 6874). These assertions are deliberately written so that a
+// per-plan table (10 Pro / 1 Free) CANNOT pass: each plan must be 5, and the
+// plan rules must not carry a video field at all.
+const ents = await import("../src/lib/buzzy/entitlements");
+const flat = video.videoDailyLimit as unknown as (plan?: string) => number;
+ok("the published cap is 5 per user per UTC day", video.DAILY_LIMIT_PER_USER === 5, video.DAILY_LIMIT_PER_USER);
+for (const plan of ["free", "starter", "pro"] as const) {
+  ok(`${plan} plan gets 5 videos a day`, video.videoDailyLimit() === 5, video.videoDailyLimit());
+  ok(`${plan} plan carries no per-plan video quota`, !("videosPerDay" in ents.PLANS[plan]), Object.keys(ents.PLANS[plan]));
+}
+ok("a plan argument changes nothing", flat("pro") === 5 && flat("free") === 5, [flat("free"), flat("pro")]);
+ok("an unknown plan is still 5", flat("gold") === 5, flat("gold"));
+process.env.BZ_VIDEO_DAILY_LIMIT = "12";
+ok("BZ_VIDEO_DAILY_LIMIT is the only override, and it is flat", video.videoDailyLimit() === 12, video.videoDailyLimit());
+delete process.env.BZ_VIDEO_DAILY_LIMIT;
+ok("no override means 5 again", video.videoDailyLimit() === 5, video.videoDailyLimit());
 
 console.log("the five ids are the kit's own recipe ids:");
 const ids = video.VIDEO_RECIPES.map((r: { id: string }) => r.id);
