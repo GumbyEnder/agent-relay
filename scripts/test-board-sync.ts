@@ -408,6 +408,25 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     await A.api.sync("sess_a2");
     truthy(/Draw it in pencil/.test(A.api.instructionsFor("sess_a2")), A.api.instructionsFor("sess_a2"));
   });
+  // Owner, 2026-11-19: "anything that's in the whiteboard, it should be able to see in its context."
+  await ok("everything on the board reaches BeeZilla: their words as instructions, the rest to see", () => {
+    const C = computer("u9");
+    C.write("ctx", { ...board([
+      card("agent", { kind: "agent", title: "agent.md", body: "BeeZilla's own words", x: 0 }),
+      card("agent-mine", { kind: "agent", title: "agent.md", body: "Keep it friendly", user: true, x: 10 }),
+      card("skill-art", { kind: "skill", title: "Picture maker", body: "draws pictures", x: 20 }),
+      card("pic-made", { kind: "image", title: "art-2026-11-19-17-13-40.png", url: "/api/buzzy/assets/5", contentType: "image/png", x: 30 }),
+      card("pic-theirs", { kind: "image", title: "beach.jpg", url: "/api/buzzy/assets/6", contentType: "image/jpeg", user: true, x: 40 }),
+      card("song", { kind: "audio", title: "music-2026-11-19-17-20-00.mp3", url: "/api/buzzy/assets/7", contentType: "audio/mpeg", x: 50 }),
+      card("link", { kind: "link", title: "Recipe ideas", url: "https://example.com/ideas", user: true, x: 60 }),
+      card("plan", { kind: "note", title: "Plan", body: "Two steps", x: 70 }),
+    ]), sync: { rev: null, dirty: false, base: null } });
+    const text = C.api.instructionsFor("ctx");
+    truthy(/^agent\.md \(how to work\): Keep it friendly\n/.test(text), "their words first: " + text);
+    truthy(/Also on the board:\n- Picture made here\n- Picture they added — beach\.jpg\n- Music made here\n- Link they added — Recipe ideas \(https:\/\/example\.com\/ideas\)\n- Note — Plan: Two steps$/.test(text), "then the rest: " + text);
+    truthy(!/art-2026|music-2026|\/api\/buzzy\/assets|BeeZilla's own words|Picture maker/.test(text), "no made file names, inside links or untouched process cards: " + text);
+    eq(C.api.instructionsFor("nothing-here"), "", "an empty board says nothing");
+  });
   await ok("the board in front of a new conversation joins it, without drawing a step twice", async () => {
     // B worked in sess_a3's conversation first: agent.md in the person's words, and the
     // picture maker still running.

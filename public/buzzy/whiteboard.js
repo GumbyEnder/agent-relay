@@ -735,22 +735,55 @@
     });
   }
 
-  // The person's own cards (ones they wrote or edited), in board order: agent.md,
-  // then each skill left to right, then the output and notes. Cards BeeZilla drew
-  // and nobody touched are not sent back: they describe what it already does.
+  // What BeeZilla is told about a board, sent with the next message.
+  //  - First the person's own cards (ones they wrote or edited), in board order:
+  //    agent.md, then each skill left to right, then the output and notes. These are
+  //    their instructions.
+  //  - Then everything else on it that holds something (owner, 2026-11-19: "anything
+  //    that's in the whiteboard, it should be able to see in its context"): the
+  //    pictures, music, video, 3D models, files and links, whether BeeZilla made them
+  //    or the person added them, and BeeZilla's own notes. Its untouched agent.md,
+  //    skill and memory cards are left out: they describe what it already does.
+  //    Made files go by kind, not by their generated name: the model repeats any
+  //    file name it is handed.
   function compile(cards) {
-    var mine = (cards || []).filter(function (c) { return c && c.user && String(c.body || "").trim(); });
-    if (!mine.length) return "";
-    var order = mine.slice().sort(function (a, b) { return a.x - b.x || a.y - b.y; });
+    var order = (cards || []).filter(Boolean).slice().sort(function (a, b) { return a.x - b.x || a.y - b.y; });
+    var mine = order.filter(function (c) { return c.user && String(c.body || "").trim(); });
     var lines = [];
-    order.forEach(function (c) { if (kindOf(c) === "agent") lines.push("agent.md (how to work): " + c.body.trim()); });
+    mine.forEach(function (c) { if (kindOf(c) === "agent") lines.push("agent.md (how to work): " + c.body.trim()); });
     var step = 0;
-    order.forEach(function (c) { if (kindOf(c) === "skill") lines.push("Step " + (++step) + " — " + c.title + ": " + c.body.trim()); });
-    order.forEach(function (c) {
+    mine.forEach(function (c) { if (kindOf(c) === "skill") lines.push("Step " + (++step) + " — " + c.title + ": " + c.body.trim()); });
+    mine.forEach(function (c) {
       var k = kindOf(c);
       if (roleOf(k) === "output") lines.push("Output — " + c.title + ": " + c.body.trim());
       else if (k === "note") lines.push("Note — " + c.body.trim());
     });
+    var also = [];
+    order.forEach(function (c) {
+      if (mine.indexOf(c) >= 0) return;
+      var k = kindOf(c);
+      var title = String(c.title || "").replace(/\s+/g, " ").trim();
+      var body = String(c.body || "").replace(/\s+/g, " ").trim();
+      if (k === "note") {
+        if (title || body) also.push("- Note" + (title ? " — " + title.slice(0, 120) : "") + (body ? ": " + body.slice(0, 240) : ""));
+        return;
+      }
+      if (roleOf(k) !== "output") return;
+      var url = String(c.url || "");
+      var web = /^https?:\/\//i.test(url);
+      var label = k === "file" && web ? "Link" : (KIND_LABEL[k] || "File");
+      var made = /^(?:art|music|video|model|model3d|clip|track)-\d{4}-\d\d-\d\d/i.test(title);
+      var line = "- " + label + (c.user ? " they added" : made ? " made here" : "");
+      if (title && !made) line += " — " + title.slice(0, 120);
+      if (body) line += ": " + body.slice(0, 240);
+      if (web) line += " (" + url.slice(0, 300) + ")";
+      also.push(line);
+    });
+    if (also.length) {
+      if (lines.length) lines.push("");
+      lines.push("Also on the board:");
+      Array.prototype.push.apply(lines, also);
+    }
     return lines.join("\n").slice(0, 4000);
   }
 

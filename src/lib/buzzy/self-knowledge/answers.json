@@ -631,7 +631,7 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -640,6 +640,10 @@
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "Create recipe"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Also on the board:"
       },
       {
         "file": "src/lib/buzzy/server.ts",
