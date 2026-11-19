@@ -6,10 +6,10 @@
 |---|---|---|
 | **Who it's for** | AI coding agents and the humans who supervise them | Non-technical people who need work done |
 | **What it is** | A durable mission board agents poll, claim, and deliver against | A consumer orchestrator that interviews you, drafts the work, and waits for your approval |
-| **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla-production.up.railway.app](https://beezilla-production.up.railway.app) · demo: [beezilla-demo-production-c069.up.railway.app](https://beezilla-demo-production-c069.up.railway.app) |
+| **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla.net](https://beezilla.net) |
 | **Entry point** | `/api/agent` (HTTP — no browser login for agents) | `/buzzy/` (branded web app) |
 
-Both share the same **Postgres** storage, **Better Auth** identities, and Nitro/TanStack server. One env flag, `BZ_BRAND=beezilla`, skins and routes a deployment as BeeZilla; without it the same build is Dev Boards. Nothing is forked.
+Two **services**, one **Postgres**, one bucket of identities. `app.devboards.ai` is served by `agent-relay` and `beezilla.net` by `beezilla-web`: one repo, one Dockerfile, one database, so the same Better Auth users and one feedback table. Each service is told which surface it answers by hostname (`BZ_CONSUMER_HOSTS`), and the console's `/buzzy/*` paths 301 to the consumer host (`BZ_MOVE_BUZZY=1`). Because either service can be pointed at the consumer host, `BZ_FEEDBACK_PEPPER` and `BZ_KEY_SEAL_SECRET` must hold the same value on both — one table, one hash, whichever process writes the row. Nothing is forked.
 
 ---
 

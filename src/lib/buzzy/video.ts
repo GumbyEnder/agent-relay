@@ -51,8 +51,8 @@ export const VIDEO_BRAND = env("BZ_VIDEO_BRAND") === "1";
  * The kit enforces the same flat number (`DAILY_LIMIT_PER_USER` on serve.py)
  * because it has no idea what a BeeZilla plan is; its 429 is the backstop, never
  * the product rule. `BZ_VIDEO_DAILY_LIMIT` is the only override, for ops. Never
- * reintroduce a plan argument: the signature takes one only so existing callers
- * cannot silently disagree with the kit.
+ * reintroduce a plan argument: this signature takes none, so no caller can pass
+ * a plan and silently disagree with the kit.
  */
 export const DAILY_LIMIT_PER_USER = 5;
 

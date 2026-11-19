@@ -1,12 +1,14 @@
 # BeeZilla on its own service (stage 2 of the split)
 
-Two products, one repo, one Postgres — for now two **services**. The console keeps
-serving everything; the BeeZilla service serves only the consumer surface. The code
-is already prepared for this: `BZ_SURFACE` says which job a process has.
+Two products, one repo, one Postgres — two **services**. **Landed 2026-11-19**:
+`beezilla.net` is now answered by `beezilla-web`, `app.devboards.ai` by `agent-relay`.
+The console keeps serving everything (with `/buzzy/*` 301ing to the product domain);
+the BeeZilla service serves only the consumer surface, `BZ_SURFACE=buzzy`. The code
+is prepared for both shapes: `BZ_SURFACE` says which job a process has.
 
 | `BZ_SURFACE` | service | serves |
 |---|---|---|
-| `all` (default) | — | today's shape: one service, hostnames decide |
+| `all` (default) | `agent-relay` | the console, hostnames decide — today with `BZ_MOVE_BUZZY=1` so `/buzzy/*` 301s to the product domain |
 | `buzzy` | `beezilla-web` | `/buzzy/*`, `/api/buzzy/*`, `/api/auth/*`, capability endpoints, `/api/agent/health` **only**. A console path 404s. |
 | `console` | `agent-relay` | everything else; `/buzzy/*` pages 301 to the product domain |
 
