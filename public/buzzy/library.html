@@ -301,26 +301,44 @@
       gap: 0.9rem;
       margin-top: 1rem;
     }
-    .artifact-shelf { margin: 0.9rem 0 1.4rem; }
-    .shelf-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.6rem; }
-    .shelf-title { font-weight: 600; font-size: 0.95rem; }
-    .shelf-meta { color: var(--bz-muted, #8d8d8d); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
-    .shelf-grid {
-      display: grid; gap: 0.6rem;
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    /* ── Finished work: the Library's first view ── */
+    .finished { margin: 0.6rem 0 1.6rem; }
+    .fw-grid {
+      display: grid; gap: 0.8rem;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
     }
-    .shelf-card {
-      background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px; padding: 0.6rem; overflow: hidden;
+    .fw-card {
+      display: flex; flex-direction: column; gap: 0.35rem; min-width: 0;
+      background: var(--bz-panel); border: 1px solid #2A2A2A; border-radius: 10px; padding: 0.7rem;
     }
-    .shelf-card audio, .shelf-card video, .shelf-card img { width: 100%; border-radius: 8px; display: block; }
-    .shelf-card img { max-height: 140px; object-fit: cover; }
-    .shelf-name {
-      font-size: 0.82rem; margin-top: 0.45rem; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis;
+    .fw-card.fw-focus { border-color: var(--bz-yellow, #ffd40d); box-shadow: inset 0 0 0 1px var(--bz-yellow, #ffd40d); }
+    .fw-preview img, .fw-preview video {
+      width: 100%; height: 150px; object-fit: cover; border-radius: 8px; display: block; background: #0c0c0c;
     }
-    .shelf-sub { font-size: 0.72rem; color: var(--bz-muted, #8d8d8d); font-variant-numeric: tabular-nums; }
-    .shelf-dl { font-size: 0.8rem; color: var(--bz-yellow, #ffd40d); text-decoration: none; }
+    .fw-preview audio { width: 100%; display: block; margin-top: 0.4rem; }
+    .fw-tile {
+      height: 150px; border-radius: 8px; background: #101010; border: 1px solid #222;
+      display: flex; align-items: center; justify-content: center; font-size: 2.2rem;
+    }
+    .kind-audio .fw-tile { height: 104px; }
+    .fw-tile.fw-doc {
+      display: block; overflow: hidden; text-align: left; padding: 0.7rem 0.8rem;
+      font-size: 0.74rem; line-height: 1.45; color: #bdbdbd;
+    }
+    .fw-title {
+      font-size: 0.92rem; font-weight: 600; color: #fff; margin: 0.15rem 0 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .fw-sub, .fw-file { font-size: 0.74rem; color: var(--bz-muted, #8d8d8d); font-variant-numeric: tabular-nums; }
+    .fw-file { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fw-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: auto; padding-top: 0.3rem; }
+    .fw-actions button { font-size: 0.8rem; padding: 0.4rem 0.75rem; }
+    .fw-dl, .fw-doc-actions a { font-size: 0.82rem; color: var(--bz-yellow, #ffd40d); text-decoration: none; padding: 0.4rem 0.3rem; }
+    .fw-dl:hover, .fw-doc-actions a:hover { text-decoration: underline; }
+    .fw-doc-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .fw-more { margin-top: 0.9rem; }
+    .local-folders { margin-top: 1.6rem; }
+    .local-folders summary { cursor: pointer; color: var(--bz-muted, #8d8d8d); font-size: 0.85rem; }
     .docfolder {
       border: 1px solid #2A2A2A;
       background: var(--bz-panel);
@@ -1163,16 +1181,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     const DOCS_KEY = "bz_docs_v1";
     let docsOpenFolder = null; // jobId currently browsed, null = folder grid
     let docsOpenDoc = null;    // doc name currently viewed, null = file list
-    // A chat file card links back with ?job=<id>. Open that folder on arrival —
-    // otherwise "Open in Library" dumped the owner on the grid and made them
-    // hunt for the file they had just been handed. Assigned HERE, after the
-    // `let`: doing it further up threw "Cannot access before initialization".
-    // docsOpenFromLink survives the company-scope guard below: a file handed
-    // over in chat may belong to a job the Library's scope filter would drop,
-    // and a link the owner just clicked must not bounce them to the grid.
+    let docsOpenServerDoc = null; // a saved document open in the viewer, by id
+    // A chat file card links back with ?job=<id>. That conversation's finished
+    // work comes first and is outlined, so "Open in Library" lands on the file
+    // the owner was just handed. The link used to open this browser's folder
+    // for the job, but a document made in Talk is saved on the server, never in
+    // that folder, so the owner landed on "No documents in this folder yet".
+    // The focused work also survives the company-scope filter: a file handed
+    // over in chat may belong to a job the Library's scope would drop, and a
+    // link the owner just clicked must not hide it.
     const docsJobParam = new URLSearchParams(window.location.search).get("job");
-    let docsOpenFromLink = null;
-    if (docsJobParam) { docsOpenFolder = docsJobParam; docsOpenFromLink = docsJobParam; }
+    const docsFocusJob = docsJobParam || null;
 
     function loadDocs() {
       try { return JSON.parse(localStorage.getItem(DOCS_KEY)) || {}; }
@@ -1296,10 +1315,37 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const co = window.BZCompanies && BZCompanies.ready() ? BZCompanies.active() : null;
       if (docsOpenFolder) {
         const openJob = catalog.jobs.find((x) => x.id === docsOpenFolder);
-        const pinnedByLink = docsOpenFolder === docsOpenFromLink;
-        if (pinnedByLink) { /* keep: the owner asked for this folder by link */ }
-        else if (openJob && !inWorkspace(openJob)) { docsOpenFolder = null; docsOpenDoc = null; }
+        if (openJob && !inWorkspace(openJob)) { docsOpenFolder = null; docsOpenDoc = null; }
         else if (!openJob && co) { docsOpenFolder = null; docsOpenDoc = null; }
+      }
+
+      if (docsOpenServerDoc) {
+        // ── Viewer for a saved document (made in a conversation) ──
+        const d = fwItems.find((x) => x.docId === docsOpenServerDoc);
+        if (!d) { docsOpenServerDoc = null; return goDocs(); }
+        const base = "/api/buzzy/documents/" + encodeURIComponent(d.docId) + "?format=";
+        const fname = slugify(d.title);
+        app.innerHTML =
+          "<div class=\"docs-back\"><button type=\"button\" id=\"docsBackFinished\" class=\"secondary\">← Library</button></div>" +
+          "<h1>" + escHtml(d.title) + "</h1>" +
+          "<p class=\"muted\">" + escHtml([FW_STATUS[d.status] || "", d.when ? "updated " + fwDate(d.when) : ""].filter(Boolean).join(" · ")) + "</p>" +
+          "<div class=\"fw-doc-actions\">" +
+            (d.jobId ? "<button type=\"button\" id=\"docKeep\">Keep working on it</button>" : "") +
+            "<a href=\"" + escAttr(base + "docx") + "\" download=\"" + escAttr(fname + ".docx") + "\">Download Word</a>" +
+            "<a href=\"" + escAttr(base + "pdf") + "\" download=\"" + escAttr(fname + ".pdf") + "\">Download PDF</a>" +
+            "<a href=\"" + escAttr(base + "md") + "\" download=\"" + escAttr(fname + ".md") + "\">Download .md</a>" +
+            "<button type=\"button\" class=\"secondary\" id=\"docCopy\">Copy text</button>" +
+          "</div>" +
+          "<div class=\"docviewer\">" + escHtml(d.content) + "</div>";
+        document.getElementById("docsBackFinished").onclick = () => { docsOpenServerDoc = null; goDocs(); };
+        const keep = document.getElementById("docKeep");
+        if (keep) keep.onclick = () => keepWorkingOn(d);
+        document.getElementById("docCopy").onclick = (e) => {
+          if (navigator.clipboard) navigator.clipboard.writeText(d.content);
+          e.target.textContent = "Copied";
+          setTimeout(() => { e.target.textContent = "Copy text"; }, 1200);
+        };
+        return;
       }
 
       if (docsOpenFolder && docsOpenDoc) {
@@ -1355,7 +1401,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 "</div>").join("")
             : "<p class='muted'>No documents in this folder yet.</p>") +
           "</div>";
-        document.getElementById("docsBackFolders").onclick = () => { docsOpenFolder = null; docsOpenFromLink = null; goDocs(); };
+        document.getElementById("docsBackFolders").onclick = () => { docsOpenFolder = null; goDocs(); };
         app.querySelectorAll("[data-open]").forEach((el) => { el.onclick = () => { docsOpenDoc = el.getAttribute("data-open"); goDocs(); }; });
         app.querySelectorAll(".di-name").forEach((el) => { el.onclick = () => { docsOpenDoc = el.getAttribute("data-doc"); goDocs(); }; });
         app.querySelectorAll("[data-dl]").forEach((el) => {
@@ -1382,135 +1428,225 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }).length
         : 0;
       app.innerHTML =
-        "<img class='mascot-sm' src='/buzzy/brand/revision6_expressions_16-smiling.png' alt='BeeZilla' />" +
         "<h1>" + (co ? "Library · " + escHtml(co.name) : "Library") + "</h1>" +
         "<p class='muted'>" + (co
-          ? "Documents for " + escHtml(co.name) + " only. Another company's files stay on their tab."
-          : "Every job keeps its own folder. Documents are markdown — open them here, download, or print to PDF.") + "</p>" +
+          ? "What BeeZilla finished for " + escHtml(co.name) + ", newest first. Another company's work stays on its own tab."
+          : "Everything BeeZilla finished for you, newest first.") + "</p>" +
         (parked ? "<p class='muted'>" + parked + (parked === 1 ? " folder isn't" : " folders aren't") + " in a company, so " + (parked === 1 ? "it isn't" : "they aren't") + " in this library.</p>" : "") +
         "<div class='docs-back'><button id='docsBackJobs' class='secondary'>← Back to Jobs</button></div>" +
-        // Artifacts first: a track or an image is a outcome you can use right here,
-        // while a document is a thing you have to open. The shelf used to be a file
-        // list with no player, so a generated track could only be downloaded blind.
-        "<div id='artifactShelf' class='artifact-shelf'><p class='muted'>Loading artifacts…</p></div>" +
-        "<div class='docs-folders'>" +
+        // Finished work first (owner feedback, 17 Nov 2026): the pieces BeeZilla
+        // made, each with one way back into the conversation that made it. This
+        // view used to show the browser's own folders first, and a document
+        // made in Talk ("Saved to your Library") was never in them.
+        "<section id='finishedWork' class='finished' aria-label='Your finished work'><p class='muted'>Loading your finished work…</p></section>" +
         (folders.length
-          ? folders.map((f) =>
-              "<div class='docfolder' data-folder='" + f.id + "'>" +
-                "<div class='df-name'>📁 " + escHtml(f.job ? jobTitle(f.job) : f.id) + "</div>" +
-                "<div class='df-meta'>" + f.docs.length + " document" + (f.docs.length === 1 ? "" : "s") +
-                  (f.job && jobComplete(f.job) ? " · approved draft" : "") +
-                  " · latest " + new Date(f.docs[0].updatedAt || f.docs[0].createdAt).toLocaleDateString() + "</div>" +
-              "</div>").join("")
-          : "<p class='muted'>No documents yet. Documents appear here as your jobs produce drafts and deliverables.</p>") +
-        "</div>";
+          ? "<details class='local-folders'><summary>Saved in this browser · " + folders.length + " folder" + (folders.length === 1 ? "" : "s") + "</summary>" +
+              "<div class='docs-folders'>" +
+              folders.map((f) =>
+                "<div class=\"docfolder\" data-folder=\"" + escAttr(f.id) + "\">" +
+                  "<div class='df-name'>📁 " + escHtml(f.job ? jobTitle(f.job) : f.id) + "</div>" +
+                  "<div class='df-meta'>" + f.docs.length + " document" + (f.docs.length === 1 ? "" : "s") +
+                    (f.job && jobComplete(f.job) ? " · approved draft" : "") +
+                    " · latest " + new Date(f.docs[0].updatedAt || f.docs[0].createdAt).toLocaleDateString() + "</div>" +
+                "</div>").join("") +
+              "</div></details>"
+          : "");
       app.querySelectorAll(".docfolder[data-folder]").forEach((el) => {
         el.onclick = () => { docsOpenFolder = el.getAttribute("data-folder"); goDocs(); };
       });
-      // Server-side deliverables belong in the Library too: a track made in chat
-      // is a deliverable, and this page is where the owner looks for it.
-      renderServerFiles(app);
       const bj = document.getElementById("docsBackJobs");
       if (bj) bj.onclick = () => { docsOpenFolder = null; docsOpenDoc = null; state.screen = "jobs"; render(); };
-      loadArtifactShelf();
+      loadFinishedWork(co);
     }
 
-    // ── Artifact shelf ───────────────────────────────────────────────
-    // Everything the account has actually produced, as usable things: audio with a
-    // player, images with a preview, anything else as a named download. Read from
-    // /api/buzzy/assets, which returns name/url/type aliases so a card needs no
-    // special-casing per kind.
-    function artifactKind(item) {
-      var t = String(item.type || item.content_type || "");
+    /* ── Finished work ──────────────────────────────────────────────
+     * One list of what BeeZilla made for this account, newest first:
+     * documents from /api/buzzy/documents (one per conversation, every
+     * version kept) and files from /api/buzzy/assets (pictures, audio,
+     * video, 3D, uploads). A piece that came out of a conversation gets
+     * "Keep working on it", which reopens that conversation in Talk in
+     * place (BZ-19: no document load, so a live mic survives). Drafts come
+     * after finished work. The old shelf read item.url, which the assets
+     * API never sends, so its players and pictures had no source; a file
+     * is served at /api/buzzy/assets/<id>. */
+    const FW_FIRST = 24; // cards before "Show all"
+    const FW_LABEL = { doc: "Document", audio: "Audio", image: "Picture", video: "Video", model: "3D model", file: "File" };
+    const FW_ICON = { doc: "📝", audio: "🎵", image: "🖼", video: "🎬", model: "🧊", file: "📄" };
+    const FW_STATUS = { draft: "Draft", ready: "Ready for you to check", accepted: "Finished" };
+    let fwItems = [];       // the list last shown, for the document viewer
+    let fwShowAll = false;
+    let fwScrolled = false; // the linked work is scrolled into view once
+
+    function fwKind(contentType, name) {
+      const t = String(contentType || "");
+      const n = String(name || "");
       if (t.indexOf("audio/") === 0) return "audio";
       if (t.indexOf("image/") === 0) return "image";
       if (t.indexOf("video/") === 0) return "video";
+      if (/^model\//.test(t) || /\.(glb|gltf|obj|stl|fbx|usdz)$/i.test(n)) return "model";
       return "file";
     }
-    function humanBytes(n) {
-      var b = Number(n) || 0;
-      if (b < 1024) return b + " B";
-      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " kB";
-      return (b / (1024 * 1024)).toFixed(1) + " MB";
+    // "spring-menu-plan.docx" -> "Spring menu plan"
+    function fwReadable(file) {
+      const base = String(file || "").replace(/\.[A-Za-z0-9]{2,5}$/, "").replace(/[-_]+/g, " ").trim();
+      return base ? base.charAt(0).toUpperCase() + base.slice(1) : "Untitled";
     }
-    function loadArtifactShelf() {
-      var host = document.getElementById("artifactShelf");
-      if (!host) return; // navigated away before the fetch landed
-      fetch("/api/buzzy/assets?limit=60", { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) {
-          var host2 = document.getElementById("artifactShelf");
-          if (!host2) return;
-          var items = (d && (d.items || d.assets)) || [];
-          if (!items.length) {
-            host2.innerHTML = "";
-            return;
-          }
-          var audioCount = items.filter(function (i) { return artifactKind(i) === "audio"; }).length;
-          var total = items.reduce(function (a, i) { return a + (Number(i.bytes) || 0); }, 0);
-          host2.innerHTML =
-            "<div class='shelf-head'><span class='shelf-title'>Artifacts</span>" +
-            "<span class='shelf-meta'>" + items.length + " file" + (items.length === 1 ? "" : "s") +
-            (audioCount ? " · " + audioCount + " audio" : "") + " · " + humanBytes(total) + "</span></div>" +
-            "<div class='shelf-grid'>" +
-            items.map(function (i) {
-              var kind = artifactKind(i);
-              var name = escHtml(i.name || i.filename || "untitled");
-              var when = i.created_at ? new Date(i.created_at).toLocaleDateString() : "";
-              var body =
-                kind === "audio" ? "<audio controls preload='none' src='" + escAttr(i.url) + "'></audio>" :
-                kind === "image" ? "<img loading='lazy' src='" + escAttr(i.url) + "' alt='" + name + "' />" :
-                kind === "video" ? "<video controls preload='none' src='" + escAttr(i.url) + "'></video>" :
-                "<a class='shelf-dl' href='" + escAttr(i.url) + "' download>Download</a>";
-              return "<div class='shelf-card kind-" + kind + "'>" + body +
-                "<div class='shelf-name' title='" + name + "'>" + name + "</div>" +
-                "<div class='shelf-sub'>" + humanBytes(i.bytes) + (when ? " · " + when : "") + "</div>" +
-                "</div>";
-            }).join("") +
-            "</div>";
-        })
-        .catch(function () {
-          var host3 = document.getElementById("artifactShelf");
-          if (host3) host3.innerHTML = "<p class='muted'>Artifacts could not be loaded just now.</p>";
+    function fwWhen(s) {
+      const t = Date.parse(s || "");
+      return isFinite(t) ? t : 0;
+    }
+    function fwDate(ms) {
+      return ms ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+    }
+    function fwSnippet(md) {
+      return String(md || "").replace(/^#+\s*/gm, "").replace(/[*_`>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 220);
+    }
+    function fwFocused(item) {
+      return docsFocusJob && (item.jobId === docsFocusJob || item.docId === docsFocusJob) ? 1 : 0;
+    }
+
+    // companyJobs: null shows everything; a Set keeps that company's work only.
+    function fwBuild(assetsBody, docsBody, companyJobs) {
+      const items = [];
+      ((docsBody && docsBody.documents) || []).forEach((d) => {
+        if (!d || !d.id) return;
+        items.push({
+          key: "d:" + d.id,
+          kind: "doc",
+          docId: String(d.id),
+          jobId: d.job_id ? String(d.job_id) : null,
+          title: String(d.title || "").trim() || "Untitled document",
+          status: String(d.status || ""),
+          when: fwWhen(d.updated_at || d.created_at),
+          content: String(d.content || ""),
         });
+      });
+      ((assetsBody && assetsBody.items) || []).forEach((a) => {
+        if (!a || a.id == null) return;
+        const name = String(a.filename || "");
+        const jobTitle = a.job_title ? String(a.job_title).trim() : "";
+        items.push({
+          key: "a:" + a.id,
+          kind: fwKind(a.content_type, name),
+          jobId: a.job_id ? String(a.job_id) : null,
+          jobTitle: jobTitle,
+          // Name the work, not the file: the conversation's title when there is one.
+          title: jobTitle || fwReadable(name),
+          fileName: name,
+          url: "/api/buzzy/assets/" + encodeURIComponent(String(a.id)),
+          status: "",
+          when: fwWhen(a.created_at),
+        });
+      });
+      const kept = companyJobs
+        ? items.filter((i) => (i.jobId && companyJobs.has(i.jobId)) || fwFocused(i))
+        : items;
+      // The linked conversation first, then finished before drafts, newest first.
+      kept.sort((x, y) =>
+        (fwFocused(y) - fwFocused(x)) ||
+        ((x.status === "draft" ? 1 : 0) - (y.status === "draft" ? 1 : 0)) ||
+        (y.when - x.when));
+      return kept;
     }
 
-    /* ── Server deliverables ────────────────────────────────────────
-     * The folder grid below lists documents that only ever existed in this
-     * browser (localStorage DOCS_KEY). Anything the server produced — a music
-     * track, a rendered file — was invisible: making a track in chat and opening
-     * the Library showed "No documents yet". Files that live on the server are
-     * listed from the server: name, size, date, link. */
-    function renderServerFiles(app) {
-      const holder = document.createElement("div");
-      holder.className = "docs-folders";
-      holder.id = "serverFiles";
-      holder.innerHTML = "<p class='muted'>Looking for files your sessions produced…</p>";
-      app.appendChild(holder);
+    function fwCard(i) {
+      const src = escAttr(i.url || "");
+      const preview =
+        i.kind === "image" ? "<img loading=\"lazy\" src=\"" + src + "\" alt=\"" + escAttr(i.title) + "\" />" :
+        i.kind === "video" ? "<video controls preload=\"none\" src=\"" + src + "\"></video>" :
+        i.kind === "audio" ? "<div class=\"fw-tile\" aria-hidden=\"true\">" + FW_ICON.audio + "</div><audio controls preload=\"none\" src=\"" + src + "\"></audio>" :
+        i.kind === "doc" ? "<div class=\"fw-tile fw-doc\">" + escHtml(fwSnippet(i.content) || "Empty document") + "</div>" :
+        "<div class=\"fw-tile\" aria-hidden=\"true\">" + (FW_ICON[i.kind] || FW_ICON.file) + "</div>";
+      const bits = [FW_LABEL[i.kind] || "File"];
+      if (i.kind === "doc" && FW_STATUS[i.status]) bits.push(FW_STATUS[i.status]);
+      if (i.when) bits.push(fwDate(i.when));
+      const keep = i.jobId
+        ? "<button type=\"button\" class=\"fw-keep\" data-key=\"" + escAttr(i.key) + "\">Keep working on it</button>"
+        : "";
+      const open = i.kind === "doc"
+        ? "<button type=\"button\" class=\"secondary fw-open\" data-key=\"" + escAttr(i.key) + "\">Open</button>"
+        : "<a class=\"fw-dl\" href=\"" + src + "\" download=\"" + escAttr(i.fileName || i.title) + "\">Download</a>";
+      return "<article class=\"fw-card kind-" + i.kind + (fwFocused(i) ? " fw-focus" : "") + "\">" +
+          "<div class=\"fw-preview\">" + preview + "</div>" +
+          "<h3 class=\"fw-title\" title=\"" + escAttr(i.title) + "\">" + escHtml(i.title) + "</h3>" +
+          "<div class=\"fw-sub\">" + escHtml(bits.join(" · ")) + "</div>" +
+          (i.jobTitle && i.fileName ? "<div class=\"fw-file\" title=\"" + escAttr(i.fileName) + "\">" + escHtml(i.fileName) + "</div>" : "") +
+          "<div class=\"fw-actions\">" + keep + open + "</div>" +
+        "</article>";
+    }
 
-      fetch("/api/buzzy/assets", { headers: { Accept: "application/json" }, credentials: "same-origin" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          const items = (data && data.items) || [];
-          if (!items.length) { holder.innerHTML = ""; return; }
-          const kb = (b) => (b > 1024 * 1024 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB");
-          const icon = (t) => (/audio/.test(t) ? "🎵" : /image/.test(t) ? "🖼" : /pdf/.test(t) ? "📕" : "📄");
-          const empty = app.querySelector(".docs-folders > p.muted");
-          if (empty && /No documents yet/i.test(empty.textContent)) empty.remove();
-          holder.style.display = "grid";
-          holder.style.gridTemplateColumns = "repeat(auto-fill, minmax(260px, 1fr))";
-          holder.style.gap = "10px";
-          holder.innerHTML =
-            "<h2 style='font-size:15px;margin:18px 0 8px;grid-column:1/-1'>Files from your sessions</h2>" +
-            items.map((f) =>
-              "<a class='docfolder' style='display:block;text-decoration:none' href='" + escHtml(f.url || ("/api/buzzy/assets/" + f.id)) + "' target='_blank' rel='noopener'>" +
-                "<div class='df-name'>" + icon(f.content_type || "") + " " + escHtml(f.filename || ("asset " + f.id)) + "</div>" +
-                "<div class='df-meta'>" +
-                  (f.job_title ? "from " + escHtml(String(f.job_title)).slice(0, 60) + " · " : "") +
-                  kb(Number(f.bytes) || 0) + " · " + new Date(f.created_at || f.createdAt || Date.now()).toLocaleDateString() + " · open</div>" +
-              "</a>").join("");
-        })
-        .catch(() => { holder.innerHTML = ""; });
+    function renderFinished(host, items, note) {
+      if (!items.length) {
+        host.innerHTML = "<p class=\"muted\">Nothing finished yet. When BeeZilla makes something for you, like a document, a picture or a song, it shows up here.</p>";
+        return;
+      }
+      const shown = fwShowAll ? items : items.slice(0, FW_FIRST);
+      host.innerHTML =
+        (note ? "<p class=\"muted\">" + escHtml(note) + "</p>" : "") +
+        "<div class=\"fw-grid\">" + shown.map(fwCard).join("") + "</div>" +
+        (items.length > FW_FIRST
+          ? "<div class=\"fw-more\"><button type=\"button\" class=\"secondary\" id=\"fwToggle\">" +
+              (fwShowAll ? "Show fewer" : "Show all " + items.length) + "</button></div>"
+          : "");
+      const byKey = {};
+      items.forEach((i) => { byKey[i.key] = i; });
+      host.querySelectorAll(".fw-keep").forEach((b) => {
+        b.onclick = () => { const i = byKey[b.getAttribute("data-key")]; if (i) keepWorkingOn(i); };
+      });
+      host.querySelectorAll(".fw-open").forEach((b) => {
+        b.onclick = () => {
+          const i = byKey[b.getAttribute("data-key")];
+          if (i) { docsOpenServerDoc = i.docId; goDocs(); window.scrollTo(0, 0); }
+        };
+      });
+      const toggle = document.getElementById("fwToggle");
+      if (toggle) toggle.onclick = () => { fwShowAll = !fwShowAll; renderFinished(host, items, note); };
+      const focus = host.querySelector(".fw-focus");
+      if (focus && !fwScrolled && focus.scrollIntoView) { fwScrolled = true; focus.scrollIntoView({ block: "nearest" }); }
+    }
+
+    function loadFinishedWork(co) {
+      if (!document.getElementById("finishedWork")) return;
+      const get = (url) => fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
+      const settle = (p) => p.then((v) => ({ ok: true, v: v }), (e) => ({ ok: false, e: e }));
+      const companyJobs = co && co.id
+        ? get("/api/buzzy/jobs?archived=1&companyId=" + encodeURIComponent(co.id))
+            .then((d) => new Set(((d && d.jobs) || []).map((j) => String(j.id))))
+            .catch(() => null)
+        : Promise.resolve(null);
+      Promise.all([
+        settle(get("/api/buzzy/assets?limit=300&order=newest")),
+        settle(get("/api/buzzy/documents")),
+        companyJobs,
+      ]).then((r) => {
+        const host = document.getElementById("finishedWork");
+        if (!host) return; // navigated away before the lists arrived
+        const assets = r[0], docs = r[1], jobs = r[2];
+        if (!assets.ok && !docs.ok) {
+          host.innerHTML = "<p class=\"muted\">" + (assets.e === 401 || docs.e === 401
+            ? "Sign in to see what BeeZilla finished for you."
+            : "Your finished work could not be loaded just now. Reload the page to try again.") + "</p>";
+          return;
+        }
+        const scopeLost = !!(co && !jobs);
+        fwItems = fwBuild(assets.ok ? assets.v : null, docs.ok ? docs.v : null, scopeLost ? null : jobs);
+        renderFinished(host, fwItems, scopeLost ? "Showing work from all your companies." : "");
+      });
+    }
+
+    // "Keep working on it": the conversation that made this piece, opened in
+    // Talk in place, the same way a Jobs card's Chat opens one (openJobChat).
+    function keepWorkingOn(item) {
+      if (!item || !item.jobId) return;
+      try {
+        sessionStorage.setItem("bz_open_job", JSON.stringify({ jobId: item.jobId, title: item.jobTitle || item.title }));
+      } catch (_) { /* storage blocked: Talk still opens the conversation, just without the title */ }
+      return softGo("/buzzy/talk").then(() => {
+        if (!(window.BeeZillaTalk && window.BeeZillaTalk.openJob(item.jobId))) {
+          softGo("/buzzy/talk?job=" + encodeURIComponent(item.jobId));
+        }
+      });
     }
 
     function goPick() {
