@@ -98,7 +98,7 @@ finished render look empty. Also surfaced: `cause`, `charge`, `attempt`,
 - The Recipes-page card (questions from `recipe.asks`, queued → making → done
   with ETA) is not built yet; the chat path is.
 - Kit-side, still to do on the production render server (not in this repo):
-  `TEXT_MODEL=gemini-flash-latest`, `DAILY_LIMIT_PER_USER=10`, and the three
+  `TEXT_MODEL=gemini-flash-latest`, `DAILY_LIMIT_PER_USER=5`, and the three
   patches below applied by `beezilla-kit-patches.py`.
 
 ## Proven against the real kit (2026-11-17, BeeServer, dev run)

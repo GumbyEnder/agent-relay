@@ -820,7 +820,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         error: `Today's ${videoLimit}-video limit is used up — it resets tomorrow.`,
       };
       messages[0]!.content +=
-        `\n\nA video was requested and REFUSED by the daily limit (${videoLimit} per day on this plan). ` +
+        `\n\nA video was requested and REFUSED by the daily limit (${videoLimit} per day, the same flat number on every plan). ` +
         "Say exactly that in one sentence. Nothing was charged. Do not describe a video.";
     } else if (videoRequest.needsTable) {
       // The chart race is the one recipe a sentence cannot start: the kit's job
@@ -1373,7 +1373,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
               }
               if ((await videoJobsToday(userId)) >= videoDailyLimit()) {
                 return {
-                  message: "generate_video failed: today's video limit for this plan is used up. Nothing was charged.",
+                  message: "generate_video failed: today's video limit is used up. Nothing was charged.",
                   errorCode: "daily_limit",
                 };
               }
