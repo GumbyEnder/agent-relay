@@ -108,6 +108,38 @@ export default defineEventHandler(async (event) => {
     return json(200, { ok: true, saved: true });
   }
 
+  // Saving the board itself as a Library file. The owner drew it, so there is no
+  // model call and no quota: it is their own artwork being filed against the project
+  // that produced it. Without the job_id the file would sit in the account with no
+  // project to show it under, which is the orphan bug the render path just fixed.
+  if (action === "file") {
+    if (!jobId) return json(400, { error: "jobId is required to file a board", code: "bad_request" });
+    const owned = await sql`SELECT id FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${user.id} LIMIT 1`;
+    if (!owned.length) return json(404, { error: "No such project", code: "not_found" });
+    const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";
+    const parsed = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+    if (!parsed) return json(400, { error: "dataUrl must be a base64 PNG or JPEG", code: "bad_request" });
+    const bytes = Buffer.from(parsed[2] as string, "base64");
+    if (bytes.byteLength === 0) return json(400, { error: "That image is empty.", code: "bad_request" });
+    if (bytes.byteLength > 16 * 1024 * 1024) return json(413, { error: "That image is over 16 MB.", code: "too_large" });
+    const ext = parsed[1] === "image/jpeg" ? "jpg" : "png";
+    const name = typeof body.name === "string" && body.name.trim()
+      ? body.name.trim().replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80)
+      : `sketch-${Date.now()}.${ext}`;
+    const stored = await storeImage(user.id, bytes, name, parsed[1] as string);
+    try {
+      await sql`UPDATE buzzy_assets SET job_id = ${jobId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
+      await sql`
+        UPDATE buzzy_jobs SET
+          data = jsonb_set(COALESCE(data, '{}'::jsonb), '{artifacts}', COALESCE(data->'artifacts', '[]'::jsonb) || ${JSON.stringify([
+            { kind: "image", id: String(stored.id), url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: parsed[1] },
+          ])}::jsonb, true),
+          updated_at = now()
+        WHERE id = ${jobId} AND user_id = ${user.id}`;
+    } catch { /* the file is stored either way */ }
+    return json(200, { ok: true, image: { id: String(stored.id), url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: parsed[1] } });
+  }
+
   // Region edit. "Make the coat red" on a finished picture used to mean re-rolling
   // the whole image and hoping the rest survived. A mask turns it into a change to
   // one part of the picture the owner actually chose, and the reference is the
