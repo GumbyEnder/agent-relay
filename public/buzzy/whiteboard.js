@@ -96,6 +96,10 @@
     history: "M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2",
     area: "M4 4h4M11 4h2M16 4h4v4M20 11v2M20 16v4h-4M13 20h-2M8 20H4v-4M4 13v-2M4 8V4",
     sell: "M3 12V4h8l10 10-8 8zM7.5 7.5h.01",
+    sketch: "M4 20l4-1 10.5-10.5-3-3L5 16zM14 7l3 3",
+    person: "M12 12a4 4 0 100-8 4 4 0 000 8zM4.5 21c.6-3.6 3.7-6 7.5-6s6.9 2.4 7.5 6",
+    mic: "M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM5 11a7 7 0 0014 0M12 18v3",
+    spark: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z",
   };
   function icon(name, cls) {
     var s = document.createElementNS(SVGNS, "svg");
@@ -122,7 +126,7 @@
   // What a card is, from whatever the source called it.
   function kindOf(c) {
     var k = String(c.kind || "").toLowerCase();
-    if (k === "area") return k;
+    if (k === "area" || k === "sketch" || k === "person") return k;
     if (k === "agent" || k === "skill" || k === "memory" || k === "note") return k;
     var name = String(c.title || c.url || "").toLowerCase();
     var t = String(c.contentType || "").toLowerCase();
@@ -136,13 +140,13 @@
     if (k === "document" || k === "output" || /\.(docx?|md|txt|rtf)$/.test(name) || /word|text\//.test(t)) return "document";
     return "file";
   }
-  var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note", area: "area" };
+  var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note", area: "area", person: "person" };
   function roleOf(kind) { return ROLE[kind] || "output"; }
   var GLYPH = { document: "W", sheet: "E", slides: "P", pdf: "PDF" };
   var KIND_LABEL = {
-    agent: "Instructions", skill: "Skill", memory: "Memory", note: "Note", image: "Picture", track: "Music",
+    agent: "Core identity", skill: "Skill", memory: "Memory", note: "Note", image: "Picture", track: "Music",
     model: "3D model", video: "Video", document: "Document", sheet: "Spreadsheet", slides: "Slides", pdf: "PDF", file: "File",
-    area: "Area",
+    area: "Area", sketch: "Drawing", person: "Who it serves",
   };
 
   // ── Saving: this browser at once, then the person's account ───────────────
@@ -781,10 +785,12 @@
     var fed = {};
     feeds.forEach(function (g) { g.items.forEach(function (c) { fed[c.id] = true; }); });
     var mine = order.filter(function (c) {
-      return c.user && String(c.body || "").trim() && kindOf(c) !== "area" && !(fed[c.id] && kindOf(c) === "note");
+      return c.user && String(c.body || "").trim() && kindOf(c) !== "area" && kindOf(c) !== "sketch" && !(fed[c.id] && kindOf(c) === "note");
     });
     var lines = [];
-    mine.forEach(function (c) { if (kindOf(c) === "agent") lines.push("agent.md (how to work): " + c.body.trim()); });
+    // Who BeeZilla is working for, then how it works here (its core identity).
+    mine.forEach(function (c) { if (kindOf(c) === "person") lines.push("Who it serves: " + c.body.trim()); });
+    mine.forEach(function (c) { if (kindOf(c) === "agent") lines.push("Core identity (how BeeZilla works here): " + c.body.trim()); });
     var step = 0;
     mine.forEach(function (c) { if (kindOf(c) === "skill") lines.push("Step " + (++step) + " — " + c.title + ": " + c.body.trim()); });
     mine.forEach(function (c) {
@@ -867,7 +873,7 @@
     if (!c) return false;
     if (String(c.kind || "") === "chat") return true;
     var k = kindOf(c);
-    if (k === "area") return false;
+    if (k === "area" || k === "sketch" || k === "person") return false;
     return k === "agent" || k === "skill" || k === "memory" || (roleOf(k) === "output" && !c.url && !c.contentType);
   }
   function inArea(area, c) {
@@ -896,7 +902,7 @@
         if (seen[id]) continue;
         seen[id] = true;
         var c = byId[id];
-        if (!c || isStep(c)) continue;
+        if (!c || isStep(c) || kindOf(c) === "person") continue;
         if (kindOf(c) === "area") {
           areaMembers(c, list).sort(byPlace).forEach(function (m) {
             if (seen[m.id] || isStep(m)) return;
@@ -938,7 +944,7 @@
     if (String(c.kind || "") === "chat") return "the conversation";
     var k = kindOf(c);
     var t = String(c.title || "").replace(/\s+/g, " ").trim().slice(0, 80);
-    if (k === "agent") return "agent.md";
+    if (k === "agent") return "the core identity";
     if (k === "skill" || k === "memory") return "the step “" + (t || "Untitled") + "”";
     return "the end result “" + (t || "Untitled") + "”";
   }
@@ -970,6 +976,7 @@
     function persist() {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(writeNow, 250);
+      maybeDraftIdentity();
     }
     var gone = false;           // destroyed: folded away, or another conversation's board is up
     function writeNow() {
@@ -1043,7 +1050,9 @@
     bar.setAttribute("aria-label", "Board tools");
     var TOOLS = [
       ["select", "Select", "V"], ["hand", "Move the board", "H"], ["note", "Note", "N"],
-      ["agent", "agent.md — how to work", "A"], ["skill", "Skill — a step", "K"], ["output", "Output — what to make", "O"],
+      ["agent", "Core identity — who BeeZilla is here", "A"], ["person", "Who it serves — the person BeeZilla works for", "P"],
+      ["skill", "Skill — a step", "K"], ["output", "Output — what to make", "O"],
+      ["sketch", "Draw — sketch on the board, then make it real", "D"],
       ["upload", "Add a file from your computer", "U"],
     ];
     var toolBtns = {};
@@ -1164,7 +1173,7 @@
     keyList.setAttribute("role", "dialog");
     keyList.setAttribute("aria-label", "Keyboard shortcuts");
     [["V", "Select"], ["H or Space", "Move the board"], ["Scroll", "Move the board"], ["Ctrl/⌘ + scroll, pinch", "Zoom"],
-     ["Alt/Option + 1", "Fit everything"], ["Alt/Option + 2", "Zoom to the selection"], ["Ctrl/⌘ + 0", "Back to 100%"], ["F1", "This list"], ["N / A / K / O", "Note / agent.md / skill / output"], ["Drag on empty board", "Select an area"],
+     ["Alt/Option + 1", "Fit everything"], ["Alt/Option + 2", "Zoom to the selection"], ["Ctrl/⌘ + 0", "Back to 100%"], ["F1", "This list"], ["N / A / P / K / O / D", "Note / core identity / who it serves / skill / output / drawing"], ["Drag on empty board", "Select an area"],
      ["Shift + click", "Add to the selection"], ["Ctrl/⌘ + A", "Select all"], ["Delete", "Remove"], ["Ctrl/⌘ + D", "Duplicate"],
      ["Ctrl/⌘ + Z", "Undo"], ["Shift+Ctrl/⌘ + Z", "Redo"], ["Double-click", "Edit a card"], ["Esc", "Clear the selection"]]
       .forEach(function (k) {
@@ -1448,6 +1457,7 @@
       canvas.style.backgroundPosition = view.x + "px " + view.y + "px, 0 0";
       zlabel.textContent = Math.round(view.z * 100) + "%";
       positionSelbar();
+      positionStrip();
     }
     function toWorld(cx, cy) {
       var r = canvas.getBoundingClientRect();
@@ -1535,18 +1545,20 @@
 
     function fillCard(n, c) {
       if (kindOf(c) === "area") { fillArea(n, c); return; }
+      if (kindOf(c) === "sketch") { fillSketch(n, c); return; }
       var keep = Array.prototype.filter.call(n.childNodes, function (x) { return x.classList && (x.classList.contains("wb-handle") || x.classList.contains("wb-rm")); });
       n.textContent = "";
       var k = kindOf(c);
       n.className = "wb-card wb-k-" + k + " wb-r-" + roleOf(k) + (c.state ? " wb-s-" + c.state : "") + (selected[c.id] ? " wb-on" : "");
       var top = el("div", "wb-ctop");
       top.appendChild(icon(k === "track" ? "play" : k === "model" ? "cube" : k === "image" ? "image" : k === "video" ? "video" :
-        k === "memory" ? "memory" : (k === "agent" || k === "skill" || k === "note") ? k : "doc", "wb-cico"));
+        k === "memory" ? "memory" : (k === "agent" || k === "skill" || k === "note" || k === "person") ? k : "doc", "wb-cico"));
       top.appendChild(el("span", "wb-ckind", KIND_LABEL[k] || "File"));
       if (c.state === "running") top.appendChild(el("span", "wb-badge wb-badge-run", "Working"));
       else if (c.state === "failed") top.appendChild(el("span", "wb-badge wb-badge-fail", "Didn't work"));
       n.appendChild(top);
-      n.appendChild(el("span", "wb-name", c.title || "Untitled"));
+      // "agent.md" means nothing to most people (owner, 2026-11-20): it reads Core identity.
+      n.appendChild(el("span", "wb-name", k === "agent" && /^agent\.?md$/i.test(String(c.title || "")) ? "Core identity" : (c.title || "Untitled")));
       if (k === "image" && c.url) {
         var img = el("img", "wb-img");
         img.src = c.url; img.alt = c.title || ""; img.loading = "lazy"; img.draggable = false;
@@ -1580,9 +1592,9 @@
         g.setAttribute("aria-hidden", "true");
         n.appendChild(g);
       }
-      if ((k === "agent" || k === "skill" || k === "memory" || k === "note" || (roleOf(k) === "output" && !c.url)) && c.body) {
+      if ((k === "agent" || k === "skill" || k === "memory" || k === "note" || k === "person" || (roleOf(k) === "output" && !c.url)) && c.body) {
         n.appendChild(el("p", "wb-body-text", c.body));
-      } else if ((k === "agent" || k === "skill" || k === "note") && !c.body) {
+      } else if ((k === "agent" || k === "skill" || k === "note" || k === "person") && !c.body) {
         n.appendChild(el("p", "wb-body-text wb-empty", "Double-click to write it."));
       }
       if (c.state === "failed" && c.err) n.appendChild(el("p", "wb-err", c.err));
@@ -1676,6 +1688,7 @@
     function removeCards(ids) {
       var gone = {};
       ids.forEach(function (id) { gone[id] = true; });
+      if (drawing && gone[drawing.card.id]) { drawing = null; sketchStrip.hidden = true; }
       state.cards = state.cards.filter(function (c) { return !gone[c.id]; });
       state.links = state.links.filter(function (l) { return !gone[l.from] && !gone[l.to]; });
       ids.forEach(function (id) { if (nodes[id]) { nodes[id].remove(); delete nodes[id]; } delete selected[id]; });
@@ -1817,6 +1830,10 @@
       n.addEventListener("dblclick", function (e) {
         if (e.target.closest && e.target.closest(".bzw,a,video")) return;
         var k = kindOf(c);
+        if (k === "sketch") {
+          if (e.target.closest && e.target.closest(".wb-sk-head")) openEditor(c); else startDrawing(c);
+          return;
+        }
         if (roleOf(k) === "output" && c.url && k !== "track") { window.open(c.url, "_blank", "noopener"); return; }
         openEditor(c);
       });
@@ -1849,7 +1866,9 @@
       b.value = c.body || "";
       b.rows = 7;
       b.maxLength = 4000;
-      b.placeholder = k === "agent" ? "How BeeZilla should work on this — your agent.md." :
+      b.placeholder = k === "sketch" ? "What should this drawing become? For example: a castle on a hill at sunset." :
+        k === "agent" ? "Your agent's core identity: who BeeZilla is here and how it should work." :
+        k === "person" ? "Who BeeZilla is working for: who you are, your business, your customers, how you like things." :
         k === "skill" ? "What this step does, in your words." :
         roleOf(k) === "output" ? "What the finished thing should be." : "Anything.";
       b.setAttribute("aria-label", "Text");
@@ -1859,6 +1878,17 @@
       var go = el("button", "wb-selbtn wb-primary", "Save");
       go.type = "submit";
       row.appendChild(go);
+      // Speak: what you say goes into the field you were in (owner, 2026-11-20).
+      var lastField = c.body || k === "sketch" || k === "skill" || k === "note" || k === "person" || k === "agent" ? b : t;
+      t.addEventListener("focus", function () { lastField = t; });
+      b.addEventListener("focus", function () { lastField = b; });
+      var speak = el("button", "wb-selbtn wb-ed-speak");
+      speak.type = "button";
+      speak.appendChild(icon("mic"));
+      speak.appendChild(el("span", null, "Speak"));
+      speak.title = "Say it instead of typing: your words go into the box you were in";
+      speak.addEventListener("click", function () { dictateInto(lastField, speak); lastField.focus(); });
+      row.appendChild(speak);
       row.appendChild(el("span", "wb-ed-note", "BeeZilla follows your edits from your next message."));
       editor.appendChild(row);
       editor.addEventListener("submit", function (e) {
@@ -1884,6 +1914,7 @@
       (c.body ? b : t).focus();
     }
     function closeEditor(keepId) {
+      stopDictation();
       if (editor) { editor.remove(); editor = null; }
       // A step made by letting go of a line on empty board, then left blank: gone again
       // (unless it is the card whose editor is opening now).
@@ -2091,6 +2122,7 @@
       n.style.height = Math.max(140, Number(c.h) || 140) + "px";
     }
     var SHARE_LABEL = { drops: "Honey Drops", honey: "Honey", open: "Open source" };
+    var PERSON_WITHHELD = "Left out when shared: whoever uses this fills in who they are.";
     function fillArea(n, c) {
       n.textContent = "";
       n.className = "wb-card wb-k-area" + (selected[c.id] ? " wb-on" : "") + (c.share ? " wb-shared" : "");
@@ -2261,6 +2293,9 @@
       if (sellStep === "examples") {
         var made = madeIn(list);
         sell.appendChild(el("p", "wb-sell-q", "Can we show what it made?"));
+        if (list.some(function (c) { return kindOf(c) === "person"; })) {
+          sell.appendChild(el("p", "wb-sell-note", "Who it serves stays yours: it's left blank for whoever uses this."));
+        }
         if (made.length) {
           var strip = el("div", "wb-sell-strip");
           made.slice(0, 8).forEach(function (c) {
@@ -2333,12 +2368,13 @@
         toolBtns[k].setAttribute("aria-pressed", k === t ? "true" : "false");
       });
       canvas.classList.toggle("wb-hand", t === "hand");
-      canvas.classList.toggle("wb-placing", t === "note" || t === "agent" || t === "skill" || t === "output");
+      canvas.classList.toggle("wb-placing", t === "note" || t === "agent" || t === "skill" || t === "output" || t === "person" || t === "sketch");
     }
     setTool("select");
     canvas.addEventListener("pointerdown", function (e) {
       if (e.target.closest && (e.target.closest(".wb-card") || e.target.closest(".wb-hit"))) return;
       canvas.focus({ preventScroll: true });
+      stopDrawing();
       closeEditor();
       var pan = e.button === 1 || spaceDown || tool === "hand";
       if (e.button !== 0 && e.button !== 1) return;
@@ -2358,11 +2394,17 @@
         canvas.addEventListener("pointerup", up);
         return;
       }
-      if (tool === "note" || tool === "agent" || tool === "skill" || tool === "output") {
+      if (tool === "sketch") {
+        var sp = toWorld(e.clientX, e.clientY);
+        setTool("select");
+        addSketch({ x: sp.x - 40, y: sp.y - 30 });
+        return;
+      }
+      if (tool === "note" || tool === "agent" || tool === "skill" || tool === "output" || tool === "person") {
         var p = toWorld(e.clientX, e.clientY);
         var made = addCard({
           kind: tool === "output" ? "document" : tool,
-          title: tool === "agent" ? "agent.md" : tool === "skill" ? "New skill" : tool === "output" ? "Output" : "Note",
+          title: tool === "agent" ? "Core identity" : tool === "person" ? "Who it serves" : tool === "skill" ? "New skill" : tool === "output" ? "Output" : "Note",
           user: true,
         }, { x: p.x - 90, y: p.y - 30 });
         setTool("select");
@@ -2437,8 +2479,9 @@
       if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); if (redo.length) { undo.push(JSON.stringify({ cards: state.cards, links: state.links })); restore(redo.pop()); } return; }
       if (mod && (e.key === "a" || e.key === "A")) { e.preventDefault(); selected = {}; state.cards.forEach(function (c) { selected[c.id] = true; }); paintSelection(); return; }
       if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && drawing) { e.preventDefault(); return; }   // drawing: never removes the card
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelected(); return; }
-      if (e.key === "Escape") { closeEditor(); keyList.hidden = true; hist.hidden = true; closeSell(); clearSelection(); setTool("select"); return; }
+      if (e.key === "Escape") { stopDrawing(); closeEditor(); keyList.hidden = true; hist.hidden = true; closeSell(); clearSelection(); setTool("select"); return; }
       // Miro's keys: Alt/Option+1 fits everything, Alt/Option+2 zooms to the
       // selection, Ctrl/⌘+0 goes back to 100%, F1 lists the shortcuts.
       if ((e.altKey || e.shiftKey) && e.code === "Digit1") { e.preventDefault(); fit(); return; }
@@ -2456,7 +2499,7 @@
       }
       if (mod || e.altKey) return;
       var k = e.key.toLowerCase();
-      var map = { v: "select", h: "hand", n: "note", a: "agent", k: "skill", o: "output" };
+      var map = { v: "select", h: "hand", n: "note", a: "agent", p: "person", k: "skill", o: "output", d: "sketch" };
       if (map[k]) { e.preventDefault(); setTool(map[k]); return; }
       if (k === "u") { e.preventDefault(); picker.click(); return; }
       if (k === "+" || k === "=") { e.preventDefault(); zoomBy(1.25); return; }
@@ -2528,6 +2571,9 @@
         nodes: list.map(function (c) {
           var k = kindOf(c);
           var r = roleOf(k);
+          // Who it serves is the person's own: never shared (owner, 2026-11-20: "that
+          // needs to be obfuscated whenever something is shared with somebody else").
+          if (k === "person") return { id: c.id, kind: "note", title: "Who it serves", body: PERSON_WITHHELD, x: c.x, y: c.y };
           return { id: c.id, kind: k === "memory" ? "memory" : r, title: c.title, body: (c.body || (c.url ? c.url : "")).slice(0, 2000), x: c.x, y: c.y };
         }),
         links: state.links.filter(function (l) { return ids[l.from] && ids[l.to]; }).map(function (l) { return { from: l.from, to: l.to }; }),
@@ -2614,6 +2660,11 @@
     // ── The live process: steps from the chat stream ─────────────────────
     function flow(step) {
       if (!step || !step.id || !root.isConnected) return null;
+      // The core identity (agent.md) isn't put up first any more (owner, 2026-11-20:
+      // "People aren't going to know what an agent.md is by default… generate it after
+      // they've put down other things"): BeeZilla's steps hang on their own, and the
+      // board drafts one once the person has laid out a few cards (draftIdentity).
+      if (step.kind === "agent" && !cardByFlow("agent")) return null;
       var fid = String(step.id);
       var c = cardByFlow(fid);
       var kind = step.kind === "output" ? kindOf({ title: step.title, url: step.url, contentType: step.contentType })
@@ -2670,6 +2721,427 @@
       return c;
     }
 
+    // ── Drawing on the board (Sketch, merged in) ─────────────────────────
+    // Owner, 2026-11-20: "we have a sketch tab with all these tools, that gets merged
+    // into the board. So you can draw on the board and get results by doing that.
+    // Results like free drawing something."
+    // A drawing is a card (kind "sketch") holding its marks as small vectors in
+    // `drawing` (saved with the board). Double-click it, or the Draw tool (D), to draw:
+    // pen, marker, eraser, line, arrow, rectangle, ellipse and text, eight colours,
+    // three sizes, undo. Make it real sends the drawing, with what it should become, to
+    // the picture maker (the Sketch page's own route) and puts the result beside it,
+    // joined by a line. The full Sketch page keeps every other tool.
+    var SKETCH_W = 440, SKETCH_H = 300, SKETCH_HEAD = 38;
+    var INK = ["#111111", "#ffffff", "#ffc107", "#e5484d", "#2f80ed", "#27ae60", "#9b51e0", "#f2994a"];
+    var PEN_SIZES = { s: 3, m: 7, l: 16 };
+    var drawing = null;        // { card, tool, color, size } while a drawing is open
+    var sketchStrip = el("div", "wb-sketchbar");
+    sketchStrip.hidden = true;
+    sketchStrip.setAttribute("role", "toolbar");
+    sketchStrip.setAttribute("aria-label", "Drawing tools");
+    var SKETCH_TOOLS = [["pen", "Pen"], ["marker", "Marker"], ["eraser", "Eraser"], ["line", "Line"], ["arrow", "Arrow"],
+      ["rect", "Rectangle"], ["ellipse", "Ellipse"], ["text", "Text"]];
+    var stripBtns = {};
+    SKETCH_TOOLS.forEach(function (t) {
+      var b = el("button", "wb-sk-tool", t[1]);
+      b.type = "button";
+      b.setAttribute("data-sk", t[0]);
+      b.addEventListener("click", function () { if (drawing) { drawing.tool = t[0]; paintStrip(); } });
+      sketchStrip.appendChild(b);
+      stripBtns[t[0]] = b;
+    });
+    var swatches = el("span", "wb-sk-swatches");
+    INK.forEach(function (col) {
+      var b = el("button", "wb-sk-ink");
+      b.type = "button";
+      b.style.background = col;
+      b.setAttribute("aria-label", "Colour " + col);
+      b.setAttribute("data-ink", col);
+      b.addEventListener("click", function () { if (drawing) { drawing.color = col; paintStrip(); } });
+      swatches.appendChild(b);
+    });
+    sketchStrip.appendChild(swatches);
+    ["s", "m", "l"].forEach(function (k) {
+      var b = el("button", "wb-sk-size", k === "s" ? "Thin" : k === "m" ? "Medium" : "Thick");
+      b.type = "button";
+      b.setAttribute("data-size", k);
+      b.addEventListener("click", function () { if (drawing) { drawing.size = k; paintStrip(); } });
+      sketchStrip.appendChild(b);
+    });
+    var skUndo = el("button", "wb-sk-act", "Undo");
+    skUndo.type = "button";
+    skUndo.addEventListener("click", function () {
+      if (!drawing) return;
+      var marks = marksOf(drawing.card);
+      if (!marks.length) return;
+      snapshot();
+      marks.pop();
+      setMarks(drawing.card, marks);
+    });
+    var skClear = el("button", "wb-sk-act", "Clear");
+    skClear.type = "button";
+    skClear.addEventListener("click", function () { if (drawing) { snapshot(); setMarks(drawing.card, []); } });
+    var skDone = el("button", "wb-sk-act wb-primary", "Done");
+    skDone.type = "button";
+    skDone.addEventListener("click", function () { stopDrawing(); });
+    sketchStrip.appendChild(skUndo);
+    sketchStrip.appendChild(skClear);
+    sketchStrip.appendChild(skDone);
+    body.appendChild(sketchStrip);
+
+    function marksOf(c) {
+      try { var v = JSON.parse(c.drawing || "[]"); return Array.isArray(v) ? v : []; } catch (_) { return []; }
+    }
+    function setMarks(c, marks) {
+      c.drawing = JSON.stringify(marks);
+      var n = nodes[c.id];
+      if (n) paintMarks(c, n.querySelector("canvas.wb-sk-canvas"));
+      persist();
+    }
+    function sketchSize(c) { return { w: Math.max(240, Number(c.w) || SKETCH_W), h: Math.max(160, Number(c.h) || SKETCH_H) }; }
+    // Draw the marks on a canvas (the card's, or a fresh one to send off).
+    function paintMarks(c, cv, opaque) {
+      if (!cv) return;
+      var sz = sketchSize(c);
+      var dpr = opaque ? 1 : Math.min(2, window.devicePixelRatio || 1);
+      if (cv.width !== Math.round(sz.w * dpr) || cv.height !== Math.round(sz.h * dpr)) { cv.width = Math.round(sz.w * dpr); cv.height = Math.round(sz.h * dpr); }
+      var g = cv.getContext("2d");
+      if (!g) return;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, sz.w, sz.h);
+      if (opaque) { g.fillStyle = "#ffffff"; g.fillRect(0, 0, sz.w, sz.h); }
+      marksOf(c).forEach(function (m) { drawMark(g, m, opaque); });
+    }
+    function drawMark(g, m, opaque) {
+      var p = m.p || [];
+      g.save();
+      g.lineCap = "round"; g.lineJoin = "round";
+      g.strokeStyle = m.c || "#111"; g.fillStyle = m.c || "#111";
+      g.lineWidth = m.s || 3;
+      if (m.t === "eraser") {
+        if (opaque) { g.strokeStyle = "#ffffff"; } else { g.globalCompositeOperation = "destination-out"; g.strokeStyle = "#000"; }
+      }
+      if (m.t === "marker") g.globalAlpha = 0.5;
+      if (m.t === "text") {
+        g.font = "600 " + Math.max(14, (m.s || 3) * 3 + 10) + "px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        g.textBaseline = "top";
+        g.fillText(String(m.text || "").slice(0, 200), p[0] || 0, p[1] || 0);
+      } else if (m.t === "rect" && p.length >= 4) {
+        g.strokeRect(Math.min(p[0], p[2]), Math.min(p[1], p[3]), Math.abs(p[2] - p[0]), Math.abs(p[3] - p[1]));
+      } else if (m.t === "ellipse" && p.length >= 4) {
+        g.beginPath();
+        g.ellipse((p[0] + p[2]) / 2, (p[1] + p[3]) / 2, Math.abs(p[2] - p[0]) / 2 || 1, Math.abs(p[3] - p[1]) / 2 || 1, 0, 0, Math.PI * 2);
+        g.stroke();
+      } else if ((m.t === "line" || m.t === "arrow") && p.length >= 4) {
+        g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(p[2], p[3]); g.stroke();
+        if (m.t === "arrow") {
+          var ang = Math.atan2(p[3] - p[1], p[2] - p[0]), len = 10 + (m.s || 3) * 2;
+          g.beginPath();
+          g.moveTo(p[2], p[3]);
+          g.lineTo(p[2] - len * Math.cos(ang - 0.45), p[3] - len * Math.sin(ang - 0.45));
+          g.moveTo(p[2], p[3]);
+          g.lineTo(p[2] - len * Math.cos(ang + 0.45), p[3] - len * Math.sin(ang + 0.45));
+          g.stroke();
+        }
+      } else if (p.length >= 2) {
+        g.beginPath();
+        g.moveTo(p[0], p[1]);
+        for (var i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]);
+        if (p.length === 2) g.lineTo(p[0] + 0.1, p[1] + 0.1);
+        g.stroke();
+      }
+      g.restore();
+    }
+    function fillSketch(n, c) {
+      n.textContent = "";
+      var sz = sketchSize(c);
+      n.className = "wb-card wb-k-sketch wb-r-output" + (c.state ? " wb-s-" + c.state : "") + (selected[c.id] ? " wb-on" : "") + (drawing && drawing.card === c ? " wb-drawing" : "");
+      n.style.width = sz.w + "px";
+      var top = el("div", "wb-ctop wb-sk-head");
+      top.appendChild(icon("sketch", "wb-cico"));
+      top.appendChild(el("span", "wb-ckind", c.title && c.title !== "Drawing" ? c.title : "Drawing"));
+      if (c.state === "running") top.appendChild(el("span", "wb-badge wb-badge-run", "Making it real"));
+      var drawBtn = el("button", "wb-sk-btn", drawing && drawing.card === c ? "Done" : "Draw");
+      drawBtn.type = "button";
+      drawBtn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      drawBtn.addEventListener("click", function (e) { e.stopPropagation(); if (drawing && drawing.card === c) stopDrawing(); else startDrawing(c); });
+      var realBtn = el("button", "wb-sk-btn wb-sk-real");
+      realBtn.type = "button";
+      realBtn.appendChild(icon("spark"));
+      realBtn.appendChild(el("span", null, "Make it real"));
+      realBtn.title = "Turn this drawing into a finished picture (say or type what it should become first, or leave it to BeeZilla)";
+      realBtn.disabled = c.state === "running";
+      realBtn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      realBtn.addEventListener("click", function (e) { e.stopPropagation(); makeReal(c); });
+      top.appendChild(drawBtn);
+      top.appendChild(realBtn);
+      n.appendChild(top);
+      var cv = el("canvas", "wb-sk-canvas");
+      cv.style.width = sz.w + "px";
+      cv.style.height = sz.h + "px";
+      cv.setAttribute("aria-label", "Drawing" + (c.body ? ": " + c.body : ""));
+      wireSketchCanvas(cv, c);
+      n.appendChild(cv);
+      var what = el("p", "wb-sk-what", c.body ? "Becomes: " + c.body : "Double-click to draw. Say what it should become, then Make it real.");
+      n.appendChild(what);
+      var rm = el("button", "wb-rm");
+      rm.type = "button";
+      rm.textContent = "×";
+      rm.setAttribute("aria-label", "Remove the drawing");
+      rm.title = "Remove";
+      rm.addEventListener("click", function (e) { e.stopPropagation(); snapshot(); if (drawing && drawing.card === c) stopDrawing(); removeCards([c.id]); });
+      n.appendChild(rm);
+      n.appendChild(portDot(c));
+      n.setAttribute("aria-label", "Drawing: " + (c.title || "Drawing"));
+      paintMarks(c, cv);
+    }
+    function wireSketchCanvas(cv, c) {
+      cv.addEventListener("pointerdown", function (e) {
+        if (!drawing || drawing.card !== c || e.button !== 0) return;      // not drawing: the card moves as usual
+        e.stopPropagation();
+        e.preventDefault();
+        var r = cv.getBoundingClientRect();
+        var sz = sketchSize(c);
+        var sx = sz.w / Math.max(1, r.width), sy = sz.h / Math.max(1, r.height);
+        var at = function (ev) { return [Math.round((ev.clientX - r.left) * sx), Math.round((ev.clientY - r.top) * sy)]; };
+        var t = drawing.tool, a = at(e);
+        if (t === "text") {
+          var words = window.prompt("Text to put on the drawing:", "");
+          if (!words) return;
+          snapshot();
+          var marks0 = marksOf(c);
+          marks0.push({ t: "text", c: drawing.color, s: PEN_SIZES[drawing.size], p: a, text: String(words).slice(0, 200) });
+          setMarks(c, marks0);
+          return;
+        }
+        cv.setPointerCapture(e.pointerId);
+        snapshot();
+        var mark = { t: t, c: drawing.color, s: t === "marker" ? PEN_SIZES[drawing.size] * 2.2 : t === "eraser" ? PEN_SIZES[drawing.size] * 3 : PEN_SIZES[drawing.size], p: a.concat(a) };
+        if (t === "pen" || t === "marker" || t === "eraser") mark.p = a.slice();
+        var marks = marksOf(c);
+        marks.push(mark);
+        var g = cv.getContext("2d");
+        var mv = function (ev) {
+          var b = at(ev);
+          if (t === "pen" || t === "marker" || t === "eraser") {
+            var q = mark.p;
+            if (Math.abs(b[0] - q[q.length - 2]) + Math.abs(b[1] - q[q.length - 1]) < 2) return;
+            q.push(b[0], b[1]);
+            if (q.length > 4000) return;
+          } else { mark.p[2] = b[0]; mark.p[3] = b[1]; }
+          c.drawing = JSON.stringify(marks);
+          paintMarks(c, cv);
+        };
+        var up = function () {
+          cv.removeEventListener("pointermove", mv);
+          cv.removeEventListener("pointerup", up);
+          cv.removeEventListener("pointercancel", up);
+          setMarks(c, marks);
+        };
+        cv.addEventListener("pointermove", mv);
+        cv.addEventListener("pointerup", up);
+        cv.addEventListener("pointercancel", up);
+        void g;
+      });
+    }
+    function paintStrip() {
+      if (!drawing) return;
+      Object.keys(stripBtns).forEach(function (k) { stripBtns[k].classList.toggle("on", k === drawing.tool); });
+      Array.prototype.forEach.call(sketchStrip.querySelectorAll(".wb-sk-ink"), function (b) { b.classList.toggle("on", b.getAttribute("data-ink") === drawing.color); });
+      Array.prototype.forEach.call(sketchStrip.querySelectorAll(".wb-sk-size"), function (b) { b.classList.toggle("on", b.getAttribute("data-size") === drawing.size); });
+      positionStrip();
+    }
+    function positionStrip() {
+      if (!drawing || sketchStrip.hidden) return;
+      var n = nodes[drawing.card.id];
+      if (!n) return;
+      var r = n.getBoundingClientRect(), br = body.getBoundingClientRect();
+      var minX = (bar.offsetLeft || 12) + (bar.offsetWidth || 52) + 10;
+      sketchStrip.style.left = clamp(r.left - br.left, minX, Math.max(minX, br.width - sketchStrip.offsetWidth - 12)) + "px";
+      sketchStrip.style.top = clamp(r.top - br.top - sketchStrip.offsetHeight - 10, 8, Math.max(8, br.height - 60)) + "px";
+    }
+    function startDrawing(c) {
+      if (drawing && drawing.card !== c) stopDrawing();
+      drawing = { card: c, tool: (drawing && drawing.tool) || "pen", color: (drawing && drawing.color) || INK[0], size: (drawing && drawing.size) || "m" };
+      selected = {}; selected[c.id] = true;
+      paintSelection();
+      fillCard(nodes[c.id], c);
+      sketchStrip.hidden = false;
+      paintStrip();
+      reveal(c);
+    }
+    function stopDrawing() {
+      if (!drawing) return;
+      var c = drawing.card;
+      drawing = null;
+      sketchStrip.hidden = true;
+      if (nodes[c.id]) fillCard(nodes[c.id], c);
+      persist();
+    }
+    function addSketch(at, title, about) {
+      var c = addCard({ kind: "sketch", title: title || "Drawing", body: about || "", user: true, exact: true }, at || nextSpot(), false);
+      if (!c) { say("The board is full — remove a few cards first."); return null; }
+      c.w = SKETCH_W; c.h = SKETCH_H; c.drawing = "[]";
+      fillCard(nodes[c.id], c);
+      persist();
+      startDrawing(c);
+      return c;
+    }
+    // Make it real: the drawing, flattened on white, and what it should become.
+    function makeReal(c, ask) {
+      if (ask != null && String(ask).trim()) { c.body = String(ask).trim().slice(0, 600); c.user = true; }
+      var marks = marksOf(c);
+      if (!marks.length) { say("Draw something first, then Make it real."); return Promise.resolve({ ok: false, note: "The drawing is empty: draw something first." }); }
+      if (drawing && drawing.card === c) stopDrawing();
+      var flat = document.createElement("canvas");
+      paintMarks(c, flat, true);
+      var dataUrl;
+      try { dataUrl = flat.toDataURL("image/png"); } catch (_) { return Promise.resolve({ ok: false, note: "The drawing couldn't be read." }); }
+      var want = String(c.body || "").trim();
+      var prompt = (want ? "Make this: " + want + "." : "Turn this sketch into a finished, polished picture.") +
+        "\n\nThe attached image is the person's hand-drawn sketch on the board: keep its layout, its shapes and what each mark shows, and honour any words written on it.";
+      c.state = "running";
+      fillCard(nodes[c.id], c);
+      say("Making your drawing real…", 4000);
+      return fetch("/api/buzzy/art", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "render", prompt: prompt, refs: [dataUrl] }),
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          c.state = "";
+          if (nodes[c.id]) fillCard(nodes[c.id], c);
+          if (!res.ok || !res.j || !res.j.image || !res.j.image.url) {
+            var why = (res.j && res.j.error) || "The picture maker didn't answer.";
+            say(why, 5000);
+            persist();
+            return { ok: false, note: why };
+          }
+          var n0 = nodes[c.id];
+          var out = addCard({ title: want ? want.slice(0, 80) : "From your drawing", url: res.j.image.url, contentType: "image/png" },
+            { x: c.x + (n0 ? n0.offsetWidth : SKETCH_W) + COL_GAP, y: c.y }, true);
+          if (out) { link(c.id, out.id, null, null, true); drawLinks(); reveal(out); }
+          persist();
+          return { ok: true, note: "Made it real: the picture is beside your drawing." };
+        })
+        .catch(function () {
+          c.state = "";
+          if (nodes[c.id]) fillCard(nodes[c.id], c);
+          persist();
+          return { ok: false, note: "Couldn't reach the picture maker — check the connection." };
+        });
+    }
+
+    // ── The core identity, drafted once the person has laid things out ──────
+    // "generate it after they've put down other things with a simpler word like your
+    // agent's core identity" (owner, 2026-11-20). Once there are at least two of the
+    // person's own cards and one is a step or an end result, and no core identity yet,
+    // the board drafts one from them, on the left. It stays a draft (BeeZilla doesn't
+    // take it as an instruction) until the person changes it. Once per board.
+    var identityKey = "bz.board.identity." + boardId;
+    var draftingIdentity = false;
+    function maybeDraftIdentity() {
+      if (draftingIdentity || state.cards.some(function (c) { return kindOf(c) === "agent"; })) return;
+      var own = state.cards.filter(function (c) { return c.user && kindOf(c) !== "area" && kindOf(c) !== "sketch"; });
+      var steps = own.filter(function (c) { return kindOf(c) === "skill"; }).sort(byPlace);
+      var ends = own.filter(function (c) { return roleOf(kindOf(c)) === "output" && !c.url && kindOf(c) !== "sketch"; });
+      if (own.length < 2 || !(steps.length || ends.length)) return;
+      try { if (localStorage.getItem(identityKey)) return; } catch (_) { /* no memory: still once per page */ }
+      draftingIdentity = true;
+      setTimeout(function () {
+        try { localStorage.setItem(identityKey, "1"); } catch (_) { /* best effort */ }
+        var who = own.filter(function (c) { return kindOf(c) === "person" && String(c.body || "").trim(); })[0];
+        var notes = own.filter(function (c) { return kindOf(c) === "note" && String(c.body || "").trim(); });
+        var text = "Here, BeeZilla helps " + (who ? "the person described in Who it serves" : "you") +
+          (ends.length ? " make " + ends.map(function (c) { return "“" + c.title + "”"; }).join(" and ") : " with this") + "." +
+          (steps.length ? " It works in this order: " + steps.map(function (c) { return c.title; }).join(", then ") + "." : "") +
+          (notes.length ? " It keeps in mind: " + String(notes[0].body).replace(/\s+/g, " ").slice(0, 160) + "." : "") +
+          " Change anything here and BeeZilla follows it.";
+        var left = own.slice().sort(byPlace)[0];
+        var c = addCard({ kind: "agent", title: "Core identity", body: text }, { x: left.x - 300, y: left.y }, true);
+        draftingIdentity = false;
+        if (!c) return;
+        if (steps[0]) link(c.id, steps[0].id, null, null, true);
+        fillCard(nodes[c.id], c);
+        drawLinks();
+        lightUp([c]);
+        persist();
+        say("Drafted your agent's core identity from your cards — change anything you like.", 5200);
+      }, 0);
+    }
+
+    // ── Talking into a card you're editing ────────────────────────────────
+    // "you have to be able to double click on a skill and actually write in the skill
+    // using voice as well. Everything should be voice activatable." The editor's
+    // Speak button writes what you say into the field you were in: live words where
+    // the browser can (Chrome, Edge, Safari), or a recording read by BeeZilla's own
+    // transcription (Brave, Firefox, the desktop app).
+    var dictation = null;
+    function stopDictation() {
+      var d = dictation;
+      dictation = null;
+      if (!d) return;
+      try { if (d.rec) d.rec.stop(); } catch (_) { /* already stopped */ }
+      try { if (d.media && d.media.state !== "inactive") d.media.stop(); } catch (_) { /* already stopped */ }
+      if (d.btn) { d.btn.classList.remove("on"); d.btn.lastChild.textContent = "Speak"; }
+    }
+    function dictateInto(field, btn) {
+      if (dictation) { stopDictation(); return; }
+      var base = field.value;
+      var put = function (words) {
+        words = String(words || "").replace(/\s+/g, " ").trim();
+        field.value = (base && words ? base.replace(/\s+$/, "") + " " : base) + words;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      btn.classList.add("on");
+      btn.lastChild.textContent = "Stop";
+      if (SR) {
+        var rec;
+        try { rec = new SR(); } catch (_) { rec = null; }
+        if (rec) {
+          rec.lang = navigator.language || "en-US";
+          rec.interimResults = true;
+          rec.continuous = true;
+          rec.onresult = function (e) {
+            var t = "";
+            for (var i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + " ";
+            put(t);
+          };
+          rec.onerror = function () { stopDictation(); };
+          rec.onend = function () { if (dictation && dictation.rec === rec) stopDictation(); };
+          dictation = { rec: rec, btn: btn };
+          try { rec.start(); return; } catch (_) { dictation = null; }
+        }
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+        btn.classList.remove("on"); btn.lastChild.textContent = "Speak";
+        say("This browser can't take dictation here. Talk to BeeZilla instead, or type.", 4200);
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var chunks = [];
+        var media = new MediaRecorder(stream);
+        dictation = { media: media, btn: btn };
+        media.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        media.onstop = function () {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          var blob = new Blob(chunks, { type: media.mimeType || "audio/webm" });
+          if (blob.size < 1200) return;
+          field.placeholder = "Listening back…";
+          fetch("/api/buzzy/transcribe", { method: "POST", credentials: "same-origin", headers: { "Content-Type": (media.mimeType || "audio/webm").split(";")[0] }, body: blob })
+            .then(function (r) { return r.json(); })
+            .then(function (j) { if (j && j.ok && j.text) put(j.text); else say((j && j.error) || "Couldn't hear that — try again.", 4200); })
+            .catch(function () { say("Couldn't hear that — check the connection.", 4200); });
+        };
+        media.start();
+      }).catch(function () {
+        btn.classList.remove("on"); btn.lastChild.textContent = "Speak";
+        say("The microphone isn't allowed for this page.", 4200);
+      });
+    }
+
     // ── BeeZilla works the board for you ─────────────────────────────────
     // Owner, 2026-11-20: "a comprehensive list of tools so that you can navigate and do
     // whatever you need to do. By just talking to Beezilla… it's got to be able to do
@@ -2678,10 +3150,13 @@
     // (never one the model wrote). Each step glides to what it touches and lights it,
     // can be undone like the person's own edits (Ctrl/⌘+Z), and answers { ok, note }
     // in plain words for the steps card.
-    var CARD_NOUNS = /\b(?:cards?|sticky notes?|notes?|steps?|skills?|agent\.? ?md|agent md|instructions(?: card)?|end results?|outputs?|results?|pictures?|photos?|images?|pics?|songs?|tracks?|music|videos?|clips?|3d models?|models?|documents?|docs?|files?|links?|areas?|orchestrations?|box(?:es)?)\b/g;
+    var CARD_NOUNS = /\b(?:who it serves|core identity|drawings?|sketch(?:es)?|doodles?|cards?|sticky notes?|notes?|steps?|skills?|agent\.? ?md|agent md|instructions(?: card)?|end results?|outputs?|results?|pictures?|photos?|images?|pics?|songs?|tracks?|music|videos?|clips?|3d models?|models?|documents?|docs?|files?|links?|areas?|orchestrations?|box(?:es)?)\b/g;
     var FILLER = { the: 1, a: 1, an: 1, my: 1, our: 1, your: 1, that: 1, this: 1, these: 1, those: 1, one: 1, on: 1, board: 1, whiteboard: 1, of: 1, about: 1, called: 1, named: 1, with: 1, "for": 1, from: 1, "in": 1, to: 1, and: 1, it: 1, them: 1 };
     function lower(s) { return String(s || "").toLowerCase().replace(/[“”"'‘’]/g, "").replace(/\s+/g, " ").trim(); }
     function kindWanted(p) {
+      if (/\b(?:drawings?|sketch(?:es)?|doodles?)\b/.test(p)) return "sketch";
+      if (/\bwho it serves\b|\bwho (?:i am|we are)\b/.test(p)) return "person";
+      if (/\bcore identity\b|\bidentity\b/.test(p)) return "agent";
       if (/\b(?:sticky )?notes?\b/.test(p)) return "note";
       if (/\b(?:steps?|skills?)\b/.test(p)) return "skill";
       if (/\bagent\.? ?md\b|\bagent md\b|\binstructions\b/.test(p)) return "agent";
@@ -2698,7 +3173,7 @@
     function kindMatches(c, want) {
       var k = kindOf(c);
       if (!want) return true;
-      if (want === "end") return roleOf(k) === "output" && !c.url;
+      if (want === "end") return roleOf(k) === "output" && !c.url && k !== "sketch";
       if (want === "skill") return k === "skill" || k === "memory";
       if (want === "link") return k === "file" && /^https?:/i.test(String(c.url || ""));
       if (want === "file") return roleOf(k) === "output" && !!c.url && k !== "image" && k !== "track" && k !== "video" && k !== "model";
@@ -2836,10 +3311,46 @@
           if (!a.title) openEditor(c);
           return ok("Added the step " + nameOf(c) + ".");
         case "agent":
-          c = made({ kind: "agent", title: "agent.md", body: a.text || "", user: true });
+          c = state.cards.filter(function (x) { return kindOf(x) === "agent"; })[0];
+          if (c && a.text) {
+            snapshot(); c.body = String(a.text).slice(0, 4000); c.user = true;
+            fillCard(nodes[c.id], c); persist(); bring([c]); lightUp([c]);
+            return ok("Changed the core identity.");
+          }
+          if (c) { selectOnly([c]); bring([c]); return wait(300).then(function () { openEditor(c); return { ok: true, note: "Here's the core identity: change what you like, then Save." }; }); }
+          c = made({ kind: "agent", title: "Core identity", body: a.text || "", user: true });
           if (!c) return no("The board is full — remove a few cards first.");
-          openEditor(c);
-          return ok("Added an agent.md. Write how BeeZilla should work, then Save.");
+          if (!a.text) openEditor(c);
+          return ok(a.text ? "Added the core identity." : "Added a core identity: say or write who BeeZilla is here and how it should work.");
+        case "person":
+          c = state.cards.filter(function (x) { return kindOf(x) === "person"; })[0];
+          if (c) {
+            if (!a.text) { selectOnly([c]); bring([c]); return wait(300).then(function () { openEditor(c); return { ok: true, note: "Here's who it serves: change what you like, then Save." }; }); }
+            snapshot(); c.body = String(a.text).slice(0, 4000); c.user = true;
+            fillCard(nodes[c.id], c); persist(); bring([c]); lightUp([c]);
+            return ok("Changed who it serves. It stays private when you share.");
+          }
+          c = made({ kind: "person", title: "Who it serves", body: a.text || "", user: true });
+          if (!c) return no("The board is full — remove a few cards first.");
+          if (!a.text) openEditor(c);
+          return ok("Added who it serves. It stays private when you share.");
+        case "sketch":
+          c = addSketch(null, "Drawing", a.text || "");
+          if (!c) return no("The board is full — remove a few cards first.");
+          return ok("Here's a drawing: draw with the pen, then say what it should become, or press Make it real.");
+        case "render":
+          r = a.target ? findCards(a.target) : { cards: state.cards.filter(function (x) { return kindOf(x) === "sketch" && selected[x.id]; }) };
+          if (!r.cards.length && !a.target) r = { cards: state.cards.filter(function (x) { return kindOf(x) === "sketch"; }).slice(-1) };
+          c = r.cards.length === 1 ? r.cards[0] : null;
+          if (!c || kindOf(c) !== "sketch") return no(r.cards.length > 1 ? notFound(r, a.target) : "There's no drawing on the board yet. Say “start a drawing”.");
+          bring([c]);
+          return makeReal(c, a.text);
+        case "clearDrawing":
+          r = a.target ? findCards(a.target) : { cards: state.cards.filter(function (x) { return kindOf(x) === "sketch"; }).slice(-1) };
+          c = r.cards.length === 1 ? r.cards[0] : null;
+          if (!c || kindOf(c) !== "sketch") return no("There's no drawing on the board yet.");
+          snapshot(); setMarks(c, []); bring([c]);
+          return ok("Cleared the drawing. Ctrl/⌘+Z brings it back.");
         case "end":
           c = made({ kind: "document", title: a.title || "End result", body: a.text || "", user: true });
           if (!c) return no("The board is full — remove a few cards first.");

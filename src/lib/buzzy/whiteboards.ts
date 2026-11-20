@@ -73,6 +73,8 @@ const CARD_FIELDS: Record<string, Field> = {
   share: { kind: "text", max: 16 },
   examples: { kind: "text", max: 8 },
   shareAt: { kind: "text", max: 40 },
+  // A drawing (kind "sketch"): its marks, as small vectors (whiteboard.js marksOf).
+  drawing: { kind: "text", max: 150_000 },
 };
 
 export type WhiteboardCard = Record<string, string | number | boolean>;

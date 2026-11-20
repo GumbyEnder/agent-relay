@@ -704,3 +704,51 @@
 .wb-card.wb-pilot { box-shadow: 0 0 0 3px var(--ob-yellow), 0 0 24px rgba(255, 193, 7, 0.55); transition: box-shadow 0.2s; }
 .wb-card.wb-k-area.wb-pilot { border-style: solid; border-color: var(--ob-yellow); box-shadow: 0 0 24px rgba(255, 193, 7, 0.35); }
 @media (prefers-reduced-motion: reduce) { .wb-card.wb-pilot { transition: none; } }
+
+/* ── Drawing on the board (Sketch, merged in), and Who it serves ──────────── */
+.wb-card.wb-k-sketch { padding: 0 0 8px; overflow: visible; background: #fbfbf8; color: #1d1d1f; border-color: #d9d6cc; }
+.wb-k-sketch .wb-sk-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 6px; margin: 0; color: #5a5a5f; }
+.wb-k-sketch .wb-ckind { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-sk-btn {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: 26px; padding: 0 9px;
+  border-radius: 8px; border: 1px solid #d0ccbf; background: #fff; color: #1d1d1f;
+  font: inherit; font-size: 0.74rem; font-weight: 700; letter-spacing: 0; text-transform: none; cursor: pointer;
+}
+.wb-sk-btn .wb-ico { width: 14px; height: 14px; }
+.wb-sk-btn:hover, .wb-sk-btn:focus-visible { border-color: var(--ob-yellow); outline: none; }
+.wb-sk-real { background: var(--ob-yellow); border-color: var(--ob-yellow); color: #141414; }
+.wb-sk-btn:disabled { opacity: 0.55; cursor: default; }
+.wb-sk-canvas { display: block; margin: 0 0 0; border-top: 1px solid #ebe8df; border-bottom: 1px solid #ebe8df; background: #fff; touch-action: none; }
+.wb-card.wb-drawing { border-color: var(--ob-yellow); box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.55), 0 10px 26px rgba(0, 0, 0, 0.45); }
+.wb-card.wb-drawing .wb-sk-canvas { cursor: crosshair; }
+.wb-sk-what { margin: 6px 10px 0; font-size: 0.78rem; line-height: 1.35; color: #5a5a5f; }
+.wb-sketchbar {
+  position: absolute; z-index: 47; display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  max-width: min(720px, calc(100% - 90px)); padding: 6px; border-radius: 12px;
+  background: #121418; border: 1px solid #3a3f47; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+.wb-sketchbar[hidden] { display: none; }
+.wb-sk-tool, .wb-sk-size, .wb-sk-act {
+  min-height: 0; height: 30px; padding: 0 9px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: #e6e9ed; font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+}
+.wb-sk-tool:hover, .wb-sk-size:hover, .wb-sk-act:hover, .wb-sk-tool:focus-visible, .wb-sk-size:focus-visible, .wb-sk-act:focus-visible { background: #262b33; outline: none; }
+.wb-sk-tool.on, .wb-sk-size.on { border-color: var(--ob-yellow); color: var(--ob-yellow); }
+.wb-sk-swatches { display: inline-flex; gap: 3px; padding: 0 4px; }
+.wb-sk-ink { width: 22px; height: 22px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid #3a3f47; cursor: pointer; }
+.wb-sk-ink.on { border-color: var(--ob-yellow); box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.4); }
+.wb-k-person { border-left: 4px solid #6fb3d9; }
+.wb-ed-speak.on { background: var(--ob-red); color: #141414; }
+.wb-ed-speak .wb-ico { width: 15px; height: 15px; }
+@media (max-width: 760px) {
+  .wb-sketchbar { left: 8px !important; right: 8px; max-width: none; }
+}
+
+/* "See board" by the Talk bar while the board is folded (voice-stage.js paintSeeBoard). */
+.ob-see-board {
+  display: inline-flex; align-items: center; justify-content: center; margin: 8px 0 0; min-height: 2.4rem; padding: 0 1.1rem;
+  border-radius: 999px; border: 1px solid #ffc107; background: transparent; color: #ffc107;
+  font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer;
+}
+.ob-see-board:hover, .ob-see-board:focus-visible { background: rgba(255, 193, 7, 0.12); outline: none; }
+.ob-see-board[hidden] { display: none; }
