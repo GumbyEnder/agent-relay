@@ -264,7 +264,9 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
    *  - `noneOf` PASSES on a missing collection. Every rule whose failure mode is
    *    "an unsourced thing slipped through" is therefore paired with `nonempty`
    *    on the same path, so an absent block fails closed instead of passing
-   *    silently. C27 and C40 are the two that need it most.
+   *    silently. C26 and C27 are the two that need it most. C40 is the exception
+   *    on the other side: an explicit empty redFlags list must pass, so it pairs
+   *    `noneOf` with `truthy` (presence, not length) instead.
    *  - No threshold appears here. 1.25x DSCR, 65% LTV, 24-month comp window and
    *    the page limit all live in the sealed half; checks.wasm is published, and
    *    a published number is the author's method leaking to a competitor.
@@ -329,9 +331,14 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
       id: "flags-cite-document",
       code: "C40",
       description: "every flagged issue cites the document it came from",
-      // nonempty is deliberate: "we found no issues" is itself a claim about a
-      // deal, and a memo may not make it silently. An open item rides here too.
-      expr: and(nonempty("domain.redFlags"), noneOf("domain.redFlags", falsy("sourceId"))),
+      // The spec asks only that a *present* flag cite its document, so an
+      // explicit empty list ("we found no issues") is a clean pass — nonempty
+      // here would fail a deal with nothing to flag.
+      // Presence is still required: `noneOf` passes on a missing collection, so
+      // truthy() is what keeps the absent block failing closed. truthy() is the
+      // right predicate, not has(): has() is a substring test on a string.
+      // (truthy([]) is true — the VM tests value identity, not length.)
+      expr: and(truthy("domain.redFlags"), noneOf("domain.redFlags", falsy("sourceId"))),
     }),
     defineRule({
       id: "plain-wording",

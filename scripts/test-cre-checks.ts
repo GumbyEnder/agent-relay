@@ -162,6 +162,19 @@ ok("flagged issue without a document fails C40 only", () => {
   failsOnly("C40", (d) => { d.domain!.redFlags![0].sourceId = null; });
 });
 
+ok("an explicit empty redFlags list is clean — no codes, no warnings", () => {
+  // The spec requires a source on every flag that exists, not that a flag
+  // exists. "We found no issues", stated explicitly, is a pass.
+  const r = verdict((d) => { d.domain!.redFlags = []; });
+  assert.equal(r.ok, true, `empty redFlags failed: ${r.codes.join(",")}`);
+  assert.equal(r.codes, []);
+  assert.equal(r.warnings, []);
+});
+
+ok("a missing redFlags block still fails C40 (noneOf must not pass silently)", () => {
+  failsOnly("C40", (d) => { delete d.domain!.redFlags; });
+});
+
 ok("missing advice notice fails C42 only", () => {
   failsOnly("C42", (d) => { d.sections![0].body = "Maple Court Retail Center (fictional). NOI $183,400."; });
 });
