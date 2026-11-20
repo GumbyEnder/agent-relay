@@ -105,6 +105,24 @@ const commands: [string, string][] = [
   ["open the idea board", "whiteboard:open"],
   ["put in a new chat icon", "newChat"],
   ["zoom out and add a note saying hello", "board:zoomOut + board:note,text=hello"],
+  ["Add a note saying Call Maria at 5 about the Lisbon order", "board:note,text=Call Maria at 5 about the Lisbon order"],
+  ["add a step called Draw the McKenzie poster", "board:step,title=Draw the McKenzie poster"],
+  ["start a drawing", "board:sketch"],
+  ["let me draw", "board:sketch"],
+  ["add a sketch of a castle", "board:sketch,text=a castle"],
+  ["turn the drawing into a castle at sunset", "board:render,text=a castle at sunset"],
+  ["make it real", "board:render"],
+  ["clear the drawing", "board:clearDrawing"],
+  ["who it serves is a bakery owner in lisbon", "board:person,text=a bakery owner in lisbon"],
+  ["add who it serves", "board:person"],
+  ["the core identity is friendly and short", "board:agent,text=friendly and short"],
+  ["add a core identity", "board:agent"],
+  ["write the core identity: always ask before posting", "board:agent,text=always ask before posting"],
+  ["open the board", "whiteboard:open"],
+  ["see the board", "whiteboard:open"],
+  ["bring the board back up", "whiteboard:open"],
+  ["remove the drawing", "board:remove,t=the drawing"],
+  ["connect who it serves to the poster step", "board:connect,t=who it serves,to=the poster step"],
   ["connect the photo to the poster step, then zoom in on the poster step", "board:connect,t=the photo,to=the poster step + board:focus,t=the poster step"],
 ];
 for (const [message, want] of commands) {
@@ -137,6 +155,10 @@ const chat = [
   "zoom out of the problem a bit and tell me the big picture",
   "make me a song about rain",
   "draw me a picture of the Milky Way",
+  "draw me a castle",
+  "I am a baker",
+  "who is it for?",
+  "make the logo real big",
 ];
 for (const message of chat) check(planAppActions(message, null, { startingBoards: titles }) === null, `chat stays chat: ${JSON.stringify(message)} (got ${brief(planAppActions(message, null, { startingBoards: titles }))})`);
 

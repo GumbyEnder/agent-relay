@@ -98,9 +98,12 @@ ok("with no lines, the summary is exactly main's, on every board", () => {
     [agent, skill, { ...end }, note, photo],
     [{ ...agent, body: "Be brief", user: true }, { ...skill, body: "Sketch first", user: true }, end, { ...note, user: true }, made, web],
   ];
+  // The one intended difference from main: agent.md reads "Core identity" now
+  // (owner, 2026-11-20: "People aren't going to know what an agent.md is").
+  const renamed = (t: string) => t.replace(/^Core identity \(how BeeZilla works here\): /gm, "agent.md (how to work): ");
   for (const b of boards) {
     const text = now.summary(b);
-    if (before) eq(text, before.summary(b), "same as main:");
+    if (before) eq(renamed(text), before.summary(b), "same as main:");
     truthy(!/Connected to BeeZilla/.test(text), "no Connected section without lines");
     truthy(!/\[\[board-pictures/.test(text), "no pictures line without lines");
   }
@@ -141,7 +144,7 @@ ok("lines chain: a note into a picture into a step brings both, nearest first by
 
 ok("a step's own inputs stay under it: a note into agent.md is not repeated for the next step", () => {
   const text = now.summary([agent, skill, note], [L("n", "a"), L("a", "s")]);
-  truthy(/Into agent\.md:\n- Note — Palette/.test(text), text);
+  truthy(/Into the core identity:\n- Note — Palette/.test(text), text);
   truthy(!/Into the step/.test(text), "the skill brings nothing of its own");
 });
 
@@ -189,6 +192,20 @@ ok("a long board stays under the cap, and the pictures line is never cut off", (
   const text = now.summary([skill, photo, ...many], [L("p", "s"), ...many.map((c) => L(c.id, "s"))]);
   truthy(text.startsWith("[[board-pictures: 12]]\n"), "pictures first");
   truthy(text.length <= 7800 + 40, `capped (${text.length})`);
+});
+
+ok("who it serves comes first, in their words, and is never a connected thing", () => {
+  const who: Card = { id: "w1", kind: "person", title: "Who it serves", body: "A bakery owner in Lisbon who likes short answers", user: true, x: 900, y: 600 };
+  const text = now.summary([who, { ...skill, body: "Sketch first", user: true }, note], [L("w1", "s"), L("n", "s")]);
+  truthy(text.startsWith("Who it serves: A bakery owner in Lisbon"), text);
+  const block = text.split("Into the step “Draw the poster”:")[1] || "";
+  truthy(!/Who it serves/.test(block) && /Note — Palette/.test(block), "joined to a step, it is still read as who BeeZilla works for, once");
+});
+
+ok("a drawing is a thing on the board, by what it should become", () => {
+  const sk: Card = { id: "d1", kind: "sketch", title: "Drawing", body: "a castle at sunset", drawing: "[]", user: true, x: 0, y: 0 };
+  const text = now.summary([skill, sk], [L("d1", "s")]);
+  truthy(/Into the step “Draw the poster”:\n- Drawing they added — Drawing: a castle at sunset/.test(text), text);
 });
 
 console.log("\nThe server's side");

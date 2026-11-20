@@ -48,7 +48,7 @@ export interface BoardStep {
 
 // Things on a board, by the words people use for them.
 const NOUNS =
-  "cards?|notes?|sticky notes?|steps?|skills?|agent\\.? ?md|agent md|instructions(?: card)?|end results?|outputs?|" +
+  "who it serves|core identity|drawings?|sketch(?:es)?|doodles?|cards?|notes?|sticky notes?|steps?|skills?|agent\\.? ?md|agent md|instructions(?: card)?|end results?|outputs?|" +
   "pictures?|photos?|images?|pics?|songs?|tracks?|music|videos?|clips?|3d models?|models?|documents?|docs?|files?|" +
   "links?|areas?|orchestrations?|boxes|box";
 const ENDS_IN_NOUN = new RegExp(`(?:^|\\s)(?:${NOUNS})$`);
@@ -128,8 +128,34 @@ const RULES: Rule[] = [
     },
   },
   {
-    re: new RegExp(`^(?:add|make|create|put)(?: an?| the)? (?:agent\\.? ?md|agent md|instructions card|agent card)(?: (?:on|to) ${BOARD})?$`),
-    make: () => ({ do: "board", value: "agent", say: "Add an agent.md" }),
+    re: new RegExp(`^(?:add|make|create|put|write|set)(?: an?| the| my)? (?:agent'?s )?(?:core identity|agent\\.? ?md|agent md|instructions card|agent card)(?: card)?(?: (?:on|to) ${BOARD})?(?:(?:,|:)?\\s*(?:saying|that says|to say|as|:)\\s*(.+))?$`),
+    make: (m) => ({ do: "board", value: "agent", text: m[1] ? clean(m[1]) : undefined, say: m[1] ? "Write the core identity" : "Add the core identity" }),
+  },
+  {
+    re: /^(?:the |my |your )?(?:agent'?s )?core identity (?:is|should be|:)\s*(.+)$/,
+    make: (m) => ({ do: "board", value: "agent", text: clean(m[1]), say: "Write the core identity" }),
+  },
+  // ── Who it serves: the person BeeZilla works for (private when shared) ──
+  {
+    re: /^(?:(?:add|set|make|change|update|write)(?: a| the)? )?who it serves(?: card)?(?:(?:,|:)?\s*(?:is|to|as|:|saying|that says)\s*(.+))?$/,
+    make: (m) => ({ do: "board", value: "person", text: m[1] ? clean(m[1]) : undefined, say: m[1] ? "Write who it serves" : "Add who it serves" }),
+  },
+  // ── Drawing on the board ─────────────────────────────────────────────
+  {
+    re: new RegExp(`^(?:add|start|make|create|open|begin|give me)(?: me)?(?: a| an| the| my)?(?: new)? (?:drawing|sketch|doodle)(?: (?:on|to) ${BOARD})?(?:(?:,|:)?\\s*(?:of|for|that becomes|to become|called)\\s*(.+))?$|^(?:let me|i want to|i'd like to|i wanna) (?:draw|sketch|doodle)(?: something)?(?: on ${BOARD})?$`),
+    make: (m) => ({ do: "board", value: "sketch", text: m[1] ? clean(m[1]) : undefined, say: "Start a drawing" }),
+  },
+  {
+    re: /^(?:turn|make|change|convert) (?:the |my |this |that )?(?:drawing|sketch|doodle) (?:into|in to|to) (.+)$/,
+    make: (m) => ({ do: "board", value: "render", text: clean(m[1]), say: `Make the drawing into ${quote(m[1]!)}` }),
+  },
+  {
+    re: /^make (?:the |my |this |that )?(?:drawing |sketch |doodle )?(?:it )?real$|^make it real$/,
+    make: () => ({ do: "board", value: "render", say: "Make the drawing real" }),
+  },
+  {
+    re: /^(?:clear|erase|wipe|empty) (?:the |my |this )?(?:drawing|sketch|doodle)$/,
+    make: () => ({ do: "board", value: "clearDrawing", say: "Clear the drawing" }),
   },
   {
     re: new RegExp(`^(?:add|make|create|put|set)(?: an?| the)? (?:end result|final result|output)(?: card)?(?: (?:on|to) ${BOARD})?(?:(?:,|:)?\\s*(?:called|named|of|to be|that says|saying|:)\\s*(.+))?$`),

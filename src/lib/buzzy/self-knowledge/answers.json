@@ -643,7 +643,7 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about. To point BeeZilla at something, drag the dot on a card's right edge onto one of its steps: what you connect, it uses there in full, and a connected picture is what it draws from. Make an area around a piece of the board to move, save or share it together; selling an orchestration (for Honey Drops or Honey, or open-sourcing it) is coming soon.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: a line to each skill it uses, and what it makes \u2014 pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about. To point BeeZilla at something, drag the dot on a card's right edge onto one of its steps: what you connect, it uses there in full, and a connected picture is what it draws from. Make an area around a piece of the board to move, save or share it together; selling an orchestration (for Honey Drops or Honey, or open-sourcing it) is coming soon. You can draw on it too: the Draw tool (D) gives you a pen, shapes and colours, and Make it real turns your drawing into a finished picture beside it. Once you've laid out a few cards, BeeZilla drafts your agent's core identity (how it works here) from them, and a Who it serves card holds who it's working for, which stays private when you share.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -676,6 +676,14 @@
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "\"chat\" is the conversation itself, sitting on the board as a card"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "function makeReal(c, ask)"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "function maybeDraftIdentity()"
       }
     ],
     "surfaces": [
@@ -1020,7 +1028,7 @@
   {
     "id": "sk-051",
     "q": "What can you do?",
-    "a": "I make things with you by talking: pictures, music, 3D models, short videos, documents, spreadsheets and slides, and I can look things up on the web. Everything I do appears on the Idea Board as I do it, so you can see each step and change any of it, and I can work the board for you when you ask (zoom out, add a note, connect two cards, make an area). Before building something from scratch I check what already exists: your Library, your recipes and simple starting boards. Tell me about one thing you're struggling to do, even if you're not sure I can help with it, and I'll see what I can do about it.",
+    "a": "I make things with you by talking: pictures, music, 3D models, short videos, documents, spreadsheets and slides, and I can look things up on the web. Everything I do appears on the Idea Board as I do it, so you can see each step and change any of it, and I can work the board for you when you ask (zoom out, add a note, connect two cards, make an area, start a drawing). Before building something from scratch I check what already exists: your Library, your recipes and simple starting boards. Tell me about one thing you're struggling to do, even if you're not sure I can help with it, and I'll see what I can do about it.",
     "sources": [
       {
         "file": "src/lib/buzzy/inspirationSearch.ts",
@@ -1072,7 +1080,7 @@
   {
     "id": "sk-053",
     "q": "Can BeeZilla work the Idea Board for me?",
-    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; fold the board away. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
+    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; start a drawing; turn the drawing into a castle at sunset; who it serves is a bakery in Lisbon; the core identity is friendly and short; open the board; fold the board away. When you're editing a card, press Speak and say what it should say. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
     "sources": [
       {
         "file": "src/lib/buzzy/boardPilot.ts",
@@ -1094,11 +1102,11 @@
   {
     "id": "sk-054",
     "q": "How do I use the Idea Board's controls?",
-    "a": "Down the left side are the tools: Select (V), Move the board (H), Note (N), agent.md (A), Skill or step (K), Output, what you want at the end (O), and Upload (U). In the bottom-right corner: zoom out and in, the percentage (back to 100%), Fit everything (Alt/Option+1), History, and the keyboard button (F1) that lists every shortcut. Drag on empty board to select cards; drag a card to move it; double-click a card to edit it; Delete removes; Ctrl/⌘+Z undoes. To connect two cards, drag the dot on a card's right edge onto another card. With cards selected, the bar above them has Create recipe, Make an area, Sell this orchestration and Remove. At the top are the Talk bar, Sell this orchestration and Fold away. Or just tell me what you want and I'll do it.",
+    "a": "Down the left side are the tools: Select (V), Move the board (H), Note (N), Core identity, who BeeZilla is here (A), Who it serves (P), Skill or step (K), Output, what you want at the end (O), Draw (D) and Upload (U). In the bottom-right corner: zoom out and in, the percentage (back to 100%), Fit everything (Alt/Option+1), History, and the keyboard button (F1) that lists every shortcut. Drag on empty board to select cards; drag a card to move it; double-click a card to edit it (Speak lets you say it instead of typing); double-click a drawing to draw on it; Delete removes; Ctrl/⌘+Z undoes. To connect two cards, drag the dot on a card's right edge onto another card. With cards selected, the bar above them has Create recipe, Make an area, Sell this orchestration and Remove. At the top are the Talk bar, Sell this orchestration and Fold away. Or just tell me what you want and I'll do it.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
-        "symbol": "[\"agent\", \"agent.md — how to work\", \"A\"]"
+        "symbol": "[\"agent\", \"Core identity — who BeeZilla is here\", \"A\"]"
       },
       {
         "file": "public/buzzy/whiteboard.js",
@@ -1111,6 +1119,10 @@
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "Make an area"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "[\"sketch\", \"Draw — sketch on the board, then make it real\", \"D\"]"
       }
     ],
     "surfaces": [

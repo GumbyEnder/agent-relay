@@ -112,7 +112,7 @@ const RULES: Rule[] = [
     make: () => ({ do: "whiteboard", value: "close", say: "Close the Idea Board" }),
   },
   {
-    re: /^(?:open|show|bring up|pull up|unfold)(?: up)?(?: me)?(?: the| my)? idea board$/,
+    re: /^(?:open|show|bring up|pull up|unfold)(?: up)?(?: me)?(?: the| my)? idea board$|^(?:open|see|show|bring up|pull up|unfold|bring back)(?: up)?(?: me)?(?: the| my)? board(?: back)?(?: up)?$|^(?:open|bring) (?:it|the board) back(?: up)?$/,
     make: () => ({ do: "whiteboard", value: "open", say: "Open the Idea Board" }),
   },
   {
@@ -198,8 +198,25 @@ function clauseStep(clause: string, current?: PrivacyMode | null): AppAction | n
   return boardStep(clause);
 }
 
+// Commands are matched in lower case; the words they carry onto the board keep the
+// person's own capitals ("add a note saying Call Maria at 5").
+function keepCase(message: string, piece: string | undefined, capital = false): string | undefined {
+  if (!piece) return piece;
+  const orig = String(message || "").replace(/[’']/g, "'").replace(/\s+/g, " ").trim();
+  const i = orig.toLowerCase().indexOf(piece.toLowerCase());
+  const got = i >= 0 ? orig.slice(i, i + piece.length) : piece;
+  return capital ? got.charAt(0).toUpperCase() + got.slice(1) : got;
+}
+function withCase(message: string, plan: AppAction[] | null): AppAction[] | null {
+  if (!plan) return plan;
+  return plan.map((s) => (s.do === "board" ? { ...s, text: keepCase(message, s.text), title: keepCase(message, s.title, true) } : s));
+}
+
 /** The actions a command asks for, or null when the message is not one. */
 export function planAppActions(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
+  return withCase(message, planInLowerCase(message, current, ctx));
+}
+function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
   const m = normal(message);
   // A note can carry a sentence or two; any other command is short.
   if (!m || m.length > (/\bnote\b/.test(m) ? 400 : MAX_LENGTH)) return null;
