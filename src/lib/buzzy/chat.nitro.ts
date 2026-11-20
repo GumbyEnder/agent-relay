@@ -885,6 +885,16 @@ export default defineEventHandler(async (event) => {
         return { ok: false, error: "No such deal-memo run.", code: "not_found" };
       }
       const summary = (view.job.summary ?? null) as Record<string, unknown> | null;
+      // The runner writes `summary.charge` as its LAST step, after the row is
+      // already visible as `done` (the debit runs detached, and only a done row
+      // may be charged). So `state === "done"` is not the same thing as "the
+      // charge settled": a poll in that window must be able to tell "not settled
+      // yet" from "nothing charged, for a reason", or the card paints
+      // "Nothing charged" over a debit that lands a moment later (room 7888).
+      const chargeNote =
+        summary && typeof summary.charge === "object" && summary.charge
+          ? (summary.charge as Record<string, unknown>)
+          : null;
       return {
         ok: true,
         jobId: view.job.job_id,
@@ -896,17 +906,18 @@ export default defineEventHandler(async (event) => {
         // Honey Drops ledger actually moved in phase F.
         chargedCents: Number(view.job.charged_cents ?? 0),
         chargedDrops: Number(view.job.charged_drops ?? 0),
+        // True once ANY settlement note exists — including a true free run, which
+        // the runner records with reason `free`. False means "no charge decision
+        // has been written yet", which the poll treats as "keep asking".
+        chargeSettled: chargeNote !== null,
         // The server's own sentence for a run that did not move money for a
         // reason (insufficient, no wallet, an unreadable price). Null on a true
         // free run: the card says "Nothing charged" by itself and the two must
         // not read the same to the person paying (room 7886).
-        chargeLine: (() => {
-          const c = summary && typeof (summary as Record<string, unknown>).charge === "object"
-            ? ((summary as Record<string, unknown>).charge as Record<string, unknown>)
-            : null;
-          if (!c || c.reason === "free" || typeof c.line !== "string") return null;
-          return c.line;
-        })(),
+        chargeLine:
+          !chargeNote || chargeNote.reason === "free" || typeof chargeNote.line !== "string"
+            ? null
+            : chargeNote.line,
         stages: view.stages.map((s) => ({ key: s.stage_key, label: s.label, state: s.state, note: s.note })),
         files: view.files,
         summary,

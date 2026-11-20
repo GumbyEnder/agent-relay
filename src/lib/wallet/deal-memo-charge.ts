@@ -38,8 +38,20 @@ export interface ChargeOutcome {
    * not_done         — the row is not `done`; a terminal/failed run never charges
    * insufficient     — the balance is below the price; the memo is kept, uncharged
    * no_wallet        — the account has no wallet row yet
+   * price_unavailable — the price could not be read (fail closed: never a free run).
+   *                     `chargeDealMemoRun` never returns this; the runner records
+   *                     it in `summary.charge` without calling the debit at all.
+   * charge_error     — the debit threw. Also runner-recorded, never returned here.
    */
-  reason: "charged" | "already_charged" | "free" | "not_done" | "insufficient" | "no_wallet";
+  reason:
+    | "charged"
+    | "already_charged"
+    | "free"
+    | "not_done"
+    | "insufficient"
+    | "no_wallet"
+    | "price_unavailable"
+    | "charge_error";
   /** The account's balance after the call, when it could be read. */
   balance: number | null;
   /** The price this call was willing to take. */
@@ -158,6 +170,15 @@ export function chargeLine(outcome: ChargeOutcome): string {
       return "Kept the memo uncharged: this account has no Honey Drops wallet yet.";
     case "not_done":
       return "Nothing charged: only a finished run can be charged.";
+    // These two are never returned by `chargeDealMemoRun` (a price we cannot read
+    // and a debit that throws both stop before or inside the statement), but the
+    // runner writes them into `summary.charge`. The sentences here are the same
+    // ones the runner records, so a future path can go through this helper
+    // without changing the words the person reads.
+    case "price_unavailable":
+      return "Kept the memo uncharged: the price could not be read just now.";
+    case "charge_error":
+      return "Kept the memo uncharged: the charge could not be completed just now.";
     default:
       return "Nothing charged.";
   }

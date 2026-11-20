@@ -2847,6 +2847,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var tries = 0;
       var misses = 0;
       var startedAt = Date.now();
+      // A done row is not a settled charge: the debit runs detached, after
+      // finishDealMemoJob() has already made the row visible as done, and its
+      // verdict is written to summary.charge afterwards. Painting "Nothing
+      // charged for this draft" in that window would hide a real debit. So the
+      // card goes up as soon as the files exist, the charge reads "working out"
+      // until the server says it settled, and we stop asking after a grace.
+      var settled = false;
+      var settleUntil = 0;
+      var graceMs = 30000;
       msg.dealMemoJobId = jobId;
       function onBoard(step) {
         if (window.__bzFlow) window.__bzFlow(Object.assign({ kind: "output", id: "out:deal-memo:" + jobId, parent: "skill:deal-memo" }, step));
@@ -2890,7 +2899,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           .then(function (p) {
             var files = Array.isArray(p.files) ? p.files.filter(function (f) { return f && f.url; }) : [];
             if (p.ok && p.state === "done" && files.length) {
-              clearInterval(tick);
+              var firstDone = !msg.artifacts;
               msg.progress = "";
               msg.artifacts = files.map(function (f) {
                 return { url: f.url, name: f.filename || "deal memo", bytes: f.bytes || 0, contentType: f.content_type || f.contentType || "" };
@@ -2900,9 +2909,31 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               // The server also says WHY money did not move (insufficient / no
               // wallet / unreadable price). Carry it; only a true free run has none.
               msg.dealMemoChargeLine = p.chargeLine ? String(p.chargeLine) : "";
+              // chargeSettled is false while the detached debit has not written
+              // its verdict yet — including a true free run, which also writes one.
+              msg.dealMemoChargePending = !p.chargeSettled && !settled;
               msg.dealMemoLibraryUrl = "/buzzy/library";
               renderChatMessages();
-              onBoard({ state: "done", title: files[0].filename || "Deal memo", contentType: "application/octet-stream", detail: "" });
+              if (firstDone) {
+                onBoard({ state: "done", title: files[0].filename || "Deal memo", contentType: "application/octet-stream", detail: "" });
+              }
+              if (p.chargeSettled) {
+                settled = true;
+                msg.dealMemoChargePending = false;
+                renderChatMessages();
+                clearInterval(tick);
+                return;
+              }
+              // Keep asking, briefly. Never poll forever over a row that will
+              // never settle (a pre-phase-F row has no summary.charge at all).
+              if (!settleUntil) settleUntil = Date.now() + graceMs;
+              if (Date.now() >= settleUntil) {
+                msg.dealMemoChargePending = false;
+                // Do not say "nothing charged" when we simply do not know.
+                msg.dealMemoChargeLine = "Couldn't confirm the charge for this draft just now — your Honey Drops balance is the record.";
+                renderChatMessages();
+                clearInterval(tick);
+              }
               return;
             }
             if (p.state === "failed" || p.state === "interrupted" || p.ok === false) {
@@ -3039,11 +3070,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // a zero for a reason (insufficient, no wallet, unreadable price) shows
         // the server's own sentence instead of hiding behind "Nothing charged".
         if (m.dealMemoLibraryUrl) {
-          var priceLine = m.dealMemoCharge > 0
-            ? "Charged " + m.dealMemoCharge + " Honey Drops."
-            : (m.dealMemoChargeLine
-              ? String(m.dealMemoChargeLine).replace(/</g, "&lt;")
-              : "Nothing charged for this draft.");
+          var priceLine = m.dealMemoChargePending
+            // The debit is written after the row is done; say so instead of
+            // pre-judging it as free (a real debit can land a moment later).
+            ? "Working out the charge for this draft…"
+            : m.dealMemoCharge > 0
+              ? "Charged " + m.dealMemoCharge + " Honey Drops."
+              : (m.dealMemoChargeLine
+                ? String(m.dealMemoChargeLine).replace(/</g, "&lt;")
+                : "Nothing charged for this draft.");
           bubble += '<div class="bz-what">' + priceLine +
             ' <a href="' + String(m.dealMemoLibraryUrl).replace(/"/g, "") + '">A copy is in your Library</a></div>';
         }

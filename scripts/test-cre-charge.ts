@@ -162,6 +162,32 @@ ok("the free run leaves the balance alone", (await balanceOf("u4")) === 100);
 const chargeOther = await chargeDealMemoRun(q, { userId: "u2", jobId: jobA, priceDrops: 40 });
 ok("a stranger's job id charges nothing", !chargeOther.applied && chargeOther.reason === "not_done");
 
+// 8. a done row is not a settled charge
+//
+// The debit runs detached, after `finishDealMemoJob()` has made the row visible
+// as `done`, and its verdict is written to `summary.charge` afterwards. A poll
+// that reads the row in that window must be able to see "no decision yet" —
+// that is exactly what `chargeSettled` reports. If a done row already carried a
+// charge note, the poll's grace would be dead code and a real debit could still
+// be painted over as "Nothing charged".
+const jobWindow = await startDoneJob("u1");
+const windowRow = await q<{ summary: Record<string, unknown> | null }>(
+  `SELECT summary FROM buzzy_deal_memo_jobs WHERE job_id = $1`,
+  [jobWindow],
+);
+const windowCharge = windowRow[0]?.summary && typeof windowRow[0].summary!.charge === "object" ? windowRow[0].summary!.charge : null;
+ok("a freshly done row carries no charge note yet", windowCharge === null);
+
+// 9. the unreadable-price and thrown-debit paths have words in the public helper
+ok(
+  "an unreadable price says why in words",
+  chargeLine({ applied: false, chargedDrops: 0, reason: "price_unavailable", balance: null, priceDrops: 40 }).includes("price could not be read"),
+);
+ok(
+  "a thrown debit says why in words",
+  chargeLine({ applied: false, chargedDrops: 0, reason: "charge_error", balance: null, priceDrops: 40 }).includes("could not be completed"),
+);
+
 console.log(`\n${passes} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log(failures.map((f) => `  ✗ ${f}`).join("\n"));

@@ -1,5 +1,5 @@
 {
   "repo": "GumbyEnder/beezilla-recipes",
-  "commit": "65e82a5d17b561986ab23f83ec33e7ae21e019ea",
+  "commit": "4bac3d2bd85b64a411f4b3311a2e54415808712a",
   "note": "Pinned by hand: bump this commit when the private modules change, in the same commit as the public change that depends on them."
 }
