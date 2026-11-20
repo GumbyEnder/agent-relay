@@ -63,6 +63,8 @@ import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThi
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
 import { createModelTask, threeDConfigured } from "./models3d";
 import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday, videoRecipeHeldBack } from "./video";
+import { asksForDealMemo, parseLoanRequest } from "./cre/loan";
+import { dealMemoConfigured, dealMemoRecipeHash, startDealMemoRun } from "@/lib/private/dealMemoRun";
 import type { VideoTopicInput } from "./video";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
@@ -376,6 +378,11 @@ export interface ChatResponse {
    * under the reply that announced it. `recipe` names which of the five ran.
    */
   video?: { jobId: string; recipe: string; etaMinutes: number; state: string };
+  /**
+   * A deal memo this turn STARTED (CR-9). The page polls
+   * GET /api/buzzy/deal-memo/<id> for the stage line and the four files.
+   */
+  dealMemo?: { jobId: string };
   /**
    * Everything this turn actually produced. The renderer draws these cards and
    * only these cards; a sentence claiming a file that is not in this list is a
@@ -1014,6 +1021,61 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         messages[0]!.content +=
           `\n\nVideo generation was attempted and FAILED (${started.code}): ${started.error} ` +
           "Tell the owner that exact reason in one sentence. Nothing was charged. Do not claim any video exists.";
+      }
+    }
+  }
+
+  // ── Deal-memo pre-pass (CR-9 phase E) ────────────────────────────────
+  // A deal memo is minutes of code and three model calls in this process, so
+  // the turn STARTS the run and answers; the page polls
+  // GET /api/buzzy/deal-memo/<id>. The run needs the loan request, and it is
+  // asked for rather than guessed: a made-up rate under a credit memo is the
+  // worst output this product can produce.
+  let dealMemoJob: { jobId: string } | null = null;
+  let dealMemoRefusal: { code: string; error: string } | null = null;
+  if (!lockdown && asksForDealMemo(message)) {
+    const recipeHash = dealMemoRecipeHash();
+    if (!dealMemoConfigured() || !recipeHash) {
+      dealMemoRefusal = { code: "not_configured", error: "The deal-memo lane is not switched on for this deployment." };
+      messages[0]!.content +=
+        "\n\nA deal memo was requested but the lane is not configured on this deployment. Say exactly that in one " +
+        "sentence. Do not describe a memo and do not claim anything was started.";
+    } else {
+      const parsed = parseLoanRequest(message, new Date().toISOString().slice(0, 10));
+      if (!parsed.ok) {
+        dealMemoRefusal = { code: "loan_incomplete", error: parsed.question };
+        messages[0]!.content +=
+          `\n\nA deal memo was requested and the loan request is incomplete: ${parsed.question} ` +
+          "Ask for exactly those numbers in one or two sentences. Do NOT claim a run started. Nothing was charged.";
+      } else {
+        const started = await startDealMemoRun({
+          userId,
+          recipeHash,
+          loan: parsed.loan,
+          title: null,
+        });
+        if (started.ok) {
+          dealMemoJob = { jobId: started.jobId };
+          req.onStage?.({ phase: "deal-memo", label: "Making your deal memo", etaMs: 90_000 });
+          req.onFlow?.({ kind: "skill", id: "skill:deal-memo", title: "Deal memo", parent: "agent", state: "running" });
+          req.onFlow?.({
+            kind: "output",
+            id: "out:deal-memo:" + started.jobId,
+            title: "Deal memo (draft)",
+            parent: "skill:deal-memo",
+            state: "running",
+          });
+          messages[0]!.content +=
+            "\n\nA deal memo was STARTED this turn and is being made now. It appears under this reply as a card " +
+            "with the stage line and the files when it is finished. Do not describe the memo, do not say it is done, " +
+            "and do not name a file. Say in one or two sentences that it is being made, then stop.";
+        } else {
+          dealMemoRefusal = { code: started.code, error: started.ask ? `${started.message} ${started.ask}` : started.message };
+          req.onFlow?.({ kind: "skill", id: "skill:deal-memo", title: "Deal memo", parent: "agent", state: "failed", detail: started.message });
+          messages[0]!.content +=
+            `\n\nThe deal memo was NOT started (${started.code}): ${started.message} ` +
+            "Tell the owner that exact reason in one sentence. Nothing was charged and no file exists.";
+        }
       }
     }
   }
@@ -2351,8 +2413,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // A video is minutes away: same contract as 3D, plus the recipe and the ETA so
   // the card can say what is being made and how long it has left.
   if (videoJob) response.video = videoJob;
+  if (dealMemoJob) response.dealMemo = dealMemoJob;
   // A refusal is never silent: the widget shows the reason it could not start.
   if (videoRefusal) response.warning = response.warning || videoRefusal.error;
+  if (dealMemoRefusal) response.warning = response.warning || dealMemoRefusal.error;
 
   // ── The artifact envelope ──────────────────────────────────────────
   // One list of what this turn actually produced. The client renders these and

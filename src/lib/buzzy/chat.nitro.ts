@@ -42,6 +42,8 @@ import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { bindRole, DEAL_ROLES, decideDuplicate, isDealRole, readPhoto } from "./cre/intake";
+import { dealMemoJobsToday, readDealMemoJob } from "./cre/jobs";
+import { dealMemoConfigured, dealMemoRecipeHash, startDealMemoRun, type DealMemoLoanRequest } from "@/lib/private/dealMemoRun";
 import { contentTypeForKind, sniffKind } from "./cre/bytes";
 import { documentContentFromMarkdown, markdownTableToCsv } from "./cre/outputs";
 import { getModels, chatCompletion } from "./llm";
@@ -843,6 +845,115 @@ export default defineEventHandler(async (event) => {
         code: "transcribe_failed",
       };
     }
+  }
+
+  // ── /api/buzzy/deal-memo — start a CR-9 run, poll it, read the files ───
+  // Same shape as the video lane: the run is detached in this process, the row
+  // is the truth, and the page polls until the files are stored. A run that was
+  // interrupted by a redeploy reads "interrupted, nothing charged" — the reaper
+  // (scripts/deal-memo-reaper.mjs) writes that at boot, never the runner.
+  if (path === "/api/buzzy/deal-memo" || path.startsWith("/api/buzzy/deal-memo/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const jobId = path.startsWith("/api/buzzy/deal-memo/") ? (path.split("/").pop() || "") : "";
+
+    if (method === "GET" && !jobId) {
+      const sql = await getSql();
+      return {
+        ok: true,
+        configured: dealMemoConfigured() && Boolean(dealMemoRecipeHash()),
+        used: await dealMemoJobsToday(
+          <T = Record<string, unknown>>(text: string, params?: unknown[]) => sql.query<T>(text, params ?? []),
+          user.id,
+        ),
+      };
+    }
+
+    if (method === "GET" && jobId) {
+      const sql = await getSql();
+      const view = await readDealMemoJob(
+        <T = Record<string, unknown>>(text: string, params?: unknown[]) => sql.query<T>(text, params ?? []),
+        { userId: user.id, jobId },
+      );
+      // 404 either way: whether another person's run exists is not this
+      // caller's business.
+      if (!view) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such deal-memo run.", code: "not_found" };
+      }
+      const summary = (view.job.summary ?? null) as Record<string, unknown> | null;
+      return {
+        ok: true,
+        jobId: view.job.job_id,
+        state: view.job.state,
+        message: view.job.message,
+        // Fixed by finishDealMemoJob / the reaper; the card must be able to say
+        // the promise out loud without composing it.
+        chargedCents: Number(view.job.charged_cents ?? 0),
+        stages: view.stages.map((s) => ({ key: s.stage_key, label: s.label, state: s.state, note: s.note })),
+        files: view.files,
+        summary,
+      };
+    }
+
+    if (method === "POST" && !jobId) {
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await event.req.json()) as Record<string, unknown>;
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send the loan request as JSON.", code: "bad_body" };
+      }
+      const raw = (body.loan ?? {}) as Record<string, unknown>;
+      const int = (v: unknown): number | null =>
+        typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null;
+      const loanAmountCents = int(raw.loanAmountCents);
+      const noteRateBp = int(raw.noteRateBp);
+      const amortizationYears = int(raw.amortizationYears);
+      const termYears = int(raw.termYears);
+      const asOf = typeof raw.asOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.asOf) ? raw.asOf : null;
+      if (!loanAmountCents || !noteRateBp || !amortizationYears || !termYears || !asOf) {
+        setResponseStatus(event, 400);
+        return {
+          ok: false,
+          error: "The loan request needs loanAmountCents, noteRateBp, amortizationYears, termYears and asOf.",
+          code: "loan_incomplete",
+        };
+      }
+      const recipeHash = typeof raw.recipeHash === "string" && /^[a-f0-9]{64}$/.test(raw.recipeHash)
+        ? raw.recipeHash
+        : dealMemoRecipeHash();
+      if (!recipeHash) {
+        setResponseStatus(event, 503);
+        return { ok: false, error: "No deal-memo recipe is published on this deployment.", code: "not_configured" };
+      }
+      const askingPriceCents = int(raw.askingPriceCents);
+      const started = await startDealMemoRun({
+        userId: user.id,
+        recipeHash,
+        loan: {
+          loanAmountCents,
+          noteRateBp,
+          amortizationYears,
+          termYears,
+          askingPriceCents: askingPriceCents ?? null,
+          asOf,
+          purpose: typeof raw.purpose === "string" ? raw.purpose.slice(0, 40) : undefined,
+        } satisfies DealMemoLoanRequest,
+        memoFormat: typeof body.memoFormat === "string" ? body.memoFormat.slice(0, 60) : undefined,
+      });
+      if (!started.ok) {
+        setResponseStatus(event, started.code === "input_required" ? 400 : 503);
+        return started;
+      }
+      return { ok: true, jobId: started.jobId, state: "queued" };
+    }
+
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET to read a run or POST to start one.", code: "method_not_allowed" };
   }
 
   // ── /api/buzzy/video — start a video recipe, poll it, keep the mp4 ─────
