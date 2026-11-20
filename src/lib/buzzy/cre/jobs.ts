@@ -296,10 +296,15 @@ export function dealMemoRecipeRefusal(
   supplied: unknown[],
 ): "not_configured" | "recipe_fixed" | null {
   if (!configuredHash) return "not_configured";
+  // Normalise BOTH sides. Comparing a lowercased client value against a
+  // configured value as configured refuses a caller who sent the right hash in
+  // capitals — a hex digest's case is not a different bundle.
+  const published = configuredHash.trim().toLowerCase();
+  if (!published) return "not_configured";
   const wants = supplied
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     .map((v) => v.trim().toLowerCase());
-  return wants.some((h) => h !== configuredHash) ? "recipe_fixed" : null;
+  return wants.some((h) => h !== published) ? "recipe_fixed" : null;
 }
 
 /** Runs started by this account in the last rolling 24h, for a daily cap. */

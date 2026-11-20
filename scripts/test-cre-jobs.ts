@@ -77,6 +77,11 @@ ok("a client hash equal to the published one is allowed", dealMemoRecipeRefusal(
 ok("a client hash that differs is refused", dealMemoRecipeRefusal(HASH, [OTHER]) === "recipe_fixed");
 ok("a hash inside the loan body is refused too", dealMemoRecipeRefusal(HASH, [undefined, OTHER]) === "recipe_fixed");
 ok("with nothing published the route is not configured", dealMemoRecipeRefusal(null, [HASH]) === "not_configured");
+// Hash case is not identity: both sides are normalised, so an uppercase caller
+// naming the published bundle runs, and case alone can never be a refusal.
+ok("an uppercase client hash equal to the published one is allowed", dealMemoRecipeRefusal(HASH, [HASH.toUpperCase(), HASH.toUpperCase()]) === null);
+ok("an uppercase configured hash accepts the lowercase client", dealMemoRecipeRefusal(HASH.toUpperCase(), [HASH, HASH]) === null);
+ok("case does not rescue a genuinely different hash", dealMemoRecipeRefusal(HASH, [OTHER.toUpperCase()]) === "recipe_fixed");
 
 // 1. create + ownership
 const jobA = newDealMemoJobId();
