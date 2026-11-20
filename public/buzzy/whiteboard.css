@@ -699,3 +699,8 @@
   .wb-sellpanel { right: 8px; left: 8px; width: auto; max-height: calc(100% - 120px); }
   .wb-panel:not(.wb-side-is-closed) .wb-sellpanel { bottom: calc(40% + 60px); max-height: calc(60% - 120px); }
 }
+
+/* A card BeeZilla is working on for you (board.act, by voice): lit for a moment. */
+.wb-card.wb-pilot { box-shadow: 0 0 0 3px var(--ob-yellow), 0 0 24px rgba(255, 193, 7, 0.55); transition: box-shadow 0.2s; }
+.wb-card.wb-k-area.wb-pilot { border-style: solid; border-color: var(--ob-yellow); box-shadow: 0 0 24px rgba(255, 193, 7, 0.35); }
+@media (prefers-reduced-motion: reduce) { .wb-card.wb-pilot { transition: none; } }

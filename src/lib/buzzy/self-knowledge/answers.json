@@ -644,7 +644,8 @@
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "Also on the board:"
-      },      {
+      },
+      {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "Connected to BeeZilla's steps"
       },
@@ -998,6 +999,124 @@
     ],
     "surfaces": [
       "desktop"
+    ]
+  },
+  {
+    "id": "sk-051",
+    "q": "What can you do?",
+    "a": "I make things with you by talking: pictures, music, 3D models, short videos, documents, spreadsheets and slides, and I can look things up on the web. Everything I do appears on the Idea Board as I do it, so you can see each step and change any of it, and I can work the board for you when you ask (zoom out, add a note, connect two cards, make an area). Before building something from scratch I check what already exists: your Library, your recipes and simple starting boards. Tell me about one thing you're struggling to do, even if you're not sure I can help with it, and I'll see what I can do about it.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/inspirationSearch.ts",
+        "symbol": "name: \"search_inspiration\""
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function boardStep"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Connected to BeeZilla's steps"
+      },
+      {
+        "file": "src/lib/buzzy/self-knowledge/index.ts",
+        "symbol": "export const OPENER_QUESTION"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-052",
+    "q": "What makes BeeZilla unique, and different from other AI tools?",
+    "a": "Four things. I don't reinvent the wheel: before making something from scratch I look for what has already been done (your Library, your recipes and simple starting boards) and start you from there. You see the work as it happens: the Idea Board draws each step, and you can change any step, connect your own pictures and notes to it, or have me do it by voice. What works becomes yours to keep: cordon off a piece of the board as an orchestration, save it as a recipe, and soon sell it, trade it for Honey Drops or Honey, or open-source it, with what it made shown as examples. And it's one button: Talk to BeeZilla, with Pause and Continue, your own AI key if you want, and privacy modes you control.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/inspirationSearch.ts",
+        "symbol": "Don't reinvent the wheel"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Sell this orchestration"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Make an area"
+      },
+      {
+        "file": "docs/beezilla/SELLING-POINTS.md",
+        "symbol": "don't reinvent the wheel"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-053",
+    "q": "Can BeeZilla work the Idea Board for me?",
+    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; fold the board away. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function boardStep"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "function act("
+      },
+      {
+        "file": "public/buzzy/pilot.js",
+        "symbol": "a.do === \"board\""
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-054",
+    "q": "How do I use the Idea Board's controls?",
+    "a": "Down the left side are the tools: Select (V), Move the board (H), Note (N), agent.md (A), Skill or step (K), Output, what you want at the end (O), and Upload (U). In the bottom-right corner: zoom out and in, the percentage (back to 100%), Fit everything (Alt/Option+1), History, and the keyboard button (F1) that lists every shortcut. Drag on empty board to select cards; drag a card to move it; double-click a card to edit it; Delete removes; Ctrl/⌘+Z undoes. To connect two cards, drag the dot on a card's right edge onto another card. With cards selected, the bar above them has Create recipe, Make an area, Sell this orchestration and Remove. At the top are the Talk bar, Sell this orchestration and Fold away. Or just tell me what you want and I'll do it.",
+    "sources": [
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "[\"agent\", \"agent.md — how to work\", \"A\"]"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Fit everything (Alt/Option+1)"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Keyboard shortcuts (F1)"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Make an area"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-055",
+    "q": "I'm lost on the Idea Board. How do I see everything again?",
+    "a": "Say “show me the whole board” and I'll zoom out to fit everything, or press Fit everything in the bottom-right corner (Alt/Option+1). Back to 100% is the percentage between the zoom buttons (Ctrl/⌘+0). Select a card and press Alt/Option+2 to zoom to it, or ask me to zoom in on it by name. Hold Space and drag, or use the Move tool (H), to move around.",
+    "sources": [
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Fit everything (Alt/Option+1)"
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export const LOST_OFFER"
+      }
+    ],
+    "surfaces": [
+      "website"
     ]
   }
 ]

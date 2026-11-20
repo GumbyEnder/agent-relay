@@ -943,6 +943,9 @@
     return "the end result “" + (t || "Untitled") + "”";
   }
 
+  // The board on the page now, for BeeZilla's on-screen steps (pilot.js).
+  var mountedBoard = null;
+
   function mount(host, opts) {
     opts = opts || {};
     var boardId = String(opts.boardId || "default").slice(0, 80);
@@ -2667,6 +2670,356 @@
       return c;
     }
 
+    // ── BeeZilla works the board for you ─────────────────────────────────
+    // Owner, 2026-11-20: "a comprehensive list of tools so that you can navigate and do
+    // whatever you need to do. By just talking to Beezilla… it's got to be able to do
+    // everything the person does within the board for the person by voice command."
+    // pilot.js calls board.act(step) with a step from the closed list in boardPilot.ts
+    // (never one the model wrote). Each step glides to what it touches and lights it,
+    // can be undone like the person's own edits (Ctrl/⌘+Z), and answers { ok, note }
+    // in plain words for the steps card.
+    var CARD_NOUNS = /\b(?:cards?|sticky notes?|notes?|steps?|skills?|agent\.? ?md|agent md|instructions(?: card)?|end results?|outputs?|results?|pictures?|photos?|images?|pics?|songs?|tracks?|music|videos?|clips?|3d models?|models?|documents?|docs?|files?|links?|areas?|orchestrations?|box(?:es)?)\b/g;
+    var FILLER = { the: 1, a: 1, an: 1, my: 1, our: 1, your: 1, that: 1, this: 1, these: 1, those: 1, one: 1, on: 1, board: 1, whiteboard: 1, of: 1, about: 1, called: 1, named: 1, with: 1, "for": 1, from: 1, "in": 1, to: 1, and: 1, it: 1, them: 1 };
+    function lower(s) { return String(s || "").toLowerCase().replace(/[“”"'‘’]/g, "").replace(/\s+/g, " ").trim(); }
+    function kindWanted(p) {
+      if (/\b(?:sticky )?notes?\b/.test(p)) return "note";
+      if (/\b(?:steps?|skills?)\b/.test(p)) return "skill";
+      if (/\bagent\.? ?md\b|\bagent md\b|\binstructions\b/.test(p)) return "agent";
+      if (/\b(?:end results?|outputs?)\b/.test(p)) return "end";
+      if (/\b(?:pictures?|photos?|images?|pics?)\b/.test(p)) return "image";
+      if (/\b(?:songs?|music|tracks?)\b/.test(p)) return "track";
+      if (/\b(?:videos?|clips?)\b/.test(p)) return "video";
+      if (/\b(?:3d|models?)\b/.test(p)) return "model";
+      if (/\blinks?\b/.test(p)) return "link";
+      if (/\b(?:documents?|docs?|files?)\b/.test(p)) return "file";
+      if (/\b(?:areas?|orchestrations?|box(?:es)?)\b/.test(p)) return "area";
+      return null;
+    }
+    function kindMatches(c, want) {
+      var k = kindOf(c);
+      if (!want) return true;
+      if (want === "end") return roleOf(k) === "output" && !c.url;
+      if (want === "skill") return k === "skill" || k === "memory";
+      if (want === "link") return k === "file" && /^https?:/i.test(String(c.url || ""));
+      if (want === "file") return roleOf(k) === "output" && !!c.url && k !== "image" && k !== "track" && k !== "video" && k !== "model";
+      return k === want;
+    }
+    // The cards a phrase names: "the beach photo", "the palette note", "it", "everything".
+    function findCards(phrase) {
+      var p = lower(phrase);
+      var list = state.cards.slice();
+      if (!p) return { cards: [] };
+      if (/^(?:it|this|that|this one|that one|them|these|those|the selection|selected|the selected (?:cards?|ones?))$/.test(p)) {
+        return { cards: list.filter(function (c) { return selected[c.id]; }) };
+      }
+      if (/^(?:everything|all|all of it|all of them|every card|all (?:the )?cards|(?:the )?whole board|the board)$/.test(p)) {
+        return { cards: list.filter(function (c) { return kindOf(c) !== "area"; }), all: true };
+      }
+      var want = kindWanted(p);
+      var newest = /\b(?:last|latest|newest|most recent|new)\b/.test(p);
+      var oldest = /\b(?:first|oldest)\b/.test(p);
+      var words = p.replace(CARD_NOUNS, " ").split(/\s+/).filter(function (w) {
+        return w && !FILLER[w] && !/^(?:last|latest|newest|most|recent|new|first|oldest)$/.test(w);
+      });
+      var pool = list.filter(function (c) { return kindMatches(c, want); });
+      if (!words.length) {
+        if (pool.length === 1) return { cards: pool };
+        if (pool.length && newest) return { cards: [pool[pool.length - 1]] };
+        if (pool.length && oldest) return { cards: [pool[0]] };
+        return { cards: [], ambiguous: pool };
+      }
+      var scored = (want ? pool : list).map(function (c) {
+        var t = lower(c.title), b = lower(c.body);
+        var s = 0;
+        words.forEach(function (w) { if (t.indexOf(w) >= 0) s += 3; else if (b.indexOf(w) >= 0) s += 1; });
+        return { c: c, s: s };
+      }).filter(function (x) { return x.s > 0; });
+      if (!scored.length) return { cards: [] };
+      scored.sort(function (x, y) { return y.s - x.s; });
+      var top = scored.filter(function (x) { return x.s === scored[0].s; });
+      if (top.length === 1) return { cards: [top[0].c] };
+      if (newest) return { cards: [top[top.length - 1].c] };
+      return { cards: [], ambiguous: top.map(function (x) { return x.c; }) };
+    }
+    function nameOf(c) { return "“" + String(c.title || KIND_LABEL[kindOf(c)] || "card").slice(0, 60) + "”"; }
+    function notFound(r, phrase) {
+      if (r.ambiguous && r.ambiguous.length) return "Which one? I see " + r.ambiguous.slice(0, 4).map(nameOf).join(", ") + (r.ambiguous.length > 4 ? " and more" : "") + ".";
+      return "I couldn't find " + (phrase ? "“" + String(phrase).slice(0, 60) + "”" : "that") + " on the board.";
+    }
+    function lightUp(list) {
+      list.forEach(function (c) {
+        var n = nodes[c.id];
+        if (!n) return;
+        n.classList.add("wb-pilot");
+        setTimeout(function () { n.classList.remove("wb-pilot"); }, 1600);
+      });
+    }
+    function bring(list) {
+      if (!list.length) return;
+      world.classList.add("wb-glide");
+      if (list.length === 1 && kindOf(list[0]) !== "area") reveal(list[0]); else frame(list, 1);
+      setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
+    }
+    function selectOnly(list) {
+      selected = {};
+      selectedLink = null;
+      list.forEach(function (c) { selected[c.id] = true; });
+      drawLinks();
+      paintSelection();
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function nextSpot() {
+      // Right of what's there, at the height of the view: the work reads left to right.
+      var b = bounds(state.cards.filter(function (c) { return kindOf(c) !== "area"; }));
+      var v = viewCentre();
+      return b ? freeSpot(b.x2 + 60, Math.max(b.y1, Math.min(v.y, b.y2))) : v;
+    }
+    function made(card, at) {
+      var c = addCard(card, at || nextSpot());
+      if (!c) return null;
+      selectOnly([c]);
+      bring([c]);
+      lightUp([c]);
+      return c;
+    }
+    function saveRecipeAs(name, list) {
+      var keep = selected;
+      selectOnly(list);
+      var graph = selectionGraph();
+      selected = keep;
+      paintSelection();
+      if (!graph.nodes.length) return Promise.resolve({ ok: false, note: "There's nothing to save in it yet." });
+      return fetch("/api/buzzy/board-recipes", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name || "My recipe", graph: graph }),
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.j || !res.j.ok) return { ok: false, note: (res.j && res.j.error) || "The recipe could not be saved." };
+          if (opts.onRecipe) opts.onRecipe(res.j.recipe);
+          return { ok: true, note: "Saved “" + res.j.recipe.name + "” under Recipes, ready to run." };
+        })
+        .catch(function () { return { ok: false, note: "The recipe could not be saved — check the connection." }; });
+    }
+
+    function act(a) {
+      a = a || {};
+      var ok = function (note) { return Promise.resolve({ ok: true, note: note || "" }); };
+      var no = function (note) { return Promise.resolve({ ok: false, note: note }); };
+      var r, c, t, list;
+      closeEditor();
+      switch (String(a.value || "")) {
+        // Seeing the board
+        case "fit":
+          world.classList.add("wb-glide"); fit(); setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
+          return ok(state.cards.length ? "Here's the whole board." : "The board is empty.");
+        case "zoomIn": world.classList.add("wb-glide"); zoomBy(1.5); setTimeout(function () { world.classList.remove("wb-glide"); }, 420); return ok();
+        case "zoomOut": world.classList.add("wb-glide"); zoomBy(1 / 1.5); setTimeout(function () { world.classList.remove("wb-glide"); }, 420); return ok();
+        case "zoom100": world.classList.add("wb-glide"); zoomTo(1); setTimeout(function () { world.classList.remove("wb-glide"); }, 420); return ok("Back to 100%.");
+        case "focus":
+          r = findCards(a.target);
+          if (!r.cards.length) return no(notFound(r, a.target));
+          selectOnly(r.cards);
+          world.classList.add("wb-glide"); frame(r.cards, 1.5); setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
+          lightUp(r.cards);
+          return ok(r.cards.length === 1 ? "Here's " + nameOf(r.cards[0]) + "." : "Here they are.");
+        // Making cards
+        case "note":
+          c = made({ kind: "note", title: a.title || "Note", body: a.text || "", user: true });
+          if (!c) return no("The board is full — remove a few cards first.");
+          if (!a.text) { openEditor(c); return ok("Added a note. Say what it should say, or type it in."); }
+          return ok("Added the note.");
+        case "step":
+          c = made({ kind: "skill", title: a.title || "New step", body: a.text || "", user: true });
+          if (!c) return no("The board is full — remove a few cards first.");
+          if (!a.title) openEditor(c);
+          return ok("Added the step " + nameOf(c) + ".");
+        case "agent":
+          c = made({ kind: "agent", title: "agent.md", body: a.text || "", user: true });
+          if (!c) return no("The board is full — remove a few cards first.");
+          openEditor(c);
+          return ok("Added an agent.md. Write how BeeZilla should work, then Save.");
+        case "end":
+          c = made({ kind: "document", title: a.title || "End result", body: a.text || "", user: true });
+          if (!c) return no("The board is full — remove a few cards first.");
+          if (!a.title) openEditor(c);
+          return ok("Added the end result " + nameOf(c) + ".");
+        // Lines
+        case "connect":
+        case "disconnect":
+          r = findCards(a.target);
+          t = findCards(a.to);
+          if (r.cards.length !== 1) return no(notFound(r, a.target));
+          if (t.cards.length !== 1) return no(notFound(t, a.to));
+          c = r.cards[0]; t = t.cards[0];
+          if (c.id === t.id) return no("That's the same card.");
+          bring([c, t]);
+          lightUp([c, t]);
+          if (a.value === "disconnect") {
+            list = state.links.filter(function (l) { return (l.from === c.id && l.to === t.id) || (l.from === t.id && l.to === c.id); });
+            if (!list.length) return no(nameOf(c) + " and " + nameOf(t) + " aren't joined.");
+            snapshot();
+            state.links = state.links.filter(function (l) { return list.indexOf(l) < 0; });
+            drawLinks();
+            persist();
+            return ok("Removed the line between " + nameOf(c) + " and " + nameOf(t) + ".");
+          }
+          if (state.links.some(function (l) { return (l.from === c.id && l.to === t.id) || (l.from === t.id && l.to === c.id); })) return ok("They're already joined.");
+          snapshot();
+          link(c.id, t.id, null, null, true);
+          persist();
+          return ok("Joined " + nameOf(c) + " to " + nameOf(t) + (isStep(t) ? ": BeeZilla uses it there from your next message." : "."));
+        // Selecting, changing, removing
+        case "select":
+          r = findCards(a.target);
+          if (!r.cards.length) return no(notFound(r, a.target));
+          selectOnly(r.cards);
+          bring(r.cards);
+          return ok(r.cards.length === 1 ? "Selected " + nameOf(r.cards[0]) + "." : "Selected " + r.cards.length + " cards.");
+        case "deselect":
+          clearSelection();
+          return ok();
+        case "remove":
+          r = findCards(a.target);
+          if (!r.cards.length) return no(notFound(r, a.target));
+          lightUp(r.cards);
+          return wait(500).then(function () {
+            snapshot();
+            removeCards(r.cards.map(function (x) { return x.id; }));
+            say("Removed. Ctrl/⌘+Z brings it back.", 4200);
+            return { ok: true, note: (r.cards.length === 1 ? "Removed " + nameOf(r.cards[0]) : "Removed " + r.cards.length + " cards") + ". Ctrl/⌘+Z brings it back." };
+          });
+        case "rename":
+        case "write":
+          r = findCards(a.target);
+          if (r.cards.length !== 1) return no(notFound(r, a.target));
+          c = r.cards[0];
+          snapshot();
+          if (a.value === "rename") c.title = String(a.title || c.title).slice(0, 140);
+          else { c.body = String(a.text || "").slice(0, 4000); c.user = true; }
+          fillCard(nodes[c.id], c);
+          drawLinks();
+          persist();
+          bring([c]);
+          lightUp([c]);
+          return ok(a.value === "rename" ? "Renamed it " + nameOf(c) + "." : "Changed " + nameOf(c) + ".");
+        case "edit":
+          r = findCards(a.target);
+          if (r.cards.length !== 1) return no(notFound(r, a.target));
+          c = r.cards[0];
+          selectOnly([c]);
+          bring([c]);
+          return wait(300).then(function () { openEditor(c); return { ok: true, note: "It's open: change what you like, then Save." }; });
+        case "duplicate":
+          r = findCards(a.target);
+          if (!r.cards.length) return no(notFound(r, a.target));
+          selectOnly(r.cards);
+          duplicateSelected();
+          return ok("Made a copy.");
+        case "move":
+          r = findCards(a.target);
+          if (r.cards.length !== 1) return no(notFound(r, a.target));
+          c = r.cards[0];
+          var moving = withAreaContents([c]);
+          var n0 = nodes[c.id];
+          var w = n0 ? n0.offsetWidth : 210, h = n0 ? n0.offsetHeight : 130;
+          var nx = c.x, ny = c.y;
+          if (a.to) {
+            t = findCards(a.to);
+            if (t.cards.length !== 1) return no(notFound(t, a.to));
+            t = t.cards[0];
+            var nt = nodes[t.id];
+            var tw = nt ? nt.offsetWidth : 210, th = nt ? nt.offsetHeight : 130;
+            if (a.dir === "under") { nx = t.x; ny = t.y + th + 30; }
+            else if (a.dir === "above") { nx = t.x; ny = t.y - h - 30; }
+            else if (a.dir === "leftof") { nx = t.x - w - 50; ny = t.y; }
+            else { nx = t.x + tw + 50; ny = t.y; }
+          } else {
+            var step = { left: [-260, 0], right: [260, 0], up: [0, -180], down: [0, 180] }[a.dir] || [0, 0];
+            nx += step[0]; ny += step[1];
+          }
+          snapshot();
+          var dx = Math.round(nx - c.x), dy = Math.round(ny - c.y);
+          moving.forEach(function (m) { m.x += dx; m.y += dy; place(m); });
+          drawLinks();
+          persist();
+          bring([c]);
+          lightUp([c]);
+          return ok("Moved " + nameOf(c) + ".");
+        // Areas, recipes, selling
+        case "area":
+          if (a.target && a.target !== "it") r = findCards(a.target);
+          else r = { cards: state.cards.filter(function (x) { return selected[x.id] && kindOf(x) !== "area"; }) };
+          if (!r.cards.length && (!a.target || a.target === "it")) r = { cards: state.cards.filter(function (x) { return kindOf(x) !== "area"; }) };
+          list = r.cards.filter(function (x) { return kindOf(x) !== "area"; });
+          if (!list.length) return no(notFound(r, a.target));
+          c = makeArea(list, a.title);
+          if (!c) return no("Couldn't make the area.");
+          bring([c]);
+          return ok("Made the area " + nameOf(c) + ". Drag its label to move it; say “sell this orchestration” when it's ready.");
+        case "sell":
+          c = null;
+          if (a.target && !/^(?:it|this|that|this area|the area|this orchestration|the orchestration|my orchestration)$/.test(lower(a.target))) {
+            r = findCards(/\barea\b/.test(lower(a.target)) ? a.target : a.target + " area");
+            if (r.cards.length === 1 && kindOf(r.cards[0]) === "area") c = r.cards[0];
+            else return no(notFound(r, a.target));
+          } else if (a.target) {
+            c = state.cards.filter(function (x) { return selected[x.id] && kindOf(x) === "area"; })[0] || null;
+            if (!c) {
+              var areas = state.cards.filter(function (x) { return kindOf(x) === "area"; });
+              if (areas.length === 1) c = areas[0];
+            }
+          }
+          openSell(c ? c.id : null);
+          if (a.choice && SHARE_OPTIONS.some(function (o) { return o[0] === a.choice; })) {
+            sellPick = a.choice;
+            sellStep = "examples";
+            paintSell();
+            focusFirst();
+            return ok("Sell this orchestration is open (coming soon). It's asking whether what it made can show as examples.");
+          }
+          return ok("Sell this orchestration is open (coming soon): pick how to share it.");
+        case "recipe":
+          r = a.target ? findCards(a.target) : { cards: state.cards.filter(function (x) { return selected[x.id]; }) };
+          if (!r.cards.length && !a.target) r = findCards("everything");
+          list = withAreaContents(r.cards).filter(function (x) { return kindOf(x) !== "area"; });
+          if (!list.length) return no(notFound(r, a.target));
+          lightUp(list);
+          var agentCard = list.filter(function (x) { return kindOf(x) === "agent"; })[0];
+          return saveRecipeAs(a.title || (agentCard && agentCard.title !== "agent.md" ? agentCard.title : "My recipe"), list);
+        // Panels, undo
+        case "history": showHistory(true); return ok("Here's the board's History: pick a version to go back to.");
+        case "keys": showKeys(true); return ok("Here are the board's shortcuts.");
+        case "undo":
+          if (!undo.length) return no("There's nothing to undo.");
+          redo.push(JSON.stringify({ cards: state.cards, links: state.links }));
+          restore(undo.pop());
+          return ok("Undone.");
+        case "redo":
+          if (!redo.length) return no("There's nothing to redo.");
+          undo.push(JSON.stringify({ cards: state.cards, links: state.links }));
+          restore(redo.pop());
+          return ok("Done again.");
+        // Something they already have, or a simple starting board
+        case "find":
+          if (!a.url) return no("Nothing like that in your Library yet.");
+          c = state.cards.filter(function (x) { return x.url === a.url; })[0];
+          if (c) { selectOnly([c]); bring([c]); lightUp([c]); return ok(nameOf(c) + " is already on the board."); }
+          c = made({ title: a.title || "From your Library", url: a.url, contentType: a.contentType || "" });
+          if (!c) return no("The board is full — remove a few cards first.");
+          return ok("Put " + nameOf(c) + " from your Library on the board.");
+        case "start":
+          var g = a.graph;
+          if (!g || !Array.isArray(g.nodes) || !g.nodes.length) return no("I couldn't find a simple starting board for that.");
+          if (g.nodes.length > 6) return no("That one is too big to start from; ask for a simpler one.");
+          addGraph(g);
+          return ok("Put a simple starting board for “" + String(a.title || "it").slice(0, 60) + "” on your board. Change any card to make it yours.");
+        default:
+          return no("BeeZilla doesn't know how to do that on the board yet.");
+      }
+    }
+
     // ── A saved recipe, back on the board ────────────────────────────────
     function addGraph(graph) {
       if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.length) return;
@@ -2765,7 +3118,7 @@
     paintSync();
     pull(eng);
 
-    return {
+    var api = {
       root: root,
       dock: dock,
       side: side,
@@ -2776,6 +3129,7 @@
         return made;
       },
       addGraph: addGraph,
+      act: act,
       instructions: instructions,
       fit: fit,
       say: say,
@@ -2798,12 +3152,17 @@
         // Folded away or switched: the board still finishes saving to the account.
         if (state.sync.dirty && !eng.off) push(eng);
         root.remove();
+        if (mountedBoard === api) mountedBoard = null;
       },
     };
+    mountedBoard = api;
+    return api;
   }
 
   window.BeeZillaWhiteboard = {
     mount: mount,
+    /** The board open on the page, or null: BeeZilla's steps run on it (board.act). */
+    current: function () { return mountedBoard && mountedBoard.isOpen() ? mountedBoard : null; },
     kindOf: kindOf,
     /** The person's edits on a board that is not on screen (folded away). */
     instructionsFor: function (boardId) {

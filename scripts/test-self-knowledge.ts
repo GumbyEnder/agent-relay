@@ -20,7 +20,9 @@ function check(ok: unknown, label: string): void {
 }
 
 // ── The answer base ──────────────────────────────────────────────────
-check(SELF_ANSWERS.length === 50, `exactly 50 answers (got ${SELF_ANSWERS.length})`);
+// 50 until 2026-11-20; the owner: "Beezilla has got to know about itself. That is a core
+// principle" (what it can do, what makes it different, working and reading the board).
+check(SELF_ANSWERS.length === 55, `exactly 55 answers (got ${SELF_ANSWERS.length})`);
 const ids = new Set<string>();
 const root = resolve(import.meta.dirname, "..");
 const fileText = new Map<string, string>();
@@ -64,6 +66,13 @@ const about = [
   "Is there a desktop app?",
   "what does the do it button do?",
   "can you remember things about my business?",
+  "What makes you unique?",
+  "what can you do that others can't?",
+  "How are you different from ChatGPT?",
+  "how do I connect two cards?",
+  "How do I zoom out?",
+  "what are the controls on the idea board?",
+  "I'm lost on the board, what do I do?",
 ];
 const notAbout = [
   "Write a menu for my cafe.",
@@ -86,6 +95,8 @@ const notAbout = [
   "Give me five names for a bakery",
   "turn this into a slide deck",
   "Who won the World Cup in 2022?",
+  "How do I connect my printer to wifi?",
+  "What makes a logo memorable?",
   "",
 ];
 for (const m of about) check(isAboutBeeZilla(m), `about BeeZilla: ${JSON.stringify(m)}`);
@@ -108,6 +119,12 @@ const expected: [string, string][] = [
   ["What is the idea board?", "What is the Idea Board (formerly the Whiteboard)?"],
   ["Can BeeZilla send emails?", "Can BeeZilla send emails for me?"],
   ["what formats can I download?", "What file formats can I download?"],
+  ["What makes you unique?", "What makes BeeZilla unique, and different from other AI tools?"],
+  ["what can you do that others can't?", "What makes BeeZilla unique, and different from other AI tools?"],
+  ["what can you do?", "What can you do?"],
+  ["can you work the idea board for me?", "Can BeeZilla work the Idea Board for me?"],
+  ["what are the controls on the idea board?", "How do I use the Idea Board's controls?"],
+  ["I'm lost on the board, how do I see everything?", "I'm lost on the Idea Board. How do I see everything again?"],
 ];
 for (const [message, question] of expected) {
   const top = relevantAnswers(message, 3).map((e) => e.id);

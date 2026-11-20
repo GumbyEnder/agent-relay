@@ -10,6 +10,10 @@
  *   - a step whose control is not on the page stops the run and says which;
  *   - a step marked `ask` (less privacy, the microphone) waits for Allow or Skip.
  * It only presses this page's own buttons, the way the owner would.
+ * Steps on the Idea Board itself ("zoom out", "connect the beach photo to the poster
+ * step", "add a note saying…") are the board's own (whiteboard.js `act`): the board
+ * opens first if it's folded, then glides to and lights what it changes, and its own
+ * words ("Joined “beach.jpg” to “Draw the poster”.") go under the step.
  * Plain IIFE, no dependencies.
  */
 (function () {
@@ -303,12 +307,32 @@
     return "ok";
   };
 
+  // A step on the Idea Board: open it if it's folded, then the board does the step.
+  Run.prototype.board = async function (a) {
+    var W = window.BeeZillaWhiteboard;
+    var b = W && W.current ? W.current() : null;
+    if (!b) {
+      var res = await this.press({ sel: "#boardToggle", name: "the Idea Board button", already: function (el) { return pressed(el); } });
+      if (res === "stopped") return { stopped: true };
+      for (var t = 0; t < 30 && !(b = W && W.current ? W.current() : null); t++) await wait(100);
+      if (!b) return { ok: false, note: "Couldn't open the Idea Board." };
+      await wait(300);
+    }
+    if (this.stopped) return { stopped: true };
+    try {
+      var out = await b.act(a);
+      return out && typeof out === "object" ? out : { ok: true, note: "" };
+    } catch (e) {
+      return { ok: false, note: "That didn't work on the board." };
+    }
+  };
+
   Run.prototype.play = async function () {
     var n = this.actions.length;
     for (var i = 0; i < n; i++) {
       if (this.stopped) return;
       var a = this.actions[i];
-      var list = presses(a);
+      var list = a.do === "board" ? [] : presses(a);
       if (!list) { this.set(i, "failed", "BeeZilla doesn't know how to do this here."); return this.end("Couldn't finish."); }
       if (a.ask) {
         var yes = await this.ask(i);
@@ -317,6 +341,16 @@
       }
       this.set(i, "doing", "");
       this.status.textContent = "Step " + (i + 1) + " of " + n + "…";
+      if (a.do === "board") {
+        var did = await this.board(a);
+        if (did.stopped || this.stopped) return;
+        this.set(i, did.ok ? "done" : "failed", did.note || "");
+        if (!did.ok) {
+          for (var q = i + 1; q < n; q++) this.set(q, "stopped", "Not done");
+          return this.end("Couldn't finish.");
+        }
+        continue;
+      }
       for (var j = 0; j < list.length; j++) {
         var result = await this.press(list[j]);
         if (result === "stopped") return;
