@@ -45,6 +45,7 @@ try {
           SET state = 'interrupted',
               message = 'interrupted, nothing charged',
               charged_cents = 0,
+              charged_drops = 0,
               finished_at = COALESCE(finished_at, now()),
               updated_at = now()
         WHERE state IN ('queued', 'running')

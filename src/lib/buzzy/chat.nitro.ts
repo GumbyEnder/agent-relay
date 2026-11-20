@@ -891,8 +891,11 @@ export default defineEventHandler(async (event) => {
         state: view.job.state,
         message: view.job.message,
         // Fixed by finishDealMemoJob / the reaper; the card must be able to say
-        // the promise out loud without composing it.
+        // the promise out loud without composing it. `chargedCents` is the E
+        // field (cents, always 0 for this lane); `chargedDrops` is what the
+        // Honey Drops ledger actually moved in phase F.
         chargedCents: Number(view.job.charged_cents ?? 0),
+        chargedDrops: Number(view.job.charged_drops ?? 0),
         stages: view.stages.map((s) => ({ key: s.stage_key, label: s.label, state: s.state, note: s.note })),
         files: view.files,
         summary,

@@ -38,6 +38,8 @@ export interface DealMemoJobRow {
   state: DealMemoState;
   message: string | null;
   charged_cents: number;
+  /** F: what the Honey Drops ledger moved. Cents stay 0 for this lane. */
+  charged_drops: number;
   inputs: unknown;
   summary: unknown;
   created_at: string;
@@ -175,6 +177,9 @@ export async function finishDealMemoJob(
             message = $3,
             summary = $4::jsonb,
             charged_cents = $5,
+            -- F: the wallet unit. A finish never charges; chargeDealMemoRun does,
+            -- and only after this returns true on a done transition.
+            charged_drops = 0,
             finished_at = COALESCE(finished_at, now()),
             updated_at = now()
       WHERE job_id = $1
@@ -211,6 +216,7 @@ export async function sweepInterruptedDealMemoJobs(
         SET state = 'interrupted',
             message = 'interrupted, nothing charged',
             charged_cents = 0,
+            charged_drops = 0,
             finished_at = COALESCE(finished_at, now()),
             updated_at = now()
       WHERE state IN ('queued', 'running')
