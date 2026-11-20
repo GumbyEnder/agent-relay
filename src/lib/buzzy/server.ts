@@ -823,7 +823,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       ? newestMade
       : null;
   // A picture connected on the board is the one a change is about.
-  const boardPictureChange = boardPictureIds.length > 0 && !isNewPictureAsk(message) && isPictureChange(message);
+  // Only when the words are about how something looks: "make it shorter" with a
+  // picture on the board is about a text, not the picture.
+  const LOOKS = /\b(?:pictures?|images?|photos?|pics?|drawings?|colou?rs?|red|orange|yellow|green|blue|purple|pink|black|white|grey|gray|gold|silver|dark(?:er)?|light(?:er)?|bright(?:er)?|dim(?:mer)?|night|day(?:time)?|sunset|sunrise|sky|clouds?|background|foreground|style|cartoon|realistic|watercolou?r|painting|sketch|shadows?|glow|blur(?:ry)?|sharp(?:er)?|zoom(?:ed)?|crop|bigger|smaller|larger|wider|taller|face|eyes|hair|hat|dog|cat|person|people|tree|trees|house|car|logo|title text|font|look|looks)\b/i;
+  const boardPictureChange = boardPictureIds.length > 0 && !isNewPictureAsk(message) && isPictureChange(message) && LOOKS.test(message);
   const systemPrompt =
     persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
 
@@ -1060,7 +1063,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         prompt = changing ? changePrompt(message) : boardReferencePrompt(message, refs.length);
       }
     }
-    if (!referenceImages && pictureToChange) {
+    if (!referenceImages && pictureToChange && !boardPictureChange) {
       try {
         const pic = await sql<{ body: Uint8Array; content_type: string | null }>`
           SELECT body, content_type FROM buzzy_assets WHERE user_id = ${userId} AND id = ${pictureToChange.id} LIMIT 1
@@ -1075,10 +1078,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
     // A change to a connected picture that couldn't be read is not a request for a new
     // picture from those few words ("make it at night" alone): nothing is drawn.
-    const nothingToChange = !referenceImages && !pictureToChange && !isImageRequest(message, { history });
+    const nothingToChange = !referenceImages && (boardPictureChange || (!pictureToChange && !isImageRequest(message, { history })));
     const verdict = nothingToChange ? null : await checkQuota({ userId, scope: "image", units: 1 });
     if (!verdict) {
-      /* nothing to draw from */
+      if (boardPictureChange) {
+        messages[0]!.content +=
+          "\n\nNo picture was drawn this turn: the picture they connected on their board could not be read. Say so in one " +
+          "sentence and suggest putting the picture on the board again. Do not describe a changed picture.";
+      }
     } else if (!verdict.ok) {
       artRefusal = { code: verdict.code ?? "refused", error: verdict.error ?? "quota refused" };
       messages[0]!.content +=

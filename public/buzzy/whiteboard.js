@@ -824,7 +824,7 @@
       lines.push("Also on the board:");
       Array.prototype.push.apply(lines, also);
     }
-    var text = lines.join("\n").slice(0, BOARD_TEXT_MAX);
+    var text = lines.join("\n").slice(0, feeds.length ? BOARD_TEXT_MAX : 4000);
     return pictures.length ? "[[board-pictures: " + pictures.join(",") + "]]\n" + text : text;
   }
   var BOARD_TEXT_MAX = 7800;
@@ -1826,7 +1826,7 @@
     // ── Editing a card (instructions, a skill's steps, the output) ───────────
     var editor = null;
     function openEditor(c) {
-      closeEditor();
+      closeEditor(c.id);
       var k = kindOf(c);
       editor = el("form", "wb-editor");
       editor.setAttribute("role", "dialog");
@@ -1880,9 +1880,11 @@
       editor.style.top = clamp(r.top - br.top, 8, Math.max(8, br.height - 320)) + "px";
       (c.body ? b : t).focus();
     }
-    function closeEditor() {
+    function closeEditor(keepId) {
       if (editor) { editor.remove(); editor = null; }
-      // A step made by letting go of a line on empty board, then left blank: gone again.
+      // A step made by letting go of a line on empty board, then left blank: gone again
+      // (unless it is the card whose editor is opening now).
+      if (keepId && keepId === blankStep) return;
       var blank = blankStep ? cardById(blankStep) : null;
       blankStep = null;
       if (blank && !String(blank.body || "").trim() && blank.title === "New step") removeCards([blank.id]);
@@ -2145,10 +2147,16 @@
     }
     function withAreaContents(list) {
       var out = list.slice();
-      list.forEach(function (c) {
-        if (kindOf(c) !== "area") return;
+      for (var i = 0; i < out.length; i++) {            // grows as areas inside areas are found
+        var c = out[i];
+        if (kindOf(c) !== "area") continue;
         areaMembers(c, state.cards).forEach(function (m) { if (out.indexOf(m) < 0) out.push(m); });
-      });
+        state.cards.forEach(function (a) {
+          if (a === c || kindOf(a) !== "area" || out.indexOf(a) >= 0) return;
+          var x = a.x + ANCHOR_X, y = a.y + ANCHOR_Y;
+          if (x >= c.x && x <= c.x + (Number(c.w) || 0) && y >= c.y && y <= c.y + (Number(c.h) || 0)) out.push(a);
+        });
+      }
       return out;
     }
     // What a drag (or an arrow key) moves: the selection, and what's inside a selected area.
@@ -2416,6 +2424,7 @@
       if (!a || !body.contains(a) || sideWrap.contains(a) || hist.contains(a)) return;
       var mod = e.ctrlKey || e.metaKey;
       if (e.key === " " && !spaceDown) { spaceDown = true; canvas.classList.add("wb-hand"); e.preventDefault(); return; }
+      if (mod && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y") && pointerBusy) { e.preventDefault(); return; }
       if (mod && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
         if (e.shiftKey) { if (redo.length) { undo.push(JSON.stringify({ cards: state.cards, links: state.links })); restore(redo.pop()); } }
@@ -2466,6 +2475,7 @@
         copy.id = uid();
         delete copy.flow;
         copy.x += 30; copy.y += 30;
+        delete copy.share; delete copy.examples; delete copy.shareAt;   // a copy is not yet shared
         map[c.id] = copy.id;
         state.cards.push(copy);
         renderCard(copy);
