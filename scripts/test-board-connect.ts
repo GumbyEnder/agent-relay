@@ -104,6 +104,10 @@ ok("with no lines, the summary is exactly main's, on every board", () => {
     truthy(!/Connected to BeeZilla/.test(text), "no Connected section without lines");
     truthy(!/\[\[board-pictures/.test(text), "no pictures line without lines");
   }
+  // A long board without lines is cut where main cuts it.
+  const many: Card[] = Array.from({ length: 24 }, (_, i) => ({ id: "z" + i, kind: "note", title: "Idea " + i, body: "word ".repeat(60), x: 0, y: i * 150 }));
+  if (before) eq(now.summary(many), before.summary(many), "a long board, cut at the same place:");
+  truthy(now.summary(many).length <= 4000, "no lines: at most 4,000 characters, as on main");
   // Lines that lead to no step change nothing either.
   const noStep = now.summary([note, photo, web], [L("n", "p"), L("p", "w")]);
   if (before) eq(noStep, before.summary([note, photo, web], [L("n", "p"), L("p", "w")]), "lines between things only:");
@@ -221,6 +225,8 @@ ok("server.ts reads the pictures line before the model sees the board, and draws
   truthy(/boardText = board\.text/.test(src), "the model gets the text without the line");
   truthy(/WHERE user_id = \$\{userId\} AND id = \$\{id\}/.test(src), "connected pictures load by the person's own user id");
   truthy(/boardPictureChange/.test(src) && /Drawing from your board/.test(src), "a change or a new picture from the board");
+  truthy(/isPictureChange\(message\) && LOOKS\.test\(message\)/.test(src), "a connected picture changes only when the words are about how it looks");
+  truthy(/pictureToChange && !boardPictureChange/.test(src) && /could not be read/.test(src), "an unreadable connected picture never falls back to another one, and the reply says so");
   const chat = readFileSync("src/lib/buzzy/chat.nitro.ts", "utf8");
   truthy(/body\.boardInstructions\.slice\(0, 8200\)/.test(chat), "the route keeps the longer summary");
 });
