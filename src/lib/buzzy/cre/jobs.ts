@@ -149,6 +149,14 @@ export async function finishDealMemoStage(
  * and the reaper never do. Charged cents are written only on `done`, and the
  * argument is clamped to zero for every other state so a failed run cannot
  * carry a charge by accident.
+ *
+ * TERMINAL-STATE GUARD. Only a queued or running row can be finished. A late
+ * finish — the process was swept as `interrupted` at boot while its detached
+ * run was still alive, or a run finished twice — must not rewrite an already
+ * terminal row: `interrupted, nothing charged` is a promise the product made,
+ * and a second `done` must not attach a charge to work that was announced as
+ * uncharged. Returns true when the transition applied, false when it was
+ * refused, so tests and callers can tell the difference.
  */
 export async function finishDealMemoJob(
   q: DealMemoQuery,
@@ -159,9 +167,9 @@ export async function finishDealMemoJob(
     summary?: unknown;
     chargedCents?: number;
   },
-): Promise<void> {
+): Promise<boolean> {
   const charged = input.state === "done" ? Math.max(0, Math.trunc(input.chargedCents ?? 0)) : 0;
-  await q(
+  const rows = await q<{ job_id: string }>(
     `UPDATE buzzy_deal_memo_jobs
         SET state = $2,
             message = $3,
@@ -169,9 +177,12 @@ export async function finishDealMemoJob(
             charged_cents = $5,
             finished_at = COALESCE(finished_at, now()),
             updated_at = now()
-      WHERE job_id = $1`,
+      WHERE job_id = $1
+        AND state IN ('queued', 'running')
+      RETURNING job_id`,
     [input.jobId, input.state, input.message ?? null, JSON.stringify(input.summary ?? null), charged],
   );
+  return rows.length > 0;
 }
 
 /**
@@ -265,6 +276,30 @@ export async function readDealMemoJob(
       url: `/api/buzzy/assets/${Number(f.id)}`,
     })),
   };
+}
+
+/**
+ * Which sealed bundle may this request run?
+ *
+ * The recipe hash is deployment configuration (BZ_DEAL_MEMO_RECIPE), never a
+ * client choice: loadDealMemoMethod opens whatever hash it is handed if the KEK
+ * can, so a caller that picked its own hash would be running a bundle the
+ * product did not publish. The chat path has always used the configured hash;
+ * the HTTP route now goes through this function so it cannot drift.
+ *
+ * Returns the refusal the route should send, or null when the request may run
+ * on the configured hash. A caller that sends the configured hash (or none) is
+ * fine; a caller that sends any other hash is told so rather than ignored.
+ */
+export function dealMemoRecipeRefusal(
+  configuredHash: string | null,
+  supplied: unknown[],
+): "not_configured" | "recipe_fixed" | null {
+  if (!configuredHash) return "not_configured";
+  const wants = supplied
+    .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    .map((v) => v.trim().toLowerCase());
+  return wants.some((h) => h !== configuredHash) ? "recipe_fixed" : null;
 }
 
 /** Runs started by this account in the last rolling 24h, for a daily cap. */

@@ -42,7 +42,7 @@ import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { bindRole, DEAL_ROLES, decideDuplicate, isDealRole, readPhoto } from "./cre/intake";
-import { dealMemoJobsToday, readDealMemoJob } from "./cre/jobs";
+import { dealMemoJobsToday, readDealMemoJob, dealMemoRecipeRefusal } from "./cre/jobs";
 import { dealMemoConfigured, dealMemoRecipeHash, startDealMemoRun, type DealMemoLoanRequest } from "@/lib/private/dealMemoRun";
 import { contentTypeForKind, sniffKind } from "./cre/bytes";
 import { documentContentFromMarkdown, markdownTableToCsv } from "./cre/outputs";
@@ -923,10 +923,28 @@ export default defineEventHandler(async (event) => {
           code: "loan_incomplete",
         };
       }
-      const recipeHash = typeof raw.recipeHash === "string" && /^[a-f0-9]{64}$/.test(raw.recipeHash)
-        ? raw.recipeHash
-        : dealMemoRecipeHash();
+      // The recipe hash is configuration, never a client choice: a caller must
+      // not point this lane at a different sealed bundle, because
+      // loadDealMemoMethod will open whatever hash it is given if the KEK can.
+      // The chat path already uses dealMemoRecipeHash(); this path now does
+      // the same, via one pure decision function the tests can reach. Accept
+      // either placement a caller might have used (top level or inside loan).
+      const recipeHash = dealMemoRecipeHash();
+      const refusal = dealMemoRecipeRefusal(recipeHash, [body.recipeHash, raw.recipeHash]);
+      if (refusal === "not_configured") {
+        setResponseStatus(event, 503);
+        return { ok: false, error: "No deal-memo recipe is published on this deployment.", code: "not_configured" };
+      }
+      if (refusal === "recipe_fixed") {
+        setResponseStatus(event, 400);
+        return {
+          ok: false,
+          error: "This lane runs the published deal-memo recipe; recipeHash is not a client choice.",
+          code: "recipe_fixed",
+        };
+      }
       if (!recipeHash) {
+        // Unreachable through dealMemoRecipeRefusal, but keeps the type real.
         setResponseStatus(event, 503);
         return { ok: false, error: "No deal-memo recipe is published on this deployment.", code: "not_configured" };
       }
