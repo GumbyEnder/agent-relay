@@ -896,6 +896,17 @@ export default defineEventHandler(async (event) => {
         // Honey Drops ledger actually moved in phase F.
         chargedCents: Number(view.job.charged_cents ?? 0),
         chargedDrops: Number(view.job.charged_drops ?? 0),
+        // The server's own sentence for a run that did not move money for a
+        // reason (insufficient, no wallet, an unreadable price). Null on a true
+        // free run: the card says "Nothing charged" by itself and the two must
+        // not read the same to the person paying (room 7886).
+        chargeLine: (() => {
+          const c = summary && typeof (summary as Record<string, unknown>).charge === "object"
+            ? ((summary as Record<string, unknown>).charge as Record<string, unknown>)
+            : null;
+          if (!c || c.reason === "free" || typeof c.line !== "string") return null;
+          return c.line;
+        })(),
         stages: view.stages.map((s) => ({ key: s.stage_key, label: s.label, state: s.state, note: s.note })),
         files: view.files,
         summary,

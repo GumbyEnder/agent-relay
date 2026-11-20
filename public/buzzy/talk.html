@@ -2897,6 +2897,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               });
               // The card must not invent a price: the server's number is the only one.
               msg.dealMemoCharge = Number(p.chargedDrops || 0);
+              // The server also says WHY money did not move (insufficient / no
+              // wallet / unreadable price). Carry it; only a true free run has none.
+              msg.dealMemoChargeLine = p.chargeLine ? String(p.chargeLine) : "";
               msg.dealMemoLibraryUrl = "/buzzy/library";
               renderChatMessages();
               onBoard({ state: "done", title: files[0].filename || "Deal memo", contentType: "application/octet-stream", detail: "" });
@@ -3032,11 +3035,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         }
         // The deal memo's copy in the Library, and the only price the server
-        // actually took. A zero is said as zero, never dressed as billing.
+        // actually took. A zero is said as zero, never dressed as billing — but
+        // a zero for a reason (insufficient, no wallet, unreadable price) shows
+        // the server's own sentence instead of hiding behind "Nothing charged".
         if (m.dealMemoLibraryUrl) {
           var priceLine = m.dealMemoCharge > 0
             ? "Charged " + m.dealMemoCharge + " Honey Drops."
-            : "Nothing charged for this draft.";
+            : (m.dealMemoChargeLine
+              ? String(m.dealMemoChargeLine).replace(/</g, "&lt;")
+              : "Nothing charged for this draft.");
           bubble += '<div class="bz-what">' + priceLine +
             ' <a href="' + String(m.dealMemoLibraryUrl).replace(/"/g, "") + '">A copy is in your Library</a></div>';
         }
