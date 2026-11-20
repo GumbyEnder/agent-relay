@@ -44,7 +44,7 @@ const opSnippet = (host: string | undefined) =>
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
   // to serve it.
-const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio", "shared", "join"]);
+const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio", "shared", "join", "download"]);
 // Opened by people who were sent a share or invitation link, often not BeeZilla
 // users yet: served as written, without the app's nav, account menu or nav.js.
 const STANDALONE = new Set(["shared", "join"]);
@@ -190,6 +190,10 @@ export default defineEventHandler(async (event) => {
     '<a href="/buzzy/memory" data-nav="memory">Memory</a>',
     '<a href="/buzzy/experts" data-nav="experts">Experts</a>',
     '<a href="/buzzy/recipes" data-nav="recipes">Recipes</a>',
+    // The installer lives in its own release line, but it is still a place in
+    // the product: a visitor who wants the desktop app should not have to find
+    // a README to get it.
+    '<a href="/buzzy/download" data-nav="download">Download</a>',
     '<a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>',
     '<a href="/buzzy/upload" data-nav="publish">Publish</a>',
     // Empty on purpose: the page cannot know who is signed in, and the text used to

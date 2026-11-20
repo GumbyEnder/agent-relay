@@ -350,6 +350,78 @@ function opsAuthorized(event: any): boolean {
   return got.length > 0 && got === want;
 }
 
+/**
+ * The Windows installer's address, read from the same feed installed copies
+ * read — never hard-coded, never mirrored.
+ *
+ * Two traps this closes:
+ *  1. Asset filenames carry the version (`BeeZilla-Setup-<ver>.exe`), so any
+ *     URL typed into a page rots on the next release. The feed names the
+ *     current file, so the page asks the feed instead of guessing.
+ *  2. `releases/latest` is not the desktop's feed. electron-updater was once
+ *     pointed at it (BZ-D1) and asked for releases/download/v0.3.0/latest.yml
+ *     forever. The desktop reads the `desktop-channel` release; a Download
+ *     page that advertised the Latest slot instead would show a version the
+ *     updater will never offer.
+ */
+const DESKTOP_FEED_URL = (
+  process.env.BZ_DESKTOP_FEED_URL ||
+  "https://github.com/GumbyEnder/agent-relay/releases/download/desktop-channel"
+).replace(/\/+$/, "");
+const DESKTOP_RELEASES_URL = "https://github.com/GumbyEnder/agent-relay/releases";
+const DESKTOP_CACHE_MS = 5 * 60 * 1000;
+
+type DesktopRelease = {
+  version: string;
+  fileName: string;
+  url: string;
+  size: number | null;
+  sha512: string | null;
+  feedUrl: string;
+  releaseUrl: string;
+  releasesUrl: string;
+  fetchedAt: string;
+};
+
+let desktopCache: { at: number; body: DesktopRelease } | null = null;
+
+/** latest.yml is a fixed, tiny shape written by desktop/release.mjs — no need
+ *  to pull a YAML parser in for six keys, but do not assume ordering. */
+function parseLatestYml(text: string): { version?: string; file?: string; size?: number | null; sha512?: string | null } {
+  const version = /^version:\s*(\S+)\s*$/m.exec(text)?.[1];
+  const path = /^path:\s*(\S+)\s*$/m.exec(text)?.[1];
+  const fileUrl = /^\s*-\s*url:\s*(\S+)\s*$/m.exec(text)?.[1];
+  const size = /^\s*size:\s*(\d+)\s*$/m.exec(text)?.[1];
+  const sha512 = /^sha512:\s*(\S+)\s*$/m.exec(text)?.[1] || /^\s*sha512:\s*(\S+)\s*$/m.exec(text)?.[1];
+  return { version, file: path || fileUrl, size: size ? Number(size) : null, sha512: sha512 ?? null };
+}
+
+async function readDesktopRelease(): Promise<DesktopRelease> {
+  const now = Date.now();
+  if (desktopCache && now - desktopCache.at < DESKTOP_CACHE_MS) return desktopCache.body;
+  const res = await fetch(`${DESKTOP_FEED_URL}/latest.yml`, {
+    redirect: "follow",
+    headers: { "user-agent": "beezilla-site" },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`feed answered ${res.status}`);
+  const parsed = parseLatestYml(await res.text());
+  if (!parsed.version || !parsed.file) throw new Error("feed has no version/path");
+  const body: DesktopRelease = {
+    version: parsed.version,
+    fileName: parsed.file.split("/").pop() as string,
+    url: /^https?:\/\//.test(parsed.file) ? parsed.file : `${DESKTOP_FEED_URL}/${parsed.file}`,
+    size: parsed.size ?? null,
+    sha512: parsed.sha512 ?? null,
+    feedUrl: `${DESKTOP_FEED_URL}/latest.yml`,
+    releaseUrl: `${DESKTOP_RELEASES_URL}/tag/desktop-v${parsed.version}`,
+    releasesUrl: DESKTOP_RELEASES_URL,
+    fetchedAt: new Date().toISOString(),
+  };
+  desktopCache = { at: now, body };
+  return body;
+}
+
 export default defineEventHandler(async (event) => {
   const method = getMethod(event);
   // In this (tanstack/nitro) runtime `event.path` carries the query string, so
@@ -619,6 +691,32 @@ export default defineEventHandler(async (event) => {
   // instruction alone mints nothing beyond it.
   if (method === "GET" && path === "/api/buzzy/tools") {
     return { tools: TOOL_REGISTRY };
+  }
+
+  // ── GET /api/buzzy/desktop-release — what /buzzy/download links to ──────
+  // Public on purpose: the installer is a public GitHub release asset, and the
+  // page that offers it is a front door, not a signed-in surface. No file is
+  // copied or proxied here — the page links straight at GitHub, so the bytes
+  // have exactly one home.
+  if (method === "GET" && path === "/api/buzzy/desktop-release") {
+    try {
+      const release = await readDesktopRelease();
+      setResponseHeader(event, "cache-control", "public, max-age=300");
+      return release;
+    } catch (err: any) {
+      // A feed hiccup must not turn a download page into a lie: serve the last
+      // good answer if we have one, otherwise say so and point at Releases.
+      if (desktopCache) {
+        setResponseHeader(event, "cache-control", "no-store");
+        return { ...desktopCache.body, stale: true, error: String(err?.message ?? err) };
+      }
+      setResponseStatus(event, 503);
+      return {
+        error: "Could not read the release feed just now.",
+        releasesUrl: DESKTOP_RELEASES_URL,
+        feedUrl: `${DESKTOP_FEED_URL}/latest.yml`,
+      };
+    }
   }
 
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──

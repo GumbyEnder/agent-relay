@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — Download for Windows</title>
+  <style>
+    :root { --bz-black:#0A0A0A; --bz-panel:#141414; --bz-yellow:#FFC107; --bz-yellow-dim:#B8860B; --bz-silver:#C9CDD2; --bz-font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; }
+    * { box-sizing: border-box; }
+    body { font-family: var(--bz-font); color:#E8E8E8; background: var(--bz-black); margin:0; line-height:1.55; -webkit-font-smoothing:antialiased; }
+    main { max-width: 780px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+    h1 { font-size:1.9rem; margin:0 0 0.35rem; color:#fff; letter-spacing:-0.01em; }
+    .lede { color:#B8B8B8; max-width:70ch; margin:0 0 1.75rem; font-size:0.95rem; }
+    .dl-card { background: var(--bz-panel); border:1px solid #2A2A2A; border-top:3px solid var(--bz-yellow); border-radius:8px; padding:1.3rem 1.4rem 1.2rem; margin:0 0 1.2rem; }
+    .dl-card .kicker { font-size:0.72rem; letter-spacing:.11em; text-transform:uppercase; color:#8A8A8A; }
+    .dl-card .ver { font-size:1.35rem; font-weight:700; color:#fff; margin:0.15rem 0 0.1rem; font-variant-numeric: tabular-nums; }
+    .dl-card .meta { font-size:0.82rem; color:#8A8A8A; margin-bottom:1rem; }
+    .btn { display:inline-block; background: var(--bz-yellow); color:#0A0A0A; font-weight:700; font-size:0.95rem;
+           padding:0.7rem 1.35rem; border-radius:6px; text-decoration:none; border:1px solid var(--bz-yellow); }
+    .btn:hover { background:#FFD24A; }
+    .btn[aria-disabled="true"] { background:#2A2A2A; border-color:#2A2A2A; color:#7A7A7A; cursor:default; }
+    .links { margin-top:0.9rem; display:flex; gap:1.1rem; flex-wrap:wrap; font-size:0.82rem; }
+    a { color: var(--bz-yellow); }
+    h2 { font-size:0.78rem; letter-spacing:.12em; text-transform:uppercase; color:#8A8A8A; margin:2rem 0 0.6rem; padding-bottom:.5rem; border-bottom:1px solid #222; }
+    ul { margin:0; padding-left:1.1rem; color:#C9CDD2; font-size:0.9rem; }
+    li { margin:0.25rem 0; }
+    .caveat { border-left:3px solid var(--bz-yellow); background: var(--bz-panel); padding:0.9rem 1.1rem; border-radius:4px; font-size:0.84rem; color:#A8A8A8; margin-top:2rem; }
+    .hash { display:block; margin-top:0.6rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.7rem; color:#7A7A7A; word-break:break-all; }
+    .status { font-size:0.8rem; color:#7A7A7A; }
+    .status.bad { color:#FF8A80; }
+  </style>
+  <link rel="stylesheet" href="/buzzy/nav.css" />
+</head>
+<body data-bz-active="download">
+  <header>
+    <div class="header-inner">
+      <a href="/buzzy/talk" class="brand-link"><div class="brand"><img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" /><strong>BeeZilla</strong></div></a>
+      <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+      <a href="/buzzy/studio" data-nav="studio">Studio</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
+      <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/download" data-nav="download">Download</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink" aria-label="Account"></a>
+    </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>Install BeeZilla on Windows</h1>
+    <p class="lede">
+      The desktop app is the same conversation as this site, running on your own machine. It keeps
+      your work in a local database, talks to BeeZilla when it needs an account or a recipe, and
+      updates itself when a new build ships. Windows 10 or 11, 64-bit.
+    </p>
+
+    <div class="dl-card">
+      <div class="kicker">Windows installer</div>
+      <div class="ver" id="ver">Checking the release feed…</div>
+      <div class="meta" id="meta">&nbsp;</div>
+      <a class="btn" id="dl" href="/buzzy/download" aria-disabled="true" role="button">Download</a>
+      <div class="links">
+        <a id="notes" href="https://github.com/GumbyEnder/agent-relay/releases" hidden>What changed in this build</a>
+        <a href="https://github.com/GumbyEnder/agent-relay/releases">All releases</a>
+      </div>
+      <div class="status" id="status" style="margin-top:0.75rem;">The link is read from the release feed, so it always names the build the app itself would update to.</div>
+      <code class="hash" id="hash" hidden></code>
+    </div>
+
+    <h2>What you get</h2>
+    <ul>
+      <li>The full chat, voice and files, without a browser tab.</li>
+      <li>Your projects and documents stored locally in <code>%APPDATA%\BeeZilla\data</code>.</li>
+      <li>Connect a BeeZilla account, or paste your own provider key in Settings.</li>
+      <li>Updates download in the background and apply on restart.</li>
+    </ul>
+
+    <h2>Installing</h2>
+    <ul>
+      <li>Run the installer, choose a folder, then open BeeZilla.</li>
+      <li>Menu → <em>Connect BeeZilla account…</em> to sign in, or set a key in Settings.</li>
+      <li>No separate server to run: the app carries its own local runtime.</li>
+    </ul>
+
+    <div class="caveat" id="caveat">
+      <strong>The build is not code-signed yet.</strong> Windows SmartScreen will warn the first time
+      you run it — choose <em>More info → Run anyway</em>. Updates use the same GitHub release feed,
+      so a new version is offered in the app rather than emailed to you.
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      var verEl = document.getElementById("ver");
+      var metaEl = document.getElementById("meta");
+      var btn = document.getElementById("dl");
+      var notes = document.getElementById("notes");
+      var statusEl = document.getElementById("status");
+      var hashEl = document.getElementById("hash");
+
+      function bytes(n) {
+        if (!n) return "";
+        return (n / 1048576).toFixed(1) + " MB";
+      }
+
+      fetch("/api/buzzy/desktop-release", { credentials: "same-origin" })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          var d = res.d || {};
+          if (!res.ok || !d.url) {
+            // Say what is true: we could not read the feed. Do not print a
+            // version we did not verify, and do not hide the Releases link.
+            verEl.textContent = "Release feed unavailable";
+            metaEl.textContent = "GitHub Releases has the installers.";
+            btn.textContent = "Open Releases";
+            btn.href = d.releasesUrl || "https://github.com/GumbyEnder/agent-relay/releases";
+            btn.removeAttribute("aria-disabled");
+            statusEl.className = "status bad";
+            statusEl.textContent = (d.error || "Could not reach the release feed just now.");
+            return;
+          }
+          verEl.textContent = "BeeZilla " + d.version;
+          metaEl.textContent = [d.fileName, bytes(d.size)].filter(Boolean).join(" · ");
+          btn.textContent = "Download for Windows" + (d.size ? " (" + bytes(d.size) + ")" : "");
+          btn.href = d.url;
+          // No `download` attribute: it is ignored cross-origin. GitHub answers
+          // the asset with Content-Disposition: attachment, which is what
+          // actually starts the save.
+          btn.removeAttribute("aria-disabled");
+          if (d.releaseUrl) { notes.href = d.releaseUrl; notes.hidden = false; }
+          if (d.sha512) {
+            hashEl.textContent = "SHA-512 " + d.sha512;
+            hashEl.hidden = false;
+          }
+          statusEl.className = "status";
+          statusEl.textContent = d.stale
+            ? "Showing the last build we could read; the feed is briefly unreachable."
+            : "Read from the release feed " + new Date(d.fetchedAt).toLocaleTimeString() + ".";
+        })
+        .catch(function () {
+          verEl.textContent = "Release feed unavailable";
+          btn.textContent = "Open Releases";
+          btn.href = "https://github.com/GumbyEnder/agent-relay/releases";
+          btn.removeAttribute("aria-disabled");
+          statusEl.className = "status bad";
+          statusEl.textContent = "Could not reach the release feed just now.";
+        });
+
+    })();
+  </script>
+</body>
+</html>
