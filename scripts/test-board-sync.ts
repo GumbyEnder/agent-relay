@@ -422,7 +422,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
       card("plan", { kind: "note", title: "Plan", body: "Two steps", x: 70 }),
     ]), sync: { rev: null, dirty: false, base: null } });
     const text = C.api.instructionsFor("ctx");
-    truthy(/^agent\.md \(how to work\): Keep it friendly\n/.test(text), "their words first: " + text);
+    truthy(/^Core identity \(how BeeZilla works here\): Keep it friendly\n/.test(text), "their words first: " + text);
     truthy(/Also on the board:\n- Picture made here\n- Picture they added — beach\.jpg\n- Music made here\n- Link they added — Recipe ideas \(https:\/\/example\.com\/ideas\)\n- Note — Plan: Two steps$/.test(text), "then the rest: " + text);
     truthy(!/art-2026|music-2026|\/api\/buzzy\/assets|BeeZilla's own words|Picture maker/.test(text), "no made file names, inside links or untouched process cards: " + text);
     eq(C.api.instructionsFor("nothing-here"), "", "an empty board says nothing");

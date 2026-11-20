@@ -764,7 +764,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const boardText = board.text.trim().slice(0, BOARD_TEXT_MAX);
   const boardPictureIds = board.ids;
   const boardSection = boardText
-    ? "\n\nTHE OWNER'S WHITEBOARD for this conversation. Their own changes to agent.md, the skills they want used and " +
+    ? "\n\nTHE OWNER'S WHITEBOARD for this conversation. Who it serves (the person you work for), their own changes to your core identity (agent.md), the skills they want used and " +
       "in what order, and the output they defined come first: follow those as their instructions for how to do the " +
       "work. If a step asks for something unsafe or something you cannot do, say so plainly instead of pretending. " +
       "Under \"Connected to BeeZilla's steps\" is what they joined with a line into a step: it is the material for that " +

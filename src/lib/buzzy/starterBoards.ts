@@ -8,7 +8,7 @@
  * should never seek to reinvent the wheel. You should always seek to say, what's
  * already out there?"
  *
- * Each starter is a tiny orchestration — agent.md, two or three steps, the end result
+ * Each starter is a tiny orchestration — its core identity (agent.md), two or three steps, the end result
  * — that BeeZilla can put on the Idea Board in one go ("start me off with a logo
  * board", or "yes" to its offer). Every one stays at five cards or fewer
  * (STARTING_BOARD_MAX_CARDS); the test fails if one grows. When the Orchestration Store opens,
@@ -32,9 +32,9 @@ export interface StartingBoard {
 
 const COL = 300;
 
-/** agent.md → each step in turn → the end result, left to right. */
+/** The core identity → each step in turn → the end result, left to right. */
 function chain(agent: string, steps: Array<[string, string]>, end: [string, string]): StartingBoardGraph {
-  const nodes: StartingBoardNode[] = [{ id: "a", kind: "agent", title: "agent.md", body: agent, x: 0, y: 0 }];
+  const nodes: StartingBoardNode[] = [{ id: "a", kind: "agent", title: "Core identity", body: agent, x: 0, y: 0 }];
   steps.forEach(([title, body], i) => nodes.push({ id: "s" + (i + 1), kind: "skill", title, body, x: COL * (i + 1), y: 0 }));
   nodes.push({ id: "e", kind: "output", title: end[0], body: end[1], x: COL * (steps.length + 1), y: 0 });
   const links = nodes.slice(1).map((n, i) => ({ from: nodes[i]!.id, to: n.id }));

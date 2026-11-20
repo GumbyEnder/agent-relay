@@ -280,6 +280,7 @@
     if (board && board.conversation && hasConversation()) board.conversation();
     if (toggle) toggle.setAttribute("aria-pressed", open ? "true" : "false");
     wasOpen = open;
+    paintSeeBoard();
     paintWords();
     paintStatus();
     paintFace();
@@ -293,6 +294,38 @@
       sync();
     });
   }
+  // Owner, 2026-11-20: "you know how you can fold up talk to Bezilla? You should be
+  // able to fold it back down with the open button. Maybe a see board button. Or just
+  // clicking in the what would you like to make box should open up the board as well."
+  // Clicking (or tapping) in the Talk box opens the board; while it's folded, a See
+  // board button sits by the Talk bar wherever the Idea Board button itself is out of
+  // sight (in the More menu).
+  if (input) {
+    input.addEventListener("pointerdown", function () { if (!board) openBoard(); });
+  }
+  var seeBoard;          // (no "= null": sync() may paint it before this line runs)
+  function paintSeeBoard() {
+    var open = !!board;
+    var toggleInSight = !!(toggle && (toggle.offsetWidth || toggle.offsetHeight) && !toggle.closest(".hidden"));
+    if (open || toggleInSight || !composer || !composer.parentNode) {
+      if (seeBoard) seeBoard.hidden = true;
+      return;
+    }
+    if (!seeBoard) {
+      seeBoard = document.createElement("button");
+      seeBoard.type = "button";
+      seeBoard.className = "ob-see-board";
+      seeBoard.textContent = "See board";
+      seeBoard.title = "Open the Idea Board";
+      seeBoard.setAttribute("aria-label", "See the Idea Board");
+      seeBoard.addEventListener("click", function () { openBoard(); });
+    }
+    if (seeBoard.parentNode !== composer.parentNode || seeBoard.previousSibling !== composer) composer.parentNode.insertBefore(seeBoard, composer.nextSibling);
+    seeBoard.hidden = false;
+  }
+  // The Idea Board button comes into sight and goes again with the More menu.
+  var morePanelForSee = $("talkMorePanel");
+  if (morePanelForSee && window.MutationObserver) new MutationObserver(function () { paintSeeBoard(); }).observe(morePanelForSee, { attributes: true, attributeFilter: ["class"] });
 
   // ── The live process, from talk.html's stream readers ─────────────────
   window.__bzTurnStart = function () {
@@ -542,6 +575,9 @@
     if (k === lastKey) return;
     var was = lastKey;
     lastKey = k;
+    // Already showing this conversation's board (the send switched it): mounting it
+    // again would close whatever was open on it — a drawing, an editor.
+    if (board && boardKey === k) return;
     if (board) { unmountBoard(); carryOver(was, k); sync(); }
     else carryOver(was, k);
     refreshFolded(k);
