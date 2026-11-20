@@ -1980,7 +1980,11 @@
       });
       // BeeZilla's own work lines (agent.md → skill → what it made) stay the work's colour
       // too; only a line between two things that leads to no step is plain (grey, dashed).
-      state.links.forEach(function (l) { if (isStep(cardById(l.from)) || isStep(cardById(l.to))) feeding[l.id] = true; });
+      state.links.forEach(function (l) {
+        var from = cardById(l.from);
+        // A drawing to the picture made from it is part of the work too.
+        if (isStep(from) || isStep(cardById(l.to)) || (from && kindOf(from) === "sketch")) feeding[l.id] = true;
+      });
       var selPath = null;
       state.links.forEach(function (l) {
         var a = cardById(l.from), b = cardById(l.to);
