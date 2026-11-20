@@ -83,6 +83,37 @@ function validDraft(recipeId: string): Draft {
           sensitiveIdentifiers: [{ id: "i1", value: "POL-****-19" }],
           promisedOutcomes: [], filingActions: [],
         } };
+    case "cre-deal-memo":
+      // The acceptance fixture from the CR-9 spec, reduced to the shape the
+      // checks read: computed money, sourced comps, three computed scenarios,
+      // a runner reconciliation verdict, cited flags, the renderer's page count
+      // and the advice notice.
+      return { ...base,
+        sections: [{
+          id: "s1",
+          title: "Summary",
+          body: "Maple Court Retail Center (fictional). Prepared with AI from your documents. Not financial or legal advice.",
+        }],
+        claims: [{ id: "c1", text: "Three of four suites are leased at 81%.", sourceId: "listing" }],
+        values: [
+          { id: "noi", kind: "money", raw: "183400.00", normalised: 18340000, source: "calculator" },
+          { id: "egi", kind: "money", raw: "264100.00", normalised: 26410000, source: "calculator" },
+        ],
+        domain: {
+          comps: [
+            { id: "C1", sourceId: "comps", excluded: false, exclusionReason: null },
+            { id: "C4", sourceId: "comps", excluded: true, exclusionReason: "portfolio_sale" },
+            { id: "C5", sourceId: "comps", excluded: true, exclusionReason: "too_old" },
+          ],
+          stress: [
+            { id: "base", rateShiftBp: 0, noteRateBp: 675, dscrX100: 131, ltvBp: 6500, debtYieldBp: 1085, source: "calculator" },
+            { id: "bp100", rateShiftBp: 100, noteRateBp: 775, dscrX100: 120, ltvBp: 6500, debtYieldBp: 1085, source: "calculator" },
+            { id: "bp200", rateShiftBp: 200, noteRateBp: 875, dscrX100: 110, ltvBp: 6500, debtYieldBp: 1085, source: "calculator" },
+          ],
+          reconciliation: { ok: true, checked: 12, mismatches: 0 },
+          redFlags: [{ id: "f1", category: "lease", sourceId: "listing", severity: "medium" }],
+          limits: { pageCount: 2, maxPages: 2 },
+        } };
     default:
       throw new Error(`no fixture for ${recipeId}`);
   }
@@ -97,6 +128,7 @@ const NEGATIVE: Record<string, (d: Draft) => void> = {
   "people-ops-paperwork": (d) => { d.domain!.employmentTerms![0].supplied = false; },
   "grants-rfp": (d) => { d.domain!.eligibility![0].sourceId = null; },
   "dispute-paperwork": (d) => { d.domain!.promisedOutcomes = ["You will win"]; },
+  "cre-deal-memo": (d) => { d.values![0].source = "typed"; },
 };
 
 const EXPECTED_NEGATIVE_CODE: Record<string, string> = {
@@ -108,15 +140,20 @@ const EXPECTED_NEGATIVE_CODE: Record<string, string> = {
   "people-ops-paperwork": "C17",
   "grants-rfp": "C19",
   "dispute-paperwork": "C24",
+  "cre-deal-memo": "C25",
 };
+
+/** Rule counts per family: the eight originals carry 4, the CR-9 memo carries 10. */
+const EXPECTED_RULE_COUNTS: Record<string, number> = { "cre-deal-memo": 10 };
+const EXPECTED_TOTAL_RULES = 42;
 
 console.log("\nStep 1 — check DSL, sealed program, evaluation\n");
 
-ok("every recipe has exactly 4 rules (3 domain checks + 1 boundary)", () => {
+ok("every recipe has its expected rule count (3 domain checks + 1 boundary, or the 10-rule memo)", () => {
   for (const id of RECIPE_IDS) {
-    assert.equal(RECIPE_RULES[id].length, 4, `${id} rule count`);
+    assert.equal(RECIPE_RULES[id].length, EXPECTED_RULE_COUNTS[id] ?? 4, `${id} rule count`);
   }
-  assert.equal(ALL_RULES.length, 32);
+  assert.equal(ALL_RULES.length, EXPECTED_TOTAL_RULES);
 });
 
 ok("codes are unique across the rule set", () => {

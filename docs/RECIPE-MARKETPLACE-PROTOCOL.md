@@ -349,7 +349,9 @@ prevent double voting and is never returned. `403 not_owned`, `400 invalid_stars
 | Range | Meaning |
 |---|---|
 | `C01`–`C24` | house rules, generic across recipes (invented figure, unsourced claim, uncategorised value, …) |
+| `C25`–`C29` | deal-memo provenance and shape: every money figure computed or sourced, every comparable sourced, every exclusion carrying a reason code, all three rate scenarios present and computed, and the runner's reconciliation verdict |
 | `C30`–`C37` | boundary rules, one per recipe family (commitments, complaints, meetings, bookkeeping, campaigns, people, grants, disputes) |
+| `C38`–`C42` | deal-memo boundary and artifact: no approval, appraisal claim or purchase advice; the rendered page count within the limit (read from the PDF writer, never the model); every flagged issue citing its document; no model boilerplate (warn only); the advice notice present |
 | `C00` | fuel budget exhausted — the check program was refused |
 | `C90` | the model's output did not match the Draft schema |
 | `C91` | disclosure risk — the draft reproduces the sealed method |

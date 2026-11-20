@@ -73,7 +73,7 @@
     "private:check": "node scripts/sync-private.mjs --check",
     "private:verify": "node scripts/sync-private.mjs --check --require-private",
     "test:surface": "npx tsx scripts/test-surface-routing.ts",
-    "test:recipes": "npx tsx scripts/test-recipe-bundle.ts && npx tsx scripts/test-recipe-checks.ts && npx tsx scripts/test-recipe-listing.ts",
+    "test:recipes": "npx tsx scripts/test-recipe-bundle.ts && npx tsx scripts/test-recipe-checks.ts && npx tsx scripts/test-cre-checks.ts && npx tsx scripts/test-recipe-listing.ts",
     "test:wallet": "npx tsx scripts/test-wallet.ts"
   },
   "dependencies": {
