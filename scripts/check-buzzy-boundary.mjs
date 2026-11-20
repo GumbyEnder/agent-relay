@@ -49,6 +49,16 @@ const BUZZY = join(LIB, "buzzy");
  *                           console. After a split it has to become a board API
  *                           call; it is on this list so that day is a decision, not
  *                           a surprise.
+ *   private/dealMemoRun   — the sealed deal-memo lane. The chat turn starts a
+ *                           run and the API reads it back, and the runner itself
+ *                           (prompts, checks, render) is sealed code that ships
+ *                           only in a private build. The import is one module,
+ *                           `private/dealMemoRun`, whose public shape is a start
+ *                           call and a job id; open builds get the stub that
+ *                           answers "not configured". It is on this list because
+ *                           the alternative — the runner registering itself from
+ *                           outside buzzy — is an inbound dependency on a buzzy
+ *                           internal, which is the direction rule 3 forbids.
  *   analytics-id          — the public OpenPanel write client id, chosen by host
  *                           (BeeZilla vs Dev Boards project). Leaf module: it
  *                           imports only `@/lib/brand` and `@/lib/product-hosts`,
@@ -58,7 +68,7 @@ const BUZZY = join(LIB, "buzzy");
  *                           the server bundle — and because the two projects must
  *                           stay one mapping in one place.
  */
-const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server", "analytics-id"]);
+const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server", "analytics-id", "private/dealMemoRun"]);
 
 /**
  * The console may import exactly one thing from `src/lib/buzzy`: the package

@@ -1,0 +1,8 @@
+{
+  "_note": "PLACEHOLDER ASSUMPTIONS for the acceptance test only. Not industry standards. The author replaces these in the sealed method.",
+  "vacancy_and_credit_loss_pct": 5,
+  "replacement_reserves_usd_per_sf": 0.20,
+  "dscr_min_x": 1.25,
+  "ltv_max_pct": 65,
+  "debt_yield_min_pct": 9.0
+}

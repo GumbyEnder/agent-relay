@@ -12,7 +12,7 @@
  *  - Unknown values carry `raw: "unknown"` with `normalised: null`.
  */
 import {
-  allOf, and, anyOf, canonicalUnit, defineRule, eq, eqPath, falsy, gte, has,
+  allOf, and, anyOf, canonicalUnit, countGte, defineRule, eq, eqPath, falsy, gte, has,
   integer, isEmpty, ltePath, matches, neq, noneOf, nonempty, not, oneOf, or, starts, truthy,
 } from "./author";
 import type { Rule } from "./types";
@@ -27,7 +27,21 @@ export const FORBIDDEN = {
   people: "\\b(you are (terminated|dismissed)|we have decided to (hire|fire)|legally (binding|compliant|safe))\\b",
   grants: "\\b(we (?:certify|confirm) (?:that )?we (?:meet|qualify)|submitted (?:the )?application|guaranteed (?:award|funding))\\b",
   dispute: "\\b(coverage is (?:guaranteed|approved)|you will (?:win|be reimbursed)|we have filed)\\b",
+  /**
+   * CR-9 deal memo. Saying a deal "will be approved", calling the memo an
+   * appraisal, or recommending a purchase turns a check job into advice, which
+   * is the one thing this recipe's boundary forbids.
+   */
+  cre: "\\b(guaranteed (?:approval|financing|loan)|will be approved|pre-?approved|risk[- ]free|this is (?:an )?appraisal|we recommend (?:you )?(?:buy|purchase|invest))\\b",
 } as const;
+
+/**
+ * "Sounds like a model wrote it" list for the deal memo. WARN only: the author's
+ * real voice rules live in the sealed half, and this list must not be read as
+ * the definition of plain writing. Patterns here are public the moment the
+ * artifact is compiled, so they carry no threshold and no author preference.
+ */
+const PLAIN_WORDING = "\\b(delve|tapestry|it'?s (?:important|worth) (?:to note|noting)|in today'?s (?:fast-paced|dynamic)|navigat(?:e|ing) the (?:complex|landscape)|in conclusion)\\b";
 
 /** A boundary rule scans every claim and every section body for the pattern. */
 /**
@@ -236,6 +250,113 @@ export const RECIPE_RULES: Record<string, Rule[]> = {
     }),
     boundaryRule("dispute", "C37", "no entitlement asserted on the owner's behalf"),
   ],
+
+  /**
+   * CR-9 — lender-ready deal memo.
+   *
+   * Ten rules: five provenance/shape rules (C25–C29), one boundary (C38), and
+   * four that decide whether the artifact is a memo at all (C39, C40, C41, C42).
+   *
+   * Design notes, each one a trap paid for once:
+   *  - The VM has no arithmetic, so C29 cannot re-add the memo. The runner
+   *    re-derives every figure and writes `domain.reconciliation`; the check
+   *    reads that verdict. A check that "looks plausible" would be theatre.
+   *  - `noneOf` PASSES on a missing collection. Every rule whose failure mode is
+   *    "an unsourced thing slipped through" is therefore paired with `nonempty`
+   *    on the same path, so an absent block fails closed instead of passing
+   *    silently. C26 and C27 are the two that need it most. C40 is the exception
+   *    on the other side: an explicit empty redFlags list must pass, so it pairs
+   *    `noneOf` with `truthy` (presence, not length) instead.
+   *  - No threshold appears here. 1.25x DSCR, 65% LTV, 24-month comp window and
+   *    the page limit all live in the sealed half; checks.wasm is published, and
+   *    a published number is the author's method leaking to a competitor.
+   */
+  "cre-deal-memo": [
+    defineRule({
+      id: "money-computed-or-sourced",
+      code: "C25",
+      description: "every money figure computed or sourced, none typed",
+      expr: and(
+        nonempty("values"),
+        allOf("values", oneOf("source", ["calculator", "source"]), eq("kind", "money")),
+      ),
+    }),
+    defineRule({
+      id: "comps-sourced",
+      code: "C26",
+      description: "every comparable has a source",
+      expr: and(nonempty("domain.comps"), noneOf("domain.comps", falsy("sourceId"))),
+    }),
+    defineRule({
+      id: "exclusions-have-reason",
+      code: "C27",
+      description: "every excluded comparable carries a reason code",
+      expr: and(
+        nonempty("domain.comps"),
+        noneOf("domain.comps", and(eq("excluded", true), falsy("exclusionReason"))),
+      ),
+    }),
+    defineRule({
+      id: "stress-complete",
+      code: "C28",
+      description: "stress table covers base, +100bp and +200bp, all computed",
+      expr: and(
+        nonempty("domain.stress"),
+        countGte("domain.stress", 3),
+        allOf("domain.stress", eq("source", "calculator")),
+        anyOf("domain.stress", eq("rateShiftBp", 0)),
+        anyOf("domain.stress", eq("rateShiftBp", 100)),
+        anyOf("domain.stress", eq("rateShiftBp", 200)),
+      ),
+    }),
+    defineRule({
+      id: "figures-reconcile",
+      code: "C29",
+      description: "the runner re-derived every figure and found no mismatch",
+      expr: and(truthy("domain.reconciliation.ok"), eq("domain.reconciliation.mismatches", 0)),
+    }),
+    boundaryRule("cre", "C38", "no approval, appraisal claim or purchase advice"),
+    defineRule({
+      id: "page-limit",
+      code: "C39",
+      description: "the rendered memo is within the page limit",
+      // pageCount comes from the PDF writer's own pagination, so the check and
+      // the file cannot disagree. A missing count fails closed.
+      expr: and(
+        nonempty("domain.limits"),
+        ltePath("domain.limits.pageCount", "domain.limits.maxPages"),
+      ),
+    }),
+    defineRule({
+      id: "flags-cite-document",
+      code: "C40",
+      description: "every flagged issue cites the document it came from",
+      // The spec asks only that a *present* flag cite its document, so an
+      // explicit empty list ("we found no issues") is a clean pass — nonempty
+      // here would fail a deal with nothing to flag.
+      // Presence is still required: `noneOf` passes on a missing collection, so
+      // truthy() is what keeps the absent block failing closed. truthy() is the
+      // right predicate, not has(): has() is a substring test on a string.
+      // (truthy([]) is true — the VM tests value identity, not length.)
+      expr: and(truthy("domain.redFlags"), noneOf("domain.redFlags", falsy("sourceId"))),
+    }),
+    defineRule({
+      id: "plain-wording",
+      code: "C41",
+      severity: "warn",
+      description: "no model-boilerplate phrasing (warn only)",
+      expr: noneOf("sections", matches("body", PLAIN_WORDING)),
+    }),
+    defineRule({
+      id: "advice-notice",
+      code: "C42",
+      description: "the advice notice is present in the memo body",
+      // Tolerant of how the notice is written ("not financial, legal or
+      // investment advice" / "not investment advice"), intolerant of its
+      // absence. The wording itself is the author's and lives in the sealed half.
+      expr: anyOf("sections", matches("body", "not (?:financial|investment|legal|accounting)(?:[,\\s]+(?:or|and)?[,\\s]*(?:financial|investment|legal|accounting))*\\s+advice")),
+    }),
+  ],
 };
 
 export function rulesFor(recipeId: string): Rule[] {
@@ -245,9 +366,11 @@ export function rulesFor(recipeId: string): Rule[] {
 }
 
 /**
- * 32 executable rules: 24 domain rules (C01–C24) plus 8 boundary rules
- * (C30–C37). The Step 1 commit message says "24 rules" because the domain set
- * was the headline number; the suite asserts 32, which is the true count.
+ * 42 executable rules: 24 domain rules (C01–C24) plus 8 boundary rules
+ * (C30–C37) for the original eight families, and the 10-rule CR-9 deal-memo
+ * family (C25–C29 provenance, C38–C42 boundary/artifact). The Step 1 commit
+ * message says "24 rules" because the domain set was the headline number; the
+ * suite asserts 42, which is the true count.
  */
 export const ALL_RULES: Rule[] = Object.values(RECIPE_RULES).flat();
 

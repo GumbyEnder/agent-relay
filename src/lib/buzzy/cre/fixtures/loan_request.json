@@ -1,0 +1,8 @@
+{
+  "_note": "EXAMPLE DATA — FICTIONAL",
+  "loan_amount_usd": 1690000,
+  "note_rate_pct_base": 6.75,
+  "amortization_years": 25,
+  "term_years": 10,
+  "purpose": "acquisition"
+}

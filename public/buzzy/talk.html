@@ -2837,6 +2837,121 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }, 8000);
     }
 
+    // ── A deal memo the chat started ─────────────────────────────────────
+    // The run takes minutes of code and three model calls on the server, so the
+    // turn only starts it and returns dealMemo { jobId }. This polls the same
+    // route the operator console reads, shows the stage it is on under the
+    // reply, and when the run is done puts the files inline with the reply. The
+    // same rows are what the Library lists — one copy, not two.
+    function watchDealMemo(jobId, msg) {
+      var tries = 0;
+      var misses = 0;
+      var startedAt = Date.now();
+      // A done row is not a settled charge: the debit runs detached, after
+      // finishDealMemoJob() has already made the row visible as done, and its
+      // verdict is written to summary.charge afterwards. Painting "Nothing
+      // charged for this draft" in that window would hide a real debit. So the
+      // card goes up as soon as the files exist, the charge reads "working out"
+      // until the server says it settled, and we stop asking after a grace.
+      var settled = false;
+      var settleUntil = 0;
+      var graceMs = 30000;
+      msg.dealMemoJobId = jobId;
+      function onBoard(step) {
+        if (window.__bzFlow) window.__bzFlow(Object.assign({ kind: "output", id: "out:deal-memo:" + jobId, parent: "skill:deal-memo" }, step));
+      }
+      function paint() {
+        var line = document.querySelector('[data-dealmemo="' + String(jobId).replace(/"/g, "") + '"]');
+        if (line) line.textContent = msg.progress || "";
+        else renderChatMessages();
+      }
+      function show(text) {
+        msg.progress = text;
+        paint();
+        onBoard({ state: "running", detail: text });
+      }
+      function stop(text) {
+        clearInterval(tick);
+        msg.progress = text;
+        renderChatMessages();
+        onBoard({ state: "failed", detail: text });
+      }
+      function minutes() {
+        return Math.max(0, Math.round((Date.now() - startedAt) / 60000));
+      }
+      function stageLine(p) {
+        var stages = Array.isArray(p.stages) ? p.stages : [];
+        var running = null;
+        var done = 0;
+        stages.forEach(function (s) {
+          if (s && s.state === "running" && !running) running = s;
+          if (s && s.state === "done") done++;
+        });
+        if (running && running.label) return running.label + "…";
+        if (done && stages.length) return done + " of " + stages.length + " steps done…";
+        return "getting started…";
+      }
+      show("Making your deal memo — getting started…");
+      var tick = setInterval(function () {
+        tries++;
+        fetch("/api/buzzy/deal-memo/" + encodeURIComponent(jobId), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            var files = Array.isArray(p.files) ? p.files.filter(function (f) { return f && f.url; }) : [];
+            if (p.ok && p.state === "done" && files.length) {
+              var firstDone = !msg.artifacts;
+              msg.progress = "";
+              msg.artifacts = files.map(function (f) {
+                return { url: f.url, name: f.filename || "deal memo", bytes: f.bytes || 0, contentType: f.content_type || f.contentType || "" };
+              });
+              // The card must not invent a price: the server's number is the only one.
+              msg.dealMemoCharge = Number(p.chargedDrops || 0);
+              // The server also says WHY money did not move (insufficient / no
+              // wallet / unreadable price). Carry it; only a true free run has none.
+              msg.dealMemoChargeLine = p.chargeLine ? String(p.chargeLine) : "";
+              // chargeSettled is false while the detached debit has not written
+              // its verdict yet — including a true free run, which also writes one.
+              msg.dealMemoChargePending = !p.chargeSettled && !settled;
+              msg.dealMemoLibraryUrl = "/buzzy/library";
+              renderChatMessages();
+              if (firstDone) {
+                onBoard({ state: "done", title: files[0].filename || "Deal memo", contentType: "application/octet-stream", detail: "" });
+              }
+              if (p.chargeSettled) {
+                settled = true;
+                msg.dealMemoChargePending = false;
+                renderChatMessages();
+                clearInterval(tick);
+                return;
+              }
+              // Keep asking, briefly. Never poll forever over a row that will
+              // never settle (a pre-phase-F row has no summary.charge at all).
+              if (!settleUntil) settleUntil = Date.now() + graceMs;
+              if (Date.now() >= settleUntil) {
+                msg.dealMemoChargePending = false;
+                // Do not say "nothing charged" when we simply do not know.
+                msg.dealMemoChargeLine = "Couldn't confirm the charge for this draft just now — your Honey Drops balance is the record.";
+                renderChatMessages();
+                clearInterval(tick);
+              }
+              return;
+            }
+            if (p.state === "failed" || p.state === "interrupted" || p.ok === false) {
+              return stop(p.message || p.error || "The deal memo did not finish.");
+            }
+            if (tries > 360) return stop("The deal memo is taking far longer than promised — ask again in a moment.");
+            if (p.state === "running" || p.state === "queued") {
+              var mins = minutes();
+              show("Making your deal memo — " + stageLine(p) + (mins >= 1 ? " (" + mins + " min)" : ""));
+            }
+            misses = 0;
+          })
+          .catch(function () {
+            if (++misses >= 4) stop("Lost touch with the deal memo — check the connection.");
+          });
+      }, 5000);
+    }
+
     // ── What happened ────────────────────────────────────────────────
     // The product judges itself on numbers; the person paying should be able to
     // see them without asking. One muted line per reply: model, wall clock, what
@@ -2950,10 +3065,28 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             bubble += renderMediaCard({ name: a.name, url: a.url, bytes: a.bytes, type: a.contentType });
           });
         }
+        // The deal memo's copy in the Library, and the only price the server
+        // actually took. A zero is said as zero, never dressed as billing — but
+        // a zero for a reason (insufficient, no wallet, unreadable price) shows
+        // the server's own sentence instead of hiding behind "Nothing charged".
+        if (m.dealMemoLibraryUrl) {
+          var priceLine = m.dealMemoChargePending
+            // The debit is written after the row is done; say so instead of
+            // pre-judging it as free (a real debit can land a moment later).
+            ? "Working out the charge for this draft…"
+            : m.dealMemoCharge > 0
+              ? "Charged " + m.dealMemoCharge + " Honey Drops."
+              : (m.dealMemoChargeLine
+                ? String(m.dealMemoChargeLine).replace(/</g, "&lt;")
+                : "Nothing charged for this draft.");
+          bubble += '<div class="bz-what">' + priceLine +
+            ' <a href="' + String(m.dealMemoLibraryUrl).replace(/"/g, "") + '">A copy is in your Library</a></div>';
+        }
         if (m.progress) {
           bubble += '<div class="bz-what"' +
             (m.model3dTask ? ' data-model3d="' + String(m.model3dTask).replace(/"/g, "") + '"'
-              : m.videoJobId ? ' data-video="' + String(m.videoJobId).replace(/"/g, "") + '"' : "") +
+              : m.videoJobId ? ' data-video="' + String(m.videoJobId).replace(/"/g, "") + '"'
+              : m.dealMemoJobId ? ' data-dealmemo="' + String(m.dealMemoJobId).replace(/"/g, "") + '"' : "") +
             '>' + String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
@@ -7244,6 +7377,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (data.model3d && data.model3d.taskId) watchModel3d(data.model3d.taskId, replyMsg);
         // Asked for a video: the turn started it, and it lands under this reply.
         if (data.video && data.video.jobId) watchVideo(data.video.jobId, replyMsg, data.video);
+        // Asked for a deal memo: the turn started the run, and it lands under this
+        // reply when the server says it is done — never before.
+        if (data.dealMemo && data.dealMemo.jobId) watchDealMemo(data.dealMemo.jobId, replyMsg);
         // A track spends plan minutes: show what is left now, not on the next send.
         if (data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
         // The turn's own numbers are authoritative — don't re-fetch over them.

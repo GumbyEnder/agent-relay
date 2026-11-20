@@ -41,6 +41,11 @@ import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } f
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
+import { bindRole, DEAL_ROLES, decideDuplicate, isDealRole, readPhoto } from "./cre/intake";
+import { dealMemoJobsToday, readDealMemoJob, dealMemoRecipeRefusal } from "./cre/jobs";
+import { dealMemoConfigured, dealMemoRecipeHash, startDealMemoRun, type DealMemoLoanRequest } from "@/lib/private/dealMemoRun";
+import { contentTypeForKind, sniffKind } from "./cre/bytes";
+import { documentContentFromMarkdown, markdownTableToCsv } from "./cre/outputs";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
@@ -90,7 +95,7 @@ import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 import { setDocumentAcceptance, materializeDraft, summarizeChanges } from "./documents";
 import { ensureExecutionBoard } from "./execution";
-import { renderTextPdf } from "./pdf";
+import { renderTextPdfDocument } from "./pdf";
 import { renderDocument } from "./artifact";
 import { TOOL_REGISTRY } from "./tools";
 import { reviewSeparately, type ReviewCheck } from "./review";
@@ -842,6 +847,158 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── /api/buzzy/deal-memo — start a CR-9 run, poll it, read the files ───
+  // Same shape as the video lane: the run is detached in this process, the row
+  // is the truth, and the page polls until the files are stored. A run that was
+  // interrupted by a redeploy reads "interrupted, nothing charged" — the reaper
+  // (scripts/deal-memo-reaper.mjs) writes that at boot, never the runner.
+  if (path === "/api/buzzy/deal-memo" || path.startsWith("/api/buzzy/deal-memo/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const jobId = path.startsWith("/api/buzzy/deal-memo/") ? (path.split("/").pop() || "") : "";
+
+    if (method === "GET" && !jobId) {
+      const sql = await getSql();
+      return {
+        ok: true,
+        configured: dealMemoConfigured() && Boolean(dealMemoRecipeHash()),
+        used: await dealMemoJobsToday(
+          <T = Record<string, unknown>>(text: string, params?: unknown[]) => sql.query<T>(text, params ?? []),
+          user.id,
+        ),
+      };
+    }
+
+    if (method === "GET" && jobId) {
+      const sql = await getSql();
+      const view = await readDealMemoJob(
+        <T = Record<string, unknown>>(text: string, params?: unknown[]) => sql.query<T>(text, params ?? []),
+        { userId: user.id, jobId },
+      );
+      // 404 either way: whether another person's run exists is not this
+      // caller's business.
+      if (!view) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such deal-memo run.", code: "not_found" };
+      }
+      const summary = (view.job.summary ?? null) as Record<string, unknown> | null;
+      // The runner writes `summary.charge` as its LAST step, after the row is
+      // already visible as `done` (the debit runs detached, and only a done row
+      // may be charged). So `state === "done"` is not the same thing as "the
+      // charge settled": a poll in that window must be able to tell "not settled
+      // yet" from "nothing charged, for a reason", or the card paints
+      // "Nothing charged" over a debit that lands a moment later (room 7888).
+      const chargeNote =
+        summary && typeof summary.charge === "object" && summary.charge
+          ? (summary.charge as Record<string, unknown>)
+          : null;
+      return {
+        ok: true,
+        jobId: view.job.job_id,
+        state: view.job.state,
+        message: view.job.message,
+        // Fixed by finishDealMemoJob / the reaper; the card must be able to say
+        // the promise out loud without composing it. `chargedCents` is the E
+        // field (cents, always 0 for this lane); `chargedDrops` is what the
+        // Honey Drops ledger actually moved in phase F.
+        chargedCents: Number(view.job.charged_cents ?? 0),
+        chargedDrops: Number(view.job.charged_drops ?? 0),
+        // True once ANY settlement note exists — including a true free run, which
+        // the runner records with reason `free`. False means "no charge decision
+        // has been written yet", which the poll treats as "keep asking".
+        chargeSettled: chargeNote !== null,
+        // The server's own sentence for a run that did not move money for a
+        // reason (insufficient, no wallet, an unreadable price). Null on a true
+        // free run: the card says "Nothing charged" by itself and the two must
+        // not read the same to the person paying (room 7886).
+        chargeLine:
+          !chargeNote || chargeNote.reason === "free" || typeof chargeNote.line !== "string"
+            ? null
+            : chargeNote.line,
+        stages: view.stages.map((s) => ({ key: s.stage_key, label: s.label, state: s.state, note: s.note })),
+        files: view.files,
+        summary,
+      };
+    }
+
+    if (method === "POST" && !jobId) {
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await event.req.json()) as Record<string, unknown>;
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send the loan request as JSON.", code: "bad_body" };
+      }
+      const raw = (body.loan ?? {}) as Record<string, unknown>;
+      const int = (v: unknown): number | null =>
+        typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null;
+      const loanAmountCents = int(raw.loanAmountCents);
+      const noteRateBp = int(raw.noteRateBp);
+      const amortizationYears = int(raw.amortizationYears);
+      const termYears = int(raw.termYears);
+      const asOf = typeof raw.asOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.asOf) ? raw.asOf : null;
+      if (!loanAmountCents || !noteRateBp || !amortizationYears || !termYears || !asOf) {
+        setResponseStatus(event, 400);
+        return {
+          ok: false,
+          error: "The loan request needs loanAmountCents, noteRateBp, amortizationYears, termYears and asOf.",
+          code: "loan_incomplete",
+        };
+      }
+      // The recipe hash is configuration, never a client choice: a caller must
+      // not point this lane at a different sealed bundle, because
+      // loadDealMemoMethod will open whatever hash it is given if the KEK can.
+      // The chat path already uses dealMemoRecipeHash(); this path now does
+      // the same, via one pure decision function the tests can reach. Accept
+      // either placement a caller might have used (top level or inside loan).
+      const recipeHash = dealMemoRecipeHash();
+      const refusal = dealMemoRecipeRefusal(recipeHash, [body.recipeHash, raw.recipeHash]);
+      if (refusal === "not_configured") {
+        setResponseStatus(event, 503);
+        return { ok: false, error: "No deal-memo recipe is published on this deployment.", code: "not_configured" };
+      }
+      if (refusal === "recipe_fixed") {
+        setResponseStatus(event, 400);
+        return {
+          ok: false,
+          error: "This lane runs the published deal-memo recipe; recipeHash is not a client choice.",
+          code: "recipe_fixed",
+        };
+      }
+      if (!recipeHash) {
+        // Unreachable through dealMemoRecipeRefusal, but keeps the type real.
+        setResponseStatus(event, 503);
+        return { ok: false, error: "No deal-memo recipe is published on this deployment.", code: "not_configured" };
+      }
+      const askingPriceCents = int(raw.askingPriceCents);
+      const started = await startDealMemoRun({
+        userId: user.id,
+        recipeHash,
+        loan: {
+          loanAmountCents,
+          noteRateBp,
+          amortizationYears,
+          termYears,
+          askingPriceCents: askingPriceCents ?? null,
+          asOf,
+          purpose: typeof raw.purpose === "string" ? raw.purpose.slice(0, 40) : undefined,
+        } satisfies DealMemoLoanRequest,
+        memoFormat: typeof body.memoFormat === "string" ? body.memoFormat.slice(0, 60) : undefined,
+      });
+      if (!started.ok) {
+        setResponseStatus(event, started.code === "input_required" ? 400 : 503);
+        return started;
+      }
+      return { ok: true, jobId: started.jobId, state: "queued" };
+    }
+
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET to read a run or POST to start one.", code: "method_not_allowed" };
+  }
+
   // ── /api/buzzy/video — start a video recipe, poll it, keep the mp4 ─────
   // The kit takes minutes per render, so this is a task API exactly like 3D:
   // the chat turn starts the job and the page polls this route until the files
@@ -1119,36 +1276,96 @@ export default defineEventHandler(async (event) => {
         code: "file_too_large",
       };
     }
-    const sha256 = createHash("sha256").update(body).digest("hex");
+    // x-bz-role binds the file to a deal-memo input. When it is present the
+    // upload is checked against that role's allowlist (magic bytes, not the
+    // extension) and a photo has its metadata removed BEFORE hashing — so the
+    // sha256 describes exactly the bytes that get stored.
+    const rawRole = (getHeader(event, "x-bz-role") || "").trim();
+    let storedRelPath = relPath;
+    let storedBody = body;
+    let storedSha: string;
+    let roleEcho: string | null = null;
+    let stripped: string[] = [];
+    if (rawRole) {
+      if (!isDealRole(rawRole)) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: `Unknown role "${rawRole.slice(0, 24)}".`, code: "bad_role", roles: Object.keys(DEAL_ROLES) };
+      }
+      const bound = bindRole({ role: rawRole, filename: relPath, bytes: body });
+      if (!bound.ok) {
+        setResponseStatus(event, bound.code === "file_too_large" ? 413 : 400);
+        return { ok: false, error: bound.message, code: bound.code, role: rawRole };
+      }
+      if (rawRole === "photos") {
+        const photo = readPhoto(body, bound.kind);
+        storedBody = photo.bytes;
+        storedSha = photo.sha256;
+        stripped = photo.removed;
+      } else {
+        storedSha = bound.sha256;
+      }
+      storedRelPath = `deals/${rawRole}/${relPath}`;
+      roleEcho = rawRole;
+    } else {
+      storedSha = createHash("sha256").update(body).digest("hex");
+    }
+    const sha256 = storedSha;
+    const body2 = storedBody;
     const filename = relPath.split("/").pop() || relPath;
-    const contentType = (getHeader(event, "content-type") || "application/octet-stream").slice(0, 120);
+    const headerType = (getHeader(event, "content-type") || "").slice(0, 120);
+    // A role-bound upload is labelled by what its bytes ARE: the browser's guess
+    // from the extension is how a renamed file carries a lie into storage and
+    // back out on download. Legacy (role-less) uploads keep their old label.
+    const contentType = rawRole
+      ? contentTypeForKind(sniffKind(body2), rawRole)
+      : headerType || "application/octet-stream";
     const sql = await getSql();
     const inserted = await sql<{ id: number; rel_path: string }>`
       INSERT INTO buzzy_assets (user_id, sha256, filename, rel_path, content_type, bytes, body)
-      VALUES (${user.id}, ${sha256}, ${filename}, ${relPath}, ${contentType}, ${body.byteLength}, ${Buffer.from(body)})
+      VALUES (${user.id}, ${sha256}, ${filename}, ${storedRelPath}, ${contentType}, ${body2.byteLength}, ${Buffer.from(body2)})
       ON CONFLICT (user_id, sha256) DO NOTHING
       RETURNING id, rel_path
     `;
     if (!inserted.length) {
       // Same bytes already stored for this account: report it as a hit, not an error.
+      // Unless the second upload asked for a different role — then the row is
+      // NOT at deals/<role>/, and saying ok would bind a deal input to a path
+      // that does not exist. decideDuplicate refuses that case.
       const prior = await sql<{ id: number; rel_path: string; bytes: number }>`
         SELECT id, rel_path, bytes FROM buzzy_assets
         WHERE user_id = ${user.id} AND sha256 = ${sha256} LIMIT 1
       `;
+      const decision = decideDuplicate({
+        requestedRole: isDealRole(rawRole) ? rawRole : null,
+        requestedPath: storedRelPath,
+        priorPath: prior[0]?.rel_path ?? storedRelPath,
+      });
+      if (!decision.ok) {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          duplicate: true,
+          error: decision.message,
+          code: decision.code,
+          role: roleEcho,
+          path: prior[0]?.rel_path ?? null,
+        };
+      }
       return {
         ok: true,
         duplicate: true,
         id: prior[0]?.id ?? null,
-        path: prior[0]?.rel_path ?? relPath,
-        bytes: prior[0]?.bytes ?? body.byteLength,
+        path: decision.path,
+        bytes: prior[0]?.bytes ?? body2.byteLength,
         sha256,
+        role: decision.role,
       };
     }
     // Search words for the upload, from its name, its folder and any note the page
     // sent about it (x-bz-note: what the person said the file is).
     const note = Array.from(getHeader(event, "x-bz-note") || "", (ch) => (ch.charCodeAt(0) < 32 ? " " : ch)).join("").trim().slice(0, 600);
     void enrichLater(sql, user.id, inserted[0]!.id, {
-      prompt: [note, relPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
+      prompt: [note, storedRelPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
       filename,
       contentType,
     });
@@ -1157,8 +1374,10 @@ export default defineEventHandler(async (event) => {
       duplicate: false,
       id: inserted[0]!.id,
       path: inserted[0]!.rel_path,
-      bytes: body.byteLength,
+      bytes: body2.byteLength,
       sha256,
+      role: roleEcho,
+      stripped,
     };
   }
 
@@ -3589,34 +3808,26 @@ export default defineEventHandler(async (event) => {
         });
       }
       if (format === "pdf") {
-        const bytes = renderTextPdf(title, text);
-        return new Response(bytes as unknown as BodyInit, {
+        // The renderer reports the pages it actually produced; E's C39 check
+        // reads that number rather than trusting a model's claim about length.
+        const rendered = renderTextPdfDocument(title, text);
+        setResponseHeader(event, "x-bz-pdf-pages", String(rendered.pageCount));
+        return new Response(rendered.bytes as unknown as BodyInit, {
           status: 200,
           headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}${versionTag}.pdf"` },
         });
       }
       if (format === "docx") {
-        // Map canonical text to the typed renderer: markdown-ish headings are
-        // sections, everything else is paragraphs. Unsupported shapes are a
+        // Map canonical text to the typed renderer: headings become sections,
+        // table rows become fixed-width text lines (dropping them would hand the
+        // lender a Word file missing its stress table). Unsupported shapes are a
         // useful error, never a silent empty file (QA-11).
-        const sections: Array<{ heading: string; paragraphs: string[] }> = [];
-        let current: { heading: string; paragraphs: string[] } = { heading: title, paragraphs: [] };
-        for (const raw of text.split("\n")) {
-          const h = raw.match(/^#{1,3}\s+(.*)$/);
-          if (h) {
-            if (current.paragraphs.length || sections.length === 0) sections.push(current);
-            current = { heading: h[1].slice(0, 120), paragraphs: [] };
-          } else if (raw.trim()) {
-            current.paragraphs.push(raw.trim().slice(0, 2000));
-          }
-        }
-        sections.push(current);
-        const shaped = sections.filter((s) => s.paragraphs.length).slice(0, 25);
-        if (!shaped.length) {
+        const shaped = documentContentFromMarkdown(text, title);
+        if (!shaped.ok) {
           setResponseStatus(event, 422);
-          return { error: "That version has no readable text to put in a Word file — download the Markdown instead.", code: "empty_document" };
+          return { error: `That version has no readable text to put in a Word file — download the Markdown instead. (${shaped.error})`, code: "empty_document" };
         }
-        const rendered = await renderDocument({ title, sections: shaped });
+        const rendered = await renderDocument(shaped.content);
         if (!rendered.ok || !rendered.bytes) {
           setResponseStatus(event, 422);
           return { error: rendered.error ?? "The Word render failed — the Markdown download still works.", code: "render_failed" };
@@ -3630,16 +3841,13 @@ export default defineEventHandler(async (event) => {
         });
       }
       if (format === "csv") {
-        // Tabular text: |-delimited rows, skipping the markdown separator row.
-        const lines = text.split("\n").filter((l) => l.includes("|") && /[a-z0-9]/i.test(l.replace(/[|\-\s:]/g, "")));
-        if (!lines.length) {
+        // Real markdown tables only: a pipe row without its separator line is
+        // prose, not a table, and exporting it would be a silent fiction.
+        const csv = markdownTableToCsv(text);
+        if (!csv) {
           setResponseStatus(event, 422);
           return { error: "That version has no table to export — CSV only works for tabular content. This is a value export: formulas are evaluated to their shown values.", code: "no_table" };
         }
-        const q = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-        const csv = lines
-          .map((l) => l.split("|").slice(1, -1).map((c) => q(c.trim())).join(","))
-          .join("\n") + "\n";
         return new Response(csv, {
           status: 200,
           headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${base}${versionTag}.csv"` },

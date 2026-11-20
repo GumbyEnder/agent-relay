@@ -1,0 +1,8 @@
+comp_id,name,sale_date,price_usd,building_sf,property_type,transaction_type,source
+C1,Oak Plaza (fictional),2026-03-14,2450000,12000,retail strip,arm's length,county recorder deed #EX-1001 (fictional)
+C2,Birch Corner (fictional),2025-11-02,3100000,14500,retail strip,arm's length,county recorder deed #EX-1002 (fictional)
+C3,Cedar Commons (fictional),2026-06-20,2280000,10800,retail strip,arm's length,broker sale comp sheet (fictional)
+C4,"Elm Portfolio, 3 bldgs (fictional)",2026-01-15,9800000,41000,retail strip,portfolio sale,news report (fictional)
+C5,Pine Center (fictional),2023-08-30,2000000,11000,retail strip,arm's length,county recorder deed #EX-1005 (fictional)
+C6,Spruce Office Park (fictional),2026-04-10,2700000,13000,suburban office,arm's length,county recorder deed #EX-1006 (fictional)
+C7,Willow Shops (fictional),2026-02-05,1500000,9000,retail strip,related-party transfer,county recorder deed #EX-1007 (fictional)

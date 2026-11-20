@@ -1,0 +1,4 @@
+scenario,note_rate_pct,annual_debt_service_usd,noi_usd,dscr_x,ltv_pct,debt_yield_pct
+base,6.75,140117,183400,1.31,65.00,10.85
++100bp,7.75,153181,183400,1.20,65.00,10.85
++200bp,8.75,166731,183400,1.10,65.00,10.85

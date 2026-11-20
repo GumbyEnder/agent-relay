@@ -65,7 +65,16 @@ export interface DraftDomain {
   legalQuestions?: string[];
   /** grants / RFP */
   eligibility?: { id: string; text: string; sourceId: string | null; gap: boolean }[];
-  limits?: { wordCount?: number | null; maxWords?: number | null; format?: string | null; requiredFormat?: string | null };
+  limits?: {
+    wordCount?: number | null;
+    maxWords?: number | null;
+    format?: string | null;
+    requiredFormat?: string | null;
+    /** page count the renderer produced — set by the PDF writer, never the model */
+    pageCount?: number | null;
+    /** page limit the sealed half imposes */
+    maxPages?: number | null;
+  };
   /** bookkeeping */
   uncategorised?: number | null;
   taxAssertions?: string[];
@@ -86,6 +95,38 @@ export interface DraftDomain {
   filingActions?: string[];
   /** identifiers that must be masked before they reach a document */
   sensitiveIdentifiers?: { id: string; value: string }[];
+  /* ── commercial real estate deal memo (CR-9) ───────────────────────────────
+   * These blocks carry provenance and shape, never the author's thresholds: the
+   * sealed half owns the numbers and the runner re-does the arithmetic, so a
+   * check can only verify that a figure is sourced, not that it is favourable.
+   */
+  /** every comparable the runner considered, kept or excluded, with why */
+  comps?: {
+    id: string;
+    sourceId: string | null;
+    excluded: boolean;
+    /** reason code for an exclusion (`portfolio_sale`, `too_old`, …); null when kept */
+    exclusionReason: string | null;
+  }[];
+  /** the three rate scenarios, computed by the debt engine, never typed */
+  stress?: {
+    id: string;
+    rateShiftBp: number;
+    noteRateBp: number;
+    dscrX100: number;
+    ltvBp: number;
+    debtYieldBp: number;
+    source: "calculator" | "typed";
+  }[];
+  /** the runner's own re-derivation of the memo's figures */
+  reconciliation?: { ok: boolean; checked: number; mismatches: number };
+  /** lease/title/survey issues that must be cleared, each citing its document */
+  redFlags?: {
+    id: string;
+    category: "lease" | "title" | "survey" | "zoning" | "environmental" | "other";
+    sourceId: string | null;
+    severity: "high" | "medium" | "low";
+  }[];
 }
 
 export interface Draft {
