@@ -511,3 +511,22 @@
   .wb-r-agent { width: 200px; }
   .wb-k-track, .wb-k-model, .wb-k-video { width: 240px; }
 }
+
+/* ── The conversation, as a card on the board (owner, 2026-11-20: "on the board itself
+   as a thing that you could scroll by. It would just be sitting there.") ─────────
+   Hold it by the bar on top to move it; inside, the words scroll and can be selected. */
+.wb-card.wb-k-chat {
+  width: 360px;
+  height: 480px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #121418;
+}
+.wb-chat-bar { margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--ob-card-edge); cursor: grab; }
+.wb-chat-bar:active { cursor: grabbing; }
+.wb-chat-grip { font-weight: 600; text-transform: none; letter-spacing: 0; opacity: 0.65; }
+.wb-chat-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; user-select: text; cursor: auto; }
+.wb-chat-body .wb-side-slot { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+

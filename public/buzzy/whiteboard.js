@@ -53,11 +53,13 @@
   // ── Icons: inline SVG (an emoji glyph does not render everywhere) ──────────
   var ICONS = {
     select: "M5 3l13 8-6 1.5 3.5 7-2.5 1.2-3.5-7L5 18z",
-    hand: "M8 11V5.5a1.5 1.5 0 013 0V10m0-.5V4.5a1.5 1.5 0 013 0V10m0-4a1.5 1.5 0 013 0v7a7 7 0 01-7 7h-.6a6 6 0 01-4.6-2.2L4 15.5a1.6 1.6 0 012.4-2.1L8 15V11",
+    // A thumb and four fingers. The first drawing had a thumb and three (owner,
+    // 2026-11-20: "There should be a 4th finger… 5 fingers total").
+    hand: "M6.5 15V6.2a1.75 1.75 0 013.5 0V11M10 10.5V4.5a1.75 1.75 0 013.5 0v6M13.5 10.5V5.7a1.75 1.75 0 013.5 0v5.3M17 9.2a1.75 1.75 0 013.5 0v5.3a7.3 7.3 0 01-7.3 7.3h-1.6c-2.4 0-3.9-.8-5.3-2.1l-3.4-3.4a1.75 1.75 0 012.5-2.5L6.5 15",
     note: "M5 4h14v10l-5 6H5zM14 20v-6h5",
     agent: "M6 3h9l4 4v14H6zM15 3v4h4M9 12h7M9 16h7",
     skill: "M12 2l2.2 6.3L21 9l-5.2 4 1.8 6.6L12 16l-5.6 3.6L8.2 13 3 9l6.8-.7z",
-    output: "M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 17v3h16v-3",
+    output: "M5 21V4M5 4h12l-2.5 4.5L17 13H5",
     upload: "M12 21V9m0 0l-4.5 4.5M12 9l4.5 4.5M4 7V4h16v3",
     fit: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
     minus: "M5 12h14",
@@ -100,7 +102,7 @@
   // What a card is, from whatever the source called it.
   function kindOf(c) {
     var k = String(c.kind || "").toLowerCase();
-    if (k === "agent" || k === "skill" || k === "memory" || k === "note") return k;
+    if (k === "agent" || k === "skill" || k === "memory" || k === "note" || k === "chat") return k;
     var name = String(c.title || c.url || "").toLowerCase();
     var t = String(c.contentType || "").toLowerCase();
     if (k === "photo" || k === "image" || /^image\//.test(t) || /\.(png|jpe?g|gif|webp|svg|avif)$/.test(name)) return "image";
@@ -113,11 +115,16 @@
     if (k === "document" || k === "output" || /\.(docx?|md|txt|rtf)$/.test(name) || /word|text\//.test(t)) return "document";
     return "file";
   }
-  var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note" };
+  // "chat" is the conversation itself, sitting on the board as a card (owner, 2026-11-20:
+  // "The conversation history… would be on the board itself as a thing that you could
+  // scroll by. It would just be sitting there."). It is never an instruction, a file or a
+  // step of a recipe, and there is one per board (its id is always "chat").
+  var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note", chat: "chat" };
+  var CHAT_ID = "chat";
   function roleOf(kind) { return ROLE[kind] || "output"; }
   var GLYPH = { document: "W", sheet: "E", slides: "P", pdf: "PDF" };
   var KIND_LABEL = {
-    agent: "Instructions", skill: "Skill", memory: "Memory", note: "Note", image: "Picture", track: "Music",
+    agent: "Instructions", skill: "Skill", memory: "Memory", note: "Note", chat: "Conversation", image: "Picture", track: "Music",
     model: "3D model", video: "Video", document: "Document", sheet: "Spreadsheet", slides: "Slides", pdf: "PDF", file: "File",
   };
 
@@ -306,6 +313,7 @@
     cards.forEach(function (c) { ids[c.id] = 1; if (c.flow) byFlow[c.flow] = c; });
     (from.cards || []).forEach(function (c0) {
       var c = copy(c0);
+      if (c.id === CHAT_ID && ids[CHAT_ID]) { map[c0.id] = CHAT_ID; return; }   // one conversation card
       var same = c.flow ? byFlow[c.flow] : null;
       if (same) {
         // Its place stays; the person's words there stay unless new ones were written
@@ -693,6 +701,24 @@
     return Promise.all([push(se), de.live ? push(de) : syncBoard(de)]);
   }
 
+  // A fresh visit starts on a blank board (owner, 2026-11-20: "It should open to a blank
+  // page each time"). The board in front of a new conversation is emptied, here and in
+  // the account, after the account's copy has been read, so nothing from another
+  // computer comes back on top of it. Its earlier versions stay in History.
+  function reset(id) {
+    var e = engine(id || SCRATCH);
+    return pull(e).then(function () {
+      return enqueue(e, function () {
+        var doc = docOf(e);
+        if (!doc || e.off || foreign(doc)) return;
+        if (!editDoc(doc, function (d) { d.cards = []; d.links = []; })) return;
+        if (e.live && e.live.state === doc) e.live.apply({ cards: [], links: [] });
+        else save(keyFor(e.id), doc);
+        return pushNow(e, 0);
+      });
+    });
+  }
+
   // Boards from before the account kept them, and changes that never reached it (the
   // page was closed offline): send them up quietly, one at a time.
   var swept = null;
@@ -755,7 +781,7 @@
     mine.forEach(function (c) { if (kindOf(c) === "skill") lines.push("Step " + (++step) + " — " + c.title + ": " + c.body.trim()); });
     mine.forEach(function (c) {
       var k = kindOf(c);
-      if (roleOf(k) === "output") lines.push("Output — " + c.title + ": " + c.body.trim());
+      if (roleOf(k) === "output") lines.push("End result — " + c.title + ": " + c.body.trim());
       else if (k === "note") lines.push("Note — " + c.body.trim());
     });
     var also = [];
@@ -870,7 +896,9 @@
     bar.setAttribute("aria-label", "Board tools");
     var TOOLS = [
       ["select", "Select", "V"], ["hand", "Move the board", "H"], ["note", "Note", "N"],
-      ["agent", "agent.md — how to work", "A"], ["skill", "Skill — a step", "K"], ["output", "Output — what to make", "O"],
+      // "Output" said nothing (owner, 2026-11-20: "It's not clear what output means"): the
+      // card says what you want to have at the end.
+      ["agent", "agent.md — how BeeZilla works", "A"], ["skill", "Skill — one step", "K"], ["output", "End result — what you want at the end", "E"],
       ["upload", "Add a file from your computer", "U"],
     ];
     var toolBtns = {};
@@ -952,7 +980,7 @@
     keyList.setAttribute("role", "dialog");
     keyList.setAttribute("aria-label", "Keyboard shortcuts");
     [["V", "Select"], ["H or Space", "Move the board"], ["Scroll", "Move the board"], ["Ctrl/⌘ + scroll, pinch", "Zoom"],
-     ["Alt/Option + 1", "Fit everything"], ["Alt/Option + 2", "Zoom to the selection"], ["Ctrl/⌘ + 0", "Back to 100%"], ["F1", "This list"], ["N / A / K / O", "Note / agent.md / skill / output"], ["Drag on empty board", "Select an area"],
+     ["Alt/Option + 1", "Fit everything"], ["Alt/Option + 2", "Zoom to the selection"], ["Ctrl/⌘ + 0", "Back to 100%"], ["F1", "This list"], ["N / A / K / E", "Note / agent.md / skill / end result"], ["Drag on empty board", "Select an area"],
      ["Shift + click", "Add to the selection"], ["Ctrl/⌘ + A", "Select all"], ["Delete", "Remove"], ["Ctrl/⌘ + D", "Duplicate"],
      ["Ctrl/⌘ + Z", "Undo"], ["Shift+Ctrl/⌘ + Z", "Redo"], ["Double-click", "Edit a card"], ["Esc", "Clear the selection"]]
       .forEach(function (k) {
@@ -1030,34 +1058,18 @@
     toast.setAttribute("aria-live", "polite");
     toast.hidden = true;
 
-    // The conversation lives inside the board, on the right, and folds to a tab.
-    var sideWrap = el("aside", "wb-side");
-    sideWrap.setAttribute("aria-label", "Conversation");
-    var sideHead = el("div", "wb-side-head");
-    sideHead.appendChild(el("span", "wb-side-title", "Conversation"));
-    var sideBtn = el("button", "wb-btn wb-side-btn", "Hide");
-    sideBtn.type = "button";
-    sideBtn.setAttribute("aria-expanded", "true");
-    sideBtn.setAttribute("aria-label", "Hide the conversation");
-    sideHead.appendChild(sideBtn);
+    // The conversation sits ON the board, as a card you can move and scroll (the
+    // "chat" card); the page puts the conversation into this slot, and the card holds
+    // the slot. It used to be a panel docked down the right side.
     var side = el("div", "wb-side-slot");     // the page puts the conversation here
-    sideWrap.appendChild(sideHead);
-    sideWrap.appendChild(side);
-    var sideOpen = true;
-    try { sideOpen = localStorage.getItem("bz.board.side") !== "closed"; } catch (_) { /* best effort */ }
-    function paintSide() {
-      sideWrap.classList.toggle("wb-side-closed", !sideOpen);
-      root.classList.toggle("wb-side-is-closed", !sideOpen);
-      sideBtn.textContent = sideOpen ? "Hide" : "Conversation";
-      sideBtn.setAttribute("aria-expanded", sideOpen ? "true" : "false");
-      sideBtn.setAttribute("aria-label", sideOpen ? "Hide the conversation" : "Show the conversation");
-    }
-    sideBtn.addEventListener("click", function () {
-      sideOpen = !sideOpen;
-      try { localStorage.setItem("bz.board.side", sideOpen ? "open" : "closed"); } catch (_) { /* best effort */ }
-      paintSide();
-    });
-    paintSide();
+    var sideWrap = el("div", "wb-side-none"); // nothing docked at the side any more
+    var sideOpen = false;
+    root.classList.add("wb-side-is-closed");
+    // Until the conversation card is on the board (and while cards are redrawn) the slot
+    // waits here, hidden but in the page: the page finds its conversation by id.
+    var sideHome = el("div", "wb-side-home");
+    sideHome.hidden = true;
+    sideHome.appendChild(side);
 
     body.appendChild(bar);
     body.appendChild(canvas);
@@ -1066,7 +1078,7 @@
     body.appendChild(hist);
     body.appendChild(selbar);
     body.appendChild(toast);
-    body.appendChild(sideWrap);
+    body.appendChild(sideHome);
     root.appendChild(head);
     root.appendChild(body);
     host.appendChild(root);
@@ -1285,7 +1297,30 @@
     function cardById(id) { for (var i = 0; i < state.cards.length; i++) if (state.cards[i].id === id) return state.cards[i]; return null; }
     function cardByFlow(fid) { for (var i = 0; i < state.cards.length; i++) if (state.cards[i].flow === fid) return state.cards[i]; return null; }
 
+    function fillChat(n, c) {
+      n.textContent = "";
+      n.className = "wb-card wb-k-chat wb-r-chat" + (selected[c.id] ? " wb-on" : "");
+      var top = el("div", "wb-ctop wb-chat-bar");
+      top.appendChild(icon("note", "wb-cico"));
+      top.appendChild(el("span", "wb-ckind", "Conversation"));
+      top.appendChild(el("span", "wb-chat-grip", "Drag here to move"));
+      top.title = "Your conversation with BeeZilla. Drag this bar to move it; scroll inside to read back.";
+      n.appendChild(top);
+      var holder = el("div", "wb-chat-body");
+      holder.appendChild(side);
+      // Inside the conversation, the pointer reads and selects words, and the wheel
+      // scrolls it; the board moves only from the bar on top.
+      holder.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      holder.addEventListener("dblclick", function (e) { e.stopPropagation(); });
+      holder.addEventListener("wheel", function (e) {
+        if (e.ctrlKey || e.metaKey) return;          // zooming the board still works
+        e.stopPropagation();
+      }, { passive: true });
+      n.appendChild(holder);
+      n.setAttribute("aria-label", "Conversation");
+    }
     function fillCard(n, c) {
+      if (kindOf(c) === "chat") { fillChat(n, c); return; }
       var keep = Array.prototype.filter.call(n.childNodes, function (x) { return x.classList && (x.classList.contains("wb-handle") || x.classList.contains("wb-rm")); });
       n.textContent = "";
       var k = kindOf(c);
@@ -1376,6 +1411,7 @@
       root.classList.toggle("wb-has-cards", state.cards.length > 0);
     }
     function rebuild() {
+      if (side.parentNode !== sideHome) sideHome.appendChild(side);   // never thrown out with a card
       Object.keys(nodes).forEach(function (id) { nodes[id].remove(); });
       nodes = {};
       selected = {};
@@ -1406,8 +1442,10 @@
       if (state.cards.length >= MAX_CARDS) { say("The board is full — remove a few cards first."); return null; }
       if (!noUndo) snapshot();
       var spot = at || viewCentre();
+      var isChat = kindOf(card) === "chat";
+      if (isChat && cardById(CHAT_ID)) return null;      // one conversation per board
       var c = {
-        id: uid(),
+        id: isChat ? CHAT_ID : uid(),
         kind: kindOf(card),
         title: String(card.title || card.name || "Untitled").slice(0, 140),
         body: String(card.body || "").slice(0, 4000),
@@ -1420,7 +1458,7 @@
       if (card.user) c.user = true;
       if (card.taskId) c.taskId = String(card.taskId);
       if (card.thumb) c.thumb = String(card.thumb);
-      var free = at && card.exact ? spot : freeSpot(spot.x, spot.y);
+      var free = at && card.exact ? spot : isChat ? freeSpot(spot.x, spot.y, 360, 480) : freeSpot(spot.x, spot.y);
       c.x = free.x; c.y = free.y;
       state.cards.push(c);
       renderCard(c);
@@ -1430,6 +1468,7 @@
     }
     function removeCards(ids) {
       var gone = {};
+      ids = ids.filter(function (id) { return id !== CHAT_ID; });
       ids.forEach(function (id) { gone[id] = true; });
       state.cards = state.cards.filter(function (c) { return !gone[c.id]; });
       state.links = state.links.filter(function (l) { return !gone[l.from] && !gone[l.to]; });
@@ -1567,12 +1606,14 @@
         n.addEventListener("pointerup", upm);
       });
       n.addEventListener("dblclick", function (e) {
+        if (c.id === CHAT_ID) return;
         if (e.target.closest && e.target.closest(".bzw,a,video")) return;
         var k = kindOf(c);
         if (roleOf(k) === "output" && c.url && k !== "track") { window.open(c.url, "_blank", "noopener"); return; }
         openEditor(c);
       });
       n.addEventListener("keydown", function (e) {
+        if (c.id === CHAT_ID) return;
         if (e.key === "Enter" && !typingInto(e.target)) { e.preventDefault(); openEditor(c); }
       });
       n.addEventListener("focus", function () { if (!selected[c.id]) select(c.id, false); });
@@ -1603,7 +1644,7 @@
       b.maxLength = 4000;
       b.placeholder = k === "agent" ? "How BeeZilla should work on this — your agent.md." :
         k === "skill" ? "What this step does, in your words." :
-        roleOf(k) === "output" ? "What the finished thing should be." : "Anything.";
+        roleOf(k) === "output" ? "What you want to have at the end — the finished thing." : "Anything.";
       b.setAttribute("aria-label", "Text");
       editor.appendChild(b);
       var row = el("div", "wb-ed-row");
@@ -1728,7 +1769,7 @@
         var p = toWorld(e.clientX, e.clientY);
         var made = addCard({
           kind: tool === "output" ? "document" : tool,
-          title: tool === "agent" ? "agent.md" : tool === "skill" ? "New skill" : tool === "output" ? "Output" : "Note",
+          title: tool === "agent" ? "agent.md" : tool === "skill" ? "New skill" : tool === "output" ? "End result" : "Note",
           user: true,
         }, { x: p.x - 90, y: p.y - 30 });
         setTool("select");
@@ -1789,7 +1830,7 @@
       // Only while the board itself has focus: never while the Talk bar or the
       // conversation beside it does.
       var a = document.activeElement;
-      if (!a || !body.contains(a) || sideWrap.contains(a) || hist.contains(a)) return;
+      if (!a || !body.contains(a) || sideWrap.contains(a) || side.contains(a) || hist.contains(a)) return;
       var mod = e.ctrlKey || e.metaKey;
       if (e.key === " " && !spaceDown) { spaceDown = true; canvas.classList.add("wb-hand"); e.preventDefault(); return; }
       if (mod && (e.key === "z" || e.key === "Z")) {
@@ -1820,7 +1861,7 @@
       }
       if (mod || e.altKey) return;
       var k = e.key.toLowerCase();
-      var map = { v: "select", h: "hand", n: "note", a: "agent", k: "skill", o: "output" };
+      var map = { v: "select", h: "hand", n: "note", a: "agent", k: "skill", e: "output", o: "output" };
       if (map[k]) { e.preventDefault(); setTool(map[k]); return; }
       if (k === "u") { e.preventDefault(); picker.click(); return; }
       if (k === "+" || k === "=") { e.preventDefault(); zoomBy(1.25); return; }
@@ -1832,7 +1873,7 @@
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("keyup", onKeyUp);
     function duplicateSelected() {
-      var list = state.cards.filter(function (c) { return selected[c.id]; });
+      var list = state.cards.filter(function (c) { return selected[c.id] && c.id !== CHAT_ID; });
       if (!list.length) return;
       snapshot();
       var map = {};
@@ -1883,7 +1924,7 @@
         .catch(function () { nameGo.disabled = false; say("The recipe could not be saved — check the connection."); });
     });
     function selectionGraph() {
-      var list = state.cards.filter(function (c) { return selected[c.id]; });
+      var list = state.cards.filter(function (c) { return selected[c.id] && c.id !== CHAT_ID; });
       var ids = {};
       list.forEach(function (c) { ids[c.id] = true; });
       return {
@@ -1896,11 +1937,42 @@
       };
     }
 
-    // ── Drops: files from the computer, Inspiration cards, search results, links ─
+    // ── Drops: files from the computer, Inspiration cards, search results, links, ──
+    // and any words dragged from a page (they become a note). Everything on the site
+    // can be moved here (owner, 2026-11-20).
     var TYPE = "application/x-beezilla-card";
     function acceptable(e) {
       var t = e.dataTransfer && e.dataTransfer.types ? Array.prototype.slice.call(e.dataTransfer.types) : [];
-      return t.indexOf(TYPE) >= 0 || t.indexOf("text/uri-list") >= 0 || t.indexOf("Files") >= 0;
+      return t.indexOf(TYPE) >= 0 || t.indexOf("text/uri-list") >= 0 || t.indexOf("Files") >= 0 || t.indexOf("text/plain") >= 0;
+    }
+    // What a drop holds, put on the board at `at` (a free spot near it). Also used by
+    // the drop strip at the top of the window, which drops onto a folded board.
+    function takeDrop(dt, at) {
+      if (!dt) return null;
+      if (dt.files && dt.files.length) { uploadFiles(dt.files, at || viewCentre()); return "file"; }
+      var raw = "";
+      try { raw = dt.getData(TYPE); } catch (_) { raw = ""; }
+      if (raw) {
+        try {
+          var c = JSON.parse(raw);
+          var made = addCard({ kind: c.kind, title: c.title, url: c.url, contentType: c.contentType, body: c.body, user: c.kind === "note" }, at);
+          return made ? made.id : null;
+        } catch (_) { return null; }
+      }
+      var uri = (dt.getData("text/uri-list") || "").split("\n")[0].trim();
+      var text = String(dt.getData("text/plain") || "").trim();
+      if (!/^https?:\/\//i.test(uri) && /^https?:\/\/\S+$/i.test(text)) uri = text;
+      if (/^https?:\/\//i.test(uri)) {
+        var u;
+        try { u = new URL(uri); } catch (_) { return null; }
+        var link = addCard({ kind: "file", title: u.host + u.pathname.replace(/\/$/, ""), url: uri }, at);
+        return link ? link.id : null;
+      }
+      if (text) {
+        var note = addCard({ kind: "note", title: "Note", body: text.slice(0, 4000), user: true }, at);
+        return note ? note.id : null;
+      }
+      return null;
     }
     canvas.addEventListener("dragover", function (e) {
       if (!acceptable(e)) return;
@@ -1919,17 +1991,8 @@
       e.stopPropagation();
       var at = toWorld(e.clientX, e.clientY);
       at = { x: at.x - 90, y: at.y - 30 };
-      if (e.dataTransfer.files && e.dataTransfer.files.length) { uploadFiles(e.dataTransfer.files, at); return; }
-      var raw = e.dataTransfer.getData(TYPE);
-      if (raw) {
-        try { var c = JSON.parse(raw); addCard({ kind: c.kind, title: c.title, url: c.url, contentType: c.contentType }, at); } catch (_) { /* best effort */ }
-        return;
-      }
-      var uri = (e.dataTransfer.getData("text/uri-list") || "").split("\n")[0].trim();
-      if (/^https?:\/\//i.test(uri)) {
-        var u = new URL(uri);
-        addCard({ kind: "file", title: u.host + u.pathname.replace(/\/$/, ""), url: uri }, at);
-      }
+      takeDrop(e.dataTransfer, at);
+      window.dispatchEvent(new CustomEvent("bz:dropped"));
     });
     function dragStarted(e) { if (acceptable(e)) root.classList.add("wb-target"); }
     function dragFinished() { root.classList.remove("wb-target"); root.classList.remove("wb-over"); }
@@ -1986,10 +2049,13 @@
         if (!parent && step.kind !== "agent") parent = cardByFlow("agent");
         var at;
         if (step.kind === "agent") {
-          // Top-left of the part of the board you can see.
+          // Top-left of the part of the board you can see, or right of the conversation
+          // card when that is where it sits.
           var cr = canvas.getBoundingClientRect(), oa = openArea();
           var vc = toWorld(cr.left + oa.x + 24, cr.top + oa.y + 24);
           at = { x: vc.x, y: vc.y };
+          var talkCard = cardById(CHAT_ID);
+          if (talkCard && at.x < talkCard.x + 360 + 40 && at.x + 240 > talkCard.x) at = { x: talkCard.x + 360 + COL_GAP / 2, y: talkCard.y };
         } else if (parent) {
           var pn = nodes[parent.id];
           var px = parent.x + (pn ? pn.offsetWidth : 200) + COL_GAP;
@@ -2141,6 +2207,34 @@
         return made;
       },
       addGraph: addGraph,
+      /** The conversation, as a card on the board: put it there once there is one to show. */
+      conversation: function () {
+        var c = cardById(CHAT_ID);
+        if (c) {
+          var nb = nodes[c.id] && nodes[c.id].querySelector(".wb-chat-body");
+          if (nb && side.parentNode !== nb) nb.appendChild(side);
+          return true;
+        }
+        var r = canvas.getBoundingClientRect();
+        if (!r.width) return false;            // not on screen yet: placed on the next look
+        // Its first place: left of everything already on the board, or the top-left of
+        // the part you can see. BeeZilla's steps are drawn to its right.
+        var b = bounds(state.cards), oa = openArea(), at;
+        if (b) at = { x: b.x1 - 360 - COL_GAP / 2, y: b.y1, exact: true };
+        else at = toWorld(r.left + oa.x + 8, r.top + oa.y + 4);
+        var made = addCard({ kind: "chat", title: "Conversation", exact: !!(at && at.exact) }, { x: at.x, y: at.y }, true);
+        // It was put where you are looking: the board's first-look "fit everything"
+        // must not move the view out from under it (the steps follow on its right).
+        if (made) state.viewSet = true;
+        if (made && b) reveal(made);
+        return !!made;
+      },
+      /** A drop that landed somewhere else (the drop strip): onto a free spot in view. */
+      drop: function (dt) {
+        var id = takeDrop(dt, null);
+        if (id && id !== "file" && nodes[id]) reveal(cardById(id));
+        return !!id;
+      },
       instructions: instructions,
       fit: fit,
       say: say,
@@ -2185,6 +2279,8 @@
     },
     /** Send up, one at a time, the boards in this browser that never reached the account. */
     sweep: sweep,
+    /** Empty a board that isn't on screen, here and in the account (a fresh visit's "talk"). */
+    reset: reset,
     merge: merge3,
     graft: graft,
   };

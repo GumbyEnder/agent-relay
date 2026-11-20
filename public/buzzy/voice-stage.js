@@ -21,17 +21,24 @@
  *
  *  - Talk to BeeZilla → Pause → Continue → Pause …: what you say collects in the box
  *    (talk.html's dictation) and nothing is sent until you send it yourself.
- *  - Folded: the Talk bar sits alone at the top of the page (#obStart).
- *  - Talking, sending, or a live step from the agent opens the whiteboard full width;
- *    the Talk bar moves INTO its top edge and the conversation into its right side.
- *    "Fold away" on the board puts the bar back on top. Talking opens it again.
+ *  - Folded: the Talk bar sits alone at the top of every page (#obStart, in the
+ *    website's header #bzHead).
+ *  - A visit opens folded, on a blank board (owner, 2026-11-20: "The whiteboard
+ *    shouldn't be open until I say something… It should open to a blank page each
+ *    time"). Pressing Talk to BeeZilla, sending, a live step from the agent, or
+ *    putting something on the board opens it full width; the Talk bar moves INTO its
+ *    top edge and the conversation sits on the board as a card you can move and
+ *    scroll. "Fold away" puts the bar back on top. Talking opens it again.
  *  - The live process: chat stream "flow" steps (agent.md, skills, outputs) are drawn
  *    on the board as they happen (window.__bzFlow, fed by talk.html).
  *  - The face top-left is the real brand art (revision6 expressions), switched by
  *    what BeeZilla is doing — content, listening, thinking, working, talking, done.
  *    Nothing is drawn over it, and it does not blink.
- *  - More (bottom row) holds everything that isn't talking.
- *  - "Your AI key": the person's own provider key, in the cloud version too.
+ *  - No More menu: the paper clip and privacy sit on the Talk bar, New conversation
+ *    on the board and in History, and "Your AI key" (the person's own provider key,
+ *    in the cloud version too) behind the settings gear.
+ *  - Anything dragged anywhere on the site can go on the board: while a drag is on,
+ *    a drop strip shows at the top of the window (bzDropStrip below).
  *
  * talk.html owns the voice engine and lends this file:
  *   window.bzVoice             — the engine's state (read-only here)
@@ -202,7 +209,11 @@
   // ── The whiteboard: folded on top, or open full width ─────────────────
   var board = null, boardKey = null;
   var folded = false;   // folded away with the board's own button
-  var wanted = false;   // opened by a send, a step, or the More menu
+  var wanted = false;   // opened by a send, a step, or something put on the board
+  // Voice can come back "armed" from an earlier visit (talk.html): that alone never
+  // opens the board. It opens once the person presses Talk to BeeZilla in this page.
+  var asked = false;
+  micBtn.addEventListener("click", function () { asked = true; }, true);
   function boardId() {
     try { return localStorage.getItem("bz_session_id") || "talk"; } catch (_) { return "talk"; }
   }
@@ -233,6 +244,18 @@
     });
     board.dock.appendChild(composer);
     if (threadCol) board.side.appendChild(threadCol);
+    // New conversation, where the conversation is (it used to wait in a More menu).
+    var tools = board.root.querySelector(".wb-tools");
+    var fresh = $("newSessionBtn");
+    if (tools && fresh) {
+      var nb = document.createElement("button");
+      nb.type = "button";
+      nb.className = "wb-btn wb-new";
+      nb.textContent = "New conversation";
+      nb.title = "Start a new conversation on a blank board. This one stays in History.";
+      nb.addEventListener("click", function () { fresh.click(); });
+      tools.insertBefore(nb, tools.firstChild);
+    }
   }
   function unmountBoard() {
     if (!board) return;
@@ -245,12 +268,16 @@
   var wasOpen = false;
   function sync() {
     // A paused session keeps its board: the words wait in the box beside it.
-    var want = voiceOn() || !!state().paused || hasConversation() || wanted;
-    if (want && !wasOpen && voiceOn()) folded = false; // Talk opens the whiteboard
+    var talking = asked && (voiceOn() || !!state().paused);
+    var want = talking || hasConversation() || wanted;
+    if (want && !wasOpen && asked && voiceOn()) folded = false; // Talk opens the whiteboard
     var open = want && !folded;
     if (open) mountBoard(); else unmountBoard();
     document.documentElement.classList.toggle("ob-open", open);
     boardHost.classList.toggle("hidden", !open);
+    // The conversation sits on the board as a card once there is one to show (placed
+    // after the board is on screen, so it lands where you can see it).
+    if (board && board.conversation && hasConversation()) board.conversation();
     if (toggle) toggle.setAttribute("aria-pressed", open ? "true" : "false");
     wasOpen = open;
     paintWords();
@@ -343,6 +370,134 @@
     if (board) board.addCard(card);
   };
 
+  // ── Everything on the site goes on the board ──────────────────────────
+  // Owner, 2026-11-20: "Everything on this website has got to be movable to the
+  // whiteboard." While anything is dragged, on any page (a picture, an Inspiration
+  // card, a search result, a link, words, a file from the computer), a strip at the
+  // top of the window shows where it goes. Dropping it there puts it on the Idea
+  // Board, which opens if it was folded; dropping straight onto the open board still
+  // puts it where you let go. Pressing an Inspiration card brings the strip up first,
+  // so you see where the card goes before you move it (window.bzDirectToBoard), and
+  // clicking the strip then puts it there without dragging at all.
+  var ARROW_UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>';
+  var strip = document.createElement("div");
+  strip.className = "bz-dropstrip";
+  strip.hidden = true;
+  strip.setAttribute("role", "status");
+  strip.setAttribute("aria-live", "polite");
+  strip.innerHTML = '<span class="bz-ds-ico">' + ARROW_UP + '</span><span class="bz-ds-text"></span>' +
+    '<button type="button" class="bz-ds-go" hidden>Show it</button>';
+  ($("bzHead") || document.body).appendChild(strip);
+  var stripText = strip.querySelector(".bz-ds-text");
+  var stripGo = strip.querySelector(".bz-ds-go");
+  var pendingCard = null, stripTimer = 0, dragOn = false;
+  function showStrip(mode, text) {
+    clearTimeout(stripTimer);
+    strip.hidden = false;
+    strip.className = "bz-dropstrip bz-ds-" + mode;
+    stripText.textContent = text;
+    stripGo.hidden = true;
+  }
+  function hideStrip(ms) {
+    clearTimeout(stripTimer);
+    stripTimer = setTimeout(function () { strip.hidden = true; pendingCard = null; }, ms || 0);
+  }
+  function boardInView() {
+    if (!board) return false;
+    var r = boardHost.getBoundingClientRect();
+    return r.height > 0 && r.bottom > 120 && r.top < window.innerHeight - 120;
+  }
+  function landed(ok) {
+    showStrip("done", ok ? "It's on your Idea Board." : "That couldn't go on the board.");
+    stripGo.hidden = !ok || boardInView();
+    hideStrip(ok ? 4200 : 3000);
+  }
+  function putOnBoard(fn) {
+    asked = true;
+    openBoard();
+    var ok = false;
+    try { ok = !!(board && fn(board)); } catch (_) { ok = false; }
+    landed(ok);
+  }
+  stripGo.addEventListener("click", function (e) {
+    e.stopPropagation();
+    hideStrip(0);
+    try { boardHost.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" }); } catch (_) { /* best effort */ }
+  });
+  strip.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    strip.classList.add("bz-ds-over");
+  });
+  strip.addEventListener("dragleave", function () { strip.classList.remove("bz-ds-over"); });
+  strip.addEventListener("drop", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragOn = false;
+    var dt = e.dataTransfer;
+    putOnBoard(function (b) { return b.drop(dt); });
+  });
+  strip.addEventListener("click", function () {
+    if (!pendingCard) return;
+    var card = pendingCard;
+    pendingCard = null;
+    putOnBoard(function (b) { return b.addCard(card); });
+  });
+  window.bzDirectToBoard = function (card) {
+    showStrip("press", "Drag it up here to put it on your Idea Board, or click here.");
+    pendingCard = card || null;
+    hideStrip(6000);
+  };
+  window.addEventListener("bz:dropped", function () { if (!strip.hidden && !/bz-ds-done/.test(strip.className)) hideStrip(0); });
+
+  // A drag that says nothing about itself still carries what it is: a picture, a
+  // sound, a link, or an element that names its card (data-bz-card).
+  function fileName(u) { try { return decodeURIComponent(new URL(u, location.href).pathname.split("/").pop() || "") || "Picture"; } catch (_) { return "Picture"; } }
+  function describe(t) {
+    var own = t.closest("[data-bz-card]");
+    if (own) { try { return JSON.parse(own.getAttribute("data-bz-card")); } catch (_) { /* fall through */ } }
+    if (t.tagName === "IMG") return { kind: "image", title: t.alt || fileName(t.currentSrc || t.src), url: t.currentSrc || t.src };
+    var media = t.closest("audio, video");
+    if (media && (media.currentSrc || media.src)) return { kind: media.tagName === "AUDIO" ? "track" : "video", title: fileName(media.currentSrc || media.src), url: media.currentSrc || media.src };
+    var a = t.closest("a[href]");
+    if (a && /^(https?:|\/)/i.test(a.getAttribute("href") || "")) {
+      var words = String(a.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      return { kind: "file", title: words || a.href, url: a.href };
+    }
+    return null;
+  }
+  document.addEventListener("dragstart", function (e) {
+    var t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
+    if (!t || !t.closest || t.closest(".wb-panel")) return;   // moving cards on the board itself
+    dragOn = true;
+    var dt = e.dataTransfer;
+    var card = describe(t);
+    if (dt && card && Array.prototype.indexOf.call(dt.types || [], "application/x-beezilla-card") < 0) {
+      try { dt.setData("application/x-beezilla-card", JSON.stringify(card)); } catch (_) { /* best effort */ }
+    }
+    showStrip("drag", "Drop here to put it on your Idea Board");
+  }, true);
+  document.addEventListener("dragend", function () {
+    if (!dragOn) return;
+    dragOn = false;
+    if (!/bz-ds-done/.test(strip.className)) hideStrip(250);
+  }, true);
+  // Files from the computer never fire dragstart in the page.
+  document.addEventListener("dragenter", function (e) {
+    if (dragOn) return;
+    var types = e.dataTransfer && e.dataTransfer.types ? Array.prototype.slice.call(e.dataTransfer.types) : [];
+    if (types.indexOf("Files") < 0) return;
+    if (strip.hidden || !/bz-ds-drag/.test(strip.className)) showStrip("drag", "Drop here to put it on your Idea Board");
+  }, true);
+  document.addEventListener("dragleave", function (e) {
+    if (dragOn || e.relatedTarget) return;
+    if (/bz-ds-drag/.test(strip.className)) hideStrip(200);   // the file left the window
+  }, true);
+  document.addEventListener("drop", function () {
+    dragOn = false;
+    if (/bz-ds-drag/.test(strip.className)) hideStrip(150);
+  }, true);
+
   // ── Where the work stands: one line at the top of the conversation ────────
   var status = document.createElement("div");
   status.className = "talk-ws-status";
@@ -392,46 +547,15 @@
     refreshFolded(k);
   }, 1500);
   sync();
-  refreshFolded(boardId());
+  // A visit starts on a blank board: the one in front of a new conversation is
+  // emptied (its earlier versions stay in the board's History).
+  if (boardId() === "talk" && window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.reset) window.BeeZillaWhiteboard.reset("talk");
+  else refreshFolded(boardId());
   // Boards from before they were saved to the account (and changes made offline
   // and never sent) go up quietly, once the page has settled.
   setTimeout(function () {
     if (window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.sweep) window.BeeZillaWhiteboard.sweep();
   }, 6000);
-
-  // ── More (bottom row): everything that isn't talking ─────────────────
-  var moreBtn = $("talkMoreBtn");
-  var morePanel = $("talkMorePanel");
-  if (moreBtn && morePanel) {
-    var setMore = function (open) {
-      morePanel.classList.toggle("hidden", !open);
-      moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
-      if (open) {
-        // Open upward when there is no room below.
-        var r = moreBtn.getBoundingClientRect();
-        morePanel.classList.toggle("up", window.innerHeight - r.bottom < 360 && r.top > 360);
-      }
-    };
-    moreBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      setMore(morePanel.classList.contains("hidden"));
-    });
-    document.addEventListener("click", function (e) {
-      if (morePanel.classList.contains("hidden")) return;
-      if (morePanel.contains(e.target) || moreBtn.contains(e.target)) return;
-      setMore(false);
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key !== "Escape" || morePanel.classList.contains("hidden")) return;
-      setMore(false);
-      moreBtn.focus();
-    });
-    morePanel.addEventListener("click", function (e) {
-      var b = e.target.closest ? e.target.closest("button, a") : null;
-      if (!b || b.closest(".talk-privacy")) return;
-      setTimeout(function () { setMore(false); }, 0);
-    });
-  }
 
   // ── Your AI key (owner: "Even on the cloud mode, I need to be able to put in my
   // own API key") ─────────────────────────────────────────────────────
@@ -459,7 +583,7 @@
       '<div class="ob-dialog-row"><button type="submit" class="ob-primary">Test and save</button>' +
       '<button type="button" class="ob-forget" hidden>Remove my key</button></div>' +
       "</form>";
-    document.body.appendChild(d);
+    ($("bzHead") || document.body).appendChild(d);
     keyDlg = d;
     var form = d.querySelector("form");
     var sel = form.querySelector("[name=provider]");

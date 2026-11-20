@@ -407,6 +407,20 @@
       "}",
       // Honey Drops, plan and company: inside the menu under your name, never in the bar.
       ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
+      // ── Pages with the website's header (#bzHead) ─────────────────────────────
+      // The places live in the header's row under the search, on every page (owner,
+      // 2026-11-20), so the old link row up here hides; the bar is the same quiet bar
+      // with the real face on every page, and it scrolls away with the page rather
+      // than pinning over it. Talk to BeeZilla is the voice switch on every page, so
+      // the Listening pill by the gear stays out of the way.
+      "html.bz-has-head #bzNav,html.bz-has-head .bz-navbar{display:none!important}",
+      "html.bz-has-head header:has(#bzChrome){position:relative!important;top:auto!important;border-bottom:0!important;background:transparent!important}",
+      "html.bz-has-head .bz-brandrow .bz-brand img{width:44px;height:44px;border-radius:10px;object-fit:contain}",
+      "html.bz-has-head .bz-brandrow .bz-brand strong{font-size:1.1rem;font-weight:800;letter-spacing:.01em}",
+      "html.bz-has-head #bzMicLive{display:none!important}",
+      // Tooltips you can read, beside the thing, never under the pointer (bzTips below).
+      "#bzTip{position:fixed;left:0;top:0;z-index:2147483600;box-sizing:border-box;max-width:min(340px,calc(100vw - 24px));padding:9px 13px;border-radius:10px;border:1px solid #3a3a3a;background:#1b1b1b;color:#f4f4f4;font:500 15px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:none}",
+      "#bzTip[hidden]{display:none}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -1236,6 +1250,9 @@
     // Talk keeps its places along the bottom (owner: "put the top menu below everything
     // else"), so the link row hides there; every other page keeps it.
     document.documentElement.classList.toggle("bz-on-talk", section() === "talk");
+    // The website's header (#bzHead: Talk to BeeZilla, the search, the row of places)
+    // is on every page that has it, so the old link row up here hides there too.
+    document.documentElement.classList.toggle("bz-has-head", !!document.getElementById("bzHead"));
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();
@@ -1538,6 +1555,9 @@
       '<a class="bzs-link" href="/buzzy/profile">About your business</a>',
       '<button type="button" class="bzs-btn" data-bzs="signout">Log out</button>',
       "</div>",
+      // Your own AI key, in the cloud too (it used to sit in Talk's More menu).
+      '<div class="bzs-row"><span class="bzs-muted">Your own AI account for BeeZilla\u2019s answers</span>',
+      '<button type="button" class="bzs-btn" data-bzs="aikey">Your AI key</button></div>',
       "</div>",
       '<div class="bzs-sec" data-bzs="plan">',
       '<div class="bzs-h" role="heading" aria-level="3">Plan &amp; usage</div>',
@@ -1593,6 +1613,21 @@
     });
     q(".bzs-close").addEventListener("click", function () { close(true); });
     sec("signout").addEventListener("click", signOut);
+    // The key dialog belongs to the website's header (voice-stage.js). A page without
+    // the header yet goes to Talk, where it is, and opens it there.
+    sec("aikey").addEventListener("click", function (e) {
+      e.stopPropagation();
+      close(false);
+      if (window.bzOpenKeyDialog) { window.bzOpenKeyDialog(); return; }
+      var shell = window.BeeZillaShell;
+      if (shell && shell.go) {
+        Promise.resolve(shell.go("/buzzy/talk")).then(function () {
+          if (window.bzOpenKeyDialog) window.bzOpenKeyDialog();
+        });
+      } else {
+        location.href = "/buzzy/talk";
+      }
+    });
     // Its links go somewhere (the shell soft-navigates /buzzy/ links), so the panel
     // has done its job and closes instead of hanging over the next page.
     panel.addEventListener("click", function (e) {
@@ -1825,6 +1860,222 @@
 
   // Pages whose DOM must survive navigation, because something live lives in it.
   var KEEP_ALIVE = ["/buzzy/talk"];
+  var TALK = "/buzzy/talk";
+
+  // ── The website's header (#bzHead) on every page ─────────────────────────
+  // Owner, 2026-11-20: "Bezilla's talk button should always be at the top. There
+  // isn't any other place there. Everything lives under there. What you see as a
+  // talk area is actually just the header of the entire website… The URL bar and
+  // menu of the website lives below the talk area."
+  // Talk's header (Talk to BeeZilla, the Idea Board, the search with its QR code and
+  // copy button, the row of places) is one element, #bzHead, that this shell keeps for
+  // the life of the document above whichever page is showing. A page opened on its own
+  // (a link, a reload) fetches Talk once, quietly, for its header; Talk's own page then
+  // waits in the cache, as if you had been there and left. The sign-in pages have none.
+  function wantsHead(path) {
+    var p = String(path || "").replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, "");
+    return /^\/buzzy(\/|$)/.test(p) && !/^\/buzzy\/(landing|login|shared|join)$/.test(p);
+  }
+  function isTalk(key) {
+    return /^\/buzzy(\/talk)?$/.test(String(key || "").replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, ""));
+  }
+
+  // ── Two kinds of stylesheet in one document ──────────────────────────────
+  // The header is Talk's, and every page under it brings its own styles. A page's
+  // stylesheet must never reach into the header (pages style bare `button`, `h2`,
+  // `body`), and Talk's must reach nothing but the header while another page shows.
+  // Both are done by rewriting each rule once, at zero added specificity, so every
+  // sheet cascades exactly as it did on its own page:
+  //  - a page's rules gain :not(:where(<the header>)) on the element they style, and
+  //    its `body` layout (Sketch's 100vh flex column, Capabilities' side padding) moves
+  //    to its own #bzPage, so the header is never squeezed, clipped or inset;
+  //  - Talk's rules are copied once with :where(<the header>) on the element they style,
+  //    and its html/body/:root rules give the header Talk's fonts, colours and
+  //    variables. The copy (#bz-head-css) stays on for every page, Talk included: the
+  //    same rules at the same specificity, later in the document, change nothing there.
+  // "The header" is #bzHead and what Talk's scripts open over the page for it
+  // (.bz-talk-own: the AI key dialog and the like).
+  var HEAD_AREA = "#bzHead, #bzHead *, .bz-talk-own, .bz-talk-own *";
+  var HEAD_ROOTS = "#bzHead, .bz-talk-own";
+  var INHERITED = /^(--|color$|font|line-height$|letter-spacing$|word-spacing$|text-(align|indent|transform|shadow|rendering|underline|decoration-skip)|white-space$|cursor$|visibility$|direction$|quotes$|list-style|caption-side$|border-collapse$|border-spacing$|empty-cells$|tab-size$|hyphens$|word-break$|overflow-wrap$|word-wrap$|-webkit-font-smoothing$|-moz-osx-font-smoothing$|writing-mode$|accent-color$|caret-color$|color-scheme$|-webkit-text-size-adjust$|text-size-adjust$|font-)/i;
+  // On a page's <body>, these lay the page itself out: they move to its #bzPage.
+  var BODY_LAYOUT = /^(display$|flex|grid|gap$|row-gap$|column-gap$|align-|justify-|place-|height$|min-height$|max-height$|width$|min-width$|max-width$|overflow|overscroll-behavior|padding|position$|inset|top$|left$|right$|bottom$|z-index$|box-sizing$|contain$|isolation$)/i;
+
+  // A selector list split at its own commas (not those inside :is(), [..] or quotes).
+  function splitList(text, sep) {
+    var out = [], depth = 0, cur = "", q = null;
+    for (var i = 0; i < text.length; i++) {
+      var ch = text.charAt(i);
+      if (q) {
+        cur += ch;
+        if (ch === "\\") { cur += text.charAt(i + 1); i++; }
+        else if (ch === q) q = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+      if (ch === "(" || ch === "[") depth++;
+      else if (ch === ")" || ch === "]") depth--;
+      if (ch === sep && depth === 0) { out.push(cur); cur = ""; continue; }
+      cur += ch;
+    }
+    if (cur.trim()) out.push(cur);
+    return out.map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+  // Where the last compound of a complex selector starts ("a > b .c:hover" → at ".c").
+  function subjectAt(sel) {
+    var depth = 0, q = null, start = 0;
+    for (var i = 0; i < sel.length; i++) {
+      var ch = sel.charAt(i);
+      if (q) { if (ch === "\\") i++; else if (ch === q) q = null; continue; }
+      if (ch === '"' || ch === "'") { q = ch; continue; }
+      if (ch === "(" || ch === "[") { depth++; continue; }
+      if (ch === ")" || ch === "]") { depth--; continue; }
+      if (depth === 0 && (ch === " " || ch === ">" || ch === "+" || ch === "~")) start = i + 1;
+    }
+    return start;
+  }
+  // Where a trailing pseudo-element starts in that compound (::before, ::placeholder…).
+  function pseudoAt(sel, from) {
+    var depth = 0, q = null;
+    for (var i = from; i < sel.length; i++) {
+      var ch = sel.charAt(i);
+      if (q) { if (ch === "\\") i++; else if (ch === q) q = null; continue; }
+      if (ch === '"' || ch === "'") { q = ch; continue; }
+      if (ch === "(" || ch === "[") { depth++; continue; }
+      if (ch === ")" || ch === "]") { depth--; continue; }
+      if (depth === 0 && ch === ":") {
+        if (sel.charAt(i + 1) === ":") return i;
+        if (/^:(before|after|first-line|first-letter)(?![\w-])/i.test(sel.slice(i))) return i;
+      }
+    }
+    return -1;
+  }
+  function onSubject(sel, extra) {
+    var at = subjectAt(sel), pe = pseudoAt(sel, at);
+    return pe < 0 ? sel + extra : sel.slice(0, pe) + extra + sel.slice(pe);
+  }
+  function subjectIs(sel, re) { return re.test(sel.slice(subjectAt(sel))); }
+  var ROOTISH = /^(html|body|:root)(?![\w-])/i;
+  var BODYISH = /^body(?![\w-])/i;
+  function decls(style) {
+    return splitList(style.cssText || "", ";").map(function (d) {
+      var c = d.indexOf(":");
+      return c < 0 ? null : { prop: d.slice(0, c).trim().toLowerCase(), text: d };
+    }).filter(Boolean);
+  }
+  function joinDecls(list) { return list.map(function (d) { return d.text; }).join("; "); }
+  // One style rule, rewritten. mode "page": kept out of the header; "head": only the header.
+  function styleRule(r, mode) {
+    var sels = splitList(r.selectorText || "", ",");
+    if (!sels.length) return "";
+    var all = decls(r.style);
+    var out = "";
+    if (mode === "page") {
+      var plain = [], bodies = [];
+      sels.forEach(function (x) { (subjectIs(x, BODYISH) ? bodies : plain).push(x); });
+      var guarded = plain.map(function (x) {
+        return subjectIs(x, ROOTISH) ? x : onSubject(x, ":not(:where(" + HEAD_AREA + "))");
+      });
+      if (guarded.length) out += guarded.join(", ") + " { " + r.style.cssText + " }\n";
+      if (bodies.length) {
+        var keep = all.filter(function (d) { return !BODY_LAYOUT.test(d.prop); });
+        var move = all.filter(function (d) { return BODY_LAYOUT.test(d.prop); });
+        if (keep.length) out += bodies.join(", ") + " { " + joinDecls(keep) + " }\n";
+        if (move.length) out += bodies.map(function (x) { return x + " > #bzPage"; }).join(", ") + " { " + joinDecls(move) + " }\n";
+      }
+      return out;
+    }
+    var mine = [], roots = [];
+    sels.forEach(function (x) { (subjectIs(x, ROOTISH) ? roots : mine).push(x); });
+    if (mine.length) out += mine.map(function (x) { return onSubject(x, ":where(" + HEAD_AREA + ")"); }).join(", ") + " { " + r.style.cssText + " }\n";
+    if (roots.length) {
+      var inh = all.filter(function (d) { return INHERITED.test(d.prop); });
+      if (inh.length) out += roots.map(function (x) { return x + " :where(" + HEAD_ROOTS + ")"; }).join(", ") + " { " + joinDecls(inh) + " }\n";
+    }
+    return out;
+  }
+  function rewriteRules(rules, mode) {
+    var out = "";
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      var text = r.cssText || "";
+      if (r.selectorText !== undefined && r.style) {
+        // A nested rule (CSS nesting) is left as written: no page here uses one.
+        out += r.cssRules && r.cssRules.length ? text + "\n" : styleRule(r, mode);
+      } else if (r.cssRules && /^@(media|supports|container|layer|document)/i.test(text)) {
+        var inner = rewriteRules(r.cssRules, mode);
+        if (inner) out += text.slice(0, text.indexOf("{")).trim() + " {\n" + inner + "}\n";
+      } else {
+        out += text + "\n";   // @keyframes, @font-face, @import, @page …
+      }
+    }
+    return out;
+  }
+  // Parse CSS text without applying it, then rewrite it.
+  function rewriteCss(text, mode) {
+    var tmp = document.createElement("style");
+    tmp.media = "not all";
+    tmp.setAttribute("data-bz-parse", "1");
+    tmp.textContent = text || "";
+    document.head.appendChild(tmp);
+    var out = "";
+    try { out = tmp.sheet ? rewriteRules(tmp.sheet.cssRules, mode) : ""; } catch (e) { out = ""; }
+    tmp.remove();
+    return out;
+  }
+  function sameOrigin(href) {
+    try { return new URL(href, location.href).origin === location.origin; } catch (e) { return false; }
+  }
+  // The text of a <style>, or of a same-origin <link> (fetched; the browser has it).
+  function cssTextOf(el) {
+    if (el.tagName === "STYLE") return Promise.resolve(el.textContent || "");
+    var href = el.getAttribute("href") || "";
+    if (!sameOrigin(href)) return Promise.resolve(null);
+    return fetch(new URL(href, location.href).href, { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .catch(function () { return null; });
+  }
+
+  // A page under the header: each of its stylesheets becomes a <style> that keeps out
+  // of the header (a font sheet from another site, nothing to rewrite, stays as is).
+  function guardPageStyles(els, key) {
+    return Promise.all(els.map(function (el) {
+      return cssTextOf(el).then(function (text) {
+        if (text === null) return el;
+        var st = document.createElement("style");
+        st.setAttribute("data-bz-style", key);
+        st.setAttribute("data-bz-guarded", "1");
+        st.textContent = rewriteCss(text, "page");
+        if (el.parentNode) el.parentNode.insertBefore(st, el.nextSibling);
+        else document.head.appendChild(st);
+        // The original stays in place, switched off for good (and matched to no
+        // screen), so the order of the page's sheets is the order it shipped.
+        el.setAttribute("data-bz-replaced", "1");
+        el.setAttribute("media", "not all");
+        try { el.disabled = true; } catch (e) { /* best effort */ }
+        return st;
+      });
+    }));
+  }
+
+  // Talk's sheets, copied for the header (#bz-head-css), in the order Talk ships them.
+  // Resolves with each sheet's text (null for one from another site).
+  var headCssReady = null;
+  function buildHeadCss(els) {
+    if (headCssReady) return headCssReady;
+    headCssReady = Promise.all(els.map(cssTextOf)).then(function (texts) {
+      var css = texts.map(function (t) { return t ? rewriteCss(t, "head") : ""; }).join("\n");
+      var st = document.getElementById("bz-head-css");
+      if (!st) {
+        st = document.createElement("style");
+        st.id = "bz-head-css";
+        document.head.appendChild(st);
+      }
+      st.textContent = css;
+      return texts;
+    });
+    return headCssReady;
+  }
   var cache = Object.create(null); // key -> { el, title, styles }
   var busy = false;
   // popstate fires AFTER location has changed, so "which page am I stashing?" must
@@ -1838,11 +2089,13 @@
   // page did not have (header x = -18px on Talk — BZ-11 residual). Claim the
   // initial page's stylesheets for its own key so the switch owns them from the
   // first hop. The chrome's stylesheet is never claimed: it must survive every page.
+  var firstSheets = [];
   Array.prototype.forEach.call(
     document.querySelectorAll('head style, head link[rel="stylesheet"]'),
     function (el) {
-      if (el.id === "bz-chrome-css" || el.hasAttribute("data-bz-style")) return;
+      if (el.id === "bz-chrome-css" || el.id === "bz-head-css" || el.hasAttribute("data-bz-style")) return;
       el.setAttribute("data-bz-style", currentKey);
+      firstSheets.push(el);
     }
   );
 
@@ -1868,9 +2121,17 @@
         // The settings dock belongs to the document, not to the first page: wrapped
         // in here it would be stashed with Talk or deleted with any other page.
         if (k.id === "bzDock") return;
+        // So do the chrome's header and the website's header (#bzHead): they stay
+        // above every page, in that order. The Feedback panel and the tooltip too.
+        if (k.id === "bzHead" || k.id === "bzFeedback" || k.id === "bzTip" || k.id === "bzHeadSoon") return;
+        if (k.tagName === "HEADER" && k.querySelector("#bzChrome, #bzNav")) return;
+        // Scripts stay where they ran; moving them changes nothing but the markup.
+        if (k.tagName === "SCRIPT") return;
         page.appendChild(k);
       });
-      document.body.appendChild(page);
+      page.setAttribute("data-bz-path", currentKey);
+      var anchor = document.getElementById("bzPageCache");
+      document.body.insertBefore(page, anchor && anchor.parentNode === document.body ? anchor : null);
     }
     if (!document.getElementById("bzPageCache")) {
       var c = document.createElement("div");
@@ -1900,7 +2161,7 @@
         if (cachedEntry) cachedEntry.styles = holder;
         holder = null;
         Array.prototype.forEach.call(document.querySelectorAll("[data-bz-style]"), function (el) {
-          try { el.disabled = el.getAttribute("data-bz-style") !== key; } catch (e) {}
+          try { el.disabled = el.getAttribute("data-bz-style") !== key || el.hasAttribute("data-bz-replaced"); } catch (e) {}
         });
         return;
       }
@@ -1911,24 +2172,49 @@
         document.head.appendChild(mine);
         holder.push(mine);
       });
+      if (wantsHead(key) && !isTalk(key)) {
+        // Under the header: rewritten so nothing here reaches into it. Until the
+        // rewrite lands (a moment: the sheets are cached) the originals stand in.
+        var originals = holder.slice();
+        guardPageStyles(originals, key).then(function (made) {
+          made.forEach(function (st) {
+            if (originals.indexOf(st) < 0) {
+              try { st.disabled = currentKey !== key; } catch (e) { /* best effort */ }
+            }
+          });
+          if (currentKey === key && window.BeeZillaChrome && window.BeeZillaChrome.syncBleed) window.BeeZillaChrome.syncBleed();
+        });
+      } else if (isTalk(key)) {
+        buildHeadCss(holder);
+      }
       if (cachedEntry) cachedEntry.styles = holder;
     } else if (cachedEntry && cachedEntry.styles) {
       holder = cachedEntry.styles;
     }
     // Only the active page's stylesheets are enabled. Pages style `body`, `#app`
     // and bare element selectors, so leaving two pages' CSS on at once repaints
-    // the current page with the previous one's rules.
+    // the current page with the previous one's rules. A sheet that was rewritten
+    // for the header (data-bz-replaced) stays off for good.
     Array.prototype.forEach.call(document.querySelectorAll("[data-bz-style]"), function (el) {
-      var on = el.getAttribute("data-bz-style") === key;
+      var on = el.getAttribute("data-bz-style") === key && !el.hasAttribute("data-bz-replaced");
       try { el.disabled = !on; } catch (e) { /* link elements on some browsers */ }
     });
     if (holder) {
-      holder.forEach(function (el) { try { el.disabled = false; } catch (e) {} });
+      holder.forEach(function (el) { if (!el.hasAttribute("data-bz-replaced")) { try { el.disabled = false; } catch (e) {} } });
     }
   }
 
-  function runScripts(root) {
+  function runScripts(root, quiet) {
     var scripts = Array.prototype.slice.call(root.querySelectorAll("script"));
+    // Talk fetched only for its header on another page is not a visit to Talk: its
+    // analytics snippet (a page view) stays out.
+    if (quiet) {
+      scripts = scripts.filter(function (s) {
+        var drop = /openpanel\.dev/.test(s.getAttribute("src") || "") || /window\.op\s*=|window\.op\(/.test(s.textContent || "");
+        if (drop) s.remove();
+        return !drop;
+      });
+    }
     // One document runs every page's scripts, so a top-level `const` on page B collides
     // with page A's — "Identifier 'QUESTIONS' has already been declared" killed the
     // whole Library script on a soft navigation out of Talk (BZ-16). Each run of
@@ -2013,6 +2299,7 @@
     adoptStyles(null, key);
     setTitle(title);
     if (window.BeeZillaChrome) window.BeeZillaChrome.boot();
+    try { window.dispatchEvent(new CustomEvent("bz:page", { detail: { key: key } })); } catch (e) { /* old browsers */ }
     // Pages that wait for DOMContentLoaded (memory.html) never see it again in a
     // soft navigation; a synthetic event keeps their boot code honest.
     try { document.dispatchEvent(new Event("DOMContentLoaded")); } catch (e) {}
@@ -2060,13 +2347,13 @@
   // Left on <body>: the shell's own nodes, the chrome (its header, the settings dock,
   // the Feedback panel), BeeZilla's step-by-step card (pilot.js styles itself and
   // follows its own "go" steps across pages), and tags that draw nothing.
-  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback"];
+  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback", "bzHead", "bzTip"];
   function adoptStrays(page) {
     if (!page) return;
     Array.prototype.slice.call(document.body.children).forEach(function (n) {
       if (n === page || DOCUMENT_OWNED.indexOf(n.id) >= 0) return;
       if (/^(HEADER|SCRIPT|STYLE|LINK|TEMPLATE|NOSCRIPT|META)$/.test(n.tagName)) return;
-      if (n.classList && n.classList.contains("bz-pilot")) return;
+      if (n.classList && (n.classList.contains("bz-pilot") || n.classList.contains("bz-talk-own"))) return;
       page.appendChild(n);
     });
   }
@@ -2080,13 +2367,30 @@
     finish(key, entry.title, entry.scrollY);
   }
 
+  function handTalk(params) {
+    var job = params && params.get ? params.get("job") : null;
+    if (job && window.BeeZillaTalk && window.BeeZillaTalk.openJob) window.BeeZillaTalk.openJob(job);
+  }
+
   function go(href, opts) {
     opts = opts || {};
     var url;
     try { url = new URL(href, location.href); } catch (e) { return Promise.resolve(); }
     if (!isShellPath(url)) { location.href = url.href; return Promise.resolve(); }
     var key = keyOf(url);
-    if (key === keyOf(location.href)) return Promise.resolve();
+    // Talk is one page, kept for good once it is here (its header is on every page): an
+    // address of Talk's with a ?job= goes to the kept Talk and hands it the job, never to
+    // a second copy of Talk running its scripts over the same header.
+    var talkAsk = null;
+    if (isTalk(url.pathname) && key !== TALK && (cache[TALK] || isTalk(currentKey))) {
+      talkAsk = url.searchParams;
+      url = new URL(TALK, location.href);
+      key = TALK;
+    }
+    // The page already showing. Not location.href: Back and Forward call this after the
+    // address has already changed, and comparing with it swapped the address but never
+    // the page.
+    if (key === currentKey) { handTalk(talkAsk); return Promise.resolve(); }
     if (busy) return Promise.resolve();
     busy = true;
 
@@ -2099,7 +2403,7 @@
     // Default is to push; only popstate passes push:false (history already moved).
     if (opts.push !== false) history.pushState({ bzShell: key }, "", url.pathname + url.search);
 
-    if (cache[key]) { restore(key); return Promise.resolve(); }
+    if (cache[key]) { restore(key); handTalk(talkAsk); return Promise.resolve(); }
 
     return fetch(url.href, { credentials: "same-origin", headers: { "x-bz-shell": "1" } })
       .then(function (r) {
@@ -2109,6 +2413,12 @@
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
         var page = buildFromDoc(doc, key);
+        var head = page.querySelector("#bzHead");
+        if (head) {
+          var have = document.getElementById("bzHead");
+          if (have) head.remove();
+          else document.body.insertBefore(head, document.getElementById("bzPage") || document.getElementById("bzPageCache"));
+        }
         document.body.insertBefore(page, document.getElementById("bzPageCache"));
         adoptStyles(doc, key);
         return runScripts(page).then(function () {
@@ -2150,5 +2460,226 @@
     go(location.href, { push: false });
   });
 
+  // A page opened on its own gets the header: Talk is fetched once, quietly. Its
+  // header goes above the page, its own page into the cache (as if you had been to
+  // Talk and left), and its scripts run, so talking works from here. Until it is in,
+  // a placeholder holds its place so the page doesn't jump far when it arrives.
+  var headLoading = null;
+  function placeholder() {
+    var ph = document.createElement("div");
+    ph.id = "bzHeadSoon";
+    ph.setAttribute("aria-hidden", "true");
+    ph.style.cssText = "box-sizing:border-box;padding:4px 24px 10px;display:flex;flex-direction:column;gap:18px";
+    var bar = "border-radius:999px;background:#141414;border:1px solid #232323";
+    ph.innerHTML =
+      '<div style="height:66px;' + bar + '"></div>' +
+      '<div style="height:56px;margin-right:80px;' + bar + '"></div>' +
+      '<div style="height:44px;margin:0 80px 0 10px;border-bottom:1px solid #1e1e1e"></div>';
+    return ph;
+  }
+  function ensureHead() {
+    if (document.getElementById("bzHead") || !wantsHead(location.pathname) || isTalk(currentKey)) return Promise.resolve();
+    if (headLoading) return headLoading;
+    // Above whichever page is showing. Never a new wrapper here: a page may be on its
+    // way in (Music studio hops to its own ?job= address as it opens), and a second
+    // #bzPage would be mistaken for the page from then on.
+    var ph = placeholder();
+    var anchor = document.getElementById("bzPage") || document.getElementById("bzPageCache");
+    document.body.insertBefore(ph, anchor && anchor.parentNode === document.body ? anchor : null);
+    headLoading = fetch(TALK, { credentials: "same-origin", headers: { "x-bz-shell": "1" } })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var talk = buildFromDoc(doc, TALK);
+        var head = talk.querySelector("#bzHead");
+        if (!head) throw new Error("no header in Talk");
+        // Talk's sheets: in the document but off (its page isn't showing), plus the
+        // copy that styles only the header, which is ready before the header shows.
+        var found = Array.prototype.slice.call(doc.querySelectorAll('style, link[rel="stylesheet"]'));
+        return buildHeadCss(found).then(function (texts) {
+          // Talk's own sheets wait, switched off, for the day you open Talk: as <style>
+          // text where it was read here, so that day nothing flashes while it loads.
+          var sheets = found.map(function (el, i) {
+            var mine;
+            if (texts && typeof texts[i] === "string") {
+              mine = document.createElement("style");
+              mine.textContent = texts[i];
+            } else {
+              mine = el.cloneNode(true);
+            }
+            mine.setAttribute("data-bz-style", TALK);
+            document.head.appendChild(mine);
+            try { mine.disabled = true; } catch (e) { /* best effort */ }
+            return mine;
+          });
+          if (document.getElementById("bzHead")) { ph.remove(); return; }
+          ph.parentNode.replaceChild(head, ph);
+          talk.removeAttribute("id");
+          document.getElementById("bzPageCache").appendChild(talk);
+          cache[TALK] = { el: talk, title: doc.title, scrollY: 0, styles: sheets };
+          document.documentElement.classList.add("bz-has-head");
+          return runScripts(talk, true).then(function () {
+            try { window.dispatchEvent(new CustomEvent("bz:page", { detail: { key: currentKey } })); } catch (e) { /* old browsers */ }
+          });
+        });
+      })
+      .catch(function () {
+        // No header this time (offline, signed out of a private page): the page itself
+        // still works, as it always did.
+        if (ph.parentNode) ph.remove();
+        headLoading = null;
+      });
+    return headLoading;
+  }
+
+  if (wantsHead(location.pathname)) {
+    if (isTalk(currentKey)) {
+      // Talk opened directly: its header is in its own markup; copy its sheets for it.
+      ensurePageWrapper();
+      buildHeadCss(firstSheets);
+    } else {
+      // Another page opened directly: its sheets keep out of the header, then the
+      // header is fetched.
+      ensurePageWrapper();
+      var settle = function () {
+        // The page's own side padding now sits on its #bzPage: the bar re-measures.
+        if (window.BeeZillaChrome && window.BeeZillaChrome.syncBleed) window.BeeZillaChrome.syncBleed();
+        ensureHead();
+      };
+      guardPageStyles(firstSheets, currentKey).then(settle, settle);
+    }
+  }
+
   window.BeeZillaShell = { go: go, cache: cache, get busy() { return busy; }, get currentKey() { return currentKey; } };
 })();
+
+/**
+ * Tooltips you can read (owner, 2026-11-20): "my mouse blocks the tooltip. Make the
+ * tooltip larger when I hover over it, and move it away from the item itself so that
+ * I can see it, rather than my own mouse blocking."
+ *
+ * Every `title` on the site shows as this tooltip instead of the browser's small one,
+ * which sits right under the pointer: 15px type on a dark card, placed beside the thing
+ * you point at with a clear gap. Tools down the left edge get theirs on the right;
+ * everything else gets it above, or to the right, or (with room for the pointer) below.
+ * It shows after a short pause, for keyboard focus too, and goes on leave, a press, a
+ * scroll or Escape. While the pointer is on a thing its title waits in data-bz-tip (so
+ * the browser's own tooltip can't show), then goes back.
+ */
+(function () {
+  "use strict";
+  if (window.BeeZillaTips) return;
+  var GAP = 14;
+  var tip = null, owner = null, timer = 0;
+
+  function box() {
+    if (tip && tip.isConnected) return tip;
+    tip = document.createElement("div");
+    tip.id = "bzTip";
+    tip.setAttribute("role", "tooltip");
+    tip.hidden = true;
+    document.body.appendChild(tip);
+    return tip;
+  }
+  function text(el) { return (el.getAttribute("data-bz-tip") || el.getAttribute("title") || "").trim(); }
+  function holder(t) {
+    var el = t && t.nodeType === 1 ? t : t && t.parentElement;
+    if (!el || !el.closest) return null;
+    var h = el.closest("[title], [data-bz-tip]");
+    if (!h || h === document.documentElement || h === document.body || h.tagName === "IFRAME") return null;
+    return text(h) ? h : null;
+  }
+  function take(el) {
+    var t = el.getAttribute("title");
+    if (!t) return;
+    el.setAttribute("data-bz-tip", t);
+    el.removeAttribute("title");
+    if (!el.hasAttribute("aria-label") && !el.hasAttribute("aria-description")) {
+      el.setAttribute("aria-description", t);
+      el.setAttribute("data-bz-tip-desc", "1");
+    }
+  }
+  function giveBack(el) {
+    if (!el) return;
+    var t = el.getAttribute("data-bz-tip");
+    // A script that set a new title meanwhile wins; otherwise the title comes back.
+    if (t && !el.hasAttribute("title")) el.setAttribute("title", t);
+    el.removeAttribute("data-bz-tip");
+    if (el.getAttribute("data-bz-tip-desc")) { el.removeAttribute("aria-description"); el.removeAttribute("data-bz-tip-desc"); }
+  }
+  function hide() {
+    clearTimeout(timer);
+    if (tip) tip.hidden = true;
+    giveBack(owner);
+    owner = null;
+  }
+  function place(el) {
+    var t = box();
+    var words = text(el);
+    if (!words || !el.isConnected) { hide(); return; }
+    t.textContent = words;
+    t.style.visibility = "hidden";
+    t.hidden = false;
+    var r = el.getBoundingClientRect();
+    var vw = document.documentElement.clientWidth || window.innerWidth;
+    var vh = window.innerHeight;
+    var w = t.offsetWidth, h = t.offsetHeight;
+    var x, y;
+    var roomRight = r.right + GAP + w <= vw - 8;
+    var roomAbove = r.top - GAP - h >= 8;
+    if (r.left < 140 && r.width <= 72 && roomRight) {
+      // A tool in a column on the left: the tooltip sits to its right.
+      x = r.right + GAP; y = r.top + r.height / 2 - h / 2;
+    } else if (roomAbove) {
+      x = r.left + r.width / 2 - w / 2; y = r.top - GAP - h;
+    } else if (roomRight) {
+      x = r.right + GAP; y = r.top + r.height / 2 - h / 2;
+    } else {
+      // Below, far enough down that the pointer's own arrow can't cover it.
+      x = r.left + r.width / 2 - w / 2; y = r.bottom + GAP + 18;
+    }
+    x = Math.max(8, Math.min(x, vw - w - 8));
+    y = Math.max(8, Math.min(y, vh - h - 8));
+    t.style.left = Math.round(x) + "px";
+    t.style.top = Math.round(y) + "px";
+    t.style.visibility = "";
+  }
+  function start(el, wait) {
+    if (owner === el) return;
+    hide();
+    owner = el;
+    take(el);
+    timer = setTimeout(function () { if (owner === el) place(el); }, wait);
+  }
+
+  document.addEventListener("pointerover", function (e) {
+    if (e.pointerType && e.pointerType !== "mouse") return;
+    var el = holder(e.target);
+    if (!el) { if (owner && !owner.contains(e.target)) hide(); return; }
+    start(el, 380);
+  }, true);
+  document.addEventListener("pointerout", function (e) {
+    if (!owner) return;
+    var to = e.relatedTarget;
+    if (to && owner.contains(to)) return;
+    hide();
+  }, true);
+  document.addEventListener("focusin", function (e) {
+    var el = holder(e.target);
+    if (!el || el !== e.target) return;
+    var visible = false;
+    try { visible = el.matches(":focus-visible"); } catch (_) { visible = false; }
+    if (visible) start(el, 120);
+  }, true);
+  document.addEventListener("focusout", function (e) { if (owner && e.target === owner) hide(); }, true);
+  document.addEventListener("pointerdown", hide, true);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); }, true);
+  window.addEventListener("scroll", function () { if (owner) hide(); }, true);
+  window.addEventListener("blur", hide);
+
+  window.BeeZillaTips = { hide: hide };
+})();
+

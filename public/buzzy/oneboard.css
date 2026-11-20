@@ -6,10 +6,10 @@
  *   "The whiteboard by default should be distinct from its background… a blackboard
  *    with a little bit of texture… more distinct than the dotted version."
  *
- * Top to bottom: the face and name · Talk to BeeZilla (inside the board when it is
- * open) · the board · one search · the row of places (Inspiration, History, Library,
- * Memory, Experts, Recipes, More) · what that place holds. Full width, 24px gutters.
- * Six things on the first screen at most; nothing covers anything else.
+ * Top to bottom: the face and name · the website's header (#bzHead, on every page:
+ * Talk to BeeZilla, the board when it is open, one search with its QR code and copy
+ * button, the row of places) · what that place or page holds. Full width, 24px
+ * gutters. Nothing covers anything else.
  */
 
 :root {
@@ -85,64 +85,123 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
   overflow: hidden;
 }
 
-/* ── Page order: Talk (or the board), anything waiting on you, then find & browse ── */
+/* ── The website's header (#bzHead), the same on every page ───────────────
+   Owner, 2026-11-20: "Bezilla's talk button should always be at the top… Everything
+   lives under there. What you see as a talk area is actually just the header of the
+   entire website… The URL bar and menu of the website lives below the talk area."
+   Talk to BeeZilla (or the board, when it is open), anything waiting on you, then
+   the search and the row of places. nav.js keeps this one element across pages. */
+.bz-head {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 var(--ob-gutter) 6px;
+  /* Its own type, the same on every page: pages set 14px or 15px on their body. */
+  font-family: var(--bz-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 16px;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.55;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  color: #e8e8e8;
+  text-align: left;
+}
+.bz-head > * { order: 3; }
+.bz-head > .ob-start { order: 1; }
+.bz-head > .ob-board { order: 2; }
+.bz-head > #chatError { order: 4; }
+.bz-head > .bz-browse { order: 5; }
+/* Talk's own page under the header: what the chosen place holds. */
 .chat-main > * { order: 3; }
-.chat-main > .ob-start { order: 1; }
-.chat-main > .ob-board { order: 2; }
-.chat-main > #chatError { order: 4; }
-.chat-main > .bz-browse { order: 5; }
 .chat-main > #recentBelow { order: 6; }
 
-/* ── Below the board: one search, then the places ───────────────────── */
+/* ── Under the board: one search, then the places ───────────────────── */
 .bz-browse { margin-top: 18px; }
-.bz-tabrow { display: flex; align-items: center; gap: 8px; }
-.bz-tabrow .bz-tabs { flex: 1 1 auto; min-width: 0; }
-/* The settings gear (#326) owns the bottom-right corner of every page. On Talk the
-   search, the places and everything listed under them keep its column clear (44px
-   gear, its 22px inset, a gap), so the gear never sits on a control there. */
-html.bz-on-talk .bz-browse { padding-right: 80px; }
+.bz-tabrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 36px; margin: 1.1rem 0.6rem 0.4rem; border-bottom: 1px solid #1e1e1e; }
+/* The settings gear (#326) owns the bottom-right corner of every page. The search
+   and the places keep its column clear (44px gear, its 22px inset, a gap), so the
+   gear never sits on a control there. */
+.bz-head .bz-browse { padding-right: 80px; }
 /* On Talk, Talk to BeeZilla is the one voice switch (owner, 2026-11-18: "There
    shouldn't be 2"). The live-mic pill beside the gear shows a running session on
    the other pages. */
 html.bz-on-talk #bzMicLive { display: none !important; }
-.bz-tabrow .talk-more { flex: 0 0 auto; }
 .bz-pane-head .ob-new { min-height: 0; padding: 0.4rem 0.95rem; border-radius: 999px; border: 1px solid #6b5a1e; background: transparent; color: var(--ob-yellow); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
 .bz-pane-head .ob-new:hover { background: #2a2204; }
 a.ob-item { text-decoration: none; }
+/* Rows that move to the Idea Board show the grabbing hand, like Inspiration. */
+.ob-item.ob-drag, .rw-item[draggable="true"] { cursor: grab; }
+.ob-item.ob-drag:active, .rw-item[draggable="true"]:active { cursor: grabbing; }
 .bz-search { max-width: none; }
-.bz-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.bz-tabs > [role="tab"] { white-space: nowrap; }
-.bz-tabrow .talk-more { position: relative; }
-.bz-tabrow .talk-more-btn {
-  width: auto;
-  height: auto;
-  min-height: 2.2rem;
-  padding: 0 0.95rem;
-  border-radius: 999px;
-  font-size: 0.92rem;
-  font-weight: 600;
+/* The places: one row that wraps and never scrolls. The old row scrolled sideways,
+   and the active tab's underline poked 1px out of it, so browsers drew a scroll bar
+   at its right end; the labels were 6px apart (owner, 2026-11-20: "crunched together
+   very close… like a scrollable bar to the right of them"). Spaced like reference
+   zMWSgG0: about a word's width between labels. */
+.bz-tabrow .bz-tabs,
+.bz-tabrow .bz-places {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+}
+.bz-tabs > [role="tab"], .bz-places > a { white-space: nowrap; }
+.bz-places > a {
+  position: relative;
+  padding: 0.55rem 0.1rem 0.75rem;
+  color: #b5b5b5;
+  font-size: 1.02rem;
+  text-decoration: none;
+}
+.bz-places > a:hover { color: #f2f2f2; }
+.bz-places > a:focus-visible { outline: 2px solid #ffc107; outline-offset: 2px; border-radius: 4px; }
+/* The page you are on, in the row: same yellow word and underline as a chosen tab. */
+.bz-places > a.on,
+.bz-tabs > button.here { color: #ffc107; font-weight: 700; }
+.bz-places > a.on::after,
+.bz-tabs > button.here::after {
+  content: "";
+  position: absolute;
+  left: -0.4rem;
+  right: -0.4rem;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px;
+  background: #ffc107;
+}
+#voiceToggle, #sessionsToggle, .tm-mode { display: none !important; }
+
+/* ── Beside the box: the paper clip and the privacy control ─────────── */
+.talk-extras { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }
+.talk-extras .talk-privacy { align-self: center; }
+.talk-extras .privacy-btn { margin-top: 0; height: 2.5rem; padding: 0 0.75rem; }
+.talk-icon {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #2c2c2c;
+  background: #1a1a1a;
+  color: #cfcfcf;
+  cursor: pointer;
 }
-.bz-tabrow .talk-more-btn .tm-dots { font-size: 1.1rem; line-height: 1; }
-.bz-tabrow .tm-sr { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
-.talk-more-panel { max-height: 70vh; overflow: auto; }
-.talk-more-panel.up { top: auto; bottom: calc(100% + 10px); }
-.talk-more-panel > a {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 9px;
-  color: #e8e8e8;
-  text-decoration: none;
-  font-size: 0.93rem;
-}
-.talk-more-panel > a:hover, .talk-more-panel > a:focus-visible { background: #222; outline: none; }
-.tm-sep { height: 1px; margin: 4px 6px; background: #2a2a2a; }
-.tm-head { padding: 0.5rem 0.7rem 0.2rem; color: #8a8a8a; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
-#voiceToggle, #sessionsToggle, .tm-mode { display: none !important; }
+.talk-icon svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.talk-icon:hover, .talk-icon[aria-expanded="true"] { color: #ffc107; border-color: #4a3b0a; }
+.talk-icon:focus-visible { outline: 2px solid #ffc107; outline-offset: 2px; }
 
 /* Search results: pictures look like pictures, music shows its waveform. */
 .bz-results-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
@@ -235,11 +294,77 @@ a.ob-item { text-decoration: none; }
   :root { --ob-gutter: 16px; }
   .ob-board { height: auto; min-height: 80vh; }
   .ob-board .wb-panel { min-height: 80vh; }
-  .bz-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .bz-tabs::-webkit-scrollbar { display: none; }
-  html.bz-on-talk .bz-browse { padding-right: 68px; } /* the gear sits 16px from the corner on a phone */
+  .bz-tabrow, .bz-tabrow .bz-tabs, .bz-tabrow .bz-places { gap: 2px 22px; }
+  .bz-head .bz-browse { padding-right: 68px; } /* the gear sits 16px from the corner on a phone */
+  .talk-extras { gap: 4px; padding-right: 0; }
+  .talk-icon, .talk-extras .privacy-btn { height: 2.3rem; }
+  .talk-icon { width: 2.3rem; }
+}
+/* A phone: the paper clip and privacy take a short second line on the right, so the box
+   keeps its width; the QR and copy buttons show their signs only (their names are in
+   their tooltips), so the search box keeps room to type. */
+@media (max-width: 520px) {
+  .ob-start .talk-bar { flex-wrap: wrap; row-gap: 6px; }
+  .ob-start .talk-bar .talk-field { flex: 1 1 calc(100% - 4.4rem); }
+  .ob-start .talk-bar .talk-extras { flex: 1 0 100%; justify-content: flex-end; }
+  .bz-search-tools .bz-share-btn > span { display: none; }
+  .bz-search-tools .bz-share-btn { padding: 0.2rem 0.5rem; }
   .ob-item { flex-direction: column; }
   .ob-item-tools { justify-content: flex-start; }
 }
 .bz-tabrow.hidden { display: none; }
+
+/* ── The drop strip: where anything dragged goes (voice-stage.js) ────────
+   Owner, 2026-11-20: "Everything on this website has got to be movable to the
+   whiteboard." Shown at the top of the window while something is dragged, and when
+   an Inspiration card is pressed. */
+.bz-dropstrip {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 32px));
+  min-height: 64px;
+  margin: 0;
+  padding: 10px 14px 10px 18px;
+  border-radius: 18px;
+  border: 2px dashed var(--ob-yellow);
+  background: rgba(24, 20, 6, 0.97);
+  color: #fff3c4;
+  font-family: var(--bz-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.bz-dropstrip[hidden] { display: none; }
+.bz-ds-ico { flex: 0 0 auto; display: inline-flex; color: var(--ob-yellow); }
+.bz-ds-ico svg { width: 28px; height: 28px; display: block; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.bz-ds-text { flex: 1 1 auto; min-width: 0; }
+.bz-dropstrip.bz-ds-over { background: #3a2f05; color: #fff; border-style: solid; }
+.bz-dropstrip.bz-ds-press { cursor: pointer; animation: bzDsNudge 1.1s ease-in-out 3; }
+.bz-dropstrip.bz-ds-done { border-style: solid; }
+.bz-ds-go {
+  flex: 0 0 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 0;
+  background: var(--ob-yellow);
+  color: #141414;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bz-ds-go[hidden] { display: none; }
+@keyframes bzDsNudge { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -5px); } }
+@media (prefers-reduced-motion: reduce) { .bz-dropstrip.bz-ds-press { animation: none; } }
 

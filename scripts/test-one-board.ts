@@ -290,7 +290,7 @@ const server = http.createServer((req, res) => {
     const r = recipes.cleanGraph(graph);
     if (!r.ok) throw new Error("clean");
     const text = recipes.recipeInstructions("Gig poster", r.graph);
-    const iAgent = text.indexOf("agent.md"), i1 = text.indexOf("Step 1 — Research"), i2 = text.indexOf("Step 2 — Draw it"), iOut = text.indexOf("Output — Poster");
+    const iAgent = text.indexOf("agent.md"), i1 = text.indexOf("Step 1 — Research"), i2 = text.indexOf("Step 2 — Draw it"), iOut = text.indexOf("End result — Poster");
     truthy(iAgent >= 0 && i1 > iAgent && i2 > i1 && iOut > i2, text);
   });
   await ok("recipes are saved per person, listed, and deleted only by their owner", async () => {

@@ -70,15 +70,19 @@
   {
     "id": "sk-005",
     "q": "What is the difference between Chat and Work?",
-    "a": "There's one bar now, with no Chat or Work switch to pick. BeeZilla answers straight away and makes what you ask for. When a job needs real effort, it offers once to take it on as a piece of work, which collects the key details and then goes through the usual draft-and-approve steps.",
+    "a": "There's no difference any more: one conversation for both. BeeZilla answers, drafts and makes things straight away. When you want something bigger built, it first asks a question or two about the end result you have in mind, and points out anything that already exists so you don't build it from scratch. Say \"just do it\" or \"cut to the chase\" and it skips straight to the work.",
     "sources": [
       {
-        "file": "public/buzzy/talk.html",
-        "symbol": "One bar, one question"
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "There is no difference here between chatting and getting work done"
       },
       {
         "file": "src/lib/buzzy/server.ts",
-        "symbol": "offer once to take it on as a piece of work"
+        "symbol": "DON'T REINVENT THE WHEEL"
+      },
+      {
+        "file": "src/lib/buzzy/intent.ts",
+        "symbol": "cut to the chase|just get (it|the job|this) done"
       }
     ],
     "surfaces": [
@@ -613,11 +617,19 @@
   {
     "id": "sk-032",
     "q": "What is the Inspiration wall?",
-    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Idea Board. It is hidden in Lockdown.",
+    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters, plus a few ideas to start from. Every card shows the grabbing hand: drag it onto the Idea Board, or press it and click the strip that appears at the top of the window. ↗ shows similar work and ⛶ opens a piece bigger. It is hidden in Lockdown.",
     "sources": [
       {
         "file": "public/buzzy/inspiration.js",
         "symbol": "BeeZillaInspiration"
+      },
+      {
+        "file": "public/buzzy/inspiration.css",
+        "symbol": "cursor: grab;"
+      },
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "Drag it up here to put it on your Idea Board"
       },
       {
         "file": "public/buzzy/privacy.js",
@@ -631,7 +643,7 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. You can drag files and search results onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -648,6 +660,10 @@
       {
         "file": "src/lib/buzzy/server.ts",
         "symbol": "onFlow?: (f: FlowStep) => void;"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "\"chat\" is the conversation itself, sitting on the board as a card"
       }
     ],
     "surfaces": [
@@ -715,7 +731,7 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Press Talk to BeeZilla: it listens, and BeeZilla reads its answers aloud. Press Pause for quiet to think (it also stops BeeZilla mid-answer) and Continue to talk again. While it's listening, a small Listening button beside the settings gear (bottom right) shows it on every other page, with Stop.",
+    "a": "Yes. Press Talk to BeeZilla: it listens, and BeeZilla reads its answers aloud. Press Pause for quiet to think (it also stops BeeZilla mid-answer) and Continue to talk again. The Talk bar is at the top of every page, so you can pause from wherever you are, and the browser tab says when it's listening.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -723,7 +739,7 @@
       },
       {
         "file": "public/buzzy/nav.js",
-        "symbol": "live.id = \"bzMicLive\""
+        "symbol": "Talk to BeeZilla is the voice switch on every page"
       },
       {
         "file": "public/buzzy/voice-stage.js",
@@ -738,7 +754,7 @@
   {
     "id": "sk-037",
     "q": "Can I give BeeZilla a document to read?",
-    "a": "Yes. Drag the file onto the Talk bar or onto the Idea Board, or use Attach file under More, at the end of the row of places below the search bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "a": "Yes. Drag the file onto the Talk bar or onto the Idea Board, or press the paper clip at the right end of the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -746,7 +762,7 @@
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Attach file</button>"
+        "symbol": "aria-label=\"Attach a file\""
       },
       {
         "file": "public/buzzy/whiteboard.js",

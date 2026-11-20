@@ -172,7 +172,9 @@
   color: var(--insp-text);
   font: inherit;
   text-align: left;
-  cursor: pointer;
+  /* The hand that grabs, not the pointing finger: everything here moves to the Idea
+     Board (owner, 2026-11-20). The corner buttons keep the pointer. */
+  cursor: grab;
   -webkit-column-break-inside: avoid;
   break-inside: avoid;
   page-break-inside: avoid;
@@ -192,8 +194,13 @@
   box-shadow: 0 0 0 2px var(--insp-accent);
 }
 
+.insp-card:active {
+  cursor: grabbing;
+}
+
 .insp-dragging {
   opacity: 0.5;
+  cursor: grabbing;
 }
 
 /* round translucent controls: top-left "show similar", top-right "expand" */
@@ -228,6 +235,12 @@
 
 .insp-btn--expand {
   right: 10px;
+}
+
+.insp-btn--ask {
+  right: 10px;
+  bottom: 10px;
+  top: auto;
 }
 
 .insp-btn:hover {

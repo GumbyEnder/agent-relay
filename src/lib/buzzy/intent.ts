@@ -48,7 +48,10 @@ export function isExecuteCommand(message: string): boolean {
     /\b(no more (questions|confirmations?)|stop asking|quit asking|don'?t ask (me )?(any ?more|again)|no (further )?questions)\b/i.test(m) ||
     /\b(just do it|just do the work|do the work|get on with it|start (now|working|generating|building)|begin (now|working)|go ahead and (do|start|build|make))\b/i.test(m) ||
     /\b(i (already )?(told|gave|answered)|already (answered|provided|gave|done the planning)|as i (said|mentioned))\b/i.test(m) ||
-    /\b(skip the (questions|interview|plan)|enough (questions|planning)|stop (planning|confirming))\b/i.test(m)
+    /\b(skip the (questions|interview|plan)|enough (questions|planning)|stop (planning|confirming))\b/i.test(m) ||
+    // "Cut to the chase", "just get the job done" (owner, 2026-11-20: "If they say, just get
+    // the job done, or cut to the chase… just immediately cut to the chase").
+    /\b(cut to the chase|just get (it|the job|this) done|get the job done already|no questions,? just)\b/i.test(m)
   );
 }
 

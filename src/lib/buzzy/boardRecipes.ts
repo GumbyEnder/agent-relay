@@ -117,7 +117,7 @@ export function recipeInstructions(name: string, g: RecipeGraph): string {
   }
   for (const id of order) {
     const n = byId.get(id)!;
-    if (n.kind === "output") lines.push(`Output — ${n.title}${n.body ? ": " + n.body : ""}`);
+    if (n.kind === "output") lines.push(`End result — ${n.title}${n.body ? ": " + n.body : ""}`);
     else if (n.kind === "note" && n.body) lines.push(`Note — ${n.body}`);
   }
   return lines.join("\n").slice(0, 4000);

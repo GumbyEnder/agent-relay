@@ -59,7 +59,9 @@
       case "tab":
         return [{ sel: '[data-tab="' + v + '"]', name: "the " + cap(v) + " tab" }];
       case "whiteboard":
-        return [{ sel: "#boardToggle", name: "the Idea Board button", already: function (el) { return pressed(el) === (v === "open"); } }];
+        // No button for it on the page any more (it opens when you talk, and folds with
+        // its own Fold away): the switch stays in the page, out of sight.
+        return [{ sel: "#boardToggle", name: "the Idea Board", hiddenOk: true, already: function (el) { return pressed(el) === (v === "open"); } }];
       case "privacy":
         return [
           { sel: "#privacyBtn", name: "the Privacy button", already: function () { var p = document.getElementById("privacyPop"); return !!p && !p.classList.contains("hidden"); } },
@@ -72,8 +74,8 @@
       case "history":
         return [{ sel: '[data-tab="history"]', name: "History, under the search bar" }];
       case "newChat":
-        // The chat header's New button; the draft banner and History drawer have their own.
-        return [{ sel: "#newSessionBtn, #newChatBtn, #drawerNewChat", name: "the New chat button" }];
+        // The board's New conversation button, History's, or the one kept out of sight.
+        return [{ sel: ".wb-new, .bz-pane-head [data-new], #newSessionBtn", name: "New conversation", hiddenOk: true }];
       case "speak":
         // One voice switch: Talk to BeeZilla (#micBtn) starts listening and speaks
         // replies together, and turns both off (toggleMic), so "speak on" is that

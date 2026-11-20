@@ -177,8 +177,8 @@
 /* The numbers under a reply (model, time, tools): there when you look, quiet otherwise. */
 .talk-ws .bz-what { opacity: 0; transition: opacity 0.15s; }
 .talk-ws .bz-what:hover { opacity: 0.85; }
-/* "Copy page link" copies this page's own address; the browser already does that. */
-#bzCopy { display: none; }
+/* "Copy page link" is back beside the QR code (owner, 2026-11-20: "the search, or enter
+   a URL with the QR code and the copy button"). */
 
 /* Where the work stands: one line at the top of the conversation. */
 .talk-ws-status {

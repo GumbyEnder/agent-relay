@@ -1597,6 +1597,243 @@
     </script>
     </div>
   </header>
+  <!-- The website's header, on every page (owner, 2026-11-20): "What you see as a talk
+       area is actually just the header of the entire website. That's why we can fold it
+       away… The URL bar and menu of the website lives below the talk area."
+       Top to bottom: Talk to BeeZilla (the Idea Board opens here when you talk), what is
+       waiting on you, the search or web address with its QR code and copy button, and
+       the row of places. Whatever page you are on opens under that row. nav.js keeps
+       this one element alive across pages; it is never part of a page. -->
+  <div id="bzHead" class="bz-head">
+    <!-- Talk to BeeZilla, above everything (owner, 2026-11-18: "a single button you
+         push called Talk to BeeZilla. With a single line chat bubble… That would be
+         above everything else"). While the whiteboard is open this same bar moves into
+         its top edge (voice-stage.js); folded, it waits here. -->
+    <div id="obStart" class="ob-start">
+    <!-- One line to make anything: the docked Talk to BeeZilla button starts voice,
+         the field takes typing, and a file or picture dropped anywhere on the bar
+         is read like an attached paper. No plus button (owner's reference A6b7ky7). -->
+    <div class="composer-card talk-card" id="composerCard">
+      <div class="talk-bar" id="talkBar">
+        <button id="micBtn" class="talk-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk to BeeZilla: it listens and your words collect in the box. Pause whenever you like; send when you're ready.">
+          <svg class="tb-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          <svg class="tb-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z"/></svg>
+          <span class="tb-label">Talk to BeeZilla</span>
+          <canvas class="tb-level" aria-hidden="true"></canvas>
+        </button>
+        <div class="talk-field">
+          <textarea id="chatInput" rows="1" placeholder="What would you like to make?" aria-label="What would you like to make?" disabled></textarea>
+          <div class="talk-actions">
+            <button id="chatDoIt" class="secondary talk-doit" type="button" disabled
+                    title="Stop asking — produce it now">Do it</button>
+            <button id="chatSend" class="talk-send" disabled aria-label="Send" title="Send">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.6l-4.3-4.3 1.4-1.4L20.4 13l-6.7 6.7-1.4-1.4 4.3-4.3H4z"/></svg>
+            </button>
+          </div>
+        </div>
+        <!-- Beside the box: a paper clip for a file (dropping it on the bar works too) and
+             the privacy control at the bar's right end (owner's reference A6b7ky7). They
+             used to hide in a More menu; nothing that belongs to talking hides now. -->
+        <span class="talk-extras">
+          <button type="button" id="paperToggle" class="paper-toggle talk-icon" aria-expanded="false" aria-label="Attach a file"
+                  title="Attach a file. You can also drop it on this bar.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6l-8.3 8.3a5.4 5.4 0 01-7.6-7.6l8.8-8.8a3.6 3.6 0 015.1 5.1l-8.8 8.8a1.8 1.8 0 01-2.5-2.5l8.1-8.1"/></svg>
+          </button>
+          <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
+          <div class="talk-privacy">
+            <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
+              <span class="pv-icons"></span>
+            </button>
+            <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
+              <div class="pp-head">
+                <strong>Privacy</strong>
+                <span class="pp-tools">
+                  <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
+                  <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
+                </span>
+              </div>
+              <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
+                <span class="pp-thumb" aria-hidden="true"></span>
+                <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
+                <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
+                <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
+              </div>
+              <p class="pp-desc" id="privacyDesc"></p>
+            </div>
+          </div>
+        </span>
+        <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
+      </div>
+      <div class="talk-sub">
+        <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
+             is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
+             dropped on the bar; this link is for a phone or a pasted letter. -->
+        <span class="talk-sub-right">
+          <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
+        </span>
+      </div>
+      <p id="voiceStatus" class="voice-status hidden" role="status"></p>
+      <!-- The plan/quota line lives in the account menu now (nav.js): a
+           running total under the composer was noise, and the plan belongs
+           beside the name it applies to (owner, Nov 2026). -->
+      <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
+        <div class="ctx-bar"><span id="ctxFill"></span></div>
+        <span id="ctxText" class="ctx-text">Context 0%</span>
+      </div>
+      <div id="boardSolo" class="board-solo"></div>
+    </div>
+    </div>
+
+    <!-- The whiteboard, full width (owner, 2026-11-18: "when you start talking to it, it
+         expands the whiteboard and puts the Talk to BeeZilla thing in the whiteboard").
+         The agent's work is drawn on it live: agent.md, a line to each skill, the
+         output. The conversation sits inside it on the right. -->
+    <div id="obBoard" class="ob-board hidden" aria-label="Idea Board"></div>
+    <!-- Where the conversation and the old mode switch wait while the board is folded. -->
+    <div id="obParking" hidden>
+      <div class="talk-ws-thread" id="talkWsThread">
+        <div class="chat-messages" id="chatMessages"></div>
+      </div>
+      <!-- Kept for the scripts that still look them up; nothing shows them. New
+           conversation lives in History and on the board, your AI key behind the
+           settings gear, the board opens when you talk (owner, 2026-11-20). -->
+      <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New conversation</button>
+      <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open or fold the Idea Board">Idea Board</button>
+      <button type="button" id="aiKeyBtn" class="talk-attach" title="Use your own AI account">Your AI key</button>
+      <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
+            <div class="tm-row tm-mode"><span class="tm-label">Mode</span>
+              <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
+                <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
+                <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
+              </div>
+            </div>
+    </div>
+
+    <!-- The brief is one line above the conversation, expandable in place.
+         No side column: it costs no width and never competes with the chat. -->
+    <div class="brief-bar hidden" id="briefBar">
+      <button type="button" class="brief-bar-btn" id="briefBarToggle" aria-expanded="false" aria-controls="briefPanel">
+        <span class="bb-label">Brief</span>
+        <span class="bb-count" id="railCount">0/4</span>
+        <span class="bb-dots" id="railDots" aria-hidden="true"></span>
+        <span class="bb-preview" id="bbPreview">Nothing captured yet</span>
+        <span class="bb-chev" aria-hidden="true">&#9662;</span>
+      </button>
+      <div class="slot-checklist brief-body hidden" id="briefPanel" role="region" aria-label="Brief">
+        <p id="briefCompany" class="brief-company"></p>
+        <div id="slotItems"></div>
+        <div id="paperBrief" class="paper-brief hidden"></div>
+      </div>
+    </div>
+
+    <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
+    <div id="paperDrop" class="paper-drop hidden">
+      <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
+      <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz" />
+      <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
+      <div class="row">
+        <button type="button" id="paperRead">Read it</button>
+      </div>
+      <p id="paperNote" class="muted" role="status"></p>
+    </div>
+    <div id="draftBanner" class="draft-ready-banner hidden">
+      <p>A draft is ready for you to review.</p>
+      <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
+      <p id="draftWarning" class="draft-warning hidden" role="alert"></p>
+      <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
+      <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
+      <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
+      <p class="muted" id="draftMeta">Version 1 · not approved</p>
+      <div class="row">
+        <button type="button" id="approveDraft">Approve this version</button>
+        <button type="button" id="draftSend">Send</button>
+      </div>
+      <div class="row row-tools">
+        <button type="button" id="downloadDraft" class="secondary">Download .md</button>
+        <button type="button" id="downloadWord" class="secondary">Word</button>
+        <button type="button" id="downloadPdf" class="secondary">PDF</button>
+        <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
+        <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
+        <button type="button" id="newChatBtn" class="secondary new-chat-btn">New conversation</button>
+      </div>
+      <p id="draftSendNote" class="muted" role="status"></p>
+      <div id="outwardConfirm" class="outward-confirm">
+        <p>Sending, filing, paying, or publishing is a separate step.</p>
+        <button type="button" id="confirmOutward" disabled>Confirm send</button>
+        <p id="outwardNote" class="muted"></p>
+      </div>
+    </div>
+    <div id="chatError" class="chat-error hidden"></div>
+    <!-- Browse half (owner's references zMWSgG0 / qVxl1TJ): building happens
+         above, finding and inspiration below. browse.js wires it; a search
+         replaces the tab content until ✕ or Escape. -->
+    <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
+      <div class="bz-search" role="search">
+        <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+        <input id="bzSearch" type="search" placeholder="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
+               aria-label="Search your pictures, music, 3D, documents, skills and recipes, or enter a web address" />
+        <span class="bz-search-tools">
+          <!-- The page's address as a QR code, for a phone (owner's reference zMWSgG0:
+               "Search or enter a URL" with the QR code and the copy button). -->
+          <button type="button" id="bzQr" class="bz-share-btn" aria-haspopup="dialog" aria-expanded="false"
+                  aria-label="Show a QR code for this page"
+                  title="Shows this page's address as a QR code to open it on your phone. Nothing is shared or sent.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2zM16 16h2v2h-2z"/></svg>
+            <span>QR code</span>
+          </button>
+          <!-- A share control that only copies a URL has to SAY so. The
+               icon alone read as "share this" and left the owner guessing
+               what left the page (nothing did). -->
+          <button type="button" id="bzCopy" class="bz-share-btn"
+                  aria-label="Copy a link to this page — nothing is shared or sent"
+                  title="Copies this page's address to your clipboard. Nothing is shared or sent.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            <span>Copy page link</span>
+          </button>
+        </span>
+      </div>
+      <p class="bz-search-note" id="bzSearchNote" role="status" aria-live="polite"></p>
+      <div class="bz-results hidden" id="bzResults" role="region" aria-label="Search results">
+        <div class="bz-results-head">
+          <h2>Search results</h2>
+          <button type="button" class="bz-icon-btn" id="bzResultsClose" aria-label="Close search" title="Close search">&#10005;</button>
+        </div>
+        <div class="bz-chips" role="tablist" aria-label="Show">
+          <button type="button" role="tab" data-f="all" class="on" aria-selected="true">All <span class="bz-chip-n"></span></button>
+          <button type="button" role="tab" data-f="pictures" aria-selected="false">Pictures <span class="bz-chip-n"></span></button>
+          <button type="button" role="tab" data-f="music" aria-selected="false">Music <span class="bz-chip-n"></span></button>
+          <button type="button" role="tab" data-f="models" aria-selected="false">3D <span class="bz-chip-n"></span></button>
+          <button type="button" role="tab" data-f="documents" aria-selected="false">Documents <span class="bz-chip-n"></span></button>
+          <button type="button" role="tab" data-f="skills" aria-selected="false">Skills <span class="bz-chip-n"></span></button>
+          <button type="button" role="tab" data-f="recipes" aria-selected="false">Recipes <span class="bz-chip-n"></span></button>
+        </div>
+        <div class="bz-results-grid" id="bzResultsGrid"></div>
+      </div>
+      <!-- The website's menu: one row under the search, on every page (owner,
+           2026-11-20: "Inspiration, history, library, memory, experts, recipes. And then
+           sketch, music studio, what BeeZilla can do, honey… and then publish. All that
+           can just be available by default."). No More menu; the row wraps when it
+           needs to and never scrolls. The first six open here, under the row; the rest
+           are their own pages, which open under the same row. -->
+      <div class="bz-tabrow" id="bzPlaces">
+        <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Places">
+          <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
+          <button type="button" role="tab" data-tab="history" aria-selected="false" tabindex="-1">History</button>
+          <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
+          <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
+          <button type="button" role="tab" data-tab="experts" aria-selected="false" tabindex="-1">Experts</button>
+          <button type="button" role="tab" data-tab="recipes" aria-selected="false" tabindex="-1">Recipes</button>
+        </div>
+        <nav class="bz-places" aria-label="More places">
+          <a href="/buzzy/sketch" data-place="sketch">Sketch</a>
+          <a href="/buzzy/studio" data-place="studio">Music studio</a>
+          <a href="/buzzy/capabilities" data-place="capabilities">What BeeZilla can do</a>
+          <a href="/buzzy/wallet" data-place="wallet">Honey</a>
+          <a href="/buzzy/upload" data-place="publish">Publish</a>
+        </nav>
+      </div>
+    </section>
+  </div>
   <main>
     <div id="chatScreen">
       <div class="chat-layout">
@@ -1637,225 +1874,9 @@
             </div>
             <div class="vs-board" id="vsBoard"></div>
           </div>
-          <!-- Talk to BeeZilla, above everything (owner, 2026-11-18: "a single button you
-               push called Talk to BeeZilla. With a single line chat bubble… That would be
-               above everything else"). While the whiteboard is open this same bar moves into
-               its top edge (voice-stage.js); folded, it waits here. -->
-          <div id="obStart" class="ob-start">
-          <!-- One line to make anything: the docked Talk to BeeZilla button starts voice,
-               the field takes typing, and a file or picture dropped anywhere on the bar
-               is read like an attached paper. No plus button (owner's reference A6b7ky7). -->
-          <div class="composer-card talk-card" id="composerCard">
-            <div class="talk-bar" id="talkBar">
-              <button id="micBtn" class="talk-btn" type="button" aria-pressed="false" aria-label="Talk to BeeZilla" title="Talk to BeeZilla: it listens and your words collect in the box. Pause whenever you like; send when you're ready.">
-                <svg class="tb-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
-                <svg class="tb-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z"/></svg>
-                <span class="tb-label">Talk to BeeZilla</span>
-                <canvas class="tb-level" aria-hidden="true"></canvas>
-              </button>
-              <div class="talk-field">
-                <textarea id="chatInput" rows="1" placeholder="What would you like to make?" aria-label="What would you like to make?" disabled></textarea>
-                <div class="talk-actions">
-                  <button id="chatDoIt" class="secondary talk-doit" type="button" disabled
-                          title="Stop asking — produce it now">Do it</button>
-                  <button id="chatSend" class="talk-send" disabled aria-label="Send" title="Send">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.6l-4.3-4.3 1.4-1.4L20.4 13l-6.7 6.7-1.4-1.4 4.3-4.3H4z"/></svg>
-                  </button>
-                </div>
-              </div>
-              <p class="talk-drop-hint" aria-hidden="true">Drop it here — BeeZilla reads it</p>
-            </div>
-            <div class="talk-sub">
-              <!-- No Music or 3D buttons: asking for a song or a 3D model in the box above
-                   is enough — the chat makes it (isMusicRequest / is3dRequest). Files are
-                   dropped on the bar; this link is for a phone or a pasted letter. -->
-              <span class="talk-sub-right">
-                <button type="button" id="privacyChip" class="privacy-chip hidden"></button>
-              </span>
-            </div>
-            <p id="voiceStatus" class="voice-status hidden" role="status"></p>
-            <!-- The plan/quota line lives in the account menu now (nav.js): a
-                 running total under the composer was noise, and the plan belongs
-                 beside the name it applies to (owner, Nov 2026). -->
-            <div id="ctxMeter" class="ctx-meter hidden" aria-live="polite">
-              <div class="ctx-bar"><span id="ctxFill"></span></div>
-              <span id="ctxText" class="ctx-text">Context 0%</span>
-            </div>
-            <div id="boardSolo" class="board-solo"></div>
-          </div>
-          </div>
-
-          <!-- The whiteboard, full width (owner, 2026-11-18: "when you start talking to it, it
-               expands the whiteboard and puts the Talk to BeeZilla thing in the whiteboard").
-               The agent's work is drawn on it live: agent.md, a line to each skill, the
-               output. The conversation sits inside it on the right. -->
-          <div id="obBoard" class="ob-board hidden" aria-label="Idea Board"></div>
-          <!-- Where the conversation and the old mode switch wait while the board is folded. -->
-          <div id="obParking" hidden>
-            <div class="talk-ws-thread" id="talkWsThread">
-              <div class="chat-messages" id="chatMessages"></div>
-            </div>
-                  <div class="tm-row tm-mode"><span class="tm-label">Mode</span>
-                    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-                      <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-                      <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
-                    </div>
-                  </div>
-          </div>
-
-          <!-- The brief is one line above the conversation, expandable in place.
-               No side column: it costs no width and never competes with the chat. -->
-          <div class="brief-bar hidden" id="briefBar">
-            <button type="button" class="brief-bar-btn" id="briefBarToggle" aria-expanded="false" aria-controls="briefPanel">
-              <span class="bb-label">Brief</span>
-              <span class="bb-count" id="railCount">0/4</span>
-              <span class="bb-dots" id="railDots" aria-hidden="true"></span>
-              <span class="bb-preview" id="bbPreview">Nothing captured yet</span>
-              <span class="bb-chev" aria-hidden="true">&#9662;</span>
-            </button>
-            <div class="slot-checklist brief-body hidden" id="briefPanel" role="region" aria-label="Brief">
-              <p id="briefCompany" class="brief-company"></p>
-              <div id="slotItems"></div>
-              <div id="paperBrief" class="paper-brief hidden"></div>
-            </div>
-          </div>
-
-          <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
-          <div id="paperDrop" class="paper-drop hidden">
-            <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
-            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz" />
-            <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
-            <div class="row">
-              <button type="button" id="paperRead">Read it</button>
-            </div>
-            <p id="paperNote" class="muted" role="status"></p>
-          </div>
-          <div id="draftBanner" class="draft-ready-banner hidden">
-            <p>A draft is ready for you to review.</p>
-            <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
-            <p id="draftWarning" class="draft-warning hidden" role="alert"></p>
-            <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
-            <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
-            <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
-            <p class="muted" id="draftMeta">Version 1 · not approved</p>
-            <div class="row">
-              <button type="button" id="approveDraft">Approve this version</button>
-              <button type="button" id="draftSend">Send</button>
-            </div>
-            <div class="row row-tools">
-              <button type="button" id="downloadDraft" class="secondary">Download .md</button>
-              <button type="button" id="downloadWord" class="secondary">Word</button>
-              <button type="button" id="downloadPdf" class="secondary">PDF</button>
-              <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
-              <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
-              <button type="button" id="newChatBtn" class="secondary new-chat-btn">New conversation</button>
-            </div>
-            <p id="draftSendNote" class="muted" role="status"></p>
-            <div id="outwardConfirm" class="outward-confirm">
-              <p>Sending, filing, paying, or publishing is a separate step.</p>
-              <button type="button" id="confirmOutward" disabled>Confirm send</button>
-              <p id="outwardNote" class="muted"></p>
-            </div>
-          </div>
-          <!-- History of work sits below the chat, in every state, so the
-               page never reflows when a conversation starts. -->
-          <!-- Browse half (owner's references zMWSgG0 / qVxl1TJ): building happens
-               above, finding and inspiration below. browse.js wires it; a search
-               replaces the tab content until ✕ or Escape. -->
-          <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
-            <div class="bz-search" role="search">
-              <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
-              <input id="bzSearch" type="search" placeholder="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
-                     aria-label="Search your pictures, music, 3D, documents, skills and recipes, or enter a web address" />
-              <span class="bz-search-tools">
-                <!-- A share control that only copies a URL has to SAY so. The
-                     icon alone read as "share this" and left the owner guessing
-                     what left the page (nothing did). -->
-                <button type="button" id="bzCopy" class="bz-share-btn"
-                        aria-label="Copy a link to this page — nothing is shared or sent"
-                        title="Copies this page's address to your clipboard. Nothing is shared or sent.">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-                  <span>Copy page link</span>
-                </button>
-              </span>
-            </div>
-            <p class="bz-search-note" id="bzSearchNote" role="status" aria-live="polite"></p>
-            <div class="bz-results hidden" id="bzResults" role="region" aria-label="Search results">
-              <div class="bz-results-head">
-                <h2>Search results</h2>
-                <button type="button" class="bz-icon-btn" id="bzResultsClose" aria-label="Close search" title="Close search">&#10005;</button>
-              </div>
-              <div class="bz-chips" role="tablist" aria-label="Show">
-                <button type="button" role="tab" data-f="all" class="on" aria-selected="true">All <span class="bz-chip-n"></span></button>
-                <button type="button" role="tab" data-f="pictures" aria-selected="false">Pictures <span class="bz-chip-n"></span></button>
-                <button type="button" role="tab" data-f="music" aria-selected="false">Music <span class="bz-chip-n"></span></button>
-                <button type="button" role="tab" data-f="models" aria-selected="false">3D <span class="bz-chip-n"></span></button>
-                <button type="button" role="tab" data-f="documents" aria-selected="false">Documents <span class="bz-chip-n"></span></button>
-                <button type="button" role="tab" data-f="skills" aria-selected="false">Skills <span class="bz-chip-n"></span></button>
-                <button type="button" role="tab" data-f="recipes" aria-selected="false">Recipes <span class="bz-chip-n"></span></button>
-              </div>
-              <div class="bz-results-grid" id="bzResultsGrid"></div>
-            </div>
-            <!-- The places, below everything (owner: "the top menu below everything else… History
-                 can move down… left of library and right of inspiration… Recipes should be at
-                 the bottom as well… And the more button should be below as well"). -->
-            <div class="bz-tabrow">
-            <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Places">
-              <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
-              <button type="button" role="tab" data-tab="history" aria-selected="false" tabindex="-1">History</button>
-              <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
-              <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
-              <button type="button" role="tab" data-tab="experts" aria-selected="false" tabindex="-1">Experts</button>
-              <button type="button" role="tab" data-tab="recipes" aria-selected="false" tabindex="-1">Recipes</button>
-            </div>
-              <div class="talk-more" id="talkMore">
-                <button type="button" id="talkMoreBtn" class="talk-more-btn" aria-expanded="false" aria-controls="talkMorePanel" title="More">
-                  <span class="tm-sr">More</span><span class="tm-dots" aria-hidden="true">&#8943;</span>
-                </button>
-                <div class="talk-more-panel hidden" id="talkMorePanel" role="group" aria-label="More">
-                  <button id="newSessionBtn" class="secondary sessions-toggle" type="button" title="Start a clean conversation">New conversation</button>
-                  <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open or fold the Idea Board">Idea Board</button>
-                  <button type="button" id="paperToggle" class="paper-toggle talk-attach" aria-expanded="false">Attach file</button>
-                  <button type="button" id="aiKeyBtn" class="talk-attach" title="Use your own AI account">Your AI key</button>
-                  <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
-                  <div class="tm-row"><span class="tm-label">Privacy</span>
-                    <!-- Privacy: one three-position slider (privacy.js). Open is the cloud default. -->
-                    <div class="talk-privacy">
-                      <button type="button" id="privacyBtn" class="privacy-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="privacyPop" aria-label="Privacy">
-                        <span class="pv-icons"></span>
-                      </button>
-                      <div class="privacy-pop hidden" id="privacyPop" role="dialog" aria-label="Privacy">
-                        <div class="pp-head">
-                          <strong>Privacy</strong>
-                          <span class="pp-tools">
-                            <button type="button" id="privacyMin" aria-label="Minimise privacy" title="Minimise">&#8211;</button>
-                            <button type="button" id="privacyClose" aria-label="Close privacy" title="Close">&#10005;</button>
-                          </span>
-                        </div>
-                        <div class="pp-slider" role="radiogroup" aria-label="Privacy mode">
-                          <span class="pp-thumb" aria-hidden="true"></span>
-                          <button type="button" role="radio" data-mode="advocate" aria-checked="false">Advocate</button>
-                          <button type="button" role="radio" data-mode="lockdown" aria-checked="false">Lockdown</button>
-                          <button type="button" role="radio" data-mode="open" aria-checked="false">Open</button>
-                        </div>
-                        <p class="pp-desc" id="privacyDesc"></p>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="tm-sep" role="separator"></div>
-                  <p class="tm-head">More places</p>
-                  <a href="/buzzy/sketch">Sketch</a>
-                  <a href="/buzzy/studio">Music studio</a>
-                  <a href="/buzzy/capabilities">What BeeZilla can do</a>
-                  <a href="/buzzy/wallet">Honey Drops</a>
-                  <a href="/buzzy/upload">Publish</a>
-                </div>
-              </div>
-            </div>
-            <div class="bz-pane" id="bzPane" role="tabpanel"></div>
-          </section>
+          <!-- What the chosen place holds (Inspiration first), right under the row of places. -->
+          <div class="bz-pane" id="bzPane" role="tabpanel"></div>
           <div id="recentBelow" class="recent-below" aria-label="Recent work"></div>
-          <div id="chatError" class="chat-error hidden"></div>
         </div>
       </div>
     </div>
@@ -2424,9 +2445,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // ── Intake mode tabs: chat (default) / form ────────────────────────
     let chatState = {
       jobId: null,
-      // Resumed on load: without this every reload started a NEW session, and a
-      // new session means a new job — 56 copies of one lullaby in Work.
-      sessionId: (function () { try { return localStorage.getItem("bz_session_id") || null; } catch (_) { return null; } })(),
+      // Every visit opens on a blank page (owner, 2026-11-20: "I guess it opened my most
+      // recent historical message. It shouldn't do that. It should open to a blank page
+      // each time"). The last conversation is one click away in History, and History's
+      // Open or a ?job= link still continues an older one. No conversation exists until
+      // something is sent, so opening the page never adds one to the list.
+      sessionId: null,
       slots: {},
       messages: [],
       draftReady: false,
@@ -2444,6 +2468,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       mode: "chat",
       workOfferDismissed: false,
     };
+
+    // The board follows bz_session_id (voice-stage.js): a fresh visit has none, so it
+    // opens on the empty board in front of a new conversation.
+    try { localStorage.removeItem("bz_session_id"); } catch (_) {}
 
     // ── Expert query param ─────────────────────────────────────────────
     var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
@@ -2517,7 +2545,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return r.json();
         })
         .then(function (session) {
-          if (!(session && session.user)) window.location.replace("/buzzy/landing");
+          if (session && session.user) return;
+          // Only Talk's own page sends a signed-out visitor to sign in. As the header of
+          // another page (Sketch, Studio and What BeeZilla can do are open to everyone)
+          // it waits, and the box stays closed until they sign in.
+          var shell = window.BeeZillaShell;
+          var key = String((shell && shell.currentKey) || location.pathname).replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, "");
+          if (/^\/buzzy(\/talk)?$/.test(key)) window.location.replace("/buzzy/landing");
         })
         .catch(function () {});
     })();
@@ -6585,6 +6619,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function newChatNow() {
       resetContextMeter();
       chatState.sessionId = null;
+      // The board follows bz_session_id (voice-stage.js): without this, New conversation
+      // kept the old conversation's board on screen until the next message.
+      try { localStorage.removeItem("bz_session_id"); } catch (_) {}
       chatState.jobId = null;
       chatState.jobContext = null;
       chatState.slots = {};
@@ -6875,7 +6912,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             '</div>';
         } else {
           shown.forEach(function (it, idx) {
-            html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0" title="' + esc(it.tooltip || it.title) + '">' +
+            // Every piece of work can be dragged onto the Idea Board (owner, 2026-11-20).
+            html += '<div class="rw-item' + (it.needsInput ? " needs-input" : "") + '" data-idx="' + idx + '" role="button" tabindex="0" draggable="true" data-bz-card="' +
+              esc(JSON.stringify({ kind: "note", title: String(it.title || "Work").slice(0, 120), body: String(it.sub || "").slice(0, 400) })) + '" title="' + esc(it.tooltip || it.title) + '">' +
               '<span class="rw-title">' + esc(it.title) + '</span>' +
               '<span class="rw-sub">' + esc(it.sub) + '</span>' +
               (it.kind === "job" ? '<span class="rw-tools"><button type="button" class="rw-rename" title="Rename">✎</button><button type="button" class="rw-delete" title="Delete">🗑</button></span>' : '') +
@@ -6954,11 +6993,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function ensureChatSession() {
       if (chatState.sessionId) return Promise.resolve(chatState.sessionId);
       var coId = activeCompanyId();
+      // `fresh`: a new conversation, never the last one the server touched in the past
+      // 12 hours. The page only lands here without a conversation on a fresh visit,
+      // after New conversation, or after a company switch — each one a new start.
       return fetch(SESSIONS_BASE, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyId: coId || undefined }),
+        body: JSON.stringify({ companyId: coId || undefined, fresh: true }),
       }).then(function (r) {
         if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.ok ? r.json() : null;
@@ -7677,12 +7719,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         body: JSON.stringify({
           jobId: chatState.jobId || undefined,
           companyId: coId || undefined,
+          // A truly new one: without `fresh` the server handed back the last conversation
+          // touched in the past 12 hours.
+          fresh: true,
         }),
       }).then(function (r) {
         if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.json();
       }).then(function (data) {
         const s = data.session;
+        // The board follows the conversation (voice-stage.js reads bz_session_id).
+        try { if (s && s.id) localStorage.setItem("bz_session_id", s.id); else localStorage.removeItem("bz_session_id"); } catch (_) {}
         chatState = {
           jobId: chatState.jobId, // keep job-scoped behavior when a job is present
           sessionId: s ? s.id : null,

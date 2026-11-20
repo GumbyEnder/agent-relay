@@ -485,9 +485,11 @@
   var mounted = null;
 
   function parkRecent() {
-    // Recent work belongs to Library; elsewhere it waits, hidden, so talk.html's
-    // own code (which repaints it) keeps working.
-    if (recent && recent.parentNode !== root) { root.appendChild(recent); }
+    // Recent work belongs to Library; elsewhere it waits, hidden, in Talk's own page
+    // (not the header, which every page shows), so talk.html's own code (which
+    // repaints it) keeps working.
+    var home = (pane && pane.parentNode) || root;
+    if (recent && recent.parentNode !== home) { home.appendChild(recent); }
     if (recent) recent.classList.add("bz-parked");
   }
 
@@ -550,7 +552,9 @@
         if (!sessions.length) { listEl.innerHTML = '<p class="ob-empty">Nothing yet. Talk to BeeZilla and your conversations collect here.</p>'; return; }
         listEl.innerHTML = sessions.slice(0, 60).map(function (c, i) {
           var n = c.messageCount != null ? c.messageCount + " message" + (c.messageCount === 1 ? "" : "s") : "";
-          return '<div class="ob-item"><div class="ob-item-main"><p class="ob-item-title">' + esc(c.title || "Untitled conversation") + "</p>" +
+          // Drag a conversation onto the Idea Board: it lands as a note with its gist.
+          var card = { kind: "note", title: String(c.title || "Conversation").slice(0, 120), body: String(c.summary || n || "").slice(0, 600) };
+          return '<div class="ob-item ob-drag" draggable="true" data-bz-card="' + esc(JSON.stringify(card)) + '"><div class="ob-item-main"><p class="ob-item-title">' + esc(c.title || "Untitled conversation") + "</p>" +
             '<p class="ob-item-sub">' + esc(c.summary || n) + "</p></div>" +
             '<div class="ob-item-tools"><button type="button" class="ob-go" data-open="' + i + '">Open</button></div></div>';
         }).join("");
@@ -580,7 +584,8 @@
         }
         mine.innerHTML = list.map(function (rc, i) {
           var steps = (rc.graph && rc.graph.nodes || []).filter(function (n) { return n.kind === "skill"; }).length;
-          return '<div class="ob-item"><div class="ob-item-main"><p class="ob-item-title">' + esc(rc.name) + "</p>" +
+          var card = { kind: "note", title: String(rc.name || "Recipe").slice(0, 120), body: "Recipe: " + steps + " step" + (steps === 1 ? "" : "s") + ". Recipes → Put on board brings back every step." };
+          return '<div class="ob-item ob-drag" draggable="true" data-bz-card="' + esc(JSON.stringify(card)) + '"><div class="ob-item-main"><p class="ob-item-title">' + esc(rc.name) + "</p>" +
             '<p class="ob-item-sub">' + steps + " step" + (steps === 1 ? "" : "s") + " · made on your Idea Board</p></div>" +
             '<div class="ob-item-tools"><button type="button" class="ob-go" data-run="' + i + '">Run</button>' +
             '<button type="button" data-put="' + i + '">Put on board</button><button type="button" data-del="' + i + '">Delete</button></div></div>';
@@ -628,6 +633,49 @@
     },
   };
 
+  // ── Which page is under the header ─────────────────────────────────────
+  // The header (search, places) is on every page; the first six places open in
+  // Talk's own page, under the row. From any other page they go to Talk first.
+  function pathNow() {
+    var key = window.BeeZillaShell && window.BeeZillaShell.currentKey;
+    return String(key || location.pathname).replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, "");
+  }
+  function onTalk() { return /^\/buzzy(\/talk)?$/.test(pathNow()); }
+  // A full page that belongs to one of the places lights that place up.
+  var PAGE_PLACE = {
+    library: "library", memory: "memory", remember: "memory", experts: "experts", recipes: "recipes",
+    sketch: "sketch", studio: "studio", capabilities: "capabilities", wallet: "wallet", upload: "publish",
+  };
+  var places = document.querySelector("#bzPlaces .bz-places");
+  function paintPlaces() {
+    var talk = onTalk();
+    var here = talk ? "" : (PAGE_PLACE[pathNow().split("/")[2] || ""] || "");
+    var first = null;
+    tabs.querySelectorAll("[data-tab]").forEach(function (b) {
+      var name = b.getAttribute("data-tab");
+      var on = talk && name === current;
+      b.classList.toggle("on", on);
+      b.classList.toggle("here", !talk && name === here);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      if (!talk && name === here) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+      b.tabIndex = on || (!talk && name === here) ? 0 : -1;
+      if (!first) first = b;
+    });
+    // Away from Talk with no place of its own lit, the row still takes Tab once.
+    if (!talk && first && !tabs.querySelector('[data-tab][tabindex="0"]')) first.tabIndex = 0;
+    if (places) {
+      places.querySelectorAll("a[data-place]").forEach(function (a) {
+        var on = a.getAttribute("data-place") === here;
+        a.classList.toggle("on", on);
+        if (on) a.setAttribute("aria-current", "page");
+        else a.removeAttribute("aria-current");
+      });
+    }
+  }
+  window.addEventListener("bz:page", paintPlaces);
+  window.addEventListener("popstate", function () { setTimeout(paintPlaces, 0); });
+
   function select(name) {
     if (!TABS[name]) name = "inspiration";
     if (mounted && mounted.destroy) { try { mounted.destroy(); } catch (_) {} }
@@ -636,42 +684,97 @@
     pane.innerHTML = "";
     current = name;
     store("bz.browse.tab", name);
-    tabs.querySelectorAll("[data-tab]").forEach(function (b) {
-      var on = b.getAttribute("data-tab") === name;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-selected", on ? "true" : "false");
-      b.tabIndex = on ? 0 : -1;
-    });
+    paintPlaces();
     TABS[name]();
+  }
+  // A place chosen from another page: go to Talk (its page is kept), then open it.
+  function choose(name) {
+    if (!onTalk() && window.BeeZillaShell && window.BeeZillaShell.go) {
+      Promise.resolve(window.BeeZillaShell.go("/buzzy/talk")).then(function () {
+        select(name);
+        paintPlaces();
+      });
+      return;
+    }
+    select(name);
   }
 
   tabs.addEventListener("click", function (e) {
     var b = e.target.closest ? e.target.closest("[data-tab]") : null;
-    if (b) select(b.getAttribute("data-tab"));
+    if (b) choose(b.getAttribute("data-tab"));
   });
   tabs.addEventListener("keydown", function (e) {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     var all = Array.prototype.slice.call(tabs.querySelectorAll("[data-tab]"));
-    var at = all.findIndex(function (b) { return b.getAttribute("data-tab") === current; });
+    var at = all.findIndex(function (b) { return b === document.activeElement; });
+    if (at < 0) at = all.findIndex(function (b) { return b.getAttribute("data-tab") === current; });
     var next = all[(at + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length];
-    if (next) { select(next.getAttribute("data-tab")); next.focus(); }
+    if (!next) return;
+    if (onTalk()) select(next.getAttribute("data-tab"));
+    next.focus();
   });
 
-  window.bzBrowseSelect = function (name) { select(name); };
+  window.bzBrowseSelect = function (name) { choose(name); };
 
   // A privacy change can hide or show the wall.
   window.addEventListener("bz:privacy", function () { if (current === "inspiration") select("inspiration"); });
 
-  // The wall script may arrive after this one.
-  select(store("bz.browse.tab") || "inspiration");
+  // Every visit opens on Inspiration (owner, 2026-11-20: "The tab in question should
+  // be Inspiration by default"). The last place you chose is no longer reopened.
+  select("inspiration");
   window.addEventListener("load", function () {
     if (current === "inspiration" && !mounted && window.BeeZillaInspiration) select("inspiration");
   });
 
+  // ── QR code: this page's address, to open it on a phone ─────────────────
+  var qrBtn = $("bzQr");
+  var qrPop = null;
+  function closeQr(focusBack) {
+    if (!qrPop) return;
+    qrPop.remove();
+    qrPop = null;
+    if (qrBtn) qrBtn.setAttribute("aria-expanded", "false");
+    if (focusBack && qrBtn) qrBtn.focus();
+  }
+  function openQr() {
+    var href = window.location.href;
+    var code = "";
+    try { code = window.BeeZillaQR ? window.BeeZillaQR.svg(href, { size: 196, margin: 3, label: "QR code for this page" }) : ""; } catch (_) { code = ""; }
+    if (!code) { say("The QR code couldn't be drawn here — Copy page link works instead."); return; }
+    qrPop = document.createElement("div");
+    qrPop.className = "bz-qr-pop";
+    qrPop.setAttribute("role", "dialog");
+    qrPop.setAttribute("aria-label", "QR code for this page");
+    qrPop.innerHTML =
+      '<div class="bz-qr-head"><strong>Open this page on your phone</strong>' +
+      '<button type="button" class="bz-icon-btn bz-qr-x" aria-label="Close the QR code" title="Close">&#10005;</button></div>' +
+      '<div class="bz-qr-code">' + code + "</div>" +
+      '<p class="bz-qr-url">' + esc(href) + "</p>" +
+      '<p class="bz-qr-note">Point your phone\'s camera at it. Nothing is shared or sent.</p>';
+    var bar = root.querySelector(".bz-search");
+    (bar || root).appendChild(qrPop);
+    qrBtn.setAttribute("aria-expanded", "true");
+    qrPop.querySelector(".bz-qr-x").addEventListener("click", function () { closeQr(true); });
+    qrPop.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); closeQr(true); } });
+    qrPop.querySelector(".bz-qr-x").focus();
+  }
+  if (qrBtn) {
+    qrBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (qrPop) closeQr(false); else openQr();
+    });
+    document.addEventListener("click", function (e) {
+      if (qrPop && !qrPop.contains(e.target) && e.target !== qrBtn) closeQr(false);
+    });
+    // The address is the page's: a new page under the header closes the old code.
+    window.addEventListener("bz:page", function () { closeQr(false); });
+  }
+
   // ── Back to top ────────────────────────────────────────────────────────
   var top = document.createElement("button");
   top.type = "button";
-  top.className = "bz-totop";
+  // Talk's own, styled from the header's copy of Talk's sheets on every page (bz-talk-own).
+  top.className = "bz-totop bz-talk-own";
   top.setAttribute("aria-label", "Back to top");
   top.title = "Back to top";
   top.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7.6l-7.1 7.1 1.4 1.4L12 10.4l5.7 5.7 1.4-1.4z"/></svg>';
