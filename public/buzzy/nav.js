@@ -1882,6 +1882,44 @@
     return /^\/buzzy(\/talk)?$/.test(String(key || "").replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, ""));
   }
 
+  // ── Who lights the places row, and when ──────────────────────────────────
+  // #bzPlaces belongs to Talk's header, which this shell paints onto every other
+  // page — so its "you are here" state must be painted by the thing that paints
+  // it, not left to a page script that may not have run yet (or at all). It was
+  // left to the markup: the row shipped with Inspiration pre-lit, so on Sketch
+  // the yellow underline sat under Inspiration with the sketch tools on screen.
+  // Same path→place rule as the nav row (BeeZillaChrome.section), so there is one
+  // mapping and one answer. On Talk the open TAB is Talk's own state (the pane you
+  // have open), which browse.js owns; this only clears the row off Talk.
+  function paintPlacesRow() {
+    var row = document.getElementById("bzPlaces");
+    if (!row) return;
+    var chrome = window.BeeZillaChrome;
+    // The shell's key, not location.pathname: Music studio rewrites its own address
+    // to /buzzy/talk after it opens, so the path would say "Talk" while the studio
+    // is what is on screen. browse.js reads the same key (pathNow), so both agree.
+    var shell = window.BeeZillaShell;
+    var key = shell && shell.currentKey ? shell.currentKey : location.pathname;
+    var here = chrome && chrome.section ? chrome.section(key) : "";
+    Array.prototype.forEach.call(row.querySelectorAll("a[data-place]"), function (a) {
+      var on = a.getAttribute("data-place") === here;
+      a.classList.toggle("on", on);
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+    if (here === "talk") return;
+    Array.prototype.forEach.call(row.querySelectorAll("[data-tab]"), function (b) {
+      var mine = b.getAttribute("data-tab") === here;
+      b.classList.remove("on");
+      b.classList.toggle("here", mine);
+      b.setAttribute("aria-selected", "false");
+      if (mine) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+      b.tabIndex = mine ? 0 : -1;
+    });
+  }
+  window.bzPaintPlacesRow = paintPlacesRow;
+
   // ── Two kinds of stylesheet in one document ──────────────────────────────
   // The header is Talk's, and every page under it brings its own styles. A page's
   // stylesheet must never reach into the header (pages style bare `button`, `h2`,
@@ -2301,6 +2339,7 @@
     adoptStyles(null, key);
     setTitle(title);
     if (window.BeeZillaChrome) window.BeeZillaChrome.boot();
+    paintPlacesRow();
     try { window.dispatchEvent(new CustomEvent("bz:page", { detail: { key: key } })); } catch (e) { /* old browsers */ }
     // Pages that wait for DOMContentLoaded (memory.html) never see it again in a
     // soft navigation; a synthetic event keeps their boot code honest.
@@ -2519,6 +2558,10 @@
           });
           if (document.getElementById("bzHead")) { ph.remove(); return; }
           ph.parentNode.replaceChild(head, ph);
+          // The row is in the document now: light the place this address is before
+          // a single page script runs, so there is never a frame where Inspiration
+          // claims to be the open place on Sketch.
+          paintPlacesRow();
           talk.removeAttribute("id");
           document.getElementById("bzPageCache").appendChild(talk);
           cache[TALK] = { el: talk, title: doc.title, scrollY: 0, styles: sheets };

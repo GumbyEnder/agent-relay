@@ -223,6 +223,18 @@ export default defineEventHandler(async (event) => {
       page = page.slice(0, at) + '<script src="/buzzy/nav.js" defer></script>' + page.slice(at);
     }
   }
+  // nav.js BUILDS the chrome on every page, so nav.css has to be there too. It was
+  // only in the fourteen pages that hand-wrote the link; landing.html had none, and
+  // on the sign-out landing (where unsigned /buzzy/talk and /buzzy/library send you)
+  // the bar painted with a sheet-metal white "More" button and every menu item
+  // running together as unstyled text. Same seam as nav.js: one link, every page,
+  // last in <head> so it wins ties against the page's own inline <style>.
+  if (!page.includes("/buzzy/nav.css")) {
+    const at = page.lastIndexOf("</head>");
+    if (at > 0) {
+      page = page.slice(0, at) + '<link rel="stylesheet" href="/buzzy/nav.css" />' + page.slice(at);
+    }
+  }
   // Analytics rides the same serve-time seam as nav.js, and is skipped when the
   // page already carries the snippet so a double-include cannot double-count.
   if (!page.includes("openpanel.dev/op1.js")) {

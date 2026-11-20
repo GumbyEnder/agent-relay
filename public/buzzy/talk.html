@@ -1817,7 +1817,12 @@
            are their own pages, which open under the same row. -->
       <div class="bz-tabrow" id="bzPlaces">
         <div class="bz-tabs" id="bzTabs" role="tablist" aria-label="Places">
-          <button type="button" role="tab" data-tab="inspiration" class="on" aria-selected="true">Inspiration</button>
+          <!-- No baked `on`/aria-selected="true": this row is painted onto pages
+               that are not Talk, and a pre-lit Inspiration claimed to be the open
+               place on Sketch with the sketch tools on screen. The open tab is
+               painted from the path (browse.js on Talk, nav.js everywhere else), so
+               an honest blank beats a lie in the markup. -->
+          <button type="button" role="tab" data-tab="inspiration" tabindex="0" aria-selected="false">Inspiration</button>
           <button type="button" role="tab" data-tab="history" aria-selected="false" tabindex="-1">History</button>
           <button type="button" role="tab" data-tab="library" aria-selected="false" tabindex="-1">Library</button>
           <button type="button" role="tab" data-tab="memory" aria-selected="false" tabindex="-1">Memory</button>
