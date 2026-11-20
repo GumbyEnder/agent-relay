@@ -26,15 +26,15 @@ export interface SelfAnswer {
 export const SELF_ANSWERS: readonly SelfAnswer[] = answers as SelfAnswer[];
 
 // Unambiguous product words: a question that uses one is about BeeZilla.
-const STRONG = /\b(bee ?zilla|buzzy|lockdown|advocate|privacy modes?|open mode|honey drops?|white ?board|inspiration( wall)?|talk bar|do it button|speak replies|attach a paper|work mode|chat mode|chats left|public link|share link|invitation link|desktop app|capabilities page|free plan|starter plan|pro plan|my plan|my library|learn a recipe)\b/;
+const STRONG = /\b(bee ?zilla|buzzy|lockdown|advocate|privacy modes?|open mode|honey drops?|white ?board|idea board|inspiration( wall)?|talk bar|do it button|speak replies|attach a paper|work mode|chat mode|chats left|public link|share link|invitation link|desktop app|capabilities page|free plan|starter plan|pro plan|my plan|my library|learn a recipe)\b/;
 // Words BeeZilla shares with everyday life ("recipe", "history"): only a short
 // "what is a …?" question about one of them is taken as a question about BeeZilla.
 const DEFINE = /^(what|what's|whats)\s+(is|are)\s+(a |an |the )?(recipes?|library|memory|history|experts?|sketch|studio|whiteboard|honey drops?|inspiration|capabilities)\s*\??$/;
 // "How do I share / invite / download …?" — doing something in BeeZilla.
-const HOW_IN_APP = /\b(how (do|can|would) i|can i|where (do|can) i|is there a way to)\s+(share|invite|export|download|accept|attach|upload|turn (it |the link )?off|stop sharing|rename|reopen|find my|save|delete|change (my )?(plan|privacy))\b/;
+const HOW_IN_APP = /\b(how (do|can|would) i|can i|where (do|can) i|is there a way to)\s+(share|invite|export|download|accept|attach|upload|turn (it |the link )?off|stop sharing|rename|reopen|find my|save|delete|change (my )?(plan|privacy)|connect (two |the |my )?cards|zoom (in|out)|make an area|use the (idea )?board|see the whole board|undo)\b/;
 // "Can you make music?" — asking what BeeZilla can do, not asking it to do a job.
 const CAN_YOU = /\b(can|could|do|does|will|would)\s+(you|beezilla|it)\s+(\w+\s+){0,2}?(make|create|generate|do|read|send|search|browse|remember|speak|talk|draw|look things up|look up|open|edit|email|log in|fill( in)?|use|work|see|keep|save|share|play)\b/;
-const ABOUT_YOU = /\b(what can you do|what do you do|who are you|what are you|are you able to|is it possible to|what are your (limits|features|capabilities))\b/;
+const ABOUT_YOU = /\b(what can you do|what do you do|who are you|what are you|are you able to|is it possible to|what are your (limits|features|capabilities)|what makes you (unique|special|different)|what('s| is) (special|unique|different) about you|how are you different|why (should i )?use you|what can you do that|i'?m lost on the (idea )?board|lost on the (idea )?board)\b/;
 // A concrete request phrased politely ("can you make me a song about rain?").
 // "About my business" / "about me" stays a question about what BeeZilla does.
 const CONCRETE = /\b(about (?!my\b|me\b|myself\b|our\b|us\b)|for me|me a|me an|for my|called|titled|with the words)/;
@@ -72,10 +72,23 @@ const INDEX = SELF_ANSWERS.map((entry) => ({
   a: new Set(tokens(entry.a + " " + (entry.limits ?? ""))),
 }));
 
+// Questions made only of small words ("what can you do?") still have an answer.
+const PINNED: [RegExp, string][] = [
+  [/\b(what can you do|what do you do)\b/, "sk-051"],
+  [/\b(who are you|what are you)\b/, "sk-001"],
+];
+
 /** The closest answers to a message: question words count three times answer words. */
 export function relevantAnswers(message: string, k = 5): SelfAnswer[] {
+  const m = normal(message);
+  const pinned = PINNED.filter(([re]) => re.test(m)).map(([, id]) => SELF_ANSWERS.find((e) => e.id === id)).filter((e): e is SelfAnswer => !!e);
   const words = Array.from(new Set(tokens(message)));
-  if (!words.length) return [];
+  if (!words.length) return pinned.slice(0, Math.max(0, k));
+  if (pinned.length) {
+    const rest = relevantAnswers(message.replace(/\b(what can you do|what do you do|who are you|what are you)\b/gi, " "), k)
+      .filter((e) => !pinned.includes(e));
+    return [...pinned, ...rest].slice(0, Math.max(0, k));
+  }
   return INDEX
     .map((row, i) => {
       let score = 0;
@@ -112,4 +125,21 @@ export function selfKnowledgeNote(message: string): string | null {
     note += line;
   }
   return note;
+}
+
+// ── Opening the conversation ──────────────────────────────────────────────
+// Owner, 2026-11-20: "One of the great ways to start this from a conversational
+// perspective… is to ask the person, tell me about one thing that you're struggling to
+// do. Regardless of if you know I can help with it or not, and I'll see if I can do
+// something about that kind of thing."
+export const OPENER_QUESTION =
+  "Tell me about one thing you're struggling to do, even if you're not sure I can help with it, and I'll see what I can do about it.";
+export const OPENER_NOTE =
+  "\n\nOPENING THE CONVERSATION: answer what they said in one or two short, warm sentences (if they asked what you " +
+  "can do or what makes you different, use the verified facts), then end by asking, in these words: \"" + OPENER_QUESTION + "\"";
+const HELLO = /^(?:(?:hi|hello|hey|hiya|howdy|yo|greetings|good (?:morning|afternoon|evening|day))(?: there)?(?:[, ]+(?:bee ?zilla|buzzy))?[.!? ]*)$/;
+const WHAT_CAN_YOU = /^(?:(?:so|ok|okay|hi|hey|hello)[, ]+)?(?:what can you do|what do you do|what are you|who are you|what makes you (?:unique|special|different)|what(?:'s| is) (?:special|unique|different) about you|what can you do that (?:others|other (?:ais?|apps|tools)|chatgpt|nobody else) can'?t(?: do)?|how are you different(?: from [a-z ]+)?|why (?:should i )?use (?:you|beezilla))\??[.! ]*$/;
+export function wantsOpener(message: string, priorTurns: number): boolean {
+  const m = String(message || "").toLowerCase().replace(/[’]/g, "'").trim();
+  return WHAT_CAN_YOU.test(m) || (priorTurns === 0 && HELLO.test(m));
 }

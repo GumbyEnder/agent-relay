@@ -19,6 +19,7 @@
 import { CALCULATE_TOOL } from "./calc";
 import { RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL } from "./artifact";
 import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } from "./info";
+import { SEARCH_INSPIRATION_TOOL } from "./inspirationSearch";
 import { WEB_SEARCH_TOOL } from "./search";
 import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
@@ -90,6 +91,18 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     offered: true,
     timeoutMs: 6000,
     maxResultBytes: 12_000,
+    cost: "free",
+    sideEffects: "read-only",
+  },
+  {
+    // "Has someone done this before?" — starting boards, their recipes, their Library
+    // (owner, 2026-11-20: "the ability to tool use to search its own archive").
+    name: "search_inspiration",
+    schema: SEARCH_INSPIRATION_TOOL,
+    gate: "always",
+    offered: true,
+    timeoutMs: 6000,
+    maxResultBytes: 8_000,
     cost: "free",
     sideEffects: "read-only",
   },
