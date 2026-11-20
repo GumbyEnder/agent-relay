@@ -21,6 +21,7 @@ import { sha256Hex, sniffKind, stripImageMetadata } from "../src/lib/buzzy/cre/b
 import {
   bindRole,
   DEAL_ROLES,
+  decideDuplicate,
   readComps,
   readListing,
   readPhoto,
@@ -225,6 +226,48 @@ async function main() {
 
   const direct = stripImageMetadata(jpeg);
   eq("stripping twice is idempotent", stripImageMetadata(direct.bytes).removed.length, 0);
+
+  // ── Duplicate bytes: a repeat is a hit, a role change is a refusal ──
+  console.log("\nduplicate uploads — content addressing must not fake a role path");
+  {
+    const same = decideDuplicate({
+      requestedRole: "rent_roll",
+      requestedPath: "deals/rent_roll/rent_roll.csv",
+      priorPath: "deals/rent_roll/rent_roll.csv",
+    });
+    ok("a repeat of the same role and path is a duplicate hit", same.ok && same.role === "rent_roll");
+    eq("the hit keeps the stored path", same.ok ? same.path : null, "deals/rent_roll/rent_roll.csv");
+
+    const legacy = decideDuplicate({
+      requestedRole: null,
+      requestedPath: "listing.txt",
+      priorPath: "deals/listing/listing.txt",
+    });
+    ok("a role-less repeat still resolves to the stored row", legacy.ok && legacy.role === null);
+    eq("a role-less repeat echoes the stored path", legacy.ok ? legacy.path : null, "deals/listing/listing.txt");
+
+    const stolen = decideDuplicate({
+      requestedRole: "listing",
+      requestedPath: "deals/listing/listing.txt",
+      priorPath: "listing.txt",
+    });
+    ok(
+      "the same bytes already uploaded without a role refuse a role binding",
+      !stolen.ok && stolen.code === "role_conflict",
+      stolen.ok ? "accepted" : stolen.message,
+    );
+
+    const crossRole = decideDuplicate({
+      requestedRole: "comps",
+      requestedPath: "deals/comps/rent_roll.csv",
+      priorPath: "deals/rent_roll/rent_roll.csv",
+    });
+    ok(
+      "the same bytes bound to a different role refuse a second binding",
+      !crossRole.ok && crossRole.code === "role_conflict",
+      crossRole.ok ? "accepted" : crossRole.message,
+    );
+  }
 
   // ── The ledger ────────────────────────────────────────────────────
   console.log("\nthe ledger — hashes and counts, never text");

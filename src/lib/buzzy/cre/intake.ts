@@ -131,6 +131,38 @@ export function bindRole(input: RoleInput): BindResult {
   return { ok: true, role: input.role, kind, sha256: sha256Hex(input.bytes) };
 }
 
+// ── Duplicate uploads ───────────────────────────────────────────────
+
+export type DuplicateDecision =
+  | { ok: true; path: string; role: DealInputRole | null }
+  | { ok: false; code: "role_conflict"; message: string };
+
+/**
+ * Content addressing is per account by sha256, so the same bytes can only have
+ * one row. That is fine for a repeat upload of the same file, and WRONG when the
+ * second upload asked for a role: the route would answer `ok: true` with a path
+ * under the first upload's name, and the deal-memo runner would look for
+ * `deals/<role>/…` and find nothing. Refuse instead of silently binding bytes to
+ * a path they are not stored at. (Found by the signed-in HTTP leg, 2026-11-19.)
+ */
+export function decideDuplicate(input: {
+  requestedRole: DealInputRole | null;
+  requestedPath: string;
+  priorPath: string;
+}): DuplicateDecision {
+  if (!input.requestedRole) return { ok: true, path: input.priorPath, role: null };
+  if (input.priorPath === input.requestedPath) {
+    return { ok: true, path: input.priorPath, role: input.requestedRole };
+  }
+  return {
+    ok: false,
+    code: "role_conflict",
+    message:
+      `Those exact bytes are already stored as "${input.priorPath}". ` +
+      `Rename the file or remove the earlier copy before binding it to ${input.requestedRole}.`,
+  };
+}
+
 // ── Listing ─────────────────────────────────────────────────────────
 
 export type ListingRead =

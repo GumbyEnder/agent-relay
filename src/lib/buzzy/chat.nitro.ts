@@ -41,7 +41,7 @@ import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } f
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
-import { bindRole, DEAL_ROLES, isDealRole, readPhoto } from "./cre/intake";
+import { bindRole, DEAL_ROLES, decideDuplicate, isDealRole, readPhoto } from "./cre/intake";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
@@ -1166,18 +1166,37 @@ export default defineEventHandler(async (event) => {
     `;
     if (!inserted.length) {
       // Same bytes already stored for this account: report it as a hit, not an error.
+      // Unless the second upload asked for a different role — then the row is
+      // NOT at deals/<role>/, and saying ok would bind a deal input to a path
+      // that does not exist. decideDuplicate refuses that case.
       const prior = await sql<{ id: number; rel_path: string; bytes: number }>`
         SELECT id, rel_path, bytes FROM buzzy_assets
         WHERE user_id = ${user.id} AND sha256 = ${sha256} LIMIT 1
       `;
+      const decision = decideDuplicate({
+        requestedRole: isDealRole(rawRole) ? rawRole : null,
+        requestedPath: storedRelPath,
+        priorPath: prior[0]?.rel_path ?? storedRelPath,
+      });
+      if (!decision.ok) {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          duplicate: true,
+          error: decision.message,
+          code: decision.code,
+          role: roleEcho,
+          path: prior[0]?.rel_path ?? null,
+        };
+      }
       return {
         ok: true,
         duplicate: true,
         id: prior[0]?.id ?? null,
-        path: prior[0]?.rel_path ?? storedRelPath,
+        path: decision.path,
         bytes: prior[0]?.bytes ?? body2.byteLength,
         sha256,
-        role: roleEcho,
+        role: decision.role,
       };
     }
     // Search words for the upload, from its name, its folder and any note the page
