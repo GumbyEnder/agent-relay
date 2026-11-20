@@ -190,6 +190,10 @@
     { id: "sketch", href: "/buzzy/sketch", label: "Sketch", more: true },
     { id: "studio", href: "/buzzy/studio", label: "Studio", more: true },
     { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities", more: true },
+    // The installer is a place in the product, not a README footnote: a person
+    // who arrives wanting the desktop app should not have to open "More" to
+    // find it. It sits in the row with the other places.
+    { id: "download", href: "/buzzy/download", label: "Download" },
     { id: "wallet", href: "/buzzy/wallet", label: "Honey Drops", more: true },
     { id: "publish", href: "/buzzy/upload", label: "Publish", more: true },
   ];
