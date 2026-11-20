@@ -25,6 +25,33 @@ import { createHash } from "node:crypto";
 
 export type SniffedKind = "jpeg" | "png" | "pdf" | "zip" | "csv" | "text" | "unknown";
 
+const KIND_CONTENT_TYPES: Record<SniffedKind, string> = {
+  jpeg: "image/jpeg",
+  png: "image/png",
+  pdf: "application/pdf",
+  // A ZIP is a container, not a format. The role decides which container
+  // (xlsx for a rent roll or comps) — see `contentTypeForKind`.
+  zip: "application/zip",
+  csv: "text/csv; charset=utf-8",
+  text: "text/plain; charset=utf-8",
+  unknown: "application/octet-stream",
+};
+
+/**
+ * The content type the bytes actually are.
+ *
+ * A browser sends whatever the OS guessed from the extension, and a renamed
+ * file carries that guess straight into storage and back out on download. The
+ * stored label is therefore derived from the sniff, with the deal role
+ * narrowing a ZIP to the spreadsheet it must be.
+ */
+export function contentTypeForKind(kind: SniffedKind, role?: string): string {
+  if (kind === "zip" && (role === "rent_roll" || role === "comps")) {
+    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  }
+  return KIND_CONTENT_TYPES[kind] ?? "application/octet-stream";
+}
+
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(Buffer.from(bytes)).digest("hex");
 }

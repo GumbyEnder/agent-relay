@@ -42,6 +42,8 @@ import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { bindRole, DEAL_ROLES, decideDuplicate, isDealRole, readPhoto } from "./cre/intake";
+import { contentTypeForKind, sniffKind } from "./cre/bytes";
+import { documentContentFromMarkdown, markdownTableToCsv } from "./cre/outputs";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
@@ -91,7 +93,7 @@ import { recordJobEvent } from "./jobEvents";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 import { setDocumentAcceptance, materializeDraft, summarizeChanges } from "./documents";
 import { ensureExecutionBoard } from "./execution";
-import { renderTextPdf } from "./pdf";
+import { renderTextPdfDocument } from "./pdf";
 import { renderDocument } from "./artifact";
 import { TOOL_REGISTRY } from "./tools";
 import { reviewSeparately, type ReviewCheck } from "./review";
@@ -1156,7 +1158,13 @@ export default defineEventHandler(async (event) => {
     const sha256 = storedSha;
     const body2 = storedBody;
     const filename = relPath.split("/").pop() || relPath;
-    const contentType = (getHeader(event, "content-type") || "application/octet-stream").slice(0, 120);
+    const headerType = (getHeader(event, "content-type") || "").slice(0, 120);
+    // A role-bound upload is labelled by what its bytes ARE: the browser's guess
+    // from the extension is how a renamed file carries a lie into storage and
+    // back out on download. Legacy (role-less) uploads keep their old label.
+    const contentType = rawRole
+      ? contentTypeForKind(sniffKind(body2), rawRole)
+      : headerType || "application/octet-stream";
     const sql = await getSql();
     const inserted = await sql<{ id: number; rel_path: string }>`
       INSERT INTO buzzy_assets (user_id, sha256, filename, rel_path, content_type, bytes, body)
@@ -3646,34 +3654,26 @@ export default defineEventHandler(async (event) => {
         });
       }
       if (format === "pdf") {
-        const bytes = renderTextPdf(title, text);
-        return new Response(bytes as unknown as BodyInit, {
+        // The renderer reports the pages it actually produced; E's C39 check
+        // reads that number rather than trusting a model's claim about length.
+        const rendered = renderTextPdfDocument(title, text);
+        setResponseHeader(event, "x-bz-pdf-pages", String(rendered.pageCount));
+        return new Response(rendered.bytes as unknown as BodyInit, {
           status: 200,
           headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}${versionTag}.pdf"` },
         });
       }
       if (format === "docx") {
-        // Map canonical text to the typed renderer: markdown-ish headings are
-        // sections, everything else is paragraphs. Unsupported shapes are a
+        // Map canonical text to the typed renderer: headings become sections,
+        // table rows become fixed-width text lines (dropping them would hand the
+        // lender a Word file missing its stress table). Unsupported shapes are a
         // useful error, never a silent empty file (QA-11).
-        const sections: Array<{ heading: string; paragraphs: string[] }> = [];
-        let current: { heading: string; paragraphs: string[] } = { heading: title, paragraphs: [] };
-        for (const raw of text.split("\n")) {
-          const h = raw.match(/^#{1,3}\s+(.*)$/);
-          if (h) {
-            if (current.paragraphs.length || sections.length === 0) sections.push(current);
-            current = { heading: h[1].slice(0, 120), paragraphs: [] };
-          } else if (raw.trim()) {
-            current.paragraphs.push(raw.trim().slice(0, 2000));
-          }
-        }
-        sections.push(current);
-        const shaped = sections.filter((s) => s.paragraphs.length).slice(0, 25);
-        if (!shaped.length) {
+        const shaped = documentContentFromMarkdown(text, title);
+        if (!shaped.ok) {
           setResponseStatus(event, 422);
-          return { error: "That version has no readable text to put in a Word file — download the Markdown instead.", code: "empty_document" };
+          return { error: `That version has no readable text to put in a Word file — download the Markdown instead. (${shaped.error})`, code: "empty_document" };
         }
-        const rendered = await renderDocument({ title, sections: shaped });
+        const rendered = await renderDocument(shaped.content);
         if (!rendered.ok || !rendered.bytes) {
           setResponseStatus(event, 422);
           return { error: rendered.error ?? "The Word render failed — the Markdown download still works.", code: "render_failed" };
@@ -3687,16 +3687,13 @@ export default defineEventHandler(async (event) => {
         });
       }
       if (format === "csv") {
-        // Tabular text: |-delimited rows, skipping the markdown separator row.
-        const lines = text.split("\n").filter((l) => l.includes("|") && /[a-z0-9]/i.test(l.replace(/[|\-\s:]/g, "")));
-        if (!lines.length) {
+        // Real markdown tables only: a pipe row without its separator line is
+        // prose, not a table, and exporting it would be a silent fiction.
+        const csv = markdownTableToCsv(text);
+        if (!csv) {
           setResponseStatus(event, 422);
           return { error: "That version has no table to export — CSV only works for tabular content. This is a value export: formulas are evaluated to their shown values.", code: "no_table" };
         }
-        const q = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-        const csv = lines
-          .map((l) => l.split("|").slice(1, -1).map((c) => q(c.trim())).join(","))
-          .join("\n") + "\n";
         return new Response(csv, {
           status: 200,
           headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${base}${versionTag}.csv"` },
