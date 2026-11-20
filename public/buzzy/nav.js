@@ -188,13 +188,15 @@
     { id: "experts", href: "/buzzy/experts", label: "Experts" },
     { id: "recipes", href: "/buzzy/recipes", label: "Recipes" },
     { id: "sketch", href: "/buzzy/sketch", label: "Sketch", more: true },
-    { id: "studio", href: "/buzzy/studio", label: "Studio", more: true },
-    { id: "capabilities", href: "/buzzy/capabilities", label: "Capabilities", more: true },
+    { id: "studio", href: "/buzzy/studio", label: "Music studio", more: true },
+    { id: "capabilities", href: "/buzzy/capabilities", label: "What BeeZilla can do", more: true },
     // The installer is a place in the product, not a README footnote: a person
     // who arrives wanting the desktop app should not have to open "More" to
-    // find it. It sits in the row with the other places.
+    // find it. It sits in the row with the other places (and in #bzPlaces).
     { id: "download", href: "/buzzy/download", label: "Download" },
-    { id: "wallet", href: "/buzzy/wallet", label: "Honey Drops", more: true },
+    // "Honey", not "Honey Drops": #bzPlaces says Honey, and this label is what an
+    // anchor looks like on a page that did not hand-write one.
+    { id: "wallet", href: "/buzzy/wallet", label: "Honey", more: true },
     { id: "publish", href: "/buzzy/upload", label: "Publish", more: true },
   ];
 

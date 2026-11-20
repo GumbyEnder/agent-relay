@@ -180,21 +180,28 @@ export default defineEventHandler(async (event) => {
   // new tab was supposed to be gone (BZ-11, BZ-14). Substituting the row makes
   // the shipped markup identical by construction; nav.js then owns state (active
   // link, account menu, company switcher) and never structure.
+  // Wording and order are nav.js LINKS and talk.html #bzPlaces: the main five,
+  // then the extra places. This row is the fallback a visitor sees if nav.js never
+  // runs or the header fetch fails, so it must say the same words in the same order
+  // — "Studio"/"Capabilities"/"Honey Drops" here while the page said "Music studio"/
+  // "What BeeZilla can do"/"Honey" is two navs for one site.
   const NAV_ROW = [
     '<a href="/buzzy/talk" data-nav="talk">Talk</a>',
-    '<a href="/buzzy/sketch" data-nav="sketch">Sketch</a>',
-    '<a href="/buzzy/studio" data-nav="studio">Studio</a>',
     // No target, no rel: one document, one mic. The shell keeps Talk alive.
     '<a href="/buzzy/library" data-nav="library">Library</a>',
-    '<a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>',
     '<a href="/buzzy/memory" data-nav="memory">Memory</a>',
     '<a href="/buzzy/experts" data-nav="experts">Experts</a>',
     '<a href="/buzzy/recipes" data-nav="recipes">Recipes</a>',
+    // The extra places, same words as #bzPlaces on Talk: Sketch, Music studio,
+    // What BeeZilla can do, Download, Honey, Publish.
+    '<a href="/buzzy/sketch" data-nav="sketch">Sketch</a>',
+    '<a href="/buzzy/studio" data-nav="studio">Music studio</a>',
+    '<a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>',
     // The installer lives in its own release line, but it is still a place in
     // the product: a visitor who wants the desktop app should not have to find
     // a README to get it.
     '<a href="/buzzy/download" data-nav="download">Download</a>',
-    '<a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>',
+    '<a href="/buzzy/wallet" data-nav="wallet">Honey</a>',
     '<a href="/buzzy/upload" data-nav="publish">Publish</a>',
     // Empty on purpose: the page cannot know who is signed in, and the text used to
     // be `Sign in`, which every signed-in reader saw for a round trip on every load
