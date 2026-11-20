@@ -28,7 +28,7 @@ import {
   documentToMarkdown,
 } from "./artifact";
 import { playbookGuidance, playbookChecks } from "./playbooks";
-import { enrichLater, rememberPrompt } from "./tags";
+import { enrichLater, rememberPrompt, searchTagged } from "./tags";
 import { buildJobEstimate } from "./digest";
 import {
   lookupMarketRate,
@@ -58,9 +58,12 @@ import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
-import { selfKnowledgeNote } from "./self-knowledge";
+import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
 import { appActionsNote, planAppActions, type AppAction } from "./pilot";
+import { lostNote, soundsLost } from "./boardPilot";
+import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
+import { inspirationNote, inspirationResult, searchInspiration, wantsInspiration } from "./inspirationSearch";
 import { createModelTask, threeDConfigured } from "./models3d";
 import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday, videoRecipeHeldBack } from "./video";
 import type { VideoTopicInput } from "./video";
@@ -833,6 +836,50 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // picture on the board is about a text, not the picture.
   const LOOKS = /\b(?:pictures?|images?|photos?|pics?|drawings?|colou?rs?|red|orange|yellow|green|blue|purple|pink|black|white|grey|gray|gold|silver|dark(?:er)?|light(?:er)?|bright(?:er)?|dim(?:mer)?|night|day(?:time)?|sunset|sunrise|sky|clouds?|background|foreground|style|cartoon|realistic|watercolou?r|painting|sketch|shadows?|glow|blur(?:ry)?|sharp(?:er)?|zoom(?:ed)?|crop|bigger|smaller|larger|wider|taller|face|eyes|hair|hat|dog|cat|person|people|tree|trees|house|car|logo|title text|font|look|looks)\b/i;
   const boardPictureChange = boardPictureIds.length > 0 && !isNewPictureAsk(message) && isPictureChange(message) && LOOKS.test(message);
+  // ── What BeeZilla does on the page this turn (pilot.ts, boardPilot.ts) ──────
+  // Planned before the picture step: "grab my beach photo" puts the one they already
+  // have on the board instead of drawing a new one (owner: "never seek to reinvent the
+  // wheel"), and "yes" to BeeZilla's own offer ("…zoom out and show you the whole
+  // board?", "…a simple starting board for “Logo for a small business”…") does it.
+  const lastReply = [...history].reverse().find((h) => h.role === "assistant")?.content ?? null;
+  let appPlan: AppAction[] | null = planAppActions(message, req.privacy ?? null, {
+    lastReply,
+    startingBoards: STARTING_BOARDS.map((b) => b.title),
+  });
+  let boardFound = false;
+  const boardNotes: string[] = [];
+  if (appPlan) {
+    const kept: AppAction[] = [];
+    for (const step of appPlan) {
+      if (step.do === "board" && step.value === "find") {
+        const want = step.kind === "music" ? "music" : step.kind === "video" ? "video" : step.kind === "file" ? "document" : "picture";
+        let hit: Awaited<ReturnType<typeof searchTagged>>[number] | null = null;
+        try {
+          hit = (await searchTagged(sql, userId, step.query ?? "", 12)).find((f) => f.kind === want) ?? null;
+        } catch (_) { hit = null; }
+        if (hit) {
+          const made = /^(?:art|music|video|model|model3d|clip|track)-\d{4}-\d\d-\d\d/i.test(hit.filename);
+          kept.push({ ...step, url: hit.url, contentType: hit.contentType, title: made ? String(step.query ?? "").slice(0, 80) : hit.filename });
+          boardFound = true;
+        } else {
+          boardNotes.push(`Nothing like "${String(step.query ?? "").slice(0, 80)}" is in their Library yet.`);
+        }
+        continue;
+      }
+      if (step.do === "board" && step.value === "start") {
+        const b = step.query ? (startingBoardByName(step.query) ?? findStartingBoards(step.query, 1)[0] ?? null) : null;
+        if (b) kept.push({ ...step, title: b.title, graph: b.graph, say: `Put a simple starting board for “${b.title}” on the board` });
+        else {
+          boardNotes.push(step.query
+            ? `No simple starting board fits "${String(step.query).slice(0, 80)}" yet: say so, and offer to lay the steps out with them.`
+            : "They asked for a starting board without saying what for: ask what they want to make.");
+        }
+        continue;
+      }
+      kept.push(step);
+    }
+    appPlan = kept.length ? kept : null;
+  }
   const systemPrompt =
     persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
 
@@ -877,7 +924,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // No gate on mode: a person who types "just make me a lullaby" in Chat mode
   // asked for a file, not a conversation about files. The quota check inside
   // gatedMusic is what decides whether this account may spend, not the UI tab.
-  if (!lockdown && !wants3d && !wantsVideo && isMusicRequest(message) && musicConfigured()) {
+  // A command for the page ("add a step called draw the poster") makes nothing itself.
+  if (!lockdown && !appPlan && !wants3d && !wantsVideo && isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
@@ -1041,7 +1089,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // ── Art pre-pass ───────────────────────────────────────────────────
   // "draw me a duck" is a request for a file, and the canvas is not the only way in.
   // Same rule as music: the harness renders, the model narrates what exists.
-  if (!lockdown && !renderedImage && !wants3d && !wantsVideo && (isImageRequest(message, { history }) || pictureToChange || boardPictureChange) && artConfigured()) {
+  if (!lockdown && !appPlan && !renderedImage && !wants3d && !wantsVideo && !boardFound && (isImageRequest(message, { history }) || pictureToChange || boardPictureChange) && artConfigured()) {
     const artStarted = Date.now();
     let prompt = message.slice(0, 1000);
     // A change is drawn from the picture it changes, sent along as the reference.
@@ -1195,8 +1243,20 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Asked to do something in BeeZilla itself ("open the whiteboard", "switch to
   // Lockdown"): the page does it on screen, step by step (pilot.ts, pilot.js), and
   // the reply only says so. Otherwise a question about BeeZilla gets its facts.
-  const appPlan = planAppActions(message, req.privacy ?? null);
   if (appPlan) messages[0]!.content += "\n\n" + appActionsNote(appPlan);
+  if (boardNotes.length) messages[0]!.content += "\n\nON THE BOARD: " + boardNotes.join(" ");
+  // "I want to make…", "has anyone done…", "I'm struggling to…": BeeZilla looks in its
+  // Inspiration archive first and says what already exists (inspirationSearch.ts).
+  if (!appPlan && wantsInspiration(message)) {
+    try {
+      const found = await searchInspiration(sql, userId, message);
+      if (found.length) messages[0]!.content += "\n\n" + inspirationNote(found);
+    } catch (_) { /* the archive helps; it never blocks the reply */ }
+  }
+  // Lost on the board: BeeZilla offers to show the whole board, and waits for a yes.
+  if (!appPlan && soundsLost(message)) messages[0]!.content += lostNote();
+  // A first hello, or "what can you do?": answer, then ask what they're struggling with.
+  if (!appPlan && wantsOpener(message, history.length)) messages[0]!.content += OPENER_NOTE;
   const selfNote = appPlan ? null : selfKnowledgeNote(message);
   if (selfNote) messages[0]!.content += "\n\n" + selfNote;
 
@@ -1540,6 +1600,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 errorCode: calc.ok ? undefined : "calc_failed",
               };
             }
+            if (tc.name === "search_inspiration") {
+              const query = String(content.query ?? "").slice(0, 160);
+              const hits = await searchInspiration(sql, userId, query);
+              return { message: inspirationResult(query, hits), errorCode: hits.length ? undefined : "no_results" };
+            }
             if (tc.name === "search_knowledge") {
               const hits = await searchKnowledge(sql, userId, String(content.query ?? ""));
               return {
@@ -1739,7 +1804,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // not an answer, and it would have been saved as the deliverable. Ask once
     // for the prose; if it still comes back as an echo, fail the turn honestly
     // rather than storing junk in the owner's Library.
-    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|calculate|render_document|render_sheet|render_presentation)\s*[:(]/i;
+    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation)\s*[:(]/i;
     const URL_ONLY = /^\s*https?:\/\/\S+\s*$/i;
     if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
       console.warn("[buzzy/chat] tool echo in reply — asking for prose once");

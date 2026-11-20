@@ -15,11 +15,16 @@
  *
  * Plans come only from this closed list, matched against the owner's own words.
  * The model never writes one, and no action reaches outside BeeZilla's pages.
+ *
+ * The Idea Board's own steps (zoom, add a note, connect two cards, make an area…)
+ * are listed in boardPilot.ts and run by the board itself (whiteboard.js `act`).
  */
+import { acceptedOffer, boardStep, closedBoardStep, type BoardStep } from "./boardPilot";
 
 export type PrivacyMode = "advocate" | "lockdown" | "open";
 
-export interface AppAction {
+export type AppAction = PageAction | BoardStep;
+export interface PageAction {
   do: "go" | "tab" | "inspiration" | "whiteboard" | "privacy" | "mode" | "history" | "newChat" | "speak" | "voice";
   /** The place, tab, kind or mode, or "open"/"close", "on"/"off". */
   value?: string;
@@ -40,8 +45,8 @@ function normal(message: string): string {
     .trim();
 }
 
-// "Hey BeeZilla, could you please …", "… for me now please!"
-const LEAD = /^(?:(?:hey|hi|ok|okay)\s+)?(?:(?:bee ?zilla|buzzy)\s*[,:!]?\s+)?(?:please\s+|pls\s+|kindly\s+)?(?:(?:can|could|would|will) you\s+(?:please\s+)?)?/;
+// "Hey BeeZilla, could you please …", "Um, okay, so can you …", "… for me now please!"
+const LEAD = /^(?:(?:hey|hi|ok|okay|um+|uh+|so|alright|all right|right|now|and)\s*[,.]?\s+)*(?:(?:bee ?zilla|buzzy|debzilla|gzilla)\s*[,:!]?\s+)?(?:please\s+|pls\s+|kindly\s+)?(?:(?:can|could|would|will) you\s+(?:please\s+)?|i want you to\s+|i'd like you to\s+|i need you to\s+)?/;
 const TAIL = /(?:\s+(?:please|pls|for me|now|right now|thanks|thank you))*\s*[.!?]*$/;
 
 const PLACES: Record<string, string> = {
@@ -106,6 +111,14 @@ const RULES: Rule[] = [
     re: /^(?:close|hide|shut|put away|dismiss)(?: the| my)? ?white ?board$/,
     make: () => ({ do: "whiteboard", value: "close", say: "Close the Idea Board" }),
   },
+  {
+    re: /^(?:open|show|bring up|pull up|unfold)(?: up)?(?: me)?(?: the| my)? idea board$/,
+    make: () => ({ do: "whiteboard", value: "open", say: "Open the Idea Board" }),
+  },
+  {
+    re: /^(?:close|hide|fold|put away|tuck away|minimi[sz]e)(?: the| my)? (?:idea board|board)(?: away)?$|^fold (?:it|the idea board|the board) away$/,
+    make: () => ({ do: "whiteboard", value: "close", say: "Fold the Idea Board away" }),
+  },
   // ── The tabs under the Talk bar ──────────────────────────────────────
   {
     re: /^(?:show|see|view)(?: me)?(?: my| the)? (inspiration(?: wall)?|library|memory|experts)(?: tab)?$|^open(?: up)?(?: the| my)? (inspiration(?: wall)?|inspiration tab|library tab|memory tab|experts tab)$/,
@@ -151,7 +164,7 @@ const RULES: Rule[] = [
   },
   // ── A new chat ───────────────────────────────────────────────────────
   {
-    re: /^(?:(?:start|open|begin|make|create)(?: me)? (?:a )?(?:new|fresh|blank) (?:chat|conversation|talk)|new chat)$/,
+    re: /^(?:(?:start|open|begin|make|create|put in|add)(?: me)? (?:a )?(?:new|fresh|blank) (?:chat|conversation|talk)(?: icon| button| card| window| tab)?|new (?:chat|conversation))$/,
     make: () => ({ do: "newChat", say: "Start a new chat" }),
   },
   // ── Speak replies ────────────────────────────────────────────────────
@@ -170,25 +183,48 @@ const RULES: Rule[] = [
   },
 ];
 
+export interface PlanContext {
+  /** BeeZilla's previous reply: "yes" to its own offer ("…zoom out and show you the whole board?"). */
+  lastReply?: string | null;
+  /** The starting boards BeeZilla can offer (starterBoards.ts), by title. */
+  startingBoards?: string[];
+}
+
+function clauseStep(clause: string, current?: PrivacyMode | null): AppAction | null {
+  for (const rule of RULES) {
+    const hit = clause.match(rule.re);
+    if (hit) return rule.make(hit, current ?? undefined);
+  }
+  return boardStep(clause);
+}
+
 /** The actions a command asks for, or null when the message is not one. */
-export function planAppActions(message: string, current?: PrivacyMode | null): AppAction[] | null {
+export function planAppActions(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
   const m = normal(message);
-  if (!m || m.length > MAX_LENGTH) return null;
+  // A note can carry a sentence or two; any other command is short.
+  if (!m || m.length > (/\bnote\b/.test(m) ? 400 : MAX_LENGTH)) return null;
+  const yes = acceptedOffer(m, ctx?.lastReply, ctx?.startingBoards ?? []);
+  if (yes) return [yes];
   const body = m.replace(LEAD, "").replace(TAIL, "");
   if (!body) return null;
+  const fixed = closedBoardStep(body);
+  if (fixed) return [fixed];
   const clauses = body.split(/\s*,?\s*(?:\band then\b|\bthen\b|\band\b)\s*|\s*,\s*/).filter(Boolean);
-  if (!clauses.length || clauses.length > MAX_STEPS) return null;
-  const plan: AppAction[] = [];
-  for (const clause of clauses) {
-    let step: AppAction | null = null;
-    for (const rule of RULES) {
-      const hit = clause.match(rule.re);
-      if (hit) { step = rule.make(hit, current ?? undefined); break; }
+  let plan: AppAction[] | null = null;
+  if (clauses.length && clauses.length <= MAX_STEPS) {
+    plan = [];
+    for (const clause of clauses) {
+      const step = clauseStep(clause, current);
+      // One clause the list doesn't cover: never half-do what was asked.
+      if (!step) { plan = null; break; }
+      plan.push(step);
     }
-    // One clause the list doesn't cover and the whole message is ordinary chat:
-    // never half-do what was asked.
-    if (!step) return null;
-    plan.push(step);
+  }
+  // "connect the note and the picture", "add a note saying eggs and milk": one board
+  // step whose words hold an "and".
+  if (!plan) {
+    const whole = boardStep(body);
+    return whole ? [whole] : null;
   }
   // Going to another page ends this one, so it can only be the last step.
   if (plan.slice(0, -1).some((s) => s.do === "go")) return null;
