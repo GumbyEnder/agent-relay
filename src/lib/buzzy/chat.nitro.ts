@@ -1474,7 +1474,7 @@ export default defineEventHandler(async (event) => {
     // The person's own process from the whiteboard (edited agent.md, skills, output,
     // or a recipe they ran). Their instructions; chatLoop caps and appends them.
     const boardInstructions = typeof body.boardInstructions === "string"
-      ? body.boardInstructions.slice(0, 4000)
+      ? body.boardInstructions.slice(0, 8200)    // the summary (up to 7,800) and its pictures line
       : null;
     // The Talk bar's privacy control. Unknown values mean the default (no change).
     let privacy: "advocate" | "lockdown" | "open" | undefined =

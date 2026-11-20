@@ -170,3 +170,36 @@ export function madeThingsSection(things: MadeThing[], now = Date.now()): string
     "\nNever name a file."
   );
 }
+
+/**
+ * Pictures the person joined with a line into one of BeeZilla's steps on the Idea Board
+ * (owner, 2026-11-20: connectors that mean something, "within our own framework").
+ * The board's summary (whiteboard.js `compile`) names them on its first line,
+ * "[[board-pictures: 12,40]]". That line is taken off here, before the board's text
+ * reaches the model, and the ids become the picture maker's references. They are only
+ * ids: the caller loads them with the person's own user id, so a made-up line can't
+ * reach anyone else's picture.
+ */
+export const BOARD_PICTURES_MAX = 4;
+export function takeBoardPictures(text: string | null | undefined): { text: string; ids: number[] } {
+  const ids: number[] = [];
+  const rest = String(text ?? "").replace(/^\s*\[\[board-pictures:\s*([0-9,\s]{1,160})\]\][^\S\n]*(?:\n|$)/, (_m, list: string) => {
+    for (const part of list.split(",")) {
+      const n = Number(part.trim());
+      if (Number.isSafeInteger(n) && n > 0 && !ids.includes(n) && ids.length < BOARD_PICTURES_MAX) ids.push(n);
+    }
+    return "";
+  });
+  return { text: rest, ids };
+}
+
+/** A new picture drawn from the pictures connected on the board. */
+export function boardReferencePrompt(message: string, count: number): string {
+  const ask = String(message || "").replace(/\s+/g, " ").trim().slice(0, 900);
+  return (
+    (count === 1
+      ? "Use the attached picture from the person's board as the reference."
+      : `Use the ${count} attached pictures from the person's board as references.`) +
+    " Keep what they show (the subject, the style and the colours) unless the request says otherwise.\n\nThe request: " + ask
+  );
+}

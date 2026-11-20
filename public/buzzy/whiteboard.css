@@ -511,3 +511,191 @@
   .wb-r-agent { width: 200px; }
   .wb-k-track, .wb-k-model, .wb-k-video { width: 240px; }
 }
+
+/* ── Connect and share (owner, 2026-11-20: "/space" connectors, within our framework) ──
+   One dot on each card's right edge starts a line; lines run left to right with an
+   arrow. Amber: part of the work (into or out of one of BeeZilla's steps). Grey and
+   dashed: two things joined that lead to no step yet. A selected step lights up what
+   feeds it. Areas cordon off a piece of the board, under everything else. */
+.wb-port {
+  right: -8px;
+  top: min(calc(50% - 8px), 48px);
+  width: 16px;
+  height: 16px;
+  box-shadow: 0 0 0 3px #141414;
+  touch-action: none;
+}
+.wb-port::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }   /* a bigger target than it looks */
+.wb-port:hover, .wb-connecting .wb-port { opacity: 1; transform: scale(1.15); }
+.wb-card.wb-target { border-color: var(--ob-yellow); box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.65), 0 10px 26px rgba(0, 0, 0, 0.45); }
+.wb-card.wb-lit:not(.wb-k-area) { border-color: rgba(255, 193, 7, 0.85); box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.35), 0 8px 22px rgba(0, 0, 0, 0.4); }
+.wb-link.wb-plain { stroke: #8a9099; stroke-dasharray: 5 6; filter: none; }
+.wb-link.wb-lit { stroke: #ffd54f; stroke-width: 3.5; }
+.wb-arrow-feed { fill: var(--ob-yellow); }
+.wb-arrow-plain { fill: #8a9099; }
+.wb-arrow-sel { fill: #fff; }
+.wb-link-x {
+  position: absolute;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid #5a2f2f;
+  background: #2a1517;
+  color: #ffb4b4;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-link-x[hidden] { display: none; }
+.wb-link-x:hover, .wb-link-x:focus-visible { background: var(--ob-red); color: #141414; outline: none; }
+
+/* Areas */
+.wb-card.wb-k-area {
+  padding: 0;
+  pointer-events: none;            /* the board under it still selects and places */
+  background: rgba(255, 193, 7, 0.035);
+  border: 2px dashed rgba(255, 193, 7, 0.5);
+  border-radius: 18px;
+  box-shadow: none;
+}
+.wb-card.wb-k-area.wb-on, .wb-card.wb-k-area:focus-visible { border-style: solid; border-color: var(--ob-yellow); box-shadow: none; }
+.wb-card.wb-k-area.wb-lit { border-color: var(--ob-yellow); background: rgba(255, 193, 7, 0.07); }
+.wb-k-area .wb-area-bar, .wb-k-area .wb-grip, .wb-k-area .wb-port, .wb-k-area .wb-rm { pointer-events: auto; }
+.wb-area-bar {
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  max-width: calc(100% - 20px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 10px;
+  background: #1b1e24;
+  border: 1px solid #3a3f47;
+  color: #eef1f4;
+  font-size: 0.84rem;
+  cursor: grab;
+  overflow: hidden;
+}
+.wb-moving .wb-area-bar { cursor: grabbing; }
+.wb-area-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wb-area-count { color: var(--ob-muted); font-size: 0.76rem; white-space: nowrap; }
+.wb-area-tag { padding: 1px 8px; border-radius: 999px; background: rgba(91, 175, 107, 0.18); color: #9fd8a9; font-size: 0.72rem; white-space: nowrap; }
+.wb-area-sell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid #4a4130;
+  background: transparent;
+  color: var(--ob-yellow);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.wb-area-sell .wb-ico { width: 14px; height: 14px; }
+.wb-area-sell:hover, .wb-area-sell:focus-visible { background: rgba(255, 193, 7, 0.12); outline: none; }
+.wb-k-area .wb-port { top: 12px; }
+.wb-grip {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 0 55%, rgba(255, 193, 7, 0.7) 55% 62%, transparent 62% 72%, rgba(255, 193, 7, 0.7) 72% 79%, transparent 79%);
+  touch-action: none;
+}
+
+/* "Coming soon" */
+.wb-soon {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 193, 7, 0.16);
+  color: var(--ob-yellow);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.wb-sell-btn { border-color: #4a4130; color: var(--ob-yellow); }
+.wb-selsell-btn { color: var(--ob-yellow); }
+.wb-selbar:has(.wb-namer:not([hidden])) .wb-area-btn,
+.wb-selbar:has(.wb-namer:not([hidden])) .wb-selsell-btn { display: none; }
+
+/* The panel: same corner and layer as History (which it replaces while open). */
+.wb-sellpanel {
+  position: absolute;
+  right: 12px;
+  bottom: 60px;
+  z-index: 46;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  max-height: min(560px, calc(100% - 80px));
+  overflow: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #121418;
+  border: 1px solid #4a4130;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  font-size: 0.88rem;
+  color: #d9dde3;
+}
+.wb-sellpanel[hidden] { display: none; }
+.wb-sell-head { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 0.98rem; }
+.wb-sell-head strong { flex: 0 1 auto; }
+.wb-sell-x { margin-left: auto; min-height: 1.9rem; padding: 0 0.7rem; font-size: 0.8rem; }
+.wb-sell-what { margin: 0; color: var(--ob-muted); font-size: 0.8rem; }
+.wb-sell-lede, .wb-sell-note { margin: 0; line-height: 1.45; }
+.wb-sell-note { color: #b9bfc7; font-size: 0.82rem; }
+.wb-sell-q { margin: 0; font-weight: 700; color: #fff; font-size: 0.95rem; }
+.wb-sell-pick { margin: 0; color: #9fd8a9; font-weight: 600; }
+.wb-sell-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #343a42;
+  background: #1a1d22;
+  color: #d9dde3;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-sell-opt strong { color: #fff; font-size: 0.92rem; }
+.wb-sell-opt span { color: var(--ob-muted); font-size: 0.8rem; line-height: 1.4; }
+.wb-sell-opt:hover, .wb-sell-opt:focus-visible, .wb-sell-opt.wb-picked { border-color: var(--ob-yellow); outline: none; }
+.wb-sell-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-sell-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #0e0f12; }
+.wb-sell-chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 999px; background: #1f2329; color: #d9dde3; font-size: 0.78rem; }
+.wb-sell-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-sell-back { align-self: flex-start; min-height: 0; padding: 2px 0; border: 0; background: none; color: var(--ob-muted); font: inherit; font-size: 0.8rem; text-decoration: underline; cursor: pointer; }
+.wb-sell-back:hover, .wb-sell-back:focus-visible { color: #fff; outline: none; }
+@media (max-width: 760px) {
+  .wb-sell-btn .wb-soon { display: none; }
+  .wb-sellpanel { right: 8px; left: 8px; width: auto; max-height: calc(100% - 120px); }
+  .wb-panel:not(.wb-side-is-closed) .wb-sellpanel { bottom: calc(40% + 60px); max-height: calc(60% - 120px); }
+}

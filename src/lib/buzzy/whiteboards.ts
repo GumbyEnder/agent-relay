@@ -65,6 +65,14 @@ const CARD_FIELDS: Record<string, Field> = {
   user: { kind: "flag" },
   taskId: { kind: "text", max: 160 },
   err: { kind: "text", max: 400 },
+  // An area (kind "area"): its size, and "Sell this orchestration" (coming soon) —
+  // how it would be shared (drops | honey | open), whether what it made may show as
+  // examples (yes | no), and when that was chosen.
+  w: { kind: "number" },
+  h: { kind: "number" },
+  share: { kind: "text", max: 16 },
+  examples: { kind: "text", max: 8 },
+  shareAt: { kind: "text", max: 40 },
 };
 
 export type WhiteboardCard = Record<string, string | number | boolean>;
