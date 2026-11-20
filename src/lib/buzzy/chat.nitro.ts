@@ -117,6 +117,11 @@ import {
   pathOnly,
   sanitizeDiag,
   wavDurationSeconds,
+  checkScreenshot,
+  listFeedback,
+  feedbackScreenshot,
+  userIdForEmail,
+  isAdminEmail,
 } from "./feedback";
 
 /**
@@ -351,6 +356,20 @@ function opsAuthorized(event: any): boolean {
 }
 
 /**
+ * Who may read other people's reports and change their plan.
+ *
+ * Two doors, deliberately: the ops key (scripts, the console), and a signed-in
+ * account whose email is in BZ_ADMIN_EMAILS (a human on /buzzy/testers, who
+ * cannot carry an ops key in a browser). Revoking an admin is a variable change.
+ */
+async function adminAuthorized(event: any): Promise<boolean> {
+  if (opsAuthorized(event)) return true;
+  const user = await getSessionUserFromHeaders(headersFromEvent(event)).catch(() => null);
+  if (!user) return false;
+  return isAdminEmail((user as { email?: string | null }).email ?? null);
+}
+
+/**
  * The Windows installer's address, read from the same feed installed copies
  * read — never hard-coded, never mirrored.
  *
@@ -509,6 +528,13 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "The diagnostic is too large to accept.", code: "diag_too_large" };
     }
     const clean = sanitizeDiag(raw?.diag ?? null);
+    // The picture (0062). Validated before any limit is counted, so a rejected
+    // upload never burns the person's hourly allowance.
+    const shot = checkScreenshot(raw?.screenshot ?? null);
+    if (!shot.ok) {
+      setResponseStatus(event, 400);
+      return shot;
+    }
     const sql = await getSql();
     const userId = user?.id ?? null;
 
@@ -574,9 +600,9 @@ export default defineEventHandler(async (event) => {
       try {
         const inserted = (await sql`
           INSERT INTO buzzy_feedback
-            (id, ref, user_id, body, page_url, route, app_sha, diag, diag_redactions, ip_hash, ua)
+            (id, ref, user_id, body, page_url, route, app_sha, diag, diag_redactions, ip_hash, ua, screenshot)
           VALUES (${id}, ${ref}, ${userId}, ${body}, ${pageUrl}, ${route}, ${appSha()},
-                  ${diag ? JSON.stringify(diag) : null}::jsonb, ${clean.redactions}, ${hashed}, ${ua})
+                  ${diag ? JSON.stringify(diag) : null}::jsonb, ${clean.redactions}, ${hashed}, ${ua}, ${shot.value})
           RETURNING ref, created_at
         `) as Array<{ ref: string; created_at: string }>;
         if (inserted[0]) {
@@ -1962,23 +1988,49 @@ export default defineEventHandler(async (event) => {
     return { ok: true, ...(await describeEntitlement(user.id)) };
   }
 
-  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops only) ─────────
+  // ── GET /api/buzzy/admin/feedback — what testers reported (admins) ───────────
+  // ?id=<report> returns that report's screenshot; otherwise the newest 200.
+  // id is TEXT in 0059, so it is passed straight through — no Number() anywhere,
+  // or a non-numeric id would become NaN and silently read nothing.
+  if (method === "GET" && path === "/api/buzzy/admin/feedback") {
+    if (!(await adminAuthorized(event))) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Only BeeZilla admins can read feedback.", code: "forbidden" };
+    }
+    const sql = await getSql();
+    const one = queryValue(fullPath, "id");
+    if (one) return { ok: true, id: one, screenshot: await feedbackScreenshot(sql, one) };
+    return { ok: true, feedback: await listFeedback(sql) };
+  }
+
+  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops or admin) ────
   // The billing hook writes here. Stripe (or a manual grant) maps to one call, so
   // entitlement logic has exactly one writer and cannot drift from the invoice.
+  // An admin may grant by email: a tester is named by the address they signed up
+  // with, not by an internal id nobody can see.
   if (method === "POST" && path === "/api/buzzy/admin/plan") {
-    if (!opsAuthorized(event)) {
+    if (!(await adminAuthorized(event))) {
       setResponseStatus(event, 403);
-      return { ok: false, error: "Ops key required.", code: "forbidden" };
+      return { ok: false, error: "Ops key or admin account required.", code: "forbidden" };
     }
     const body = (await event.req.json().catch(() => ({}))) as {
       user?: string;
       userId?: string;
+      email?: string;
       plan?: string;
       planUntil?: string;
       note?: string;
     };
-    const userId = String(body.user ?? body.userId ?? "").trim();
+    let userId = String(body.user ?? body.userId ?? "").trim();
     const plan = String(body.plan ?? "").trim().toLowerCase();
+    if (!userId && body.email) {
+      const found = await userIdForEmail(await getSql(), String(body.email));
+      if (!found) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No account has that email.", code: "no_account" };
+      }
+      userId = found;
+    }
     if (!userId) {
       setResponseStatus(event, 400);
       return { ok: false, error: "which account? pass user=<id>", code: "no_user" };

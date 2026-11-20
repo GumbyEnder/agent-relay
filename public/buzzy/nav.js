@@ -884,6 +884,15 @@
         '  <span class="bz-fb-hint" id="bzFbHint">Up to 60 seconds.</span>',
         '</div>',
         '<label class="bz-fb-check"><input type="checkbox" id="bzFbDiag" /> Include a diagnostic file</label>',
+        '<div class="bz-fb-row">',
+        '  <label class="bz-fb-link" for="bzFbShot">Attach a screenshot (optional)</label>',
+        '  <input type="file" id="bzFbShot" accept="image/png,image/jpeg,image/webp" hidden />',
+        '  <span class="bz-fb-hint" id="bzFbShotHint">The picture you were looking at.</span>',
+        '</div>',
+        '<div class="bz-fb-row" id="bzFbShotRow" hidden>',
+        '  <img id="bzFbShotImg" alt="The screenshot you attached" style="max-width:100%;max-height:160px;border:1px solid #333;border-radius:8px;display:block" />',
+        '  <button type="button" id="bzFbShotDrop" class="bz-fb-link">Remove</button>',
+        '</div>',
         '<button type="button" id="bzFbSee" class="bz-fb-link" aria-expanded="false">See what\u2019s included</button>',
         '<pre id="bzFbDiagBox" class="bz-fb-diag" hidden></pre>',
         '<p class="bz-fb-never" id="bzFbStamped" hidden>The server stamps this record with its build sha, shown in the report as \u201cstamped by the server\u201d. Nothing else is added to the preview above.</p>',
@@ -894,6 +903,7 @@
     }
 
     var text, diagBox, diagSee, mic, hint, send, status;
+    var shot = null;
     function refs() {
       if (text) return;
       text = body.querySelector("#bzFbText");
@@ -1082,7 +1092,51 @@
         el.setAttribute("aria-expanded", openNow ? "true" : "false");
       } else if (el.id === "bzFbSend") {
         submit();
+      } else if (el.id === "bzFbShotDrop") {
+        shot = null;
+        var row = body.querySelector("#bzFbShotRow");
+        var input = body.querySelector("#bzFbShot");
+        if (row) row.hidden = true;
+        if (input) input.value = "";
+        var h = body.querySelector("#bzFbShotHint");
+        if (h) h.textContent = "The picture you were looking at.";
       }
+    });
+
+    // A screenshot comes in as a data URL because the server stores the row, not
+    // a file: one admin read has to reproduce the report. Anything over the cap
+    // is refused here as well as at the door, so the person is told before they
+    // wait for a round trip that will fail.
+    var SHOT_MAX = 1500000;
+    document.addEventListener("change", function (e) {
+      var input = e.target;
+      if (!input || input.id !== "bzFbShot") return;
+      var h = body.querySelector("#bzFbShotHint");
+      var row = body.querySelector("#bzFbShotRow");
+      var img = body.querySelector("#bzFbShotImg");
+      var file = input.files && input.files[0];
+      if (!file) return;
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+        if (h) h.textContent = "Pick a PNG, JPEG or WebP picture.";
+        input.value = "";
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var data = String(reader.result || "");
+        if (data.length > SHOT_MAX) {
+          shot = null;
+          if (row) row.hidden = true;
+          if (h) h.textContent = "That picture is too big \u2014 pick one under about 1 MB.";
+          input.value = "";
+          return;
+        }
+        shot = data;
+        if (img) img.src = data;
+        if (row) row.hidden = false;
+        if (h) h.textContent = "Attached. It is stored with your report.";
+      };
+      reader.readAsDataURL(file);
     });
 
     function submit() {
@@ -1100,6 +1154,7 @@
         page_url: location.pathname,
         route: section(),
       };
+      if (shot) payload.screenshot = shot;
       if (withDiag) {
         var d = paintDiag();
         payload.diag = d.value;

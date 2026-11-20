@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — Testers</title>
+  <style>
+    :root { --bz-black:#0A0A0A; --bz-panel:#141414; --bz-yellow:#FFC107; --bz-silver:#C9CDD2; --bz-font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; }
+    * { box-sizing: border-box; }
+    body { font-family: var(--bz-font); color:#E8E8E8; background: var(--bz-black); margin:0; line-height:1.55; -webkit-font-smoothing:antialiased; }
+    header { border-bottom:1px solid #1E1E1E; background:#0C0C0C; }
+    .header-inner { max-width:1120px; margin:0 auto; padding:.55rem 1.25rem; display:flex; align-items:center; gap:1.25rem; flex-wrap:wrap; }
+    .brand-link { text-decoration:none; }
+    .brand { display:flex; align-items:center; gap:.5rem; color:#fff; font-size:.95rem; }
+    .mascot-mark { width:22px; height:22px; border-radius:4px; }
+    #bzNav { display:flex; gap:.15rem; flex-wrap:wrap; margin-left:auto; }
+    #bzNav a { color:#9B9B9B; text-decoration:none; font-size:.8rem; padding:.32rem .55rem; border-radius:5px; }
+    #bzNav a:hover { color:#fff; background:#1A1A1A; }
+    #bzNav a[aria-current="page"] { color:#0A0A0A; background:var(--bz-yellow); font-weight:600; }
+    #bzNav a.account-link { color:var(--bz-yellow); }
+    main { max-width:1120px; margin:0 auto; padding:2rem 1.25rem 4rem; }
+    h1 { font-size:1.8rem; margin:0 0 .35rem; color:#fff; letter-spacing:-.01em; }
+    .lede { color:#B8B8B8; max-width:70ch; margin:0 0 1.5rem; font-size:.95rem; }
+    h2 { font-size:.78rem; letter-spacing:.12em; text-transform:uppercase; color:#8A8A8A; margin:2rem 0 .75rem; padding-bottom:.5rem; border-bottom:1px solid #222; }
+    .panel { background:var(--bz-panel); border:1px solid #2A2A2A; border-radius:8px; padding:1.1rem 1.2rem; }
+    label { display:block; font-size:.74rem; letter-spacing:.08em; text-transform:uppercase; color:#8A8A8A; margin:0 0 .3rem; }
+    input, select { width:100%; background:#0E0E0E; border:1px solid #2C2C2C; border-radius:6px; color:#E8E8E8; font:inherit; font-size:.9rem; padding:.5rem .6rem; }
+    input:focus, select:focus { outline:none; border-color:var(--bz-yellow); }
+    .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.75rem; margin-bottom:.9rem; }
+    button { background:var(--bz-yellow); border:0; border-radius:6px; color:#0A0A0A; font:inherit; font-weight:600; font-size:.85rem; padding:.55rem .95rem; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:default; }
+    button.ghost { background:none; border:1px solid #333; color:var(--bz-silver); font-weight:500; }
+    .status { font-size:.82rem; color:#9B9B9B; margin-top:.6rem; min-height:1.2em; }
+    .status.bad { color:#FF7A7A; }
+    .status.good { color:#8BE28B; }
+    .report { border:1px solid #242424; border-radius:8px; padding:.9rem 1rem; margin-bottom:.6rem; background:#111; }
+    .report .meta { font-size:.72rem; color:#7A7A7A; letter-spacing:.04em; margin-bottom:.35rem; display:flex; gap:.6rem; flex-wrap:wrap; }
+    .report .meta code { color:var(--bz-yellow); }
+    .report p { margin:0 0 .5rem; white-space:pre-wrap; }
+    .shot { margin-top:.5rem; }
+    .shot img { max-width:100%; border:1px solid #2A2A2A; border-radius:6px; display:block; }
+    .empty { color:#7A7A7A; font-size:.9rem; }
+    .gate { border:1px solid #3A2E00; background:#1B1600; border-radius:8px; padding:1rem 1.2rem; }
+    .gate p { margin:0; }
+    code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85em; }
+  </style>
+</head>
+<body data-bz-active="testers">
+  <header>
+    <div class="header-inner">
+      <a href="/buzzy/talk" class="brand-link"><div class="brand"><img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" /><strong>BeeZilla</strong></div></a>
+      <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
+      <a href="/buzzy/capabilities" data-nav="capabilities">Capabilities</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey Drops</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+    </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>Testers</h1>
+    <p class="lede">For BeeZilla admins: put a tester on a plan by the email they signed up with, and read what testers reported with <strong>Send feedback</strong>. (3D and pictures work on every plan; a plan decides how much of them.)</p>
+
+    <div id="gate" class="gate" hidden>
+      <p><strong>Only BeeZilla admins can use this page.</strong> An admin is a signed-in account whose email is listed in <code>BZ_ADMIN_EMAILS</code> on the server.</p>
+    </div>
+
+    <div id="body" hidden>
+      <h2>Put a tester on a plan</h2>
+      <div class="panel">
+        <div class="row">
+          <div>
+            <label for="email">Account email</label>
+            <input id="email" type="email" placeholder="tester@example.com" autocomplete="off" />
+          </div>
+          <div>
+            <label for="plan">Plan</label>
+            <select id="plan">
+              <option value="pro">Pro</option>
+              <option value="starter">Starter</option>
+              <option value="free">Free</option>
+            </select>
+          </div>
+          <div>
+            <label for="until">Until (optional)</label>
+            <input id="until" type="date" />
+          </div>
+        </div>
+        <button id="grant">Set the plan</button>
+        <div id="grantStatus" class="status"></div>
+      </div>
+
+      <h2>What testers reported</h2>
+      <div id="reports"><p class="empty">Loading…</p></div>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    "use strict";
+
+    // ONE navigation: the same eight links every page carries, with the active
+    // state computed from the path rather than hard-coded here.
+    // Testers is an admin page, so it is deliberately not one of the eight
+    // public nav links: the page marks itself active through body[data-bz-active]
+    // and nobody stumbles into it from the nav.
+
+    fetch("/api/buzzy/entitlement", { credentials: "same-origin" })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (out) {
+        if (!out.ok) {
+          document.getElementById("gate").hidden = false;
+          document.getElementById("gate").querySelector("p").innerHTML =
+            'Sign in as an admin to use this page. An admin is an account whose email is listed in <code>BZ_ADMIN_EMAILS</code>.';
+          return;
+        }
+        load();
+      })
+      .catch(function () { document.getElementById("gate").hidden = false; });
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    function load() {
+      var box = document.getElementById("reports");
+      fetch("/api/buzzy/admin/feedback", { credentials: "same-origin" })
+        .then(function (r) {
+          if (r.status === 403) {
+            document.getElementById("gate").hidden = false;
+            document.getElementById("body").hidden = true;
+            throw new Error("forbidden");
+          }
+          return r.json();
+        })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || "Could not read reports.");
+          document.getElementById("gate").hidden = true;
+          document.getElementById("body").hidden = false;
+          var rows = j.feedback || [];
+          if (!rows.length) { box.innerHTML = '<p class="empty">No reports yet.</p>'; return; }
+          box.innerHTML = rows.map(function (f) {
+            var who = f.email ? esc(f.email) : "anonymous";
+            return '<div class="report">' +
+              '<div class="meta"><code>' + esc(f.ref) + '</code><span>' + esc(new Date(f.created_at).toLocaleString()) + '</span>' +
+              '<span>' + who + '</span><span>' + esc(f.route || f.page_url || "") + '</span><span>status: ' + esc(f.status) + '</span></div>' +
+              '<p>' + esc(f.body) + '</p>' +
+              (f.has_screenshot ? '<button class="ghost" type="button" data-shot="' + esc(f.id) + '">See the screenshot</button><div class="shot" hidden></div>' : "") +
+              '</div>';
+          }).join("");
+        })
+        .catch(function (e) {
+          if (e && e.message === "forbidden") return;
+          box.innerHTML = '<p class="empty">Could not read reports. Try again in a moment.</p>';
+        });
+    }
+
+    document.getElementById("reports").addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-shot]") : null;
+      if (!b) return;
+      var id = b.getAttribute("data-shot");
+      var box = b.parentNode.querySelector(".shot");
+      if (!box) return;
+      if (!box.hidden) { box.hidden = true; b.textContent = "See the screenshot"; return; }
+      b.disabled = true;
+      fetch("/api/buzzy/admin/feedback?id=" + encodeURIComponent(id), { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          b.disabled = false;
+          if (j && j.ok && j.screenshot) {
+            box.innerHTML = '<img alt="The screenshot attached to report ' + esc(j.id) + '" src="' + esc(j.screenshot) + '" />';
+            box.hidden = false;
+            b.textContent = "Hide the screenshot";
+          } else {
+            b.textContent = "No screenshot on that report";
+          }
+        })
+        .catch(function () { b.disabled = false; b.textContent = "Could not load it — try again"; });
+    });
+
+    document.getElementById("grant").addEventListener("click", function () {
+      var btn = this;
+      var email = document.getElementById("email").value.trim();
+      var plan = document.getElementById("plan").value;
+      var until = document.getElementById("until").value;
+      var status = document.getElementById("grantStatus");
+      if (!email) { status.className = "status bad"; status.textContent = "Which account? Type the email they signed up with."; return; }
+      btn.disabled = true;
+      status.className = "status";
+      status.textContent = "Setting…";
+      var body = { email: email, plan: plan };
+      if (until) body.planUntil = new Date(until + "T23:59:59Z").toISOString();
+      fetch("/api/buzzy/admin/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body),
+      }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (out) {
+          btn.disabled = false;
+          if (out.ok && out.j && out.j.ok) {
+            status.className = "status good";
+            status.textContent = email + " is on " + (out.j.plan || plan) + (out.j.planUntil ? " until " + new Date(out.j.planUntil).toLocaleDateString() : "") + ".";
+          } else {
+            status.className = "status bad";
+            status.textContent = (out.j && out.j.error) || "Could not set that plan.";
+          }
+        })
+        .catch(function () { btn.disabled = false; status.className = "status bad"; status.textContent = "Could not set that plan — check your connection."; });
+    });
+  })();
+  </script>
+</body>
+</html>

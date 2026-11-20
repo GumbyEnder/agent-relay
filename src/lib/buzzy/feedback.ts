@@ -20,6 +20,7 @@
  *    duration rather than by Content-Length.
  */
 import { createHash, randomUUID } from "node:crypto";
+import type { Sql } from "@/lib/db";
 
 export const FEEDBACK_BODY_MAX = 5000;
 export const FEEDBACK_DIAG_MAX_BYTES = 256 * 1024;
@@ -367,3 +368,89 @@ export interface FeedbackLimits {
 }
 
 export const LIMITS: FeedbackLimits = { anonHour: 5, anonDay: 15, userHour: 20 };
+
+// ── The picture attached to a report (0062) ──────────────────────────────────
+//
+// A data URL, not a file: the row has to stand on its own so one admin read
+// reproduces the report. 1.5 MB of characters is about 1.1 MB of picture, which
+// is one phone screenshot at full resolution. Anything bigger is a photo of a
+// screen, not evidence, and the person can crop it.
+export const SCREENSHOT_MAX = 1_500_000;
+
+const DATA_URL = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * Accept a screenshot only if it is a PNG/JPEG/WebP data URL inside the cap.
+ * Returns null for "no picture" — absence is normal, not an error.
+ */
+export function checkScreenshot(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string; code: string } {
+  if (raw == null || raw === "") return { ok: true, value: null };
+  const s = String(raw);
+  if (s.length > SCREENSHOT_MAX) {
+    return { ok: false, error: "That picture is too big. Pick one under about 1 MB.", code: "screenshot_too_big" };
+  }
+  if (!DATA_URL.test(s)) {
+    return { ok: false, error: "A screenshot must be a PNG, JPEG or WebP picture.", code: "bad_screenshot" };
+  }
+  return { ok: true, value: s };
+}
+
+// ── Reading reports back (admins) ────────────────────────────────────────────
+//
+// id is TEXT in 0059, so nothing here may coerce it to a number. The person who
+// wrote a report is joined by user_id, and an anonymous report has NULL there —
+// an admin sees "anonymous", never an invented identity.
+
+export interface FeedbackRow {
+  id: string;
+  ref: string;
+  created_at: string;
+  body: string;
+  route: string | null;
+  page_url: string | null;
+  status: string;
+  has_screenshot: boolean;
+  diag_redactions: number;
+  email: string | null;
+  name: string | null;
+}
+
+export async function listFeedback(sql: Sql, limit = 200): Promise<FeedbackRow[]> {
+  return sql<FeedbackRow>`
+    SELECT f.id, f.ref, f.created_at, f.body, f.route, f.page_url, f.status,
+           (f.screenshot IS NOT NULL) AS has_screenshot, f.diag_redactions,
+           u.email, u.name
+    FROM buzzy_feedback f
+    LEFT JOIN "user" u ON u.id = f.user_id
+    ORDER BY f.created_at DESC
+    LIMIT ${Math.max(1, Math.min(500, limit))}
+  `;
+}
+
+export async function feedbackScreenshot(sql: Sql, id: string): Promise<string | null> {
+  const rows = await sql<{ screenshot: string | null }>`
+    SELECT screenshot FROM buzzy_feedback WHERE id = ${id} LIMIT 1
+  `;
+  return rows[0]?.screenshot ?? null;
+}
+
+/** The account a tester signed up with, by email. */
+export async function userIdForEmail(sql: Sql, email: string): Promise<string | null> {
+  const rows = await sql<{ id: string }>`
+    SELECT id FROM "user" WHERE lower(email) = lower(${email.trim()}) LIMIT 1
+  `;
+  return rows[0]?.id ?? null;
+}
+
+export function adminEmails(env: Record<string, string | undefined> = process.env): Set<string> {
+  return new Set(
+    String(env.BZ_ADMIN_EMAILS || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export function isAdminEmail(email: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
+  return !!email && adminEmails(env).has(String(email).trim().toLowerCase());
+}
