@@ -643,7 +643,7 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: its instructions (agent.md), a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about. To point BeeZilla at something, drag the dot on a card's right edge onto one of its steps: what you connect, it uses there in full, and a connected picture is what it draws from. Make an area around a piece of the board to move, save or share it together; selling an orchestration (for Honey Drops or Honey, or open-sourcing it) is coming soon.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -656,6 +656,17 @@
       {
         "file": "public/buzzy/whiteboard.js",
         "symbol": "Also on the board:"
+      },      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Connected to BeeZilla's steps"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Make an area"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Sell this orchestration"
       },
       {
         "file": "src/lib/buzzy/server.ts",

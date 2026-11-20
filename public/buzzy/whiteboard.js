@@ -28,6 +28,26 @@
  *   - Drop anything on it: files from your computer, Inspiration cards, search
  *     results, links.
  *
+ * Connect and share (owner, 2026-11-20, after "/space" — Slashspace, Flowith, Poppy):
+ *   "create the same connectors and node system, but within our own framework…
+ *    We're not trying to create massive whiteboards. We're trying to allow people to
+ *    cordon off a little piece of what they do, or an entire whiteboard of what they
+ *    do, and be like, okay, sell this as an orchestration."
+ *   - Lines mean something. Every card has one dot on its right edge; drag it onto a
+ *     card to connect them, the way the work flows (left to right, with an arrow).
+ *     A line into one of BeeZilla's steps — agent.md, a skill, the end result, or the
+ *     conversation — means "use this here": it goes to BeeZilla in full with the next
+ *     message. Lines chain (a note → a picture → a step brings both), and a picture
+ *     connected to a step is the reference when BeeZilla draws or changes a picture.
+ *     With no lines, BeeZilla still sees the whole board as a list, as before.
+ *   - Click a step to light up everything that feeds it. Click a line to remove it.
+ *     Let go of a line on empty board and a new step appears there, already connected.
+ *   - An area cordons off a piece of the board: select cards, Make an area. Drag its
+ *     label to move everything inside; connect it to a step to bring all of it.
+ *   - Sell this orchestration (coming soon), on an area or for the whole board: trade
+ *     it for Honey Drops or Honey, or open-source it — and say whether what it made can
+ *     be shown as examples in Inspiration and Recipes.
+ *
  *   var board = BeeZillaWhiteboard.mount(el, { boardId, onFold });
  *   board.flow(step)        // a live step from the chat stream (see FlowStep in server.ts)
  *   board.addCard(card)     // a file, a note, anything
@@ -76,6 +96,8 @@
     file: "M6 3h9l4 4v14H6z",
     memory: "M12 3a7 7 0 00-4 12.7V19h8v-3.3A7 7 0 0012 3zM9 22h6",
     history: "M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2",
+    area: "M4 4h4M11 4h2M16 4h4v4M20 11v2M20 16v4h-4M13 20h-2M8 20H4v-4M4 13v-2M4 8V4",
+    sell: "M3 12V4h8l10 10-8 8zM7.5 7.5h.01",
   };
   function icon(name, cls) {
     var s = document.createElementNS(SVGNS, "svg");
@@ -102,6 +124,7 @@
   // What a card is, from whatever the source called it.
   function kindOf(c) {
     var k = String(c.kind || "").toLowerCase();
+    if (k === "area") return k;
     if (k === "agent" || k === "skill" || k === "memory" || k === "note" || k === "chat") return k;
     var name = String(c.title || c.url || "").toLowerCase();
     var t = String(c.contentType || "").toLowerCase();
@@ -119,13 +142,16 @@
   // "The conversation history… would be on the board itself as a thing that you could
   // scroll by. It would just be sitting there."). It is never an instruction, a file or a
   // step of a recipe, and there is one per board (its id is always "chat").
-  var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note", chat: "chat" };
+  // "area" is the branch's grouping box: it is never an instruction either, it is a frame
+  // the recipe graph flattens back into its contents.
+  var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note", chat: "chat", area: "area" };
   var CHAT_ID = "chat";
   function roleOf(kind) { return ROLE[kind] || "output"; }
   var GLYPH = { document: "W", sheet: "E", slides: "P", pdf: "PDF" };
   var KIND_LABEL = {
     agent: "Instructions", skill: "Skill", memory: "Memory", note: "Note", chat: "Conversation", image: "Picture", track: "Music",
     model: "3D model", video: "Video", document: "Document", sheet: "Spreadsheet", slides: "Slides", pdf: "PDF", file: "File",
+    area: "Area",
   };
 
   // ── Saving: this browser at once, then the person's account ───────────────
@@ -772,9 +798,19 @@
   //    skill and memory cards are left out: they describe what it already does.
   //    Made files go by kind, not by their generated name: the model repeats any
   //    file name it is handed.
-  function compile(cards) {
-    var order = (cards || []).filter(Boolean).slice().sort(function (a, b) { return a.x - b.x || a.y - b.y; });
-    var mine = order.filter(function (c) { return c.user && String(c.body || "").trim(); });
+  //  - Connected: what the person joined with a line into one of BeeZilla's steps
+  //    (see "Connections" below), in full, under the step it feeds. Pictures among
+  //    them are named once more on a first line the server reads and removes before
+  //    the model sees anything ("[[board-pictures: 12,40]]"): it draws from them.
+  function compile(cards, links) {
+    var order = (cards || []).filter(Boolean).slice().sort(byPlace);
+    var feeds = feedsOf(order, links);
+    // The person's own notes that feed a step are written out under that step instead.
+    var fed = {};
+    feeds.forEach(function (g) { g.items.forEach(function (c) { fed[c.id] = true; }); });
+    var mine = order.filter(function (c) {
+      return c.user && String(c.body || "").trim() && kindOf(c) !== "area" && !(fed[c.id] && kindOf(c) === "note");
+    });
     var lines = [];
     mine.forEach(function (c) { if (kindOf(c) === "agent") lines.push("agent.md (how to work): " + c.body.trim()); });
     var step = 0;
@@ -784,33 +820,155 @@
       if (roleOf(k) === "output") lines.push("End result — " + c.title + ": " + c.body.trim());
       else if (k === "note") lines.push("Note — " + c.body.trim());
     });
+    var listed = {};
+    var pictures = [];
+    if (feeds.length) {
+      if (lines.length) lines.push("");
+      lines.push("Connected to BeeZilla's steps — use these where they are joined:");
+      feeds.forEach(function (g) {
+        lines.push("Into " + stepName(g.step) + ":");
+        g.items.forEach(function (c) {
+          if (listed[c.id]) { lines.push("- " + shortName(c) + " (listed above)"); return; }
+          listed[c.id] = true;
+          lines.push(thingLine(c, kindOf(c) === "note" ? 1500 : 800));
+          var m = kindOf(c) === "image" ? ASSET_URL.exec(String(c.url || "")) : null;
+          if (m && pictures.indexOf(m[1]) < 0 && pictures.length < 4) pictures.push(m[1]);
+        });
+      });
+    }
     var also = [];
     order.forEach(function (c) {
-      if (mine.indexOf(c) >= 0) return;
+      if (mine.indexOf(c) >= 0 || listed[c.id]) return;
       var k = kindOf(c);
-      var title = String(c.title || "").replace(/\s+/g, " ").trim();
-      var body = String(c.body || "").replace(/\s+/g, " ").trim();
       if (k === "note") {
-        if (title || body) also.push("- Note" + (title ? " — " + title.slice(0, 120) : "") + (body ? ": " + body.slice(0, 240) : ""));
+        if (String(c.title || "").trim() || String(c.body || "").trim()) also.push(thingLine(c, 240));
         return;
       }
       if (roleOf(k) !== "output") return;
-      var url = String(c.url || "");
-      var web = /^https?:\/\//i.test(url);
-      var label = k === "file" && web ? "Link" : (KIND_LABEL[k] || "File");
-      var made = /^(?:art|music|video|model|model3d|clip|track)-\d{4}-\d\d-\d\d/i.test(title);
-      var line = "- " + label + (c.user ? " they added" : made ? " made here" : "");
-      if (title && !made) line += " — " + title.slice(0, 120);
-      if (body) line += ": " + body.slice(0, 240);
-      if (web) line += " (" + url.slice(0, 300) + ")";
-      also.push(line);
+      also.push(thingLine(c, 240));
     });
     if (also.length) {
       if (lines.length) lines.push("");
       lines.push("Also on the board:");
       Array.prototype.push.apply(lines, also);
     }
-    return lines.join("\n").slice(0, 4000);
+    var text = lines.join("\n").slice(0, BOARD_TEXT_MAX);
+    return pictures.length ? "[[board-pictures: " + pictures.join(",") + "]]\n" + text : text;
+  }
+  var BOARD_TEXT_MAX = 7800;
+  var ASSET_URL = /^\/api\/buzzy\/assets\/(\d{1,12})(?:[/?#]|$)/;
+  var MADE_NAME = /^(?:art|music|video|model|model3d|clip|track)-\d{4}-\d\d-\d\d/i;
+  function byPlace(a, b) { return a.x - b.x || a.y - b.y; }
+  // One thing on the board, in a line. Made files go by kind, never by their name.
+  function thingLine(c, bodyMax) {
+    var k = kindOf(c);
+    var title = String(c.title || "").replace(/\s+/g, " ").trim();
+    var body = String(c.body || "").replace(/\s+/g, " ").trim();
+    if (k === "note") return "- Note" + (title ? " — " + title.slice(0, 120) : "") + (body ? ": " + body.slice(0, bodyMax) : "");
+    var url = String(c.url || "");
+    var web = /^https?:\/\//i.test(url);
+    var label = k === "file" && web ? "Link" : (KIND_LABEL[k] || "File");
+    var made = MADE_NAME.test(title);
+    var line = "- " + label + (c.user ? " they added" : made ? " made here" : "");
+    if (title && !made) line += " — " + title.slice(0, 120);
+    if (body) line += ": " + body.slice(0, bodyMax);
+    if (web) line += " (" + url.slice(0, 300) + ")";
+    return line;
+  }
+  function shortName(c) {
+    var k = kindOf(c);
+    var title = String(c.title || "").replace(/\s+/g, " ").trim();
+    var label = k === "file" && /^https?:\/\//i.test(String(c.url || "")) ? "Link" : (KIND_LABEL[k] || "File");
+    return label + (title && !MADE_NAME.test(title) ? " — " + title.slice(0, 80) : "");
+  }
+
+  // ── Connections: what feeds BeeZilla's steps ──────────────────────────────
+  // A step is one of BeeZilla's own cards: agent.md, a skill (or memory), an end
+  // result that is still a description (no file yet), or the conversation card where
+  // the page has one. Everything else — notes, pictures, music, files, links — is a
+  // thing. A line points the way the work flows (from → to). A step's inputs are the
+  // things with a line into it, followed back through other things (a chain), and
+  // everything inside an area with a line into it; never through another step, whose
+  // own inputs are listed under it. Each thing counts once per step.
+  var ANCHOR_X = 105, ANCHOR_Y = 34;       // where a card "is": its title, near the top
+  function isStep(c) {
+    if (!c) return false;
+    if (String(c.kind || "") === "chat") return true;
+    var k = kindOf(c);
+    if (k === "area") return false;
+    return k === "agent" || k === "skill" || k === "memory" || (roleOf(k) === "output" && !c.url && !c.contentType);
+  }
+  function inArea(area, c) {
+    if (!c || c === area || c.id === area.id || kindOf(c) === "area") return false;
+    var x = c.x + ANCHOR_X, y = c.y + ANCHOR_Y;
+    return x >= area.x && x <= area.x + (Number(area.w) || 0) && y >= area.y && y <= area.y + (Number(area.h) || 0);
+  }
+  function areaMembers(area, cards) { return (cards || []).filter(function (c) { return inArea(area, c); }); }
+  function feedsOf(cards, links) {
+    var list = (cards || []).filter(Boolean);
+    var byId = {};
+    list.forEach(function (c) { byId[c.id] = c; });
+    var into = {};
+    (links || []).forEach(function (l) {
+      if (!l || l.from === l.to || !byId[l.from] || !byId[l.to]) return;
+      (into[l.to] = into[l.to] || []).push(l.from);
+    });
+    var out = [];
+    list.filter(isStep).sort(byPlace).forEach(function (stepCard) {
+      var seen = {};
+      seen[stepCard.id] = true;
+      var items = [];
+      var queue = (into[stepCard.id] || []).slice();
+      while (queue.length) {
+        var id = queue.shift();
+        if (seen[id]) continue;
+        seen[id] = true;
+        var c = byId[id];
+        if (!c || isStep(c)) continue;
+        if (kindOf(c) === "area") {
+          areaMembers(c, list).sort(byPlace).forEach(function (m) {
+            if (seen[m.id] || isStep(m)) return;
+            seen[m.id] = true;
+            items.push(m);
+          });
+        } else items.push(c);
+        Array.prototype.push.apply(queue, into[id] || []);
+      }
+      if (items.length) out.push({ step: stepCard, items: items.slice(0, 24) });
+    });
+    return out;
+  }
+  // Everything upstream of one card (lines and areas), for lighting up what feeds it.
+  function upstreamOf(cardId, cards, links) {
+    var list = (cards || []).filter(Boolean);
+    var byId = {};
+    list.forEach(function (c) { byId[c.id] = c; });
+    var into = {};
+    (links || []).forEach(function (l) { if (l && byId[l.from] && byId[l.to]) (into[l.to] = into[l.to] || []).push(l); });
+    var cardsLit = {}, linksLit = {};
+    var queue = [cardId];
+    var seen = {};
+    while (queue.length) {
+      var id = queue.shift();
+      if (seen[id]) continue;
+      seen[id] = true;
+      (into[id] || []).forEach(function (l) {
+        linksLit[l.id] = true;
+        cardsLit[l.from] = true;
+        var from = byId[l.from];
+        if (from && kindOf(from) === "area") areaMembers(from, list).forEach(function (m) { cardsLit[m.id] = true; });
+        queue.push(l.from);
+      });
+    }
+    return { cards: cardsLit, links: linksLit };
+  }
+  function stepName(c) {
+    if (String(c.kind || "") === "chat") return "the conversation";
+    var k = kindOf(c);
+    var t = String(c.title || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (k === "agent") return "agent.md";
+    if (k === "skill" || k === "memory") return "the step “" + (t || "Untitled") + "”";
+    return "the end result “" + (t || "Untitled") + "”";
   }
 
   function mount(host, opts) {
@@ -887,6 +1045,20 @@
     foldBtn.appendChild(el("span", "wb-btn-label", "Fold away"));
     foldBtn.setAttribute("aria-label", "Fold the Idea Board away");
     foldBtn.title = "Fold the Idea Board away (it keeps everything)";
+    // Owner, 2026-11-20: "we should have a coming soon button… with some options on
+    // the right that says, sell this orchestration." Here: the whole board.
+    var sellBtn = el("button", "wb-btn wb-sell-btn");
+    sellBtn.type = "button";
+    sellBtn.appendChild(icon("sell"));
+    sellBtn.appendChild(el("span", "wb-btn-label", "Sell this orchestration"));
+    sellBtn.appendChild(el("span", "wb-soon", "Coming soon"));
+    sellBtn.title = "Sell, trade or open-source what you built here (coming soon)";
+    sellBtn.setAttribute("aria-label", "Sell this orchestration (coming soon)");
+    // The top bar's button is always the whole board; an area has its own on its label.
+    sellBtn.addEventListener("click", function () {
+      if (sell.hidden || sellFor !== null) openSell(null); else closeSell();
+    });
+    tools.appendChild(sellBtn);
     tools.appendChild(foldBtn);
     head.appendChild(tools);
 
@@ -938,7 +1110,46 @@
     svg.setAttribute("width", "1");
     svg.setAttribute("height", "1");
     svg.style.overflow = "visible";
+    // Arrowheads: amber where the line feeds one of BeeZilla's steps, grey otherwise.
+    var arrowId = "wbArrow" + Math.random().toString(36).slice(2, 8);
+    var defs = document.createElementNS(SVGNS, "defs");
+    [["feed", "wb-arrow-feed"], ["plain", "wb-arrow-plain"], ["sel", "wb-arrow-sel"]].forEach(function (m) {
+      var mk = document.createElementNS(SVGNS, "marker");
+      mk.setAttribute("id", arrowId + "-" + m[0]);
+      mk.setAttribute("viewBox", "0 0 10 10");
+      mk.setAttribute("refX", "8.5");
+      mk.setAttribute("refY", "5");
+      mk.setAttribute("markerWidth", "7");
+      mk.setAttribute("markerHeight", "7");
+      mk.setAttribute("markerUnits", "userSpaceOnUse");
+      mk.setAttribute("orient", "auto");
+      var tip = document.createElementNS(SVGNS, "path");
+      tip.setAttribute("d", "M0,0 L10,5 L0,10 z");
+      tip.setAttribute("class", m[1]);
+      mk.appendChild(tip);
+      defs.appendChild(mk);
+    });
+    svg.appendChild(defs);
     world.appendChild(svg);
+    // The × on a selected line, at its middle (Poppy's way: no hunting for the line).
+    var linkX = el("button", "wb-link-x", "×");
+    linkX.type = "button";
+    linkX.hidden = true;
+    linkX.title = "Remove this line";
+    linkX.setAttribute("aria-label", "Remove this line");
+    linkX.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    linkX.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!selectedLink) return;
+      snapshot();
+      state.links = state.links.filter(function (l) { return l.id !== selectedLink; });
+      selectedLink = null;
+      drawLinks();
+      persist();
+      say("Line removed. Ctrl/⌘+Z brings it back.");
+      canvas.focus({ preventScroll: true });
+    });
+    world.appendChild(linkX);
     canvas.appendChild(world);
     var marquee = el("div", "wb-marquee");
     marquee.hidden = true;
@@ -971,7 +1182,7 @@
     var keysBtn = zbtn("keys", "Keyboard shortcuts (F1)", function () { showKeys(keyList.hidden); });
     function showKeys(open) {
       keyList.hidden = !open;
-      if (open) hist.hidden = true;
+      if (open) { hist.hidden = true; closeSell(); }
     }
 
     // Shortcuts are never key-only: the list is one click away in the corner.
@@ -1022,6 +1233,17 @@
       histBtn.focus({ preventScroll: true });
     });
 
+    // Sell this orchestration (coming soon): the right-hand panel. Built by paintSell().
+    var sell = el("div", "wb-sellpanel");
+    sell.hidden = true;
+    sell.setAttribute("role", "dialog");
+    sell.setAttribute("aria-label", "Sell this orchestration");
+    // Keys inside the panel are the panel's; Esc closes it.
+    sell.addEventListener("keydown", function (e) {
+      e.stopPropagation();
+      if (e.key === "Escape") { closeSell(); sellBtn.focus({ preventScroll: true }); }
+    });
+
     var selbar = el("div", "wb-selbar");
     selbar.hidden = true;
     selbar.setAttribute("role", "toolbar");
@@ -1033,6 +1255,29 @@
     recipeBtn.appendChild(icon("recipe"));
     recipeBtn.appendChild(el("span", null, "Create recipe"));
     selbar.appendChild(recipeBtn);
+    var areaBtn = el("button", "wb-selbtn wb-area-btn");
+    areaBtn.type = "button";
+    areaBtn.appendChild(icon("area"));
+    areaBtn.appendChild(el("span", null, "Make an area"));
+    areaBtn.title = "Draw an area around these cards, to move, connect, save or share them together";
+    areaBtn.addEventListener("click", function () {
+      var list = state.cards.filter(function (c) { return selected[c.id] && kindOf(c) !== "area"; });
+      var made = makeArea(list);
+      if (made) { say("Area made. Drag its label to move everything inside; double-click the label to name it.", 4200); }
+    });
+    selbar.appendChild(areaBtn);
+    var selSellBtn = el("button", "wb-selbtn wb-selsell-btn");
+    selSellBtn.type = "button";
+    selSellBtn.appendChild(icon("sell"));
+    selSellBtn.appendChild(el("span", null, "Sell this orchestration"));
+    selSellBtn.appendChild(el("span", "wb-soon", "Soon"));
+    selSellBtn.title = "Sell, trade or open-source these cards (coming soon)";
+    selSellBtn.addEventListener("click", function () {
+      var area = state.cards.filter(function (c) { return selected[c.id] && kindOf(c) === "area"; })[0];
+      if (!area) area = makeArea(state.cards.filter(function (c) { return selected[c.id] && kindOf(c) !== "area"; }));
+      if (area) openSell(area.id);
+    });
+    selbar.appendChild(selSellBtn);
     var removeBtn = el("button", "wb-selbtn");
     removeBtn.type = "button";
     removeBtn.appendChild(icon("trash"));
@@ -1076,6 +1321,7 @@
     body.appendChild(zoom);
     body.appendChild(keyList);
     body.appendChild(hist);
+    body.appendChild(sell);
     body.appendChild(selbar);
     body.appendChild(toast);
     body.appendChild(sideHome);
@@ -1122,6 +1368,7 @@
       hist.hidden = !open;
       if (!open) return;
       keyList.hidden = true;
+      closeSell();
       paintSync();
       loadHistory();
       histClose.focus({ preventScroll: true });
@@ -1321,6 +1568,7 @@
     }
     function fillCard(n, c) {
       if (kindOf(c) === "chat") { fillChat(n, c); return; }
+      if (kindOf(c) === "area") { fillArea(n, c); return; }
       var keep = Array.prototype.filter.call(n.childNodes, function (x) { return x.classList && (x.classList.contains("wb-handle") || x.classList.contains("wb-rm")); });
       n.textContent = "";
       var k = kindOf(c);
@@ -1381,12 +1629,7 @@
         rm.title = "Remove";
         rm.addEventListener("click", function (e) { e.stopPropagation(); snapshot(); removeCards([c.id]); });
         n.appendChild(rm);
-        CORNERS.forEach(function (corner) {
-          var h = el("span", "wb-handle wb-" + corner);
-          h.setAttribute("data-corner", corner);
-          h.title = "Drag to another card to connect";
-          n.appendChild(h);
-        });
+        n.appendChild(portDot(c));
       }
       n.setAttribute("aria-label", (KIND_LABEL[k] || "Card") + ": " + (c.title || "Untitled"));
     }
@@ -1398,7 +1641,8 @@
       n.style.top = c.y + "px";
       fillCard(n, c);
       wireCard(n, c);
-      world.appendChild(n);
+      if (kindOf(c) === "area") { world.insertBefore(n, world.firstChild); sizeArea(c, n); }
+      else world.appendChild(n);
       nodes[c.id] = n;
       return n;
     }
@@ -1498,6 +1742,7 @@
       selbar.hidden = n === 0;
       if (n === 0) { namer.hidden = true; recipeBtn.hidden = false; }
       selCount.textContent = n === 1 ? "1 card" : n + " cards";
+      areaBtn.hidden = !state.cards.some(function (c) { return selected[c.id] && kindOf(c) !== "area"; });
       positionSelbar();
     }
     function positionSelbar() {
@@ -1554,6 +1799,8 @@
         e.preventDefault();
         canvas.focus({ preventScroll: true });
         n.setPointerCapture(e.pointerId);
+        if (handle && handle.classList.contains("wb-port")) { startConnect(e, n, c); return; }
+        if (e.target.closest && e.target.closest(".wb-grip")) { startResize(e, n, c); return; }
         if (handle) {
           var corner = handle.getAttribute("data-corner");
           var start = cornerXY(c, corner);
@@ -1582,7 +1829,7 @@
         }
         if (!selected[c.id]) select(c.id, e.shiftKey);
         else if (e.shiftKey) { select(c.id, true); return; }
-        var moving = state.cards.filter(function (x) { return selected[x.id]; });
+        var moving = movingSet();
         var startP = toWorld(e.clientX, e.clientY);
         var orig = moving.map(function (x) { return { c: x, x: x.x, y: x.y }; });
         var moved = false;
@@ -1646,6 +1893,7 @@
         k === "skill" ? "What this step does, in your words." :
         roleOf(k) === "output" ? "What you want to have at the end — the finished thing." : "Anything.";
       b.setAttribute("aria-label", "Text");
+      if (k === "area") { b.hidden = true; t.placeholder = "Name this area"; }
       editor.appendChild(b);
       var row = el("div", "wb-ed-row");
       var go = el("button", "wb-selbtn wb-primary", "Save");
@@ -1675,7 +1923,13 @@
       editor.style.top = clamp(r.top - br.top, 8, Math.max(8, br.height - 320)) + "px";
       (c.body ? b : t).focus();
     }
-    function closeEditor() { if (editor) { editor.remove(); editor = null; } }
+    function closeEditor() {
+      if (editor) { editor.remove(); editor = null; }
+      // A step made by letting go of a line on empty board, then left blank: gone again.
+      var blank = blankStep ? cardById(blankStep) : null;
+      blankStep = null;
+      if (blank && !String(blank.body || "").trim() && blank.title === "New step") removeCards([blank.id]);
+    }
 
     // ── Lines ────────────────────────────────────────────────────────────
     function link(fromId, toId, fc, tc, flowLink) {
@@ -1698,22 +1952,58 @@
       var dir = dirA || (b.x >= a.x ? 1 : -1);
       return "M" + a.x + "," + a.y + " C" + (a.x + dx * dir) + "," + a.y + " " + (b.x - dx * dir) + "," + b.y + " " + b.x + "," + b.y;
     }
+    // A line leaves a card from its dot (right edge) and comes into the next card from
+    // the left, the way the work flows. Lines drawn corner to corner before keep that.
+    function portXY(c) {
+      var n = nodes[c.id];
+      if (kindOf(c) === "area") return { x: c.x + (Number(c.w) || 0), y: c.y + 20 };
+      var w = n ? n.offsetWidth : 210, h = n ? n.offsetHeight : 120;
+      return { x: c.x + w, y: c.y + Math.min(h / 2, 56) };
+    }
+    function inXY(c) {
+      var n = nodes[c.id];
+      if (kindOf(c) === "area") return { x: c.x, y: c.y + 20 };
+      var h = n ? n.offsetHeight : 120;
+      return { x: c.x - 3, y: c.y + Math.min(h / 2, 56) };
+    }
+    function flowCurve(p, q) {
+      var dx = Math.max(40, Math.abs(q.x - p.x) * 0.5);
+      return "M" + p.x + "," + p.y + " C" + (p.x + dx) + "," + p.y + " " + (q.x - dx) + "," + q.y + " " + q.x + "," + q.y;
+    }
+    // What lights up: everything feeding the one step that is selected.
+    function litFor() {
+      var ids = Object.keys(selected);
+      var c = ids.length === 1 ? cardById(ids[0]) : null;
+      return c && isStep(c) ? upstreamOf(c.id, state.cards, state.links) : { cards: {}, links: {} };
+    }
     function drawLinks() {
       Array.prototype.slice.call(svg.querySelectorAll(".wb-link:not(.wb-preview), .wb-hit")).forEach(function (p) { p.remove(); });
+      var lit = litFor();
+      var feeding = {}, live = {};
+      state.cards.forEach(function (c) {
+        if (!isStep(c)) return;
+        var up = upstreamOf(c.id, state.cards, state.links);
+        Object.keys(up.links).forEach(function (id) { feeding[id] = true; if (c.state === "running") live[id] = true; });
+      });
+      // BeeZilla's own work lines (agent.md → skill → what it made) stay the work's colour
+      // too; only a line between two things that leads to no step is plain (grey, dashed).
+      state.links.forEach(function (l) { if (isStep(cardById(l.from)) || isStep(cardById(l.to))) feeding[l.id] = true; });
+      var selPath = null;
       state.links.forEach(function (l) {
         var a = cardById(l.from), b = cardById(l.to);
         if (!a || !b) return;
         var d;
         if (l.fc && l.tc) d = curve(cornerXY(a, l.fc), cornerXY(b, l.tc));
-        else {
-          var pa = sidePoint(a, b), pb = sidePoint(b, a);
-          d = curve(pa, pb, pa.dir, pa.h);
-        }
+        else d = flowCurve(portXY(a), inXY(b));
         var p = document.createElementNS(SVGNS, "path");
-        var running = b.state === "running";
-        p.setAttribute("class", "wb-link" + (l.id === selectedLink ? " wb-sel" : "") + (l.fresh ? " wb-draw" : "") + (running ? " wb-live" : "") + (b.state === "failed" ? " wb-bad" : ""));
+        var running = b.state === "running" || live[l.id];
+        var sel = l.id === selectedLink;
+        p.setAttribute("class", "wb-link" + (feeding[l.id] ? " wb-feed" : " wb-plain") + (lit.links[l.id] ? " wb-lit" : "") +
+          (sel ? " wb-sel" : "") + (l.fresh ? " wb-draw" : "") + (running ? " wb-live" : "") + (b.state === "failed" ? " wb-bad" : ""));
         p.setAttribute("d", d);
+        p.setAttribute("marker-end", "url(#" + arrowId + "-" + (sel ? "sel" : feeding[l.id] || lit.links[l.id] ? "feed" : "plain") + ")");
         svg.appendChild(p);
+        if (sel) selPath = p;
         if (l.fresh) { delete l.fresh; }
         var hit = document.createElementNS(SVGNS, "path");
         hit.setAttribute("class", "wb-hit");
@@ -1729,6 +2019,341 @@
         });
         svg.appendChild(hit);
       });
+      Object.keys(nodes).forEach(function (id) { nodes[id].classList.toggle("wb-lit", !!lit.cards[id]); });
+      // An area's count follows what is in it now.
+      state.cards.forEach(function (a) {
+        if (kindOf(a) !== "area" || !nodes[a.id]) return;
+        var cnt = nodes[a.id].querySelector(".wb-area-count");
+        var k = areaMembers(a, state.cards).length;
+        if (cnt) cnt.textContent = k === 1 ? "1 card" : k + " cards";
+      });
+      linkX.hidden = !selPath;
+      if (selPath) {
+        try {
+          var mid = selPath.getPointAtLength(selPath.getTotalLength() / 2);
+          linkX.style.left = mid.x + "px";
+          linkX.style.top = mid.y + "px";
+        } catch (_) { linkX.hidden = true; }
+      }
+    }
+
+    // ── Connecting: drag a card's dot onto another card ─────────────────────
+    var blankStep = null;        // a step made by letting go on empty board, until it has words
+    function portDot(c) {
+      var h = el("span", "wb-handle wb-port");
+      h.setAttribute("data-port", "out");
+      h.title = kindOf(c) === "area"
+        ? "Drag onto a step: BeeZilla uses everything in this area there"
+        : "Drag onto another card to connect it. Into one of BeeZilla's steps, it means: use this here.";
+      return h;
+    }
+    function cardAt(x, y) {
+      var t = document.elementFromPoint(x, y);
+      var n = t && t.closest ? t.closest(".wb-card") : null;
+      if (!n) return null;
+      var hit = null;
+      Object.keys(nodes).forEach(function (id) { if (nodes[id] === n) hit = cardById(id); });
+      return hit;
+    }
+    function startConnect(e, n, c) {
+      var start = portXY(c);
+      preview = document.createElementNS(SVGNS, "path");
+      preview.setAttribute("class", "wb-link wb-preview");
+      preview.setAttribute("marker-end", "url(#" + arrowId + "-feed)");
+      svg.appendChild(preview);
+      root.classList.add("wb-connecting");
+      var over = null;
+      function mark(t) {
+        if (over === t) return;
+        if (over && nodes[over.id]) nodes[over.id].classList.remove("wb-target");
+        over = t;
+        if (over && nodes[over.id]) nodes[over.id].classList.add("wb-target");
+      }
+      var move = function (ev) {
+        var p = toWorld(ev.clientX, ev.clientY);
+        var t = cardAt(ev.clientX, ev.clientY);
+        if (t && (t.id === c.id || kindOf(t) === "area")) t = null;
+        mark(t);
+        if (preview) preview.setAttribute("d", flowCurve(start, t ? inXY(t) : p));
+      };
+      var done = function (ev, cancelled) {
+        n.removeEventListener("pointermove", move);
+        n.removeEventListener("pointerup", up);
+        n.removeEventListener("pointercancel", cancel);
+        document.removeEventListener("keydown", esc, true);
+        if (preview) { preview.remove(); preview = null; }
+        root.classList.remove("wb-connecting");
+        var to = over;
+        mark(null);
+        if (cancelled) return;
+        if (to) {
+          var dup = state.links.some(function (l) { return (l.from === c.id && l.to === to.id) || (l.from === to.id && l.to === c.id); });
+          if (dup) { say("These two are already connected."); return; }
+          snapshot();
+          link(c.id, to.id, null, null, true);
+          persist();
+          if (isStep(to)) say("Connected. BeeZilla uses it for " + stepName(to) + " from your next message.", 4200);
+          return;
+        }
+        // Let go on empty board: a new step there, already connected (nothing dangles).
+        var target = document.elementFromPoint(ev.clientX, ev.clientY);
+        if (!target || !canvas.contains(target) || (target.closest && target.closest(".wb-card"))) return;
+        var p = toWorld(ev.clientX, ev.clientY);
+        snapshot();
+        var made = addCard({ kind: "skill", title: "New step", user: true, exact: true }, { x: Math.round(p.x + 6), y: Math.round(p.y - 34) }, true);
+        if (!made) return;
+        link(c.id, made.id, null, null, true);
+        persist();
+        select(made.id, false);
+        openEditor(made);
+        blankStep = made.id;
+      };
+      var up = function (ev) { done(ev, false); };
+      var cancel = function (ev) { done(ev, true); };
+      var esc = function (ev) { if (ev.key === "Escape") { ev.stopPropagation(); ev.preventDefault(); done(ev, true); } };
+      n.addEventListener("pointermove", move);
+      n.addEventListener("pointerup", up);
+      n.addEventListener("pointercancel", cancel);
+      document.addEventListener("keydown", esc, true);
+    }
+
+    // ── Areas: cordon off a piece of the board ─────────────────────────────
+    // Owner, 2026-11-20: "an easy way to cordon off a piece of it and share it… a
+    // little piece of what they do, or an entire whiteboard". An area is a card of its
+    // own (kind "area", with a width and height) drawn under everything; what's inside
+    // is whatever sits in it now, so moving a card in or out changes it.
+    function sizeArea(c, n) {
+      n = n || nodes[c.id];
+      if (!n) return;
+      n.style.width = Math.max(200, Number(c.w) || 200) + "px";
+      n.style.height = Math.max(140, Number(c.h) || 140) + "px";
+    }
+    var SHARE_LABEL = { drops: "Honey Drops", honey: "Honey", open: "Open source" };
+    function fillArea(n, c) {
+      n.textContent = "";
+      n.className = "wb-card wb-k-area" + (selected[c.id] ? " wb-on" : "") + (c.share ? " wb-shared" : "");
+      var barEl = el("div", "wb-area-bar");
+      barEl.appendChild(icon("area", "wb-cico"));
+      barEl.appendChild(el("span", "wb-area-name", c.title || "My orchestration"));
+      var count = areaMembers(c, state.cards).length;
+      barEl.appendChild(el("span", "wb-area-count", count === 1 ? "1 card" : count + " cards"));
+      if (c.share) barEl.appendChild(el("span", "wb-area-tag", (SHARE_LABEL[c.share] || "Shared") + " · coming soon"));
+      var sb = el("button", "wb-area-sell");
+      sb.type = "button";
+      sb.appendChild(icon("sell"));
+      sb.appendChild(el("span", null, "Sell"));
+      sb.appendChild(el("span", "wb-soon", "Soon"));
+      sb.title = "Sell this orchestration (coming soon)";
+      sb.setAttribute("aria-label", "Sell this orchestration: " + (c.title || "area") + " (coming soon)");
+      sb.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      sb.addEventListener("click", function (e) { e.stopPropagation(); openSell(c.id); });
+      barEl.appendChild(sb);
+      barEl.title = "Drag to move this area and everything in it. Double-click to name it.";
+      n.appendChild(barEl);
+      var rm = el("button", "wb-rm");
+      rm.type = "button";
+      rm.textContent = "×";
+      rm.setAttribute("aria-label", "Remove the area " + (c.title || "") + " (the cards stay)");
+      rm.title = "Remove the area (the cards stay)";
+      rm.addEventListener("click", function (e) { e.stopPropagation(); snapshot(); removeCards([c.id]); });
+      n.appendChild(rm);
+      var grip = el("span", "wb-grip");
+      grip.title = "Drag to make the area bigger or smaller";
+      n.appendChild(grip);
+      n.appendChild(portDot(c));
+      n.setAttribute("aria-label", "Area: " + (c.title || "My orchestration") + ", " + (count === 1 ? "1 card" : count + " cards"));
+      sizeArea(c, n);
+    }
+    function makeArea(list, name) {
+      list = (list || []).filter(function (c) { return kindOf(c) !== "area"; });
+      var b = bounds(list);
+      if (!b) { say("Select some cards first."); return null; }
+      var pad = 26, top = 48;
+      var agent = list.filter(function (c) { return kindOf(c) === "agent"; })[0];
+      snapshot();
+      var c = addCard({
+        kind: "area", user: true, exact: true,
+        title: name || (agent && agent.title && agent.title !== "agent.md" ? agent.title : "My orchestration"),
+      }, { x: Math.round(b.x1 - pad), y: Math.round(b.y1 - top) }, true);
+      if (!c) return null;
+      c.w = Math.round(b.x2 - b.x1 + pad * 2);
+      c.h = Math.round(b.y2 - b.y1 + top + pad);
+      fillCard(nodes[c.id], c);
+      selected = {};
+      selected[c.id] = true;
+      drawLinks();
+      paintSelection();
+      persist();
+      return c;
+    }
+    function withAreaContents(list) {
+      var out = list.slice();
+      list.forEach(function (c) {
+        if (kindOf(c) !== "area") return;
+        areaMembers(c, state.cards).forEach(function (m) { if (out.indexOf(m) < 0) out.push(m); });
+      });
+      return out;
+    }
+    // What a drag (or an arrow key) moves: the selection, and what's inside a selected area.
+    function movingSet() { return withAreaContents(state.cards.filter(function (x) { return selected[x.id]; })); }
+    function startResize(e, n, c) {
+      var startP = toWorld(e.clientX, e.clientY);
+      var w0 = Number(c.w) || 200, h0 = Number(c.h) || 140;
+      var moved = false;
+      var mv = function (ev) {
+        var p = toWorld(ev.clientX, ev.clientY);
+        var dx = p.x - startP.x, dy = p.y - startP.y;
+        if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+        if (!moved) { moved = true; snapshot(); }
+        c.w = Math.max(200, Math.round(w0 + dx));
+        c.h = Math.max(140, Math.round(h0 + dy));
+        sizeArea(c, n);
+        drawLinks();
+      };
+      var upr = function () {
+        n.removeEventListener("pointermove", mv);
+        n.removeEventListener("pointerup", upr);
+        if (moved) { fillCard(n, c); persist(); }
+      };
+      n.addEventListener("pointermove", mv);
+      n.addEventListener("pointerup", upr);
+    }
+
+    // ── Sell this orchestration (coming soon) ───────────────────────────────
+    // Owner, 2026-11-20: "sell this orchestration. Trade for honey drop or honey, or
+    // open source it… it should ask if it can use… the outputs you've used before, to
+    // help advertise it, so that when it shows up in the inspiration panel and in the
+    // recipes panel, we have a lot of outputs to work with as examples."
+    // Nothing is listed or charged yet: the choice is kept on the area (share,
+    // examples, shareAt) and saved with the board, ready for when the store opens.
+    var sellFor = null;          // the area's id, or null for the whole board
+    var sellStep = "choose";
+    var sellPick = null;
+    var SHARE_OPTIONS = [
+      ["drops", "Trade for Honey Drops", "People pay a few Honey Drops each time they use it."],
+      ["honey", "Trade for Honey", "People pay once in Honey for their own copy to keep."],
+      ["open", "Open source it", "Free for everyone to use, learn from and build on."],
+    ];
+    function sellCards() {
+      var area = sellFor ? cardById(sellFor) : null;
+      return area ? areaMembers(area, state.cards) : state.cards.filter(function (c) { return kindOf(c) !== "area"; });
+    }
+    function madeIn(list) {
+      return list.filter(function (c) { var k = kindOf(c); return roleOf(k) === "output" && (c.url || c.thumb) && c.state !== "running"; });
+    }
+    function openSell(areaId) {
+      hist.hidden = true;
+      keyList.hidden = true;
+      sellFor = areaId || null;
+      var area = sellFor ? cardById(sellFor) : null;
+      sellPick = area && area.share ? area.share : null;
+      sellStep = area && area.share ? "saved" : "choose";
+      paintSell();
+      sell.hidden = false;
+      var first = sell.querySelector("button.wb-sell-opt") || sell.querySelector(".wb-sell-row button") || sell.querySelector("button");
+      if (first) first.focus({ preventScroll: true });
+    }
+    function closeSell() { if (sell) sell.hidden = true; }
+    function sellButton(cls, label, fn) {
+      var b = el("button", cls, label);
+      b.type = "button";
+      b.addEventListener("click", fn);
+      return b;
+    }
+    function paintSell() {
+      sell.textContent = "";
+      var area = sellFor ? cardById(sellFor) : null;
+      var list = sellCards();
+      var headEl = el("div", "wb-sell-head");
+      var h = el("strong", null, "Sell this orchestration");
+      headEl.appendChild(h);
+      headEl.appendChild(el("span", "wb-soon", "Coming soon"));
+      var x = sellButton("wb-btn wb-sell-x", "Close", function () { closeSell(); sellBtn.focus({ preventScroll: true }); });
+      headEl.appendChild(x);
+      sell.appendChild(headEl);
+      sell.appendChild(el("p", "wb-sell-what", (area ? "This area: " + (area.title || "My orchestration") : "The whole board") +
+        " · " + (list.length === 1 ? "1 card" : list.length + " cards")));
+      if (!list.length) {
+        sell.appendChild(el("p", "wb-sell-note", "Nothing here yet. Talk to BeeZilla or put your own steps on the board, then come back to share it."));
+        return;
+      }
+      if (sellStep === "choose") {
+        sell.appendChild(el("p", "wb-sell-lede", "Someone may need exactly what you built. Share it, and they start where you finished instead of from scratch."));
+        SHARE_OPTIONS.forEach(function (o) {
+          var b = el("button", "wb-sell-opt" + (sellPick === o[0] ? " wb-picked" : ""));
+          b.type = "button";
+          b.setAttribute("data-share", o[0]);
+          b.appendChild(el("strong", null, o[1]));
+          b.appendChild(el("span", null, o[2]));
+          b.addEventListener("click", function () { sellPick = o[0]; sellStep = "examples"; paintSell(); focusFirst(); });
+          sell.appendChild(b);
+        });
+        return;
+      }
+      if (sellStep === "examples") {
+        var made = madeIn(list);
+        sell.appendChild(el("p", "wb-sell-q", "Can we show what it made?"));
+        if (made.length) {
+          var strip = el("div", "wb-sell-strip");
+          made.slice(0, 8).forEach(function (c) {
+            var k = kindOf(c);
+            if (k === "image" && c.url) {
+              var img = el("img", "wb-sell-thumb");
+              img.src = c.url; img.alt = ""; img.loading = "lazy"; img.draggable = false;
+              strip.appendChild(img);
+            } else if (c.thumb) {
+              var t = el("img", "wb-sell-thumb");
+              t.src = c.thumb; t.alt = ""; t.draggable = false;
+              strip.appendChild(t);
+            } else strip.appendChild(el("span", "wb-sell-chip", KIND_LABEL[k] || "File"));
+          });
+          sell.appendChild(strip);
+          sell.appendChild(el("p", "wb-sell-note", "What it made would appear as examples in Inspiration and Recipes, so people can see what they'll get before they use it."));
+        } else {
+          sell.appendChild(el("p", "wb-sell-note", "It hasn't made anything yet. When it makes pictures, music or other things, they could appear as examples in Inspiration and Recipes."));
+        }
+        var row = el("div", "wb-sell-row");
+        row.appendChild(sellButton("wb-selbtn wb-primary", "Yes, show my examples", function () { saveShare("yes"); }));
+        row.appendChild(sellButton("wb-selbtn", "No, keep them private", function () { saveShare("no"); }));
+        sell.appendChild(row);
+        sell.appendChild(sellButton("wb-sell-back", "Back", function () { sellStep = "choose"; paintSell(); focusFirst(); }));
+        return;
+      }
+      // saved
+      var opt = SHARE_OPTIONS.filter(function (o) { return o[0] === (area && area.share); })[0];
+      sell.appendChild(el("p", "wb-sell-q", "Saved for when the store opens"));
+      if (opt && area) {
+        sell.appendChild(el("p", "wb-sell-pick", opt[1] + " · " + (area.examples === "yes" ? "examples shown" : "examples kept private")));
+      }
+      sell.appendChild(el("p", "wb-sell-note", "The Orchestration Store is coming soon. When it opens, this one is ready to list, and you'll find what other people built there too, ready to start from."));
+      var row2 = el("div", "wb-sell-row");
+      row2.appendChild(sellButton("wb-selbtn wb-primary", "Done", function () { closeSell(); sellBtn.focus({ preventScroll: true }); }));
+      row2.appendChild(sellButton("wb-selbtn", "Change", function () { sellStep = "choose"; paintSell(); focusFirst(); }));
+      sell.appendChild(row2);
+    }
+    function focusFirst() {
+      var b = sell.querySelector("button.wb-sell-opt") || sell.querySelector(".wb-sell-row button");
+      if (b) b.focus({ preventScroll: true });
+    }
+    function saveShare(examples) {
+      var area = sellFor ? cardById(sellFor) : null;
+      if (!area) {
+        // The whole board: an area around everything, so it's plain what's included.
+        var all = state.cards.filter(function (c) { return kindOf(c) !== "area"; });
+        area = state.cards.filter(function (c) {
+          return kindOf(c) === "area" && all.every(function (m) { return inArea(c, m); });
+        })[0] || makeArea(all, "Whole board");
+        if (!area) return;
+        sellFor = area.id;
+      } else snapshot();
+      area.share = sellPick || "open";
+      area.examples = examples === "yes" ? "yes" : "no";
+      area.shareAt = new Date().toISOString();
+      if (nodes[area.id]) fillCard(nodes[area.id], area);
+      persist();
+      sellStep = "saved";
+      paintSell();
+      focusFirst();
     }
 
     // ── Pointer: the board itself (pan, box-select, place a new card) ────────
@@ -1795,7 +2420,8 @@
           var n = nodes[c.id];
           var cw = n ? n.offsetWidth : 180, ch = n ? n.offsetHeight : 120;
           // Miro's rule today: a plain drag selects every card the box touches.
-          if (c.x < wb.x && c.x + cw > wa.x && c.y < wb.y && c.y + ch > wa.y) selected[c.id] = true;
+          if (kindOf(c) === "area") { if (c.x >= wa.x && c.x + cw <= wb.x && c.y >= wa.y && c.y + ch <= wb.y) selected[c.id] = true; }
+          else if (c.x < wb.x && c.x + cw > wa.x && c.y < wb.y && c.y + ch > wa.y) selected[c.id] = true;
         });
         paintSelection();
       };
@@ -1843,7 +2469,7 @@
       if (mod && (e.key === "a" || e.key === "A")) { e.preventDefault(); selected = {}; state.cards.forEach(function (c) { selected[c.id] = true; }); paintSelection(); return; }
       if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); return; }
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelected(); return; }
-      if (e.key === "Escape") { closeEditor(); keyList.hidden = true; hist.hidden = true; clearSelection(); setTool("select"); return; }
+      if (e.key === "Escape") { closeEditor(); keyList.hidden = true; hist.hidden = true; closeSell(); clearSelection(); setTool("select"); return; }
       // Miro's keys: Alt/Option+1 fits everything, Alt/Option+2 zooms to the
       // selection, Ctrl/⌘+0 goes back to 100%, F1 lists the shortcuts.
       if ((e.altKey || e.shiftKey) && e.code === "Digit1") { e.preventDefault(); fit(); return; }
@@ -1855,7 +2481,7 @@
         e.preventDefault();
         var step = e.shiftKey ? 100 : 10;
         snapshot();
-        state.cards.forEach(function (c) { if (selected[c.id]) { c.x += d[0] * step; c.y += d[1] * step; place(c); } });
+        movingSet().forEach(function (c) { c.x += d[0] * step; c.y += d[1] * step; place(c); });
         drawLinks(); positionSelbar(); persist();
         return;
       }
@@ -1925,6 +2551,9 @@
     });
     function selectionGraph() {
       var list = state.cards.filter(function (c) { return selected[c.id] && c.id !== CHAT_ID; });
+      // An area is a frame, not a node: what the recipe should receive is the pictures and
+      // cards inside it (withAreaContents), never the box itself.
+      list = withAreaContents(list).filter(function (c) { return kindOf(c) !== "area"; });
       var ids = {};
       list.forEach(function (c) { ids[c.id] = true; });
       return {
@@ -2123,7 +2752,7 @@
     }
 
     // ── What the person changed, as instructions for their next message ──────
-    function instructions() { return compile(state.cards); }
+    function instructions() { return compile(state.cards, state.links); }
 
     // ── The account's copy, put on the board in place ────────────────────
     // Cards keep their objects where they still exist, so an upload or an edit in
@@ -2267,7 +2896,7 @@
     /** The person's edits on a board that is not on screen (folded away). */
     instructionsFor: function (boardId) {
       var v = load(keyFor(boardId));
-      return v ? compile(v.cards) : "";
+      return v ? compile(v.cards, v.links) : "";
     },
     /** The board in front of a new conversation ("talk") joins it once it has an id. */
     carry: carry,
