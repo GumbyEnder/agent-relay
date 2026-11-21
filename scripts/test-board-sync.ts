@@ -61,7 +61,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     return db.query(text, values).then((r) => r.rows);
   }) as unknown as Sql;
   (sql as unknown as { query: unknown }).query = (text: string, params?: unknown[]) => db.query(text, params ?? []).then((r) => r.rows);
-  for (const [id, user] of [["sess_a1", "u1"], ["sess_a2", "u1"], ["sess_a3", "u1"], ["sess_b1", "u2"]]) {
+  for (const [id, user] of [["sess_a1", "u1"], ["sess_a2", "u1"], ["sess_a3", "u1"], ["sess_b1", "u2"], ["sess_c6", "u6"]]) {
     await db.query("INSERT INTO buzzy_sessions (id, user_id) VALUES ($1, $2)", [id, user]);
   }
   const route = (user: string, method: string, rest: string, body?: unknown) => wb.whiteboardRoute(sql, user, method, rest, body);
@@ -291,6 +291,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     sync(id: string): Promise<unknown>;
     carry(from: string, to: string): Promise<unknown>;
     sweep(gap?: number): Promise<number>;
+    reset(id: string): Promise<unknown>;
     merge(b: unknown, m: unknown, t: unknown): { cards: Card[]; links: Array<Record<string, unknown>> };
     instructionsFor(id: string): string;
   };
@@ -565,6 +566,37 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     await A.api.sync("sess_a2");
     eq([e.backoff, e.status], [0, "saved"], "and starts over once it saves");
     truthy(ids(await account("u1", "sess_a2")).includes("while-the-server-fails"));
+  });
+  // A visit empties the board in front of a new conversation, and its comment promises
+  // the earlier versions stay in History. A blank save inside the five-minute window
+  // used to roll into the entry the drawing had just made, so the drawing was gone.
+  await ok("a new visit starts blank, and the board drawn a minute ago is still in History", async () => {
+    const disk = new Map<string, string>();
+    const drew = computer("u6", disk);
+    await drew.api.sync("talk");
+    drew.edit("talk", (b) => { b.cards.push(card("two-1"), card("two-2")); });
+    await drew.api.sync("talk");
+    eq(ids(await account("u6", "talk")), ["two-1", "two-2"]);
+    const reloaded = computer("u6", disk);       // the same browser, opened again
+    await reloaded.api.reset("talk");
+    eq(ids(await account("u6", "talk")), [], "a new visit starts blank");
+    const hist = await versions("u6", "talk");
+    const drawn = hist.find((v) => v.cards === 2);
+    truthy(drawn, `the two cards are still in History (cards: ${JSON.stringify(hist.map((v) => v.cards))})`);
+    const r = await route("u6", "POST", `talk/versions/${drawn!.id}/restore`);
+    eq(ids(r.body.board as wb.StoredWhiteboard), ["two-1", "two-2"], "and going back to it brings them back");
+  });
+  await ok("the board inside a conversation survives a reload", async () => {
+    // "talk" is emptied on a visit; a conversation's board is only read back.
+    const disk = new Map<string, string>();
+    const drew = computer("u6", disk);
+    await route("u6", "PUT", "sess_c6", { state: board([card("kept-1"), card("kept-2")]), baseRev: null });
+    await drew.api.sync("sess_c6");
+    eq(ids(drew.read("sess_c6")), ["kept-1", "kept-2"], "read on this computer");
+    const reloaded = computer("u6", disk);       // the same browser, opened again
+    await reloaded.api.sync("sess_c6");          // what voice-stage.js does for a conversation
+    eq(ids(reloaded.read("sess_c6")), ["kept-1", "kept-2"], "still there after the reload");
+    eq(ids(await account("u6", "sess_c6")), ["kept-1", "kept-2"]);
   });
   await ok("the merge on its own: two copies that never met don't land on top of each other", () => {
     const m = A.api.merge(null, { cards: [card("mine", { x: 0, y: 0 })], links: [] }, { cards: [card("theirs", { x: 0, y: 0 })], links: [] });

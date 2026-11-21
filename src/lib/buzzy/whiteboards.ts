@@ -18,8 +18,10 @@
  * History (buzzy_whiteboard_versions): every save lands in the newest entry; a save
  * more than VERSION_WINDOW_MINUTES after that entry began starts a new one, and going
  * back to an earlier entry always starts a new one, so the board you left is still
- * there to come back to. At most VERSIONS_KEPT entries per board, none older than
- * VERSIONS_MAX_DAYS.
+ * there to come back to. A save that empties a board also starts a new one: the visit
+ * that opens a fresh board empties it (whiteboard.js reset()), and rolling that blank
+ * into the entry the drawing had just made would throw the drawing away. At most
+ * VERSIONS_KEPT entries per board, none older than VERSIONS_MAX_DAYS.
  *
  * A board is the person's own data, shown back only to them, as text (whiteboard.js
  * builds every card from textContent). This file still checks its shape, keeps only
@@ -237,6 +239,9 @@ export async function recordVersion(
   reason: "save" | "restore",
 ): Promise<void> {
   if (reason === "save") {
+    // A blank save never rolls into an entry that had cards: emptying the board is how
+    // a new visit starts, and the drawing has to stay here to be gone back to. (Two
+    // blank saves in a row still share one entry.)
     const merged = await sql`
       UPDATE buzzy_whiteboard_versions
       SET state = ${json}::jsonb, rev = ${rev}::int, card_count = ${board.cards}::int, bytes = ${board.bytes}::int,
@@ -247,6 +252,7 @@ export async function recordVersion(
         AND reason = 'save'
         AND rev < ${rev}::int
         AND started_at > now() - ${VERSION_WINDOW_MINUTES}::int * interval '1 minute'
+        AND NOT (${board.cards}::int = 0 AND card_count > 0)
       RETURNING id`;
     if (merged.length) return;
   }
