@@ -71,5 +71,27 @@
     </div>
   </main>
   <footer>BeeZilla helps you get the work done — this is not legal or financial advice.</footer>
+  <script>
+    // Signed in already? This page is not for you. The server sends a signed-in
+    // visitor straight to Talk; this covers the copies it is not asked for: Back or
+    // a restored tab (pageshow from the page cache) and the shell's own fetch, which
+    // runs this script without a page load. Only a 200 that names a user moves on,
+    // and only while this page is still the one showing.
+    (function () {
+      var here = function () { return /^\/buzzy\/landing(\.html)?\/?$/.test(location.pathname); };
+      function check() {
+        if (!here()) return;
+        fetch("/api/auth/get-session", { credentials: "same-origin", cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (s) { if (s && s.user && here()) window.location.replace("/buzzy/talk"); })
+          .catch(function () {});
+      }
+      check();
+      if (!window.__bzLandingShow) {
+        window.__bzLandingShow = true;
+        window.addEventListener("pageshow", function (e) { if (e.persisted) check(); });
+      }
+    })();
+  </script>
 </body>
 </html>

@@ -14,6 +14,7 @@
  */
 
 import { defineEventHandler, getHeader, getMethod, sendRedirect, setResponseStatus } from "h3";
+import type { H3Event } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { openpanelClientId } from "@/lib/analytics-id";
@@ -54,6 +55,72 @@ const html = (body: string, status = 200) =>
     status,
     headers: { "content-type": "text/html; charset=utf-8" },
   });
+
+/**
+ * The two pages whose only job is signing in. Someone who is already signed in
+ * never gets them: they are sent on to Talk before a byte of either is written.
+ *
+ * Owner, 2026-11-21, on Brave: "when you're already logged in and you go to the
+ * website again… it forces you back to the login screen. But when you click any
+ * of the buttons in the top right, you're actually back in BeeZilla, logged in."
+ * Measured: a signed-in visitor was served both pages as-is (the welcome page
+ * with Log in / Register, the Welcome back form), their own name in the top
+ * right. Every sign-in walks through these two addresses, so they are the ones
+ * the address bar suggests, a bookmark or a top-sites tile holds and a restored
+ * tab reopens. Neither page asked who was visiting; only the places in the bar
+ * led back in.
+ */
+const SIGN_IN_PAGES = new Set(["landing", "login"]);
+
+/**
+ * Query words that leave a sign-in visit a plain visit: where to go after
+ * (`next`), which tab (`mode`), and the email-confirmation landing (`verified`).
+ * Any other word asks the page for one of its own steps (the set-password step
+ * after an emailed link is shown to someone who IS signed in), so the page is
+ * served as asked.
+ */
+const PLAIN_VISIT = new Set(["next", "mode", "verified"]);
+
+/** Where a signed-in visitor goes instead. */
+const SIGNED_IN_HOME = "/buzzy/talk";
+
+/**
+ * `?next=` on the sign-in page, when it is safe to follow: a BeeZilla page on
+ * this origin, and not one of the sign-in pages (that would be a loop). Parsed
+ * as a URL rather than eyeballed, so `//host`, `/\host` and `/buzzy/../x` cannot
+ * slip past a prefix check.
+ */
+export function signedInDestination(page: string, query: URLSearchParams): string {
+  const next = page === "login" ? query.get("next") : null;
+  if (!next || next.charAt(0) !== "/") return SIGNED_IN_HOME;
+  let u: URL;
+  try {
+    u = new URL(next, "http://bz.invalid");
+  } catch {
+    return SIGNED_IN_HOME;
+  }
+  if (u.origin !== "http://bz.invalid") return SIGNED_IN_HOME;
+  const path = u.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+  if (!/^\/buzzy(\/|$)/.test(path)) return SIGNED_IN_HOME;
+  if (/^\/buzzy\/(landing|login)$/.test(path)) return SIGNED_IN_HOME;
+  return u.pathname + u.search + u.hash;
+}
+
+/**
+ * Is a real session behind this request? Same answer the APIs act on
+ * (`getSessionUserFromHeaders`). A request with no cookie at all is answered
+ * without loading auth, and a check that fails answers "no", which serves the
+ * sign-in page exactly as before.
+ */
+async function signedIn(event: H3Event): Promise<boolean> {
+  if (!getHeader(event, "cookie")) return false;
+  try {
+    const { getSessionUserFromHeaders } = await import("@/lib/auth/verify.server");
+    return Boolean(await getSessionUserFromHeaders(event.req.headers));
+  } catch {
+    return false;
+  }
+}
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event);
@@ -145,6 +212,27 @@ export default defineEventHandler(async (event) => {
   if (!PAGES.has(name)) {
     setResponseStatus(event, 404);
     return out("<h1>Not found</h1>", 404);
+  }
+
+  // Signed in already? Then this is not the page for you: on to Talk (or to the
+  // `next` the sign-in page was given). Both answers say `no-store`, because the
+  // page now depends on who asks: a copy kept from a signed-out visit must not be
+  // replayed by Back or a restored tab once you have signed in. Not for the shell's
+  // own fetch (`x-bz-shell`): it would follow the redirect and paint Talk under
+  // this address — the welcome page's own check moves that reader instead.
+  const signInPage = SIGN_IN_PAGES.has(name);
+  if (signInPage && !getHeader(event, "x-bz-shell")) {
+    // Everything after the FIRST "?": a `next` written without encoding carries a
+    // "?" of its own, and split("?")[1] would cut its query off.
+    const raw = event.path ?? "";
+    const query = new URLSearchParams(raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "");
+    const plain = [...query.keys()].every((k) => PLAIN_VISIT.has(k));
+    if (plain && (await signedIn(event))) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: signedInDestination(name, query), "cache-control": "no-store" },
+      });
+    }
   }
 
   // `/buzzy/library` is the Library (documents vault) view of the app shell and
@@ -243,5 +331,9 @@ export default defineEventHandler(async (event) => {
     // app.devboards.ai, and only the request knows which project it is.
     if (at > 0) page = page.slice(0, at) + opSnippet(getHeader(event, "host")) + page.slice(at);
   }
-  return out(page);
+  const res = out(page);
+  // A sign-in page differs by visitor now (see the redirect above), so no copy of
+  // it may be kept and shown again without asking.
+  if (signInPage) res.headers.set("cache-control", "no-store");
+  return res;
 });
