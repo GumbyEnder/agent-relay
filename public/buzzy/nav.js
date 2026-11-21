@@ -2143,8 +2143,15 @@
     var u = url instanceof URL ? url : new URL(url, location.href);
     return u.pathname.replace(/\/+$/, "") + u.search;
   }
+  // The sign-in pages are not part of the shell: they are loaded for real, so the
+  // server can send a reader who is already signed in on to Talk. Fetched by the
+  // shell, that redirect would be followed and Talk painted under /buzzy/login.
   function isShellPath(u) {
-    return u.origin === location.origin && /^\/buzzy(\/|$)/.test(u.pathname);
+    return (
+      u.origin === location.origin &&
+      /^\/buzzy(\/|$)/.test(u.pathname) &&
+      !/^\/buzzy\/(landing|login)(\.html)?\/?$/.test(u.pathname)
+    );
   }
   function keepAlive(key) {
     return KEEP_ALIVE.indexOf(key.replace(/\?.*$/, "")) >= 0;
