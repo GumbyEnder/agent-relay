@@ -608,6 +608,15 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   // The settings gear (#326) sits fixed in the bottom-right corner of every page, and on
   // a short window History reaches that corner. A panel covers the gear, never the
   // reverse; the page's own menus still cover the board.
+  // The board follows the conversation in front of the person: voice-stage.js reads
+  // bz_session_id, so every path that puts a conversation on screen has to say which
+  // one it is. A new conversation did; opening one from the list did not, and the
+  // board stayed on the blank new-conversation board while its cards sat in the account.
+  await ok("opening a conversation from the list moves the board to that conversation", () => {
+    const page = readFileSync(join(process.cwd(), "public/buzzy/talk.html"), "utf8");
+    const body = page.slice(page.indexOf("async function openSession(s)"), page.indexOf("function renameSession(s, card)"));
+    truthy(/localStorage\.setItem\("bz_session_id", s\.id\)/.test(body), "openSession names the conversation to the board");
+  });
   await ok("History covers the settings gear, and the page's menus still cover History", () => {
     const read = (f: string) => readFileSync(join(process.cwd(), "public/buzzy", f), "utf8");
     const css = read("whiteboard.css");
