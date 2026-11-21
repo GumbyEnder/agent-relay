@@ -1560,6 +1560,10 @@
       <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
       <a href="/buzzy/studio" data-nav="studio">Music studio</a>
       <a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>
+      <!-- The raw file is what /buzzy/talk.html serves; the rendered /buzzy/talk gets
+           NAV_ROW instead. Both must carry Download in the same slot as #bzPlaces
+           (after What BeeZilla can do, before Honey) or the two navs disagree. -->
+      <a href="/buzzy/download" data-nav="download">Download</a>
       <a href="/buzzy/wallet" data-nav="wallet">Honey</a>
       <a href="/buzzy/upload" data-nav="publish">Publish</a>
       <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
@@ -1579,6 +1583,7 @@
       else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
       else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
       else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
+      else if (/^\/buzzy\/download$/.test(path)) section = "download";
       else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
       else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
       // These screens are not in the nav, so nothing lights up — claiming
