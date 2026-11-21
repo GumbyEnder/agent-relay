@@ -63,6 +63,22 @@ assert(
   "nav.js LINKS has no Download entry — the row and the state engine would disagree",
 );
 
+// ── the places row on Talk agrees with the nav (landing-order note on #350) ─
+// #350 put Download in today's nav; CR-10 turned that nav into one row of places
+// inside #bzPlaces. If Download stays only in NAV_ROW/LINKS the row a visitor
+// actually reads on Talk has no installer in it, and the two navs disagree again.
+const talk = readFileSync(join(pub, "talk.html"), "utf8");
+const placesRow = /<nav class="bz-places"[^>]*>([\s\S]*?)<\/nav>/.exec(talk)?.[1] ?? "";
+const placeIds = [...placesRow.matchAll(/data-place="([a-z-]+)"/g)].map((m) => m[1]);
+assert(
+  placeIds.length > 0,
+  "talk.html has no #bzPlaces places row — CR-10's one row of places is gone",
+);
+assert(
+  placeIds.join(",") === "sketch,studio,capabilities,download,wallet,publish",
+  `#bzPlaces order (${placeIds.join(",")}) does not match nav.js LINKS / NAV_ROW — the places row and the nav disagree`,
+);
+
 // ── the page is a front door, not a signed-in screen ─────────────────────
 assert(
   !/window\.location\.replace\("\/buzzy\/landing"\)/.test(page),
