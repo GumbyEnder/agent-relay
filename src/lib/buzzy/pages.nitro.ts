@@ -73,13 +73,14 @@ const html = (body: string, status = 200) =>
 const SIGN_IN_PAGES = new Set(["landing", "login"]);
 
 /**
- * Query words that leave a sign-in visit a plain visit: where to go after
- * (`next`), which tab (`mode`), and the email-confirmation landing (`verified`).
- * Any other word asks the page for one of its own steps (the set-password step
- * after an emailed link is shown to someone who IS signed in), so the page is
- * served as asked.
+ * Query words that ask the sign-in page for one of its own steps, shown even to
+ * someone who IS signed in: the set-password step after an emailed link
+ * (`step`), and the message for a link that expired or failed (`link`,
+ * `error`). Every other word leaves it a plain visit — `next`, `mode`,
+ * `verified`, and the `utm_*` / `fbclid` / `gclid` a shared or advertised link
+ * carries, which must not decide whether a signed-in visitor is recognised.
  */
-const PLAIN_VISIT = new Set(["next", "mode", "verified"]);
+const PAGE_STEPS = new Set(["step", "link", "error"]);
 
 /** Where a signed-in visitor goes instead. */
 const SIGNED_IN_HOME = "/buzzy/talk";
@@ -107,16 +108,33 @@ export function signedInDestination(page: string, query: URLSearchParams): strin
 }
 
 /**
+ * How long a sign-in page waits to learn who is asking. These pages used to be
+ * static; a slow or unreachable session store must not hold them. A normal
+ * lookup takes milliseconds.
+ */
+const SESSION_CHECK_MS = 1500;
+
+/** `check`'s answer, or `null` once `ms` have passed. */
+export function answerWithin<T>(check: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([check, late]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Is a real session behind this request? Same answer the APIs act on
- * (`getSessionUserFromHeaders`). A request with no cookie at all is answered
- * without loading auth, and a check that fails answers "no", which serves the
- * sign-in page exactly as before.
+ * (`getSessionUserFromHeaders`, which also refuses a disabled account). A
+ * request with no cookie at all is answered without loading auth; a check that
+ * fails or runs out of time answers "no", which serves the sign-in page exactly
+ * as before.
  */
 async function signedIn(event: H3Event): Promise<boolean> {
   if (!getHeader(event, "cookie")) return false;
   try {
     const { getSessionUserFromHeaders } = await import("@/lib/auth/verify.server");
-    return Boolean(await getSessionUserFromHeaders(event.req.headers));
+    return Boolean(await answerWithin(getSessionUserFromHeaders(event.req.headers), SESSION_CHECK_MS));
   } catch {
     return false;
   }
@@ -219,15 +237,16 @@ export default defineEventHandler(async (event) => {
   // page now depends on who asks: a copy kept from a signed-out visit must not be
   // replayed by Back or a restored tab once you have signed in. Not for the shell's
   // own fetch (`x-bz-shell`): it would follow the redirect and paint Talk under
-  // this address — the welcome page's own check moves that reader instead.
+  // this address. nav.js no longer soft-navigates to these pages; this covers a
+  // copy of the old nav.js still in someone's cache.
   const signInPage = SIGN_IN_PAGES.has(name);
   if (signInPage && !getHeader(event, "x-bz-shell")) {
     // Everything after the FIRST "?": a `next` written without encoding carries a
     // "?" of its own, and split("?")[1] would cut its query off.
     const raw = event.path ?? "";
     const query = new URLSearchParams(raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "");
-    const plain = [...query.keys()].every((k) => PLAIN_VISIT.has(k));
-    if (plain && (await signedIn(event))) {
+    const step = [...query.keys()].some((k) => PAGE_STEPS.has(k));
+    if (!step && (await signedIn(event))) {
       return new Response(null, {
         status: 302,
         headers: { location: signedInDestination(name, query), "cache-control": "no-store" },
