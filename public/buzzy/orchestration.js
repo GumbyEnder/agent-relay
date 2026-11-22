@@ -846,7 +846,9 @@ var BZOrchestration = (() => {
     return {
       nodes: spec.nodes.map((n) => ({
         key: n.id,
-        kind: n.type === "approval" ? "gate" : n.type === "tool" ? "model" : n.type === "agent" ? "agent" : n.type === "note" ? "review" : n.type,
+        // The approval node is the product's gate (buzzygrok 6675); everything else
+        // keeps its own type now that 0063 widened the CHECK.
+        kind: n.type === "approval" ? "gate" : n.type,
         title: n.name,
         config: { ...n.config, orchType: n.type, orchConfig: n.config },
         x: n.x,

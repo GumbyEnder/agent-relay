@@ -44,7 +44,7 @@ import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
-import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
+import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import {
@@ -1517,6 +1517,31 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── /api/buzzy/graphs/:id/revisions — the history the counter never kept ──
+  if (method === "GET" && /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+\/revisions(\/[0-9]+)?$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const parts = path.split("/");
+    const graphId = parts[4]!;
+    if (parts[5]) {
+      const rev = Number(parts[6]);
+      if (!Number.isInteger(rev) || rev < 1) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Bad revision.", code: "bad_revision" };
+      }
+      const found = await loadGraphRevision(user.id, graphId, rev);
+      if (!found) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such revision on this account.", code: "not_found" };
+      }
+      return { ok: true, ...found };
+    }
+    return { ok: true, revisions: await listGraphRevisions(user.id, graphId) };
+  }
+
   // ── /api/buzzy/graphs — author, list and read orchestration graphs ────
   // 6d's whiteboard writes through here; a run (6e) freezes what it reads.
   if (path === "/api/buzzy/graphs" || /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+$/.test(path)) {
@@ -1549,6 +1574,19 @@ export default defineEventHandler(async (event) => {
       } catch {
         setResponseStatus(event, 400);
         return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+      const b = body as Record<string, unknown>;
+      // CR-3: the orchestration editor posts one `spec`. It is validated here with
+      // the same function the page runs, and saved with its revision in one statement.
+      if (b && typeof b === "object" && b.spec && typeof b.spec === "object") {
+        try {
+          const saved = await saveOrchestrationGraph(user.id, b.spec);
+          return { ok: true, id: saved.id, version: saved.version, spec: saved.spec };
+        } catch (e) {
+          setResponseStatus(event, 400);
+          const err = e as Error & { code?: string; issues?: unknown };
+          return { ok: false, error: err.message, code: err.code || "invalid_spec", issues: err.issues ?? [] };
+        }
       }
       const checked = validateGraph(body);
       if (!checked.ok) {

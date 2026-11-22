@@ -115,10 +115,13 @@
     <h1>Orchestrate</h1>
     <input id="orchName" value="Untitled orchestration" aria-label="Orchestration name" />
     <span id="status">valid</span>
+    <span id="verNote" style="color:var(--muted);font-size:12px"></span>
     <span class="spacer"></span>
+    <select id="verSel" title="Saved versions" style="display:none;font:inherit;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:#fff"></select>
     <button id="btnNew" class="ghost" title="Start an empty flow">New</button>
     <button id="btnImport" class="ghost">Import…</button>
     <button id="btnLayout" class="ghost">Auto-layout</button>
+    <button id="btnSave" class="ghost" title="Save to your account (⌘S)">Save</button>
     <button id="btnExport" title="Download the JSON spec">Download</button>
     <button id="btnSend" class="primary" title="Hand the spec to Buzzy in Talk">Send to agent</button>
   </header>
@@ -220,6 +223,7 @@
   var spec = null, issues = [], selected = [], hoverPort = null, drag = null, view = { x: 40, y: 40, k: 1 };
   var history = [], redo = [], clipboard = null, tab = "mermaid", dirty = false, saveTimer = 0;
   var lastCanon = "";
+  var graphId = "", graphVersion = 0;
   var $ = function (s) { return document.querySelector(s); };
   var svg = $("#canvas"), world = $("#world"), gEdges = $("#edges"), gNodes = $("#nodes"), gTemp = $("#temp");
   var statusEl = $("#status"), nameEl = $("#orchName");
@@ -833,12 +837,107 @@
     location.href = "/buzzy/talk?fromOrchestration=1";
   });
 
+  // ── account save / load / versions ─────────────────────────────────
+  function verNote(text) { $("#verNote").textContent = text || ""; }
+  async function saveToAccount() {
+    var r = validate(spec);
+    if (!r.ok) {
+      statusEl.textContent = "fix " + r.issues.filter(function (i) { return i.severity === "error"; }).length + " first";
+      statusEl.className = "bad";
+      return;
+    }
+    $("#btnSave").disabled = true;
+    try {
+      var res = await fetch("/api/buzzy/graphs", {
+        method: "POST", credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spec: spec })
+      });
+      var j = await res.json().catch(function () { return {}; });
+      if (!res.ok || !j.ok) {
+        statusEl.textContent = res.status === 401 ? "sign in to save" : (j.error || "save failed");
+        statusEl.className = "bad";
+        return;
+      }
+      graphId = j.id;
+      graphVersion = j.version;
+      if (j.spec) spec = j.spec;
+      lastCanon = canonicalSpec(spec);
+      try { window.history.replaceState(null, "", "/buzzy/orchestrate?graph=" + encodeURIComponent(graphId)); } catch (e) {}
+      verNote("saved · v" + graphVersion);
+      statusEl.textContent = "saved"; statusEl.className = "good";
+      loadVersions();
+    } catch (e) {
+      statusEl.textContent = "save failed"; statusEl.className = "bad";
+    } finally {
+      $("#btnSave").disabled = false;
+    }
+  }
+  async function loadVersions() {
+    var sel = $("#verSel");
+    if (!graphId) { sel.style.display = "none"; return; }
+    try {
+      var res = await fetch("/api/buzzy/graphs/" + encodeURIComponent(graphId) + "/revisions", { credentials: "same-origin" });
+      var j = await res.json();
+      if (!res.ok || !j.ok) return;
+      sel.innerHTML = "";
+      (j.revisions || []).forEach(function (v) {
+        var o = document.createElement("option");
+        o.value = String(v.revision);
+        o.textContent = "v" + v.revision + (v.revision === graphVersion ? " (current)" : "");
+        if (v.revision === graphVersion) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.style.display = (j.revisions || []).length ? "" : "none";
+      sel.onchange = function () { openRevision(Number(sel.value)); };
+    } catch (e) { /* offline: the working copy is still in localStorage */ }
+  }
+  async function openGraph(id) {
+    try {
+      var res = await fetch("/api/buzzy/graphs/" + encodeURIComponent(id), { credentials: "same-origin" });
+      var j = await res.json().catch(function () { return {}; });
+      if (!res.ok || !j.ok || !j.graph || !j.graph.spec) {
+        statusEl.textContent = res.status === 401 ? "sign in to open" : "not found";
+        statusEl.className = "bad";
+        return false;
+      }
+      spec = j.graph.spec;
+      graphId = j.graph.id;
+      graphVersion = j.graph.version;
+      history = []; redo = []; selected = [];
+      commit(false); fit();
+      verNote("v" + graphVersion);
+      loadVersions();
+      return true;
+    } catch (e) {
+      statusEl.textContent = "could not open"; statusEl.className = "bad";
+      return false;
+    }
+  }
+  async function openRevision(rev) {
+    if (!graphId || !rev) return;
+    try {
+      var res = await fetch("/api/buzzy/graphs/" + encodeURIComponent(graphId) + "/revisions/" + rev, { credentials: "same-origin" });
+      var j = await res.json().catch(function () { return {}; });
+      if (!res.ok || !j.ok || !j.spec) return;
+      spec = j.spec;
+      spec.id = graphId;
+      history = []; redo = []; selected = [];
+      commit(false);
+      verNote("viewing v" + rev);
+      statusEl.textContent = "viewing v" + rev; statusEl.className = "";
+    } catch (e) { /* keep the current drawing */ }
+  }
+
   // ── toolbar ─────────────────────────────────────────────────────────
   $("#orchName").addEventListener("input", function () { spec.name = this.value; commit(false); });
   $("#btnNew").addEventListener("click", function () {
     if (dirty && !confirm("Start a new flow? The current one is saved in this browser.")) return;
+    graphId = ""; graphVersion = 0; $("#verSel").style.display = "none"; verNote("");
+    try { window.history.replaceState(null, "", "/buzzy/orchestrate"); } catch (e) {}
     spec = starter(); history = []; redo = []; selected = []; commit();
   });
+  $("#btnSave").addEventListener("click", saveToAccount);
   $("#btnLayout").addEventListener("click", autoLayout);
   $("#btnImport").addEventListener("click", function () { $("#importDlg").showModal(); });
   $("#importCancel").addEventListener("click", function () { $("#importDlg").close(); });
@@ -932,6 +1031,7 @@
     if ((ev.key === "Delete" || ev.key === "Backspace") && !mod) { ev.preventDefault(); deleteSelection(); }
     else if (mod && ev.key.toLowerCase() === "z") { ev.preventDefault(); ev.shiftKey ? redoFn() : undo(); }
     else if (mod && ev.key.toLowerCase() === "y") { ev.preventDefault(); redoFn(); }
+    else if (mod && ev.key.toLowerCase() === "s") { ev.preventDefault(); saveToAccount(); }
     else if (mod && ev.key.toLowerCase() === "c") { copySelection(); }
     else if (mod && ev.key.toLowerCase() === "v") { pasteClipboard(); }
     else if (mod && ev.key.toLowerCase() === "a") { ev.preventDefault(); selected = spec.nodes.map(function (n) { return n.id; }); draw(); paintInspector(); }
@@ -945,10 +1045,13 @@
   try { var raw = localStorage.getItem("bz_orch_spec"); if (raw) booted = JSON.parse(raw); } catch (e) {}
   if (booted) { var v = validate(booted); if (v.ok) spec = v.spec; }
   if (!spec) spec = starter();
-  window.BZ_ORCH_DEBUG = { get spec() { return spec; }, toWorld: toWorld, commit: commit, fit: fit, view: function () { return view; }, drag: function () { return drag; } };
+  var params = new URLSearchParams(location.search);
+  var wantGraph = params.get("graph") || params.get("job") || "";
+  window.BZ_ORCH_DEBUG = { get spec() { return spec; }, toWorld: toWorld, commit: commit, fit: fit, view: function () { return view; }, drag: function () { return drag; }, save: saveToAccount, open: openGraph, graphId: function () { return graphId; } };
   commit(false);
   fit();
   paintInspector();
+  if (wantGraph) openGraph(wantGraph);
 
   // Recover from an old working copy that no longer validates: keep it visible rather
   // than silently replacing a person's drawing.
