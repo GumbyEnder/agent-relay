@@ -188,6 +188,7 @@
     { id: "experts", href: "/buzzy/experts", label: "Experts" },
     { id: "recipes", href: "/buzzy/recipes", label: "Recipes" },
     { id: "sketch", href: "/buzzy/sketch", label: "Sketch", more: true },
+    { id: "orchestrate", href: "/buzzy/orchestrate", label: "Orchestrate", more: true },
     { id: "studio", href: "/buzzy/studio", label: "Music studio", more: true },
     { id: "capabilities", href: "/buzzy/capabilities", label: "What BeeZilla can do", more: true },
     // The installer is a place in the product, not a README footnote: a person

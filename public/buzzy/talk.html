@@ -1564,6 +1564,7 @@
       <a href="/buzzy/experts" data-nav="experts">Experts</a>
       <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
       <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+      <a href="/buzzy/orchestrate" data-nav="orchestrate">Orchestrate</a>
       <a href="/buzzy/studio" data-nav="studio">Music studio</a>
       <a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>
       <!-- The raw file is what /buzzy/talk.html serves; the rendered /buzzy/talk gets
@@ -1581,20 +1582,17 @@
        TALK. Active state is computed here from the path, not hard-coded per page. */
     (function () {
       var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
-      // index.html serves ONLY /buzzy/library; every other /buzzy route
-      // redirects to the chat, so bare /buzzy counts as Talk here.
-      var section = "library";
+      // One rule: the page's segment names its nav anchor. The hard-coded list that
+      // used to live here defaulted to "library" for every route it did not name, so
+      // /buzzy/orchestrate (and sketch, studio, capabilities, project) lit Library.
+      var seg = (path.match(/^\/buzzy\/([a-z-]+)$/) || [])[1] || "";
+      var section = "";
       if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
-      else if (/^\/buzzy\/library$/.test(path)) section = "library";
-      else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
-      else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
-      else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
-      else if (/^\/buzzy\/download$/.test(path)) section = "download";
-      else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
-      else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
-      // These screens are not in the nav, so nothing lights up — claiming
-      // "Library" was active on the business profile was simply wrong.
-      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
+      else if (seg === "remember") section = "memory";
+      else if (seg === "upload") section = "publish";
+      else if (seg) section = seg;
+      // Only light a link that exists; screens that are not in the nav light nothing.
+      if (section && !document.querySelector('#bzNav a[data-nav="' + section + '"]')) section = "";
       var links = document.querySelectorAll("#bzNav a[data-nav]");
       for (var i = 0; i < links.length; i++) {
         var on = links[i].getAttribute("data-nav") === section;
@@ -1842,6 +1840,7 @@
         </div>
         <nav class="bz-places" aria-label="More places">
           <a href="/buzzy/sketch" data-place="sketch">Sketch</a>
+          <a href="/buzzy/orchestrate" data-place="orchestrate">Orchestrate</a>
           <a href="/buzzy/studio" data-place="studio">Music studio</a>
           <a href="/buzzy/capabilities" data-place="capabilities">What BeeZilla can do</a>
           <!-- #350's landing-order note: the installer is a place too, and it sits

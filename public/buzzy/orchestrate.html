@@ -1,0 +1,962 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Orchestrate — BeeZilla</title>
+<link rel="stylesheet" href="/buzzy/nav.css" />
+<style>
+  /* The editor is one screen: palette, canvas, inspector, output. The nav is injected
+     at serve time by pages.nitro.ts, so nothing here draws chrome. */
+  :root {
+    --ink: #1d1b16; --muted: #6b6558; --line: #d9d3c6; --paper: #fbfaf7;
+    --node: #ffffff; --honey: #b07a12; --honey-soft: #f6e7c8; --bad: #a5342c; --warn: #8a6a12;
+    --ok: #2f6b3a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--ink); background: var(--paper);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #app { display: grid; grid-template-rows: auto 1fr; height: calc(100vh - 56px); min-height: 480px; }
+  header.bar {
+    display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+    border-bottom: 1px solid var(--line); background: var(--paper); flex-wrap: wrap;
+  }
+  header.bar h1 { font-size: 15px; margin: 0 10px 0 0; font-weight: 650; letter-spacing: -0.01em; }
+  header.bar input#orchName {
+    font: inherit; font-weight: 600; border: 1px solid transparent; background: transparent;
+    padding: 4px 6px; border-radius: 6px; min-width: 220px; color: var(--ink);
+  }
+  header.bar input#orchName:hover, header.bar input#orchName:focus { border-color: var(--line); background: #fff; outline: none; }
+  .spacer { flex: 1; }
+  button, .btn {
+    font: inherit; border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border-radius: 7px; padding: 6px 10px; cursor: pointer;
+  }
+  button:hover { border-color: #bcb4a2; }
+  button.primary { background: var(--honey); border-color: var(--honey); color: #fff; }
+  button.ghost { background: transparent; }
+  button:disabled { opacity: .45; cursor: default; }
+  #status { color: var(--muted); font-size: 12px; min-width: 90px; }
+  #status.bad { color: var(--bad); }
+  #status.good { color: var(--ok); }
+
+  main { display: grid; grid-template-columns: 168px minmax(0, 1fr) 300px; min-height: 0; }
+  #palette { border-right: 1px solid var(--line); padding: 10px; overflow: auto; background: #fff; }
+  #palette h2, #inspector h2, #issues h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 0 8px; }
+  .pal-item {
+    display: flex; align-items: center; gap: 8px; padding: 7px 8px; margin-bottom: 6px;
+    border: 1px solid var(--line); border-radius: 7px; cursor: grab; background: var(--paper);
+    user-select: none;
+  }
+  .pal-item:hover { border-color: var(--honey); background: var(--honey-soft); }
+  .pal-item .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--honey); }
+  .pal-item small { color: var(--muted); font-size: 11px; display: block; }
+
+  #center { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: 1fr auto; }
+  #canvasWrap { position: relative; overflow: hidden; background:
+     radial-gradient(circle at 1px 1px, #e7e2d6 1px, transparent 0) 0 0 / 16px 16px; }
+  svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  /* The live connector and marquee must not be hit-testable: elementFromPoint at the
+     drop target was returning this temp path, so a connect never found the node. */
+  #temp, #temp * { pointer-events: none; }
+  #minimap {
+    position: absolute; right: 12px; bottom: 12px; width: 168px; height: 116px;
+    background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  #zoomHud { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 6px; align-items: center; }
+  #zoomHud button { padding: 3px 8px; font-size: 13px; }
+
+  #side { border-left: 1px solid var(--line); display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; background: #fff; }
+  #inspector { overflow: auto; padding: 12px; border-bottom: 1px solid var(--line); }
+  #issues { overflow: auto; padding: 12px; background: var(--paper); }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+  .field input[type=text], .field input[type=number], .field textarea, .field select {
+    width: 100%; font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 6px 7px; background: #fff;
+  }
+  .field textarea { min-height: 64px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .field .hint { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .check { display: flex; gap: 7px; align-items: center; font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; }
+  .issue { padding: 6px 7px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid var(--warn); background: #fff; cursor: pointer; font-size: 12px; }
+  .issue.error { border-left-color: var(--bad); }
+  .issue:hover { background: var(--honey-soft); }
+  .issue b { font-weight: 650; }
+
+  #outputPane { border-top: 1px solid var(--line); background: #fff; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 34vh; min-height: 180px; }
+  #outputHead { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab { border: 1px solid transparent; background: transparent; padding: 4px 9px; border-radius: 6px; color: var(--muted); }
+  .tab.on { background: var(--honey-soft); border-color: #e6d3a6; color: var(--ink); font-weight: 600; }
+  #outputBody { position: relative; min-height: 0; }
+  #outputText {
+    width: 100%; height: 100%; border: 0; resize: none; padding: 10px 12px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #2b2922; background: #fcfbf8;
+    outline: none; white-space: pre;
+  }
+  .notRunnable { color: var(--warn); font-size: 11px; }
+  dialog { border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(640px, 92vw); }
+  dialog textarea { width: 100%; height: 260px; font: 12px/1.5 ui-monospace, monospace; }
+  .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 120px minmax(0, 1fr) 240px; }
+    #outputPane { height: 30vh; }
+  }
+</style>
+</head>
+<body>
+<nav id="bzNav"><a href="/buzzy/talk" data-nav="talk">Talk</a><a href="/buzzy/library" data-nav="library">Library</a></nav>
+<div id="app">
+  <header class="bar">
+    <h1>Orchestrate</h1>
+    <input id="orchName" value="Untitled orchestration" aria-label="Orchestration name" />
+    <span id="status">valid</span>
+    <span class="spacer"></span>
+    <button id="btnNew" class="ghost" title="Start an empty flow">New</button>
+    <button id="btnImport" class="ghost">Import…</button>
+    <button id="btnLayout" class="ghost">Auto-layout</button>
+    <button id="btnExport" title="Download the JSON spec">Download</button>
+    <button id="btnSend" class="primary" title="Hand the spec to Buzzy in Talk">Send to agent</button>
+  </header>
+
+  <main>
+    <aside id="palette">
+      <h2>Nodes</h2>
+      <div id="palList"></div>
+      <div class="hint" style="color:var(--muted);font-size:11px;margin-top:8px">
+        Drag onto the canvas, or click to place at the centre. Drag a port to connect.
+      </div>
+    </aside>
+
+    <section id="center">
+      <div id="canvasWrap">
+        <svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="application" aria-label="Orchestration canvas">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8d8574"></path>
+            </marker>
+          </defs>
+          <g id="world">
+            <g id="edges"></g>
+            <g id="nodes"></g>
+            <g id="temp"></g>
+          </g>
+        </svg>
+        <svg id="minimap" viewBox="0 0 168 116" aria-hidden="true"><g id="miniWorld"></g><rect id="miniView" fill="none" stroke="#b07a12" stroke-width="1.5" rx="2"></rect></svg>
+        <div id="zoomHud"><button id="zOut" aria-label="Zoom out">−</button><button id="zIn" aria-label="Zoom in">+</button><button id="zFit" class="ghost">Fit</button></div>
+      </div>
+      <div id="outputPane">
+        <div id="outputHead">
+          <button class="tab on" data-tab="mermaid">Mermaid</button>
+          <button class="tab" data-tab="json">JSON spec</button>
+          <button class="tab" data-tab="yaml">YAML</button>
+          <button class="tab" data-tab="sheet">Run sheet</button>
+          <span class="spacer" style="flex:1"></span>
+          <button id="btnCopy" class="ghost">Copy</button>
+          <button id="btnDl" class="ghost">Download this</button>
+          <span id="outNote" class="notRunnable"></span>
+        </div>
+        <div id="outputBody"><textarea id="outputText" readonly spellcheck="false"></textarea></div>
+      </div>
+    </section>
+
+    <aside id="side">
+      <div id="inspector"><h2>Inspector</h2><div class="empty">Select a node.</div></div>
+      <div id="issues"><h2>Problems</h2><div id="issueList"></div></div>
+    </aside>
+  </main>
+</div>
+
+<dialog id="importDlg">
+  <h3 style="margin:0 0 8px;font-size:15px">Import a flow</h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 8px">Paste our Mermaid export (the <code>%% spec:</code> comment restores every field) or a JSON spec.</p>
+  <textarea id="importText" placeholder="flowchart TD … or { &quot;schema&quot;: &quot;beezilla/orchestration&quot; … }"></textarea>
+  <div class="dlg-actions"><button id="importCancel">Cancel</button><button id="importGo" class="primary">Import</button></div>
+</dialog>
+
+<script src="/buzzy/orchestration.js"></script>
+<script>
+/* BeeZilla — Orchestration Builder (CR-3, PR1)
+ *
+ * The spec module (src/lib/buzzy/orchestration.ts) is the single source of truth for
+ * validation, canonical JSON, Mermaid and the run sheet. This page is a view over it:
+ * every edit replaces `spec`, then `commit()` validates, redraws and re-emits the
+ * three outputs. Nothing here re-implements a rule.
+ *
+ * Canvas maths: the SVG's user units are CSS pixels, so pointer coordinates come from
+ * getScreenCTM().inverse() and are correct at dpr 1, 1.5 and 2 without multiplying by
+ * devicePixelRatio. That is deliberate — the Sketch page's bug was pointer maths that
+ * assumed CSS px and DPR were the same thing.
+ */
+(function () {
+  "use strict";
+  var MOD = window.BZOrchestration;
+  if (!MOD) { document.body.insertAdjacentHTML("beforeend", '<p style="padding:16px;color:#a5342c">The spec module did not load.</p>'); return; }
+  var validate = MOD.validateOrchestration, toMermaid = MOD.toMermaid, fromMermaid = MOD.fromMermaid;
+  var toRunSheet = MOD.toRunSheet, canonicalSpec = MOD.canonicalSpec, toYaml = MOD.toYaml;
+  var PORTS = MOD.PORTS, snap = MOD.snap;
+
+  var TYPES = [
+    { type: "start", label: "Start / Input", hint: "where the run begins" },
+    { type: "agent", label: "Agent step", hint: "prompt, model, tools" },
+    { type: "tool", label: "Tool call", hint: "one named tool" },
+    { type: "decision", label: "Decision", hint: "if / else on its edges" },
+    { type: "parallel", label: "Parallel", hint: "fan-out or join" },
+    { type: "loop", label: "Loop", hint: "until, with a max" },
+    { type: "approval", label: "Human approval", hint: "stops the run" },
+    { type: "trigger", label: "Wait / trigger", hint: "schedule, webhook, event" },
+    { type: "subflow", label: "Sub-orchestration", hint: "reference another" },
+    { type: "end", label: "Output / End", hint: "returns bindings" },
+    { type: "note", label: "Note", hint: "comment, not executed" }
+  ];
+  var SHORT = { start: "Start", agent: "Agent", tool: "Tool", decision: "Decision", parallel: "Parallel", loop: "Loop", approval: "Approval", trigger: "Trigger", subflow: "Sub-flow", end: "End", note: "Note" };
+  var RUNNABLE = { start: true, agent: true, tool: false, decision: false, parallel: false, loop: false, approval: false, trigger: false, subflow: false, end: true, note: true };
+  var W = 176, H = 64, BODY_H = 22;
+
+  var spec = null, issues = [], selected = [], hoverPort = null, drag = null, view = { x: 40, y: 40, k: 1 };
+  var history = [], redo = [], clipboard = null, tab = "mermaid", dirty = false, saveTimer = 0;
+  var lastCanon = "";
+  var $ = function (s) { return document.querySelector(s); };
+  var svg = $("#canvas"), world = $("#world"), gEdges = $("#edges"), gNodes = $("#nodes"), gTemp = $("#temp");
+  var statusEl = $("#status"), nameEl = $("#orchName");
+
+  function uid(prefix) {
+    var s = "abcdefghijklmnopqrstuvwxyz0123456789";
+    var out = "";
+    for (var i = 0; i < 6; i++) out += s[Math.floor(Math.random() * s.length)];
+    return prefix + "_" + out;
+  }
+  function nodeById(id) { for (var i = 0; i < spec.nodes.length; i++) if (spec.nodes[i].id === id) return spec.nodes[i]; return null; }
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  // ── initial spec ─────────────────────────────────────────────────────
+  function starter() {
+    return {
+      schema: "beezilla/orchestration", schemaVersion: 1,
+      name: "Untitled orchestration", description: "", direction: "TD", grid: 16, entry: "n_start",
+      params: [{ name: "goal", type: "string", required: true, default: null, description: "" }],
+      policy: { maxConcurrency: 4, budgetSec: 900, onError: "stop" },
+      nodes: [
+        { id: "n_start", type: "start", name: "Start", x: 96, y: 64, notes: "", config: {} },
+        { id: "n_end", type: "end", name: "End", x: 96, y: 320, notes: "", config: { outputs: {} } }
+      ],
+      edges: [{ id: "e_1", from: { node: "n_start", port: "out" }, to: { node: "n_end", port: "in" }, label: "", condition: null }],
+      meta: { generator: "human" }
+    };
+  }
+
+  function commit(pushHistory) {
+    var r = validate(spec);
+    // Keep the raw spec (with any invalid bits the person is mid-editing) as the
+    // working copy, but render from the validated shape so snapping and defaults show.
+    spec = r.spec;
+    issues = r.issues;
+    // Undo records the state BEFORE a change, and it is driven by canonical bytes so
+    // every mutation path (drag, palette, inspector, paste) is covered by one rule.
+    var canon = canonicalSpec(spec);
+    if (lastCanon && canon !== lastCanon) {
+      history.push(lastCanon);
+      if (history.length > 100) history.shift();
+      redo.length = 0;
+    }
+    lastCanon = canon;
+    dirty = true;
+    $("#orchName").value = spec.name;
+    draw();
+    paintIssues();
+    paintOutput();
+    var blocking = r.issues.filter(function (i) { return i.severity === "error" && i.code !== "ORCH003"; });
+    statusEl.textContent = r.ok ? "valid" : blocking.length + " blocking";
+    statusEl.className = r.ok ? "good" : "bad";
+    scheduleSave();
+  }
+
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      try { localStorage.setItem("bz_orch_spec", canonicalSpec(spec)); } catch (e) {}
+    }, 400);
+  }
+
+  // ── geometry ────────────────────────────────────────────────────────
+  function portPoint(n, port) {
+    var x = n.x, y = n.y;
+    if (port === "in") return { x: x, y: y + H / 2 };
+    if (port === "out") return { x: x + W, y: y + H / 2 };
+    if (port === "yes") return { x: x + W, y: y + H / 3 };
+    if (port === "no") return { x: x + W, y: y + 2 * H / 3 };
+    if (port === "body") return { x: x + W, y: y + H / 3 };
+    if (port === "back") return { x: x, y: y + H };
+    if (port === "exit") return { x: x + W, y: y + 2 * H / 3 };
+    if (port === "approved") return { x: x + W, y: y + H / 3 };
+    if (port === "rejected") return { x: x + W, y: y + 2 * H / 3 };
+    return { x: x + W, y: y + H / 2 };
+  }
+  function portsOf(n) {
+    if (n.type === "decision") return ["out"];
+    return PORTS[n.type] || [];
+  }
+
+  function edgePath(e) {
+    var a = nodeById(e.from.node), b = nodeById(e.to.node);
+    if (!a || !b) return "";
+    var p1 = portPoint(a, e.from.port), p2 = portPoint(b, e.to.port);
+    var dx = Math.max(36, Math.abs(p2.x - p1.x) * 0.45);
+    if (e.to.port === "back") {
+      // A loop back edge leaves the bottom of the body and returns under the loop node,
+      // so it reads as a loop rather than a second forward arrow.
+      var midY = Math.max(p1.y, p2.y) + 56;
+      return "M " + p1.x + " " + p1.y + " C " + p1.x + " " + midY + ", " + p2.x + " " + midY + ", " + p2.x + " " + p2.y;
+    }
+    return "M " + p1.x + " " + p1.y + " C " + (p1.x + dx) + " " + p1.y + ", " + (p2.x - dx) + " " + p2.y + ", " + p2.x + " " + p2.y;
+  }
+
+  function svgEl(name, attrs) {
+    var el = document.createElementNS("http://www.w3.org/2000/svg", name);
+    for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  // ── drawing ─────────────────────────────────────────────────────────
+  function draw() {
+    world.setAttribute("transform", "translate(" + view.x + "," + view.y + ") scale(" + view.k + ")");
+    gEdges.textContent = "";
+    gNodes.textContent = "";
+    $("#miniWorld").textContent = "";
+
+    spec.edges.forEach(function (e) {
+      var g = svgEl("g", { "data-edge": e.id, "class": "edge" });
+      var hit = svgEl("path", { d: edgePath(e), fill: "none", stroke: "transparent", "stroke-width": 12, style: "cursor:pointer" });
+      var path = svgEl("path", { d: edgePath(e), fill: "none", stroke: selected.indexOf("e:" + e.id) >= 0 ? "#b07a12" : "#8d8574", "stroke-width": selected.indexOf("e:" + e.id) >= 0 ? 2.4 : 1.6, "marker-end": "url(#arrow)" });
+      g.appendChild(hit); g.appendChild(path);
+      var label = e.label || e.condition || "";
+      if (label) {
+        var mid = midpoint(e);
+        var t = svgEl("text", { x: mid.x, y: mid.y - 5, "text-anchor": "middle", "font-size": 11, fill: "#6b6558", "font-family": "ui-monospace, monospace" });
+        t.textContent = label;
+        g.appendChild(t);
+      }
+      g.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        ev.stopPropagation();
+        selected = ["e:" + e.id];
+        draw(); paintInspector();
+      });
+      gEdges.appendChild(g);
+    });
+
+    spec.nodes.forEach(function (n) {
+      var g = svgEl("g", { "data-node": n.id, transform: "translate(" + n.x + "," + n.y + ")", style: "cursor:move" });
+      var sel = selected.indexOf(n.id) >= 0;
+      var fill = n.type === "note" ? "#fff7df" : "#ffffff";
+      var stroke = sel ? "#b07a12" : "#cfc8b8";
+      g.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: H, rx: 9, fill: fill, stroke: stroke, "stroke-width": sel ? 2.4 : 1.2 }));
+      g.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: BODY_H, rx: 9, fill: n.type === "note" ? "#f3e3b4" : "#f1ece0" }));
+      g.appendChild(svgEl("rect", { x: 0, y: BODY_H - 9, width: W, height: 9, fill: n.type === "note" ? "#f3e3b4" : "#f1ece0" }));
+      var kind = svgEl("text", { x: 8, y: 15, "font-size": 9.5, "letter-spacing": ".06em", fill: "#7a7160", "font-family": "ui-monospace, monospace" });
+      kind.textContent = (SHORT[n.type] || n.type).toUpperCase();
+      g.appendChild(kind);
+      if (!RUNNABLE[n.type]) {
+        var warn = svgEl("text", { x: W - 8, y: 15, "text-anchor": "end", "font-size": 9.5, fill: "#8a6a12", "font-family": "ui-monospace, monospace" });
+        warn.textContent = "NOT RUNNABLE YET";
+        g.appendChild(warn);
+      }
+      var name = svgEl("text", { x: 9, y: 40, "font-size": 13, "font-weight": 600, fill: "#1d1b16", "font-family": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" });
+      name.textContent = clip(n.name || n.id, 24);
+      g.appendChild(name);
+      var sub = svgEl("text", { x: 9, y: 55, "font-size": 10.5, fill: "#6b6558", "font-family": "ui-monospace, monospace" });
+      sub.textContent = clip(subtitle(n), 30);
+      g.appendChild(sub);
+
+      portsOf(n).forEach(function (port) {
+        var p = portPoint(n, port);
+        // A 5px dot is a 1.5px target when the whole graph is fitted at 0.3×.
+        // The visible dot stays small; the hit area does not.
+        var hit = svgEl("circle", { cx: p.x - n.x, cy: p.y - n.y, r: 11, fill: "transparent", "data-port": port, style: "cursor:crosshair" });
+        hit.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); startConnect(ev, n, port); });
+        g.appendChild(hit);
+        var c = svgEl("circle", { cx: p.x - n.x, cy: p.y - n.y, r: 5, fill: "#ffffff", stroke: "#b07a12", "stroke-width": 1.6, "pointer-events": "none" });
+        g.appendChild(c);
+      });
+      g.addEventListener("pointerdown", function (ev) { startNodeDrag(ev, n); });
+      g.addEventListener("dblclick", function (ev) { ev.stopPropagation(); selected = [n.id]; draw(); paintInspector(); $("#inspector input, #inspector textarea, #inspector select"); });
+      gNodes.appendChild(g);
+    });
+
+    drawMinimap();
+  }
+
+  function subtitle(n) {
+    var c = n.config || {};
+    if (n.type === "agent") return (c.model || c.agent || "model default") + (Array.isArray(c.tools) && c.tools.length ? " · " + c.tools.length + " tools" : "");
+    if (n.type === "tool") return c.tool || "no tool set";
+    if (n.type === "parallel") return c.mode + (c.join ? " · " + c.join : "");
+    if (n.type === "loop") return "max " + (c.maxIterations || "?") + " · " + clip(c.until || "no condition", 18);
+    if (n.type === "approval") return c.approver || "owner";
+    if (n.type === "trigger") return (c.mode || "wait") + " · " + ((c.trigger && c.trigger.kind) || "?");
+    if (n.type === "subflow") return (c.ref && c.ref.graphId) || "no ref";
+    if (n.type === "end") return Object.keys(c.outputs || {}).length + " output(s)";
+    if (n.type === "decision") return "conditions on edges";
+    if (n.type === "note") return clip(c.text || "", 24);
+    return "";
+  }
+  function clip(s, n) { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  function midpoint(e) {
+    var a = nodeById(e.from.node), b = nodeById(e.to.node);
+    if (!a || !b) return { x: 0, y: 0 };
+    var p1 = portPoint(a, e.from.port), p2 = portPoint(b, e.to.port);
+    return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+  }
+
+  function drawMinimap() {
+    var mini = $("#miniWorld"), box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    spec.nodes.forEach(function (n) { box.x0 = Math.min(box.x0, n.x); box.y0 = Math.min(box.y0, n.y); box.x1 = Math.max(box.x1, n.x + W); box.y1 = Math.max(box.y1, n.y + H); });
+    if (!isFinite(box.x0)) box = { x0: 0, y0: 0, x1: 1, y1: 1 };
+    var pad = 60; box.x0 -= pad; box.y0 -= pad; box.x1 += pad; box.y1 += pad;
+    var sx = 168 / Math.max(1, box.x1 - box.x0), sy = 116 / Math.max(1, box.y1 - box.y0);
+    var s = Math.min(sx, sy);
+    spec.nodes.forEach(function (n) {
+      mini.appendChild(svgEl("rect", { x: (n.x - box.x0) * s, y: (n.y - box.y0) * s, width: Math.max(2, W * s), height: Math.max(2, H * s), rx: 1, fill: selected.indexOf(n.id) >= 0 ? "#b07a12" : "#cfc8b8" }));
+    });
+    mini.__box = { box: box, s: s };
+    var wrap = $("#canvasWrap").getBoundingClientRect();
+    var vr = { x: -view.x / view.k, y: -view.y / view.k, w: wrap.width / view.k, h: wrap.height / view.k };
+    $("#miniView").setAttribute("x", (vr.x - box.x0) * s);
+    $("#miniView").setAttribute("y", (vr.y - box.y0) * s);
+    $("#miniView").setAttribute("width", Math.max(2, vr.w * s));
+    $("#miniView").setAttribute("height", Math.max(2, vr.h * s));
+  }
+
+  // ── pointer: world coords, drag, connect, pan ───────────────────────
+  function toWorld(ev) {
+    var m = svg.getScreenCTM().inverse();
+    var p = svg.createSVGPoint();
+    p.x = ev.clientX; p.y = ev.clientY;
+    var w = p.matrixTransform(m);
+    return { x: (w.x - view.x) / view.k, y: (w.y - view.y) / view.k };
+  }
+  function startNodeDrag(ev, n) {
+    if (ev.button !== 0) return;
+    if (ev.target.getAttribute && ev.target.getAttribute("data-port")) return;
+    ev.stopPropagation();
+    if (ev.shiftKey) {
+      var at = selected.indexOf(n.id);
+      if (at >= 0) selected.splice(at, 1); else selected.push(n.id);
+    } else if (selected.indexOf(n.id) < 0) selected = [n.id];
+    var start = toWorld(ev);
+    var orig = selected.filter(function (id) { return nodeById(id); }).map(function (id) { var x = nodeById(id); return { id: id, x: x.x, y: x.y }; });
+    drag = { kind: "node", start: start, orig: orig, moved: false };
+    draw(); paintInspector();
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+  function startConnect(ev, n, port) {
+    ev.stopPropagation();
+    var p = portPoint(n, port);
+    drag = { kind: "edge", from: n.id, port: port, p1: p, p2: p };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+  function onMove(ev) {
+    if (!drag) return;
+    var w = toWorld(ev);
+    if (drag.kind === "node") {
+      var dx = snap(w.x - drag.start.x, spec.grid), dy = snap(w.y - drag.start.y, spec.grid);
+      if (dx || dy) drag.moved = true;
+      drag.orig.forEach(function (o) { var n = nodeById(o.id); if (n) { n.x = snap(o.x + dx, spec.grid); n.y = snap(o.y + dy, spec.grid); } });
+      draw();
+    } else if (drag.kind === "edge") {
+      drag.p2 = w; drawTemp(drag);
+    } else if (drag.kind === "pan") {
+      view.x = drag.vx + (ev.clientX - drag.sx); view.y = drag.vy + (ev.clientY - drag.sy);
+      draw();
+    } else if (drag.kind === "marquee") {
+      drag.rect = { x: Math.min(drag.start.x, w.x), y: Math.min(drag.start.y, w.y), w: Math.abs(w.x - drag.start.x), h: Math.abs(w.y - drag.start.y) };
+      drawTemp(drag);
+    }
+  }
+  function drawTemp(d) {
+    gTemp.textContent = "";
+    if (d.kind === "edge") {
+      gTemp.appendChild(svgEl("path", { d: "M " + d.p1.x + " " + d.p1.y + " L " + d.p2.x + " " + d.p2.y, stroke: "#b07a12", "stroke-width": 2, "stroke-dasharray": "5 4", fill: "none" }));
+    } else if (d.kind === "marquee" && d.rect) {
+      gTemp.appendChild(svgEl("rect", { x: d.rect.x, y: d.rect.y, width: d.rect.w, height: d.rect.h, fill: "rgba(176,122,18,.08)", stroke: "#b07a12", "stroke-dasharray": "4 3" }));
+    }
+  }
+  function onUp(ev) {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    var d = drag; drag = null;
+    if (!d) return;
+    if (d.kind === "node") {
+      if (d.moved) commit();
+    } else if (d.kind === "edge") {
+      var hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      var host = hit && hit.closest ? hit.closest("[data-node]") : null;
+      var nodeId = host ? host.getAttribute("data-node") : null;
+      var port = hit && hit.getAttribute && hit.getAttribute("data-port") ? hit.getAttribute("data-port") : "in";
+      if (nodeId && nodeId !== d.from) addEdge(d.from, d.port, nodeId, port);
+      draw();
+    } else if (d.kind === "marquee" && d.rect) {
+      if (!ev.shiftKey) selected = [];
+      spec.nodes.forEach(function (n) {
+        if (n.x + W > d.rect.x && n.x < d.rect.x + d.rect.w && n.y + H > d.rect.y && n.y < d.rect.y + d.rect.h) {
+          if (selected.indexOf(n.id) < 0) selected.push(n.id);
+        }
+      });
+      gTemp.textContent = "";
+      draw(); paintInspector();
+    }
+    scheduleSave();
+  }
+
+  svg.addEventListener("pointerdown", function (ev) {
+    if (ev.button === 0 && ev.shiftKey) {
+      ev.preventDefault();
+      drag = { kind: "marquee", start: toWorld(ev), rect: null };
+      window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+      return;
+    }
+    if (ev.button === 1 || (ev.button === 0 && ev.target === svg)) {
+      ev.preventDefault();
+      drag = { kind: "pan", sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y };
+      svg.style.cursor = "grabbing";
+      window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", function () { svg.style.cursor = ""; onUp(ev); });
+    }
+  });
+
+  function addEdge(from, fromPort, to, toPort) {
+    var exists = spec.edges.some(function (e) { return e.from.node === from && e.from.port === fromPort && e.to.node === to && e.to.port === toPort; });
+    if (exists) return;
+    spec.edges.push({ id: uid("e"), from: { node: from, port: fromPort }, to: { node: to, port: toPort }, label: "", condition: null });
+    commit();
+    selected = ["e:" + spec.edges[spec.edges.length - 1].id];
+    paintInspector();
+  }
+
+  // ── palette ─────────────────────────────────────────────────────────
+  var palList = $("#palList");
+  TYPES.forEach(function (t) {
+    var el = document.createElement("div");
+    el.className = "pal-item";
+    el.setAttribute("draggable", "true");
+    el.setAttribute("data-type", t.type);
+    el.innerHTML = '<span class="sw"></span><span>' + esc(t.label) + '<small>' + esc(t.hint) + "</small></span>";
+    el.addEventListener("dragstart", function (ev) { ev.dataTransfer.setData("text/bz-node", t.type); });
+    el.addEventListener("click", function () { addNode(t.type, null); });
+    palList.appendChild(el);
+  });
+  $("#canvasWrap").addEventListener("dragover", function (ev) { ev.preventDefault(); });
+  $("#canvasWrap").addEventListener("drop", function (ev) {
+    ev.preventDefault();
+    var type = ev.dataTransfer.getData("text/bz-node");
+    if (type) addNode(type, toWorld(ev));
+  });
+
+  function addNode(type, at) {
+    var wrap = $("#canvasWrap").getBoundingClientRect();
+    var c = at || { x: (wrap.width / 2 - view.x) / view.k, y: (wrap.height / 2 - view.y) / view.k };
+    var base = { id: uid("n"), type: type, name: SHORT[type] + " " + (spec.nodes.length + 1), x: snap(c.x - W / 2, spec.grid), y: snap(c.y - H / 2, spec.grid), notes: "", config: {} };
+    if (type === "start") { var hasStart = spec.nodes.some(function (n) { return n.type === "start"; }); if (hasStart) { delete base.id; return; } }
+    if (type === "agent") base.config = { prompt: "", model: null, tools: [], inputs: {}, output: { name: "output" }, timeoutSec: 180, retries: 1, onError: { policy: "stop" }, needsApproval: false };
+    if (type === "tool") base.config = { tool: "", args: {}, inputs: {}, output: { name: "output" }, timeoutSec: 120, retries: 0, onError: { policy: "stop" }, needsApproval: false };
+    if (type === "decision") base.config = {};
+    if (type === "parallel") base.config = { mode: "fan-out", maxConcurrency: 2 };
+    if (type === "loop") base.config = { until: "$input.goal != \"\"", maxIterations: 3 };
+    if (type === "approval") base.config = { prompt: "", approver: "owner", timeoutSec: 86400, onTimeout: "stop" };
+    if (type === "trigger") base.config = { mode: "wait", trigger: { kind: "event", event: "" } };
+    if (type === "subflow") base.config = { ref: { graphId: "", revision: null }, inputs: {}, output: { name: "output" } };
+    if (type === "end") base.config = { outputs: {} };
+    if (type === "note") base.config = { text: "" };
+    spec.nodes.push(base);
+    if (type === "start" && !spec.entry) spec.entry = base.id;
+    selected = [base.id];
+    commit();
+    paintInspector();
+  }
+
+  function deleteSelection() {
+    var nodeIds = selected.filter(function (s) { return s.indexOf("e:") !== 0; });
+    var edgeIds = selected.filter(function (s) { return s.indexOf("e:") === 0; }).map(function (s) { return s.slice(2); });
+    if (!nodeIds.length && !edgeIds.length) return;
+    spec.nodes = spec.nodes.filter(function (n) { return nodeIds.indexOf(n.id) < 0; });
+    spec.edges = spec.edges.filter(function (e) { return edgeIds.indexOf(e.id) < 0 && nodeIds.indexOf(e.from.node) < 0 && nodeIds.indexOf(e.to.node) < 0; });
+    if (nodeIds.indexOf(spec.entry) >= 0) spec.entry = (spec.nodes.filter(function (n) { return n.type === "start"; })[0] || {}).id || "";
+    selected = [];
+    commit();
+    paintInspector();
+  }
+
+  // ── clipboard / undo ────────────────────────────────────────────────
+  function copySelection() {
+    var nodes = spec.nodes.filter(function (n) { return selected.indexOf(n.id) >= 0; });
+    if (!nodes.length) return;
+    var ids = nodes.map(function (n) { return n.id; });
+    clipboard = {
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      edges: JSON.parse(JSON.stringify(spec.edges.filter(function (e) { return ids.indexOf(e.from.node) >= 0 && ids.indexOf(e.to.node) >= 0; })))
+    };
+  }
+  function pasteClipboard() {
+    if (!clipboard) return;
+    var map = {};
+    selected = [];
+    clipboard.nodes.forEach(function (n) {
+      var id = uid("n"); map[n.id] = id;
+      var copy = JSON.parse(JSON.stringify(n)); copy.id = id; copy.x += 32; copy.y += 32;
+      spec.nodes.push(copy); selected.push(id);
+    });
+    clipboard.edges.forEach(function (e) {
+      spec.edges.push({ id: uid("e"), from: { node: map[e.from.node], port: e.from.port }, to: { node: map[e.to.node], port: e.to.port }, label: e.label || "", condition: e.condition == null ? null : e.condition });
+    });
+    commit();
+  }
+  function undo() {
+    if (!history.length) return;
+    redo.push(canonicalSpec(spec));
+    var prev = history.pop();
+    spec = JSON.parse(prev); lastCanon = prev;
+    var r = validate(spec); spec = r.spec; issues = r.issues;
+    selected = []; draw(); paintIssues(); paintOutput(); paintInspector();
+  }
+  function redoFn() {
+    if (!redo.length) return;
+    history.push(canonicalSpec(spec));
+    var next = redo.pop();
+    spec = JSON.parse(next); lastCanon = next;
+    var r = validate(spec); spec = r.spec; issues = r.issues;
+    selected = []; draw(); paintIssues(); paintOutput(); paintInspector();
+  }
+
+  // ── inspector ───────────────────────────────────────────────────────
+  function field(label, inner, hint) {
+    return '<div class="field"><label>' + esc(label) + "</label>" + inner + (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
+  }
+  function input(path, value, attrs) {
+    return '<input type="text" data-path="' + esc(path) + '" value="' + esc(value == null ? "" : value) + '" ' + (attrs || "") + " />";
+  }
+  function bindInspector(host) {
+    host.querySelectorAll("[data-path]").forEach(function (el) {
+      el.addEventListener("input", function () {
+        applyPath(el.getAttribute("data-path"), el.type === "number" ? Number(el.value) : (el.type === "checkbox" ? el.checked : el.value));
+        commit(false);
+      });
+      el.addEventListener("change", function () { commit(); });
+    });
+  }
+  function applyPath(path, value) {
+    // "web_search, web_extract" in the tools box is a list, not a string.
+    if (/\.config\.tools$/.test(path) && typeof value === "string") {
+      value = value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    var parts = path.split("."), obj = null;
+    if (parts[0] === "node") { obj = nodeById(parts[1]); parts = parts.slice(2); }
+    else if (parts[0] === "edge") { obj = spec.edges.filter(function (e) { return e.id === parts[1]; })[0]; parts = parts.slice(2); }
+    else if (parts[0] === "spec") { obj = spec; parts = parts.slice(1); }
+    if (!obj) return;
+    var at = obj;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (at[parts[i]] == null || typeof at[parts[i]] !== "object") at[parts[i]] = {};
+      at = at[parts[i]];
+    }
+    at[parts[parts.length - 1]] = value;
+    if (parts[0] === "name" || (parts.length === 1 && parts[0] === "name")) {
+      // name change: nothing else to keep in sync
+    }
+  }
+  function paintInspector() {
+    var host = $("#inspector");
+    if (selected.length !== 1) {
+      host.innerHTML = "<h2>Inspector</h2><div class='empty'>" + (selected.length ? selected.length + " selected" : "Select a node.") + "</div>" +
+        (selected.length ? '<div class="field">' + '<button id="delSel">Delete selection</button></div>' : "");
+      var b = $("#delSel"); if (b) b.addEventListener("click", deleteSelection);
+      return;
+    }
+    var key = selected[0];
+    if (key.indexOf("e:") === 0) return paintEdgeInspector(key.slice(2));
+    var n = nodeById(key);
+    if (!n) { host.innerHTML = "<h2>Inspector</h2><div class='empty'>Select a node.</div>"; return; }
+    var c = n.config || {};
+    var html = "<h2>Inspector · " + esc(SHORT[n.type] || n.type) + "</h2>";
+    html += field("Name", input("node." + n.id + ".name", n.name));
+    if (n.type === "agent") {
+      html += field("Instructions / prompt", '<textarea data-path="node.' + n.id + '.config.prompt">' + esc(c.prompt || "") + "</textarea>", "Use {{$input.goal}} or {{$node_id.output}} to interpolate.");
+      html += field("Agent", input("node." + n.id + ".config.agent", c.agent || "buzzy"));
+      html += field("Model (blank = default)", input("node." + n.id + ".config.model", c.model || ""));
+      html += field("Tools allowed (comma separated)", input("node." + n.id + ".config.tools", Array.isArray(c.tools) ? c.tools.join(", ") : ""));
+      html += field("Inputs (JSON: name → binding)", '<textarea data-path="node.' + n.id + '.config.inputs">' + esc(JSON.stringify(c.inputs || {})) + "</textarea>");
+      html += field("Output name", input("node." + n.id + ".config.output.name", (c.output && c.output.name) || ""));
+      html += '<div class="row2">' + field("Timeout (s)", '<input type="number" data-path="node.' + n.id + '.config.timeoutSec" value="' + esc(c.timeoutSec || 180) + '" />') + field("Retries", '<input type="number" data-path="node.' + n.id + '.config.retries" value="' + esc(c.retries == null ? 1 : c.retries) + '" />') + "</div>";
+      html += field("On error", '<select data-path="node.' + n.id + '.config.onError.policy">' + opt(["stop", "skip", "route"], (c.onError && c.onError.policy) || "stop") + "</select>");
+      html += '<div class="field"><label class="check"><input type="checkbox" data-path="node.' + n.id + '.config.needsApproval" ' + (c.needsApproval ? "checked" : "") + " /> Needs approval before it runs</label></div>";
+    } else if (n.type === "tool") {
+      html += field("Tool", input("node." + n.id + ".config.tool", c.tool || ""));
+      html += field("Args (JSON: name → binding or literal)", '<textarea data-path="node.' + n.id + '.config.args">' + esc(JSON.stringify(c.args || {})) + "</textarea>");
+      html += field("Output name", input("node." + n.id + ".config.output.name", (c.output && c.output.name) || ""));
+      html += '<div class="row2">' + field("Timeout (s)", '<input type="number" data-path="node.' + n.id + '.config.timeoutSec" value="' + esc(c.timeoutSec || 120) + '" />') + field("Retries", '<input type="number" data-path="node.' + n.id + '.config.retries" value="' + esc(c.retries || 0) + '" />') + "</div>";
+    } else if (n.type === "decision") {
+      html += "<p class='empty'>A decision has no condition of its own. Each outgoing edge carries one; the edge with no condition is the else.</p>";
+      spec.edges.filter(function (e) { return e.from.node === n.id; }).forEach(function (e) {
+        html += '<div class="issue" style="border-left-color:#b07a12" data-edge-open="' + e.id + '"><b>' + esc(e.label || (e.condition ? "branch" : "else")) + "</b><br/>" + esc(e.condition || "otherwise") + "</div>";
+      });
+    } else if (n.type === "parallel") {
+      html += field("Mode", '<select data-path="node.' + n.id + '.config.mode">' + opt(["fan-out", "join"], c.mode || "fan-out") + "</select>");
+      html += field("Join policy", '<select data-path="node.' + n.id + '.config.join">' + opt(["all", "any", "first"], c.join || "all") + "</select>");
+      html += field("Max concurrency", '<input type="number" data-path="node.' + n.id + '.config.maxConcurrency" value="' + esc(c.maxConcurrency || 2) + '" />');
+      if ((c.mode || "") === "join") html += field("Output name", input("node." + n.id + ".config.output.name", (c.output && c.output.name) || ""));
+    } else if (n.type === "loop") {
+      html += field("Repeat until", input("node." + n.id + ".config.until", c.until || ""), "An expression, e.g. $n_edit.score >= 0.85");
+      html += field("Max iterations", '<input type="number" min="1" max="50" data-path="node.' + n.id + '.config.maxIterations" value="' + esc(c.maxIterations || 3) + '" />');
+    } else if (n.type === "approval") {
+      html += field("What the person is approving", '<textarea data-path="node.' + n.id + '.config.prompt">' + esc(c.prompt || "") + "</textarea>");
+      html += field("Approver", '<select data-path="node.' + n.id + '.config.approver">' + opt(["owner", "ops"], c.approver || "owner") + "</select>");
+      html += field("If nobody answers", '<select data-path="node.' + n.id + '.config.onTimeout">' + opt(["stop", "reject"], c.onTimeout || "stop") + "</select>");
+    } else if (n.type === "trigger") {
+      html += field("Mode", '<select data-path="node.' + n.id + '.config.mode">' + opt(["wait", "entry"], c.mode || "wait") + "</select>");
+      html += field("Kind", '<select data-path="node.' + n.id + '.config.trigger.kind">' + opt(["schedule", "webhook", "event"], (c.trigger && c.trigger.kind) || "event") + "</select>");
+      html += field("Schedule (cron)", input("node." + n.id + ".config.trigger.schedule", c.trigger && c.trigger.schedule));
+      html += field("Webhook path", input("node." + n.id + ".config.trigger.webhook", c.trigger && c.trigger.webhook));
+      html += field("Event name", input("node." + n.id + ".config.trigger.event", c.trigger && c.trigger.event));
+    } else if (n.type === "subflow") {
+      html += field("Graph id", input("node." + n.id + ".config.ref.graphId", c.ref && c.ref.graphId));
+      html += field("Revision (blank = latest)", input("node." + n.id + ".config.ref.revision", c.ref && c.ref.revision != null ? c.ref.revision : ""));
+      html += field("Inputs (JSON)", '<textarea data-path="node.' + n.id + '.config.inputs">' + esc(JSON.stringify(c.inputs || {})) + "</textarea>");
+    } else if (n.type === "end") {
+      html += field("Outputs (JSON: name → binding)", '<textarea data-path="node.' + n.id + '.config.outputs">' + esc(JSON.stringify(c.outputs || {})) + "</textarea>");
+    } else if (n.type === "note") {
+      html += field("Note", '<textarea data-path="node.' + n.id + '.config.text">' + esc(c.text || "") + "</textarea>");
+    } else if (n.type === "start") {
+      html += "<p class='empty'>The graph's inputs are its params, edited below.</p>";
+    }
+    html += "<hr style='border:0;border-top:1px solid var(--line);margin:10px 0' />";
+    html += field("Params (JSON array)", '<textarea data-path="spec.params">' + esc(JSON.stringify(spec.params)) + "</textarea>", "name, type, required, default");
+    html += '<div class="field"><button id="delOne">Delete node</button></div>';
+    host.innerHTML = html;
+    bindInspector(host);
+    // JSON textareas need parsing back into objects, not strings.
+    host.querySelectorAll("textarea[data-path$='.inputs'],textarea[data-path$='.args'],textarea[data-path$='.outputs'],textarea[data-path='spec.params']").forEach(function (el) {
+      el.addEventListener("change", function () {
+        try { applyPath(el.getAttribute("data-path"), JSON.parse(el.value || "null")); commit(); }
+        catch (e) { statusEl.textContent = "bad JSON"; statusEl.className = "bad"; }
+      });
+    });
+    var del = $("#delOne"); if (del) del.addEventListener("click", function () { selected = [n.id]; deleteSelection(); });
+    host.querySelectorAll("[data-edge-open]").forEach(function (el) {
+      el.addEventListener("click", function () { selected = ["e:" + el.getAttribute("data-edge-open")]; draw(); paintInspector(); });
+    });
+  }
+  function paintEdgeInspector(id) {
+    var e = spec.edges.filter(function (x) { return x.id === id; })[0];
+    var host = $("#inspector");
+    if (!e) { host.innerHTML = "<h2>Inspector</h2><div class='empty'>That edge is gone.</div>"; return; }
+    var from = nodeById(e.from.node), to = nodeById(e.to.node);
+    var html = "<h2>Edge</h2>";
+    html += field("Label", input("edge." + id + ".label", e.label || ""));
+    html += field("Condition", input("edge." + id + ".condition", e.condition || ""), "Empty = else. Only one else per decision.");
+    html += '<p class="empty">' + esc((from ? from.name : e.from.node) + " → " + (to ? to.name : e.to.node)) + "</p>";
+    html += '<div class="field"><button id="delEdge">Delete edge</button></div>';
+    host.innerHTML = html;
+    bindInspector(host);
+    var del = $("#delEdge"); if (del) del.addEventListener("click", function () { selected = ["e:" + id]; deleteSelection(); });
+  }
+  function opt(values, current) {
+    return values.map(function (v) { return '<option value="' + esc(v) + '"' + (v === current ? " selected" : "") + ">" + esc(v) + "</option>"; }).join("");
+  }
+
+  // ── issues ──────────────────────────────────────────────────────────
+  function paintIssues() {
+    var host = $("#issueList");
+    if (!issues.length) { host.innerHTML = '<p class="empty">No problems. This flow is ready to export.</p>'; return; }
+    host.innerHTML = "";
+    issues.forEach(function (i) {
+      var el = document.createElement("div");
+      el.className = "issue " + (i.severity === "error" ? "error" : "");
+      el.innerHTML = "<b>" + esc(i.code) + "</b> " + esc(i.message);
+      el.addEventListener("click", function () {
+        if (i.nodeId && nodeById(i.nodeId)) { selected = [i.nodeId]; draw(); paintInspector(); }
+        else if (i.edgeId) { selected = ["e:" + i.edgeId]; draw(); paintInspector(); }
+      });
+      host.appendChild(el);
+    });
+  }
+
+  // ── outputs ─────────────────────────────────────────────────────────
+  function paintOutput() {
+    var text = "";
+    var note = "";
+    if (tab === "mermaid") { text = toMermaid(spec); note = "Paste into mermaid.live to check the drawing."; }
+    else if (tab === "json") { text = JSON.stringify(JSON.parse(canonicalSpec(spec)), null, 2); note = "Canonical spec, schemaVersion " + spec.schemaVersion + "."; }
+    else if (tab === "yaml") { text = toYaml(spec); note = "Same object as JSON."; }
+    else { text = toRunSheet(spec); note = "Plain English, numbered."; }
+    $("#outputText").value = text;
+    $("#outNote").textContent = note;
+  }
+  document.querySelectorAll(".tab").forEach(function (b) {
+    b.addEventListener("click", function () {
+      tab = b.getAttribute("data-tab");
+      document.querySelectorAll(".tab").forEach(function (x) { x.classList.toggle("on", x === b); });
+      paintOutput();
+    });
+  });
+  function currentOutput() { return $("#outputText").value; }
+  $("#btnCopy").addEventListener("click", function () {
+    navigator.clipboard.writeText(currentOutput()).then(function () {
+      $("#btnCopy").textContent = "Copied";
+      setTimeout(function () { $("#btnCopy").textContent = "Copy"; }, 1200);
+    });
+  });
+  $("#btnDl").addEventListener("click", function () {
+    var ext = tab === "mermaid" ? "mmd" : tab === "json" ? "json" : tab === "yaml" ? "yaml" : "txt";
+    var blob = new Blob([currentOutput()], { type: "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (spec.name || "orchestration").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "." + ext;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  });
+  $("#btnExport").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(JSON.parse(canonicalSpec(spec)), null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (spec.name || "orchestration").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  });
+  $("#btnSend").addEventListener("click", function () {
+    // PR1 hands the spec to Talk through localStorage. Outbound sends (webhook,
+    // Agent Bus, email) are explicitly not built — they need Shane's say-so first.
+    try { localStorage.setItem("bz_orch_handoff", canonicalSpec(spec)); } catch (e) {}
+    location.href = "/buzzy/talk?fromOrchestration=1";
+  });
+
+  // ── toolbar ─────────────────────────────────────────────────────────
+  $("#orchName").addEventListener("input", function () { spec.name = this.value; commit(false); });
+  $("#btnNew").addEventListener("click", function () {
+    if (dirty && !confirm("Start a new flow? The current one is saved in this browser.")) return;
+    spec = starter(); history = []; redo = []; selected = []; commit();
+  });
+  $("#btnLayout").addEventListener("click", autoLayout);
+  $("#btnImport").addEventListener("click", function () { $("#importDlg").showModal(); });
+  $("#importCancel").addEventListener("click", function () { $("#importDlg").close(); });
+  $("#importGo").addEventListener("click", function () {
+    var raw = $("#importText").value.trim();
+    if (!raw) return;
+    var next = null;
+    if (raw.charAt(0) === "{") {
+      try { var v = validate(JSON.parse(raw)); if (!v.ok) { alert("That spec has blocking problems: " + v.issues.filter(function (i) { return i.severity === "error"; }).map(function (i) { return i.code; }).join(", ")); return; } next = v.spec; }
+      catch (e) { alert("That is not JSON."); return; }
+    } else {
+      var r = fromMermaid(raw);
+      if (!r.ok) { alert(r.error); return; }
+      next = r.spec;
+    }
+    spec = next; history = []; redo = []; selected = []; commit(); fit();
+    $("#importDlg").close(); $("#importText").value = "";
+  });
+
+  function autoLayout() {
+    var depth = {}, byId = {};
+    spec.nodes.forEach(function (n) { byId[n.id] = n; });
+    var entry = spec.entry || (spec.nodes.filter(function (n) { return n.type === "start"; })[0] || {}).id;
+    if (!entry) return;
+    var q = [[entry, 0]], seen = {};
+    while (q.length) {
+      var pair = q.shift(), id = pair[0], d = pair[1];
+      if (seen[id]) { depth[id] = Math.max(depth[id] || 0, d); continue; }
+      seen[id] = true; depth[id] = d;
+      spec.edges.forEach(function (e) { if (e.from.node === id && e.to.port !== "back") q.push([e.to.node, d + 1]); });
+    }
+    var rows = {};
+    spec.nodes.forEach(function (n) {
+      var d = depth[n.id] == null ? 0 : depth[n.id];
+      rows[d] = (rows[d] || 0);
+      var r = rows[d]++;
+      if (spec.direction === "LR") { n.x = snap(64 + d * 260, spec.grid); n.y = snap(64 + r * 120, spec.grid); }
+      else { n.x = snap(64 + (r - 0.5) * 230, spec.grid); n.y = snap(64 + d * 150, spec.grid); }
+    });
+    commit(); fit();
+  }
+
+  function fit() {
+    if (!spec.nodes.length) return;
+    var wrap = $("#canvasWrap").getBoundingClientRect();
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    spec.nodes.forEach(function (n) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + W); y1 = Math.max(y1, n.y + H); });
+    var pad = 48;
+    var k = Math.min((wrap.width - pad * 2) / Math.max(1, x1 - x0), (wrap.height - pad * 2) / Math.max(1, y1 - y0), 1.4);
+    view.k = Math.max(0.08, k);
+    view.x = (wrap.width - (x1 - x0) * view.k) / 2 - x0 * view.k;
+    view.y = (wrap.height - (y1 - y0) * view.k) / 2 - y0 * view.k;
+    draw();
+  }
+
+  $("#zIn").addEventListener("click", function () { zoomAt(1.2); });
+  $("#zOut").addEventListener("click", function () { zoomAt(1 / 1.2); });
+  $("#zFit").addEventListener("click", fit);
+  function zoomAt(factor, cx, cy) {
+    var wrap = $("#canvasWrap").getBoundingClientRect();
+    cx = cx == null ? wrap.width / 2 : cx; cy = cy == null ? wrap.height / 2 : cy;
+    var k2 = Math.min(2.5, Math.max(0.12, view.k * factor));
+    view.x = cx - (cx - view.x) * (k2 / view.k);
+    view.y = cy - (cy - view.y) * (k2 / view.k);
+    view.k = k2;
+    draw();
+  }
+  $("#canvasWrap").addEventListener("wheel", function (ev) {
+    if (!ev.ctrlKey && !ev.metaKey && Math.abs(ev.deltaY) < 2) return;
+    ev.preventDefault();
+    var r = $("#canvasWrap").getBoundingClientRect();
+    zoomAt(ev.deltaY < 0 ? 1.08 : 1 / 1.08, ev.clientX - r.left, ev.clientY - r.top);
+  }, { passive: false });
+  $("#minimap").addEventListener("click", function (ev) {
+    var info = $("#miniWorld").__box; if (!info) return;
+    var r = this.getBoundingClientRect();
+    var x = (ev.clientX - r.left) * (168 / r.width), y = (ev.clientY - r.top) * (116 / r.height);
+    var wrap = $("#canvasWrap").getBoundingClientRect();
+    var wx = info.box.x0 + x / info.s, wy = info.box.y0 + y / info.s;
+    view.x = wrap.width / 2 - wx * view.k;
+    view.y = wrap.height / 2 - wy * view.k;
+    draw();
+  });
+
+  // ── keyboard ────────────────────────────────────────────────────────
+  window.addEventListener("keydown", function (ev) {
+    var tag = (ev.target.tagName || "").toLowerCase();
+    var typing = tag === "input" || tag === "textarea" || tag === "select";
+    if (typing) return;
+    var mod = ev.metaKey || ev.ctrlKey;
+    if ((ev.key === "Delete" || ev.key === "Backspace") && !mod) { ev.preventDefault(); deleteSelection(); }
+    else if (mod && ev.key.toLowerCase() === "z") { ev.preventDefault(); ev.shiftKey ? redoFn() : undo(); }
+    else if (mod && ev.key.toLowerCase() === "y") { ev.preventDefault(); redoFn(); }
+    else if (mod && ev.key.toLowerCase() === "c") { copySelection(); }
+    else if (mod && ev.key.toLowerCase() === "v") { pasteClipboard(); }
+    else if (mod && ev.key.toLowerCase() === "a") { ev.preventDefault(); selected = spec.nodes.map(function (n) { return n.id; }); draw(); paintInspector(); }
+    else if (ev.key === "Escape") { selected = []; draw(); paintInspector(); }
+  });
+
+  window.addEventListener("resize", function () { draw(); });
+
+  // ── boot ────────────────────────────────────────────────────────────
+  var booted = null;
+  try { var raw = localStorage.getItem("bz_orch_spec"); if (raw) booted = JSON.parse(raw); } catch (e) {}
+  if (booted) { var v = validate(booted); if (v.ok) spec = v.spec; }
+  if (!spec) spec = starter();
+  window.BZ_ORCH_DEBUG = { get spec() { return spec; }, toWorld: toWorld, commit: commit, fit: fit, view: function () { return view; }, drag: function () { return drag; } };
+  commit(false);
+  fit();
+  paintInspector();
+
+  // Recover from an old working copy that no longer validates: keep it visible rather
+  // than silently replacing a person's drawing.
+  if (!validate(spec).ok) {
+    statusEl.textContent = "needs fixing";
+    statusEl.className = "bad";
+  }
+})();
+</script>
+</body>
+</html>

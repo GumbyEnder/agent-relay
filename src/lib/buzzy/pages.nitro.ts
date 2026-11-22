@@ -45,7 +45,7 @@ const opSnippet = (host: string | undefined) =>
 // Every name here must have a file in public/buzzy — "form" was listed with no
   // form.html behind it, so /buzzy/form answered 404 from a route that claimed
   // to serve it.
-const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio", "shared", "join", "download", "testers"]);
+const PAGES = new Set(["talk", "memory", "remember", "experts", "library", "profile", "landing", "login", "recipes", "wallet", "upload", "graph", "capabilities", "project", "sketch", "studio", "shared", "join", "download", "testers", "orchestrate"]);
 // Opened by people who were sent a share or invitation link, often not BeeZilla
 // users yet: served as written, without the app's nav, account menu or nav.js.
 const STANDALONE = new Set(["shared", "join"]);
@@ -170,6 +170,12 @@ export default defineEventHandler(async (event) => {
   let name: string;
   if (segments.length === 2) {
     name = segments[1];
+    // CR-3: one editor. The old whiteboard kept its route, its saved graphs keep
+    // their ids (?graph=), and the link on Recipes now lands here.
+    if (name === "graph") {
+      const qs = (event.path ?? "").includes("?") ? "?" + (event.path ?? "").split("?").slice(1).join("?") : "";
+      return sendRedirect(event, "/buzzy/orchestrate" + qs, 301);
+    }
   } else {
     setResponseStatus(event, 404);
     return out("<h1>Not found</h1>", 404);
@@ -302,6 +308,7 @@ export default defineEventHandler(async (event) => {
     // The extra places, same words as #bzPlaces on Talk: Sketch, Music studio,
     // What BeeZilla can do, Download, Honey, Publish.
     '<a href="/buzzy/sketch" data-nav="sketch">Sketch</a>',
+    '<a href="/buzzy/orchestrate" data-nav="orchestrate">Orchestrate</a>',
     '<a href="/buzzy/studio" data-nav="studio">Music studio</a>',
     '<a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>',
     // The installer lives in its own release line, but it is still a place in
