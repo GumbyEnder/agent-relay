@@ -177,6 +177,45 @@ export async function generateMusic(prompt: string, lengthMs = 20000): Promise<M
   }
 }
 
+/**
+ * Music for a signed-in account, with the plan and the quota enforced HERE.
+ *
+ * The web app talks to ElevenLabs from OUR server, so it never passes through the
+ * /api/inference gateway — which is exactly why a free account could still generate
+ * audio from the web while the gateway refused the same account (measured:
+ * plan=free, POST /api/buzzy/music → 200, 144,620 B). Every server-side call goes
+ * through this function so there is one place that can spend our music quota.
+ */
+export async function gatedMusic(userId: string, prompt: string, lengthMs = 20000): Promise<MusicResult> {
+  const seconds = Math.max(3, Math.round(lengthMs / 1000));
+  const { checkQuota, recordUsage } = await import("./entitlements");
+  const verdict = await checkQuota({ userId, scope: "music", units: seconds });
+  if (!verdict.ok) {
+    await recordUsage({
+      userId,
+      scope: "music",
+      units: 0,
+      ms: 0,
+      status: "refused",
+      code: verdict.code ?? "quota",
+      model: "music_v2_5",
+    });
+    return { ok: false, code: verdict.code ?? "quota_exhausted", error: verdict.error ?? "music quota reached" };
+  }
+  const started = Date.now();
+  const made = await generateMusic(prompt, lengthMs);
+  await recordUsage({
+    userId,
+    scope: "music",
+    units: made.ok ? seconds : 0,
+    ms: Date.now() - started,
+    status: made.ok ? "ok" : "failed",
+    code: made.ok ? null : (made.code ?? "music_failed"),
+    model: "music_v2_5",
+  });
+  return made;
+}
+
 /** Store generated audio in the same content-addressed shelf as any other upload. */
 export async function storeAudio(
   userId: string,

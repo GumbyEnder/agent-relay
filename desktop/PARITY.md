@@ -50,10 +50,14 @@ Tracked as issues, not as this document:
   not the eleven links in web order. Before: eight or ten hand-written anchors, order
   Talk / Capabilities / Sketch / Memory / Experts / Recipes / Honey Drops / Publish,
   `target="_blank"` on Library, literal "Sign in".
-- **CR-8, still open:** the row names `Music studio` (`/buzzy/studio`) and `Download`
-  (`/buzzy/download`); neither page exists on this line yet, so both answer 404 here
-  while they are 200 on the website. Those two surfaces are the next increment — the
-  row is theirs to inherit, not theirs to re-declare (do not fork nav.js per host).
+- **CR-8, the two pages the row names (done on this branch):** `public/buzzy/studio.html`
+  and `public/buzzy/download.html` are web main's bytes, `chat.js` is web main's, and
+  `src/lib/buzzy/studio.ts` + `studio.nitro.ts` are ported with the `/api/buzzy/studio`
+  route listed before the `/api/buzzy/**` catch-all in `vite.config.ts`. Migration
+  `0054_buzzy_music_edits.sql` keeps web's number (the desktop must never invent one).
+  `desktop/smoke.mjs` now follows every `#bzNav` href and fails if any answers
+  non-200 or renders without the nav, so a link the row inherits from the website
+  cannot 404 here unnoticed.
 
 ## Verifying
 

@@ -94,10 +94,10 @@
       "id": "nav.canonical",
       "name": "One nav — eight links, active state from the path",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["public/buzzy/common.js", "public/buzzy/talk.html#bzNav"], "pages": ["talk", "index", "memory", "remember", "experts", "recipes", "wallet", "upload", "profile", "landing"] },
-      "desktop": { "evidence": [], "note": "the desktop bundle has no common.js: its eleven pages each carry their own nav markup, so Talk/Library/Recipes can drift apart page by page." },
-      "next": "Copy common.js + the #bzNav block into the desktop line. Highest-value port: it removes a whole class of divergence."
+      "state": "both",
+      "web": { "evidence": ["public/buzzy/nav.js", "public/buzzy/nav.css", "src/lib/buzzy/pages.nitro.ts", "public/buzzy/talk.html#bzNav"], "pages": ["talk", "index", "memory", "remember", "experts", "recipes", "wallet", "upload", "profile", "landing", "studio", "download"] },
+      "desktop": { "evidence": ["public/buzzy/nav.js", "public/buzzy/nav.css", "src/lib/buzzy/pages.nitro.ts"], "pages": ["talk", "index", "memory", "remember", "experts", "recipes", "wallet", "upload", "profile", "landing", "studio", "download"] },
+      "note": "CR-8: nav.js and nav.css are the website's bytes on both lines, and pages.nitro.ts writes NAV_ROW once per line — one row, not a lookalike per host."
     },
     {
       "id": "library.documents",
@@ -254,9 +254,19 @@
       "id": "generation.music",
       "name": "Music generation (ElevenLabs, task API)",
       "owner": "buzzy",
-      "state": "web-only",
-      "web": { "evidence": ["src/lib/buzzy/music.ts"], "routes": ["/api/buzzy/music"] },
-      "desktop": { "evidence": [], "note": "also blocked on the ElevenLabs plan — see improvement-loop state.json music-3d." }
+      "state": "both",
+      "web": { "evidence": ["src/lib/buzzy/music.ts", "src/lib/buzzy/studio.ts"], "pages": ["studio"], "routes": ["/api/buzzy/music", "/api/buzzy/studio"] },
+      "desktop": { "evidence": ["src/lib/buzzy/music.ts", "src/lib/buzzy/studio.ts"], "pages": ["studio"], "routes": ["/api/buzzy/music", "/api/buzzy/studio"] },
+      "note": "Same plan/render/edit code and the same quota gate on both lines; the desktop spends our music quota through gatedMusic and stores audio in its local PGlite asset shelf (migration 0054_buzzy_music_edits)."
+    },
+    {
+      "id": "distribution.download",
+      "name": "Download — the installer page",
+      "owner": "buzzy",
+      "state": "both",
+      "web": { "evidence": ["public/buzzy/download.html"], "pages": ["download"], "routes": [] },
+      "desktop": { "evidence": ["public/buzzy/download.html"], "pages": ["download"], "routes": [] },
+      "note": "The same page on both lines; it links the GitHub release feed, and the nav row names it on both surfaces so it cannot 404 from the header."
     },
     {
       "id": "generation.model3d",

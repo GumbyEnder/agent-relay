@@ -482,6 +482,13 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
               {
+                // The music studio: plan, renders and the edit log. Listed before
+                // the catch-all so /api/buzzy/studio reaches studio.nitro.ts, not
+                // chat.nitro.ts.
+                route: "/api/buzzy/studio",
+                handler: "./src/lib/buzzy/studio.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/**",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
