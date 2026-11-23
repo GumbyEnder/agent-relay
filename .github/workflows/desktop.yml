@@ -59,7 +59,11 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            fs.writeFileSync("/tmp/ci-publishers.json", JSON.stringify({ publishers: [{ id: "ci", key: "ed25519:ci-smoke" }] }));
+            // Field names are the contract trust.ts reads: { keyId, publicKey }.
+            // This fixture used to write { id, key }, so loadPinFile() skipped the
+            // entry while dist.mjs still counted one pin — the smoke test proved
+            // nothing about the pin path.
+            fs.writeFileSync("/tmp/ci-publishers.json", JSON.stringify({ publishers: [{ keyId: "ed25519:ci-smoke", publicKey: "ci-smoke-not-a-real-key" }] }));
           '
           BZ_RECIPE_PUBLISHER_FILE=/tmp/ci-publishers.json node desktop/dist.mjs stage
 
