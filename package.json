@@ -74,7 +74,8 @@
     "private:verify": "node scripts/sync-private.mjs --check --require-private",
     "test:surface": "npx tsx scripts/test-surface-routing.ts",
     "test:recipes": "npx tsx scripts/test-recipe-bundle.ts && npx tsx scripts/test-recipe-checks.ts && npx tsx scripts/test-recipe-listing.ts",
-    "test:wallet": "npx tsx scripts/test-wallet.ts"
+    "test:wallet": "npx tsx scripts/test-wallet.ts",
+    "test:buzzy-art": "node scripts/test-buzzy-art-cap.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
