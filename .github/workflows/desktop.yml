@@ -63,8 +63,23 @@ jobs:
           '
           BZ_RECIPE_PUBLISHER_FILE=/tmp/ci-publishers.json node desktop/dist.mjs stage
 
+      - name: Install the desktop app's own dependencies
+        # The root `npm ci` installs the server, not the app: desktop has its own
+        # package.json. Without this, `npx electron-builder` fetched whatever the
+        # registry was serving (26.18.0), found no electron in node_modules, and
+        # refused to guess a version from the "^32.2.0" range — so Package died and
+        # the smoke check below never ran.
+        #
+        # `npm install`, not `npm ci`: electron-builder declares a windows-only
+        # optional dependency that a lock generated on linux cannot represent, so
+        # npm ci rejects the app's lockfile here however it was produced. The
+        # determinism that matters is the exact electron and electron-builder pins.
+        run: npm install --prefix desktop --no-audit --no-fund
+
       - name: Package (directory target, no NSIS — this is a smoke test, not a release)
-        run: npx electron-builder --dir --publish never
+        run: |
+          ./node_modules/.bin/electron-builder --version
+          ./node_modules/.bin/electron-builder --dir --publish never
         working-directory: desktop
 
       - name: Start the packaged runtime and assert it serves
