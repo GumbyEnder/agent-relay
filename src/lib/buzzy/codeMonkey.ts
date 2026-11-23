@@ -447,6 +447,10 @@ export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[],
       "",
       "Attach as proof:",
       lines(policy.proof.map((p) => PROOF_WORDS[p])),
+      "",
+      "Write your delivery for someone who never watched you work: the most important thing first, in plain words, " +
+        "then what changed, what you decided and why, and anything you did NOT verify. Keep going until every check passes; " +
+        "don't stop to list what's left or to ask whether to continue.",
     ].join("\n"),
     tags: ["code-monkey", `slice:${slice.key}`, `door:${slice.door}`, `stakes:${card.stakes}`, ...slice.after.map((a) => `after:${a}`)],
   };
@@ -477,7 +481,8 @@ export const START_CODE_PROJECT_TOOL = {
       "Start a coding project in Code Monkey's workshop when the owner wants software made or changed. " +
       "Describe the RESULT (who it is for, what changes for them, checks that pass or fail), never a plan. " +
       "Cut the work into 1-8 thin slices that each work end to end and can be tried; use `after` only when one slice truly needs another first. " +
-      "Decide reasonable details yourself and list them as assumptions instead of asking.",
+      "Decide reasonable details yourself and list them as assumptions instead of asking. " +
+      "Set each check's bar as high as the owner would want — agents keep working until they reach it.",
     parameters: {
       type: "object",
       properties: {

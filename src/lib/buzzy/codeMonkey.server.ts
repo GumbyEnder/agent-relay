@@ -316,7 +316,7 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
           title: `Review: ${s.title}`.slice(0, 120),
           objective: `Check, with a fresh pair of eyes, that "${s.title}" really does what its done checks say. You did not build it, and you are from a different company than the model that did.`,
           context: `Project: ${link.card.making} — for ${link.card.forWhom}. Stakes: ${link.card.stakes}.\nWhat the builder delivered:\n${(m?.delivery ?? "").slice(0, 3000)}\nProof attached:\n${proofLinks.map((l) => `- ${l}`).join("\n") || "- none"}`,
-          constraints: "Do not fix anything yourself: report. Run the tests, then run the real app and try each check the way the owner would. Judge the evidence, not the builder's claims.",
+          constraints: "Do not fix anything yourself: report. Run the tests, then run the real app and try each check the way the owner would. Judge the evidence, not the builder's claims. Be strict: don't soften a FAIL because the builder disagrees, and don't invent problems you can't show.",
           acceptance: [
             "Deliver one line per done check, each starting with PASS or FAIL and the evidence you saw yourself:",
             ...s.doneWhen.map((c) => `- ${c.text}`),

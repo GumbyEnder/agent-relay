@@ -145,6 +145,8 @@ check("objective says how the owner tries it", /goodnight/.test(brief.objective)
 check("context names who it's for and why", /two kids/.test(brief.context) && /10-minute/.test(brief.context));
 check("context says what it builds on", /Builds on/.test(brief.context));
 check("acceptance lists the slice's checks and the proof", /within 8 choices/.test(brief.acceptance) && /screenshot/.test(brief.acceptance));
+check("the delivery must read well to someone who never watched", /never watched you work/.test(brief.acceptance) && /did NOT verify/.test(brief.acceptance));
+check("and the worker keeps going instead of stopping with a to-do list", /don't stop to list what's left/.test(brief.acceptance));
 check("two-way slice: decide yourself, note it", /make reasonable decisions yourself/.test(brief.constraints));
 check("the brief asks for testing the real running app", /run the real app/.test(brief.constraints));
 check("assumptions and not-doing travel with the brief", /no install/.test(brief.constraints) && /No accounts/.test(brief.constraints));
