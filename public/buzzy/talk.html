@@ -1121,11 +1121,17 @@
       border-left: 1px solid #2A2A2A;
       z-index: 61;
       box-shadow: -6px 0 24px rgba(0,0,0,0.5);
-      display: flex;
       flex-direction: column;
       transform: translateX(100%);
       transition: transform 0.18s ease;
+      /* Closed = absent from layout. A panel parked just off the right edge is
+         still a 359px box hanging outside the viewport: at 390px every probe
+         (and the desktop shell's width check) reads that as overflow even
+         though Chromium shows no scrollbar, and it stays in the a11y tree.
+         `.mounted` exists only while the drawer is opening, open, or closing. */
+      display: none;
     }
+    #sessionsDrawer.mounted { display: flex; }
     #sessionsDrawer.open { transform: translateX(0); }
     .drawer-header {
       display: flex;
@@ -7591,6 +7597,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const drawer = document.getElementById("sessionsDrawer");
       const overlay = document.getElementById("sessionsOverlay");
       overlay.classList.remove("hidden");
+      drawer.classList.add("mounted");
+      // Resolve the off-canvas start position before `open`, or the panel is
+      // painted straight into place instead of sliding in.
+      void drawer.offsetWidth;
       drawer.classList.add("open");
       drawer.setAttribute("aria-hidden", "false");
       var pill = document.getElementById("sessionsPill");
@@ -7602,7 +7612,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const overlay = document.getElementById("sessionsOverlay");
       drawer.classList.remove("open");
       drawer.setAttribute("aria-hidden", "true");
-      setTimeout(function () { overlay.classList.add("hidden"); }, 180);
+      setTimeout(function () {
+        // Take the panel back out of layout once the slide-out has finished,
+        // so the closed page is exactly the viewport wide again.
+        drawer.classList.remove("mounted");
+        overlay.classList.add("hidden");
+      }, 180);
     }
     // Handle auth/errors with plain-language notes; 401 → sign in.
     function sessionsError(msg) {
