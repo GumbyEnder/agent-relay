@@ -2483,12 +2483,27 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       workOfferDismissed: false,
     };
 
+    // ── Is this document actually Talk? ────────────────────────────────
+    // Talk's markup is also the website's header, so nav.js fetches this page on every
+    // other /buzzy/* page and runs its scripts (runScripts(talk, true)) with *that*
+    // page's address in location. Those runs are not a visit to Talk: reading their
+    // ?job= / ?expert= filed another page's parameters as this chat's state and then
+    // replaced the address with /buzzy/talk — which erased a sketch board's ?job=, so
+    // every saved board became unreachable by link and a refresh found nothing.
+    // One test, used by everything below that reads the address.
+    var bzOwnPage = (function () {
+      var shell = window.BeeZillaShell;
+      var key = shell && shell.currentKey ? String(shell.currentKey) : location.pathname;
+      return /^\/buzzy(\/talk)?$/.test(key.replace(/[?#].*$/, "").replace(/\/+$/, "") || "/buzzy");
+    })();
+
     // The board follows bz_session_id (voice-stage.js): a fresh visit has none, so it
-    // opens on the empty board in front of a new conversation.
-    try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+    // opens on the empty board in front of a new conversation. Only a real visit — a
+    // header-donor run must not clear the id of the conversation the reader is in.
+    if (bzOwnPage) { try { localStorage.removeItem("bz_session_id"); } catch (_) {} }
 
     // ── Expert query param ─────────────────────────────────────────────
-    var expertFromUrl = new URLSearchParams(window.location.search).get("expert");
+    var expertFromUrl = bzOwnPage ? new URLSearchParams(window.location.search).get("expert") : null;
     if (expertFromUrl) {
       chatState.expert = expertFromUrl;
       window.history.replaceState({}, "", "/buzzy/talk");
@@ -2497,7 +2512,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // ── Job context from the Jobs card "Chat" button ───────────────────
     // sessionStorage payload (set by openJobChat) gives the agent the project
     // context; the ?job= param identifies the job for transcript restore.
-    var jobFromUrl = new URLSearchParams(window.location.search).get("job");
+    var jobFromUrl = bzOwnPage ? new URLSearchParams(window.location.search).get("job") : null;
     if (jobFromUrl) {
       chatState.jobId = jobFromUrl;
       try {
