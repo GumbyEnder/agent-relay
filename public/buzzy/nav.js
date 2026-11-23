@@ -812,6 +812,18 @@
     }
     var user = null;
 
+    /**
+     * The probe finished without an answer: a non-2xx, a body that is not JSON, or a
+     * server that answered with nothing at all. A known signed-in reader keeps their
+     * name (the cache painted it), but a reader we have never identified must not be
+     * left with an empty bordered label — that is the "blank account link" the
+     * packaged app showed at 390px, exactly where the web paints "Sign in". The link
+     * already points at /buzzy/landing in this state, so the honest label costs nothing.
+     */
+    function inconclusive() {
+      if (!user && !a.textContent) a.textContent = "Sign in";
+    }
+
     var cached = readIdentityCache();
     if (cached !== undefined) paint(cached ? cached.name : null, cached ? cached.email : null);
 
@@ -859,7 +871,7 @@
       // which is the same lie this cache exists to prevent.
       .then(function (r) { return r.ok ? r.json() : undefined; })
       .then(function (res) {
-        if (res === undefined) return; // inconclusive: keep whatever we painted
+        if (res === undefined) { inconclusive(); return; } // keep whatever we painted
         var u = res && res.user;
         if (u && (u.name || u.email)) {
           writeIdentityCache({ name: u.name || u.email, email: u.email || "" });
@@ -871,7 +883,7 @@
       })
       // A failed round trip proves nothing about who is signed in, so it must not
       // overwrite the cached identity or repaint "Sign in" over a real name.
-      .catch(function () { /* keep whatever we painted */ });
+      .catch(inconclusive);
 
     // Adopt a page-built menu as the dropdown. clone the link once so a page's own
     // click handler (Talk binds a toggle to `.account-link`) cannot double-toggle ours.
