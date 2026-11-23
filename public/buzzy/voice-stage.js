@@ -358,6 +358,11 @@
   window.__bzTurnDone = function (data) {
     running = {};
     if (!data) { paintFace(); return; }
+    // An agent asked BeeZilla, or she asked one: the Hive window (agents.js), if it is open,
+    // reads what was said without waiting for its next look.
+    if ((data.tools || []).some(function (t) { return t && /^ask_(bzilla|agent)$/.test(t.name); })) {
+      try { window.dispatchEvent(new CustomEvent("bz:hive")); } catch (_) { /* old browsers */ }
+    }
     var outs = [];
     (data.artifacts || []).forEach(function (a) { if (a && a.url) outs.push({ url: a.url, title: a.name, contentType: a.contentType }); });
     [data.audio, data.image].forEach(function (a) { if (a && a.url) outs.push({ url: a.url, title: a.name, contentType: a.type }); });
