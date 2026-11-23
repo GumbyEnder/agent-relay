@@ -38,6 +38,11 @@ everything."
    picture, colour, job or folders; tidy now. What they decide is never undone by the automatic
    parts (the tidy never moves what they placed, a starter agent they removed never comes back).
 
+Before you ship a screen, also check: can everything on it be found step by step from `brain`,
+with its address shown and a breadcrumb back? Does every folder wear its branch's colour and
+shape, and does the interface wear the colour of the agent being talked to, with the modes
+keeping theirs?
+
 ## Critical: everything moves to the Idea Board
 
 Owner, 2026-11-20: "Everything on this website has got to be movable to the
@@ -273,7 +278,3 @@ Answer yes to each, or fix it:
 9. Can every thing on this page be dragged onto the Idea Board, with the grabbing
    hand on hover?
 10. Does a fresh visit open folded, on a blank page?
-11. Can every thing on it be found step by step from `brain`, with its address shown and a
-    breadcrumb back?
-12. Does every folder wear its branch's colour and shape, and does the interface wear the colour
-    of the agent being talked to (with the modes keeping theirs)?
