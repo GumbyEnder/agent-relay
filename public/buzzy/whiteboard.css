@@ -115,6 +115,32 @@
   pointer-events: none;
 }
 .wb-hint strong { color: #eef1f4; font-size: 1.05rem; }
+/* No card in sight (zoomed or moved far off): one press brings them all back. */
+.wb-lost {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  max-width: min(440px, 80%);
+  min-height: 2.6rem;
+  padding: 0.5rem 1.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ob-yellow);
+  color: #141414;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.3;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+}
+.wb-lost:hover { filter: brightness(1.06); }
+.wb-lost:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+/* A pinch anywhere on the board is the board's (whiteboard.js), never the page's:
+   fingers can still scroll the page from the board's bars, but not zoom it. */
+.wb-panel { touch-action: pan-x pan-y; }
 .wb-marquee {
   position: absolute;
   border: 1.5px solid var(--ob-yellow);

@@ -124,6 +124,65 @@
   function typingInto(t) {
     return !!(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)));
   }
+  function num(v) { return typeof v === "number" && isFinite(v); }
+
+  // ── Zooming, and cards that went out of reach ──────────────────────────────
+  // Owner, 2026-11-21: "when zooming in and out of the board, things throw themselves
+  // around and you lose your bits."
+  //
+  // How much one wheel step zooms. A trackpad pinch arrives as many small steps of
+  // −100·ln(scale) (Chromium; Firefox is close), so exp(−step/100) follows the fingers
+  // exactly; a mouse wheel's notches are big steps (100 or so), about 28% each. (It
+  // was 0.012 a step under 30 and 0.0025 over: a slow pinch ran ahead of the fingers
+  // and a quick one fell four times behind them.)
+  function zoomFactor(dy, mode) {
+    dy = Number(dy) || 0;
+    if (mode === 1) dy *= 33;              // lines (Firefox's mouse wheel)
+    else if (mode === 2) dy *= 400;        // pages
+    var f = Math.abs(dy) < 50 ? Math.exp(-dy / 100) : Math.exp(-clamp(dy, -400, 400) * 0.0025);
+    return clamp(f, 0.5, 2);
+  }
+  // Cards far from the rest of the board (or with broken numbers) come back beside it,
+  // so "Fit everything" can always show the whole board. FAR is well past any board
+  // laid out on purpose: at the smallest zoom it is wider than a screen.
+  var FAR = 6000;
+  function strays(cards, sizeOf) {
+    sizeOf = sizeOf || function () { return { w: 240, h: 150 }; };
+    var list = (cards || []).filter(Boolean);
+    function fine(c) { return num(c.x) && num(c.y); }
+    function box(cs) {
+      var b = null;
+      cs.forEach(function (c) {
+        var s = sizeOf(c);
+        if (!b) b = { x1: c.x, y1: c.y, x2: c.x + s.w, y2: c.y + s.h };
+        else { b.x1 = Math.min(b.x1, c.x); b.y1 = Math.min(b.y1, c.y); b.x2 = Math.max(b.x2, c.x + s.w); b.y2 = Math.max(b.y2, c.y + s.h); }
+      });
+      return b;
+    }
+    var good = list.filter(fine);
+    // Home: the card with the most others near it — the main part of the board.
+    var home = null, most = -1;
+    good.forEach(function (c) {
+      var k = 0;
+      good.forEach(function (o) { if (Math.abs(o.x - c.x) <= FAR && Math.abs(o.y - c.y) <= FAR) k++; });
+      if (k > most) { most = k; home = c; }
+    });
+    var near = home ? good.filter(function (c) { return Math.abs(c.x - home.x) <= FAR && Math.abs(c.y - home.y) <= FAR; }) : [];
+    var far = list.filter(function (c) { return near.indexOf(c) < 0; });
+    if (!far.length) return [];
+    var b = near.length ? box(near) : { x1: 0, y1: 0, x2: 0, y2: -80 };
+    var moves = [];
+    var fb = far.every(fine) ? box(far) : null;
+    if (fb && fb.x2 - fb.x1 <= FAR && fb.y2 - fb.y1 <= FAR) {
+      // Flung off together: they come back together, in the same shape, just below.
+      var dx = b.x1 - fb.x1, dy = b.y2 + 80 - fb.y1;
+      far.forEach(function (c) { moves.push({ id: c.id, x: Math.round(c.x + dx), y: Math.round(c.y + dy) }); });
+    } else {
+      var x = b.x1;
+      far.forEach(function (c) { moves.push({ id: c.id, x: Math.round(x), y: Math.round(b.y2 + 80) }); x += sizeOf(c).w + 40; });
+    }
+    return moves;
+  }
 
   // What a card is, from whatever the source called it.
   function kindOf(c) {
@@ -992,7 +1051,14 @@
       if (!local.sync.dirty || setAside(boardId, local)) local = null;
     }
     var state = local || blank();
+    if (!state.view || typeof state.view !== "object") state.view = { x: 0, y: 0, z: 1 };
     var view = state.view;
+    // A saved view with broken numbers, or zoomed past the limits, starts again: the
+    // board then fits everything into sight as it opens.
+    if (!num(view.x) || !num(view.y) || !num(view.z) || view.z < ZMIN || view.z > ZMAX) {
+      view.x = 0; view.y = 0; view.z = 1;
+      delete state.viewSet;
+    }
     var selected = {};          // card id → true
     var selectedLink = null;    // link id
     var tool = "select";
@@ -1171,6 +1237,17 @@
     hint.appendChild(el("strong", null, "Talk to BeeZilla, and its work appears here."));
     hint.appendChild(el("span", null, "Or drag files, pictures and Inspiration cards in. Use the tools on the left to draw your own process."));
     canvas.appendChild(hint);
+    // Zoomed or moved so far that no card is in sight: one press brings them all back.
+    var lost = el("button", "wb-lost");
+    lost.type = "button";
+    lost.hidden = true;
+    lost.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    lost.addEventListener("click", function () {
+      world.classList.add("wb-glide");
+      fit();
+      setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
+    });
+    canvas.appendChild(lost);
 
     var zoom = el("div", "wb-zoom");
     function zbtn(name, label, fn) {
@@ -1203,7 +1280,7 @@
     keyList.hidden = true;
     keyList.setAttribute("role", "dialog");
     keyList.setAttribute("aria-label", "Keyboard shortcuts");
-    [["V", "Select"], ["H or Space", "Move the board"], ["Scroll", "Move the board"], ["Ctrl/⌘ + scroll, pinch", "Zoom"],
+    [["V", "Select"], ["H or Space", "Move the board"], ["Scroll", "Move the board"], ["Ctrl/⌘ + scroll, pinch", "Zoom"], ["+ / − (or Ctrl/⌘ + / −)", "Zoom in / out"],
      ["Alt/Option + 1", "Fit everything"], ["Alt/Option + 2", "Zoom to the selection"], ["Ctrl/⌘ + 0", "Back to 100%"], ["F1", "This list"], ["N / A / P / K / E / D", "Note / core identity / who it serves / skill / end result / drawing"], ["Drag on empty board", "Select an area"],
      ["Shift + click", "Add to the selection"], ["Ctrl/⌘ + A", "Select all"], ["Delete", "Remove"], ["Ctrl/⌘ + D", "Duplicate"],
      ["Ctrl/⌘ + Z", "Undo"], ["Shift+Ctrl/⌘ + Z", "Redo"], ["Double-click", "Edit a card"], ["Esc", "Clear the selection"]]
@@ -1473,6 +1550,7 @@
       zlabel.textContent = Math.round(view.z * 100) + "%";
       positionSelbar();
       positionStrip();
+      checkLost();
     }
     function toWorld(cx, cy) {
       var r = canvas.getBoundingClientRect();
@@ -1480,13 +1558,44 @@
     }
     function zoomAt(cx, cy, z) {
       var r = canvas.getBoundingClientRect();
-      var nz = clamp(z, ZMIN, ZMAX);
+      var nz = clamp(Number(z) || view.z, ZMIN, ZMAX);
       var px = cx - r.left, py = cy - r.top;
       view.x = px - (px - view.x) * (nz / view.z);
       view.y = py - (py - view.y) * (nz / view.z);
       view.z = nz;
+      steeredAt = Date.now();
       applyView();
       persist();
+    }
+    // The person is steering the board (zooming or moving it): what BeeZilla draws
+    // meanwhile doesn't pull the view away for a few seconds, and nothing glides under
+    // their fingers.
+    var steeredAt = 0;
+    function steer() {
+      steeredAt = Date.now();
+      world.classList.remove("wb-glide");
+    }
+    // Is any card in sight? (A board not on screen yet counts as yes: nothing to fix.)
+    function anyInView() {
+      var r = canvas.getBoundingClientRect();
+      if (!r.width || !r.height) return true;
+      return state.cards.some(function (c) {
+        var n = nodes[c.id];
+        var w = (n ? n.offsetWidth : 180) * view.z, h = (n ? n.offsetHeight : 120) * view.z;
+        var x = c.x * view.z + view.x, y = c.y * view.z + view.y;
+        return x < r.width && x + w > 0 && y < r.height && y + h > 0;
+      });
+    }
+    var lostAsk = 0;
+    function checkLost() {
+      if (lostAsk || typeof requestAnimationFrame !== "function") return;
+      lostAsk = requestAnimationFrame(function () {
+        lostAsk = 0;
+        var n = state.cards.length;
+        var out = n > 0 && !anyInView();
+        lost.hidden = !out;
+        if (out) lost.textContent = n === 1 ? "Your card is out of sight. Show it" : "Your " + n + " cards are out of sight. Show them";
+      });
     }
     function zoomBy(f) { var r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, view.z * f); }
     function zoomTo(z) { var r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, z); }
@@ -1532,11 +1641,13 @@
       if (!list.length) { fit(); return; }
       frame(list, 2);
     }
-    // Keep a new card in sight: pan just enough, never jump around.
-    function reveal(c) {
+    // Keep a new card in sight: pan just enough, never jump around. A step BeeZilla
+    // draws on its own (`auto`) waits while the person is zooming or moving the board.
+    function reveal(c, auto) {
       var n = nodes[c.id];
       var r = canvas.getBoundingClientRect();
       if (!n || !r.width) return;
+      if (auto && Date.now() - steeredAt < 4000) return;
       var w = n.offsetWidth * view.z, h = n.offsetHeight * view.z;
       var sx = c.x * view.z + view.x, sy = c.y * view.z + view.y;
       var m = 30, dx = 0, dy = 0;
@@ -1669,6 +1780,7 @@
     function refreshHint() {
       hint.hidden = state.cards.length > 0;
       root.classList.toggle("wb-has-cards", state.cards.length > 0);
+      checkLost();
     }
     function rebuild() {
       if (side.parentNode !== sideHome) sideHome.appendChild(side);   // never thrown out with a card
@@ -1784,6 +1896,30 @@
     function clearSelection() { selected = {}; selectedLink = null; drawLinks(); paintSelection(); }
 
     // ── Pointer: cards ───────────────────────────────────────────────────
+    // A drag follows the one pointer that started it (on a touch screen a second finger
+    // is a pinch, never part of the drag), and can be taken back: when that second
+    // finger comes down, `abort` puts back what the drag did, so a pinch never moves,
+    // draws, joins or selects anything. One drag at a time.
+    var dragging = null;
+    function follow(target, pid, move, up, abort, onCancel) {
+      var d = {};
+      function mv(ev) { if (ev.pointerId === pid) move(ev); }
+      function end(ev) { if (ev.pointerId === pid) { stop(); up(ev); } }
+      // The browser called the pointer off: taken back, unless the drag says otherwise.
+      function cancel(ev) { if (ev.pointerId !== pid) return; if (onCancel) { stop(); onCancel(ev); } else d.abort(); }
+      function stop() {
+        target.removeEventListener("pointermove", mv);
+        target.removeEventListener("pointerup", end);
+        target.removeEventListener("pointercancel", cancel);
+        if (dragging === d) dragging = null;
+      }
+      d.abort = function () { stop(); if (abort) abort(); };
+      target.addEventListener("pointermove", mv);
+      target.addEventListener("pointerup", end);
+      target.addEventListener("pointercancel", cancel);
+      dragging = d;
+      return d;
+    }
     var preview = null;
     function cornerXY(c, corner) {
       var n = nodes[c.id];
@@ -1824,10 +1960,8 @@
           preview = document.createElementNS(SVGNS, "path");
           preview.setAttribute("class", "wb-link wb-preview");
           svg.appendChild(preview);
-          var move = function (ev) { var p = toWorld(ev.clientX, ev.clientY); preview.setAttribute("d", curve(start, p)); };
+          var move = function (ev) { var p = toWorld(ev.clientX, ev.clientY); if (preview) preview.setAttribute("d", curve(start, p)); };
           var up = function (ev) {
-            n.removeEventListener("pointermove", move);
-            n.removeEventListener("pointerup", up);
             if (preview) { preview.remove(); preview = null; }
             var target = document.elementFromPoint(ev.clientX, ev.clientY);
             var card = target && target.closest ? target.closest(".wb-card") : null;
@@ -1840,10 +1974,10 @@
             link(c.id, toId, corner, th ? th.getAttribute("data-corner") : nearestCorner(to, toWorld(ev.clientX, ev.clientY)));
             persist();
           };
-          n.addEventListener("pointermove", move);
-          n.addEventListener("pointerup", up);
+          follow(n, e.pointerId, move, up, function () { if (preview) { preview.remove(); preview = null; } });
           return;
         }
+        var hadSel = Object.assign({}, selected);
         if (!selected[c.id]) select(c.id, e.shiftKey);
         else if (e.shiftKey) { select(c.id, true); return; }
         var moving = movingSet();
@@ -1862,12 +1996,18 @@
         var upm = function () {
           n.classList.remove("wb-moving");
           selbar.classList.remove("wb-quiet");
-          n.removeEventListener("pointermove", mv);
-          n.removeEventListener("pointerup", upm);
           if (moved) persist();
         };
-        n.addEventListener("pointermove", mv);
-        n.addEventListener("pointerup", upm);
+        follow(n, e.pointerId, mv, upm, function () {
+          // Taken back: every card where it was, and the selection as it was.
+          orig.forEach(function (o) { o.c.x = o.x; o.c.y = o.y; place(o.c); });
+          if (moved) undo.pop();
+          n.classList.remove("wb-moving");
+          selbar.classList.remove("wb-quiet");
+          selected = hadSel;
+          drawLinks();
+          paintSelection();
+        });
       });
       n.addEventListener("dblclick", function (e) {
         if (c.id === CHAT_ID) return;
@@ -2118,9 +2258,6 @@
         if (preview) preview.setAttribute("d", flowCurve(start, t ? inXY(t) : p));
       };
       var done = function (ev, cancelled) {
-        n.removeEventListener("pointermove", move);
-        n.removeEventListener("pointerup", up);
-        n.removeEventListener("pointercancel", cancel);
         document.removeEventListener("keydown", esc, true);
         if (preview) { preview.remove(); preview = null; }
         root.classList.remove("wb-connecting");
@@ -2150,11 +2287,8 @@
         blankStep = made.id;
       };
       var up = function (ev) { done(ev, false); };
-      var cancel = function (ev) { done(ev, true); };
-      var esc = function (ev) { if (ev.key === "Escape") { ev.stopPropagation(); ev.preventDefault(); done(ev, true); } };
-      n.addEventListener("pointermove", move);
-      n.addEventListener("pointerup", up);
-      n.addEventListener("pointercancel", cancel);
+      var drag = follow(n, e.pointerId, move, up, function () { done(null, true); });
+      var esc = function (ev) { if (ev.key === "Escape") { ev.stopPropagation(); ev.preventDefault(); drag.abort(); } };
       document.addEventListener("keydown", esc, true);
     }
 
@@ -2259,12 +2393,14 @@
         drawLinks();
       };
       var upr = function () {
-        n.removeEventListener("pointermove", mv);
-        n.removeEventListener("pointerup", upr);
         if (moved) { fillCard(n, c); persist(); }
       };
-      n.addEventListener("pointermove", mv);
-      n.addEventListener("pointerup", upr);
+      follow(n, e.pointerId, mv, upr, function () {
+        c.w = w0; c.h = h0;
+        if (moved) undo.pop();
+        sizeArea(c, n);
+        drawLinks();
+      });
     }
 
     // ── Sell this orchestration (coming soon) ───────────────────────────────
@@ -2419,8 +2555,71 @@
       canvas.classList.toggle("wb-placing", t === "note" || t === "agent" || t === "skill" || t === "output" || t === "person" || t === "sketch");
     }
     setTool("select");
+
+    // ── Two fingers on a touch screen: they zoom and move the board, nothing else ──
+    // A second finger used to start a box of its own while the first one dragged the
+    // card under it: the cards followed the fingers and the board never zoomed. Now the
+    // second finger takes back whatever the first one started (see follow) and the two
+    // zoom the board: the spot between them stays between them. Registered before the
+    // board's own pointerdown, so a second finger reaches nothing else.
+    var fingers = {};           // pointerId → { x, y }: the fingers on the board
+    var pinch = null;           // two fingers down: { a, b, d0, z0, wx, wy }
+    var lingering = {};         // fingers still down after a pinch: they start nothing
+    var pinchEnded = 0;
+    function fingerIds() { return Object.keys(fingers); }
+    function movePinch() {
+      var p = fingers[pinch.a], q = fingers[pinch.b];
+      if (!p || !q) return;
+      var r = canvas.getBoundingClientRect();
+      var z = clamp(pinch.z0 * Math.max(10, Math.hypot(p.x - q.x, p.y - q.y)) / pinch.d0, ZMIN, ZMAX);
+      view.z = z;
+      view.x = (p.x + q.x) / 2 - r.left - pinch.wx * z;
+      view.y = (p.y + q.y) / 2 - r.top - pinch.wy * z;
+      applyView();
+    }
     canvas.addEventListener("pointerdown", function (e) {
-      if (e.target.closest && (e.target.closest(".wb-card") || e.target.closest(".wb-hit"))) return;
+      if (e.pointerType !== "touch") return;
+      fingers[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = fingerIds();
+      if (ids.length < 2) return;
+      e.stopImmediatePropagation();       // the second finger starts nothing of its own
+      e.preventDefault();
+      if (pinch) return;                  // a third finger: the first two go on pinching
+      if (dragging) dragging.abort();     // what the first finger started is taken back
+      gesture = null;
+      steer();
+      ids.slice(0, 2).forEach(function (id) { try { canvas.setPointerCapture(Number(id)); } catch (_) { /* already lifted */ } });
+      var p = fingers[ids[0]], q = fingers[ids[1]];
+      var mid = toWorld((p.x + q.x) / 2, (p.y + q.y) / 2);
+      pinch = { a: ids[0], b: ids[1], d0: Math.max(10, Math.hypot(p.x - q.x, p.y - q.y)), z0: view.z, wx: mid.x, wy: mid.y };
+    }, true);
+    canvas.addEventListener("pointermove", function (e) {
+      if (!fingers[e.pointerId]) return;
+      fingers[e.pointerId] = { x: e.clientX, y: e.clientY };
+      if (pinch) { e.stopImmediatePropagation(); movePinch(); }
+      else if (lingering[e.pointerId]) e.stopImmediatePropagation();
+    }, true);
+    function fingerUp(e) {
+      if (!fingers[e.pointerId]) return;
+      delete fingers[e.pointerId];
+      if (pinch || lingering[e.pointerId]) e.stopImmediatePropagation();
+      delete lingering[e.pointerId];
+      if (pinch && (!fingers[pinch.a] || !fingers[pinch.b])) {
+        pinch = null;
+        pinchEnded = Date.now();
+        fingerIds().forEach(function (id) { lingering[id] = true; });
+        persist();
+      }
+    }
+    canvas.addEventListener("pointerup", fingerUp, true);
+    canvas.addEventListener("pointercancel", fingerUp, true);
+    // A pinch is not a tap: nothing under the fingers is pressed when they lift.
+    root.addEventListener("click", function (e) {
+      if (pinch || Date.now() - pinchEnded < 500) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
+
+    canvas.addEventListener("pointerdown", function (e) {
+      if (e.target.closest && (e.target.closest(".wb-card") || e.target.closest(".wb-hit") || e.target.closest(".wb-lost"))) return;
       canvas.focus({ preventScroll: true });
       stopDrawing();
       closeEditor();
@@ -2431,15 +2630,13 @@
       if (pan) {
         var sx = e.clientX, sy = e.clientY, ox = view.x, oy = view.y;
         canvas.classList.add("wb-panning");
-        var mv = function (ev) { view.x = ox + ev.clientX - sx; view.y = oy + ev.clientY - sy; applyView(); };
+        steer();
+        var mv = function (ev) { steeredAt = Date.now(); view.x = ox + ev.clientX - sx; view.y = oy + ev.clientY - sy; applyView(); };
         var up = function () {
           canvas.classList.remove("wb-panning");
-          canvas.removeEventListener("pointermove", mv);
-          canvas.removeEventListener("pointerup", up);
           persist();
         };
-        canvas.addEventListener("pointermove", mv);
-        canvas.addEventListener("pointerup", up);
+        follow(canvas, e.pointerId, mv, up, function () { canvas.classList.remove("wb-panning"); });
         return;
       }
       if (tool === "sketch") {
@@ -2463,6 +2660,7 @@
       var r = canvas.getBoundingClientRect();
       var x0 = e.clientX - r.left, y0 = e.clientY - r.top;
       var base = e.shiftKey ? Object.assign({}, selected) : {};
+      var hadSel = Object.assign({}, selected);
       if (!e.shiftKey) clearSelection();
       var boxing = false;
       var mvb = function (ev) {
@@ -2485,28 +2683,62 @@
       };
       var upb = function () {
         marquee.hidden = true;
-        canvas.removeEventListener("pointermove", mvb);
-        canvas.removeEventListener("pointerup", upb);
       };
-      canvas.addEventListener("pointermove", mvb);
-      canvas.addEventListener("pointerup", upb);
+      follow(canvas, e.pointerId, mvb, upb, function () {
+        marquee.hidden = true;
+        selected = hadSel;
+        drawLinks();
+        paintSelection();
+      });
     });
     canvas.addEventListener("wheel", function (e) {
+      if (e.ctrlKey || e.metaKey) return;          // a pinch: the board's zoom, below
       if (e.target.closest && e.target.closest(".wb-body-text")) {
         var t = e.target.closest(".wb-body-text");
-        if (t.scrollHeight > t.clientHeight && !e.ctrlKey && !e.metaKey) return; // let long text scroll
+        if (t.scrollHeight > t.clientHeight) return; // let long text scroll
       }
       e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
-        // Pinch on a trackpad arrives as ctrl+wheel with small deltas.
-        var f = Math.exp(-e.deltaY * (Math.abs(e.deltaY) < 30 ? 0.012 : 0.0025));
-        zoomAt(e.clientX, e.clientY, view.z * f);
-      } else {
-        view.x -= e.deltaX; view.y -= e.deltaY;
-        applyView();
-        persist();
-      }
+      steer();
+      view.x -= e.deltaX; view.y -= e.deltaY;
+      applyView();
+      persist();
     }, { passive: false });
+    // Zooming is the board's wherever the pointer is on it — the cards, the top bar
+    // with the Talk box, the tools, the zoom buttons, a panel — and never the web
+    // page's. A pinch (Ctrl/⌘ + scroll) over the top bar or the tools used to zoom the
+    // whole page: it jumped toward the fingers, parts of it went off screen, and a
+    // pinch back on the board then zoomed the board, so the page stayed big.
+    var gesture = null;         // Safari's own pinch: { z0 }
+    function zoomAtPointer(cx, cy, z) {
+      // Over the top bar or the tools, the board zooms at its nearest edge.
+      var r = canvas.getBoundingClientRect();
+      zoomAt(num(cx) ? clamp(cx, r.left, r.right) : r.left + r.width / 2, num(cy) ? clamp(cy, r.top, r.bottom) : r.top + r.height / 2, z);
+    }
+    root.addEventListener("wheel", function (e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      if (gesture) return;                         // Safari: its gesture events carry this pinch
+      steer();
+      zoomAtPointer(e.clientX, e.clientY, view.z * zoomFactor(e.deltaY, e.deltaMode));
+    }, { passive: false });
+    // Safari pinches with gesture events of its own, and zooms the page unless told not to.
+    root.addEventListener("gesturestart", function (e) {
+      e.preventDefault();
+      if (pinch) return;                           // two fingers on a touch screen: above
+      gesture = { z0: view.z };
+      steer();
+    });
+    root.addEventListener("gesturechange", function (e) {
+      e.preventDefault();
+      if (!gesture || pinch) return;
+      zoomAtPointer(e.clientX, e.clientY, gesture.z0 * (Number(e.scale) || 1));
+    });
+    root.addEventListener("gestureend", function (e) {
+      e.preventDefault();
+      if (!gesture) return;
+      gesture = null;
+      persist();
+    });
 
     // ── Keyboard ─────────────────────────────────────────────────────────
     function onKeyDown(e) {
@@ -2535,6 +2767,14 @@
       if ((e.altKey || e.shiftKey) && e.code === "Digit1") { e.preventDefault(); fit(); return; }
       if (e.altKey && e.code === "Digit2") { e.preventDefault(); zoomToSelection(); return; }
       if (mod && (e.key === "0" || e.code === "Digit0")) { e.preventDefault(); zoomTo(1); return; }
+      // Ctrl/⌘ + and − zoom the board too, as Ctrl/⌘ 0 does: never the page behind it
+      // (the browser keeps a page's zoom, so the whole site would stay big).
+      if (mod && !e.altKey && (e.key === "+" || e.key === "=" || e.key === "-" || e.key === "_")) {
+        e.preventDefault();
+        steer();
+        zoomBy(e.key === "-" || e.key === "_" ? 1 / 1.25 : 1.25);
+        return;
+      }
       if (e.key === "F1" || e.key === "?") { e.preventDefault(); showKeys(keyList.hidden); return; }
       var d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (d && Object.keys(selected).length) {
@@ -2779,7 +3019,7 @@
         }
         fillCard(nodes[c.id], c);
         drawLinks();
-        reveal(c);
+        reveal(c, true);
       } else {
         if (step.title && !(c.user && step.kind === "agent")) c.title = String(step.title).slice(0, 140);
         if (step.url) c.url = String(step.url);
@@ -3008,14 +3248,13 @@
           paintMarks(c, cv);
         };
         var up = function () {
-          cv.removeEventListener("pointermove", mv);
-          cv.removeEventListener("pointerup", up);
-          cv.removeEventListener("pointercancel", up);
           setMarks(c, marks);
         };
-        cv.addEventListener("pointermove", mv);
-        cv.addEventListener("pointerup", up);
-        cv.addEventListener("pointercancel", up);
+        var before = marksOf(c);            // the drawing as it was before this stroke
+        follow(cv, e.pointerId, mv, up, function () {
+          undo.pop();
+          setMarks(c, before);
+        }, up);
         void g;
       });
     }
@@ -3666,9 +3905,24 @@
     // Not cut to MAX_CARDS: two computers' cards merged can briefly hold more, and
     // cutting would lose some. Adding stops at MAX_CARDS.
     state.cards.forEach(renderCard);
+    // Anything that went far off the board (or has broken numbers) comes back beside
+    // the rest, and a board that would open with nothing in sight is fitted into view.
+    var back = strays(state.cards, function (c) {
+      var n = nodes[c.id];
+      return { w: (n && n.offsetWidth) || 240, h: (n && n.offsetHeight) || 150 };
+    });
+    back.forEach(function (m) { var c = cardById(m.id); if (c) { c.x = m.x; c.y = m.y; place(c); } });
+    if (back.length) {
+      persist();
+      say(back.length === 1 ? "A card that had gone far off the board is back beside the others."
+        : back.length + " cards that had gone far off the board are back beside the others.", 5200);
+    }
     refreshHint();
     applyView();
-    requestAnimationFrame(function () { drawLinks(); if (state.cards.length && !state.viewSet) { fit(); state.viewSet = true; } });
+    requestAnimationFrame(function () {
+      drawLinks();
+      if (state.cards.length && (!state.viewSet || back.length || !anyInView())) { fit(); state.viewSet = true; }
+    });
     if (window.ResizeObserver) new ResizeObserver(function () { positionSelbar(); }).observe(canvas);
 
     function pointerDown() { pointerBusy = true; }
@@ -3797,5 +4051,9 @@
     reset: reset,
     merge: merge3,
     graft: graft,
+    /** How much one wheel or pinch step zooms (scripts/test-board-zoom.ts). */
+    zoomFactor: zoomFactor,
+    /** Where cards that went far off the board come back to (scripts/test-board-zoom.ts). */
+    strays: strays,
   };
 })();
