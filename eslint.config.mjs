@@ -15,6 +15,10 @@ export default tseslint.config(
       ".nitro/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
+      // Synced from the private recipe repo on every build (scripts/sync-private.mjs).
+      // Lint them at the source, not here: fixes made in this tree are overwritten.
+      "src/lib/private/**",
+      "scripts/private/**",
     ],
   },
   js.configs.recommended,
