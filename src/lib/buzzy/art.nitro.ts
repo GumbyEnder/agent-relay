@@ -19,6 +19,12 @@ import { artConfigured, generateImage, storeImage, imageModel } from "./art";
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+// A board is posted whole on every autosave (public/buzzy/sketch.html, 1.2s debounce),
+// so one oversized board costs the user that whole upload on each pause in drawing.
+// The page refuses over this same number first and says so out loud; this is the
+// backstop for any other caller of the route.
+const MAX_BOARD_BYTES = 8 * 1024 * 1024;
+
 // Matches chat.nitro.ts: h3 hands us node headers, and the auth helper wants a Headers.
 function headersFromEvent(event: any): Headers {
   const rawHeaders = event.node?.req?.headers ?? event.req?.headers;
@@ -81,6 +87,18 @@ export default defineEventHandler(async (event) => {
     if (!jobId) return json(400, { error: "jobId is required to save a board", code: "bad_request" });
     const board = body.board && typeof body.board === "object" ? body.board : null;
     if (!board) return json(400, { error: "board is required", code: "bad_request" });
+    // Backstop for the page's own cap. The board is re-posted whole on every
+    // autosave, so its size is a cost the user pays on each pause in drawing:
+    // measured 2026-11-23, without this check a 48 MB board was accepted and written
+    // to jsonb (50,331,971 B in, 50,332,010 B back out) with nothing refusing it.
+    const boardBytes = JSON.stringify(board).length;
+    if (boardBytes > MAX_BOARD_BYTES) {
+      return json(413, {
+        error: "Board is too large to save (" + (boardBytes / (1024 * 1024)).toFixed(1) + " MB, limit 8 MB)",
+        code: "payload_too_large",
+        bytes: boardBytes,
+      });
+    }
     const owned = await sql`SELECT id FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${user.id} LIMIT 1`;
     if (!owned.length) return json(404, { error: "No such project", code: "not_found" });
     // The board is the project's source, so it lives beside its brief and survives

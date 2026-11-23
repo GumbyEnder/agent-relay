@@ -852,6 +852,50 @@
 
     // ── autosave ──────────────────────────────────────────────────────
     var saveTimer = null, saving = false, saveAgain = false;
+    // A board is posted whole on every autosave, so its size is not a detail. Measured
+    // 2026-11-23: the route accepted a 48 MB board and stored it (50 MB up on every
+    // pause in drawing, 50 MB back on every load). Shrink once, then refuse out loud —
+    // a board that silently loses a layer is worse than one that says it is too big.
+    var MAX_BOARD_BYTES = 8 * 1024 * 1024;
+    var blockedBytes = 0;
+    function bodyBytes(s) {
+      // Blob.size is the real encoded size; String.length undercounts non-ASCII.
+      try { return new Blob([s]).size; } catch (e) { return s.length; }
+    }
+    function tooBig(bytes) {
+      var mb = (bytes / (1024 * 1024)).toFixed(1);
+      setSaved(false);
+      setStatus("Board is " + mb + " MB — over the 8 MB save limit. Remove an image, or Create the board as a file.");
+      var el = document.getElementById("savedFlag");
+      if (el) { clearTimeout(el._t); el.textContent = "Too large to save"; el.style.color = "#ff6b6b"; }
+    }
+    // Second shrink pass, for boards that accumulated images: the import path already
+    // caps a single image at 2560 px, this re-encodes the largest one smaller.
+    function shrinkLargestImage() {
+      var imgs = doc.images.slice().sort(function (a, b) { return (b.url || "").length - (a.url || "").length; });
+      var target = imgs[0];
+      if (!target || !target.url || !/^data:/.test(target.url)) return Promise.resolve(false);
+      return new Promise(function (resolve) {
+        var probe = new Image();
+        probe.onload = function () {
+          var s = Math.min(1, 1600 / Math.max(probe.naturalWidth || 1, probe.naturalHeight || 1));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round((probe.naturalWidth || 1) * s));
+          c.height = Math.max(1, Math.round((probe.naturalHeight || 1) * s));
+          c.getContext("2d").drawImage(probe, 0, 0, c.width, c.height);
+          var next = "";
+          try { next = c.toDataURL("image/jpeg", 0.82); } catch (e) { next = ""; }
+          // Only accept a real win, or the retry loops on the same bytes forever.
+          if (!next || next.length >= target.url.length) { resolve(false); return; }
+          target.url = next;               // the placed rectangle keeps its w/h
+          renderImages(); paint();
+          resolve(true);
+        };
+        probe.onerror = function () { resolve(false); };
+        probe.src = target.url;
+      });
+    }
+
     function autoSave() {
       if (!jobId) return;
       clearTimeout(saveTimer);
@@ -882,11 +926,35 @@
       // measured: a 45 KB body throws `TypeError: Failed to fetch` and the save is
       // silently lost. The 1.2s autosave is what actually persists a board; a plain
       // fetch is what makes it land.
+      var bytes = bodyBytes(body);
+      if (bytes > MAX_BOARD_BYTES) {
+        // Same board as last attempt? Then shrinking already failed and another
+        // autosave must not re-run the re-encode every 1.2 seconds.
+        if (blockedBytes === bytes) {
+          saving = false; saveAgain = false;
+          tooBig(bytes);
+          return;
+        }
+        blockedBytes = bytes;
+        shrinkLargestImage().then(function (changed) {
+          saving = false; saveAgain = false;
+          if (changed) { flushSave(); return; }
+          tooBig(bytes);
+        });
+        return;
+      }
+      blockedBytes = 0;
       fetch("/api/buzzy/art", {
         method: "POST", credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: body,
-      }).then(function (r) { if (!r.ok) throw new Error("save failed"); setSaved(true); })
+      }).then(function (r) {
+        // The route enforces the same limit; a 413 here means the client cap and the
+        // server cap disagreed or another caller raced us. Say it, do not retry blindly.
+        if (r.status === 413) { tooBig(bytes); return; }
+        if (!r.ok) throw new Error("save failed");
+        setSaved(true);
+      })
         .catch(function () { setSaved(false); })
         .then(function () {
           saving = false;
