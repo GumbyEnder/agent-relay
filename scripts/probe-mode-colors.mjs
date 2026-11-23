@@ -9,6 +9,9 @@
 // asks: is Open green, Advocate yellow, Lockdown red?
 // usage: node scripts/probe-mode-colors.mjs            (BZ_PROBE_CDP=<DevTools URL> to reuse a browser;
 //        BZ_SHOT=<folder> writes a picture of each theme)
+//        node scripts/probe-mode-colors.mjs <origin>   ALSO checks the real page of a built server, signed in:
+//        the Talk bar's own privacy button, its picker and pill, on Talk and on Library, dark and light
+//        (sign-in as in probe-soft-nav.mjs: BZ_PROBE_COOKIE, or the dev magic-link inbox, BZ_MAIL_LOG).
 import { createRequire } from "node:module";
 import { readFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -162,6 +165,101 @@ for (const theme of ["dark", "light"]) {
   }
   await page.close();
 }
+
+// ── The real page: a built server, signed in ─────────────────────────────────────────────────
+const ORIGIN = (process.argv[2] || "").replace(/\/+$/, "");
+if (ORIGIN) {
+  const { existsSync } = await import("node:fs");
+  const MAIL_LOG = process.env.BZ_MAIL_LOG || ".data/outbound-mail.jsonl";
+  async function devSignIn() {
+    const email = `probe-modes-${Date.now().toString(36)}@test.local`;
+    const res = await fetch(`${ORIGIN}/api/auth/sign-in/magic-link`, {
+      method: "POST", headers: { "content-type": "application/json", origin: ORIGIN }, body: JSON.stringify({ email, callbackURL: "/" }),
+    });
+    if (!res.ok) throw new Error(`magic-link request failed ${res.status}`);
+    for (let i = 0; i < 30; i++) {
+      if (existsSync(MAIL_LOG)) {
+        for (const line of readFileSync(MAIL_LOG, "utf8").trim().split("\n").reverse()) {
+          let mail; try { mail = JSON.parse(line); } catch { continue; }
+          if (mail.to !== email) continue;
+          const link = mail.actionUrl || (mail.text || "").match(/https?:\/\/\S*magic-link\/verify\S*/)?.[0];
+          if (!link) continue;
+          const v = await fetch(link.replace(/&amp;/g, "&").replace(/^https?:\/\/[^/]+/, ORIGIN), { redirect: "manual" });
+          const c = (v.headers.getSetCookie?.() ?? []).map((x) => x.split(";")[0]).find((x) => x.includes("session_token"));
+          if (c) return c;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error(`no magic-link mail for ${email} in ${MAIL_LOG}`);
+  }
+  const cookie = process.env.BZ_PROBE_COOKIE || (await devSignIn());
+  const eq = cookie.indexOf("=");
+  const lctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  await lctx.addCookies([{ name: cookie.slice(0, eq), value: cookie.slice(eq + 1), domain: new URL(ORIGIN).hostname, path: "/", httpOnly: true, secure: ORIGIN.startsWith("https:"), sameSite: "Lax" }]);
+  // BZ_OLD_CSS=<a privacy.css>: serve that file instead, to see an older stylesheet fail.
+  if (process.env.BZ_OLD_CSS) {
+    const older = readFileSync(process.env.BZ_OLD_CSS, "utf8");
+    await lctx.route(/\/buzzy\/privacy\.css/, (r) => r.fulfill({ status: 200, contentType: "text/css", body: older }));
+  }
+  const lp = await lctx.newPage();
+  await lp.route(/openpanel\.dev/, (r) => r.abort());
+  const lerrors = [];
+  lp.on("pageerror", (e) => lerrors.push(String(e).slice(0, 200)));
+  const live = (theme, where) => lp.evaluate(({ theme, where }) => {
+    const cs = (el, p) => getComputedStyle(el)[p];
+    const btn = document.getElementById("privacyBtn");
+    const chip = document.getElementById("privacyChip");
+    return { btnColor: cs(btn, "color"), chipBorder: cs(chip, "borderTopColor"), chipBg: cs(chip, "backgroundColor"), mode: btn.getAttribute("data-mode") };
+  }, { theme, where });
+  for (const where of ["Talk", "Library"]) {
+    await lp.goto(`${ORIGIN}/buzzy/${where === "Talk" ? "talk" : "library"}`, { waitUntil: "load" });
+    await lp.waitForFunction(() => document.querySelector("#privacyBtn[data-mode]") && window.BeeZillaShell, null, { timeout: 25000 });
+    await lp.waitForTimeout(1200);
+    for (const theme of ["dark", "light"]) {
+      await lp.evaluate((t) => { document.documentElement.setAttribute("data-theme", t); }, theme);
+      for (const mode of ["advocate", "lockdown", "open"]) {
+        const label = `real page, ${where}, ${theme}`;
+        // choose the mode the way a person does: open the picker, press the mode
+        await lp.mouse.move(5, 5);
+        if (await lp.locator("#privacyPop.hidden").count()) await lp.locator("#privacyBtn").click();
+        await lp.locator(`#privacyPop [data-mode="${mode}"]`).click();
+        await lp.waitForTimeout(250);
+        const want = WANT[mode];
+        let c = await live(theme, where);
+        note(label, mode, "button with the picker open", family(c.btnColor), want);
+        // the picker closed, pointer elsewhere: at rest
+        await lp.locator("#privacyClose").click();
+        await lp.mouse.move(5, 5);
+        await lp.waitForTimeout(200);
+        c = await live(theme, where);
+        note(label, mode, "button at rest", family(c.btnColor), want);
+        // pointer over it
+        await lp.locator("#privacyBtn").hover();
+        c = await live(theme, where);
+        note(label, mode, "button under the pointer", family(c.btnColor), want);
+        // minimised: the pill
+        await lp.mouse.move(5, 5);
+        await lp.locator("#privacyBtn").click();
+        await lp.locator("#privacyMin").click();
+        await lp.waitForTimeout(200);
+        c = await live(theme, where);
+        note(label, mode, "pill's border", family(c.chipBorder), want);
+        note(label, mode, "pill's fill", family(c.chipBg, true), want);
+        if (process.env.BZ_SHOT && theme === "dark" && where === "Talk" && mode === "open") {
+          await lp.screenshot({ path: path.join(process.env.BZ_SHOT, "real-talk-open-pill.png"), clip: { x: 0, y: 0, width: 1366, height: 520 } });
+        }
+        // (the next mode opens the picker again from the button)
+      }
+      await lp.evaluate(() => document.documentElement.removeAttribute("data-theme"));
+    }
+  }
+  // leave the account the way a fresh one is: Open, the website's default
+  await lp.evaluate(() => fetch("/api/buzzy/privacy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "open" }) }));
+  note("real page", "all", "no page errors", lerrors.length === 0 ? "none" : lerrors.join(" | "), "none");
+  await lctx.close();
+}
+
 await context.close();
 if (!process.env.BZ_PROBE_CDP) await browser.close();
 
