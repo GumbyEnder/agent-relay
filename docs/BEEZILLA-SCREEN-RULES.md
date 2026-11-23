@@ -102,7 +102,16 @@ Owner, 2026-11-21 (agents.js, agents.css; the server side is src/lib/buzzy/agent
    productivity", "…fun and hobbies"). Onto a colony adds to it; between two rows reorders; out
    to a gap leaves. A colony opens and closes like a folder and can be ungrouped (its agents
    stay). Dragging is never the only way: an agent's Edit window has a Colony choice.
-8. More Zillas arrive as files: a picture named `<creature>.webp` (and `<creature>-<colour>.webp`
+8. The Hive (owner: "When it scrolls above Bzilla, you see something called Hive… you can see
+   your agents talking to each other to get things done, agent-to-agent chat, and observe it
+   happening in the background: a window of chats that say 'Bunnyzilla asked Bzilla for
+   this.'"): the first row of the strip, above BeeZilla and scrolled out of sight; a small
+   "Hive" label at the top of the strip says it is there and scrolls to it. It opens a window
+   beside the strip (not a modal: the page behind stays usable) that lists who asked whom and
+   what came back, and updates while it is open. Only Esc or its X closes it; its corner
+   resizes it. BeeZilla manages the agents and can talk across all of them, so the asking
+   goes through her: an agent calls ask_bzilla, and she calls ask_agent.
+9. More Zillas arrive as files: a picture named `<creature>.webp` (and `<creature>-<colour>.webp`
    for each colour) in `public/buzzy/zillas`, and one line in the roster in agents.ts. The
    colour versions there now are stand-ins made from the owner's starter picture
    (`scripts/zilla-art.py`); a real picture takes a stand-in's place by using its file name.

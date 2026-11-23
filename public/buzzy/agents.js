@@ -44,6 +44,15 @@
  *    colony to add to it, between two to reorder, out to a gap to leave. A colony opens and
  *    closes like a folder. Everything here is also a button: the agent's Edit window has a
  *    Colony choice, and a colony has its own Edit window (name, purpose, ungroup).
+ *  - The Hive (owner: "The sidebar opens up above Bzilla. You can scroll up and down the
+ *    sidebar to see maybe hundreds of agents. When it scrolls above Bzilla, you see something
+ *    called Hive… If you click on it, you can see your agents talking to each other to get
+ *    things done, agent-to-agent chat, and observe it happening in the background: a window of
+ *    chats that say 'Bunnyzilla asked Bzilla for this.'"). The Hive is the first row of the
+ *    strip, scrolled out of sight above BeeZilla until you scroll up (a small "Hive" label at
+ *    the top says so, and pressing it scrolls there). Pressing it opens a window beside the
+ *    strip that shows what the agents asked each other and what came back; it is not a modal,
+ *    so the page stays usable, it updates while it is open, and only Esc or its X closes it.
  *  - "Edit" (the ⋯ button, or a right-click) changes the name, job, face, colour and size,
  *    or removes the agent. It is a dialog that only Esc or its X closes (no click-outside
  *    close, ever), and its box can be pulled bigger by the corner.
@@ -65,6 +74,7 @@
   var LS_OPEN = "bz.agents.open";
   var LS_W = "bz.agents.w";
   var TALK = "/buzzy/talk";
+  var HIVE_API = "/api/buzzy/hive";
   var FACES = ["✅", "🗓️", "✉️", "💰", "🧾", "✈️", "🏠", "📚", "🧸", "🐶", "🌱", "🎵", "📷", "🎬", "✍️", "📱", "📰", "⚖️", "🚗", "💼", "🤝", "📣", "🔎", "💻", "🎮", "🍳", "🛒", "🏋️", "🩺", "🎁", "🎉", "💡", "✨"];
 
   var root = document.documentElement;
@@ -79,13 +89,14 @@
     layout: [],           // the top-level order: [{ type: "agent"|"colony", id }]
     colors: [],
     creatures: [],
+    hive: { open: false, messages: [], lastId: 0, timer: 0, atBottom: true },
     open: false,
     width: OPEN_W,
     current: "bzilla",    // the id of the agent whose conversation is open ("bzilla" for none)
     loaded: false,
     failed: false,
   };
-  var rail = null, scroll = null, list = null, addRow = null, addBtn = null, toggleBtn = null, edge = null, msgEl = null, tab = null;
+  var rail = null, scroll = null, inner = null, peek = null, hiveWin = null, list = null, addRow = null, addBtn = null, toggleBtn = null, edge = null, msgEl = null, tab = null;
   var modal = null, modalOpener = null;
   var retryTimer = 0, msgTimer = 0;
   var readyResolve;
@@ -108,6 +119,19 @@
   var ICON_PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
   var ICON_CHEV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
   var ICON_MORE = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+  // Three cells of a honeycomb, drawn from their centres so the corners are exact.
+  function hexPath(cx, cy, r) {
+    var pts = [];
+    for (var k = 0; k < 6; k++) {
+      var a = (Math.PI / 180) * (60 * k - 30);
+      pts.push((cx + r * Math.cos(a)).toFixed(2) + " " + (cy + r * Math.sin(a)).toFixed(2));
+    }
+    return "M" + pts.join("L") + "Z";
+  }
+  var ICON_HIVE = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="' + hexPath(8.3, 8.4, 4.6) + '" opacity="0.55"/>' +
+    '<path d="' + hexPath(15.7, 8.4, 4.6) + '" opacity="0.8"/>' +
+    '<path d="' + hexPath(12, 14.8, 4.6) + '"/></svg>';
   function safeImage(src) { return typeof src === "string" && /^\/buzzy\/zillas\/[a-z0-9-]+\.webp$/.test(src) ? src : "/buzzy/zillas/bee.webp"; }
   function safeColor(c) { return typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : "#ffd40d"; }
   function pathNow() { return location.pathname.replace(/\.html$/, "").replace(/\/+$/, ""); }
@@ -209,7 +233,9 @@
     if (!rail) return;
     var keep = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("data-agent") : null;
     var keepColony = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("data-colony") : null;
+    var scrolled = scroll ? scroll.scrollTop : 0;
     list.textContent = "";
+    list.appendChild(hiveRow());
     if (S.bzilla) list.appendChild(rowFor(S.bzilla, null));
     // The order is the server's layout: agents and colonies together; an open colony shows
     // its agents under it. Anything the layout forgot (a stale answer) still shows, last.
@@ -227,8 +253,10 @@
     });
     S.agents.forEach(function (a) { if (!shown[a.id]) list.appendChild(rowFor(a, null)); });
     syncTitles();
+    if (scroll) scroll.scrollTop = scrolled;
     if (keep) { var again = list.querySelector('[data-agent="' + keep + '"]'); if (again) again.focus({ preventScroll: true }); }
     else if (keepColony) { var c2 = list.querySelector('[data-colony="' + keepColony + '"]'); if (c2) c2.focus({ preventScroll: true }); }
+    paintPeek();
     root.setAttribute("data-bz-agent-count", String(S.agents.length));
   }
   // The strip shows faces only, so each face carries its words as a tooltip; opened, the
@@ -441,12 +469,13 @@
     if (!drag) return null;
     var item = e.target.closest && e.target.closest(".bzag-item");
     if (!item) {
-      var bare = e.target === scroll || e.target === list || (e.target.closest && e.target.closest(".bzag-addrow"));
+      var bare = e.target === scroll || e.target === inner || e.target === list || (e.target.closest && e.target.closest(".bzag-addrow"));
       return bare ? { end: true } : null;
     }
     var li = item.closest(".bzag-row");
     var aid = item.getAttribute("data-agent");
     var cid = item.getAttribute("data-colony");
+    if (item.getAttribute("data-hive")) return { li: li, first: true };                // nothing goes above BeeZilla
     if (aid === "bzilla") return { li: li, first: true };            // BeeZilla stays on top: under her is the first place
     if (cid) return { li: li, target: { colony: cid }, zone: zoneFor(e, li, !!drag.agent) };
     var a = byId(aid);
@@ -488,13 +517,180 @@
     });
   }
 
+  // ── the Hive ─────────────────────────────────────────────────────────────
+  // The first row of the strip, above BeeZilla. The strip opens scrolled so that BeeZilla is
+  // at the top and the Hive is just out of sight: scroll up to find it. (The scroll area
+  // always has that much room to scroll, however few agents there are.)
+  function hiveRow() {
+    var li = el("li", "bzag-row bzag-hive-row");
+    var item = el("div", "bzag-item bzag-hive", {
+      role: "button", tabindex: "0", "data-hive": "1",
+      "aria-label": "Hive, your agents talking to each other",
+    });
+    item.style.setProperty("--c", "#ffd40d");
+    item.setAttribute("data-tip", "Hive: watch your agents ask each other for help.");
+    var slot = el("span", "bzag-slot");
+    var box = el("span", "bzag-hexbox");
+    box.appendChild(svg(ICON_HIVE));
+    slot.appendChild(box);
+    item.appendChild(slot);
+    var text = el("span", "bzag-text");
+    var name = el("span", "bzag-name"); name.textContent = "Hive";
+    var words = el("span", "bzag-role"); words.textContent = "your agents at work";
+    text.appendChild(name); text.appendChild(words);
+    item.appendChild(text);
+    li.appendChild(item);
+    return li;
+  }
+  function hiveHeight() {
+    var r = list && list.querySelector(".bzag-hive-row");
+    return r ? r.offsetHeight : 64;
+  }
+  function hideHiveAbove() {
+    if (!scroll) return;
+    scroll.style.setProperty("--hive-h", hiveHeight() + "px");
+    scroll.scrollTop = hiveHeight();
+    paintPeek();
+  }
+  // A small "Hive" label at the very top while the Hive is scrolled out of sight.
+  function paintPeek() {
+    if (!peek || !scroll) return;
+    peek.hidden = scroll.scrollTop <= 6;
+  }
+  function showHive() {
+    if (!scroll) return;
+    try { scroll.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" }); } catch { scroll.scrollTop = 0; }
+    var row = list.querySelector(".bzag-hive");
+    if (row) setTimeout(function () { row.focus({ preventScroll: true }); }, reduce ? 0 : 280);
+  }
+
+  function who(id) { return id === "bzilla" ? S.bzilla : byId(id); }
+  function hiveFace(id) {
+    var a = who(id);
+    if (a) return avatar(a, 30);
+    var av = el("span", "bzag-av");
+    av.style.setProperty("--s", "30px");
+    var b = el("span", "bzag-hexbox"); b.appendChild(svg(ICON_HIVE));
+    av.appendChild(b);
+    return av;
+  }
+  function clock(at) {
+    try { return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch { return ""; }
+  }
+  function hiveCard(m) {
+    if (m.kind === "note") {
+      var n = el("div", "bzh-note", { draggable: "true" });
+      n.textContent = m.body;
+      var t = el("time"); t.textContent = " · " + clock(m.at);
+      n.appendChild(t);
+      return n;
+    }
+    var asked = m.kind === "ask";
+    var card = el("article", "bzh-msg " + (asked ? "is-ask" : "is-answer"), { draggable: "true" });
+    var head = el("div", "bzh-head");
+    head.appendChild(hiveFace(m.fromId));
+    var line = el("span", "bzh-line");
+    var from = el("b"); from.textContent = m.fromName || "An agent";
+    var verb = el("span"); verb.textContent = asked ? " asked " : " answered ";
+    var to = el("b"); to.textContent = m.toName || "an agent";
+    line.appendChild(from); line.appendChild(verb); line.appendChild(to);
+    head.appendChild(line);
+    var when = el("time"); when.textContent = clock(m.at);
+    head.appendChild(when);
+    var body = el("p", "bzh-body"); body.textContent = m.body;
+    card.appendChild(head); card.appendChild(body);
+    card.addEventListener("dragstart", function (e) {
+      try {
+        e.dataTransfer.setData("application/x-beezilla-card", JSON.stringify({ kind: "note", title: (m.fromName || "An agent") + (asked ? " asked " : " answered ") + (m.toName || "an agent"), body: m.body }));
+        e.dataTransfer.effectAllowed = "copy";
+      } catch { /* best effort */ }
+    });
+    return card;
+  }
+  function paintHive() {
+    if (!hiveWin) return;
+    var feed = hiveWin.querySelector(".bzh-feed");
+    var empty = hiveWin.querySelector(".bzh-empty");
+    var msgs = S.hive.messages;
+    empty.hidden = msgs.length > 0;
+    feed.textContent = "";
+    msgs.forEach(function (m) { feed.appendChild(hiveCard(m)); });
+    if (S.hive.atBottom) feed.scrollTop = feed.scrollHeight;
+  }
+  function loadHive(first) {
+    var url = HIVE_API + (S.hive.lastId && !first ? "?after=" + S.hive.lastId : "");
+    return api("GET", url).then(function (res) {
+      if (!res.ok || !Array.isArray(res.body.messages)) return;
+      var got = res.body.messages;
+      if (first) S.hive.messages = got;
+      else if (got.length) S.hive.messages = S.hive.messages.concat(got).slice(-200);
+      else return;
+      S.hive.lastId = S.hive.messages.length ? S.hive.messages[S.hive.messages.length - 1].id : 0;
+      paintHive();
+    }).catch(function () { /* the next tick tries again */ });
+  }
+  function onHiveKey(e) {
+    if (e.key !== "Escape" || !hiveWin) return;
+    // A dialog on top closes first; the Hive window waits for its own Esc.
+    if (modal && modal.classList.contains("open")) return;
+    e.preventDefault();
+    closeHive();
+  }
+  function closeHive() {
+    if (!hiveWin) return;
+    clearInterval(S.hive.timer);
+    S.hive.timer = 0;
+    hiveWin.remove();
+    hiveWin = null;
+    S.hive.open = false;
+    document.removeEventListener("keydown", onHiveKey, true);
+    var row = list && list.querySelector(".bzag-hive");
+    if (row) row.focus({ preventScroll: true });
+  }
+  // The window of chats. Not a modal: the page behind it stays usable, so you can watch the
+  // agents work while you carry on. Only its X or Esc closes it, and its corner resizes it.
+  function openHive() {
+    if (hiveWin) { hiveWin.focus(); return; }
+    hiveWin = el("section", "", { id: "bzHive", role: "dialog", "aria-label": "Hive: your agents talking to each other", tabindex: "-1" });
+    var head = el("div", "bzh-top");
+    var ico = el("span", "bzag-hexbox"); ico.appendChild(svg(ICON_HIVE));
+    head.appendChild(ico);
+    var ttl = el("div", "bzh-title");
+    var h = el("h2"); h.textContent = "Hive";
+    var sub = el("p"); sub.textContent = "Your agents asking each other for help. Newest at the bottom.";
+    ttl.appendChild(h); ttl.appendChild(sub);
+    head.appendChild(ttl);
+    var x = el("button", "bzh-x", { type: "button", "aria-label": "Close the Hive" });
+    x.innerHTML = "&#10005;";
+    head.appendChild(x);
+    hiveWin.appendChild(head);
+    var feed = el("div", "bzh-feed", { role: "log", "aria-live": "polite", tabindex: "0" });
+    hiveWin.appendChild(feed);
+    var empty = el("p", "bzh-empty");
+    empty.textContent = "Nothing here yet. When one of your agents asks BeeZilla, or BeeZilla asks one of them, to get something done, you can watch it here.";
+    hiveWin.appendChild(empty);
+    document.body.appendChild(hiveWin);
+    S.hive.open = true;
+    S.hive.atBottom = true;
+    feed.addEventListener("scroll", function () { S.hive.atBottom = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 24; });
+    x.addEventListener("click", closeHive);
+    document.addEventListener("keydown", onHiveKey, true);
+    paintHive();
+    loadHive(true);
+    S.hive.timer = setInterval(function () { loadHive(false); }, 4000);
+    window.addEventListener("bz:hive", function again() { if (!hiveWin) { window.removeEventListener("bz:hive", again); return; } loadHive(false); });
+    hiveWin.focus({ preventScroll: true });
+  }
+
   // ── the strip: build, open, size ─────────────────────────────────────────
   function build() {
     if (rail) return;
     rail = el("aside", "", { id: "bzAgents", "aria-label": "Your Zilla agents" });
     scroll = el("div", "bzag-scroll", { id: "bzagScroll" });
+    inner = el("div", "bzag-inner");
     list = el("ul", "bzag-list", { role: "list" });
-    scroll.appendChild(list);
+    inner.appendChild(list);
+    scroll.appendChild(inner);
     addRow = el("div", "bzag-addrow");
     addRow.style.setProperty("--s", SIZES.m + "px");
     addBtn = el("button", "bzag-add", { type: "button", "aria-label": "Add an agent" });
@@ -507,7 +703,14 @@
     addBtn.appendChild(plusSlot);
     addBtn.appendChild(plusText);
     addRow.appendChild(addBtn);
-    scroll.appendChild(addRow);
+    inner.appendChild(addRow);
+    // "Hive" at the very top while the Hive is scrolled out of sight above BeeZilla.
+    peek = el("button", "bzag-peek", { type: "button", "aria-label": "Show the Hive, above BeeZilla" });
+    peek.hidden = true;
+    var pk = el("span", "bzag-peek-ico"); pk.appendChild(svg(ICON_HIVE));
+    var pt = el("span"); pt.textContent = "Hive";
+    peek.appendChild(pk); peek.appendChild(pt);
+    rail.appendChild(peek);
     rail.appendChild(scroll);
 
     msgEl = el("p", "bzag-msg", { role: "status", "aria-live": "polite" });
@@ -766,7 +969,9 @@
       var more = e.target.closest && e.target.closest(".bzag-more");
       if (more && more.getAttribute("data-more-colony")) { var mc = colonyById(more.getAttribute("data-more-colony")); if (mc) colonyDialog({ colony: mc, opener: more }); return; }
       if (more) { var m = byId(more.getAttribute("data-more")); if (m) editDialog(m, more); return; }
+      if (e.target.closest && e.target.closest(".bzag-peek")) { showHive(); return; }
       var item = e.target.closest && e.target.closest(".bzag-item");
+      if (item && item.getAttribute("data-hive")) { openHive(); return; }
       if (item && item.getAttribute("data-colony")) { toggleColony(item.getAttribute("data-colony")); return; }
       if (item) { openAgent(byId(item.getAttribute("data-agent"))); return; }
       if (e.target.closest(".bzag-add")) { add(); return; }
@@ -774,10 +979,11 @@
       // The empty part of the strip opens and closes it too ("when you click on it,
       // it'll open up a sidebar on the left that expands"). Faces and buttons have
       // their own jobs, so only a press on the bare strip counts.
-      if (e.target === scroll || e.target === list || e.target === rail) { if (!phone.matches) toggle(); }
+      if (e.target === scroll || e.target === inner || e.target === list || e.target === rail) { if (!phone.matches) toggle(); }
     });
     rail.addEventListener("keydown", function (e) {
       var item = e.target.closest && e.target.closest(".bzag-item");
+      if (item && item.getAttribute("data-hive") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openHive(); return; }
       if (item && item.getAttribute("data-colony") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleColony(item.getAttribute("data-colony")); return; }
       if (item && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openAgent(byId(item.getAttribute("data-agent"))); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -839,6 +1045,7 @@
     });
     closeBtn.addEventListener("click", closeDrawer);
     tab.addEventListener("click", openDrawer);
+    scroll.addEventListener("scroll", paintPeek);
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && root.classList.contains("bz-agents-drawer") && !(modal && modal.classList.contains("open"))) { closeDrawer(); }
     });
@@ -1191,6 +1398,7 @@
       if (!rail) return;
       root.classList.add("bz-has-agents");
       setOpen(open, true);
+      hideHiveAbove();
       if (wanted) {
         try { window.history.replaceState({}, "", TALK); } catch { /* best effort */ }
         openAgent(byId(wanted), { fromUrl: true });
@@ -1208,6 +1416,7 @@
     update: update,
     noteSession: noteSession,
     refresh: load,
+    hive: openHive,
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
