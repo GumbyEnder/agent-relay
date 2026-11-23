@@ -22,6 +22,7 @@ import {
   canonicalSpec,
   fromMermaid,
   parseExpression,
+  parseGraphDetailPath,
   snap,
   toMermaid,
   toRunSheet,
@@ -218,6 +219,31 @@ ok("the page is registered in one nav and one route table", () => {
   truthy(pages.includes('href="/buzzy/orchestrate" data-nav="orchestrate"'), "NAV_ROW has the anchor");
   truthy(/id: "orchestrate", href: "\/buzzy\/orchestrate"/.test(nav), "nav.js LINKS has orchestrate");
   truthy(pages.includes('name === "graph"') && pages.includes('return sendRedirect(event, "/buzzy/orchestrate"'), "graph redirects");
+});
+
+ok("the revisions route parses its path, not its index", () => {
+  // The bug this replaces: the route tested the literal "revisions" segment, so the
+  // list branch was unreachable and every call answered 400 bad_revision.
+  const list = parseGraphDetailPath("/api/buzzy/graphs/g1/revisions");
+  truthy(list !== null, "list path parses");
+  eq(list!.graphId, "g1");
+  eq(list!.revision, null);
+  eq(list!.bad, undefined);
+
+  const one = parseGraphDetailPath("/api/buzzy/graphs/g1/revisions/2");
+  eq(one!.graphId, "g1");
+  eq(one!.revision, 2);
+
+  eq(parseGraphDetailPath("/api/buzzy/graphs/g1")!.revision, null);
+  eq(parseGraphDetailPath("/api/buzzy/graphs/g1")!.graphId, "g1");
+
+  // A bad revision must be reported, never silently treated as "list everything".
+  eq(parseGraphDetailPath("/api/buzzy/graphs/g1/revisions/0")!.revision, null);
+  eq(parseGraphDetailPath("/api/buzzy/graphs/g1/revisions/0")!.bad, "0");
+  eq(parseGraphDetailPath("/api/buzzy/graphs/g1/revisions/abc")!.bad, "abc");
+
+  eq(parseGraphDetailPath("/api/buzzy/graphs/g1/run"), null);
+  eq(parseGraphDetailPath("/api/buzzy/runs/x"), null);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

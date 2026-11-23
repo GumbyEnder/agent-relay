@@ -971,3 +971,29 @@ export function toGraphRows(spec: OrchSpec): {
     })),
   };
 }
+
+/** Parse the graph detail routes the API exposes. One helper, because a route that
+ *  parses its own path by index is how CR-3 shipped a revisions list nobody could
+ *  reach (the branch tested the literal "revisions" segment instead of the number
+ *  after it). Returns null when the path is not a graph detail route.
+ *
+ *  "/api/buzzy/graphs/g1"             -> { graphId: "g1", revision: null }
+ *  "/api/buzzy/graphs/g1/revisions"   -> { graphId: "g1", revision: null }
+ *  "/api/buzzy/graphs/g1/revisions/2" -> { graphId: "g1", revision: 2 }
+ *
+ *  A non-numeric or zero revision is not silently coerced: it yields revision: null
+ *  with the raw segment in `bad`, so the caller can answer 400 rather than list.
+ */
+export function parseGraphDetailPath(
+  path: string,
+): { graphId: string; revision: number | null; bad?: string } | null {
+  const m = /^\/api\/buzzy\/graphs\/([A-Za-z0-9_-]+)(?:\/revisions(?:\/([^/]+))?)?$/.exec(path);
+  if (!m) return null;
+  const graphId = m[1]!;
+  const raw = m[2];
+  if (raw === undefined) return { graphId, revision: null };
+  if (!/^[0-9]+$/.test(raw)) return { graphId, revision: null, bad: raw };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return { graphId, revision: null, bad: raw };
+  return { graphId, revision: n };
+}

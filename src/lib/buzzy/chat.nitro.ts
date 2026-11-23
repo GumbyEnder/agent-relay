@@ -45,6 +45,7 @@ import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
+import { parseGraphDetailPath } from "./orchestration";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import {
@@ -1524,18 +1525,16 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 401);
       return { ok: false, error: "Sign in required", code: "signed_out" };
     }
-    const parts = path.split("/");
-    const graphId = parts[4]!;
-    // parts = ["", "api", "buzzy", "graphs", <id>, "revisions", <rev>?] — the segment
-    // after "revisions" is the revision. Testing parts[5] (always "revisions") made the
-    // list branch unreachable and answered every /revisions call with 400 bad_revision.
-    if (parts[6]) {
-      const rev = Number(parts[6]);
-      if (!Number.isInteger(rev) || rev < 1) {
-        setResponseStatus(event, 400);
-        return { ok: false, error: "Bad revision.", code: "bad_revision" };
-      }
-      const found = await loadGraphRevision(user.id, graphId, rev);
+    // Parsed by helper, not by index: the index version tested the literal
+    // "revisions" segment and made the list branch unreachable (400 on every call).
+    const route = parseGraphDetailPath(path)!;
+    const graphId = route.graphId;
+    if (route.bad) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Bad revision.", code: "bad_revision" };
+    }
+    if (route.revision !== null) {
+      const found = await loadGraphRevision(user.id, graphId, route.revision);
       if (!found) {
         setResponseStatus(event, 404);
         return { ok: false, error: "No such revision on this account.", code: "not_found" };
