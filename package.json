@@ -68,6 +68,8 @@
     "test:email-first": "npx tsx scripts/test-email-first.ts",
     "test:bz-f001-profile": "npx tsx scripts/test-bz-f001-profile.ts",
     "test:model-policy": "npx tsx scripts/test-model-policy.ts",
+    "test:talk-box": "node scripts/test-talk-box.mjs",
+    "posttest:buzzy-art": "npm run test:talk-box",
     "tui": "npm --prefix apps/tui run dev",
     "tui:status": "npm --prefix apps/tui run status",
     "tui:build": "npm --prefix apps/tui run build",
