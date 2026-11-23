@@ -124,6 +124,29 @@ const authorized = await fetch(`${base}/api/buzzy/jobs`, {
 }).then((r) => r.status).catch(() => 0);
 check("API accepts with the token", authorized === 200, `status ${authorized}`);
 
+// The header's own question, answered in better-auth's shape. A bare `null` return
+// from a Nitro handler is a ZERO-LENGTH body (200, 0 bytes), which `res.json()` cannot
+// parse: the account control treats that as "inconclusive" and leaves an empty label,
+// so the packaged app at 390px showed a blank 88px box where the web shows "Sign in".
+const sessOut = await fetch(`${base}/api/auth/get-session`);
+const sessBody = (await sessOut.text()).trim();
+check(
+  "get-session without the token is JSON null, not an empty body",
+  sessOut.status === 200 &&
+    /application\/json/i.test(sessOut.headers.get("content-type") || "") &&
+    sessBody === "null",
+  `status ${sessOut.status}, ${sessOut.headers.get("content-type")}, body ${JSON.stringify(sessBody)}`,
+);
+
+const sessIn = await fetch(`${base}/api/auth/get-session`, {
+  headers: { authorization: `Bearer ${token}` },
+}).then((r) => r.json()).catch(() => null);
+check(
+  "get-session with the token names the local owner",
+  sessIn?.user?.id === "local_owner" && typeof sessIn?.user?.name === "string",
+  sessIn?.user?.id ?? "no user",
+);
+
 const badHost = await new Promise((done) => {
   const req = http.request(
     {
