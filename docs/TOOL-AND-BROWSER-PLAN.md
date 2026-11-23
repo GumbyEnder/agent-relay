@@ -231,3 +231,15 @@ here deliberately; the no-credentials rule is what keeps that acceptable.
 - Multi-page crawling / site maps (one page per call, deliberately).
 - Anti-bot circumvention. If a site blocks us, the product says so; we do not defeat it.
 - Storing third-party credentials, ever.
+
+---
+
+## 10. Nodes on the Idea Board (2026-11-23)
+
+B3's "a person shows a job, the AI does it" has a first half that needs none of B3's approval
+design: the **Browser use** node lets a person *record* a job in a server browser (same provider,
+no proxy, so the view is the AI's) and keeps the steps; the **API use** node lets them try an
+API from the same server. Both are cards on the board, joined to a step to say "use this here";
+BeeZilla is told them in words. Letting the model run a node itself is still B3 (D4: submissions
+and anything that leaves the account clear the outbound approval first). Details, limits and
+safety: `docs/beezilla/MORE-NODES.md`.
