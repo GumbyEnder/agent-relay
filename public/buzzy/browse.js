@@ -37,6 +37,41 @@
   }
 
   var input = $("bzSearch");
+  // ── The placeholder has to FIT ──────────────────────────────────────────
+  // Measured on live at 390px: the input's content box is 79px wide (two 48px
+  // tap-target tools next to it), while the shipped placeholder needs 551px at
+  // 16px — so a phone rendered "Search eve…", a cut-off sentence that reads as a
+  // broken field. Pick the longest wording that actually fits and re-pick on
+  // resize; the markup keeps the long line for a wide window and for no-JS.
+  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search or paste a link", "Search"];
+  (function () {
+    if (!input) return;
+    var long = input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
+    var all = [long].concat(PLACEHOLDER_SHRINKS);
+    var canvas = null;
+    function pick() {
+      var room = input.clientWidth - (parseFloat(window.getComputedStyle(input).paddingLeft) || 0) - (parseFloat(window.getComputedStyle(input).paddingRight) || 0);
+      if (!(room > 0)) return;                       // not laid out yet: keep the long line
+      var cs = window.getComputedStyle(input);
+      canvas = canvas || document.createElement("canvas");
+      var ctx = canvas.getContext && canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.font = cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+      var chosen = all[all.length - 1];
+      for (var i = 0; i < all.length; i++) {
+        if (ctx.measureText(all[i]).width <= room) { chosen = all[i]; break; }
+      }
+      if (input.placeholder !== chosen) input.placeholder = chosen;
+    }
+    var t = null;
+    function soon() { clearTimeout(t); t = setTimeout(pick, 60); }
+    window.addEventListener("resize", soon);
+    if (window.ResizeObserver) new window.ResizeObserver(soon).observe(input);
+    // A webfont that lands after first paint measures wider than it renders, so
+    // re-pick once the fonts are ready rather than keeping the too-short word.
+    if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(soon);
+    pick();
+  })();
   var results = $("bzResults");
   var grid = $("bzResultsGrid");
   var note = $("bzSearchNote");
