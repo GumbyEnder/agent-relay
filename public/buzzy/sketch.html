@@ -2267,7 +2267,14 @@
       function esc(t) {
         return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       }
-      doc.strokes.forEach(function (st) {
+      // Walk the stacking order (#296), not doc.strokes: the SVG must put the marks in
+      // the same order the canvas does, or a shape sent to the front exports underneath.
+      // SVG has no bitmaps, so image entries are skipped by design.
+      orderSync();
+      doc.order.forEach(function (entry) {
+        if (entry.kind !== "stroke") return;
+        var st = doc.strokes.find(function (x) { return x.id === entry.id; });
+        if (!st) return;
         var c = st.color || "#ffd40d";
         var w = st.width || 3;
         var fc = st.fillColor || "none";
