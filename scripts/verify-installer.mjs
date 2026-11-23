@@ -123,14 +123,23 @@ if (!existsSync(APP)) {
 
   const pinsFile = join(APP, "publishers.json");
   let pins = -1;
+  let pinRows = 0;
   try {
-    pins = JSON.parse(readFileSync(pinsFile, "utf8")).publishers?.length ?? -1;
+    const rows = JSON.parse(readFileSync(pinsFile, "utf8")).publishers;
+    if (Array.isArray(rows)) {
+      pinRows = rows.length;
+      // Count pins the runtime will honour: loadPinFile() drops a row with no
+      // `publicKey`, so a file of `{ id, key }` rows stages fine and trusts
+      // nothing. Counting rows hid exactly that.
+      pins = rows.filter((r) => r && typeof r.publicKey === "string" && r.publicKey.trim() !== "").length;
+    }
   } catch {}
-  check("the publisher pin file is staged", pins >= 0, pins >= 0 ? `${pins} pin(s)` : "missing/unreadable");
+  const pinDetail = `${pins >= 0 ? pins : "?"} usable of ${pinRows} row(s)`;
+  check("the publisher pin file is staged", pins >= 0, pins >= 0 ? pinDetail : "missing/unreadable");
   if (allowZeroPins) {
-    console.log(`NOTE  ${pins} pins — allowed by --allow-zero-pins; a real release must refuse this`);
+    console.log(`NOTE  ${pinDetail} — allowed by --allow-zero-pins; a real release must refuse this`);
   } else {
-    check("at least one publisher is pinned (or every recipe is untrusted)", pins > 0, `${pins} pin(s)`);
+    check("at least one publisher is pinned (or every recipe is untrusted)", pins > 0, pinDetail);
   }
 
   const scripts = join(APP, "scripts", "beezilla-local.mjs");

@@ -69,7 +69,7 @@ const rogueBundle = seal(rogueKey).bytes;
 const pin: TrustAnchor = { keyId: goodKey.keyId, publicKey: goodKey.publicKeyRaw };
 
 const state = {
-  catalogMode: "ok" as "ok" | "404" | "garbage" | "empty",
+  catalogMode: "ok" as "ok" | "404" | "garbage" | "empty" | "nosha",
   bundleMode: "ok" as "ok" | "rogue" | "oversize",
 };
 
@@ -85,7 +85,9 @@ const startServer = async () => {
       const recipes =
         state.catalogMode === "empty"
           ? []
-          : [
+          : state.catalogMode === "nosha"
+            ? [{ id: recipe.id, version: "1.0.0", title: recipe.id, url: "/recipes/good.bezz", keyId: goodKey.keyId }]
+            : [
               {
                 id: recipe.id,
                 version: "1.0.0",
@@ -133,6 +135,14 @@ const dataDir = mkdtempSync(join(tmpdir(), "bz-catalog-"));
   const empty = await fetchCatalog(base);
   check("an empty catalog is not an error", empty.ok && empty.entries.length === 0);
 
+  state.catalogMode = "nosha";
+  const nosha = await fetchCatalog(base);
+  check(
+    "an entry without a sha256 is not listed",
+    nosha.ok && nosha.entries.length === 0,
+    `${nosha.entries.length} entries`,
+  );
+
   state.catalogMode = "ok";
 }
 
@@ -145,6 +155,21 @@ const dataDir = mkdtempSync(join(tmpdir(), "bz-catalog-"));
     thrown = err instanceof Error ? err.message : String(err);
   }
   check("a file:// catalog is refused", /must be http/.test(thrown), thrown);
+
+  thrown = "";
+  try {
+    catalogBaseUrl("http://api.example.com");
+  } catch (err) {
+    thrown = err instanceof Error ? err.message : String(err);
+  }
+  check("a plain-http catalog off loopback is refused", /must be https/.test(thrown), thrown);
+
+  check(
+    "a loopback catalog may stay on http",
+    catalogBaseUrl("http://127.0.0.1:8787") === "http://127.0.0.1:8787" &&
+      catalogBaseUrl("http://localhost:8787") === "http://localhost:8787",
+  );
+  check("an https catalog is accepted", catalogBaseUrl("https://api.example.com") === "https://api.example.com");
   check("trailing slashes are normalised", catalogBaseUrl("https://api.example.com//") === "https://api.example.com");
 
   const none = await fetchCatalog("");
@@ -203,6 +228,22 @@ const entry = {
 {
   const missing = await downloadBundle(base, { ...entry, url: "/recipes/nope.bezz" });
   check("a missing bundle reports the status", !missing.ok && /404/.test(missing.error ?? ""), missing.error);
+}
+
+{
+  const undigested = await downloadBundle(base, { ...entry, sha256: "" });
+  check(
+    "a bundle with no digest is refused before the request",
+    !undigested.ok && /no sha256 digest/.test(undigested.error ?? ""),
+    undigested.error,
+  );
+
+  const plainHttp = await downloadBundle(base, { ...entry, url: "http://cdn.example.com/recipes/good.bezz" });
+  check(
+    "a plain-http bundle off loopback is refused",
+    !plainHttp.ok && /must be https/.test(plainHttp.error ?? ""),
+    plainHttp.error,
+  );
 }
 
 // ── env-driven pins behave like the rest of the app ─────────────────────────
