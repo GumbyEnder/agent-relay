@@ -201,8 +201,23 @@
           }).join("") + "</ul></div>"
         : "") +
       "</section>";
+    // The owner's own words, kept exactly as typed; the card above is only a summary of them.
+    if (p.source && p.source.words) {
+      html += '<details class="bzcm-words"><summary>Your words' + (p.source.at ? " · " + esc(new Date(p.source.at).toLocaleString()) : "") + "</summary>" +
+        '<p class="bzcm-words-text">' + esc(p.source.words) + "</p></details>";
+    }
+    var notes = [];
+    notes.push(p.reviewIndependent
+      ? "Every step is checked by a second AI from another company" + (p.reviewerProvider ? " (" + esc(p.reviewerProvider) + ")" : "") + " before it counts."
+      : '<b>No second AI from another company is set up</b>, so steps finish marked "not independently reviewed".');
+    if (p.launch && p.launch.authorized) {
+      notes.push("Going live is allowed for this project — " + (p.launch.source === "your words" ? 'you asked: "' + esc(p.launch.evidence) + '"' : "you said go on “" + esc(p.launch.evidence) + "”") + ".");
+    } else if ((p.slices || []).some(function (s) { return s.door === "one-way"; })) {
+      notes.push("Anything that can't be undone waits for your OK. Other steps keep going meanwhile.");
+    }
+    html += '<ul class="bzcm-notes">' + notes.map(function (n) { return "<li>" + n + "</li>"; }).join("") + "</ul>";
     html += '<div class="bzcm-counts">' + summary + "</div>";
-    html += '<ol class="bzcm-slices">' + (p.slices || []).map(sliceHtml).join("") + "</ol>";
+    html += '<p class="bzcm-sub-h">Steps</p><ol class="bzcm-slices">' + (p.slices || []).map(sliceHtml).join("") + "</ol>";
     body.innerHTML = html;
   }
 
@@ -225,6 +240,8 @@
           : '<a href="' + esc(safe) + '" target="_blank" rel="noopener">' + esc(safe.replace(/^https?:\/\//, "").slice(0, 70)) + "</a>") + "</li>";
       }).join("") + "</ul>";
     }
+    if (s.reviewed === "pass") out += '<p class="bzcm-review ok">' + icon("check") + " Checked by a second AI from another company.</p>";
+    if (s.reviewed === "not-available") out += '<p class="bzcm-review warn">Not independently reviewed — no reviewer from another company is set up.</p>';
     if (s.review && s.review.summary) out += '<p class="bzcm-review"><b>Second opinion:</b> ' + esc(s.review.summary) + "</p>";
     return out ? '<div class="bzcm-proof-wrap"><p class="bzcm-sub-h">Proof</p>' + out + "</div>" : "";
   }
@@ -241,8 +258,8 @@
         '<button type="button" class="bzcm-btn" data-cm-answer="' + esc(s.question.callId) + '">Send answer</button></div>';
     } else if (s.ownerLooks) {
       act += '<div class="bzcm-ask"><p>' + (s.door === "one-way"
-        ? "It's built and checked. The last step can't be undone — say go when you're ready."
-        : "It's built and a second AI checked it. Have a look at the proof.") + "</p>" +
+        ? "It's built and checked. The last part can't be undone — say go when you're ready. Other steps keep going meanwhile."
+        : "It's built and checked. Because this one matters a lot, have a look at the proof before it counts.") + "</p>" +
         '<div class="bzcm-row"><button type="button" class="bzcm-btn" data-cm-ok="' + esc(s.key) + '">' + (s.door === "one-way" ? "Go ahead" : "Looks right") + "</button>" +
         '<button type="button" class="bzcm-btn ghost" data-cm-notyet="' + esc(s.key) + '">Not yet…</button></div>' +
         '<div class="bzcm-notyet" data-cm-notyet-box="' + esc(s.key) + '" hidden><textarea rows="2" placeholder="What should change?"></textarea>' +
@@ -252,6 +269,7 @@
       '<div class="bzcm-slice-top"><span class="bzcm-state s-' + esc(s.state) + '">' + icon(st.shape) + " " + st.label + "</span>" + door + "</div>" +
       '<h4 class="bzcm-slice-title">' + esc(s.title) + "</h4>" +
       '<p class="bzcm-try"><b>Try it:</b> ' + esc(s.shows) + "</p>" +
+      (s.authorizedBy ? '<p class="bzcm-authorized">You already asked for this: “' + esc(s.authorizedBy) + "”</p>" : "") +
       '<ul class="bzcm-checks small">' + (s.doneWhen || []).map(function (d) { return "<li>" + esc(d) + "</li>"; }).join("") + "</ul>" +
       (s.progress && s.state === "working" ? '<p class="bzcm-progress">' + esc(s.progress) + "</p>" : "") +
       proofHtml(s) + act + "</li>";
@@ -328,10 +346,10 @@
     /** The card Talk shows under a reply that started a project. */
     cardHtml: function (cp) {
       var st = STAKES[cp.stakes] || STAKES.product;
-      return '<div class="bzcm-talk-card" draggable="true" data-bz-card="' + cardAttr(cp.making, "Code Monkey is making this · " + cp.slices + " slices") + '">' +
+      return '<div class="bzcm-talk-card" draggable="true" data-bz-card="' + cardAttr(cp.making, "Code Monkey is making this · " + cp.slices + " steps") + '">' +
         '<span class="bzcm-talk-shape">' + icon(st.shape) + "</span>" +
         '<span class="bzcm-talk-text"><b>Code Monkey is making:</b> ' + esc(cp.making) + ' <span class="bzcm-talk-sub">· ' +
-        esc(String(cp.slices)) + " slice" + (cp.slices === 1 ? "" : "s") + " · " + esc(st.label) + "</span></span>" +
+        esc(String(cp.slices)) + " step" + (cp.slices === 1 ? "" : "s") + " · " + esc(st.label) + "</span></span>" +
         '<button type="button" class="bzcm-btn" data-code-job="' + esc(cp.jobId) + '">Open the workshop</button></div>';
     },
   };

@@ -21,6 +21,9 @@ import {
   stateFromColumn,
   slicesToRelease,
   missionBrief,
+  authorizedByWords,
+  providerOf,
+  reviewIsIndependent,
 } from "../src/lib/buzzy/codeMonkey";
 
 let failures = 0;
@@ -51,16 +54,32 @@ check("publishing to the App Store is one-way", doorFor({ title: "Submit to the 
 check("a new screen is two-way", doorFor({ title: "Play the first scene", shows: "open the link and tap Start", doneWhen: [{ text: "Tapping Start shows the forest scene" }] }).door === "two-way");
 check("hint can raise a two-way slice", doorFor({ title: "Play the first scene", shows: "x", doneWhen: [], oneWayHint: true }).door === "one-way");
 
-console.log("review policy:");
+console.log("review policy (owner, 2026-11-23: every step reviewed by another company):");
 const playTwo = reviewPolicy("play", "two-way");
-check("play + two-way: auto, no owner, no second reviewer", playTwo.autoAccept && !playTwo.ownerLooks && !playTwo.independentReview);
-check("play proof is light (try it + screenshot)", playTwo.proof.join() === "try-it,screenshot");
+check("play + two-way: automatic, no owner, still reviewed by another company", playTwo.autoAccept && !playTwo.ownerLooks && playTwo.independentReview);
+check("play proof: tests, try it, screenshots, review", playTwo.proof.join() === "tests,try-it,screenshot,independent-review", playTwo.proof.join());
 const prodTwo = reviewPolicy("product", "two-way");
-check("product + two-way: auto with an independent reviewer and tests", prodTwo.autoAccept && prodTwo.independentReview && prodTwo.proof.includes("tests"));
+check("product + two-way: automatic, reviewed, with a recorded walk-through", prodTwo.autoAccept && prodTwo.independentReview && prodTwo.proof.includes("video") && prodTwo.proof.includes("tests"));
 const anyOne = reviewPolicy("play", "one-way");
-check("one-way door: owner looks even for play", anyOne.ownerLooks && !anyOne.autoAccept && anyOne.proof.includes("undo-note"));
+check("one-way door: owner looks even for play, with an undo note", anyOne.ownerLooks && !anyOne.autoAccept && anyOne.proof.includes("undo-note"));
 const crit = reviewPolicy("critical", "two-way");
-check("critical: owner looks + independent review + undo note", crit.ownerLooks && crit.independentReview && crit.proof.includes("undo-note"));
+check("critical: owner looks + review + security check + undo note", crit.ownerLooks && crit.independentReview && crit.proof.includes("security-check") && crit.proof.includes("undo-note"));
+check("every tier and door is independently reviewed", (["play", "product", "critical"] as const).every((t) => (["two-way", "one-way"] as const).every((d) => reviewPolicy(t, d).independentReview)));
+
+console.log("who reviews — a different company, or it doesn't count:");
+check("claude_code is Anthropic, codex is OpenAI", providerOf("claude_code") === "anthropic" && providerOf("codex") === "openai");
+check("a run-any-model harness needs its company named", providerOf("hermes") === null && providerOf("hermes", "DeepSeek") === "deepseek");
+check("Anthropic reviewed by OpenAI is independent", reviewIsIndependent("anthropic", "openai"));
+check("same company is not independent", !reviewIsIndependent("openai", "openai"));
+check("unknown is not independent", !reviewIsIndependent("anthropic", null) && !reviewIsIndependent(null, null));
+
+console.log("the owner's own words can authorize launching and messaging — nothing else:");
+check("'…publish it on itch.io…' authorizes a launch, quoting the whole sentence", authorizedByWords("Make a puzzle game. When it works, publish it on itch.io so everyone can play. Thanks!", "publish") === "When it works, publish it on itch.io so everyone can play.");
+check("'email my subscribers' authorizes sending", Boolean(authorizedByWords("Build the launch page and email my subscribers when it's ready", "message")));
+check("no launch words, no launch authorization", authorizedByWords("Make a puzzle game for kids", "publish") === null);
+check("money is never authorized by words", authorizedByWords("charge every customer now", "money") === null);
+check("deleting is never authorized by words", authorizedByWords("delete all the old records", "delete") === null);
+check("doors carry their kind", doorFor({ title: "Publish it on itch.io", shows: "", doneWhen: [] }).kind === "publish" && doorFor({ title: "Text the parents a reminder", shows: "", doneWhen: [] }).kind === "message");
 
 console.log("checks must pass or fail:");
 check("'looks professional' is vague", isVagueCheck("It looks professional"));
@@ -127,12 +146,16 @@ check("context names who it's for and why", /two kids/.test(brief.context) && /1
 check("context says what it builds on", /Builds on/.test(brief.context));
 check("acceptance lists the slice's checks and the proof", /within 8 choices/.test(brief.acceptance) && /screenshot/.test(brief.acceptance));
 check("two-way slice: decide yourself, note it", /make reasonable decisions yourself/.test(brief.constraints));
+check("the brief asks for testing the real running app", /run the real app/.test(brief.constraints));
 check("assumptions and not-doing travel with the brief", /no install/.test(brief.constraints) && /No accounts/.test(brief.constraints));
 check("tags carry slice, door, stakes and order", ["slice:s4", "door:two-way", "stakes:play", "after:s2", "after:s3"].every((t) => brief.tags.includes(t)));
 check("no capital-letter rules except the one ONE", !/\b(MUST|NEVER|ALWAYS|IMPORTANT)\b/.test(brief.constraints));
 const oneWay = settleSlices(normalizeSlices([{ key: "s1", title: "Email every subscriber the launch news", shows: "check your inbox", doneWhen: ["The email arrives with the link"], after: [] }]));
 const oneWayBrief = missionBrief({ ...card, stakes: "product" }, oneWay[0], oneWay);
 check("one-way slice: build it but don't run the irreversible step", /do not run the irreversible step/.test(oneWayBrief.constraints));
+check("…and it waits for the review and the owner's go", /owner says go ahead/.test(oneWayBrief.constraints));
+const authorizedBrief = missionBrief({ ...card, stakes: "product" }, oneWay[0], oneWay, "Email my subscribers the news.");
+check("an authorized one-way slice still holds the step until the review passes", /do not run the irreversible step/.test(authorizedBrief.constraints) && /once the independent review passes/.test(authorizedBrief.constraints) && /Email my subscribers/.test(authorizedBrief.constraints));
 check("one-way slice asks for an undo note", /how to undo/.test(oneWayBrief.acceptance));
 
 if (failures) {

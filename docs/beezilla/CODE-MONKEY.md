@@ -21,7 +21,32 @@ bit of friction has to pay for itself (docs/beezilla/PRINCIPLES.md).
 5. **Strong judge, cheap workers, spend savings on verification.** The cost of a fixed level
    of AI ability falls ~13× a year ([Epoch AI, 2026-09](https://epoch.ai/publications/the-plunging-price-of-thought)).
 
-The workshop is those five, made into code.
+The workshop is those five, made into code — adjusted by the owner's decisions below.
+
+## Owner's decisions (2026-11-23)
+
+After weighing the same research and its contradictions, the owner settled these for
+BeeZilla's coding agent (the owner's own report is kept, word for word, outside the repo):
+
+- **Built for people who don't code.** They describe the outcome; Code Monkey makes the
+  technical decisions and explains only consequential ones in plain words. Questions to
+  the person are about what it should do, look like, who it's for — never about code.
+- **Every step is reviewed by a model from a different company** than the one that built
+  it, with fresh context, against the evidence. If no such reviewer is available, the step
+  is reported "not independently reviewed" — never "passed".
+- **Verification means the running product**: tests, then the real app used like a person
+  would, with screenshots or a short recording. A claim of "done" is not evidence.
+- **People see a plain checklist of steps**; the dependency graph stays internal.
+- **Original words are kept as typed**; summaries (the result card) point back to them and
+  never replace them.
+- **Human review never stalls the project**: while one step waits for the owner, the
+  independent steps keep going.
+- **Launching follows the owner's instructions and history**: the first public launch needs
+  their OK unless they asked for it in so many words; once a project has been allowed to go
+  live, that becomes its launch policy for later releases. One unrelated past launch is not
+  blanket permission.
+- Still open, and not to be invented here: approval modes (manual / automatic / reduced
+  safeguards), automatic reasoning-effort choice, the skill library, agent counts.
 
 ## How a project starts
 
@@ -45,14 +70,24 @@ shows a card under the reply that opens the workshop.
 
 ## The review policy (`reviewPolicy`)
 
+Every step: independent review by another company's model first.
+
 | | can be undone | can't be undone |
 |---|---|---|
-| **play** | done when proof is attached | independent review, then the owner says go |
-| **product** | independent review, then done | independent review, then the owner says go |
-| **critical** | independent review, then the owner looks | independent review, then the owner says go |
+| **play** | done once reviewed, with proof | reviewed, then authorized, then the step runs |
+| **product** | done once reviewed, with proof | reviewed, then authorized, then the step runs |
+| **critical** | reviewed, then the owner looks | reviewed, then authorized, then the step runs |
 
-A one-way slice is built and tested but its irreversible step is held back; "Go ahead"
-returns it to the builder once, and that delivery completes it.
+Proof grows with the stakes: play = tests, a try-it link, screenshots; product adds a short
+recording of a person's path through it; critical adds a security check and an undo note.
+Delivered without proof → sent back, never Done.
+
+A one-way step is built and tested but its irreversible part is held back until its review
+passes. It then runs only with authorization: the owner's own words in the request
+(`authorizedByWords` — launching and messaging only; money, deletion, sign-in and data
+changes always get their own go-ahead), the project's launch policy, or the owner's
+"Go ahead" in the workshop. The step returns to the builder once with "go ahead", and that
+delivery completes it.
 
 ## Lifecycle of a slice (all moves are idempotent; reading the project moves it along)
 
@@ -71,8 +106,11 @@ They work missions like any Dev Boards harness (skills/devboards/SKILL.md): poll
 claim, heartbeat, escalate one question, deliver with artifacts.
 
 - Builder `code-monkey-<id>`, harness `BZ_CODE_HARNESS` (default `claude_code`).
-- Reviewer `code-review-<id>`, harness `BZ_CODE_REVIEW_HARNESS` (default `codex`) — a
-  different provider from the builder, which is what makes the review independent.
+- Reviewer `code-review-<id>`, harness `BZ_CODE_REVIEW_HARNESS` (default `codex`).
+- Each harness's company comes from `providerOf` (claude_code → anthropic, codex → openai,
+  gemini_cli → google…); run-any-model harnesses such as hermes need it named with
+  `BZ_CODE_PROVIDER` / `BZ_CODE_REVIEW_PROVIDER`. Only two known, different companies count
+  as independent; the project records which it was.
 
 Each mission's brief is written the way top engineers brief a capable coworker
 (`missionBrief`): objective with how the owner tries it, context (who it's for, why,
@@ -87,7 +125,8 @@ to attach). No role-play, no capital-letter rules.
 - `GET` → the person's coding projects; `GET ?job=<id>` → card, slices, proof, questions.
 - `POST {action:"start", card, slices}` — what the Talk tool calls.
 - `POST {action:"answer", jobId, callId, text}` — reply to an agent's question.
-- `POST {action:"looks-right"|"not-yet", jobId, slice, text?}` — the owner's look.
+- `POST {action:"looks-right"|"not-yet", jobId, slice, text?}` — the owner's look ("Go ahead"
+  on a one-way step; on a launch it also sets the project's launch policy).
 
 ## Screen
 
@@ -100,9 +139,11 @@ the Talk box (Talk stays the one place to talk).
 
 - `scripts/test-code-monkey.ts` — the policy (stakes floors, doors, vague checks, slices,
   brief text).
-- `scripts/test-code-monkey-flow.ts` — end to end on the real board store (PGlite): play
-  auto-accept and release order, a question reaching the owner, a failed then passed
-  independent review, a one-way door with go-ahead, and privacy between accounts.
+- `scripts/test-code-monkey-flow.ts` — end to end on the real board store (PGlite): release
+  order, a review for every step, a question reaching the owner, no proof → sent back, a
+  failed then passed review, a one-way door with go-ahead, a launch authorized by the
+  owner's own words, a go-ahead becoming the launch policy, "not independently reviewed"
+  when no other company is set up, the owner's words kept as typed, privacy between accounts.
 - `scripts/test-tool-registry.ts` — the `code` gate.
 
 Both new scripts run in CI through the `posttest:buzzy-jobs` hook.

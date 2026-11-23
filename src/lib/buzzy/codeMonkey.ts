@@ -18,8 +18,19 @@
  *     (critical). The model proposes the tier; code only ever RAISES it.
  *   - Two-way doors (anything that can be undone) run without asking and show
  *     proof after. One-way doors (sending, paying, publishing, deleting,
- *     changing who can sign in) stop for the owner's go-ahead. Code decides
- *     which door a slice is; the model can only add caution, never remove it.
+ *     changing who can sign in) need the owner's explicit authorization: their
+ *     own words in the request, or a go-ahead. Code decides which door a slice
+ *     is; the model can only add caution, never remove it.
+ *
+ * The owner's decisions of 2026-11-23 (docs/beezilla/CODE-MONKEY.md, "Owner's decisions") add:
+ *   - EVERY step gets an independent review by a model from a different
+ *     company than the one that built it; when no such reviewer is set up, the
+ *     step is reported "not independently reviewed", never "passed".
+ *   - Verification means the running product: tests, then the app used like a
+ *     person would, with screenshots or a short recording.
+ *   - The first public launch needs the owner's OK unless they asked for it in
+ *     so many words; after that the project's launch policy governs.
+ *   - People see a plain checklist of steps; the dependency graph stays inside.
  *
  * Everything that can be wrong here is checked by scripts/test-code-monkey.ts.
  */
@@ -28,7 +39,9 @@ export type Stakes = "play" | "product" | "critical";
 export type Door = "two-way" | "one-way";
 /** What the person sees. Maps from the Dev Boards columns underneath. */
 export type SliceState = "waiting" | "working" | "needs-you" | "checking" | "done";
-export type ProofKind = "try-it" | "screenshot" | "tests" | "independent-review" | "undo-note";
+export type ProofKind = "tests" | "try-it" | "screenshot" | "video" | "independent-review" | "security-check" | "undo-note";
+/** What makes a one-way door one-way. `flagged` = the model asked for caution. */
+export type DoorKind = "publish" | "message" | "money" | "delete" | "access" | "data" | "flagged";
 
 export interface DoneCheck {
   /** One line that someone can answer yes or no to, in plain words. */
@@ -68,6 +81,8 @@ export interface SliceInput {
 
 export interface Slice extends SliceInput {
   door: Door;
+  /** Set for one-way slices: which kind of point of no return it is. */
+  doorKind?: DoorKind;
   /** Why code chose that door, in plain words (empty for an ordinary two-way slice). */
   doorWhy: string;
 }
@@ -146,51 +161,101 @@ export function settleStakes(proposed: Stakes | undefined, text: string): { stak
 
 // ── Doors ───────────────────────────────────────────────────────────────
 
-const ONE_WAY_SIGNALS: [RegExp, string][] = [
-  [/\b(delete|deletes|deleting|wipe|erase|drop (the )?(table|database)|overwrite|purge|remove (all|every|old) (data|records|users|files))\b/i, "it deletes or overwrites data"],
-  [/\b(send(s|ing)?|e-?mail(s|ing)?|text(s|ing)?|notif(y|ies|ying)|messag(e|es|ing))\b[^.\n]{0,40}\b(e-?mails?|texts?|sms|messages?|newsletters?|invites?|invitations?|notifications?|subscribers?|customers?|users?|members?|everyone|people|parents|clients?)\b/i, "it sends messages to people"],
-  [/\b(charge|charges|charging|take payment|payout|refund|transfer money|bill (the|our) )/i, "it moves money"],
-  [/\b(publish|publishes|publishing|go live|goes live|deploy(s|ing)? to (production|the live|the public)|submit(s|ting)? to (the )?(app store|play store|steam)|post(s|ing)? (publicly|to (social|twitter|x|instagram|facebook|reddit)))\b/i, "it makes something public"],
-  [/\b(change(s|ing)? (who can|permissions|passwords?)|reset (all )?passwords|revoke|grant (admin|access)|sign[- ]?in rules)\b/i, "it changes who can get in"],
-  [/\b(migrat(e|es|ing|ion)\b.*\b(data|database|users)|rename (a |the )?(column|table)s?)\b/i, "it reshapes stored data"],
+const ONE_WAY_SIGNALS: [RegExp, string, DoorKind][] = [
+  [/\b(delete|deletes|deleting|wipe|erase|drop (the )?(table|database)|overwrite|purge|remove (all|every|old) (data|records|users|files))\b/i, "it deletes or overwrites data", "delete"],
+  [/\b(send(s|ing)?|e-?mail(s|ing)?|text(s|ing)?|notif(y|ies|ying)|messag(e|es|ing))\b[^.\n]{0,40}\b(e-?mails?|texts?|sms|messages?|newsletters?|invites?|invitations?|notifications?|subscribers?|customers?|users?|members?|everyone|people|parents|clients?)\b/i, "it sends messages to people", "message"],
+  [/\b(charge|charges|charging|take payment|payout|refund|transfer money|bill (the|our) )/i, "it moves money", "money"],
+  [/\b(publish|publishes|publishing|go live|goes live|deploy(s|ing)? to (production|the live|the public)|submit(s|ting)? to (the )?(app store|play store|steam)|post(s|ing)? (publicly|to (social|twitter|x|instagram|facebook|reddit)))\b/i, "it makes something public", "publish"],
+  [/\b(change(s|ing)? (who can|permissions|passwords?)|reset (all )?passwords|revoke|grant (admin|access)|sign[- ]?in rules)\b/i, "it changes who can get in", "access"],
+  [/\b(migrat(e|es|ing|ion)\b.*\b(data|database|users)|rename (a |the )?(column|table)s?)\b/i, "it reshapes stored data", "data"],
 ];
 
 /** Code decides the door from the slice's own words; the model's hint can only add caution. */
-export function doorFor(slice: Pick<SliceInput, "title" | "shows" | "doneWhen" | "oneWayHint">): { door: Door; why: string } {
+export function doorFor(slice: Pick<SliceInput, "title" | "shows" | "doneWhen" | "oneWayHint">): { door: Door; why: string; kind?: DoorKind } {
   const text = [slice.title, slice.shows, ...(slice.doneWhen || []).map((c) => c.text)].join(" \n ");
-  const hits = firstHits(text, ONE_WAY_SIGNALS);
-  if (hits.length) return { door: "one-way", why: hits.join("; ") };
-  if (slice.oneWayHint) return { door: "one-way", why: "Code Monkey flagged it as hard to undo" };
+  const hits = ONE_WAY_SIGNALS.filter(([re]) => re.test(text));
+  if (hits.length) return { door: "one-way", why: [...new Set(hits.map((h) => h[1]))].join("; "), kind: hits[0][2] };
+  if (slice.oneWayHint) return { door: "one-way", why: "Code Monkey flagged it as hard to undo", kind: "flagged" };
   return { door: "two-way", why: "" };
+}
+
+/**
+ * The owner's own words can authorize a point of no return — "…and publish it",
+ * "email my subscribers when it's ready". Only launching and messaging can be
+ * authorized this way; money, deletion, sign-in and data changes always get their
+ * own go-ahead (an inference about what they'd probably want is not authorization).
+ * Only the owner's words count, never text the model wrote.
+ */
+const AUTHORIZING_WORDS: Partial<Record<DoorKind, RegExp>> = {
+  publish: /\b(publish|launch|go live|make it live|put it (online|live|out there)|deploy it|release it|ship it|submit it to|put it on (the )?(app store|play store|steam|itch))\b/i,
+  message: /\b(send|email|e-mail|text|message|notify)\b[^.?!\n]{0,40}\b(subscribers?|customers?|members?|parents|clients?|everyone|my list|mailing list)\b/i,
+};
+
+/** The sentence of the owner's words that authorizes this kind of step, or null. */
+export function authorizedByWords(words: string, kind: DoorKind | undefined): string | null {
+  const re = kind ? AUTHORIZING_WORDS[kind] : undefined;
+  if (!re) return null;
+  const t = String(words || "");
+  const m = re.exec(t);
+  if (!m) return null;
+  // The sentence it sits in. A full stop only ends a sentence before a space or the end
+  // (so "itch.io" stays whole).
+  let from = 0;
+  for (const e of t.slice(0, m.index).matchAll(/[.!?](\s|$)/g)) from = (e.index ?? 0) + 1;
+  const after = /[.!?](\s|$)/.exec(t.slice(m.index + m[0].length));
+  const end = after ? m.index + m[0].length + (after.index ?? 0) + 1 : t.length;
+  return t.slice(from, end).trim().slice(0, 240);
+}
+
+// ── Who reviews: a different company than the one that built it ───────
+
+const HARNESS_PROVIDER: Record<string, string> = {
+  claude_code: "anthropic",
+  codex: "openai",
+  gemini_cli: "google",
+  grok: "xai",
+  xai: "xai",
+  copilot: "github",
+  cursor: "cursor",
+  amp: "sourcegraph",
+};
+
+/** The company behind a harness's model. Harnesses that run any model (hermes, opencode…) need it named. */
+export function providerOf(harness: string, named?: string): string | null {
+  const n = String(named || "").trim().toLowerCase();
+  if (n) return n;
+  return HARNESS_PROVIDER[String(harness || "").trim().toLowerCase()] ?? null;
+}
+
+/** Independent only when both companies are known and they differ. Unknown is not independent. */
+export function reviewIsIndependent(builder: string | null, reviewer: string | null): boolean {
+  return Boolean(builder && reviewer && builder !== reviewer);
 }
 
 // ── Review policy ──────────────────────────────────────────────────────
 
 /**
- * How much proof and whose eyes a slice needs. The rule of thumb from teams that
- * ship thousands of agent changes: undoable small changes merge on green checks,
- * ordinary product work gets an independent reviewer, risky work gets a person.
+ * How much proof and whose eyes a slice needs. Every step is reviewed by a model
+ * from another company (owner, 2026-11-23); proof grows with the stakes; a person
+ * looks only at critical work and at points of no return they haven't authorized.
  */
 export function reviewPolicy(stakes: Stakes, door: Door): ReviewPolicy {
-  if (door === "one-way" || stakes === "critical") {
-    return {
-      autoAccept: false,
-      ownerLooks: true,
-      independentReview: true,
-      proof: stakes === "play" ? ["try-it", "screenshot", "undo-note"] : ["tests", "try-it", "independent-review", "undo-note"],
-    };
-  }
-  if (stakes === "product") {
-    return { autoAccept: true, ownerLooks: false, independentReview: true, proof: ["tests", "try-it", "screenshot", "independent-review"] };
-  }
-  return { autoAccept: true, ownerLooks: false, independentReview: false, proof: ["try-it", "screenshot"] };
+  const proof: ProofKind[] =
+    stakes === "critical" ? ["tests", "try-it", "screenshot", "video", "security-check", "independent-review", "undo-note"]
+    : stakes === "product" ? ["tests", "try-it", "screenshot", "video", "independent-review"]
+    : ["tests", "try-it", "screenshot", "independent-review"];
+  if (door === "one-way" && !proof.includes("undo-note")) proof.push("undo-note");
+  const ownerLooks = door === "one-way" || stakes === "critical";
+  return { autoAccept: !ownerLooks, ownerLooks, independentReview: true, proof };
 }
 
 export const PROOF_WORDS: Record<ProofKind, string> = {
-  "try-it": "a link or steps to try it",
-  screenshot: "a screenshot of it working",
-  tests: "test results (each done-when check, passed)",
-  "independent-review": "notes from a second reviewer that did not write it",
+  tests: "test results (each done-when check, passed) — and the checks you ran on the real, running app",
+  "try-it": "a link or steps to try the running app yourself",
+  screenshot: "screenshots of the running app doing each done-when check",
+  video: "a short screen recording of a person's path through it, start to finish",
+  "independent-review": "a review by a model from a different company than the one that built it",
+  "security-check": "what you checked for security (secrets, sign-in, other people's data) and what you found",
   "undo-note": "how to undo it if it goes wrong",
 };
 
@@ -300,8 +365,8 @@ export function topoOrder(slices: Pick<SliceInput, "key" | "after">[]): string[]
 
 export function settleSlices(raw: SliceInput[]): Slice[] {
   return raw.map((s) => {
-    const { door, why } = doorFor(s);
-    return { ...s, door, doorWhy: why };
+    const { door, why, kind } = doorFor(s);
+    return kind ? { ...s, door, doorWhy: why, doorKind: kind } : { ...s, door, doorWhy: why };
   });
 }
 
@@ -346,7 +411,7 @@ export interface MissionBrief {
  * guardrails, what done looks like and the proof to bring back. No role-play,
  * no capital-letter rules — those make current models over-apply instructions.
  */
-export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[]): MissionBrief {
+export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[], authorizedBy?: string | null): MissionBrief {
   const policy = reviewPolicy(card.stakes, slice.door);
   const waitsFor = slice.after
     .map((k) => allSlices.find((s) => s.key === k))
@@ -357,8 +422,12 @@ export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[])
     card.notDoing.length ? `Not part of this project:\n${lines(card.notDoing)}` : "",
     card.assumptions.length ? `Already decided for the owner (keep these unless a done check can't pass):\n${lines(card.assumptions)}` : "",
     slice.door === "one-way"
-      ? `This slice is hard to undo (${slice.doorWhy}). Build and test everything, but do not run the irreversible step itself — deliver it ready for the owner's go-ahead.`
+      ? `This slice is hard to undo (${slice.doorWhy}). Build and test everything, but do not run the irreversible step itself — deliver it ready. ` +
+        (authorizedBy
+          ? `The owner already asked for it in their own words ("${authorizedBy}"), so once the independent review passes you will be told to go ahead.`
+          : "It runs only after the independent review passes and the owner says go ahead.")
       : "This slice can be undone, so make reasonable decisions yourself and note them in your delivery instead of asking.",
+    "Test it the way the owner will use it: run the real app and go through each done check like a person would, not only unit tests.",
     "If a done check truly can't pass without the owner, escalate ONE short question with your recommended answer; otherwise keep going.",
     "Leave the codebase easier to change than you found it: match existing patterns and names, and turn any fix for a repeated mistake into a test or lint check rather than a comment.",
   ].filter(Boolean);

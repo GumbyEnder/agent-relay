@@ -94,6 +94,14 @@
 .bzcm-link { border: 0; background: none; color: var(--cm-text); cursor: pointer; font: inherit; font-size: 0.85rem; text-decoration: underline; padding: 0; flex: none; }
 
 .bzcm-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.bzcm-words { background: var(--cm-surface); border: 1px solid var(--cm-line); border-radius: 12px; padding: 10px 14px; }
+.bzcm-words summary { cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--cm-muted); }
+.bzcm-words-text { margin: 8px 0 0; white-space: pre-wrap; font-size: 0.95rem; }
+.bzcm-notes { margin: 0; padding-left: 1.1em; font-size: 0.9rem; color: var(--cm-muted); display: grid; gap: 4px; }
+.bzcm-notes b { color: var(--cm-ink); }
+.bzcm-authorized { margin: 4px 0 0; font-size: 0.88rem; color: var(--cm-text); }
+.bzcm-review.ok { color: var(--cm-done); display: flex; align-items: center; gap: 6px; }
+.bzcm-review.warn { color: var(--cm-text); }
 .bzcm-count { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85rem; padding: 3px 10px; border-radius: 999px; background: var(--cm-surface); border: 1px solid var(--cm-line); }
 
 .bzcm-slices { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

@@ -1,17 +1,24 @@
 /**
  * Code Monkey's workshop, end to end on the real board store (PGlite, no network).
  *
- * Drives three projects the way agents would — claim, deliver with proof,
- * escalate, review — and checks what the owner sees and when the workshop
- * moves work on its own:
- *   1. play: slices release in order, proof auto-accepts, a question reaches the owner
- *   2. product: delivered work waits for an independent reviewer; FAIL sends it back
- *   3. one-way door: the owner says go ahead, then the held-back step completes it
+ * Drives projects the way agents would — claim, deliver with proof, escalate,
+ * review — and checks what the owner sees and when the workshop moves work on
+ * its own, under the owner's decisions of 2026-11-23 (docs/beezilla/CODE-MONKEY.md):
+ *   1. play: steps release in order; EVERY step gets a review by another company;
+ *      a question reaches the owner; no proof → sent back; the owner's words kept
+ *   2. product: a failed review sends the step back; a fresh review follows
+ *   3. one-way door (email): reviewed first, then the owner says go, then it runs
+ *   4. launch authorized in the owner's own words: no stop, but only after review
+ *   5. go-ahead on the first launch becomes this project's launch policy
+ *   6. no reviewer from another company: "not independently reviewed", never "passed"
  * Run: npx tsx scripts/test-code-monkey-flow.ts
  */
 import { durableBoard as board, ensureBoardReady } from "../src/lib/board-store.server";
 import { getSql } from "../src/lib/db";
 import { startCodeProject, readCodeProject, ownerActs, listCodeProjects } from "../src/lib/buzzy/codeMonkey.server";
+
+process.env.BZ_CODE_HARNESS = "claude_code";
+process.env.BZ_CODE_REVIEW_HARNESS = "codex";
 
 let failures = 0;
 function check(label: string, condition: boolean, detail?: unknown) {
@@ -28,17 +35,30 @@ async function main() {
   const user = `user_cm_${Date.now().toString(36)}`;
   const stranger = `${user}_other`;
 
-  async function missionOf(jobId: string, key: string) {
-    const rows = await sql<{ data: { codeMonkey: { slices: { key: string; missionId: string; reviewMissionId?: string }[]; agentName: string; reviewerName: string } } }>`
-      SELECT data FROM buzzy_jobs WHERE id = ${jobId}`;
+  type Link = { slices: { key: string; missionId: string; reviewMissionId?: string }[]; agentName: string; reviewerName: string };
+  async function ids(jobId: string, key: string) {
+    const rows = await sql<{ data: { codeMonkey: Link } }>`SELECT data FROM buzzy_jobs WHERE id = ${jobId}`;
     const link = rows[0].data.codeMonkey;
     const s = link.slices.find((x) => x.key === key)!;
     return { missionId: s.missionId, reviewMissionId: s.reviewMissionId, agent: link.agentName, reviewer: link.reviewerName };
   }
-  const stateOf = async (jobId: string) => {
+  const states = async (jobId: string) => {
     const v = await readCodeProject(sql, user, jobId);
     return Object.fromEntries((v?.slices ?? []).map((s) => [s.key, s.state]));
   };
+  const column = async (id: string | undefined) => (id ? (await board.getMission(id))?.column : undefined);
+  /** Builder delivers; the workshop opens the review; the reviewer delivers a verdict. */
+  async function buildAndReview(jobId: string, key: string, proof: string[], verdict: "PASS" | "FAIL" = "PASS") {
+    const a = await ids(jobId, key);
+    await board.claim(a.missionId, a.agent);
+    await board.deliver(a.missionId, a.agent, `Built ${key}`, proof);
+    await readCodeProject(sql, user, jobId);
+    const b = await ids(jobId, key);
+    if (!b.reviewMissionId) return null;
+    await board.claim(b.reviewMissionId, b.reviewer);
+    await board.deliver(b.reviewMissionId, b.reviewer, `- ${verdict} every check, tried in the running app\nVERDICT ${verdict}`);
+    return b.reviewMissionId;
+  }
 
   console.log("refuses a vague project before anything is created:");
   const vague = await startCodeProject(sql, user, {
@@ -48,8 +68,9 @@ async function main() {
   check("refused with reasons", !vague.ok && vague.problems.length >= 2, vague.ok ? "started" : vague.problems);
 
   console.log("1. a bedtime game (play):");
+  const words = "Can you build a bedtime adventure game for my kids? They're 8 and 10.";
   const game = await startCodeProject(sql, user, {
-    words: "a bedtime adventure game for my kids, 8 and 10",
+    words,
     card: {
       making: "a bedtime adventure game",
       forWhom: "me and my two kids (8 and 10)",
@@ -66,105 +87,160 @@ async function main() {
   check("started", game.ok, game.ok ? undefined : game.problems);
   if (!game.ok) return;
   const g = game.jobId;
-  check("stakes stayed play", game.project.card.stakes === "play");
-  check("first slice waits for an agent, second waits on the first", JSON.stringify(await stateOf(g)) === JSON.stringify({ s1: "waiting", s2: "waiting" }));
-  const g1 = await missionOf(g, "s1");
-  const g1m = await board.getMission(g1.missionId);
-  check("first slice is claimable (Ready)", g1m?.column === "ready", g1m?.column);
-  const g2m = await board.getMission((await missionOf(g, "s2")).missionId);
-  check("second slice is parked until the first is done", g2m?.column === "blocked", g2m?.column);
-  check("the brief carries the done checks and the proof wanted", /forest scene/.test(g1m?.acceptance ?? "") && /screenshot/.test(g1m?.acceptance ?? ""));
+  check("the owner's words are kept exactly as typed", game.project.source.words === words);
+  check("reviews are independent (Anthropic builds, OpenAI reviews)", game.project.reviewIndependent && game.project.builderProvider === "anthropic" && game.project.reviewerProvider === "openai");
+  check("both steps start waiting", JSON.stringify(await states(g)) === JSON.stringify({ s1: "waiting", s2: "waiting" }));
+  const g1 = await ids(g, "s1");
+  check("first step is claimable, second parked", (await column(g1.missionId)) === "ready" && (await column((await ids(g, "s2")).missionId)) === "blocked");
+  check("the brief asks for the running app to be tested", /run the real app/.test((await board.getMission(g1.missionId))?.constraints ?? ""));
 
-  const claimed = await board.claim(g1.missionId, g1.agent);
-  check("an agent can claim it", claimed.ok, claimed);
-  check("owner sees Working", (await stateOf(g)).s1 === "working");
-  const asked = await board.escalate(g1.missionId, g1.agent, "Should the hero be an animal or a kid?");
-  check("an agent question escalates", asked.ok, asked);
+  await board.claim(g1.missionId, g1.agent);
+  check("owner sees Working", (await states(g)).s1 === "working");
+  await board.escalate(g1.missionId, g1.agent, "Should the hero be an animal or a kid?");
   const withQ = await readCodeProject(sql, user, g);
   const q = withQ?.slices.find((s) => s.key === "s1")?.question;
-  check("owner sees Needs you with the question", withQ?.slices[0].state === "needs-you" && /animal/.test(q?.text ?? ""));
+  check("an agent's question reaches the owner as Needs you", withQ?.slices[0].state === "needs-you" && /animal/.test(q?.text ?? ""));
   check("a stranger cannot answer it", !(await ownerActs(sql, stranger, g, { kind: "answer", callId: q?.callId ?? "", text: "x" })).ok);
-  const answered = await ownerActs(sql, user, g, { kind: "answer", callId: q?.callId ?? "", text: "An animal — a fox" });
-  check("the owner answers", answered.ok, answered);
+  check("the owner answers", (await ownerActs(sql, user, g, { kind: "answer", callId: q?.callId ?? "", text: "An animal — a fox" })).ok);
   check("the question is gone", !(await readCodeProject(sql, user, g))?.slices[0].question);
 
   await board.claim(g1.missionId, g1.agent);
-  const delivered = await board.deliver(g1.missionId, g1.agent, "Fox hero and forest scene done. Try it: https://preview.example/game", ["https://preview.example/shot-1.png"]);
-  check("the agent delivers with proof", delivered.ok, delivered);
-  const afterDeliver = await stateOf(g);
-  check("play + undoable work auto-accepts on proof", afterDeliver.s1 === "done", afterDeliver);
-  const again = await stateOf(g);
-  check("the next slice is released once its 'after' is done", again.s2 === "waiting" && (await board.getMission((await missionOf(g, "s2")).missionId))?.column === "ready");
-  const view = await readCodeProject(sql, user, g);
-  check("proof links reach the owner", (view?.slices[0].proof.links ?? []).includes("https://preview.example/shot-1.png") && (view?.slices[0].proof.links ?? []).includes("https://preview.example/game"));
+  await board.deliver(g1.missionId, g1.agent, "Fox hero and the forest scene. Try it: https://preview.example/game", ["https://preview.example/shot-1.png"]);
+  check("delivered play work waits for its review (Checking, not Done)", (await states(g)).s1 === "checking");
+  const g1r = await ids(g, "s1");
+  check("…a review mission for the other company's reviewer exists", Boolean(g1r.reviewMissionId));
+  check("the review asks for PASS/FAIL per check from the running app", /PASS or FAIL/.test((await board.getMission(g1r.reviewMissionId!))?.acceptance ?? "") && /real app/.test((await board.getMission(g1r.reviewMissionId!))?.constraints ?? ""));
+  await board.claim(g1r.reviewMissionId!, g1r.reviewer);
+  await board.deliver(g1r.reviewMissionId!, g1r.reviewer, "- PASS Tapping a hero shows the forest scene (iPad Safari)\nVERDICT PASS");
+  const afterReview = await readCodeProject(sql, user, g);
+  check("reviewed play work with proof is Done", afterReview?.slices[0].state === "done" && afterReview.slices[0].reviewed === "pass", afterReview?.slices[0]);
+  check("the next step is released once its 'after' is done", (await column((await ids(g, "s2")).missionId)) === "ready");
+  check("proof links reach the owner", (afterReview?.slices[0].proof.links ?? []).includes("https://preview.example/game"));
 
-  console.log("2. a game for kids everywhere (product, independent review):");
+  const g2 = await ids(g, "s2");
+  await board.claim(g2.missionId, g2.agent);
+  await board.deliver(g2.missionId, g2.agent, "Choices wired up", []);
+  const g2r = await ids(g, "s2");
+  await readCodeProject(sql, user, g);
+  const g2r2 = await ids(g, "s2");
+  await board.claim(g2r2.reviewMissionId!, g2r2.reviewer);
+  await board.deliver(g2r2.reviewMissionId!, g2r2.reviewer, "- PASS choices branch\nVERDICT PASS");
+  await readCodeProject(sql, user, g);
+  const gameBoard = (await sql<{ data: { codeMonkey: { projectId: string } } }>`SELECT data FROM buzzy_jobs WHERE id = ${g}`)[0].data.codeMonkey.projectId;
+  const notes = ((await board.snapshot(gameBoard))?.events ?? []).filter((e) => e.missionId === g2.missionId);
+  check("no proof attached → sent back to the builder, never Done", (await column(g2.missionId)) === "ready" && /without proof/i.test(JSON.stringify(notes)), { column: await column(g2.missionId), g2r });
+
+  console.log("2. a game for kids everywhere (product, failed then passed review):");
   const pub = await startCodeProject(sql, user, {
-    words: "publish a game kids everywhere will enjoy on Steam",
-    card: {
-      making: "a puzzle game", forWhom: "kids everywhere", outcome: "kids solve a puzzle a day",
-      doneWhen: ["A new puzzle appears every day at midnight"], stakes: "play",
-    },
+    words: "make a puzzle game kids everywhere will enjoy",
+    card: { making: "a puzzle game", forWhom: "kids everywhere", outcome: "kids solve a puzzle a day", doneWhen: ["A new puzzle appears every day at midnight"], stakes: "play" },
     slices: [{ key: "s1", title: "Solve today's puzzle", shows: "open the link and drag the pieces", doneWhen: ["Placing every piece shows 'Solved!'"] }],
   });
   check("started", pub.ok);
   if (!pub.ok) return;
   check("stakes raised to product by the words, not the model", pub.project.card.stakes === "product" && pub.project.stakesRaisedFrom === "play");
-  const p1 = await missionOf(pub.jobId, "s1");
-  await board.claim(p1.missionId, p1.agent);
-  await board.deliver(p1.missionId, p1.agent, "Done", ["https://preview.example/puzzle"]);
-  const pv = await stateOf(pub.jobId);
-  check("delivered product work is Checking, not Done", pv.s1 === "checking", pv);
-  const p1r = await missionOf(pub.jobId, "s1");
-  check("an independent review mission exists", Boolean(p1r.reviewMissionId));
-  const rm = await board.getMission(p1r.reviewMissionId!);
-  check("the review asks for PASS/FAIL per check", /PASS or FAIL/.test(rm?.acceptance ?? "") && /Solved/.test(rm?.acceptance ?? ""));
-  await board.claim(p1r.reviewMissionId!, p1r.reviewer);
-  await board.deliver(p1r.reviewMissionId!, p1r.reviewer, "- FAIL Placing every piece shows 'Solved!' — the last piece does nothing\nVERDICT FAIL");
-  const back = await stateOf(pub.jobId);
-  check("a failed review sends the slice back to the builder", back.s1 === "waiting" && (await board.getMission(p1.missionId))?.column === "ready", back);
-  await board.claim(p1.missionId, p1.agent);
-  await board.deliver(p1.missionId, p1.agent, "Fixed the last piece", ["https://preview.example/puzzle-2"]);
-  await readCodeProject(sql, user, pub.jobId);
-  const p1r2 = await missionOf(pub.jobId, "s1");
-  check("a fresh review follows the fix", Boolean(p1r2.reviewMissionId) && p1r2.reviewMissionId !== p1r.reviewMissionId);
-  await board.claim(p1r2.reviewMissionId!, p1r2.reviewer);
-  await board.deliver(p1r2.reviewMissionId!, p1r2.reviewer, "- PASS Placing every piece shows 'Solved!' (tried in Chrome)\nVERDICT PASS");
-  check("a passing review lets undoable product work through", (await stateOf(pub.jobId)).s1 === "done");
+  await buildAndReview(pub.jobId, "s1", ["https://preview.example/puzzle"], "FAIL");
+  const p1 = await ids(pub.jobId, "s1");
+  const back = await states(pub.jobId);
+  check("a failed review sends the step back to the builder", back.s1 === "waiting" && (await column(p1.missionId)) === "ready", back);
+  const firstReview = p1.reviewMissionId;
+  await buildAndReview(pub.jobId, "s1", ["https://preview.example/puzzle-2"], "PASS");
+  const p1b = await ids(pub.jobId, "s1");
+  check("a fresh review followed the fix", Boolean(p1b.reviewMissionId) && p1b.reviewMissionId !== firstReview);
+  check("a passing review lets undoable product work through", (await states(pub.jobId)).s1 === "done");
 
-  console.log("3. a one-way door (sending email):");
+  console.log("3. a one-way door, not authorized (email):");
   const mail = await startCodeProject(sql, user, {
+    words: "write a launch announcement for the game",
     card: { making: "a launch announcement", forWhom: "my newsletter subscribers", outcome: "they hear about the game", doneWhen: ["Each subscriber gets one email with the link"], stakes: "product" },
     slices: [{ key: "s1", title: "Email every subscriber the launch news", shows: "check your own inbox first", doneWhen: ["The email arrives with a working link"] }],
   });
   check("started", mail.ok);
   if (!mail.ok) return;
-  check("the slice is a one-way door", mail.project.slices[0].door === "one-way");
-  const m1 = await missionOf(mail.jobId, "s1");
-  const mm = await board.getMission(m1.missionId);
-  check("the brief tells the builder to hold the irreversible step", /do not run the irreversible step/.test(mm?.constraints ?? ""));
-  await board.claim(m1.missionId, m1.agent);
-  await board.deliver(m1.missionId, m1.agent, "Email built and test-sent to the owner only", ["https://preview.example/email.png"]);
-  await readCodeProject(sql, user, mail.jobId);
-  const m1r = await missionOf(mail.jobId, "s1");
-  await board.claim(m1r.reviewMissionId!, m1r.reviewer);
-  await board.deliver(m1r.reviewMissionId!, m1r.reviewer, "- PASS The email arrives with a working link\nVERDICT PASS");
+  check("the step is a one-way door with no authorization", mail.project.slices[0].door === "one-way" && !mail.project.slices[0].authorizedBy);
+  const m1 = await ids(mail.jobId, "s1");
+  check("the brief holds the irreversible step", /do not run the irreversible step/.test((await board.getMission(m1.missionId))?.constraints ?? ""));
+  await buildAndReview(mail.jobId, "s1", ["https://preview.example/email.png"]);
   const ready = await readCodeProject(sql, user, mail.jobId);
   check("after review, the owner is asked (never auto-sent)", ready?.slices[0].state === "needs-you" && ready.slices[0].ownerLooks === true, ready?.slices[0]);
-  check("'looks right' from a stranger is refused", !(await ownerActs(sql, stranger, mail.jobId, { kind: "looks-right", sliceKey: "s1" })).ok);
-  const go = await ownerActs(sql, user, mail.jobId, { kind: "looks-right", sliceKey: "s1" });
-  check("the owner says go ahead", go.ok, go);
-  check("go ahead returns it to the builder to run the held-back step", (await board.getMission(m1.missionId))?.column === "ready");
+  check("'go' from a stranger is refused", !(await ownerActs(sql, stranger, mail.jobId, { kind: "looks-right", sliceKey: "s1" })).ok);
+  check("the owner says go ahead", (await ownerActs(sql, user, mail.jobId, { kind: "looks-right", sliceKey: "s1" })).ok);
+  check("go ahead returns it to the builder to run the held-back step", (await column(m1.missionId)) === "ready");
   await board.claim(m1.missionId, m1.agent);
   await board.deliver(m1.missionId, m1.agent, "Sent to 312 subscribers", ["https://preview.example/sent-log"]);
-  check("its delivery after go-ahead completes it", (await stateOf(mail.jobId)).s1 === "done");
+  check("that delivery completes it", (await states(mail.jobId)).s1 === "done");
+
+  console.log("4. a launch the owner asked for in their own words:");
+  const launch = await startCodeProject(sql, user, {
+    words: "Make a colouring page for my niece. When it works, publish it on itch.io so the family can find it.",
+    card: { making: "a colouring page", forWhom: "my niece", outcome: "she colours animals on a tablet", doneWhen: ["Tapping a colour then an area fills it"], stakes: "play" },
+    slices: [
+      { key: "s1", title: "Colour in the first picture", shows: "open the link and tap", doneWhen: ["Tapping a colour then an area fills it"] },
+      { key: "s2", title: "Publish it on itch.io", shows: "open the itch.io page", doneWhen: ["The itch.io page loads the game"], after: ["s1"] },
+    ],
+  });
+  check("started", launch.ok);
+  if (!launch.ok) return;
+  const pubStep = launch.project.slices.find((s) => s.key === "s2")!;
+  check("the publish step carries the owner's sentence", pubStep.door === "one-way" && /publish it on itch\.io/.test(pubStep.authorizedBy ?? ""), pubStep);
+  check("the project's launch policy says it came from their words", launch.project.launch?.authorized === true && launch.project.launch.source === "your words");
+  const l2brief = (await board.getMission((await ids(launch.jobId, "s2")).missionId))?.constraints ?? "";
+  check("even authorized, the brief holds the step until the review passes", /do not run the irreversible step/.test(l2brief) && /once the independent review passes/.test(l2brief));
+  await buildAndReview(launch.jobId, "s1", ["https://preview.example/colour"]);
+  await readCodeProject(sql, user, launch.jobId);
+  await buildAndReview(launch.jobId, "s2", ["https://preview.example/itch-ready"]);
+  const l2 = await ids(launch.jobId, "s2");
+  const lview = await readCodeProject(sql, user, launch.jobId);
+  check("after its review it goes ahead by itself — the owner is not asked", (await column(l2.missionId)) === "ready" && lview?.slices[1].state !== "needs-you", lview?.slices[1]);
+  await board.claim(l2.missionId, l2.agent);
+  await board.deliver(l2.missionId, l2.agent, "Live at https://example.itch.io/colouring", ["https://example.itch.io/colouring"]);
+  check("its delivery completes the launch", (await states(launch.jobId)).s2 === "done");
+
+  console.log("5. the first launch's go-ahead becomes this project's launch policy:");
+  const two = await startCodeProject(sql, user, {
+    words: "Make a tiny recipe site for my cooking club.",
+    card: { making: "a recipe site", forWhom: "my cooking club", outcome: "members find this week's recipe", doneWhen: ["The home page shows this week's recipe"], stakes: "play" },
+    slices: [
+      { key: "s1", title: "Publish the first version", shows: "open the site", doneWhen: ["The site loads this week's recipe"] },
+      { key: "s2", title: "Publish the update with the archive", shows: "open the archive", doneWhen: ["The archive lists past recipes"], after: ["s1"] },
+    ],
+  });
+  check("started without any launch authorization", two.ok && !two.project.launch);
+  if (!two.ok) return;
+  await buildAndReview(two.jobId, "s1", ["https://preview.example/site"]);
+  check("the first launch waits for the owner", (await readCodeProject(sql, user, two.jobId))?.slices[0].state === "needs-you");
+  await ownerActs(sql, user, two.jobId, { kind: "looks-right", sliceKey: "s1" });
+  const t1 = await ids(two.jobId, "s1");
+  await board.claim(t1.missionId, t1.agent);
+  await board.deliver(t1.missionId, t1.agent, "Live", ["https://preview.example/live"]);
+  const policyView = await readCodeProject(sql, user, two.jobId);
+  check("the project now has a launch policy from the owner's go-ahead", policyView?.launch?.authorized === true && policyView.launch.source === "your go-ahead");
+  await buildAndReview(two.jobId, "s2", ["https://preview.example/archive"]);
+  const t2 = await ids(two.jobId, "s2");
+  await readCodeProject(sql, user, two.jobId);
+  check("the later launch goes ahead after review without asking again", (await column(t2.missionId)) === "ready" && (await readCodeProject(sql, user, two.jobId))?.slices[1].state !== "needs-you");
+
+  console.log("6. no reviewer from another company:");
+  process.env.BZ_CODE_REVIEW_HARNESS = "claude_code";
+  const solo = await startCodeProject(sql, user, {
+    words: "a dice roller for our board-game night",
+    card: { making: "a dice roller", forWhom: "our board-game night", outcome: "we roll dice on a phone", doneWhen: ["Tapping Roll shows a number from 1 to 6"], stakes: "play" },
+    slices: [{ key: "s1", title: "Roll a die", shows: "tap Roll", doneWhen: ["Tapping Roll shows a number from 1 to 6"] }],
+  });
+  process.env.BZ_CODE_REVIEW_HARNESS = "codex";
+  check("started, marked as not independent", solo.ok && solo.project.reviewIndependent === false);
+  if (!solo.ok) return;
+  const reviewed = await buildAndReview(solo.jobId, "s1", ["https://preview.example/dice"]);
+  check("no same-company review is created", reviewed === null);
+  const sv = await readCodeProject(sql, user, solo.jobId);
+  check("it finishes, reported 'not independently reviewed' — never 'passed'", sv?.slices[0].state === "done" && sv.slices[0].reviewed === "not-available", sv?.slices[0]);
 
   console.log("listing and privacy:");
   const mine = await listCodeProjects(sql, user);
-  check("the owner's list has the three projects", mine.length === 3, mine.length);
+  check("the owner's list has the six projects", mine.length === 6, mine.length);
   check("a stranger sees none of them", (await listCodeProjects(sql, stranger)).length === 0);
   check("a stranger can't read one", (await readCodeProject(sql, stranger, g)) === null);
-  check("reading twice changes nothing more", JSON.stringify(await stateOf(g)) === JSON.stringify(await stateOf(g)));
+  check("reading twice changes nothing more", JSON.stringify(await states(g)) === JSON.stringify(await states(g)));
 }
 
 main()
