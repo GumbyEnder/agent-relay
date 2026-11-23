@@ -15,16 +15,28 @@
   color: #CFCFCF;
   cursor: pointer;
 }
-.privacy-btn:hover, .privacy-btn[aria-expanded="true"] { color: #FFC107; border-color: #4A3B0A; }
-.privacy-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 2px; }
+/* The modes keep their own colours in EVERY state (owner, 2026-11-21: "open should be green,
+   advocate should be yellow, lockdown should be red. But right now, the open icon is yellow…").
+   Hover, the open picker and the focus ring used to paint every mode yellow, and Open had no
+   colour of its own. These base states are neutral; the per-mode rules below colour them. */
+.privacy-btn:hover, .privacy-btn[aria-expanded="true"] { color: #F2F2F2; border-color: #4A4A4A; }
+.privacy-btn:focus-visible { outline: 2px solid #F2F2F2; outline-offset: 2px; }
 .pv-icons { display: inline-flex; align-items: center; gap: 0.3rem; }
 .pv-icons svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* Icons alone were a guessing game (owner, Nov 2026): say the mode out loud.
    Under 520px the word would squeeze the prompt bar, so the tooltip carries it. */
 .pv-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
 @media (max-width: 520px) { .pv-label { display: none; } }
-.privacy-btn[data-mode="lockdown"] { color: #FF8A80; }
+/* Open is green, Advocate is yellow, Lockdown is red: the button, the picker's slider, the pill. */
+.privacy-btn[data-mode="open"] { color: #5FD38D; }
 .privacy-btn[data-mode="advocate"] { color: #FFC107; }
+.privacy-btn[data-mode="lockdown"] { color: #FF8A80; }
+.privacy-btn[data-mode="open"]:hover, .privacy-btn[data-mode="open"][aria-expanded="true"] { color: #8FE8B2; border-color: #2E9E5B; }
+.privacy-btn[data-mode="advocate"]:hover, .privacy-btn[data-mode="advocate"][aria-expanded="true"] { color: #FFD54F; border-color: #6B5410; }
+.privacy-btn[data-mode="lockdown"]:hover, .privacy-btn[data-mode="lockdown"][aria-expanded="true"] { color: #FFA8A0; border-color: #8E2A2E; }
+.privacy-btn[data-mode="open"]:focus-visible { outline-color: #5FD38D; }
+.privacy-btn[data-mode="advocate"]:focus-visible { outline-color: #FFC107; }
+.privacy-btn[data-mode="lockdown"]:focus-visible { outline-color: #FF8A80; }
 
 .privacy-pop {
   position: absolute;
@@ -129,7 +141,26 @@
   cursor: pointer;
 }
 .privacy-chip.hidden { display: none; }
+.privacy-chip[data-mode="open"] { border-color: #2E9E5B; background: #12301F; color: #E7F6EC; }
 .privacy-chip[data-mode="advocate"] { border-color: #8A6D00; background: #2A2204; color: #FFE08A; }
 .privacy-chip[data-mode="lockdown"] { border-color: #8E2A2E; background: #2E1213; color: #FFC7C9; }
 .privacy-chip .pv-icons svg { width: 0.95rem; height: 0.95rem; }
 @media (prefers-reduced-motion: reduce) { .pp-thumb { transition: none; } }
+
+/* ── The light theme: the same three colours, darker so they read on a light page ───────────
+   (the picker itself stays a dark card, so its slider needs no second set). */
+:root[data-theme="light"] .privacy-btn { background: #FFFFFF; border-color: #CFCFCF; color: #444444; }
+:root[data-theme="light"] .privacy-btn:hover, :root[data-theme="light"] .privacy-btn[aria-expanded="true"] { color: #1A1A1A; border-color: #9A9A9A; }
+:root[data-theme="light"] .privacy-btn:focus-visible { outline-color: #1A1A1A; }
+:root[data-theme="light"] .privacy-btn[data-mode="open"] { color: #1E7B45; }
+:root[data-theme="light"] .privacy-btn[data-mode="advocate"] { color: #8A6D00; }
+:root[data-theme="light"] .privacy-btn[data-mode="lockdown"] { color: #C62828; }
+:root[data-theme="light"] .privacy-btn[data-mode="open"]:hover, :root[data-theme="light"] .privacy-btn[data-mode="open"][aria-expanded="true"] { color: #145C33; border-color: #2E9E5B; }
+:root[data-theme="light"] .privacy-btn[data-mode="advocate"]:hover, :root[data-theme="light"] .privacy-btn[data-mode="advocate"][aria-expanded="true"] { color: #6B5300; border-color: #C99A00; }
+:root[data-theme="light"] .privacy-btn[data-mode="lockdown"]:hover, :root[data-theme="light"] .privacy-btn[data-mode="lockdown"][aria-expanded="true"] { color: #9B1C1C; border-color: #D14343; }
+:root[data-theme="light"] .privacy-btn[data-mode="open"]:focus-visible { outline-color: #1E7B45; }
+:root[data-theme="light"] .privacy-btn[data-mode="advocate"]:focus-visible { outline-color: #8A6D00; }
+:root[data-theme="light"] .privacy-btn[data-mode="lockdown"]:focus-visible { outline-color: #C62828; }
+:root[data-theme="light"] .privacy-chip[data-mode="open"] { border-color: #2E9E5B; background: #E7F6EC; color: #14532D; }
+:root[data-theme="light"] .privacy-chip[data-mode="advocate"] { border-color: #C99A00; background: #FFF4CC; color: #5C4600; }
+:root[data-theme="light"] .privacy-chip[data-mode="lockdown"] { border-color: #D14343; background: #FDE8E8; color: #7F1D1D; }

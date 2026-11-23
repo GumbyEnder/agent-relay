@@ -99,6 +99,12 @@ Each rule is a lesson the owner taught on a game; the quote is theirs.
 11. Show a value only once the person has it; no "0 of 0" counters.
 12. Ask before anything spends money or makes something public.
 13. Keep what the owner liked; change only what they asked.
+14. The three privacy modes keep their colours wherever a mode shows (the Talk bar
+    button, its picker, the pill, hover, keyboard focus, dark and light): Open is
+    green, Advocate is yellow, Lockdown is red. "Open should be green, advocate
+    should be yellow, lockdown should be red… be careful with that" (owner,
+    2026-11-21). `npm run test:mode-colors` holds the stylesheet to it and
+    `scripts/probe-mode-colors.mjs` draws it in a real browser.
 
 ## Miro's ways, used by default
 
@@ -139,3 +145,5 @@ Answer yes to each, or fix it:
 9. Can every thing on this page be dragged onto the Idea Board, with the grabbing
    hand on hover?
 10. Does a fresh visit open folded, on a blank page?
+11. Does a mode (Open, Advocate, Lockdown) show in its own colour, green, yellow, red,
+    in every state?
