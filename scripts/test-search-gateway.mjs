@@ -78,7 +78,7 @@ async function boot(extraEnv = {}) {
     try {
       const res = await fetch(`${base}/`, { signal: AbortSignal.timeout(1500) });
       if (res.status < 500) return { child, base, dataDir };
-    } catch {}
+    } catch { /* nothing to do */ }
     await sleep(500);
   }
   return { child, base, dataDir };

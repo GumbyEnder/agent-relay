@@ -63,8 +63,8 @@ export function checkArithmetic(text: string): ReviewCheck | null {
 
 /** Party presence: a letter/proposal should name who it's from and to. */
 export function checkParties(text: string): ReviewCheck {
-  const hasFrom = /\bfrom\b|^[-*•]?\s*(from|vendor|supplier|issued by)\s*[:\-]/im.test(text);
-  const hasTo = /\bto\b|^[-*•]?\s*(to|bill to|billed to|customer|client)\s*[:\-]/im.test(text);
+  const hasFrom = /\bfrom\b|^[-*•]?\s*(from|vendor|supplier|issued by)\s*[:-]/im.test(text);
+  const hasTo = /\bto\b|^[-*•]?\s*(to|bill to|billed to|customer|client)\s*[:-]/im.test(text);
   if (hasFrom && hasTo) {
     return { label: "Both parties are named", verdict: "verified" };
   }

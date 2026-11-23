@@ -16,14 +16,14 @@ for (const p of PAGES) {
   // Only anchors inside the nav count. Pages also carry CSS selectors like
   // `#bzNav a[data-nav="sketch"]`, which a naive regex counts as links and has
   // twice made a correct page look like a divergent template.
-  const navBlock = (html.match(/<nav id="bzNav"[^>]*>([\s\S]*?)<\/nav>/i) || [, ""])[1];
+  const navBlock = (html.match(/<nav id="bzNav"[^>]*>([\s\S]*?)<\/nav>/i) || ["", ""])[1];
   const navIds = [...navBlock.matchAll(/<a[^>]*\sdata-nav="([^"]+)"/g)].map((m) => m[1]);
   // drop the duplicates nav.js's LINKS list can add; keep document order
   const uniq = navIds.filter((v, i) => navIds.indexOf(v) === i);
   const sig = crypto.createHash("md5").update(uniq.join(",")).digest("hex").slice(0, 8);
   const libMatch = navBlock.match(/<a[^>]*data-nav="library"[^>]*>/i);
   const lib = libMatch ? libMatch[0] : "(no library anchor)";
-  const title = (html.match(/<title>([^<]*)<\/title>/i) || [, "(no title)"])[1];
+  const title = (html.match(/<title>([^<]*)<\/title>/i) || ["", "(no title)"])[1];
   const ownHeader = /id="bzHeader"|class="[^"]*page-header/.test(html) && !/id="bzNav"/.test(html);
   rows.push({
     page: p, status: res.status, bytes: html.length, anchors: uniq.length, sig,

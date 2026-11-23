@@ -623,7 +623,7 @@
       var api = window.BZCompanies;
       if (api && typeof api.select === "function") api.select(id);
       else {
-        try { localStorage.setItem("bz_active_company", id); } catch (e) {}
+        try { localStorage.setItem("bz_active_company", id); } catch (e) { /* nothing to do */ }
         location.reload();
       }
     });
@@ -985,7 +985,7 @@
       hint.textContent = "Transcribing\u2026";
       var chunks = r.chunks;
       var rate = r.rate;
-      if (r.ctx && r.ctx.state !== "closed") { try { r.ctx.close(); } catch (e) {} }
+      if (r.ctx && r.ctx.state !== "closed") { try { r.ctx.close(); } catch (e) { /* nothing to do */ } }
       if (r.stream) { r.stream.getTracks().forEach(function (t) { t.stop(); }); }
       var total = 0;
       chunks.forEach(function (c) { total += c.length; });
@@ -1034,8 +1034,8 @@
         src.connect(proc);
         proc.connect(ctx.destination);
         recorder = { ctx: ctx, stream: stream, proc: proc, chunks: chunks, rate: ctx.sampleRate, stop: function () {
-          try { proc.disconnect(); } catch (e) {}
-          try { src.disconnect(); } catch (e) {}
+          try { proc.disconnect(); } catch (e) { /* nothing to do */ }
+          try { src.disconnect(); } catch (e) { /* nothing to do */ }
         } };
         mic.setAttribute("aria-pressed", "true");
         mic.innerHTML = "&#9632; Stop";
@@ -1084,7 +1084,7 @@
       btn.setAttribute("aria-expanded", folding ? "false" : "true");
     });
     head.addEventListener("click", function () {
-      if (panel.classList.contains("min")) { panel.classList.remove("min"); min.textContent = "\u2013"; text && text.focus(); }
+      if (panel.classList.contains("min")) { panel.classList.remove("min"); min.textContent = "\u2013"; if (text) text.focus(); }
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && panel.classList.contains("open") && !panel.classList.contains("min")) shut();
@@ -2208,7 +2208,7 @@
         if (cachedEntry) cachedEntry.styles = holder;
         holder = null;
         Array.prototype.forEach.call(document.querySelectorAll("[data-bz-style]"), function (el) {
-          try { el.disabled = el.getAttribute("data-bz-style") !== key || el.hasAttribute("data-bz-replaced"); } catch (e) {}
+          try { el.disabled = el.getAttribute("data-bz-style") !== key || el.hasAttribute("data-bz-replaced"); } catch (e) { /* nothing to do */ }
         });
         return;
       }
@@ -2247,7 +2247,7 @@
       try { el.disabled = !on; } catch (e) { /* link elements on some browsers */ }
     });
     if (holder) {
-      holder.forEach(function (el) { if (!el.hasAttribute("data-bz-replaced")) { try { el.disabled = false; } catch (e) {} } });
+      holder.forEach(function (el) { if (!el.hasAttribute("data-bz-replaced")) { try { el.disabled = false; } catch (e) { /* nothing to do */ } } });
     }
   }
 
@@ -2315,7 +2315,7 @@
   function stripChrome(root) {
     Array.prototype.forEach.call(root.querySelectorAll(CHROME_OWNED), function (n) {
       if (n.closest("#bzChrome")) return; // the live chrome, not the imported copy
-      n.parentNode && n.parentNode.removeChild(n);
+      if (n.parentNode) n.parentNode.removeChild(n);
     });
     // Whatever the page kept in its own <header> (a toolbar, a search box) is page
     // content, not chrome: unwrap it into the page so there is exactly one header
@@ -2350,8 +2350,8 @@
     try { window.dispatchEvent(new CustomEvent("bz:page", { detail: { key: key } })); } catch (e) { /* old browsers */ }
     // Pages that wait for DOMContentLoaded (memory.html) never see it again in a
     // soft navigation; a synthetic event keeps their boot code honest.
-    try { document.dispatchEvent(new Event("DOMContentLoaded")); } catch (e) {}
-    try { window.scrollTo(0, scrollY || 0); } catch (e) {}
+    try { document.dispatchEvent(new Event("DOMContentLoaded")); } catch (e) { /* nothing to do */ }
+    try { window.scrollTo(0, scrollY || 0); } catch (e) { /* nothing to do */ }
     busy = false;
   }
 
@@ -2378,7 +2378,7 @@
       // a page's own code can end up measuring the hidden copy. restore() puts it back.
       page.removeAttribute("id");
     } else {
-      page.parentNode && page.parentNode.removeChild(page);
+      if (page.parentNode) page.parentNode.removeChild(page);
     }
   }
 

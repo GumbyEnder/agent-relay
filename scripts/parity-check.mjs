@@ -70,7 +70,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const ROUTE_RE = /["'`](\/api\/[a-zA-Z0-9/_:.\-]*)["'`]/g;
+const ROUTE_RE = /["'`](\/api\/[a-zA-Z0-9/_:.-]*)["'`]/g;
 
 /**
  * Route family: /api/buzzy/graphs/:<id> → /api/buzzy/graphs

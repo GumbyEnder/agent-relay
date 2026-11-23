@@ -136,6 +136,7 @@
   var MARK = { waiting: "○", doing: "…", done: "✓", failed: "✕", stopped: "–", skipped: "–", asking: "?" };
 
   function Run(actions) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     this.actions = actions;
     this.stopped = false;
@@ -223,6 +224,7 @@
     }
     this.status.textContent = text;
     this.stopBtn.textContent = "Close";
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     this.stopBtn.onclick = function () { self.remove(); };
     if (this.lit) { this.lit.classList.remove("bz-pilot-target"); this.lit = null; }
@@ -236,6 +238,7 @@
 
   // Allow / Skip under a step that waits for the owner.
   Run.prototype.ask = function (i) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     var r = this.rows[i];
     this.set(i, "asking", "Waiting for you");
@@ -253,8 +256,8 @@
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(yes);
       };
-      allow.addEventListener("click", function () { self.resolveAsk && self.resolveAsk(true); });
-      skip.addEventListener("click", function () { self.resolveAsk && self.resolveAsk(false); });
+      allow.addEventListener("click", function () { if (self.resolveAsk) self.resolveAsk(true); });
+      skip.addEventListener("click", function () { if (self.resolveAsk) self.resolveAsk(false); });
     });
   };
 
@@ -365,6 +368,7 @@
       this.set(i, "done", "");
     }
     this.end("Done.");
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     setTimeout(function () { if (self.finished && !self.stopped && !self.card.matches(":hover, :focus-within")) self.remove(); }, 6000);
   };

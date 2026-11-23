@@ -77,7 +77,7 @@ const navRowLinks = [...navRowSrc.matchAll(/href="([^"]+)"\s+data-nav="([a-z-]+)
 );
 assert(navRowLinks.length >= 6, `NAV_ROW parsed to only ${navRowLinks.length} links`);
 
-const linksSrc = /var LINKS = \[([\s\S]*?)\n  \];/.exec(navJs)?.[1] ?? "";
+const linksSrc = /var LINKS = \[([\s\S]*?)\n {2}\];/.exec(navJs)?.[1] ?? "";
 assert(linksSrc, "nav.js no longer declares LINKS");
 const navLinks = [...linksSrc.matchAll(/\{\s*id: "([a-z-]+)",\s*href: "([^"]+)",\s*label: "([^"]+)"([^}]*)\}/g)].map(
   (m) => ({ id: m[1], href: m[2], label: m[3], more: /\bmore:\s*true\b/.test(m[4]) }),
