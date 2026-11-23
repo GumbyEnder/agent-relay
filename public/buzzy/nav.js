@@ -1251,6 +1251,12 @@
     var a = document.createElement("a");
     a.className = "bz-brand";
     a.href = "/buzzy/talk";
+    // The bee is home (the page shell below handles the click): the top page, with the
+    // board folded away, from any page, even when Talk is the one showing. Middle-click
+    // and the like still open Talk in a new tab, as for any link.
+    a.setAttribute("data-bz-home", "");
+    a.setAttribute("aria-label", "BeeZilla home");
+    a.title = "Home: back to the top, with the board folded away";
     // The real brand face, content by default (owner, 2026-11-18: "he has an apathetic
     // face as his default face… it should be in the repo, the proper faces"). On Talk,
     // voice-stage.js switches it to the face for what BeeZilla is doing.
@@ -2517,6 +2523,21 @@
       });
   }
 
+  // The bee (the logo, top left) is home: the top page, which is Talk, scrolled to the
+  // top with the Idea Board folded away and Inspiration under the row. Owner, 2026-11-21:
+  // "when you click the bee itself, like the Beezilla logo, it should bring you back to
+  // the top page with the thing folded away." Going to Talk is not enough: from Talk
+  // itself the link went nowhere, and from another page it brought Talk back exactly as
+  // it was left (the board still open). Talk lends the two hooks, so the sign-in pages
+  // (no header, no board) just follow the link.
+  function goHome() {
+    return Promise.resolve(go(TALK)).then(function () {
+      try { if (window.bzFoldBoard) window.bzFoldBoard(); } catch (e) { /* best effort */ }
+      try { if (window.bzBrowseHome) window.bzBrowseHome(); } catch (e) { /* best effort */ }
+      try { window.scrollTo(0, 0); } catch (e) { /* best effort */ }
+    });
+  }
+
   document.addEventListener(
     "click",
     function (e) {
@@ -2527,6 +2548,11 @@
       // soft-navigate on it before the chrome's own click handler could toggle the
       // menu, so clicking your name took you to /buzzy/profile and no menu ever showed.
       if (a.id === "accountLink") return;
+      if (a.hasAttribute("data-bz-home") && document.getElementById("bzHead")) {
+        e.preventDefault();
+        goHome();
+        return;
+      }
       if (a.target && a.target !== "_self") return;
       if (a.hasAttribute("download")) return;
       var href = a.getAttribute("href");

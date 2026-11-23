@@ -762,6 +762,18 @@
 
   window.bzBrowseSelect = function (name) { choose(name); };
 
+  // The bee in the corner (nav.js) brings you to the top page: a search or a web page
+  // you were reading is put away, the QR code closes, and Inspiration is under the row
+  // again, as on a fresh visit. Only called once Talk is the page showing.
+  window.bzBrowseHome = function () {
+    if (typeof closeQr === "function") closeQr(false);   // (a function only while the QR popover exists)
+    readSeq++;            // a page still being fetched must not open itself afterwards
+    closeSearch();        // also hides the reader and brings the row and its pane back
+    // Already on a mounted Inspiration wall: leave it, rather than rebuild it for nothing.
+    if (current === "inspiration" && mounted) paintPlaces();
+    else select("inspiration");
+  };
+
   // A privacy change can hide or show the wall.
   window.addEventListener("bz:privacy", function () { if (current === "inspiration") select("inspiration"); });
 

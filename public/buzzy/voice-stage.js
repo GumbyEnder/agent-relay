@@ -287,6 +287,14 @@
     if (voiceOn() && !raf) raf = requestAnimationFrame(draw);
   }
   function openBoard() { folded = false; wanted = true; sync(); }
+  // The bee in the corner (nav.js) brings you home with the board folded away, so the
+  // Talk bar waits alone at the top again (owner, 2026-11-21: "when you click the bee
+  // itself… it should bring you back to the top page with the thing folded away").
+  // Nothing is lost: the conversation stays in History, the board is kept, and See board
+  // or talking opens them again. `asked` goes too, so a voice session that is still
+  // running cannot throw the board straight back open; pressing Talk to BeeZilla again
+  // (or sending a message) does that, as on a fresh visit.
+  window.bzFoldBoard = function () { folded = true; wanted = false; asked = false; sync(); };
   if (toggle) {
     toggle.addEventListener("click", function () {
       if (board) { folded = true; wanted = false; }
