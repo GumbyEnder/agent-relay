@@ -337,7 +337,8 @@ await page.waitForTimeout(200);
 await page.keyboard.press("Escape");
 await page.waitForTimeout(150);
 await page.locator('.wb-tool[data-tool="note"]').click();
-await page.mouse.click(650, 450);
+const canvasBox = await page.evaluate(() => { const r = document.querySelector(".wb-canvas").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width }; });
+await page.mouse.click(canvasBox.x + canvasBox.w * 0.45, canvasBox.y + 90);   // high on the board: the editor opens beside it, with room below
 await page.waitForSelector(".wb-editor", { timeout: 5000 });
 await page.waitForTimeout(250);
 const es = await page.evaluate(() => [...document.querySelectorAll(".wb-editor > .bz-rs")].map((h) => h.getAttribute("data-edge")).sort().join(" "));
