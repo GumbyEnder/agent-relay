@@ -308,7 +308,7 @@ html.bz-agents-open #bzAgents .bzag-edge { display: block; }
     all: unset;
     position: fixed;
     left: 0;
-    top: 118px;
+    bottom: 84px;
     z-index: 43;
     box-sizing: border-box;
     display: flex;
@@ -379,6 +379,11 @@ html[data-bz-agent] #micBtn.talk-btn.on { animation: bzagPulse 1.6s ease-in-out 
   0%, 100% { filter: drop-shadow(0 0 8px var(--bzag-glow)); }
   50% { filter: drop-shadow(0 0 20px var(--bzag-glow-strong)); }
 }
+/* On a phone the board's Talk bar is one row: the button shows its sign only (as it does on
+   a page with the board folded), so the box beside it keeps room to type in. */
+@media (max-width: 520px) {
+  html[data-bz-agent] .wb-dock #micBtn .tb-label { display: none; }
+}
 /* A long name must not stretch the bar: the words shorten with an ellipsis. */
 html[data-bz-agent] #micBtn .tb-label { display: inline-block; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 /* The strip leaves the board less room, and its header (the Talk bar, then New
@@ -387,9 +392,10 @@ html[data-bz-agent] #micBtn .tb-label { display: inline-block; max-width: 26ch; 
 @media (min-width: 761px) {
   html.bz-has-agents .wb-head { flex-wrap: wrap; }
   html.bz-has-agents .wb-dock { flex: 1 1 600px; min-width: 600px; }
-  /* One line, clipped: a hint that is too long for the box must not wrap into a second line. */
-  html.bz-has-agents .wb-dock #chatInput::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+/* One line, clipped: a hint that is too long for the box must not wrap into a second line
+   (on a phone the box is narrow too). */
+html.bz-has-agents .wb-dock #chatInput::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The face and name at the top left become the agent's. */
 .bz-brand .bz-agent-face { display: none; }
 html[data-bz-agent] .bz-brand .bz-face { display: none !important; }
