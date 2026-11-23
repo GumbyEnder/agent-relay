@@ -2288,6 +2288,34 @@
     function cardById(id) { for (var i = 0; i < state.cards.length; i++) if (state.cards[i].id === id) return state.cards[i]; return null; }
     function cardByFlow(fid) { for (var i = 0; i < state.cards.length; i++) if (state.cards[i].flow === fid) return state.cards[i]; return null; }
 
+    // The conversation card can be dragged bigger or smaller by any side or corner (resize.js
+    // draws the grab strips and reports each finished drag as bz:resized; owner, 2026-11-22:
+    // "I could just grab the side or the corner and grow the size of that so I can see it
+    // bigger"). Its size is part of the card, so it is saved with the board, goes through
+    // undo, and a double-click on a strip puts it back at 360 x 480.
+    var CHAT_MIN_W = 260, CHAT_MIN_H = 220;
+    function sizeChat(c, n) {
+      if (!n) return;
+      n.style.width = Number(c.w) > 0 ? Math.max(CHAT_MIN_W, Math.round(Number(c.w))) + "px" : "";
+      n.style.height = Number(c.h) > 0 ? Math.max(CHAT_MIN_H, Math.round(Number(c.h))) + "px" : "";
+      if (n.bzSized) return;
+      n.bzSized = true;
+      // While it is pulled, the board is busy like it is for any drag: an update from the
+      // account waits (applyRemote draws every card again, and would cut the drag short).
+      n.addEventListener("bz:resizestart", pointerDown);
+      n.addEventListener("bz:resizeend", pointerDone);
+      n.addEventListener("bz:resize", function () { drawLinks(); });
+      n.addEventListener("bz:resized", function (e) {
+        var d = e.detail || {};
+        snapshot();
+        if (d.reset) { delete c.w; delete c.h; }
+        else { c.w = Math.round(d.w); c.h = Math.round(d.h); c.x = Math.round(d.x); c.y = Math.round(d.y); }
+        place(c);
+        sizeChat(c, n);
+        drawLinks();
+        persist();
+      });
+    }
     function fillChat(n, c) {
       n.textContent = "";
       n.className = "wb-card wb-k-chat wb-r-chat" + (selected[c.id] ? " wb-on" : "");
@@ -2309,6 +2337,7 @@
       }, { passive: true });
       n.appendChild(holder);
       n.setAttribute("aria-label", "Conversation");
+      sizeChat(c, n);
     }
     function fillCard(n, c) {
       if (kindOf(c) === "chat") { fillChat(n, c); return; }

@@ -84,7 +84,8 @@
     "test:recipes": "npx tsx scripts/test-recipe-bundle.ts && npx tsx scripts/test-recipe-checks.ts && npx tsx scripts/test-recipe-listing.ts",
     "test:wallet": "npx tsx scripts/test-wallet.ts",
     "test:board-orchestrate": "npx tsx scripts/test-board-orchestrate.ts",
-    "posttest:wallet": "npm run test:board-orchestrate",
+    "test:resizable-boxes": "npx tsx scripts/test-resizable-boxes.ts",
+    "posttest:wallet": "npm run test:board-orchestrate && npm run test:resizable-boxes",
     "test:buzzy-art": "node scripts/test-buzzy-art-cap.mjs"
   },
   "dependencies": {

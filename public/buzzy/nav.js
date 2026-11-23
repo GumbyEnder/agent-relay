@@ -323,7 +323,7 @@
       "#bzFeedback.min .bz-panel-body{display:none}",
       "#bzFeedback .bz-fb-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:.55rem;padding:0 .1rem .2rem}",
       "#bzFeedback .bz-fb-label{font-size:.8rem;color:#c9c9c9}",
-      "#bzFeedback .bz-fb-text{width:100%;box-sizing:border-box;background:#0b0b0b;color:#f2f2f2;border:1px solid #333;border-radius:10px;padding:.6rem .7rem;font:inherit;font-size:.9rem;resize:vertical;min-height:96px}",
+      "#bzFeedback .bz-fb-text{width:100%;box-sizing:border-box;background:#0b0b0b;color:#f2f2f2;border:1px solid #333;border-radius:10px;padding:.6rem .7rem;font:inherit;font-size:.9rem;resize:vertical;min-height:96px;flex:1 1 auto}",
       "#bzFeedback .bz-fb-text:focus{outline:2px solid #ffd40d;outline-offset:1px}",
       "#bzFeedback .bz-fb-row{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}",
       "#bzFeedback .bz-fb-mic{background:#1b1b1b;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.32rem .75rem;font:inherit;font-size:.82rem;cursor:pointer}",
@@ -1236,6 +1236,17 @@
     document.head.appendChild(s);
   }
 
+  // Boxes and panels you can drag bigger or smaller (owner, 2026-11-22): resize.js finds
+  // them on every page and puts the grab strips on, so no page has to ask for it.
+  function loadResize() {
+    if (window.BeeZillaResize) return;
+    if (document.querySelector('script[src="/buzzy/resize.js"]')) return;
+    var s = document.createElement("script");
+    s.src = "/buzzy/resize.js";
+    s.defer = true;
+    document.head.appendChild(s);
+  }
+
   /**
    * The brand for row one — ALWAYS the canonical one.
    *
@@ -1384,6 +1395,7 @@
     }
 
     loadCompanies();
+    loadResize();
     companyControl(chrome);
     accountControl(chrome);
     menuPlanLine();

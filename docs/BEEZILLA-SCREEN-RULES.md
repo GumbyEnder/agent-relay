@@ -169,6 +169,50 @@ From about 550 searches on Miro and node-based AI canvases (2026-11-18).
 8. From node canvases (Freepik/Magnific Spaces, Flora, n8n): each step shows its own
    state while it runs; a saved chain runs again with new input; failures say why.
 
+## Boxes and panels can be made bigger or smaller
+
+Owner, 2026-11-22: "If I have a box like the conversation history, I could just grab the
+side or the corner and grow the size of that so I can see it bigger if I want to. Make it
+so." A design rule from now on, next to the pop-up rule that nothing closes on a click
+outside it (only Esc or an X closes anything): every box or panel that holds something worth
+reading can be dragged by a side or a corner. `public/buzzy/resize.js` does it, on every
+page.
+
+1. Any side or corner. The pointer says so, a line lights along the edge about to be
+   grabbed, and the corner you can Tab to wears a small grip. A box is pulled by the sides
+   that make sense for where it sits: a card on the Idea Board by all four sides and
+   corners; a panel hanging from a corner (Feedback from the top right, History from the
+   bottom right) by the sides that face into the page, so the corner it hangs from never
+   moves.
+2. The size a box opens at is where it starts, not a cap. Pull it past that, up to the
+   window's edge (or the edge of the panel it sits in). It is never so small it can't be
+   used (260 x 220 for the conversation) and never so big it leaves the window.
+3. At any zoom. A card on the board changes by what the pointer moved, not by what the
+   board's zoom turned it into.
+4. Dragging is never the only way. Tab to the corner: the arrow keys change the size
+   (Shift for bigger steps), Home puts it back. A double-click on a side or the corner
+   puts it back. Esc, while dragging, takes the drag back, and that Esc is the drag's: it
+   closes nothing.
+5. It is remembered. The conversation card keeps its size in the card (saved with the
+   board to the account, and in undo); the Idea Board's height and the panels' sizes are
+   kept in this browser. A panel that folds up (Feedback) is its small self again and
+   gets its size back when it unfolds.
+6. A drag never closes, moves or selects anything else, and one that ends somewhere
+   outside the box leaves it open.
+7. The boxes today: the conversation (the card on the Idea Board), the Idea Board's height
+   (by its bottom edge), History, the step editor, Feedback. Menus, tooltips and small
+   forms (the AI key, the purchase confirmation, the privacy picker) are not boxes people
+   need bigger; the rule is for what holds something to read or write. The 360 x 480 the
+   conversation opens at, like the caps in the rules from the games, is where it starts.
+8. A new box joins by saying so, with no code of its own:
+   `data-bz-resize="e s se" data-bz-resize-anchor="start" data-bz-resize-key="agents"`
+   (the sides to pull; how it sits: start = held by its left and top, end = by its right and
+   bottom, center; the name its size is kept under; the list is at the top of resize.js).
+   Whoever shows the box inside should let it take the room (flex: 1 on what holds the
+   words). It is not finished until `scripts/probe-resizable-boxes.mjs` pulls it; copy one
+   of its blocks. `scripts/test-resizable-boxes.ts` holds the sums and the manners (it runs
+   in `test:ci`).
+
 ## Before you ship a screen
 
 Answer yes to each, or fix it:
@@ -176,7 +220,8 @@ Answer yes to each, or fix it:
 1. Is Talk to BeeZilla the one obvious first action?
 2. Are six or fewer things visible before you scroll?
 3. Does nothing cover anything else, on a laptop and at 390px wide?
-4. Does every panel have a visible close or fold?
+4. Does every panel have a visible close or fold, and can it be dragged bigger or smaller
+   by a side or a corner?
 5. Does every key shortcut also have a button or a label?
 6. Are all icons SVG, and is every face a real brand expression?
 7. Does music show a waveform wherever it appears?

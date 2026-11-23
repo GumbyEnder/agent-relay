@@ -448,7 +448,7 @@
 }
 .wb-ed-head { display: flex; align-items: center; justify-content: space-between; color: #eef1f4; }
 .wb-ed-title, .wb-ed-body { width: 100%; box-sizing: border-box; border-radius: 9px; border: 1px solid #3a3f47; background: #0d0f12; color: #fff; font: inherit; padding: 8px 10px; }
-.wb-ed-body { resize: vertical; min-height: 8em; line-height: 1.45; font-size: 0.9rem; }
+.wb-ed-body { resize: vertical; min-height: 8em; line-height: 1.45; font-size: 0.9rem; flex: 1 1 auto; }   /* a taller editor (resize.js) gives the extra room to the words */
 .wb-ed-row { display: flex; align-items: center; gap: 10px; }
 .wb-ed-note { font-size: 0.78rem; color: var(--ob-muted); }
 .wb-toast {
@@ -542,6 +542,7 @@
    as a thing that you could scroll by. It would just be sitting there.") ─────────
    Hold it by the bar on top to move it; inside, the words scroll and can be selected. */
 .wb-card.wb-k-chat {
+  box-sizing: border-box;   /* its size is the outside one, the one resize.js and the card remember */
   width: 360px;
   height: 480px;
   padding: 0;
