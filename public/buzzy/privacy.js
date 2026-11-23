@@ -175,14 +175,17 @@
       if (on) on.focus();
     });
   });
-  pop.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { e.preventDefault(); close(false); btn.focus(); }
-  });
-  document.addEventListener("click", function (e) {
-    if (pop.classList.contains("hidden")) return;
-    if (pop.contains(e.target) || btn.contains(e.target) || (chip && chip.contains(e.target))) return;
+  // Esc closes it wherever focus is: with no click-outside close, a press on the page
+  // moves focus out of the pop-up, and Esc must still work from there.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || pop.classList.contains("hidden")) return;
+    e.preventDefault();
     close(false);
+    btn.focus();
   });
+  // No click handler on the page around it: the privacy pop-up closes with its X, its
+  // minimise button, Esc, or the button that opened it (owner, 2026-11-21: "no
+  // click-outside-to-close. Escape key or an X closes anything that opens up").
 
   paint();
 })();

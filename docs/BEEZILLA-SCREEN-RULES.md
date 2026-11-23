@@ -1,6 +1,6 @@
 # BeeZilla screen rules
 
-Updated 2026-11-20. Every change to a BeeZilla screen is checked against this page.
+Updated 2026-11-23. Every change to a BeeZilla screen is checked against this page.
 It joins three sources: the owner's own words about BeeZilla, the interface lessons
 from the owner's games (Unbearable, Gone Dark / Cozy Driver, Mech Arena), and Miro's
 standard ways of working, which people already know.
@@ -24,6 +24,36 @@ whiteboard. That's so poor that you can list it as a critical design principle."
 4. A new kind of thing on a page is not finished until it can be dragged to the
    board: give it a drag payload (`application/x-beezilla-card`, or a
    `data-bz-card` attribute, or a plain link or picture) and check it lands.
+
+## Critical: nothing closes on a click outside it
+
+Owner, 2026-11-21: "They would have to X out to lose their progress, not just click to
+the side. That's a fundamental principle of our design: no click-outside-to-close.
+Escape key or an X closes anything that opens up."
+
+1. Anything that opens (a dialog, a pop-up, a panel, a drawer, a sidebar, a window of
+   chats, a viewer) closes only with its own X (or a button that says Close or Cancel)
+   or with Esc. A click, a tap or a press anywhere else leaves it open and keeps what was
+   typed or chosen in it, so progress is only ever lost on purpose.
+2. So there is never a click handler on a backdrop that closes the box, and never a
+   document-level "click outside" listener that closes or minimises a panel. Choosing
+   something inside a menu closes the menu (that is an act on it), and a tooltip goes away
+   by itself because it holds nothing. The plain menus that remain (the account menu: nothing
+   can be typed in it) also close on a press away; each is listed, with its reason, in
+   `scripts/test-no-outside-close.mjs`, and a new one needs a reason there.
+3. Every one has a visible way out: an X or a button named Close or Cancel (36px or more),
+   and it answers Esc wherever focus is. With more than one open, Esc closes the top-most.
+4. A new pop-up is not finished until a test presses outside it and finds it still open.
+   `scripts/test-no-outside-close.mjs` reads the source for backdrop and outside-press
+   closers (it runs in `test:ci`); `scripts/probe-no-outside-close.mjs` presses outside the
+   real ones in a browser.
+
+## Critical: boxes and panels can be resized
+
+Owner, 2026-11-22: boxes and panels (conversation history and the like) can be resized by
+grabbing a side or a corner. A panel that sits beside the page is pulled by its inner edge;
+a dialog by its corner (a native `resize: both`, or a handle). Nothing is capped so small,
+or so large, that it can no longer be used.
 
 ## The website's header, on every page
 
@@ -157,3 +187,6 @@ Answer yes to each, or fix it:
 10. Does a fresh visit open folded, on a blank page?
 11. Does a mode (Open, Advocate, Lockdown) show in its own colour, green, yellow, red,
     in every state?
+12. Does everything that opens close only with its own X, Close or Esc, and keep what was
+    typed when the page around it is pressed?
+13. Can every box and panel be resized by a side or a corner?

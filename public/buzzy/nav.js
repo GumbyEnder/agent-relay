@@ -1680,9 +1680,8 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && isOpen()) close(true);
     });
-    document.addEventListener("click", function (e) {
-      if (isOpen() && !dock.contains(e.target)) close(false);
-    });
+    // The panel closes with its X, Esc, or the gear: a click on the page around it does
+    // nothing (owner, 2026-11-21: "no click-outside-to-close").
     window.addEventListener("popstate", function () { close(false); });
 
     // ── What the panel shows ───────────────────────────────────────────

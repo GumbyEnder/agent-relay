@@ -635,10 +635,14 @@
     var now = form.querySelector(".ob-key-now");
     var forget = form.querySelector(".ob-forget");
     var custom = form.querySelector(".ob-custom");
-    function close() { d.remove(); keyDlg = null; if (keyBtn) keyBtn.focus(); }
+    function close() { d.remove(); keyDlg = null; document.removeEventListener("keydown", onEsc, true); if (keyBtn) keyBtn.focus(); }
+    // Esc closes it wherever focus is: a press on the dark around the box moves focus
+    // out of it, and with no click-outside close Esc must still work from there.
+    function onEsc(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
+    document.addEventListener("keydown", onEsc, true);
     d.querySelector(".ob-x").addEventListener("click", close);
-    d.addEventListener("click", function (e) { if (e.target === d) close(); });
-    d.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); close(); } });
+    // Only its X or Esc closes it: a click on the page around it does nothing, so a key
+    // half-pasted is never lost by accident (owner, 2026-11-21: "no click-outside-to-close").
     sel.addEventListener("change", function () { custom.hidden = sel.value !== "custom"; });
     function paintNow(k) {
       if (k && k.saved) {
