@@ -1,4 +1,4 @@
--- 0063 — sharing a page, only after the person says yes (owner, 2026-11-21).
+-- 0064 — sharing a page, only after the person says yes (owner, 2026-11-21).
 --
 -- The QR code and Copy page link used to hand out the page's own address, which opens
 -- nothing for anyone else (every page asks them to sign in). Now they open a window that
