@@ -24,10 +24,13 @@ import { WEB_SEARCH_TOOL } from "./search";
 import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
 import { GENERATE_VIDEO_TOOL } from "./video";
+import { START_CODE_PROJECT_TOOL } from "./codeMonkey";
 
-export type ToolGate = "always" | "draft";
+/** `code` tools appear only on turns that ask for software to be made or changed. */
+export type ToolGate = "always" | "draft" | "code";
 export type ToolCost = "free" | "metered";
-export type ToolSideEffect = "read-only" | "render-to-memory";
+/** `starts-work` hands a job to agents (Code Monkey's board); it can be stopped, so it is a two-way door. */
+export type ToolSideEffect = "read-only" | "render-to-memory" | "starts-work";
 
 export interface ToolPolicy {
   name: string;
@@ -196,6 +199,21 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     sideEffects: "render-to-memory",
     withheldReason: "the deliverable is not ready yet — same gate as the document.",
   },
+  {
+    // Code Monkey's workshop (codeMonkey.server.ts): turns a coding request into
+    // slices that agents build on a board, with proof. Egress: the agents that
+    // build it talk to their own model providers, so Lockdown withholds it.
+    name: "start_code_project",
+    egress: true,
+    schema: START_CODE_PROJECT_TOOL,
+    gate: "code",
+    offered: true,
+    timeoutMs: 20_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "starts-work",
+    withheldReason: "this turn isn't asking for software to be made or changed.",
+  },
 ];
 
 export interface ToolContext {
@@ -203,10 +221,18 @@ export interface ToolContext {
   draftGateOpen: boolean;
   /** The owner chose Lockdown: nothing that leaves BeeZilla is offered. */
   lockdown?: boolean;
+  /** This turn asks for software to be made or changed (codeMonkey.isCodeRequest). */
+  codeRequest?: boolean;
+}
+
+function gateOpen(p: ToolPolicy, ctx: ToolContext): boolean {
+  if (p.gate === "always") return true;
+  if (p.gate === "code") return ctx.codeRequest === true;
+  return ctx.draftGateOpen;
 }
 
 function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
-  return p.offered && (p.gate === "always" || ctx.draftGateOpen) && !(ctx.lockdown && p.egress);
+  return p.offered && gateOpen(p, ctx) && !(ctx.lockdown && p.egress);
 }
 
 /** The schemas the model is allowed to see on this turn. */
@@ -234,6 +260,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (ctx.lockdown && policy.egress) {
     return `${name} is off in Lockdown — nothing leaves BeeZilla in that mode. The privacy control on the Talk bar switches it back.`;
+  }
+  if (policy.gate === "code" && !ctx.codeRequest) {
+    return `${name} is not available on this turn — ${policy.withheldReason}`;
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;

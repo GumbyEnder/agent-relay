@@ -53,6 +53,8 @@ import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
+import { isCodeRequest, argsToProject, CODE_MONKEY_GUIDE, codeProjectStartedMessage, codeProjectRefusedMessage } from "./codeMonkey";
+import { startCodeProject } from "./codeMonkey.server";
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
@@ -364,6 +366,8 @@ export interface TurnTimings {
 }
 
 export interface ChatResponse {
+  /** A coding project Code Monkey started this turn; Talk shows a card that opens its workshop. */
+  codeProject?: { jobId: string; making: string; stakes: "play" | "product" | "critical"; slices: number };
   ok: boolean;
   reply: string;
   slots?: Record<string, string>;
@@ -619,6 +623,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const videoRequest = videoAsk(message);
   const wantsVideo = Boolean(videoRequest);
   const lockdown = req.privacy === "lockdown";
+  // Code Monkey: a turn that asks for software to be made or changed gets the
+  // workshop tool (codeMonkey.ts). Lockdown withholds it with everything else
+  // that reaches an outside provider.
+  const codeRequest = isCodeRequest(message);
+  let codeProject: ChatResponse["codeProject"] = undefined;
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
   const requestedDraft = !wants3d && !wantsVideo && (isDraftRequest(message) || req.execute === true);
@@ -1348,6 +1357,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "Never say it is finished or attached, and never answer with JSON or a tool call.",
     );
   }
+  if (codeRequest && !lockdown) afterNotes.push(CODE_MONKEY_GUIDE);
   if (afterNotes.length) messages.push({ role: "system", content: afterNotes.join("\n\n") });
 
   // ── Context accounting ─────────────────────────────────────────────
@@ -1379,12 +1389,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
-  const toolCtx = { draftGateOpen, lockdown };
+  const toolCtx = { draftGateOpen, lockdown, codeRequest };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
   // non-empty tool list is what disables streaming), which is the 12s answer.
   // Web lookups are already handled by the deterministic research pre-pass.
-  const loopTools = (draftGateOpen || isExplicitDocumentRequest(message))
+  const loopTools = (draftGateOpen || isExplicitDocumentRequest(message) || codeRequest)
     ? (offeredTools(toolCtx) as unknown[])
     : [];
   // glm-class models treat an optional tool as optional and answer in prose.
@@ -1607,6 +1617,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                   : `fetch_website failed: ${page.error}. Reply without it.`,
                 errorCode: page.ok ? undefined : "fetch_failed",
               };
+            }
+            if (tc.name === "start_code_project") {
+              const { card, slices } = argsToProject(content);
+              const started = await startCodeProject(sql, userId, { card, slices, words: message });
+              if (!started.ok) return { message: codeProjectRefusedMessage(started.problems), errorCode: "invalid_project" };
+              codeProject = {
+                jobId: started.jobId,
+                making: started.project.card.making,
+                stakes: started.project.card.stakes,
+                slices: started.project.slices.length,
+              };
+              return { message: codeProjectStartedMessage(started.project) };
             }
             if (tc.name === "calculate") {
               // BZ-F038: arithmetic runs HERE, deterministically — never in the
@@ -2545,6 +2567,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
 
   // Every turn names the item it is about, so a client never has to remember it.
+  if (codeProject) response.codeProject = codeProject;
   if (jobId && !response.jobId) response.jobId = jobId;
   return response;
 }

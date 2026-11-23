@@ -50,6 +50,7 @@
     "test:github-ingest": "npx tsx scripts/test-github-ingest-extras.ts && npx tsx scripts/test-ingest-authz.ts",
     "test:api": "node scripts/agent-api-smoke.mjs",
     "test:buzzy-jobs": "node scripts/test-buzzy-jobs-ownership.mjs",
+    "posttest:buzzy-jobs": "npx tsx scripts/test-code-monkey.ts && npx tsx scripts/test-code-monkey-flow.ts",
     "test:buzzy-resume": "node scripts/test-buzzy-resume.mjs",
     "test:library-finished": "node scripts/test-library-finished.mjs",
     "test:board-nodes": "npx tsx scripts/test-board-nodes.ts",

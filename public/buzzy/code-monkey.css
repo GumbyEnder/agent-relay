@@ -1,0 +1,155 @@
+/* Code Monkey's workshop (code-monkey.js). Code Monkey's colour is #B8591F.
+ * States are told apart by shape AND colour, never colour alone. The Open /
+ * Advocate / Lockdown greens, yellows and reds are left to the privacy modes. */
+:root {
+  /* BeeZilla is dark everywhere; these sit on its board colours (oneboard.css). */
+  --cm: #b8591f;          /* Code Monkey: fills, borders, buttons */
+  --cm-text: #ec9a63;     /* the same orange, light enough to read as text on dark */
+  --cm-soft: #2a1d15;
+  --cm-ink: #f2f2f2;
+  --cm-muted: #9aa0a8;
+  --cm-line: #2f343c;
+  --cm-surface: #15171b;
+  --cm-bg: #101214;
+  --cm-working: #7ea2ff;
+  --cm-checking: #b497ff;
+  --cm-done: #4cc5b0;
+  --cm-waiting: #9aa0a8;
+}
+
+.bzcm {
+  position: fixed;
+  top: 72px;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 100vw);
+  z-index: 60;
+  display: none;
+  flex-direction: column;
+  background: var(--cm-bg);
+  color: var(--cm-ink);
+  border-left: 3px solid var(--cm);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.bzcm.is-open { display: flex; }
+.bzcm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--cm-line);
+  background: var(--cm-soft);
+}
+.bzcm-mark {
+  width: 34px; height: 34px; border-radius: 10px;
+  display: grid; place-items: center;
+  background: var(--cm); color: #fff; flex: none;
+}
+.bzcm-titles { flex: 1; min-width: 0; }
+.bzcm-kicker { margin: 0; font-size: 0.78rem; font-weight: 700; color: var(--cm-text); letter-spacing: 0.02em; }
+.bzcm-title { margin: 0; font-size: 1.05rem; line-height: 1.2; }
+.bzcm-all, .bzcm-x {
+  border: 1px solid var(--cm-line); background: var(--cm-surface); color: var(--cm-ink);
+  border-radius: 9px; cursor: pointer; font: inherit; font-size: 0.85rem;
+}
+.bzcm-all { padding: 6px 10px; }
+.bzcm-x { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; }
+.bzcm-all:hover, .bzcm-x:hover { border-color: var(--cm); }
+.bzcm-body { flex: 1; overflow: auto; padding: 14px; display: grid; gap: 12px; align-content: start; }
+.bzcm-empty { color: var(--cm-muted); margin: 8px 2px; }
+.bzcm-empty p { margin: 0 0 8px; }
+
+.bzcm-i { display: inline-block; vertical-align: -2px; flex: none; }
+.bzcm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bzcm-proj {
+  width: 100%; text-align: left; display: grid; gap: 2px; cursor: grab;
+  border: 1px solid var(--cm-line); background: var(--cm-surface); color: var(--cm-ink);
+  border-radius: 12px; padding: 12px 14px; font: inherit;
+}
+.bzcm-proj:hover { border-color: var(--cm); }
+.bzcm-proj-name { font-weight: 700; }
+.bzcm-proj-sub { color: var(--cm-muted); font-size: 0.85rem; }
+
+.bzcm-card, .bzcm-slice {
+  background: var(--cm-surface); border: 1px solid var(--cm-line); border-radius: 14px; padding: 14px 16px; cursor: grab;
+}
+.bzcm-card:active, .bzcm-slice:active, .bzcm-proj:active { cursor: grabbing; }
+.bzcm-card-top, .bzcm-slice-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bzcm-stakes {
+  display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 0.82rem;
+  color: var(--cm-text); border: 1.5px solid var(--cm); border-radius: 999px; padding: 2px 10px;
+}
+.bzcm-raised { font-size: 0.8rem; color: var(--cm-muted); }
+.bzcm-making { margin: 8px 0 6px; font-size: 1.15rem; line-height: 1.3; }
+.bzcm-line { margin: 0 0 4px; }
+.bzcm-sub { margin-top: 10px; }
+.bzcm-sub-h { margin: 0 0 4px; font-size: 0.78rem; font-weight: 700; color: var(--cm-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.bzcm-checks, .bzcm-not, .bzcm-assume, .bzcm-proof { margin: 0; padding-left: 1.2em; }
+.bzcm-checks li::marker { content: "☐  "; color: var(--cm-text); }
+.bzcm-checks.small { font-size: 0.92rem; color: var(--cm-ink); margin-top: 6px; }
+.bzcm-not li { color: var(--cm-muted); }
+.bzcm-assume { list-style: none; padding: 0; display: grid; gap: 4px; }
+.bzcm-assume li { display: flex; gap: 8px; justify-content: space-between; align-items: baseline; }
+.bzcm-link { border: 0; background: none; color: var(--cm-text); cursor: pointer; font: inherit; font-size: 0.85rem; text-decoration: underline; padding: 0; flex: none; }
+
+.bzcm-counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.bzcm-count { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85rem; padding: 3px 10px; border-radius: 999px; background: var(--cm-surface); border: 1px solid var(--cm-line); }
+
+.bzcm-slices { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.bzcm-slice { border-left-width: 5px; }
+.bzcm-slice.s-waiting { border-left-color: var(--cm-waiting); }
+.bzcm-slice.s-working { border-left-color: var(--cm-working); }
+.bzcm-slice.s-needs-you { border-left-color: var(--cm); background: var(--cm-soft); }
+.bzcm-slice.s-checking { border-left-color: var(--cm-checking); }
+.bzcm-slice.s-done { border-left-color: var(--cm-done); }
+.bzcm-state { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 0.82rem; }
+.bzcm-state.s-waiting, .bzcm-count.s-waiting { color: var(--cm-waiting); }
+.bzcm-state.s-working, .bzcm-count.s-working { color: var(--cm-working); }
+.bzcm-state.s-needs-you, .bzcm-count.s-needs-you { color: var(--cm-text); }
+.bzcm-state.s-checking, .bzcm-count.s-checking { color: var(--cm-checking); }
+.bzcm-state.s-done, .bzcm-count.s-done { color: var(--cm-done); }
+.bzcm-door { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--cm-muted); }
+.bzcm-door.one-way { color: var(--cm-text); font-weight: 600; }
+.bzcm-slice-title { margin: 6px 0 2px; font-size: 1rem; }
+.bzcm-try { margin: 0; font-size: 0.92rem; }
+.bzcm-progress { margin: 6px 0 0; font-size: 0.88rem; color: var(--cm-muted); font-style: italic; }
+.bzcm-proof-wrap { margin-top: 10px; border-top: 1px dashed var(--cm-line); padding-top: 8px; }
+.bzcm-proof-sum, .bzcm-review { margin: 0 0 6px; font-size: 0.9rem; white-space: pre-wrap; }
+.bzcm-proof { list-style: none; padding: 0; display: grid; gap: 6px; }
+.bzcm-proof img { max-width: 100%; border-radius: 8px; border: 1px solid var(--cm-line); display: block; }
+.bzcm-proof a { color: var(--cm-text); word-break: break-all; }
+
+.bzcm-ask { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--cm-surface); border: 1.5px solid var(--cm); }
+.bzcm-ask p { margin: 0 0 8px; }
+.bzcm-ask textarea {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 0.95rem; padding: 8px 10px; margin-bottom: 8px;
+  border: 1px solid var(--cm-line); border-radius: 8px; background: var(--cm-bg); color: var(--cm-ink); resize: vertical;
+}
+.bzcm-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.bzcm-btn {
+  border: 0; background: var(--cm); color: #fff; font: inherit; font-weight: 700; font-size: 0.9rem;
+  border-radius: 9px; padding: 8px 14px; cursor: pointer;
+}
+.bzcm-btn.ghost { background: transparent; color: var(--cm-text); border: 1.5px solid var(--cm); }
+.bzcm-btn:disabled { opacity: 0.6; cursor: default; }
+/* Page styles must not repaint the workshop: BeeZilla's own button and heading rules
+ * (yellow hovers, coloured h2s) stay outside it. */
+.bzcm-btn:hover, .bzcm-btn:focus-visible { background: #a14c19; color: #fff; }
+.bzcm-btn.ghost:hover, .bzcm-btn.ghost:focus-visible { background: var(--cm-soft); color: var(--cm-text); }
+.bzcm h2, .bzcm h3, .bzcm h4, .bzcm-talk-card b { color: var(--cm-ink); }
+.bzcm-notyet { margin-top: 8px; }
+
+/* The card under a Talk reply that started a project. */
+.bzcm-talk-card {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; cursor: grab;
+  padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--cm); background: var(--cm-soft); color: var(--cm-ink);
+}
+.bzcm-talk-shape { color: var(--cm-text); display: inline-flex; }
+.bzcm-talk-text { flex: 1; min-width: 180px; }
+.bzcm-talk-sub { color: var(--cm-muted); font-size: 0.9rem; }
+
+@media (max-width: 640px) {
+  .bzcm { top: 56px; width: 100vw; border-left: 0; border-top: 3px solid var(--cm); }
+  .bzcm-all { padding: 5px 8px; font-size: 0.8rem; }
+}

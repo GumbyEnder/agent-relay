@@ -72,7 +72,14 @@ check("web, page reading and music are marked as leaving BeeZilla", ["web_search
 check("lockdown offers none of them", outside.every((n) => !locked.includes(n)), locked.join(","));
 check("lockdown keeps the local tools", ["calculate", "render_document", "render_sheet"].every((n) => locked.includes(n)), locked.join(","));
 check("a withheld outside tool explains Lockdown", /Lockdown/.test(refusalFor("web_search", { draftGateOpen: true, lockdown: true }) ?? ""));
-check("without lockdown nothing changes", outside.filter((n) => policyFor(n)?.offered).every((n) => offeredToolNames({ draftGateOpen: true }).includes(n)));
+check("without lockdown nothing changes", outside.filter((n) => policyFor(n)?.offered).every((n) => offeredToolNames({ draftGateOpen: true, codeRequest: true }).includes(n)));
+
+console.log("code gate (Code Monkey's workshop):");
+check("not offered on an ordinary turn", !offeredToolNames({ draftGateOpen: true }).includes("start_code_project"));
+check("offered on a coding turn, even before any draft", offeredToolNames({ draftGateOpen: false, codeRequest: true }).includes("start_code_project"));
+check("a coding turn adds nothing else", offeredToolNames({ draftGateOpen: false, codeRequest: true }).filter((n) => !offeredToolNames({ draftGateOpen: false }).includes(n)).join() === "start_code_project");
+check("lockdown withholds it (its agents reach model providers)", !offeredToolNames({ draftGateOpen: true, codeRequest: true, lockdown: true }).includes("start_code_project"));
+check("refused off a coding turn, with a reason", /software/.test(String(refusalFor("start_code_project", { draftGateOpen: true }))));
 
 console.log("result clamp:");
 const clamped = clampResult("web_search", "x".repeat(20000));

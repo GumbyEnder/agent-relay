@@ -1228,6 +1228,16 @@
     }
   }
 
+  // Code Monkey's workshop opens from any page (a Talk card, the agents strip, or
+  // a #code link), so its script rides along with the chrome like companies.js.
+  function loadCodeMonkey() {
+    if (window.BeeZillaCodeMonkey) return;
+    if (document.querySelector('script[src="/buzzy/code-monkey.js"]')) return;
+    var s = document.createElement("script");
+    s.src = "/buzzy/code-monkey.js";
+    document.head.appendChild(s);
+  }
+
   function loadCompanies() {
     if (window.BZCompanies) return;
     if (document.querySelector('script[src="/buzzy/companies.js"]')) return;
@@ -1384,6 +1394,7 @@
     }
 
     loadCompanies();
+    loadCodeMonkey();
     companyControl(chrome);
     accountControl(chrome);
     menuPlanLine();
