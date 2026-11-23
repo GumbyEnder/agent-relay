@@ -194,7 +194,21 @@ async function signIn(email) {
     headers: { "content-type": "application/json", origin: BASE },
     body: JSON.stringify({ email, callbackURL: "/" }),
   });
-  if (!res.ok) throw new Error(`magic-link request failed ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    // Driving a server you did not start (the `[baseUrl]` mode) only works when
+    // that server trusts this origin: Better Auth compares the request's origin
+    // against its baseURL/trustedOrigins, and a bare localhost:PORT server is not
+    // trusted by default. Say that instead of leaking a 403 the reader has to decode.
+    if (/INVALID_ORIGIN/i.test(body)) {
+      throw new Error(
+        `the server at ${BASE} does not trust this origin (Better Auth INVALID_ORIGIN).\n` +
+          `      Start it with BETTER_AUTH_URL=${BASE} (and BETTER_AUTH_TRUSTED_ORIGINS=${BASE}), ` +
+          `or run this suite with no arguments so it boots its own server.`,
+      );
+    }
+    throw new Error(`magic-link request failed ${res.status}: ${body}`);
+  }
   const url = await readMailUrl(email);
   const vres = await fetch(url, { redirect: "manual" });
   const setCookies = vres.headers.getSetCookie?.() ?? [];
