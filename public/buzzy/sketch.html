@@ -86,6 +86,7 @@
   #toolbar .sep { width:1px; height:22px; background:var(--bz-line); margin:0 0.3rem; }
   .tool { min-width:2.1rem; padding:0.3rem 0.45rem; }
   .tool .glyph { font-size:0.95rem; line-height:1; }
+  .tool .glyph .tic { width:1.2rem; height:1.2rem; display:block; }
   #sizeWrap, #tolWrap { display:flex; align-items:center; gap:0.35rem; font-size:0.76rem; color:var(--bz-muted); }
   #size, #tol { width:96px; accent-color: var(--bz-yellow); }
   .colors { position:relative; width:44px; height:34px; }
@@ -167,29 +168,29 @@
 </header>
 
 <div id="toolbar">
-  <button class="tool on" data-tool="select" title="Select / move a mark (S)"><span class="glyph">▣</span></button>
-  <button class="tool" data-tool="selrect" title="Rectangle select (M)"><span class="glyph">⬚</span></button>
-  <button class="tool" data-tool="selfree" title="Free-form select (N)"><span class="glyph">⬡</span></button>
-  <button class="tool" data-tool="pencil" title="Pencil — hard edge (P)"><span class="glyph">✏</span></button>
-  <button class="tool" data-tool="brush" title="Brush (B)"><span class="glyph">🖌</span></button>
-  <button class="tool" data-tool="eraser" title="Eraser — erases pixels (E)"><span class="glyph">◻</span></button>
-  <button class="tool" data-tool="fill" title="Fill with colour (F)"><span class="glyph">🪣</span></button>
-  <button class="tool" data-tool="picker" title="Pick a colour from the board (I)"><span class="glyph">💧</span></button>
-  <button class="tool" data-tool="airbrush" title="Airbrush (A)"><span class="glyph">💨</span></button>
+  <button class="tool on" data-tool="select" title="Select / move a mark (S)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-select"/></svg></span></button>
+  <button class="tool" data-tool="selrect" title="Rectangle select (M)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-selrect"/></svg></span></button>
+  <button class="tool" data-tool="selfree" title="Free-form select (N)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-selfree"/></svg></span></button>
+  <button class="tool" data-tool="pencil" title="Pencil — hard edge (P)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-pencil"/></svg></span></button>
+  <button class="tool" data-tool="brush" title="Brush (B)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-brush"/></svg></span></button>
+  <button class="tool" data-tool="eraser" title="Eraser — erases pixels (E)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-eraser"/></svg></span></button>
+  <button class="tool" data-tool="fill" title="Fill with colour (F)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-fill"/></svg></span></button>
+  <button class="tool" data-tool="picker" title="Pick a colour from the board (I)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-picker"/></svg></span></button>
+  <button class="tool" data-tool="airbrush" title="Airbrush (A)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-airbrush"/></svg></span></button>
   <span class="sep"></span>
-  <button class="tool" data-tool="line" title="Line (L)"><span class="glyph">╱</span></button>
-  <button class="tool" data-tool="curve" title="Curve — drag, then move to bend, click to fix (C)"><span class="glyph">⌒</span></button>
-  <button class="tool" data-tool="rect" title="Rectangle (R)"><span class="glyph">▭</span></button>
-  <button class="tool" data-tool="rrect" title="Rounded rectangle (Shift+R)"><span class="glyph">▢</span></button>
-  <button class="tool" data-tool="ellipse" title="Ellipse (O)"><span class="glyph">◯</span></button>
-  <button class="tool" data-tool="triangle" title="Triangle (V)"><span class="glyph">△</span></button>
-  <button class="tool" data-tool="polygon" title="Polygon — click each corner, double-click to close (Y)"><span class="glyph">⬠</span></button>
-  <button class="tool" data-tool="star" title="Star (5)"><span class="glyph">★</span></button>
-  <button class="tool" data-tool="arrow" title="Arrow (9)"><span class="glyph">➔</span></button>
-  <button class="tool" data-tool="bubble" title="Speech bubble (6)"><span class="glyph">💬</span></button>
-  <button class="tool" data-tool="text" title="Text — click to place a text box (T)"><span class="glyph">T</span></button>
-  <button class="tool" data-tool="zoom" title="Zoom (Z) — click to zoom in, Alt-click out"><span class="glyph">⌕</span></button>
-  <button class="tool" data-tool="pan" title="Pan (H) — drag the board"><span class="glyph">✥</span></button>
+  <button class="tool" data-tool="line" title="Line (L)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-line"/></svg></span></button>
+  <button class="tool" data-tool="curve" title="Curve — drag, then move to bend, click to fix (C)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-curve"/></svg></span></button>
+  <button class="tool" data-tool="rect" title="Rectangle (R)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-rect"/></svg></span></button>
+  <button class="tool" data-tool="rrect" title="Rounded rectangle (Shift+R)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-rrect"/></svg></span></button>
+  <button class="tool" data-tool="ellipse" title="Ellipse (O)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-ellipse"/></svg></span></button>
+  <button class="tool" data-tool="triangle" title="Triangle (V)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-triangle"/></svg></span></button>
+  <button class="tool" data-tool="polygon" title="Polygon — click each corner, double-click to close (Y)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-polygon"/></svg></span></button>
+  <button class="tool" data-tool="star" title="Star (5)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-star"/></svg></span></button>
+  <button class="tool" data-tool="arrow" title="Arrow (9)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-arrow"/></svg></span></button>
+  <button class="tool" data-tool="bubble" title="Speech bubble (6)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-bubble"/></svg></span></button>
+  <button class="tool" data-tool="text" title="Text — click to place a text box (T)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-text"/></svg></span></button>
+  <button class="tool" data-tool="zoom" title="Zoom (Z) — click to zoom in, Alt-click out"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-zoom"/></svg></span></button>
+  <button class="tool" data-tool="pan" title="Pan (H) — drag the board"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-pan"/></svg></span></button>
   <span class="sep"></span>
   <div id="sizeWrap"><span>Size</span><input id="size" type="range" min="1" max="50" value="6" /><span id="sizeVal">6</span></div>
   <div id="tolWrap"><span>Fill tol.</span><input id="tol" type="range" min="0" max="120" value="24" /><span id="tolVal">24</span></div>

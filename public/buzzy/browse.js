@@ -672,7 +672,7 @@
       pane.innerHTML = '<div class="bz-pane-head"><h2>Experts</h2>' + link("/buzzy/experts", "All experts") + "</div>" +
         '<div class="bz-experts">' + ex.map(function (e) {
           return '<a class="bz-expert" href="/buzzy/experts#' + esc(e.id) + '">' +
-            '<span class="bz-expert-ico" aria-hidden="true">' + esc(icons[e.id] || "★") + "</span>" +
+            '<span class="bz-expert-ico" aria-hidden="true">' + (icons[e.id] || icons.other || "") + "</span>" +
             '<span class="bz-expert-name">' + esc(e.name) + "</span>" +
             '<span class="bz-expert-blurb">' + esc(e.blurb || "") + "</span></a>";
         }).join("") + "</div>";
