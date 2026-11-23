@@ -59,6 +59,24 @@ ok("golden fixture validates with no blocking issue", () => {
   eq(r.spec.nodes.length, 12);
   eq(r.spec.edges.length, 14);
   eq(r.spec.entry, "n_start");
+
+  // The three review deltas, held by assertion so they cannot regress:
+  // 1. the decision's else edge ends the run — it is not a cycle back into n_res.
+  const elseEdge = r.spec.edges.find((e) => e.id === "e4")!;
+  eq(elseEdge.condition, null);
+  eq(elseEdge.to.node, "n_end");
+  if (r.issues.some((i) => i.code === "ORCH011")) throw new Error("golden closes a cycle outside a loop back port");
+  // 2. every binding names something that exists: the join declares "draft", and
+  //    the end output is named for what it carries.
+  const join = r.spec.nodes.find((n) => n.id === "n_join")!;
+  eq(join.config.output, { name: "draft" });
+  const end = r.spec.nodes.find((n) => n.id === "n_end")!;
+  eq(Object.keys(end.config.outputs as Record<string, string>), ["score"]);
+  if (r.issues.some((i) => ["ORCH006", "ORCH009"].includes(i.code))) {
+    throw new Error(`golden has a binding/port issue: ${r.issues.map((i) => i.code).join(", ")}`);
+  }
+  // 3. no unknown ports anywhere in a clean graph.
+  if (r.issues.some((i) => i.code === "ORCH009")) throw new Error("golden uses an unknown port");
 });
 
 ok("x/y snap to the grid on the way in", () => {
@@ -167,6 +185,15 @@ ok("half-drawn flow is savable with warnings", () => {
 ok("blocking codes fire on the graph that breaks them", () => {
   const noStart = clone(); noStart.nodes = noStart.nodes.filter((n: any) => n.id !== "n_start");
   has(validateOrchestration(noStart).issues, "ORCH001");
+
+  // An unknown port is a BLOCK, not a warning: the edge cannot be routed.
+  const badPort = clone();
+  badPort.edges.find((e: any) => e.id === "e3").from.port = "yes";
+  const bp = validateOrchestration(badPort);
+  const bpIssue = bp.issues.find((i) => i.code === "ORCH009");
+  truthy(bpIssue, `expected ORCH009; got ${bp.issues.map((i) => i.code).join(", ")}`);
+  truthy(bpIssue!.severity === "error", "ORCH009 must be an error");
+  truthy(!bp.ok, "unknown port must block a save");
 
   const noteEdge = clone();
   noteEdge.edges.push({ id: "e99", from: { node: "n_note", port: "out" }, to: { node: "n_end", port: "in" }, label: "", condition: null });

@@ -123,7 +123,7 @@ export interface ValidateResult {
 }
 
 const BLOCKING = new Set([
-  "ORCH001", "ORCH002", "ORCH006", "ORCH007", "ORCH008",
+  "ORCH001", "ORCH002", "ORCH006", "ORCH007", "ORCH008", "ORCH009",
   "ORCH010", "ORCH011", "ORCH012", "ORCH013", "ORCH015", "ORCH017", "ORCH020",
 ]);
 
@@ -581,11 +581,13 @@ export function validateOrchestration(input: unknown): ValidateResult {
       add("ORCH008", "error", `Edge ${fromNode || "?"} -> ${toNode || "?"} points at a node that does not exist.`, undefined, id);
       continue;
     }
+    // An unknown port is not a warning: the edge cannot be routed at all, so it
+    // blocks the save (one rule, one severity). Direction comes from PORTS.
     if (!PORTS[a.type].includes(fromPort)) {
-      add("ORCH009", "warn", `Edge from "${a.id}" uses port "${fromPort}", which a ${a.type} does not have.`, a.id, id);
+      add("ORCH009", "error", `Edge from "${a.id}" uses port "${fromPort}", which a ${a.type} does not have.`, a.id, id);
     }
     if (!PORTS[b.type].includes(toPort)) {
-      add("ORCH009", "warn", `Edge into "${b.id}" uses port "${toPort}", which a ${b.type} does not have.`, b.id, id);
+      add("ORCH009", "error", `Edge into "${b.id}" uses port "${toPort}", which a ${b.type} does not have.`, b.id, id);
     }
     if (a.type === "note" || b.type === "note") {
       add("ORCH012", "error", `A note is a comment and cannot be connected ("${a.type === "note" ? a.id : b.id}").`, a.type === "note" ? a.id : b.id, id);

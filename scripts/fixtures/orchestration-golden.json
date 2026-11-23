@@ -45,7 +45,7 @@
       "config": { "prompt": "Approve the edited brief before it leaves the building.", "approver": "owner",
         "timeoutSec": 86400, "onTimeout": "stop" } },
     { "id": "n_end", "type": "end", "name": "End", "x": 0, "y": 1120, "notes": "",
-      "config": { "outputs": { "brief": "$n_edit.score" } } },
+      "config": { "outputs": { "score": "$n_edit.score" } } },
     { "id": "n_note", "type": "note", "name": "Why", "x": 320, "y": 0, "notes": "", "config": { "text": "Not executed." } }
   ],
   "edges": [

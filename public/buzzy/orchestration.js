@@ -32,6 +32,7 @@ var BZOrchestration = (() => {
     fromBase64Url: () => fromBase64Url,
     fromMermaid: () => fromMermaid,
     parseExpression: () => parseExpression,
+    parseGraphDetailPath: () => parseGraphDetailPath,
     snap: () => snap,
     toBase64Url: () => toBase64Url,
     toGraphRows: () => toGraphRows,
@@ -62,6 +63,7 @@ var BZOrchestration = (() => {
     "ORCH006",
     "ORCH007",
     "ORCH008",
+    "ORCH009",
     "ORCH010",
     "ORCH011",
     "ORCH012",
@@ -507,10 +509,10 @@ var BZOrchestration = (() => {
         continue;
       }
       if (!PORTS[a.type].includes(fromPort)) {
-        add("ORCH009", "warn", `Edge from "${a.id}" uses port "${fromPort}", which a ${a.type} does not have.`, a.id, id);
+        add("ORCH009", "error", `Edge from "${a.id}" uses port "${fromPort}", which a ${a.type} does not have.`, a.id, id);
       }
       if (!PORTS[b.type].includes(toPort)) {
-        add("ORCH009", "warn", `Edge into "${b.id}" uses port "${toPort}", which a ${b.type} does not have.`, b.id, id);
+        add("ORCH009", "error", `Edge into "${b.id}" uses port "${toPort}", which a ${b.type} does not have.`, b.id, id);
       }
       if (a.type === "note" || b.type === "note") {
         add("ORCH012", "error", `A note is a comment and cannot be connected ("${a.type === "note" ? a.id : b.id}").`, a.type === "note" ? a.id : b.id, id);
@@ -860,6 +862,17 @@ var BZOrchestration = (() => {
         kind: e.to.port === "approved" || e.to.port === "rejected" ? "gate" : "data"
       }))
     };
+  }
+  function parseGraphDetailPath(path) {
+    const m = /^\/api\/buzzy\/graphs\/([A-Za-z0-9_-]+)(?:\/revisions(?:\/([^/]+))?)?$/.exec(path);
+    if (!m) return null;
+    const graphId = m[1];
+    const raw = m[2];
+    if (raw === void 0) return { graphId, revision: null };
+    if (!/^[0-9]+$/.test(raw)) return { graphId, revision: null, bad: raw };
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) return { graphId, revision: null, bad: raw };
+    return { graphId, revision: n };
   }
   return __toCommonJS(orchestration_exports);
 })();
