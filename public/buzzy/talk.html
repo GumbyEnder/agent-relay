@@ -2489,6 +2489,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // agent's id, and the server speaks as that agent.
     var bzAgent = null;
     function talkWho() { return bzAgent && bzAgent.name ? bzAgent.name : "BeeZilla"; }
+    // A conversation opened from History belongs to the agent it was had with (or to
+    // BeeZilla): the header, the button and the strip follow it.
+    function syncAgentFor(agentId) {
+      var A = window.BeeZillaAgents;
+      if (!A) return;
+      if (!agentId) {
+        if (bzAgent) { bzAgent = null; A.paint(null); paintVoice(); }
+        return;
+      }
+      A.get(agentId).then(function (a) {
+        if (a && (!bzAgent || bzAgent.id !== a.id)) { bzAgent = a; A.paint(a); paintVoice(); }
+      });
+    }
 
     // ── Is this document actually Talk? ────────────────────────────────
     // Talk's markup is also the website's header, so nav.js fetches this page on every
@@ -6691,6 +6704,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function welcomeMessage() {
+      // New conversation while talking to one of the person's agents is a new conversation
+      // with that agent, which greets in its own words (the server's `opening`).
+      if (bzAgent) return bzAgent.opening || ("Hi, I'm " + bzAgent.name + ". What do you need?");
       return "I'm BeeZilla. Describe the job — what needs to be done. I'll capture the decisions as we go and turn it into a clear scope of work.";
     }
 
@@ -7786,6 +7802,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return { role: m.role, content: m.content };
         });
         chatState.sessionId = s.id;
+        syncAgentFor(typeof data.agentId === "string" ? data.agentId : null);
         // The board follows the conversation in front of you (voice-stage.js reads
         // bz_session_id): without this the chat showed the conversation while the
         // Idea Board stayed on the blank board of a new one, and the conversation's

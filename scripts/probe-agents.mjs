@@ -153,6 +153,19 @@ await page.locator('#bzAgents .bzag-item:not([data-agent="bzilla"])').first().cl
 await page.waitForFunction(() => /Got it/.test(document.getElementById("chatMessages")?.innerText || ""), null, { timeout: 10000 }).catch(() => {});
 check("pressing it picks its conversation back up", /Got it/.test(await thread()), (await thread()).slice(0, 160));
 
+// A new conversation with an agent greets in the agent's words, and a conversation opened
+// from History brings its agent back.
+await page.evaluate(() => document.querySelector(".wb-new") && document.querySelector(".wb-new").click());
+await page.waitForTimeout(700);
+const fresh = await page.evaluate(() => ({ name: document.querySelector(".bz-brand strong")?.textContent, text: (document.getElementById("chatMessages")?.innerText || "").replace(/\s+/g, " ") }));
+check("New conversation stays with the agent and it greets in its own words", fresh.name === "Bunnyzilla" && /Hi, I'm Bunnyzilla\. I help with to-do list/.test(fresh.text), fresh);
+const sid = (await page.evaluate(async () => (await (await fetch("/api/buzzy/agents", { credentials: "same-origin" })).json()).agents[0].lastSessionId));
+await page.locator('#bzAgents .bzag-item[data-agent="bzilla"]').click();
+await page.waitForFunction(() => !document.documentElement.getAttribute("data-bz-agent"), null, { timeout: 8000 });
+await page.evaluate((id) => window.bzOpenSession({ id }), sid);
+await page.waitForFunction(() => document.documentElement.getAttribute("data-bz-agent"), null, { timeout: 8000 }).catch(() => {});
+check("opening an agent's conversation from History brings the agent back", await page.evaluate(() => document.querySelector(".bz-brand strong")?.textContent === "Bunnyzilla" && !!document.documentElement.getAttribute("data-bz-agent")));
+
 // 6. The plus: the next one, once.
 await page.locator("#bzAgents .bzag-add").click();
 await page.waitForFunction(() => document.querySelectorAll("#bzAgents .bzag-item").length === 3, null, { timeout: 8000 });
