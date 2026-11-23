@@ -521,6 +521,16 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
               {
+                // The Idea Board's "More" nodes: trying an API, and the server browser a
+                // person records a job in. Streams, so it has its own handler.
+                route: "/api/buzzy/nodes",
+                handler: "./src/lib/buzzy/boardNodes.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/nodes/**",
+                handler: "./src/lib/buzzy/boardNodes.nitro.ts",
+              },
+              {
                 // Before the wildcard: the canvas needs its own handler.
                 route: "/api/buzzy/art",
                 handler: "./src/lib/buzzy/art.nitro.ts",

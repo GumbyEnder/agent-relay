@@ -30,6 +30,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Sql } from "@/lib/db";
+import { NODE_TEXT_MAX, bodyFor, cleanNodeText, isNodeKind } from "./boardNodes";
 
 /** One board, as stored. 160 cards with full notes come to about 700 KB. */
 export const WHITEBOARD_MAX_BYTES = 1024 * 1024;
@@ -77,6 +78,9 @@ const CARD_FIELDS: Record<string, Field> = {
   shareAt: { kind: "text", max: 40 },
   // A drawing (kind "sketch"): its marks, as small vectors (whiteboard.js marksOf).
   drawing: { kind: "text", max: 150_000 },
+  // A node from "More" (kind "api" or "browser"): its details as JSON text. cleanCard
+  // re-checks it (boardNodes.ts) and keeps no key, token or password.
+  node: { kind: "text", max: NODE_TEXT_MAX },
 };
 
 export type WhiteboardCard = Record<string, string | number | boolean>;
@@ -131,6 +135,19 @@ function cleanCard(raw: unknown): WhiteboardCard | null {
     if (f.kind === "text") out[key] = f.link ? webLink(text(r[key], f.max)) : text(r[key], f.max);
     else if (f.kind === "number") out[key] = num(r[key]);
     else if (r[key] === true) out[key] = true;
+  }
+  // The details of a node are kept for a node, checked and with every secret left out;
+  // on any other card the field means nothing and is dropped. A node's own words (`body`) are
+  // written here from what was kept, never taken from the page: they are shown on the card,
+  // copied into recipes and shown on a shared page, and a key must not get there by that side.
+  if (own(out, "node")) {
+    const kept = isNodeKind(out.kind) ? cleanNodeText(out.kind, out.node) : "";
+    if (kept) {
+      out.node = kept;
+      out.body = bodyFor(out.kind, JSON.parse(kept));
+    } else delete out.node;
+  } else if (isNodeKind(out.kind)) {
+    out.body = "";
   }
   return typeof out.id === "string" && out.id ? out : null;
 }

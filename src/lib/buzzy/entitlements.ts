@@ -29,6 +29,11 @@ export interface PlanRules {
   musicMaxSeconds: number;
   /** images rendered per day; 0 = the plan does not include art */
   imagesPerDay: number;
+  /**
+   * Seconds a "Browser use" node may keep a server browser open in a rolling 24 h (the
+   * browser costs money while it is open, so it is counted by the second). 0 = none.
+   */
+  browserSecondsPerDay: number;
   /** models this plan may name; null = the deployment's own default set */
   models: string[] | null;
 }
@@ -46,9 +51,9 @@ export const FREE_MODELS = (process.env.BZ_FREE_MODELS ?? "google/gemini-3.1-fla
 export const PLANS: Record<PlanName, PlanRules> = {
   // Music is the most expensive unit we buy, so it is a paid perk: a free account
   // gets chat on the cheap lane, not audio generation.
-  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, models: FREE_MODELS },
-  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 60, models: null },
-  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 400, models: null },
+  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, browserSecondsPerDay: 600, models: FREE_MODELS },
+  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 60, browserSecondsPerDay: 3600, models: null },
+  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 400, browserSecondsPerDay: 14400, models: null },
 };
 
 export const DEFAULT_PLAN: PlanName = ((): PlanName => {
@@ -135,8 +140,8 @@ export interface QuotaVerdict {
  */
 export async function checkQuota(opts: {
   userId: string;
-  scope: "inference" | "music" | "image";
-  /** music: requested seconds. inference: 1 */
+  scope: "inference" | "music" | "image" | "browser";
+  /** music: requested seconds. inference: 1. browser: the seconds about to be used (default 1) */
   units?: number;
   model?: string;
 }): Promise<QuotaVerdict> {
@@ -174,6 +179,25 @@ export async function checkQuota(opts: {
       };
     }
     return { ok: true, plan: ent.plan, used, limit: rules.musicSecondsPerDay };
+  }
+
+  if (opts.scope === "browser") {
+    const want = Math.max(1, Math.round(opts.units ?? 1));
+    const used = await unitsInWindow(opts.userId, "browser");
+    if (rules.browserSecondsPerDay <= 0 || used + want > rules.browserSecondsPerDay) {
+      const left = Math.max(0, Math.floor(rules.browserSecondsPerDay - used));
+      return {
+        ok: false,
+        code: rules.browserSecondsPerDay <= 0 ? "plan_required" : "quota_exhausted",
+        plan: ent.plan,
+        used,
+        limit: rules.browserSecondsPerDay,
+        error: rules.browserSecondsPerDay <= 0
+          ? `the ${ent.plan} plan does not include the server browser`
+          : `the ${ent.plan} plan includes ${Math.round(rules.browserSecondsPerDay / 60)} minutes of server browser a day, and ${left <= 0 ? "today's are used up" : `${Math.ceil(left / 60)} minute${left > 60 ? "s are" : " is"} left`}. It comes back on a rolling 24 hours`,
+      };
+    }
+    return { ok: true, plan: ent.plan, used, limit: rules.browserSecondsPerDay };
   }
 
   if (opts.scope === "image") {
