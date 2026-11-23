@@ -298,12 +298,6 @@ export interface ChatRequest {
    */
   onFlow?: (f: FlowStep) => void;
   /**
-   * The person's own edits to the process, compiled from their whiteboard: changed
-   * agent.md text, skills they added, the output they defined, or a recipe they ran.
-   * Their instructions for this conversation — appended to the system prompt, capped.
-   */
-  boardInstructions?: string | null;
-  /**
    * The Zilla agent this conversation is with (agents.ts), when it belongs to one of the
    * person's agents: the turn is spoken BY that agent, with its name and its job in the
    * prompt. Decided by the conversation (chat.nitro.ts reads it from the session), never
@@ -311,6 +305,12 @@ export interface ChatRequest {
    * the person's agents are.
    */
   agent?: AgentTurn | null;
+  /**
+   * The person's own edits to the process, compiled from their whiteboard: changed
+   * agent.md text, skills they added, the output they defined, or a recipe they ran.
+   * Their instructions for this conversation — appended to the system prompt, capped.
+   */
+  boardInstructions?: string | null;
 }
 
 /** One step of a turn, as the whiteboard draws it. */
@@ -750,7 +750,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     try { readyForRoster = await readyAgents(sql, userId); } catch { readyForRoster = []; }
   }
   const agentParts = agentPromptParts(req.agent, personaForMode(mode), readyForRoster);
-  const persona = agentParts.persona + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
+  // (agentParts.section rides with the persona, so the system prompt below is built as before.)
+  const persona = agentParts.persona + agentParts.section + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
   // Freshness: without a date the model cannot tell a superseded price from the
   // current one. It answered "78 cents" the day USPS's own page said 82.
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -899,7 +900,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     appPlan = kept.length ? kept : null;
   }
   const systemPrompt =
-    persona + agentParts.section + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
