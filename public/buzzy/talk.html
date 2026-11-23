@@ -1138,6 +1138,20 @@
 /* ── Mobile/async pass (plan doc 23): one-thumb approval + legibility ── */
 @media (max-width: 640px) {
   button, [role="button"] { min-height: 48px; min-width: 48px; font-size: 16px; }
+  /* The bar is the website's, not this page's. On web, every page's stylesheet is
+     rewritten with :not(:where(#bzHead)) so a page can never restyle the shared
+     header; this page predates #bzHead, so nothing does that here and the touch
+     rule above was inflating #bzChrome's Feedback bubble to 48px — 17px taller
+     than the web's, which is most of the 179-vs-172 bar at 390px. Keep the touch
+     target for the page, exempt the bar. Delete this the day talk.html gains
+     #bzHead and nav.js scopes the page CSS itself. */
+  header button, header [role="button"] { min-height: 0; min-width: 0; font-size: inherit; }
+  /* nav.js wraps the place row on a phone with its own .3rem row gap, which reads
+     as a squeeze next to the web's .9rem (measured: rows 6.4px apart here, 14.4px
+     on beezilla.net, the remaining 7px of the 390px bar). The desktop has no
+     #bzHead for the shell to scope the bar's copy of that rule to, so the page
+     restores the bar's own gap while it is the only thing owning the bar. */
+  header .bz-brandrow #bzNav { row-gap: .9rem; }
   .bz-digest { font-size: 15px; padding: 10px 12px; }
 }
 .bz-approve-bar { position: sticky; bottom: 0; background: var(--bz-panel, #141414); padding: 10px; display: flex; gap: 8px; }
