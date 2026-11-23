@@ -75,6 +75,10 @@ try {
   try { before = boardCode(execFileSync("git", ["show", "origin/main:public/buzzy/whiteboard.js"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })); }
   catch { before = null; }
 }
+// A stale clone can hand back a whiteboard.js from before instructionsFor() existed:
+// loading it succeeds and the throw only lands inside the assert. Probe once here so
+// "main is not comparable from this checkout" degrades to the skipped path instead.
+if (before) { try { before.summary([]); } catch { before = null; } }
 
 const L = (from: string, to: string): Link => ({ id: `l-${from}-${to}`, from, to });
 const longNote = "Use the warm palette from the beach photo. " + "Keep the horizon low and the sky wide. ".repeat(12);
@@ -98,15 +102,21 @@ ok("with no lines, the summary is exactly main's, on every board", () => {
     [agent, skill, { ...end }, note, photo],
     [{ ...agent, body: "Be brief", user: true }, { ...skill, body: "Sketch first", user: true }, end, { ...note, user: true }, made, web],
   ];
-  // The one intended difference from main: agent.md reads "Core identity" now
-  // (owner, 2026-11-20: "People aren't going to know what an agent.md is").
-  const renamed = (t: string) => t.replace(/^Core identity \(how BeeZilla works here\): /gm, "agent.md (how to work): ");
+  // The label moved once (owner, 2026-11-20: "People aren't going to know what an
+  // agent.md is") and main carries the new wording now, so a one-way shim made the
+  // comparison fail on CI where origin/main is the commit under test. Hold BOTH
+  // sides to one token: the assert is about everything except the wording, and the
+  // wording itself is pinned below.
+  const labelStep = (t: string) => t.replace(/^(?:Core identity \(how BeeZilla works here\)|agent\.md \(how to work\)): /gm, "AGENT STEP: ");
   for (const b of boards) {
     const text = now.summary(b);
-    if (before) eq(renamed(text), before.summary(b), "same as main:");
+    if (before) eq(labelStep(text), labelStep(before.summary(b)), "same as main:");
     truthy(!/Connected to BeeZilla/.test(text), "no Connected section without lines");
     truthy(!/\[\[board-pictures/.test(text), "no pictures line without lines");
   }
+  // The wording itself is product copy: pin it, so a silent re-rename fails here.
+  truthy(now.summary([{ ...agent, body: "Be brief", user: true }]).includes("Core identity (how BeeZilla works here): Be brief"),
+    "the step is still called Core identity");
   // A long board without lines is cut where main cuts it.
   const many: Card[] = Array.from({ length: 24 }, (_, i) => ({ id: "z" + i, kind: "note", title: "Idea " + i, body: "word ".repeat(60), x: 0, y: i * 150 }));
   if (before) eq(now.summary(many), before.summary(many), "a long board, cut at the same place:");
