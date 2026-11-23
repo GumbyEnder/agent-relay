@@ -705,7 +705,18 @@
     function paint() {
       var dpr = window.devicePixelRatio || 1;
       var r = canvas.getBoundingClientRect();
-      var bw = Math.max(1, Math.round(r.width * dpr)), bh = Math.max(1, Math.round(r.height * dpr));
+      // A hidden or minimised stage measures 0×0, and sizing the backing store from that
+      // anyway (`max(1, …)`) threw the whole board away: the canvas became 1×1 and stayed
+      // blank until some later resize event happened to fire (measured 2026-11-23). Keep
+      // the last good backing store when there is no area to paint into, and re-arm once
+      // the layout gives the stage an area again.
+      if (r.width < 2 || r.height < 2) {
+        if (!paint._retry) {
+          paint._retry = setTimeout(function () { paint._retry = 0; paint(); }, 120);
+        }
+        return;
+      }
+      var bw = Math.round(r.width * dpr), bh = Math.round(r.height * dpr);
       if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
       var g = ctx;
       g.setTransform(1, 0, 0, 1, 0, 0);
