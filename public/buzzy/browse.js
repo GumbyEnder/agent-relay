@@ -145,28 +145,16 @@
     if (msg) say.t = setTimeout(function () { note.textContent = ""; }, 6000);
   }
 
-  // ── Copy this page's link, and say truthfully whether it worked ────────
-  function copyLink() {
-    var href = window.location.href;
-    // Say what was copied and what did NOT happen. "Link copied." next to a
-    // share-looking icon was ambiguous: the owner could not tell whether the
-    // page had just been shared with someone.
-    var done = "Copied this page's address. Nothing was shared or sent.";
-    function fallback() {
-      var ta = document.createElement("textarea");
-      ta.value = href;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed"; ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      var ok = false;
-      try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
-      document.body.removeChild(ta);
-      say(ok ? done : "Couldn't copy here — the address is " + href);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(href).then(function () { say(done); }, fallback);
-    } else fallback();
+  // ── The QR code and Copy page link share the page, so both ask first ───
+  // Owner, 2026-11-21: "When you use a QR code or copy a page link, you have to be given a
+  // prompt… everything on this page… becomes available… a little pop-up to say yes and
+  // confirm before they do that." They used to hand out the page's own address, which opens
+  // nothing for anyone else. Now nothing is copied, drawn or made until the window
+  // (page-share.js) gets its "Yes, share this page"; it lists what becomes public, to whom,
+  // and carries the small "Block searches" tick.
+  function askToShare(kind) {
+    if (window.BeeZillaPageShare) { window.BeeZillaPageShare.open(kind); return; }
+    say("Sharing isn't ready on this page. Reload it and try again.");
   }
 
   // ── Sources (cached per page view; search queries the server each time) ─
@@ -410,7 +398,7 @@
     }
   });
   var copyBtn = $("bzCopy");
-  if (copyBtn) copyBtn.addEventListener("click", copyLink);
+  if (copyBtn) copyBtn.addEventListener("click", function () { askToShare("copy"); });
 
   // ── Reader: the built-in browser for a typed web address ──────────────
   // Home · Back · breadcrumbs · the page as text with its links. Fetched by the
@@ -784,49 +772,9 @@
     if (current === "inspiration" && !mounted && window.BeeZillaInspiration) select("inspiration");
   });
 
-  // ── QR code: this page's address, to open it on a phone ─────────────────
+  // ── QR code: asks first, then draws the shared page's code in the window ──
   var qrBtn = $("bzQr");
-  var qrPop = null;
-  function closeQr(focusBack) {
-    if (!qrPop) return;
-    qrPop.remove();
-    qrPop = null;
-    if (qrBtn) qrBtn.setAttribute("aria-expanded", "false");
-    if (focusBack && qrBtn) qrBtn.focus();
-  }
-  function openQr() {
-    var href = window.location.href;
-    var code = "";
-    try { code = window.BeeZillaQR ? window.BeeZillaQR.svg(href, { size: 196, margin: 3, label: "QR code for this page" }) : ""; } catch (_) { code = ""; }
-    if (!code) { say("The QR code couldn't be drawn here — Copy page link works instead."); return; }
-    qrPop = document.createElement("div");
-    qrPop.className = "bz-qr-pop";
-    qrPop.setAttribute("role", "dialog");
-    qrPop.setAttribute("aria-label", "QR code for this page");
-    qrPop.innerHTML =
-      '<div class="bz-qr-head"><strong>Open this page on your phone</strong>' +
-      '<button type="button" class="bz-icon-btn bz-qr-x" aria-label="Close the QR code" title="Close">&#10005;</button></div>' +
-      '<div class="bz-qr-code">' + code + "</div>" +
-      '<p class="bz-qr-url">' + esc(href) + "</p>" +
-      '<p class="bz-qr-note">Point your phone\'s camera at it. Nothing is shared or sent.</p>';
-    var bar = root.querySelector(".bz-search");
-    (bar || root).appendChild(qrPop);
-    qrBtn.setAttribute("aria-expanded", "true");
-    qrPop.querySelector(".bz-qr-x").addEventListener("click", function () { closeQr(true); });
-    qrPop.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); closeQr(true); } });
-    qrPop.querySelector(".bz-qr-x").focus();
-  }
-  if (qrBtn) {
-    qrBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      if (qrPop) closeQr(false); else openQr();
-    });
-    document.addEventListener("click", function (e) {
-      if (qrPop && !qrPop.contains(e.target) && e.target !== qrBtn) closeQr(false);
-    });
-    // The address is the page's: a new page under the header closes the old code.
-    window.addEventListener("bz:page", function () { closeQr(false); });
-  }
+  if (qrBtn) qrBtn.addEventListener("click", function (e) { e.stopPropagation(); askToShare("qr"); });
 
   // ── Back to top ────────────────────────────────────────────────────────
   var top = document.createElement("button");

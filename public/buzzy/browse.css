@@ -17,27 +17,6 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .bz-search { position: relative; }
-/* The page's address as a QR code (browse.js): under the QR button, with a way out. */
-.bz-qr-pop {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 70;
-  box-sizing: border-box;
-  width: 268px;
-  padding: 12px 14px 14px;
-  border-radius: 16px;
-  background: #151515;
-  border: 1px solid #2c2c2c;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
-  color: #e8e8e8;
-  text-align: center;
-}
-.bz-qr-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; text-align: left; }
-.bz-qr-head strong { font-size: 0.95rem; color: #f2f2f2; }
-.bz-qr-code svg { display: block; margin: 0 auto; border-radius: 10px; }
-.bz-qr-url { margin: 10px 0 4px; font-size: 0.74rem; line-height: 1.35; color: #9a9a9a; word-break: break-all; }
-.bz-qr-note { margin: 0; font-size: 0.8rem; line-height: 1.4; color: #c9c9c9; }
 .bz-search:focus-within {
   border-color: #FFC107;
   box-shadow: 0 0 0 1px #FFC107, 0 0 22px rgba(255, 193, 7, 0.35);

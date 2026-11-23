@@ -1548,6 +1548,7 @@
   <link rel="stylesheet" href="/buzzy/calm.css" />
   <link rel="stylesheet" href="/buzzy/oneboard.css" />
   <link rel="stylesheet" href="/buzzy/share.css" />
+  <link rel="stylesheet" href="/buzzy/page-share.css" />
 </head>
 <body>
   <header>
@@ -1783,20 +1784,19 @@
         <input id="bzSearch" type="search" placeholder="Search" data-placeholder-full="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
                aria-label="Search your pictures, music, 3D, documents, skills and recipes, or enter a web address" />
         <span class="bz-search-tools">
-          <!-- The page's address as a QR code, for a phone (owner's reference zMWSgG0:
-               "Search or enter a URL" with the QR code and the copy button). -->
-          <button type="button" id="bzQr" class="bz-share-btn" aria-haspopup="dialog" aria-expanded="false"
-                  aria-label="Show a QR code for this page"
-                  title="Shows this page's address as a QR code to open it on your phone. Nothing is shared or sent.">
+          <!-- The QR code and the copy button of the owner's reference zMWSgG0 ("Search or
+               enter a URL"). Both SHARE the page, so both open a window that says what
+               becomes public and to whom, with the small "Block searches" tick, and nothing
+               is shared until its "Yes, share this page" (owner, 2026-11-21; page-share.js). -->
+          <button type="button" id="bzQr" class="bz-share-btn" aria-haspopup="dialog"
+                  aria-label="Share this page with a QR code. You are asked first."
+                  title="Share this page as a QR code. You are asked first, and nothing is shared until you say yes.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2zM16 16h2v2h-2z"/></svg>
             <span>QR code</span>
           </button>
-          <!-- A share control that only copies a URL has to SAY so. The
-               icon alone read as "share this" and left the owner guessing
-               what left the page (nothing did). -->
-          <button type="button" id="bzCopy" class="bz-share-btn"
-                  aria-label="Copy a link to this page — nothing is shared or sent"
-                  title="Copies this page's address to your clipboard. Nothing is shared or sent.">
+          <button type="button" id="bzCopy" class="bz-share-btn" aria-haspopup="dialog"
+                  aria-label="Copy a link that shares this page. You are asked first."
+                  title="Copy a link to this page. You are asked first, and nothing is shared until you say yes.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
             <span>Copy page link</span>
           </button>
@@ -8093,6 +8093,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/inspiration.js"></script>
 <script src="/buzzy/qr.js"></script>
 <script src="/buzzy/share.js"></script>
+<script src="/buzzy/page-share.js"></script>
 <script src="/buzzy/waveform.js"></script>
 <script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/board-nodes.js"></script>

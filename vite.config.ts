@@ -536,6 +536,21 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/art.nitro.ts",
               },
               {
+                // Sharing a page, only after the person says yes: their own side (preview,
+                // share, turn off) and the one public address, /buzzy/p/<token>. Before
+                // the wildcards below, so the page handler never serves it.
+                route: "/api/buzzy/page-shares",
+                handler: "./src/lib/buzzy/pageShare.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/page-shares/**",
+                handler: "./src/lib/buzzy/pageShare.nitro.ts",
+              },
+              {
+                route: "/buzzy/p/**",
+                handler: "./src/lib/buzzy/pageShare.nitro.ts",
+              },
+              {
                 route: "/api/buzzy/**",
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
