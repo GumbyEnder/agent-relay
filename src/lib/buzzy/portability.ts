@@ -49,9 +49,28 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   let agents: any[] = [];
   try {
     agents = await sql`
-      SELECT name, creature, look, role, instructions, face, created_at
+      SELECT id, name, creature, look, role, instructions, face, created_at
       FROM buzzy_agents WHERE user_id = ${userId} ORDER BY pos ASC, created_at ASC`;
   } catch { agents = []; }
+  // The colonies those agents are grouped into (0066), each with the person's own words for
+  // its purpose. Read apart from the agents so a database that has not had 0066 yet still
+  // exports every agent, just with no colony named.
+  let seats: any[] = [];
+  try {
+    seats = await sql`
+      SELECT a.id AS agent_id, c.id AS colony_id, c.name, c.purpose
+      FROM buzzy_agents a
+      JOIN buzzy_agent_colonies c ON c.id = a.colony_id AND c.user_id = a.user_id
+      WHERE a.user_id = ${userId}
+      ORDER BY c.pos ASC, c.created_at ASC, a.pos ASC, a.created_at ASC`;
+  } catch { seats = []; }
+  const colonyOf = new Map<string, string>(seats.map((s: any) => [s.agent_id, s.name]));
+  const colonies = new Map<string, { name: string; purpose: string; agents: string[] }>();
+  for (const s of seats) {
+    const c: { name: string; purpose: string; agents: string[] } = colonies.get(s.colony_id) ?? { name: s.name, purpose: s.purpose, agents: [] };
+    c.agents.push(agents.find((a: any) => a.id === s.agent_id)?.name ?? "");
+    colonies.set(s.colony_id, c);
+  }
 
   const zip = new JSZip();
   const stamp = new Date().toISOString().slice(0, 10);
@@ -64,7 +83,11 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   if (agents.length) {
     zip.file("zilla_agents.csv", toCsv(agents.map((a: any) => ({
       name: a.name, zilla: a.look ? `${a.look} ${a.creature}` : a.creature, helps_with: a.role, in_your_words: a.instructions, face: a.face,
+      colony: colonyOf.get(a.id) ?? "",
     }))));
+  }
+  if (colonies.size) {
+    zip.file("zilla_colonies.csv", toCsv([...colonies.values()].map((c) => ({ name: c.name, purpose: c.purpose, agents: c.agents.join(" | ") }))));
   }
 
   // Approved documents as markdown files
@@ -141,6 +164,8 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   // one its job, and the marker that they were handed their starter agent.
   buzzy_agents: "DELETE FROM buzzy_agents WHERE user_id = $1 RETURNING 1",
   buzzy_agent_seed: "DELETE FROM buzzy_agent_seed WHERE user_id = $1 RETURNING 1",
+  // The colonies those agents are grouped into (0066), with the purpose the person wrote for each.
+  buzzy_agent_colonies: "DELETE FROM buzzy_agent_colonies WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */

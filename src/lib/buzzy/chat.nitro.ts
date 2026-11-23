@@ -34,6 +34,10 @@
  *   PATCH /api/buzzy/agents/:id     — change its name, colour, size, job or face
  *   DELETE /api/buzzy/agents/:id    — remove it (its conversations stay in History)
  *   POST /api/buzzy/agents/:id/identity — tell it its job ({ text, sessionId? })
+ *   POST /api/buzzy/agents/colonies — make a colony from a drop ({ name?, purpose?, agents: [id, …] })
+ *   PATCH /api/buzzy/agents/colonies/:id — change its name, purpose or whether it is open
+ *   DELETE /api/buzzy/agents/colonies/:id — ungroup it (its agents stay, in its place)
+ *   PUT  /api/buzzy/agents/layout   — the whole order and who is in which colony ({ items })
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
@@ -3298,7 +3302,8 @@ export default defineEventHandler(async (event) => {
   // Owner, 2026-11-21: dedicated helpers, each with a name, a size, a colour and a job;
   // the bee (BeeZilla herself) first, one greyed-out bunny under her, and a plus to add
   // more. The person's own agents only; agents.ts has the rules (list, add, change,
-  // remove, and POST :id/identity, where they tell an agent its job).
+  // remove, POST :id/identity, where they tell an agent its job, and the colonies that
+  // agents are grouped into: POST/PATCH/DELETE colonies, PUT layout).
   if (path === "/api/buzzy/agents" || path.startsWith("/api/buzzy/agents/")) {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
@@ -3306,7 +3311,8 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "Sign in required", code: "signed_out" };
     }
     let body: unknown = undefined;
-    if (method === "POST" || method === "PATCH") {
+    // PUT too: PUT /api/buzzy/agents/layout carries the whole order (agents.ts).
+    if (method === "POST" || method === "PATCH" || method === "PUT") {
       const tooBig = () => {
         setResponseStatus(event, 413);
         return { ok: false, error: "That is more than an agent needs. A few sentences are plenty.", code: "too_big" };

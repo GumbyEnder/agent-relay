@@ -20,14 +20,18 @@
  *     everywhere and can be tested;
  *   - the words a conversation with an agent is given: who it is, what its job is,
  *     and, for BeeZilla herself, who her agents are (agentPromptParts);
- *   - the rows (buzzy_agents, migration 0065) and the route /api/buzzy/agents.
+ *   - colonies: named folders of agents with a purpose, and the one order the sidebar
+ *     shows agents and colonies in (see "Colonies" below);
+ *   - the rows (buzzy_agents, migration 0065; buzzy_agent_colonies, migration 0066) and
+ *     the route /api/buzzy/agents.
  *
  * BeeZilla herself is never a row. The sidebar always starts with her, she cannot be
- * renamed, moved or deleted, and a conversation with no agent is hers (BZILLA below).
+ * renamed, moved, grouped or deleted, and a conversation with no agent is hers (BZILLA
+ * below).
  *
  * Everything here is the person's own data, shown back only to them. Every query is
- * scoped by user_id, and an agent that belongs to someone else is answered exactly
- * like one that does not exist.
+ * scoped by user_id, and an agent or colony that belongs to someone else is answered
+ * exactly like one that does not exist.
  */
 import { randomBytes } from "node:crypto";
 import type { Sql } from "@/lib/db";
@@ -121,7 +125,10 @@ export interface Agent {
   instructions: string;
   /** One emoji for the job, or ''. */
   face: string;
+  /** Its place: at the top level while colonyId is null, inside its colony otherwise. */
   pos: number;
+  /** The colony it sits in, or null when it is on its own. */
+  colonyId: string | null;
   /** True once it has a job. A greyed-out agent is one that is not ready. */
   ready: boolean;
   image: string;
@@ -140,6 +147,46 @@ export interface AgentTurn {
   role: string;
   instructions: string;
   face: string;
+}
+
+/** The most colonies one person keeps. Each holds an agent, so this is a roof, not a plan. */
+export const COLONIES_MAX = 100;
+export const COLONY_NAME_MAX = 40;
+export const COLONY_PURPOSE_MAX = 200;
+/** What a colony is called when the person left its name empty. */
+export const COLONY_DEFAULT_NAME = "New colony";
+
+/** A folder of agents: a name, a purpose in the person's own words, and who is inside. */
+export interface Colony {
+  id: string;
+  name: string;
+  purpose: string;
+  /** Whether its agents show under it. */
+  open: boolean;
+  /** Its place among the top-level items. */
+  pos: number;
+  /** Its agents, in the order they sit inside it. */
+  agentIds: string[];
+}
+
+/** One place at the top level of the sidebar: an agent on its own, or a colony. */
+export type LayoutItem = { type: "agent"; id: string } | { type: "colony"; id: string };
+
+/** Where one agent sits, as every layout answer reports it. */
+export interface Seat {
+  id: string;
+  colonyId: string | null;
+  pos: number;
+}
+
+/** What the sidebar is drawn from: the agents (in page order), the colonies and the top-level order. */
+export interface AgentList {
+  /** Every agent in the order it sits on the page: a colony's agents follow the colony's place. */
+  agents: Agent[];
+  /** The colonies, in top-level order. */
+  colonies: Colony[];
+  /** The top level: agents on their own and colonies, in one order. */
+  layout: LayoutItem[];
 }
 
 /**
@@ -306,6 +353,40 @@ export function checkFields(raw: Record<string, unknown>): { ok: true; fields: P
       return no(400, "bad_face", "A face is a single emoji, or nothing.");
     }
     f.face = e.trim();
+  }
+  return { ok: true, fields: f };
+}
+
+/** The fields a person can set on a colony, as they are stored. */
+export interface ColonyFields {
+  name: string;
+  purpose: string;
+  open: boolean;
+}
+
+/** Text, a number (read as text, like every other field here) or nothing: not an object, a list or a flag. */
+const textOrNothing = (v: unknown) => v === null || v === undefined || typeof v === "string" || typeof v === "number";
+
+/**
+ * Check the colony fields present in `raw` and return those, cleaned: a name of at most
+ * COLONY_NAME_MAX and a purpose of at most COLONY_PURPOSE_MAX characters, each on one
+ * tidy line with no control characters and no angle brackets. Either may be empty (the
+ * person is encouraged to fill them in, never made to); an empty name becomes "New
+ * colony", so a colony always has one to show. Absent keys are left out.
+ */
+export function checkColonyFields(raw: Record<string, unknown>): { ok: true; fields: Partial<ColonyFields> } | Refusal {
+  const f: Partial<ColonyFields> = {};
+  if (own(raw, "name")) {
+    if (!textOrNothing(raw.name)) return no(400, "bad_name", `A colony's name is text, up to ${COLONY_NAME_MAX} characters.`);
+    f.name = line(raw.name, COLONY_NAME_MAX, true) || COLONY_DEFAULT_NAME;
+  }
+  if (own(raw, "purpose")) {
+    if (!textOrNothing(raw.purpose)) return no(400, "bad_purpose", `A colony's purpose is text, up to ${COLONY_PURPOSE_MAX} characters.`);
+    f.purpose = line(raw.purpose, COLONY_PURPOSE_MAX, true);
+  }
+  if (own(raw, "open")) {
+    if (typeof raw.open !== "boolean") return no(400, "bad_open", "open is true (its agents show) or false (they are folded away).");
+    f.open = raw.open;
   }
   return { ok: true, fields: f };
 }
@@ -522,27 +603,55 @@ export function personaFor(agent: { name: string } | null | undefined, basePerso
 export interface ReadyAgent {
   name: string;
   role: string;
+  /** The colony it sits in, when it is in one: the person's own words for it. */
+  colony?: { id: string; name: string; purpose: string } | null;
 }
 
 const ROSTER_LINES = 20;
 
+/** The person's words, as data: in double quotes, any double quote of theirs turned into a single one. */
+const quoted = (s: string) => `"${String(s).replace(/"/g, "'")}"`;
+
 /**
  * For BeeZilla's own turns: who the person's agents are, so she can talk about them
- * across everything. Only agents that have a job are listed. '' when there are none,
- * which leaves a person without agents exactly as before.
+ * across everything. Only agents that have a job are listed, at most ROSTER_LINES of
+ * them. '' when there are none, which leaves a person without agents exactly as before.
+ *
+ * Agents that sit in colonies are grouped: one line per colony (its name and purpose are
+ * the person's words, quoted as theirs, and what they write there never changes the
+ * rules), then the agents on their own, one line each. A person with no colonies gets the
+ * text they have always got, byte for byte.
  */
 export function agentsRosterBlock(agents: ReadyAgent[]): string {
   const ready = agents.filter((a) => a && a.name && a.role);
   if (!ready.length) return "";
-  const lines = ready.slice(0, ROSTER_LINES).map((a) => `- ${a.name}: helps with ${a.role}`);
+  const shown = ready.slice(0, ROSTER_LINES);
+  const colonies = new Map<string, { name: string; purpose: string; agents: ReadyAgent[] }>();
+  const alone: ReadyAgent[] = [];
+  for (const a of shown) {
+    if (!a.colony) { alone.push(a); continue; }
+    const c = colonies.get(a.colony.id) ?? { name: a.colony.name || COLONY_DEFAULT_NAME, purpose: a.colony.purpose || "", agents: [] };
+    c.agents.push(a);
+    colonies.set(a.colony.id, c);
+  }
+  const lines = [
+    ...[...colonies.values()].map(
+      (c) => `- Colony ${quoted(c.name)}${c.purpose ? ` (purpose: ${quoted(c.purpose)})` : ""}: ` + c.agents.map((a) => `${a.name} (helps with ${a.role})`).join(", "),
+    ),
+    ...alone.map((a) => `- ${a.name}: helps with ${a.role}`),
+  ];
   const more = ready.length > ROSTER_LINES ? `\n- …and ${ready.length - ROSTER_LINES} more.` : "";
+  const grouped = colonies.size > 0;
   return (
-    `\n\nTHE PERSON'S ZILLA AGENTS. They have dedicated helpers, each looking after one part of their life or work. You are ` +
-    `BeeZilla, their executive assistant: you work across all of it and look after these agents (names and jobs are what the ` +
-    `person typed):\n${lines.join("\n")}${more}\n` +
-    `When what they ask clearly belongs to one of these, say which agent looks after it: they open an agent by clicking its ` +
-    `Zilla in the sidebar on the left. Don't say you have asked an agent, passed something on or checked with one: you can't ` +
-    `do that yet, and saying so would be false.`
+    `\n\nTHE PERSON'S ZILLA AGENTS. They have dedicated helpers, each looking after one part of their life or work. ` +
+    (grouped ? `Some are grouped into colonies: a colony is a folder of agents with a name and a purpose the person chose. ` : ``) +
+    `You are BeeZilla, their executive assistant: you work across all of it and look after these agents (` +
+    (grouped ? `names, jobs, colony names and purposes` : `names and jobs`) +
+    ` are what the person typed):\n${lines.join("\n")}${more}\n` +
+    `When what they ask clearly belongs to one of these, say which agent looks after it` +
+    (grouped ? ` (and the colony it is in, if it is in one)` : ``) +
+    `: they open an agent by clicking its Zilla in the sidebar on the left. Don't say you have asked an agent, passed ` +
+    `something on or checked with one: you can't do that yet, and saying so would be false.`
   );
 }
 
@@ -574,6 +683,7 @@ interface AgentRow {
   instructions: string;
   face: string;
   pos: number | string;
+  colony_id?: string | null;
   created_at: Date | string;
   updated_at: Date | string;
   last_session_id?: string | null;
@@ -594,6 +704,7 @@ function rowToAgent(r: AgentRow): Agent {
     instructions: String(r.instructions ?? ""),
     face: String(r.face ?? ""),
     pos: Number(r.pos) || 0,
+    colonyId: r.colony_id ?? null,
     ready: role !== "",
     image: agentImage(r.creature, r.look),
     opening: agentOpening({ name: r.name, role }),
@@ -603,14 +714,16 @@ function rowToAgent(r: AgentRow): Agent {
   };
 }
 
-function newId(): string {
-  // 12 characters of base 36 from random bytes: ag_k3j9x0w2m1qa
+function newId(prefix = "ag_"): string {
+  // 12 characters of base 36 from random bytes: ag_k3j9x0w2m1qa (a colony's is co_…)
   const n = Array.from(randomBytes(12), (b) => (b % 36).toString(36)).join("");
-  return "ag_" + n;
+  return prefix + n;
 }
 
 const AGENT_ID = /^ag_[a-z0-9]{12}$/;
+const COLONY_ID = /^co_[a-z0-9]{12}$/;
 const notFound = () => no(404, "not_found", "There is no agent like that on your account.");
+const colonyNotFound = () => no(404, "not_found", "There is no colony like that on your account.");
 
 /**
  * Give a person their starter agent: one greyed-out bunny, made once. The marker and
@@ -636,11 +749,16 @@ export async function ensureSeeded(sql: Sql, userId: string): Promise<boolean> {
   return made.length > 0;
 }
 
-/** The person's agents, in the order they sit in the sidebar. Seeds the starter on the first look. */
-export async function listAgents(sql: Sql, userId: string): Promise<Agent[]> {
+/**
+ * What the sidebar is drawn from, in the order it shows: the person's agents (each with
+ * the colony it sits in), their colonies, and the top-level order of both. Seeds the
+ * starter on the first look. `agents` runs down the page, so with no colonies it is the
+ * list it always was.
+ */
+export async function listAgents(sql: Sql, userId: string): Promise<AgentList> {
   await ensureSeeded(sql, userId);
   const rows = await sql<AgentRow>`
-    SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos,
+    SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos, a.colony_id,
            a.created_at, a.updated_at,
            (SELECT s.id FROM buzzy_sessions s
              WHERE s.user_id = a.user_id AND s.agent_id = a.id
@@ -650,13 +768,18 @@ export async function listAgents(sql: Sql, userId: string): Promise<Agent[]> {
     ORDER BY a.pos ASC, a.created_at ASC, a.id ASC
     LIMIT ${AGENTS_MAX}
   `;
-  return rows.map(rowToAgent);
+  const order = arrange(rows, await readColonyRows(sql, userId));
+  return {
+    agents: order.agents.map((r) => ({ ...rowToAgent(r), colonyId: order.colonyOf.get(r.id) ?? null })),
+    colonies: order.colonies.map((c) => toColony(c, order.members.get(c.id) ?? [])),
+    layout: order.layout,
+  };
 }
 
 async function getAgent(sql: Sql, userId: string, id: string): Promise<Agent | null> {
   if (!AGENT_ID.test(id)) return null;
   const rows = await sql<AgentRow>`
-    SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos,
+    SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos, a.colony_id,
            a.created_at, a.updated_at,
            (SELECT s.id FROM buzzy_sessions s
              WHERE s.user_id = a.user_id AND s.agent_id = a.id
@@ -700,12 +823,20 @@ export async function createAgent(
   const name = f.name ?? (picked ? uniqueName(defaultName(creature, look), have.map((a) => a.name)) : dflt.name);
   const color = f.color ?? defaultColor(creature, look);
   const size = f.size ?? "m";
-  const next = await sql<{ n: number }>`SELECT COALESCE(MAX(pos), -1) + 1 AS n FROM buzzy_agents WHERE user_id = ${userId}`;
+  // Last place at the top level. An agent's pos and a colony's pos share that one line, and an
+  // agent inside a colony counts too (its pos is only ever smaller than the line's end), so
+  // the new one lands after everything whatever the person has grouped.
+  const next = await sql<{ n: number }>`
+    SELECT GREATEST(
+      COALESCE((SELECT MAX(pos) FROM buzzy_agents WHERE user_id = ${userId}), -1),
+      COALESCE((SELECT MAX(pos) FROM buzzy_agent_colonies WHERE user_id = ${userId}), -1)
+    ) + 1 AS n
+  `;
   const id = newId();
   const rows = await sql<AgentRow>`
     INSERT INTO buzzy_agents (id, user_id, creature, look, name, color, size, role, instructions, face, pos)
     VALUES (${id}, ${userId}, ${creature}, ${look}, ${name}, ${color}, ${size}, '', '', '', ${Number(next[0]?.n ?? 0)})
-    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, created_at, updated_at
+    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, created_at, updated_at
   `;
   return { ok: true, agent: rowToAgent(rows[0]!) };
 }
@@ -745,16 +876,30 @@ export async function updateAgent(
         size = ${f.size ?? now.size}, role = ${role}, instructions = ${f.instructions ?? now.instructions},
         face = ${face}, updated_at = now()
     WHERE id = ${id} AND user_id = ${userId}
-    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, created_at, updated_at
+    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, created_at, updated_at
   `;
   if (!rows[0]) return notFound();
   return { ok: true, agent: { ...rowToAgent(rows[0]), lastSessionId: now.lastSessionId } };
 }
 
-/** Remove an agent. Its conversations stay in History as ordinary ones. */
+/**
+ * Remove an agent. Its conversations stay in History as ordinary ones. A colony it was the
+ * last agent of goes with it, in the same statement: no colony is left empty.
+ */
 export async function deleteAgent(sql: Sql, userId: string, id: string): Promise<boolean> {
   if (!AGENT_ID.test(id)) return false;
-  const gone = await sql<{ id: string }>`DELETE FROM buzzy_agents WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+  const gone = await sql<{ id: string }>`
+    WITH gone AS (
+      DELETE FROM buzzy_agents WHERE id = ${id} AND user_id = ${userId} RETURNING id, colony_id
+    ), emptied AS (
+      DELETE FROM buzzy_agent_colonies c
+      USING gone g
+      WHERE c.id = g.colony_id AND c.user_id = ${userId}
+        AND NOT EXISTS (SELECT 1 FROM buzzy_agents a WHERE a.user_id = ${userId} AND a.colony_id = c.id AND a.id <> g.id)
+      RETURNING c.id
+    )
+    SELECT id FROM gone
+  `;
   if (!gone.length) return false;
   await sql`UPDATE buzzy_sessions SET agent_id = NULL WHERE user_id = ${userId} AND agent_id = ${id}`;
   return true;
@@ -791,7 +936,7 @@ export async function setIdentity(
       UPDATE buzzy_agents
       SET role = ${role}, instructions = ${line(said, INSTRUCTIONS_MAX)}, face = ${faceForRole(role)}, updated_at = now()
       WHERE id = ${id} AND user_id = ${userId}
-      RETURNING id, creature, look, name, color, size, role, instructions, face, pos, created_at, updated_at
+      RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, created_at, updated_at
     `;
     if (rows[0]) saved = { ...rowToAgent(rows[0]), lastSessionId: agent.lastSessionId };
   }
@@ -836,7 +981,7 @@ export async function setIdentity(
 export async function agentForSession(sql: Sql, userId: string, sessionId: string): Promise<Agent | null> {
   if (!sessionId) return null;
   const rows = await sql<AgentRow>`
-    SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos,
+    SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos, a.colony_id,
            a.created_at, a.updated_at
     FROM buzzy_sessions s
     JOIN buzzy_agents a ON a.id = s.agent_id AND a.user_id = s.user_id
@@ -852,15 +997,440 @@ export async function ownsAgent(sql: Sql, userId: string, id: string): Promise<b
   return rows.length > 0;
 }
 
-/** The agents that have a job, for BeeZilla's own turns. Never seeds, never throws on an older database. */
+/**
+ * The agents that have a job, for BeeZilla's own turns: those in colonies first (colony by
+ * colony, in the sidebar's order, each with its colony's name and purpose), then the ones on
+ * their own. Never seeds, never throws on an older database: one that has not had 0066 yet
+ * has no colonies, and gets the plain list it always did.
+ */
 export async function readyAgents(sql: Sql, userId: string): Promise<ReadyAgent[]> {
-  const rows = await sql<{ name: string; role: string }>`
-    SELECT name, role FROM buzzy_agents
-    WHERE user_id = ${userId} AND role <> ''
+  try {
+    const rows = await sql<{ name: string; role: string; colony_id: string | null; colony_name: string | null; colony_purpose: string | null }>`
+      SELECT a.name, a.role, c.id AS colony_id, c.name AS colony_name, c.purpose AS colony_purpose
+      FROM buzzy_agents a
+      LEFT JOIN buzzy_agent_colonies c ON c.id = a.colony_id AND c.user_id = a.user_id
+      WHERE a.user_id = ${userId} AND a.role <> ''
+      ORDER BY (c.id IS NULL), c.pos ASC, c.created_at ASC, c.id ASC, a.pos ASC, a.created_at ASC, a.id ASC
+      LIMIT ${ROSTER_LINES + 1}
+    `;
+    return rows.map((r) => ({
+      name: r.name,
+      role: r.role,
+      colony: r.colony_id ? { id: r.colony_id, name: r.colony_name ?? "", purpose: r.colony_purpose ?? "" } : null,
+    }));
+  } catch {
+    return sql<ReadyAgent>`
+      SELECT name, role FROM buzzy_agents
+      WHERE user_id = ${userId} AND role <> ''
+      ORDER BY pos ASC, created_at ASC, id ASC
+      LIMIT ${ROSTER_LINES + 1}
+    `;
+  }
+}
+
+// ── Colonies ────────────────────────────────────────────────────────────────
+//
+// Owner, 2026-11-21: "When you click and hold an agent, you can drop it on another agent,
+// just like you can drop a Discord server on another Discord server. It creates a folder
+// of agents, and prompts: name your new colony, name and purpose." The page is one list:
+// the agents that are on their own and the colonies, merged by pos (the older first when
+// two tie); a colony's agents go by their own pos inside it. So an agent's pos is its
+// place at the top level while it has no colony, and its place inside the colony once it
+// has one.
+//
+// Every change to who is where is worked out here, in memory, from the rows as they are
+// (a Plan: the new top level, who is in each colony, which colonies are left with nobody)
+// and then written by ONE statement. Sql has no multi-statement transaction, and one
+// statement is atomic on both Neon and PGlite, so a move is made whole or not at all. The
+// same statement renumbers pos from 0, so no order is ambiguous afterwards.
+
+interface ColonyRow {
+  id: string;
+  name: string;
+  purpose: string;
+  open: boolean;
+  pos: number | string;
+  created_at: Date | string;
+}
+
+/** What an order needs to know about a row: agents and colonies are placed the same way. */
+interface Placed {
+  id: string;
+  pos: number | string;
+  created_at: Date | string;
+}
+
+/** An agent as the layout sees it: where it says it is. */
+interface Lite extends Placed {
+  colony_id: string | null;
+}
+
+/** By pos, then the older first, then id: one order, the same every time, for every kind of row. */
+function byPlace(a: Placed, b: Placed): number {
+  const d = (Number(a.pos) || 0) - (Number(b.pos) || 0);
+  if (d) return d;
+  const x = iso(a.created_at);
+  const y = iso(b.created_at);
+  return x < y ? -1 : x > y ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+const agentItem = (id: string): LayoutItem => ({ type: "agent", id });
+const colonyItem = (id: string): LayoutItem => ({ type: "colony", id });
+
+interface Arranged<A extends Placed & { colony_id?: string | null }> {
+  /** The top level, in order. */
+  layout: LayoutItem[];
+  /** Colony id → the ids of its agents, in order. */
+  members: Map<string, string[]>;
+  /** Every agent in page order: a colony's agents follow its place. */
+  agents: A[];
+  /** The colonies, in top-level order. */
+  colonies: ColonyRow[];
+  /** Agent id → the colony it really sits in. A colony_id that names a colony that is not there is no colony. */
+  colonyOf: Map<string, string | null>;
+}
+
+/** Put the person's agents and colonies in the one order the page shows them in. */
+function arrange<A extends Placed & { colony_id?: string | null }>(agentRows: A[], colonyRows: ColonyRow[]): Arranged<A> {
+  const real = new Set(colonyRows.map((c) => c.id));
+  const loose: A[] = [];
+  const inside = new Map<string, A[]>();
+  for (const a of agentRows) {
+    const home = a.colony_id && real.has(a.colony_id) ? a.colony_id : null;
+    if (!home) { loose.push(a); continue; }
+    const list = inside.get(home);
+    if (list) list.push(a);
+    else inside.set(home, [a]);
+  }
+  const byId = new Map(agentRows.map((a) => [a.id, a] as const));
+  const colonyById = new Map(colonyRows.map((c) => [c.id, c] as const));
+  const places: Array<{ item: LayoutItem; at: Placed }> = [
+    ...loose.map((a) => ({ item: agentItem(a.id), at: a as Placed })),
+    ...colonyRows.map((c) => ({ item: colonyItem(c.id), at: c as Placed })),
+  ].sort((x, y) => byPlace(x.at, y.at));
+  const members = new Map<string, string[]>();
+  const colonyOf = new Map<string, string | null>();
+  const agents: A[] = [];
+  const colonies: ColonyRow[] = [];
+  for (const { item } of places) {
+    if (item.type === "agent") {
+      agents.push(byId.get(item.id)!);
+      colonyOf.set(item.id, null);
+      continue;
+    }
+    const list = (inside.get(item.id) ?? []).sort(byPlace);
+    members.set(item.id, list.map((a) => a.id));
+    for (const a of list) colonyOf.set(a.id, item.id);
+    agents.push(...list);
+    colonies.push(colonyById.get(item.id)!);
+  }
+  return { layout: places.map((p) => p.item), members, agents, colonies, colonyOf };
+}
+
+function toColony(c: ColonyRow, agentIds: string[]): Colony {
+  return { id: c.id, name: c.name, purpose: c.purpose, open: c.open !== false, pos: Number(c.pos) || 0, agentIds };
+}
+
+async function readColonyRows(sql: Sql, userId: string): Promise<ColonyRow[]> {
+  return sql<ColonyRow>`
+    SELECT id, name, purpose, open, pos, created_at FROM buzzy_agent_colonies
+    WHERE user_id = ${userId}
     ORDER BY pos ASC, created_at ASC, id ASC
-    LIMIT ${ROSTER_LINES + 1}
+    LIMIT ${AGENTS_MAX}
   `;
-  return rows;
+}
+
+/** The person's order as it is now: just where everyone sits, which is all a plan needs. */
+async function readOrder(sql: Sql, userId: string): Promise<Arranged<Lite>> {
+  const agents = await sql<Lite>`
+    SELECT id, colony_id, pos, created_at FROM buzzy_agents
+    WHERE user_id = ${userId}
+    ORDER BY pos ASC, created_at ASC, id ASC
+    LIMIT ${AGENTS_MAX}
+  `;
+  return arrange(agents, await readColonyRows(sql, userId));
+}
+
+/** What every layout change answers with: the new order, the colonies and where each agent sits. */
+export interface LayoutBody {
+  layout: LayoutItem[];
+  colonies: Colony[];
+  agents: Seat[];
+}
+
+function layoutBody(order: Arranged<Lite>): LayoutBody {
+  return {
+    layout: order.layout,
+    colonies: order.colonies.map((c) => toColony(c, order.members.get(c.id) ?? [])),
+    agents: order.agents.map((a) => ({ id: a.id, colonyId: order.colonyOf.get(a.id) ?? null, pos: Number(a.pos) || 0 })),
+  };
+}
+
+/** The whole of a change, before it is written. */
+interface Plan {
+  /** The new top level, in order. Every colony in it has an agent. */
+  top: LayoutItem[];
+  /** Colony id → its agents, in order. */
+  members: Map<string, string[]>;
+  /** Colonies left with nobody: deleted. */
+  drop: string[];
+}
+
+/** The last step of every plan: a colony with nobody in it is not kept. */
+function settle(top: LayoutItem[], members: Map<string, string[]>): Plan {
+  const drop: string[] = [];
+  const kept = top.filter((e) => {
+    if (e.type === "agent" || (members.get(e.id) ?? []).length) return true;
+    members.delete(e.id);
+    drop.push(e.id);
+    return false;
+  });
+  return { top: kept, members, drop };
+}
+
+/**
+ * The new order a request describes, `items` being [{ agent } | { colony, agents }] and the
+ * old order what is there now. Ids that are not the person's, or not there, are ignored.
+ * An agent or colony named twice keeps its first place. Whatever the request left out is
+ * kept, in the order it had, after everything it did say: an agent on its own goes at the
+ * end, and a colony goes at the end with the agents the request did not move out of it. So
+ * a browser that has not heard of the newest agent can never drop one.
+ */
+function planLayout(old: Arranged<Lite>, items: unknown[]): Plan {
+  const mine = new Set(old.agents.map((a) => a.id));
+  const colonyIds = new Set(old.colonies.map((c) => c.id));
+  const placed = new Set<string>();
+  const named = new Set<string>();
+  const take = (id: unknown): string | null => {
+    if (typeof id !== "string" || !mine.has(id) || placed.has(id)) return null;
+    placed.add(id);
+    return id;
+  };
+  const top: LayoutItem[] = [];
+  const members = new Map<string, string[]>();
+
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const it = raw as Record<string, unknown>;
+    if (own(it, "colony")) {
+      const cid = it.colony;
+      if (typeof cid !== "string" || !colonyIds.has(cid) || named.has(cid)) continue;
+      named.add(cid);
+      const inside: string[] = [];
+      for (const a of Array.isArray(it.agents) ? it.agents.slice(0, AGENTS_MAX) : []) {
+        const id = take(a);
+        if (id) inside.push(id);
+      }
+      members.set(cid, inside);
+      top.push(colonyItem(cid));
+    } else if (own(it, "agent")) {
+      const id = take(it.agent);
+      if (id) top.push(agentItem(id));
+    }
+  }
+  for (const e of old.layout) {
+    if (e.type === "agent") {
+      if (take(e.id)) top.push(e);
+      continue;
+    }
+    if (named.has(e.id)) continue;
+    named.add(e.id);
+    members.set(e.id, (old.members.get(e.id) ?? []).filter((id) => take(id)));
+    top.push(e);
+  }
+  // An agent that a colony in the request left out of its list: out of the colony, on its own, last.
+  for (const a of old.agents) if (take(a.id)) top.push(agentItem(a.id));
+  return settle(top, members);
+}
+
+/**
+ * A new colony from `ids` (the agents it holds, in order, all the person's). It takes the
+ * top-level place of the first one: where that agent was, or, when it sat in a colony,
+ * right after that colony. The agents leave wherever they were; a colony that leaves empty
+ * is deleted (so the new one stands where it stood).
+ */
+function planCreate(old: Arranged<Lite>, ids: string[], colonyId: string): Plan {
+  const moving = new Set(ids);
+  const first = ids[0]!;
+  const home = old.colonyOf.get(first) ?? null;
+  const members = new Map<string, string[]>();
+  for (const [cid, list] of old.members) members.set(cid, list.filter((a) => !moving.has(a)));
+  members.set(colonyId, ids.slice());
+  const top: LayoutItem[] = [];
+  for (const e of old.layout) {
+    if (e.type === "agent") {
+      if (e.id === first) top.push(colonyItem(colonyId));
+      else if (!moving.has(e.id)) top.push(e);
+      continue;
+    }
+    top.push(e);
+    if (e.id === home) top.push(colonyItem(colonyId));
+  }
+  return settle(top, members);
+}
+
+/** Ungroup: the colony goes, and its agents stand on their own, in order, where it was. Nothing else moves. */
+function planUngroup(old: Arranged<Lite>, colonyId: string): Plan {
+  const members = new Map(old.members);
+  const inside = members.get(colonyId) ?? [];
+  members.delete(colonyId);
+  const top: LayoutItem[] = [];
+  for (const e of old.layout) {
+    if (e.type === "colony" && e.id === colonyId) for (const id of inside) top.push(agentItem(id));
+    else top.push(e);
+  }
+  const plan = settle(top, members);
+  plan.drop.push(colonyId);
+  return plan;
+}
+
+/**
+ * Write a plan: renumber the top level from 0 and each colony's agents from 0, move agents
+ * into and out of colonies, make the new colony (`made`, if there is one) and delete the
+ * ones the plan drops. One statement, so it is all or nothing, and only the rows whose
+ * place actually changes are written. Updated-at stays: where an agent sits is not a change
+ * to the agent.
+ */
+async function writePlan(sql: Sql, userId: string, plan: Plan, made?: { id: string; name: string; purpose: string }): Promise<void> {
+  const agentSeats: Array<{ id: string; colony_id: string | null; pos: number }> = [];
+  const colonySeats: Array<{ id: string; pos: number }> = [];
+  const newColony: Array<{ id: string; name: string; purpose: string; pos: number }> = [];
+  plan.top.forEach((it, i) => {
+    if (it.type === "agent") {
+      agentSeats.push({ id: it.id, colony_id: null, pos: i });
+      return;
+    }
+    if (made && it.id === made.id) newColony.push({ ...made, pos: i });
+    else colonySeats.push({ id: it.id, pos: i });
+    (plan.members.get(it.id) ?? []).forEach((id, j) => agentSeats.push({ id, colony_id: it.id, pos: j }));
+  });
+  await sql.query(
+    `WITH made AS (
+       INSERT INTO buzzy_agent_colonies (id, user_id, name, purpose, pos)
+       SELECT m.id, $1::text, m.name, m.purpose, m.pos
+         FROM jsonb_to_recordset($2::jsonb) AS m(id text, name text, purpose text, pos int)
+       RETURNING id
+     ), moved AS (
+       UPDATE buzzy_agents a
+          SET colony_id = w.colony_id, pos = w.pos
+         FROM jsonb_to_recordset($3::jsonb) AS w(id text, colony_id text, pos int)
+        WHERE a.id = w.id AND a.user_id = $1::text
+          AND (a.colony_id IS DISTINCT FROM w.colony_id OR a.pos <> w.pos)
+       RETURNING a.id
+     ), placed AS (
+       UPDATE buzzy_agent_colonies c
+          SET pos = w.pos
+         FROM jsonb_to_recordset($4::jsonb) AS w(id text, pos int)
+        WHERE c.id = w.id AND c.user_id = $1::text AND c.pos <> w.pos
+       RETURNING c.id
+     ), gone AS (
+       DELETE FROM buzzy_agent_colonies c
+        WHERE c.user_id = $1::text AND c.id IN (SELECT jsonb_array_elements_text($5::jsonb))
+       RETURNING c.id
+     )
+     SELECT (SELECT count(*) FROM made)::int AS made, (SELECT count(*) FROM moved)::int AS moved,
+            (SELECT count(*) FROM placed)::int AS placed, (SELECT count(*) FROM gone)::int AS gone`,
+    [userId, JSON.stringify(newColony), JSON.stringify(agentSeats), JSON.stringify(colonySeats), JSON.stringify(plan.drop)],
+  );
+}
+
+/**
+ * Make a colony of the named agents: `raw` is { name?, purpose?, agents: [id, …] }. At least
+ * one agent, every one the person's (anything else is answered as an agent that is not
+ * there). The colony stands where the first agent stood, and the agents go into it in the
+ * order given, leaving any colony they were in; one left empty is deleted, and so is not
+ * counted against the most a person keeps.
+ */
+export async function createColony(
+  sql: Sql,
+  userId: string,
+  raw: Record<string, unknown>,
+): Promise<({ ok: true; colony: Colony } & LayoutBody) | Refusal> {
+  const checked = checkColonyFields({
+    ...(own(raw, "name") ? { name: raw.name } : {}),
+    ...(own(raw, "purpose") ? { purpose: raw.purpose } : {}),
+  });
+  if (!checked.ok) return checked;
+  const wanted = Array.isArray(raw.agents) ? raw.agents : [];
+  if (!wanted.length) return no(400, "no_agents", "Say which agents go in the colony: { agents: [id, …] }, at least one.");
+  const order = await readOrder(sql, userId);
+  const mine = new Set(order.agents.map((a) => a.id));
+  const ids = new Set<string>();
+  for (const w of wanted) {
+    if (typeof w !== "string" || !mine.has(w)) return notFound();
+    ids.add(w);
+  }
+  const emptied = order.colonies.filter((c) => (order.members.get(c.id) ?? []).every((a) => ids.has(a))).length;
+  if (order.colonies.length - emptied >= COLONIES_MAX) {
+    return no(409, "too_many_colonies", `You have ${COLONIES_MAX} colonies, the most one account keeps. Ungroup one before you make another.`);
+  }
+  const colonyId = newId("co_");
+  await writePlan(sql, userId, planCreate(order, [...ids], colonyId), {
+    id: colonyId,
+    name: checked.fields.name ?? COLONY_DEFAULT_NAME,
+    purpose: checked.fields.purpose ?? "",
+  });
+  const body = layoutBody(await readOrder(sql, userId));
+  const colony = body.colonies.find((c) => c.id === colonyId);
+  if (!colony) return no(500, "not_saved", "That colony couldn't be made. Try again.");
+  return { ok: true, colony, ...body };
+}
+
+/** Change a colony: only the fields that are sent change. A foreign or missing colony is answered the same. */
+export async function updateColony(
+  sql: Sql,
+  userId: string,
+  id: string,
+  raw: Record<string, unknown>,
+): Promise<{ ok: true; colony: Colony } | Refusal> {
+  if (!COLONY_ID.test(id)) return colonyNotFound();
+  const found = await sql<{ id: string }>`SELECT id FROM buzzy_agent_colonies WHERE id = ${id} AND user_id = ${userId}`;
+  if (!found.length) return colonyNotFound();
+  const checked = checkColonyFields(raw);
+  if (!checked.ok) return checked;
+  const f = checked.fields;
+  if (!Object.keys(f).length) {
+    return no(400, "nothing_to_change", "Say what to change: the colony's name, its purpose, or whether it is open.");
+  }
+  const rows = await sql<ColonyRow>`
+    UPDATE buzzy_agent_colonies
+    SET name = COALESCE(${f.name ?? null}::text, name),
+        purpose = COALESCE(${f.purpose ?? null}::text, purpose),
+        open = COALESCE(${f.open ?? null}::boolean, open),
+        updated_at = now()
+    WHERE id = ${id} AND user_id = ${userId}
+    RETURNING id, name, purpose, open, pos, created_at
+  `;
+  if (!rows[0]) return colonyNotFound();
+  const inside = await sql<{ id: string }>`
+    SELECT id FROM buzzy_agents WHERE user_id = ${userId} AND colony_id = ${id}
+    ORDER BY pos ASC, created_at ASC, id ASC
+  `;
+  return { ok: true, colony: toColony(rows[0], inside.map((r) => r.id)) };
+}
+
+/** Ungroup a colony: it is deleted, and its agents stand on their own, in order, in its place. */
+export async function ungroupColony(sql: Sql, userId: string, id: string): Promise<({ ok: true } & LayoutBody) | Refusal> {
+  if (!COLONY_ID.test(id)) return colonyNotFound();
+  const order = await readOrder(sql, userId);
+  if (!order.colonies.some((c) => c.id === id)) return colonyNotFound();
+  await writePlan(sql, userId, planUngroup(order, id));
+  return { ok: true, ...layoutBody(await readOrder(sql, userId)) };
+}
+
+/**
+ * Set the whole order and who is in which colony: `items` is [{ agent: id } | { colony: id,
+ * agents: [id, …] }, …] (see planLayout for what is ignored, kept and dropped). Answers with
+ * the order as it now is.
+ */
+export async function setLayout(sql: Sql, userId: string, items: unknown): Promise<({ ok: true } & LayoutBody) | Refusal> {
+  if (!Array.isArray(items)) {
+    return no(400, "bad_layout", "Send { items: [{ agent: id } or { colony: id, agents: [id, …] }, …] }: the whole order.");
+  }
+  if (items.length > AGENTS_MAX + COLONIES_MAX) return no(400, "bad_layout", "That is more places than a sidebar has.");
+  const order = await readOrder(sql, userId);
+  await writePlan(sql, userId, planLayout(order, items));
+  return { ok: true, ...layoutBody(await readOrder(sql, userId)) };
 }
 
 // ── The route ───────────────────────────────────────────────────────────────
@@ -876,11 +1446,17 @@ const refuse = (r: Refusal): AgentsReply => reply(r.status, { ok: false, error: 
  * /api/buzzy/agents… for a signed-in person (chat.nitro.ts checks the session and reads
  * the body; `rest` is the path after /api/buzzy/agents).
  *
- *   GET  /                   { bzilla, agents, next, colors, creatures }
+ *   GET  /                   { bzilla, agents, colonies, layout, next, colors, creatures }
  *   POST /                   add one: { creature?, look?, name?, size?, color? } → 201 { agent }
  *   PATCH /<id>              change: { name?, color?, size?, role?, instructions?, face?, look?, creature? }
- *   DELETE /<id>             remove it
+ *   DELETE /<id>             remove it (a colony that loses its last agent goes too)
  *   POST /<id>/identity      tell it its job: { text, sessionId? } → { saved, agent?, reply }
+ *
+ *   POST /colonies           make one from a drop: { name?, purpose?, agents: [id, …] } → 201 { colony, layout, colonies, agents }
+ *   PATCH /colonies/<id>     change: { name?, purpose?, open? } → { colony }
+ *   DELETE /colonies/<id>    ungroup it: its agents stand on their own, in its place → { layout, colonies, agents }
+ *   PUT  /layout             the whole order and who is in which colony:
+ *                            { items: [{ agent: id } | { colony: id, agents: [id, …] }, …] } → { layout, colonies, agents }
  */
 export async function agentsRoute(
   sql: Sql,
@@ -894,11 +1470,13 @@ export async function agentsRoute(
 
   if (parts.length === 0) {
     if (method === "GET") {
-      const agents = await listAgents(sql, userId);
+      const { agents, colonies, layout } = await listAgents(sql, userId);
       return reply(200, {
         ok: true,
         bzilla: BZILLA,
         agents,
+        colonies,
+        layout,
         next: nextDefault(agents),
         colors: COLORS.map((c) => ({ name: c.name, hex: c.hex })),
         creatures: CREATURES.map((c) => ({ id: c.id, word: c.word, name: c.word + "zilla", color: c.color, image: agentImage(c.id, "") })),
@@ -909,6 +1487,31 @@ export async function agentsRoute(
       return made.ok ? reply(201, { ok: true, agent: made.agent }) : refuse(made);
     }
     return reply(405, { ok: false, error: "Use GET or POST.", code: "method_not_allowed" });
+  }
+
+  // Colonies and the layout: an agent's id always starts ag_, so these two words are never one.
+  if (parts[0] === "colonies" && parts.length <= 2) {
+    if (parts.length === 1) {
+      if (method !== "POST") return reply(405, { ok: false, error: "Use POST.", code: "method_not_allowed" });
+      const made = await createColony(sql, userId, obj);
+      if (!made.ok) return refuse(made);
+      return reply(201, { ok: true, colony: made.colony, layout: made.layout, colonies: made.colonies, agents: made.agents });
+    }
+    const cid = parts[1]!;
+    if (method === "PATCH") {
+      const changed = await updateColony(sql, userId, cid, obj);
+      return changed.ok ? reply(200, { ok: true, colony: changed.colony }) : refuse(changed);
+    }
+    if (method === "DELETE") {
+      const out = await ungroupColony(sql, userId, cid);
+      return out.ok ? reply(200, { ok: true, layout: out.layout, colonies: out.colonies, agents: out.agents }) : refuse(out);
+    }
+    return reply(405, { ok: false, error: "Use PATCH or DELETE.", code: "method_not_allowed" });
+  }
+  if (parts[0] === "layout" && parts.length === 1) {
+    if (method !== "PUT") return reply(405, { ok: false, error: "Use PUT.", code: "method_not_allowed" });
+    const out = await setLayout(sql, userId, obj.items);
+    return out.ok ? reply(200, { ok: true, layout: out.layout, colonies: out.colonies, agents: out.agents }) : refuse(out);
   }
 
   const id = parts[0]!;
