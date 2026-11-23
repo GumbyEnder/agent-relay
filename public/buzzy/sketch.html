@@ -910,7 +910,11 @@
         strokes: doc.strokes,
         // id is persisted so `order` (and any anchor pointing at a mark) still
         // resolves after a reload — it used to be dropped and regenerated.
-        images: doc.images.map(function (i) { return { id: i.id, x: i.x, y: i.y, w: i.w, h: i.h, url: i.url }; }),
+        images: doc.images.map(function (i) {
+          // Never save a blob: URL — it resolves only inside this document, so a stored
+          // one is a dead pointer (that is how pasted images vanished on reload).
+          return { id: i.id, x: i.x, y: i.y, w: i.w, h: i.h, url: /^blob:/.test(i.url) ? "" : i.url };
+        }).filter(function (i) { return i.url; }),
         order: doc.order,
       };
     }
@@ -1812,16 +1816,48 @@
     }
 
     // ── images: drop, paste, move, resize ─────────────────────────────
-    function addImage(url, at) {
-      var w = 240, h = 160;
-      var img = new Image();
-      img.onload = function () {
-        var ratio = img.naturalHeight / img.naturalWidth || 0.66;
-        h = Math.round(w * ratio);
-        place(url, at, w, h);
-      };
-      img.onerror = function () { place(url, at, w, h); };
-      img.src = url;
+    function addImage(url, at, file) {
+      // A blob: URL points into this document only: saved into the board it comes back
+      // as a dead reference and the image is gone on the next load (it was being saved
+      // verbatim). Keep the bytes instead, so the board *is* the image.
+      var src = file ? fileToDataUrl(file) : Promise.resolve(url);
+      src.then(function (href) {
+        var w = 240, h = 160;
+        var img = new Image();
+        img.onload = function () {
+          var ratio = img.naturalHeight / img.naturalWidth || 0.66;
+          place(href, at, w, Math.round(w * ratio));
+        };
+        img.onerror = function () { place(href, at, w, h); };
+        img.src = href;
+      }).catch(function () {
+        setStatus("That image could not be read — try pasting it again.");
+      });
+    }
+    // Inline the file as a data URL, shrinking anything big: a 6K pasted screenshot is
+    // ~20 MB of base64 and would be saved on every keystroke's autosave.
+    var MAX_IMG_EDGE = 2560;
+    function fileToDataUrl(f) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () {
+          var raw = String(fr.result || "");
+          if (raw.length <= 1.5 * 1024 * 1024) { resolve(raw); return; }
+          var probe = new Image();
+          probe.onload = function () {
+            var s = Math.min(1, MAX_IMG_EDGE / Math.max(probe.naturalWidth || 1, probe.naturalHeight || 1));
+            var c = document.createElement("canvas");
+            c.width = Math.max(1, Math.round((probe.naturalWidth || 1) * s));
+            c.height = Math.max(1, Math.round((probe.naturalHeight || 1) * s));
+            c.getContext("2d").drawImage(probe, 0, 0, c.width, c.height);
+            try { resolve(c.toDataURL("image/jpeg", 0.9)); } catch (err) { resolve(raw); }
+          };
+          probe.onerror = function () { resolve(raw); };
+          probe.src = raw;
+        };
+        fr.onerror = function () { reject(new Error("read failed")); };
+        fr.readAsDataURL(f);
+      });
     }
     function place(url, at, w, h) {
       snapshot();
@@ -1895,8 +1931,7 @@
       var at = pt(e);
       for (const f of e.dataTransfer.files) {
         if (!f.type.startsWith("image/")) continue;
-        var url = URL.createObjectURL(f);
-        addImage(url, at);
+        addImage(null, at, f);
       }
     });
     window.addEventListener("paste", function (e) {
@@ -1905,7 +1940,7 @@
       for (const it of items) {
         if (it.type.indexOf("image") === 0) {
           var f = it.getAsFile();
-          if (f) { foundImage = true; addImage(URL.createObjectURL(f), { x: 40 + doc.images.length * 20, y: 40 + doc.images.length * 20 }); }
+          if (f) { foundImage = true; addImage(null, { x: 40 + doc.images.length * 20, y: 40 + doc.images.length * 20 }, f); }
         }
       }
       if (!foundImage && lastSelBuf) { e.preventDefault(); pasteSel(); }
@@ -2473,7 +2508,9 @@
             if (d.board.w && d.board.h) { doc.w = d.board.w; doc.h = d.board.h; }
             if (d.board.bg) doc.bg = d.board.bg;
             doc.strokes = d.board.strokes || [];
-            doc.images = d.board.images || [];
+            // An image with no url was a blob: pointer that could not be saved; it must
+            // not come back as an empty wrap the user can drag but never see.
+            doc.images = (d.board.images || []).filter(function (im) { return im && im.url; });
             // Boards saved before #296 have no image ids and no order. Give the
             // images stable ids here (dragging and order resolution both key on
             // them) and let orderSync() rebuild the old images-then-strokes order.
