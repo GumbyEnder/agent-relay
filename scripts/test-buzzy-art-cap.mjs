@@ -280,6 +280,20 @@ async function main() {
     `stored id=${afterBoard?.images?.[0]?.id} urlLen=${(afterBoard?.images?.[0]?.url || "").length}`,
   );
 
+  // CAP-7: the page's own 413 branch is not reachable from the UI while both caps agree,
+  // so nothing above would notice it being reverted to the client-cap message (which,
+  // measured on a divergence build, printed "Board is 0.4 MB - over the 8 MB save limit").
+  // Pin the wiring in the served bytes instead of trusting a walk nobody can repeat.
+  const page = await fetch(`${BASE}/buzzy/sketch`, { headers: { cookie } });
+  const pageText = await page.text();
+  const branch = /if \(r\.status === 413\) \{ rejectedByServer\(bytes\); return; \}/.test(pageText);
+  const misleading = /if \(r\.status === 413\) \{ tooBig\(/.test(pageText);
+  check(
+    "CAP-7  the served page reports a 413 as a server refusal, not the client cap",
+    page.status === 200 && branch && !misleading,
+    `HTTP ${page.status} branch=${branch} tooBigOn413=${misleading}`,
+  );
+
   await stop();
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);
