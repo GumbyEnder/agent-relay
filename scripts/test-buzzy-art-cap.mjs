@@ -294,6 +294,24 @@ async function main() {
     `HTTP ${page.status} branch=${branch} tooBigOn413=${misleading}`,
   );
 
+  // CAP-8: the two #296 review must-fixes. Neither is reachable from the cap walk:
+  //   * imageEl must re-point its cached element when a URL changes — shrinkLargestImage
+  //     rewrites im.url in place, and a cache keyed only by id kept painting the old,
+  //     larger bitmap until reload (the save carried the new URL, so the board lied);
+  //   * the image wrap must not take the pointer, or a mark in front of an image paints
+  //     correctly and still cannot be clicked — the wrap stole every press in its rect.
+  // Pin the served bytes; the behaviour itself is measured in a browser (CDP).
+  const srcRepoint = /el\.getAttribute\("src"\) !== url[\s\S]{0,400}?el\.src = url;/.test(pageText);
+  const wrapPassive = /\.img-wrap \{ position:absolute; pointer-events:none;/.test(pageText);
+  const wrapTakesPress = /\.img-wrap \{ position:absolute; pointer-events:auto;/.test(pageText);
+  const orderedHit = /function hitTestOrdered\(/.test(pageText);
+  const selectUsesOrdered = /var pick = hitTestOrdered\(p\);/.test(pageText);
+  check(
+    "CAP-8  the served page re-points a changed image URL and takes the press on top",
+    srcRepoint && wrapPassive && !wrapTakesPress && orderedHit && selectUsesOrdered,
+    `srcRepoint=${srcRepoint} wrapPassive=${wrapPassive} wrapAuto=${wrapTakesPress} orderedHit=${orderedHit} select=${selectUsesOrdered}`,
+  );
+
   await stop();
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);

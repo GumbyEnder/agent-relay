@@ -45,7 +45,13 @@
   #board { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none;
            cursor:crosshair; }
   #layers { position:absolute; inset:0; pointer-events:none; }
-  .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
+  /* #296: a wrap must never take the click. The stacking order says which item is
+     visible on top, and only the board's hit test knows that; a wrap that ate the
+     pointerdown stole every click inside an image's rectangle, so a mark in front of
+     an image could be seen but not selected. The board now receives the press and
+     picks the front-most item; only the resize handle stays clickable, and only on
+     the selected image. */
+  .img-wrap { position:absolute; pointer-events:none; cursor:move; border:1px solid transparent; }
   .img-wrap.selected { border-color: var(--bz-yellow); }
   .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none; }
   /* #296: once the canvas has a decoded copy it paints the image in its stacking
@@ -55,7 +61,8 @@
      turning into an invisible hole. */
   .img-wrap.painted img { visibility:hidden; }
   .img-wrap .handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--bz-yellow);
-                      border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
+                      border-radius:2px; cursor:nwse-resize; pointer-events:none; }
+  .img-wrap.selected .handle { pointer-events:auto; }
   /* The right padding keeps the bar's last words clear of the settings gear, which
      nav.js pins to the bottom-right corner of every page (44px, 22px in). */
   footer { border-top:1px solid var(--bz-line); padding:0.5rem 80px 0.5rem 1rem; display:flex; gap:0.6rem; align-items:center; }
@@ -793,22 +800,47 @@
       var dx = p.x - (a.x + t * vx), dy = p.y - (a.y + t * vy);
       return Math.sqrt(dx * dx + dy * dy);
     }
+    // One mark's hit test. Shared by the text-anchor lookup (strokes only) and the
+    // select tool's front-to-back walk, so both agree on what "under the cursor" means.
+    function strokeHit(p, st) {
+      if (st.tool === "line" || st.tool === "arrow" || st.tool === "curve") {
+        var d = segDist(p, { x: st.x1, y: st.y1 }, { x: st.x2, y: st.y2 });
+        if (d < Math.max(8, (st.width || 3) / 2 + 4)) return true;
+      }
+      var b = markBBox(st), pad = 6;
+      return p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad;
+    }
+    function imageHit(p, im) {
+      return p.x >= im.x && p.x <= im.x + im.w && p.y >= im.y && p.y <= im.y + im.h;
+    }
     // Which mark is under the cursor? Bounding box first (cheap), segments for lines.
     // Walked in stacking order, front to back (#296) — the mark you can see on top is
     // the one a click should select, which is no longer the same as the array order.
+    // Strokes only: this is what text anchoring asks for.
     function hitTest(p) {
       orderSync();
       for (var oi = doc.order.length - 1; oi >= 0; oi--) {
         var entry = doc.order[oi];
         if (entry.kind !== "stroke") continue;
         var st = doc.strokes.find(function (x) { return x.id === entry.id; });
-        if (!st) continue;
-        if (st.tool === "line" || st.tool === "arrow" || st.tool === "curve") {
-          var d = segDist(p, { x: st.x1, y: st.y1 }, { x: st.x2, y: st.y2 });
-          if (d < Math.max(8, (st.width || 3) / 2 + 4)) return st;
+        if (st && strokeHit(p, st)) return st;
+      }
+      return null;
+    }
+    // The select tool's hit test: images and marks in one walk, so the visible top
+    // item wins. Reported 2026-11-23: a mark in front of an image painted correctly
+    // but could not be clicked, because the image's DOM wrap took the press.
+    function hitTestOrdered(p) {
+      orderSync();
+      for (var oi = doc.order.length - 1; oi >= 0; oi--) {
+        var entry = doc.order[oi];
+        if (entry.kind === "image") {
+          var im = doc.images.find(function (x) { return x.id === entry.id; });
+          if (im && imageHit(p, im)) return { kind: "image", id: im.id, item: im };
+          continue;
         }
-        var b = markBBox(st), pad = 6;
-        if (p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad) return st;
+        var st = doc.strokes.find(function (x) { return x.id === entry.id; });
+        if (st && strokeHit(p, st)) return { kind: "stroke", id: st.id, item: st };
       }
       return null;
     }
@@ -1329,6 +1361,12 @@
         el.onload = function () { paint(); };
         el.src = url;
         imgCache[id] = el;
+      } else if (url && el.getAttribute("src") !== url) {
+        // The URL can change under a stable id: shrinkLargestImage() rewrites im.url
+        // in place to the smaller re-encode. A cache keyed only by id kept painting
+        // the old, larger bitmap (the save carried the new URL, so the board looked
+        // wrong until reload). Re-point the cached element; onload repaints.
+        el.src = url;
       }
       return el;
     }
@@ -1679,14 +1717,23 @@
       }
 
       if (tool === "select") {
-        var hit = hitTest(p);
+        // Front-to-back over both kinds (#296): the item you can see on top is the one
+        // the click selects. A mark drawn over an image must be reachable.
+        var pick = hitTestOrdered(p);
+        var hit = pick && pick.kind === "stroke" ? pick.item : null;
         selectedStroke = hit ? hit.id : null;
+        selected = pick && pick.kind === "image" ? pick.id : null;
         if (hit) {
           // Any mark can be dragged; text is the one that has to be (Paint's text
           // box is movable after you type in it).
           markDrag = { id: hit.id, sx: p.x, sy: p.y, ox: hit.x1, oy: hit.y1, moved: false };
           canvas.setPointerCapture(e.pointerId);
+        } else if (selected) {
+          var im = pick.item;
+          drag = { id: im.id, mode: "move", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h };
+          canvas.setPointerCapture(e.pointerId);
         }
+        renderImages();
         syncTextBar();
         paint();
         return;
@@ -1988,11 +2035,13 @@
         wrap.appendChild(img);
         wrap.appendChild(handle);
         wrap.addEventListener("pointerdown", function (e) {
-          if (tool !== "select") return;
+          // Only the resize handle is clickable on a wrap now; everything else goes to
+          // the board's front-to-back hit test (#296). The handle exists only on the
+          // selected image, so a click here is unambiguous.
+          if (tool !== "select" || e.target !== handle) return;
           e.stopPropagation();
           selected = im.id;
-          drag = { id: im.id, mode: e.target === handle ? "resize" : "move", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h };
-          renderImages();
+          drag = { id: im.id, mode: "resize", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h };
         });
         layers.appendChild(wrap);
       });
