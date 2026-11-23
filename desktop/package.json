@@ -15,6 +15,7 @@
   "build": {
     "appId": "ai.beezilla.desktop",
     "productName": "BeeZilla",
+    "electronVersion": "32.3.3",
     "copyright": "BeeZilla",
     "directories": {
       "output": "../dist-desktop",
@@ -58,8 +59,8 @@
     ]
   },
   "devDependencies": {
-    "electron": "^32.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "32.3.3",
+    "electron-builder": "25.1.8"
   },
   "dependencies": {
     "electron-updater": "^6.8.11"
