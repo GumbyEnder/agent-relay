@@ -83,6 +83,7 @@
   color: #e6e6e6;
   font: inherit;
   font-size: 0.9rem;
+  white-space: nowrap;
   cursor: pointer;
 }
 .pshare-btn:hover { background: #1f1f1f; }

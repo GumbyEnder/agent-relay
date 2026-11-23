@@ -48,6 +48,16 @@ talk area." Reference zMWSgG0.
 5. Talking controls sit on the Talk bar (the paper clip, privacy); New conversation is
    on the board and in History; personal settings (your AI key) are behind the gear.
 6. Tooltips are large and sit beside the thing, never under the pointer.
+7. The QR code and Copy page link SHARE the page, so both ask first (owner, 2026-11-21:
+   "you have to know that you're going to open this up… a little pop-up to say yes and
+   confirm… to anyone with a link or searching it via the internet… a sub option that's
+   small that says block searches by default"). `public/buzzy/page-share.js` is that
+   window: it lists what becomes public (from the server, with numbers), what is left
+   out, and the small "Block searches" tick, ticked until it is unticked. Nothing is made
+   until "Yes, share this page"; while the tick is on, the shared page (`/buzzy/p/<token>`)
+   is served `X-Robots-Tag: noindex…` and a robots meta tag. Only Open shares. If a share
+   ever exposes more than the window lists, change the window (`includesOf`,
+   `NOT_INCLUDED` in `src/lib/buzzy/pageShare.ts`) in the same change.
 
 ## The owner's picture of the Talk page
 

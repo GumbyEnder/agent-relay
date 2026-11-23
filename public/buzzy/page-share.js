@@ -341,6 +341,10 @@
     row.appendChild(field);
     row.appendChild(copy);
     s.body.appendChild(row);
+    if (info && info.includes && info.includes.length) {
+      var put = make("p", "pshare-small", "In the copy: " + info.includes.map(function (l) { return l.label.toLowerCase() + " (" + l.detail + ")"; }).join("; ") + ".");
+      s.body.appendChild(put);
+    }
     var qrBox = make("div", "pshare-qr");
     qrBox.hidden = true;
     s.body.appendChild(qrBox);
@@ -416,10 +420,10 @@
       if (!res.ok || !d.ok || !d.share) { showError(s, failure(res), function () { open(s.kind, true); }); return; }
       if (s.kind === "copy") {
         copyText(absolute(d.share.url)).then(function (done) {
-          if (session === s) showShared(s, d.share, { fresh: true, copied: done });
+          if (session === s) showShared(s, d.share, { fresh: true, copied: done, includes: d.includes });
         });
       } else {
-        showShared(s, d.share, { fresh: true });
+        showShared(s, d.share, { fresh: true, includes: d.includes });
       }
     });
   }
@@ -429,7 +433,7 @@
       if (session !== s) return;
       var d = res.data || {};
       if (!res.ok || !d.ok || !d.share) { showError(s, failure(res), function () { open(s.kind, true); }); return; }
-      showShared(s, d.share, { updated: true });
+      showShared(s, d.share, { updated: true, includes: d.includes });
     });
   }
   function stop(s, share) {
