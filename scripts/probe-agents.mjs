@@ -82,7 +82,7 @@ const strip = () => page.evaluate(() => {
     left: r ? Math.round(r.left) : null, width: r ? Math.round(r.width) : null,
     pad: getComputedStyle(document.documentElement).paddingLeft,
     head: document.querySelector("#bzHead")?.getBoundingClientRect().left ?? null,
-    names: [...document.querySelectorAll("#bzAgents .bzag-item")].map((n) => n.getAttribute("aria-label")),
+    names: [...document.querySelectorAll("#bzAgents .bzag-item:not(.bzag-hive)")].map((n) => n.getAttribute("aria-label")),
   };
 });
 const hop = async (path) => {
@@ -150,7 +150,7 @@ await page.reload({ waitUntil: "load" });
 await page.waitForSelector("#bzAgents .bzag-item");
 const names = (await strip()).names;
 check("after a reload Bunnyzilla still helps with the to-do list", /^Bunnyzilla, helps with to-do list/.test(names[1] || ""), names);
-await page.locator('#bzAgents .bzag-item:not([data-agent="bzilla"])').first().click();
+await page.locator('#bzAgents .bzag-item[data-agent]:not([data-agent="bzilla"])').first().click();
 await page.waitForFunction(() => /Got it/.test(document.getElementById("chatMessages")?.innerText || ""), null, { timeout: 10000 }).catch(() => {});
 check("pressing it picks its conversation back up", /Got it/.test(await thread()), (await thread()).slice(0, 160));
 
@@ -169,7 +169,7 @@ check("opening an agent's conversation from History brings the agent back", awai
 
 // 6. The plus: the next one, once.
 await page.locator("#bzAgents .bzag-add").click();
-await page.waitForFunction(() => document.querySelectorAll("#bzAgents .bzag-item").length === 3, null, { timeout: 8000 });
+await page.waitForFunction(() => document.querySelectorAll("#bzAgents .bzag-item:not(.bzag-hive)").length === 3, null, { timeout: 8000 });
 await page.waitForTimeout(700);
 const added = (await strip()).names;
 check("the plus brings in Bullzilla, waiting for a job", /^Bullzilla, waiting for a job/.test(added[2] || ""), added);
@@ -212,7 +212,7 @@ await page.waitForSelector("#bzAgents .bzag-item");
 await page.waitForTimeout(500);
 const many = await page.evaluate(() => {
   const sc = document.getElementById("bzagScroll");
-  return { n: document.querySelectorAll("#bzAgents .bzag-item").length, scrolls: sc.scrollHeight > sc.clientHeight, plusBottom: Math.round(document.querySelector("#bzAgents .bzag-add").getBoundingClientRect().bottom), vh: innerHeight };
+  return { n: document.querySelectorAll("#bzAgents .bzag-item:not(.bzag-hive)").length, scrolls: sc.scrollHeight > sc.clientHeight, plusBottom: Math.round(document.querySelector("#bzAgents .bzag-add").getBoundingClientRect().bottom), vh: innerHeight };
 });
 check("many agents: the strip scrolls and the plus stays on screen", many.n > 20 && many.scrolls && many.plusBottom <= many.vh, many);
 await shot("6-many");
@@ -244,7 +244,7 @@ check("Save renames the agent", /Dolly/.test(await page.evaluate(() => document.
 // Dragging to the Idea Board: a face carries a picture card.
 const card = await page.evaluate(() => {
   const dt = new DataTransfer();
-  document.querySelector('#bzAgents .bzag-item:not([data-agent="bzilla"])').dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+  document.querySelector('#bzAgents .bzag-item[data-agent]:not([data-agent="bzilla"])').dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
   return dt.getData("application/x-beezilla-card");
 });
 check("an agent can be dragged to the Idea Board as a picture card", /"kind":"image"/.test(card) && /\/buzzy\/zillas\//.test(card), card.slice(0, 120));

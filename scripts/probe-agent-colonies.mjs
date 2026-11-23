@@ -73,7 +73,7 @@ const api = (method, path, body) => page.evaluate(async ([m, p, b]) => {
   const r = await fetch("/api/buzzy/agents" + p, { method: m, credentials: "same-origin", headers: { "content-type": "application/json" }, body: b === undefined ? undefined : JSON.stringify(b) });
   return r.json();
 }, [method, path, body]);
-const names = () => page.evaluate(() => [...document.querySelectorAll("#bzAgents .bzag-item")].map((n) => (n.getAttribute("data-colony") ? "[colony] " : "") + (n.querySelector(".bzag-name")?.textContent || "")));
+const names = () => page.evaluate(() => [...document.querySelectorAll("#bzAgents .bzag-item:not(.bzag-hive)")].map((n) => (n.getAttribute("data-colony") ? "[colony] " : "") + (n.querySelector(".bzag-name")?.textContent || "")));
 const item = (id) => `#bzAgents .bzag-item[data-agent="${id}"]`;
 const modalOpen = () => page.evaluate(() => document.getElementById("bzAgentsModal")?.classList.contains("open"));
 
