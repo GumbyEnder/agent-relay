@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- .cjs smoke script: require() is the only module system node gives it */
 // Verifies the voice lane module end to end: streaming SSE parse, first text,
 // first audio, PCM byte count. Run from the repo root with the prod key env.
 const path = require("path");

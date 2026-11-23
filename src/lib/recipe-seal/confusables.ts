@@ -28,6 +28,7 @@ const MAP = (() => {
 
 /** Fold code points that merely LOOK like ASCII into the ASCII they imitate. */
 export function foldConfusables(s: string): string {
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   if (!/[^\x00-\x7F]/.test(s)) return s;
   let out = "";
   for (const ch of s) {

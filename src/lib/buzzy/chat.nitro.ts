@@ -283,6 +283,7 @@ function companyPayload(row: CompanyRow, facts: FactRow[] = []) {
 
 function factValue(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   const v = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
   return v || null;
 }
@@ -3022,6 +3023,7 @@ export default defineEventHandler(async (event) => {
     }
     const cleanOneLiner =
       hasOneLiner && typeof body.one_liner === "string"
+        // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
         ? body.one_liner.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
         : null;
     const sql = await getSql();

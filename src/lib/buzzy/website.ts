@@ -107,6 +107,7 @@ export async function hostBlocked(host: string): Promise<"blocked" | "missing" |
 }
 
 function clean(s: string, max: number): string {
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   const cut = t.slice(0, max);

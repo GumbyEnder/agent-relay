@@ -79,6 +79,7 @@ const TO_RE = /^(?:to|bill to|billed to|sold to|customer|client)\s*[:-]\s*(.+)$/
 const ASK_RE = /^(?:for|description|re|subject|regarding|services|work)\s*[:-]\s*(.+)$/i;
 
 function cleanLine(raw: string): string {
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   return raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 }
 
@@ -406,6 +407,7 @@ function newId(prefix: string): string {
 export function cleanFilename(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const base = raw.replace(/\\/g, "/").split("/").pop() || "";
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   return base.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 180);
 }
 
@@ -790,6 +792,7 @@ export async function updatePaperLine(
       WHERE id = ${lineId} AND user_id = ${userId}
     `;
   } else {
+    // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
     const next = (value || "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
     if (!next) {
       return { ok: false, error: "Type the corrected line.", code: "bad_request", status: 400 };

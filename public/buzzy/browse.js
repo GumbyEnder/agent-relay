@@ -32,7 +32,7 @@
       .catch(function () { return null; });
   }
   function store(key, val) {
-    try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (_) {}
+    try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (_) { /* nothing to do */ }
     return null;
   }
 
@@ -678,7 +678,7 @@
 
   function select(name) {
     if (!TABS[name]) name = "inspiration";
-    if (mounted && mounted.destroy) { try { mounted.destroy(); } catch (_) {} }
+    if (mounted && mounted.destroy) { try { mounted.destroy(); } catch (_) { /* nothing to do */ } }
     mounted = null;
     parkRecent();
     pane.innerHTML = "";
