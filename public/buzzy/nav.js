@@ -1084,7 +1084,7 @@
       btn.setAttribute("aria-expanded", folding ? "false" : "true");
     });
     head.addEventListener("click", function () {
-      if (panel.classList.contains("min")) { panel.classList.remove("min"); min.textContent = "\u2013"; text && text.focus(); }
+      if (panel.classList.contains("min")) { panel.classList.remove("min"); min.textContent = "\u2013"; if (text) text.focus(); }
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && panel.classList.contains("open") && !panel.classList.contains("min")) shut();
@@ -2315,7 +2315,7 @@
   function stripChrome(root) {
     Array.prototype.forEach.call(root.querySelectorAll(CHROME_OWNED), function (n) {
       if (n.closest("#bzChrome")) return; // the live chrome, not the imported copy
-      n.parentNode && n.parentNode.removeChild(n);
+      if (n.parentNode) n.parentNode.removeChild(n);
     });
     // Whatever the page kept in its own <header> (a toolbar, a search box) is page
     // content, not chrome: unwrap it into the page so there is exactly one header
@@ -2378,7 +2378,7 @@
       // a page's own code can end up measuring the hidden copy. restore() puts it back.
       page.removeAttribute("id");
     } else {
-      page.parentNode && page.parentNode.removeChild(page);
+      if (page.parentNode) page.parentNode.removeChild(page);
     }
   }
 

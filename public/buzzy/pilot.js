@@ -253,8 +253,8 @@
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(yes);
       };
-      allow.addEventListener("click", function () { self.resolveAsk && self.resolveAsk(true); });
-      skip.addEventListener("click", function () { self.resolveAsk && self.resolveAsk(false); });
+      allow.addEventListener("click", function () { if (self.resolveAsk) self.resolveAsk(true); });
+      skip.addEventListener("click", function () { if (self.resolveAsk) self.resolveAsk(false); });
     });
   };
 
