@@ -57,6 +57,26 @@
  *    or removes the agent. It is a dialog that only Esc or its X closes (no click-outside
  *    close, ever), and its box can be pulled bigger by the corner.
  *
+ *  - Code Monkey (owner, 2026-11-23: "By default, there's going to be this monkey on the left
+ *    side underneath the Bzilla thing… this is your coding monkey"): every account starts with
+ *    it right under BeeZilla, ready to talk to, in its own picture and colour (#B8591F). It is
+ *    an agent like the others; the server makes it (agents.ts).
+ *  - The panel (owner, 2026-11-23: "Each time you click one, there's a list of folders that is
+ *    highlighted and a list of folders that is grayed out. The highlighted ones are on top.
+ *    Those are the domains that the bot in question often operates from. If you click any of the
+ *    folders, it will highlight many of the bots that work frequently in that folder. It'll also
+ *    give you a list of recent sessions related to that folder. If you click a bot, it'll give
+ *    you a list of recent sessions related to that bot under history."): pressing an agent (or
+ *    BeeZilla) opens a column beside the strip with its folders of the brain (lit on top, grey
+ *    below) and its History. Pressing a folder lights up the bots that work there, lists the
+ *    recent conversations about it, and opens the Memory tab at that folder, with the breadcrumb
+ *    back to brain (brain.js). Like Discord: servers down the left, their channels beside them.
+ *    Only Esc or its X closes it; its right edge makes it wider or narrower.
+ *  - The whole interface wears the colour of the agent you are talking to (owner: "change the
+ *    standard color based on the one you have loaded of the button and the interface"): the Talk
+ *    button, the open place in the row, links and focus rings (agents.css). BeeZilla's own is
+ *    the yellow. The privacy modes keep their green, yellow and red whoever is talking.
+ *
  * Talk lends one door: window.BeeZillaTalk.talkAs(agent) (talk.html). This file lends
  * window.BeeZillaAgents to it: paint(agent) dresses the header (button colour, face, name,
  * the words in the box), update(agent) and noteSession(id, sessionId) keep the strip honest.
@@ -75,6 +95,19 @@
   var LS_W = "bz.agents.w";
   var TALK = "/buzzy/talk";
   var HIVE_API = "/api/buzzy/hive";
+  var BRAIN_API = "/api/buzzy/brain";
+  var PANEL_W = 300;
+  var PANEL_MIN = 240;
+  var PANEL_MAX = 480;
+  var LS_PW = "bz.agents.panelW";
+  // The brain's branches (src/lib/buzzy/brainMap.ts): a colour and a shape each, the same in the
+  // Memory tab (brain.js), so a folder always says which part of the brain it is in.
+  var BRANCH = {
+    brain: { color: "#F472B6", shape: "hexagon", label: "brain" },
+    knowledge: { color: "#4DA3FF", shape: "circle", label: "knowledge" },
+    systems: { color: "#2DD4BF", shape: "square", label: "systems" },
+    assets: { color: "#A78BFA", shape: "triangle", label: "assets" },
+  };
   var FACES = ["✅", "🗓️", "✉️", "💰", "🧾", "✈️", "🏠", "📚", "🧸", "🐶", "🌱", "🎵", "📷", "🎬", "✍️", "📱", "📰", "⚖️", "🚗", "💼", "🤝", "📣", "🔎", "💻", "🎮", "🍳", "🛒", "🏋️", "🩺", "🎁", "🎉", "💡", "✨"];
 
   var root = document.documentElement;
@@ -95,9 +128,14 @@
     current: "bzilla",    // the id of the agent whose conversation is open ("bzilla" for none)
     loaded: false,
     failed: false,
+    // The panel beside the strip: whose it is, and whether it shows the agent or one folder.
+    panel: { open: false, agentId: null, view: "agent", folder: null, data: null, info: null, seq: 0, width: PANEL_W },
+    highlight: null,      // the ids of the bots lit up for the folder in view (null: none)
+    folderSeq: 0,
   };
   var rail = null, scroll = null, inner = null, peek = null, hiveWin = null, list = null, addRow = null, addBtn = null, toggleBtn = null, edge = null, msgEl = null, tab = null;
   var modal = null, modalOpener = null;
+  var panel = null, panelHead = null, panelBody = null, panelEdge = null;
   var retryTimer = 0, msgTimer = 0;
   var readyResolve;
   var ready = new Promise(function (r) { readyResolve = r; });
@@ -157,6 +195,16 @@
   }
   function contrast(a, b) { var l1 = luminance(a), l2 = luminance(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); }
   function inkFor(hex) { return contrast(hex, "#141414") >= contrast(hex, "#ffffff") ? "#141414" : "#ffffff"; }
+  // The agent's colour as text on the dark page: the colour itself when it reads well enough
+  // (4.5:1 on #0b0b0b), else the same colour lightened step by step until it does. Fills (the
+  // Talk button, underlines) keep the exact colour; only words use this.
+  function readable(hex) {
+    for (var t = 0; t <= 1.0001; t += 0.05) {
+      var c = t ? mix(hex, "#ffffff", t) : safeColor(hex);
+      if (contrast(c, "#0b0b0b") >= 4.5) return c;
+    }
+    return "#ffffff";
+  }
 
   // ── what an agent is, in words ───────────────────────────────────────────
   function isBz(a) { return !!a && a.id === "bzilla"; }
@@ -257,6 +305,7 @@
     if (keep) { var again = list.querySelector('[data-agent="' + keep + '"]'); if (again) again.focus({ preventScroll: true }); }
     else if (keepColony) { var c2 = list.querySelector('[data-colony="' + keepColony + '"]'); if (c2) c2.focus({ preventScroll: true }); }
     paintPeek();
+    paintHighlight();
     root.setAttribute("data-bz-agent-count", String(S.agents.length));
   }
   // The strip shows faces only, so each face carries its words as a tooltip; opened, the
@@ -682,6 +731,421 @@
     hiveWin.focus({ preventScroll: true });
   }
 
+  // ── the panel: an agent's folders and its History ────────────────────────
+  // Owner, 2026-11-23 (the whole of it is at the top of this file). A column beside the strip:
+  // the agent's folders of the brain (lit on top, the most worked-in first; the rest of the brain
+  // grey below, A to Z), then its recent conversations under History. A folder pressed here
+  // lights up the bots that work in it, lists the recent conversations about it, and opens the
+  // Memory tab at it (brain.js), with the breadcrumb back to brain.
+  function shapeEl(kind, color, px) {
+    var s = px || 14;
+    var w = el("span", "bzap-shape", { "aria-hidden": "true" });
+    var d = kind === "circle" ? '<circle cx="12" cy="12" r="8.5"/>'
+      : kind === "square" ? '<rect x="4" y="4" width="16" height="16" rx="3.5"/>'
+      : kind === "triangle" ? '<path d="M12 3.6l9 16H3z" stroke-linejoin="round"/>'
+      : '<path d="M12 2.6l8.2 4.7v9.4L12 21.4l-8.2-4.7V7.3z" stroke-linejoin="round"/>';
+    w.innerHTML = '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '">' + d + "</svg>";
+    w.style.setProperty("--bc", color);
+    return w;
+  }
+  function branchFor(path) { return BRANCH[String(path || "").split("/")[0]] || BRANCH.brain; }
+  function words(tag, cls, t) { var n = el(tag, cls); n.textContent = t == null ? "" : String(t); return n; }
+  function ago(at) {
+    var t = Date.parse(at);
+    if (!t) return "";
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) { var m = Math.round(s / 60); return m + (m === 1 ? " minute ago" : " minutes ago"); }
+    if (s < 86400) { var h = Math.round(s / 3600); return h + (h === 1 ? " hour ago" : " hours ago"); }
+    var d = Math.round(s / 86400);
+    return d === 1 ? "yesterday" : d + " days ago";
+  }
+
+  function ensurePanel() {
+    if (panel && panel.isConnected) return panel;
+    panel = el("aside", "", { id: "bzAgentPanel", "aria-label": "Folders and history", tabindex: "-1" });
+    panel.hidden = true;
+    panelHead = el("div", "bzap-head");
+    panelBody = el("div", "bzap-body");
+    panelEdge = el("div", "bzap-edge", { role: "separator", "aria-orientation": "vertical", "aria-label": "Make this panel wider or narrower", tabindex: "0" });
+    panel.appendChild(panelHead);
+    panel.appendChild(panelBody);
+    panel.appendChild(panelEdge);
+    document.body.appendChild(panel);
+    wirePanel();
+    return panel;
+  }
+  function panelAgent() {
+    var id = S.panel.agentId;
+    return id === "bzilla" ? S.bzilla : byId(id);
+  }
+  function openPanel(id) {
+    if (!id) return;
+    ensurePanel();
+    var same = S.panel.agentId === id && S.panel.data && !S.panel.data.error;
+    S.panel.open = true;
+    S.panel.agentId = id;
+    S.panel.view = "agent";
+    S.panel.folder = null;
+    S.panel.info = null;
+    if (!same) S.panel.data = null;
+    root.classList.add("bz-agent-panel");
+    root.style.setProperty("--bzap-w", S.panel.width + "px");
+    clearHighlight();
+    renderPanel();
+    loadPanel(id);
+  }
+  function loadPanel(id) {
+    var seq = ++S.panel.seq;
+    return api("GET", BRAIN_API + "/agent/" + encodeURIComponent(id)).then(function (res) {
+      if (seq !== S.panel.seq || S.panel.agentId !== id) return;
+      S.panel.data = res.ok ? res.body : { error: (res.body && res.body.error) || "These folders couldn't be loaded just now." };
+      if (S.panel.view === "agent") renderPanel();
+    }).catch(function () {
+      if (seq !== S.panel.seq) return;
+      S.panel.data = { error: "Couldn't reach BeeZilla to load the folders. Try again in a moment." };
+      if (S.panel.view === "agent") renderPanel();
+    });
+  }
+  function closePanel() {
+    if (!S.panel.open) return;
+    S.panel.open = false;
+    S.panel.seq++;
+    root.classList.remove("bz-agent-panel");
+    clearHighlight();
+    if (panel) panel.hidden = true;
+    var item = rail && rail.querySelector('[data-agent="' + S.panel.agentId + '"]');
+    if (item) item.focus({ preventScroll: true });
+  }
+  function panelX() {
+    var x = el("button", "bzap-x", { type: "button", "aria-label": "Close this panel" });
+    x.innerHTML = "&#10005;";
+    x.setAttribute("data-panel-close", "1");
+    return x;
+  }
+  function section(title, hint) {
+    var sec = el("section", "bzap-sec");
+    sec.appendChild(words("h3", "bzap-h", title));
+    if (hint) sec.appendChild(words("p", "bzap-hint", hint));
+    panelBody.appendChild(sec);
+    return sec;
+  }
+  function folderButton(f) {
+    var b = el("button", "bzap-folder " + (f.hot ? "is-hot" : "is-grey"), { type: "button", "data-folder": f.path, title: "brain/" + f.path, draggable: "true" });
+    var br = branchFor(f.path);
+    b.style.setProperty("--bc", br.color);
+    b.appendChild(shapeEl(br.shape, br.color, 14));
+    var t = el("span", "bzap-ftext");
+    t.appendChild(words("span", "bzap-fname", f.label));
+    t.appendChild(words("span", "bzap-fpath", ["brain"].concat((f.crumbs || []).slice(0, -1)).join(" › ")));
+    b.appendChild(t);
+    if (f.total) b.appendChild(words("span", "bzap-count", f.total));
+    b.setAttribute("data-bz-card", JSON.stringify({ kind: "note", title: "Folder brain/" + f.path, body: (f.total === 1 ? "1 thing" : (f.total || 0) + " things") + " in it." }));
+    return b;
+  }
+  function sessionButton(sess) {
+    var b = el("button", "bzap-chat", { type: "button", "data-session": sess.id, draggable: "true" });
+    b.appendChild(words("span", "bzap-chat-title", sess.title || "Conversation"));
+    b.appendChild(words("span", "bzap-chat-sub", [ago(sess.updatedAt), sess.summary].filter(Boolean).join(" · ")));
+    b.setAttribute("data-bz-card", JSON.stringify({ kind: "note", title: String(sess.title || "Conversation").slice(0, 120), body: String(sess.summary || "").slice(0, 600) }));
+    return b;
+  }
+  function renderPanel() {
+    if (!panel) return;
+    panel.hidden = !S.panel.open;
+    if (!S.panel.open) return;
+    var a = panelAgent();
+    panelHead.textContent = "";
+    panelBody.textContent = "";
+    panel.style.setProperty("--c", safeColor(a ? a.color : "#ffd40d"));
+    if (S.panel.view === "folder") { renderFolderView(a); return; }
+    var name = a ? a.name : "This agent";
+    panel.setAttribute("aria-label", name + ": folders and history");
+    if (a) panelHead.appendChild(avatar(a, 42));
+    var ttl = el("div", "bzap-title");
+    ttl.appendChild(words("h2", "bzap-name", name));
+    ttl.appendChild(words("p", "bzap-job", a ? jobWords(a) : ""));
+    panelHead.appendChild(ttl);
+    panelHead.appendChild(panelX());
+    var d = S.panel.data;
+    if (!d) { panelBody.appendChild(words("p", "bzap-note", "Loading " + name + "'s folders…")); return; }
+    if (d.error) { panelBody.appendChild(words("p", "bzap-note", d.error)); return; }
+    var bz = isBz(a);
+    var sec = section("Folders", bz ? "Lit: where BeeZilla works most. She can reach every folder." : "Lit: where " + name + " often works. Grey: the rest of your brain.");
+    var folders = Array.isArray(d.folders) ? d.folders : [];
+    var hot = folders.filter(function (f) { return f.hot; });
+    var grey = folders.filter(function (f) { return !f.hot; });
+    var ul = el("ul", "bzap-list", { "aria-label": "Folders " + name + " works in" });
+    hot.forEach(function (f) { var li = el("li"); li.appendChild(folderButton(f)); ul.appendChild(li); });
+    sec.appendChild(ul);
+    if (!hot.length) sec.appendChild(words("p", "bzap-note", "None yet. As you talk to " + name + ", the folders it works in light up here."));
+    if (grey.length) {
+      sec.appendChild(words("p", "bzap-sep", "The rest of your brain"));
+      var ul2 = el("ul", "bzap-list is-grey", { "aria-label": "The rest of your brain" });
+      grey.forEach(function (f) { var li = el("li"); li.appendChild(folderButton(f)); ul2.appendChild(li); });
+      sec.appendChild(ul2);
+    }
+    var hist = section("History", bz ? "Your recent conversations with BeeZilla." : "Your recent conversations with " + name + ".");
+    var hs = Array.isArray(d.history) ? d.history : [];
+    if (!hs.length) hist.appendChild(words("p", "bzap-note", "No conversations yet. Press Talk to " + name + " at the top to start one."));
+    else {
+      var hl = el("ul", "bzap-list");
+      hs.forEach(function (sess) { var li = el("li"); li.appendChild(sessionButton(sess)); hl.appendChild(li); });
+      hist.appendChild(hl);
+    }
+    var links = el("div", "bzap-links");
+    var all = words("button", "bzap-link", "See all in History");
+    all.type = "button";
+    all.setAttribute("data-panel-history", "1");
+    var brainBtn = words("button", "bzap-link", "Open the whole brain");
+    brainBtn.type = "button";
+    brainBtn.setAttribute("data-folder", "");
+    links.appendChild(all);
+    links.appendChild(brainBtn);
+    panelBody.appendChild(links);
+  }
+  // A folder's crumbs and label before its info is in: from the agent's list, else from its path.
+  function folderMeta(path) {
+    var f = (S.panel.data && S.panel.data.folders || []).filter(function (x) { return x.path === path; })[0];
+    if (f) return { label: f.label, crumbs: f.crumbs };
+    if (S.panel.info && S.panel.info.folder && S.panel.info.folder.path === path) return { label: S.panel.info.folder.label, crumbs: S.panel.info.crumbs };
+    var parts = path.split("/");
+    return { label: parts[parts.length - 1].replace(/-/g, " "), crumbs: parts.map(function (p) { return p.replace(/-/g, " "); }) };
+  }
+  function renderFolderView(a) {
+    var path = S.panel.folder;
+    var meta = folderMeta(path);
+    var br = branchFor(path);
+    panel.setAttribute("aria-label", "Folder brain/" + path);
+    var back = el("button", "bzap-back", { type: "button", "aria-label": "Back to " + (a ? a.name : "the agent") + "'s folders", "data-panel-back": "1" });
+    back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
+    panelHead.appendChild(back);
+    panelHead.appendChild(shapeEl(br.shape, br.color, 28));
+    var ttl = el("div", "bzap-title");
+    ttl.appendChild(words("h2", "bzap-name", meta.label));
+    ttl.appendChild(words("p", "bzap-job", "brain/" + path));
+    panelHead.appendChild(ttl);
+    panelHead.appendChild(panelX());
+    // The way back up, one step at a time, always to brain.
+    var nav = el("nav", "bzap-crumbs", { "aria-label": "Where this folder is" });
+    var parts = path.split("/");
+    var trail = [""].concat(parts.map(function (_, i) { return parts.slice(0, i + 1).join("/"); }));
+    trail.forEach(function (p, i) {
+      if (i) nav.appendChild(words("span", "bzap-crumb-sep", "›"));
+      var b = el("button", "bzap-crumb" + (p === path ? " is-here" : ""), { type: "button", "data-folder": p });
+      var bb = branchFor(p);
+      b.style.setProperty("--bc", bb.color);
+      b.appendChild(shapeEl(bb.shape, bb.color, 12));
+      b.appendChild(words("span", "", i === 0 ? "brain" : (meta.crumbs && meta.crumbs[i - 1]) || p.split("/").pop()));
+      nav.appendChild(b);
+    });
+    panelBody.appendChild(nav);
+    var info = S.panel.info && S.panel.info.folder && S.panel.info.folder.path === path ? S.panel.info : null;
+    var who = section("Works here", "The bots that work in this folder most. They light up in the strip.");
+    if (!info) who.appendChild(words("p", "bzap-note", "Looking…"));
+    else if (!info.workers.length) who.appendChild(words("p", "bzap-note", "Nobody works here yet."));
+    else {
+      var wl = el("ul", "bzap-list");
+      info.workers.forEach(function (w) {
+        var li = el("li");
+        var b = el("button", "bzap-worker", { type: "button", "data-worker": w.id });
+        b.style.setProperty("--c", safeColor(w.color));
+        var me = byId(w.id) || (w.id === "bzilla" ? S.bzilla : null);
+        b.appendChild(me ? avatar(me, 30) : el("img", "", { src: safeImage(w.image), alt: "" }));
+        var t = el("span", "bzap-ftext");
+        t.appendChild(words("span", "bzap-fname", w.name));
+        t.appendChild(words("span", "bzap-fpath", w.id === "bzilla" ? "your executive assistant" : (w.role ? "helps with " + w.role : "waiting for a job")));
+        b.appendChild(t);
+        li.appendChild(b);
+        wl.appendChild(li);
+      });
+      who.appendChild(wl);
+    }
+    var rec = section("Recent sessions", "Conversations about this folder, newest first.");
+    if (info && info.sessions.length) {
+      var sl = el("ul", "bzap-list");
+      info.sessions.forEach(function (sess) { var li = el("li"); li.appendChild(sessionButton(sess)); sl.appendChild(li); });
+      rec.appendChild(sl);
+    } else if (info) rec.appendChild(words("p", "bzap-note", "No conversations about it yet."));
+    var links = el("div", "bzap-links");
+    var show = words("button", "bzap-link", "Show it in Memory");
+    show.type = "button";
+    show.setAttribute("data-panel-show", path);
+    links.appendChild(show);
+    panelBody.appendChild(links);
+  }
+
+  // Light up the bots that work in the folder in view; the others step back.
+  function highlight(workers) {
+    S.highlight = (workers || []).map(function (w) { return w.id; });
+    paintHighlight();
+  }
+  function paintHighlight() {
+    if (!rail) return;
+    var on = S.highlight;
+    root.classList.toggle("bzag-folder-focus", !!on);
+    Array.prototype.forEach.call(rail.querySelectorAll(".bzag-item[data-agent]"), function (n) {
+      var lit = !!on && on.indexOf(n.getAttribute("data-agent")) >= 0;
+      n.classList.toggle("bzag-works", lit);
+    });
+  }
+  function clearHighlight() { S.highlight = null; paintHighlight(); }
+
+  function fetchFolder(path) {
+    var seq = ++S.folderSeq;
+    return api("GET", BRAIN_API + "/folder?path=" + encodeURIComponent(path)).then(function (res) {
+      if (seq !== S.folderSeq || !res.ok) return;
+      takeFolder(path, res.body);
+    }).catch(function () { /* the folder view stays as it is */ });
+  }
+  function takeFolder(path, info) {
+    if (!info) return;
+    S.panel.info = info;
+    highlight(info.workers || []);
+    if (S.panel.open && S.panel.view === "folder" && S.panel.folder === path) renderPanel();
+  }
+  // A folder chosen: from the panel (opens the Memory tab there too) or from the Memory tab
+  // itself (fromBrain: it is already showing, and it sends the folder's info along).
+  function showFolder(path, info, fromBrain) {
+    var p = String(path || "");
+    if (!p) {
+      if (S.panel.open && S.panel.view === "folder") { S.panel.view = "agent"; S.panel.folder = null; renderPanel(); }
+      clearHighlight();
+      if (!fromBrain) brainShow("");
+      return;
+    }
+    if (S.panel.open) {
+      S.panel.view = "folder";
+      S.panel.folder = p;
+      if (!(S.panel.info && S.panel.info.folder && S.panel.info.folder.path === p)) S.panel.info = null;
+      renderPanel();
+    }
+    if (info) takeFolder(p, info);
+    else fetchFolder(p);
+    if (!fromBrain) brainShow(p);
+  }
+  function backToAgent() {
+    S.panel.view = "agent";
+    S.panel.folder = null;
+    clearHighlight();
+    renderPanel();
+    var first = panelBody && panelBody.querySelector(".bzap-folder");
+    if (first) first.focus({ preventScroll: true });
+  }
+  function brainShow(path) {
+    if (window.BeeZillaBrain && window.BeeZillaBrain.show) { window.BeeZillaBrain.show(path); return; }
+    loadBrainKit().then(function () { if (window.BeeZillaBrain) window.BeeZillaBrain.show(path); });
+  }
+  // brain.js and brain.css: the Memory tab's explorer, loaded once for the whole document.
+  var brainKit = null;
+  function loadBrainKit() {
+    if (window.BeeZillaBrain) return Promise.resolve();
+    if (brainKit) return brainKit;
+    brainKit = new Promise(function (resolve) {
+      if (!document.getElementById("bzBrainCss")) {
+        var css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = "/buzzy/brain.css";
+        css.id = "bzBrainCss";
+        (document.head || document.documentElement).appendChild(css);
+      }
+      var js = document.getElementById("bzBrainJs");
+      if (!js) {
+        js = document.createElement("script");
+        js.id = "bzBrainJs";
+        js.src = "/buzzy/brain.js";
+        (document.head || document.documentElement).appendChild(js);
+      }
+      js.addEventListener("load", function () { resolve(); });
+      js.addEventListener("error", function () { resolve(); });
+      if (window.BeeZillaBrain) resolve();
+    });
+    return brainKit;
+  }
+  // Open one of the conversations listed in the panel: Talk, then that conversation.
+  function openChat(sessionId) {
+    if (!sessionId) return;
+    if (phone.matches) closePanel();
+    var sh = window.BeeZillaShell;
+    var moved = sh && sh.go ? Promise.resolve(sh.go(TALK)) : Promise.resolve();
+    moved.then(whenTalk).then(function (talk) {
+      if (talk && window.bzOpenSession) {
+        window.bzOpenSession({ id: sessionId });
+        try { localStorage.setItem("bz_session_id", sessionId); } catch { /* private mode */ }
+        try { window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" }); } catch { window.scrollTo(0, 0); }
+      }
+    });
+  }
+  function onPanelKey(e) {
+    if (e.key !== "Escape" || !S.panel.open || e.defaultPrevented) return;
+    if ((modal && modal.classList.contains("open")) || hiveWin || document.querySelector(".bzb-modal")) return;
+    var t = e.target;
+    var typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+    var mine = t && ((panel && panel.contains(t)) || (rail && rail.contains(t)));
+    // Esc while typing in Talk is Talk's; anywhere else it is the panel's: back one step, then shut.
+    if (typing && !mine) return;
+    e.preventDefault();
+    if (S.panel.view === "folder") backToAgent();
+    else closePanel();
+  }
+  function wirePanel() {
+    panel.addEventListener("click", function (e) {
+      var t = e.target;
+      if (t.closest("[data-panel-close]")) { closePanel(); return; }
+      if (t.closest("[data-panel-back]")) { backToAgent(); return; }
+      var f = t.closest("[data-folder]");
+      if (f) { showFolder(f.getAttribute("data-folder"), null, false); return; }
+      var show = t.closest("[data-panel-show]");
+      if (show) { brainShow(show.getAttribute("data-panel-show")); return; }
+      var chat = t.closest("[data-session]");
+      if (chat) { openChat(chat.getAttribute("data-session")); return; }
+      var w = t.closest("[data-worker]");
+      if (w) { var who = w.getAttribute("data-worker"); openAgent(who === "bzilla" ? S.bzilla : byId(who)); return; }
+      if (t.closest("[data-panel-history]")) {
+        if (window.bzBrowseSelect) window.bzBrowseSelect("history");
+        setTimeout(function () {
+          var pane = document.querySelector(".bz-pane") || document.getElementById("bzPane");
+          if (pane && pane.scrollIntoView) try { pane.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" }); } catch { /* old browsers */ }
+        }, 350);
+      }
+    });
+    panel.addEventListener("dragstart", function (e) {
+      var n = e.target.closest && e.target.closest("[data-bz-card]");
+      if (!n) return;
+      try { e.dataTransfer.setData("application/x-beezilla-card", n.getAttribute("data-bz-card")); e.dataTransfer.effectAllowed = "copy"; } catch { /* best effort */ }
+    });
+    document.addEventListener("keydown", onPanelKey, true);
+    // Its right edge: drag it (or the arrow keys on it) for a wider or narrower panel.
+    panelEdge.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      panelEdge.setPointerCapture(e.pointerId);
+      panel.classList.add("bzap-sizing");
+      root.classList.remove("bz-agents-anim");
+    });
+    panelEdge.addEventListener("pointermove", function (e) {
+      if (!panel.classList.contains("bzap-sizing")) return;
+      var left = panel.getBoundingClientRect().left;
+      S.panel.width = Math.max(PANEL_MIN, Math.min(PANEL_MAX, Math.round(e.clientX - left)));
+      root.style.setProperty("--bzap-w", S.panel.width + "px");
+    });
+    function endPanelSize(e) {
+      if (!panel.classList.contains("bzap-sizing")) return;
+      panel.classList.remove("bzap-sizing");
+      root.classList.add("bz-agents-anim");
+      try { panelEdge.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      lsSet(LS_PW, String(S.panel.width));
+    }
+    panelEdge.addEventListener("pointerup", endPanelSize);
+    panelEdge.addEventListener("pointercancel", endPanelSize);
+    panelEdge.addEventListener("keydown", function (e) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      S.panel.width = Math.max(PANEL_MIN, Math.min(PANEL_MAX, S.panel.width + (e.key === "ArrowRight" ? 16 : -16)));
+      root.style.setProperty("--bzap-w", S.panel.width + "px");
+      lsSet(LS_PW, String(S.panel.width));
+    });
+  }
+
   // ── the strip: build, open, size ─────────────────────────────────────────
   function build() {
     if (rail) return;
@@ -796,6 +1260,8 @@
   function openAgent(a, opts) {
     if (!a) return;
     if (phone.matches) closeDrawer();
+    // Its folders and History, beside the strip (the panel). From a link (?agent=) too.
+    openPanel(isBz(a) ? "bzilla" : a.id);
     var sh = window.BeeZillaShell;
     var moved = sh && sh.go ? Promise.resolve(sh.go(TALK)) : Promise.resolve();
     moved.then(whenTalk).then(function (talk) {
@@ -842,7 +1308,7 @@
     var input = document.getElementById("chatInput");
     if (!agent) {
       root.removeAttribute("data-bz-agent");
-      ["--bzag", "--bzag-hi", "--bzag-lo", "--bzag-glow", "--bzag-glow-strong", "--bzag-ink"].forEach(function (k) { root.style.removeProperty(k); });
+      ["--bzag", "--bzag-hi", "--bzag-lo", "--bzag-glow", "--bzag-glow-strong", "--bzag-ink", "--bzag-text"].forEach(function (k) { root.style.removeProperty(k); });
       if (brand) {
         var s0 = brand.querySelector("strong");
         if (s0 && brand.getAttribute("data-bzag-name")) s0.textContent = brand.getAttribute("data-bzag-name");
@@ -857,6 +1323,7 @@
       }
       S.current = "bzilla";
       markCurrent();
+      followInPanel();
       return;
     }
     var c = safeColor(agent.color);
@@ -868,6 +1335,7 @@
     root.style.setProperty("--bzag-glow", "rgba(" + rg.join(",") + ",0.45)");
     root.style.setProperty("--bzag-glow-strong", "rgba(" + rg.join(",") + ",0.75)");
     root.style.setProperty("--bzag-ink", inkFor(c));
+    root.style.setProperty("--bzag-text", readable(c));
     if (brand) {
       var strong = brand.querySelector("strong");
       if (strong) {
@@ -898,6 +1366,12 @@
     }
     S.current = agent.id;
     markCurrent();
+    followInPanel();
+  }
+  // A conversation opened from History belongs to someone: an open panel that shows an agent
+  // shows that one now. A panel on a folder stays on its folder.
+  function followInPanel() {
+    if (S.panel.open && S.panel.view === "agent" && S.panel.agentId !== S.current) openPanel(S.current);
   }
   function markCurrent() {
     if (!rail) return;
@@ -920,6 +1394,8 @@
     if (!found) S.agents.push(a);
     render();
     if (S.current === a.id) paint(a);
+    // Its job or its folders may have changed: the panel reads them again.
+    if (S.panel.open && S.panel.agentId === a.id) { if (S.panel.view === "agent") renderPanel(); loadPanel(a.id); }
   }
   function noteSession(id, sessionId) {
     var a = byId(id);
@@ -1129,7 +1605,7 @@
   }
 
   function editDialog(agent, opener) {
-    var draft = { name: agent.name, role: agent.role || "", face: agent.face || "", look: agent.look || "", color: safeColor(agent.color), size: agent.size || "m" };
+    var draft = { name: agent.name, role: agent.role || "", face: agent.face || "", look: agent.look || "", color: safeColor(agent.color), size: agent.size || "m", creature: agent.creature || "bunny", domains: (agent.domains || []).slice() };
     var box = el("div", "bzag-box", { role: "dialog", "aria-modal": "true", "aria-labelledby": "bzagTitle" });
     var head = el("div", "bzag-head");
     var pic = el("img", "", { alt: "", src: safeImage(agent.image) });
@@ -1163,6 +1639,45 @@
     faceWrap.appendChild(faces);
     box.appendChild(faceWrap);
 
+    // Picture: which Zilla it looks like (owner, 2026-11-23: "The avatar of the bot, which you
+    // can change. We want to give users a sense of being able to control their environment").
+    var picWrap = el("div", "bzag-field", { role: "group", "aria-label": "Picture" });
+    var pl = el("span"); pl.textContent = "Picture";
+    var pics = el("div", "bzag-pics");
+    function picSrc(creature) { return "/buzzy/zillas/" + creature + (draft.look ? "-" + draft.look : "") + ".webp"; }
+    function paintPics() {
+      Array.prototype.forEach.call(pics.children, function (b) {
+        var id = b.getAttribute("data-creature");
+        b.setAttribute("aria-pressed", String(id === draft.creature));
+        var im = b.querySelector("img");
+        if (im) im.setAttribute("src", picSrc(id));
+      });
+    }
+    (S.creatures.length ? S.creatures : [{ id: draft.creature, name: agent.name, color: agent.color }]).forEach(function (c) {
+      var b = el("button", "bzag-pick", { type: "button", "data-creature": c.id, "aria-pressed": "false", "aria-label": "Look like " + (c.name || c.id), title: c.name || c.id });
+      b.appendChild(el("img", "", { src: picSrc(c.id), alt: "", draggable: "false" }));
+      b.addEventListener("click", function () {
+        draft.creature = c.id;
+        // The plain yellow bee is BeeZilla herself: a bee agent always wears a colour.
+        if (c.id === "bee" && !draft.look) {
+          var first = S.colors[0];
+          if (first) { draft.look = first.name; draft.color = first.hex; }
+          msg.textContent = "The plain yellow bee is BeeZilla herself, so this one wears a colour.";
+        }
+        own = c.color || own;
+        var origin = swatches.firstChild;
+        if (origin) origin.style.setProperty("--c", own || "#ffd40d");
+        if (!draft.look) draft.color = own || draft.color;
+        pic.setAttribute("src", picSrc(c.id));
+        paintPics();
+        paintSwatches();
+      });
+      pics.appendChild(b);
+    });
+    picWrap.appendChild(pl); picWrap.appendChild(pics);
+    box.appendChild(picWrap);
+    paintPics();
+
     // Colony: the same move as dragging, for the keyboard and for a phone.
     var colonySel = el("select", "bzag-select");
     var optNone = el("option", "", { value: "" }); optNone.textContent = "On its own";
@@ -1177,7 +1692,7 @@
     var sl = el("span"); sl.textContent = "Colour";
     var swatches = el("div", "bzag-swatches");
     var picks = [{ name: "", hex: null }].concat(S.colors.map(function (c) { return { name: c.name, hex: c.hex }; }));
-    var own = (S.creatures.filter(function (c) { return c.id === agent.creature; })[0] || {}).color;
+    var own = (S.creatures.filter(function (c) { return c.id === agent.creature; })[0] || {}).color || safeColor(agent.color);
     function paintSwatches() {
       Array.prototype.forEach.call(swatches.children, function (b, i) {
         var p = picks[i];
@@ -1190,9 +1705,10 @@
       b.addEventListener("click", function () {
         draft.look = p.name;
         draft.color = p.hex || own || draft.color;
-        var base = agent.creature || "bunny";
+        var base = draft.creature || agent.creature || "bunny";
         pic.setAttribute("src", "/buzzy/zillas/" + base + (p.name ? "-" + p.name : "") + ".webp");
         paintSwatches();
+        paintPics();
       });
       swatches.appendChild(b);
     });
@@ -1214,6 +1730,58 @@
     });
     sizeWrap.appendChild(zl); sizeWrap.appendChild(sizes);
     box.appendChild(sizeWrap);
+
+    // Folders it works in: its domains of expertise in the brain (owner: "give them defined
+    // domains of expertise"). They light up in its panel, and it is listed as working there.
+    var domWrap = el("div", "bzag-field", { role: "group", "aria-label": "Folders it works in" });
+    var dl = el("span"); dl.textContent = "Folders it works in";
+    var chips = el("div", "bzag-domains");
+    var addLine = el("div", "bzag-domain-add");
+    var folderSel = el("select", "bzag-select", { "aria-label": "Add a folder of the brain" });
+    var firstOpt = el("option", "", { value: "" }); firstOpt.textContent = "Add a folder…";
+    folderSel.appendChild(firstOpt);
+    var subject = el("input", "", { type: "text", maxlength: "40", autocomplete: "off", placeholder: "or a new subject, like taxes", "aria-label": "A new subject for it to work in" });
+    var addDomain = el("button", "bzag-btn", { type: "button" }); addDomain.textContent = "Add";
+    addLine.appendChild(folderSel); addLine.appendChild(subject); addLine.appendChild(addDomain);
+    function slugify(t) {
+      return String(t || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/g, "");
+    }
+    function paintDomains() {
+      chips.textContent = "";
+      if (!draft.domains.length) { var none = el("p", "bzag-note"); none.textContent = "None yet. Add the folders it should work in."; chips.appendChild(none); }
+      draft.domains.forEach(function (d) {
+        var chip = el("span", "bzag-domain");
+        var br = branchFor(d);
+        chip.style.setProperty("--bc", br.color);
+        chip.appendChild(shapeEl(br.shape, br.color, 12));
+        var t = el("span"); t.textContent = "brain/" + d;
+        chip.appendChild(t);
+        var x = el("button", "bzag-domain-x", { type: "button", "aria-label": "Take brain/" + d + " off its folders" });
+        x.innerHTML = "&#10005;";
+        x.addEventListener("click", function () { draft.domains = draft.domains.filter(function (o) { return o !== d; }); paintDomains(); });
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      });
+    }
+    addDomain.addEventListener("click", function () {
+      var want = subject.value.trim() ? "knowledge/" + slugify(subject.value) : folderSel.value;
+      if (!want || want === "knowledge/") return;
+      if (draft.domains.indexOf(want) < 0 && draft.domains.length < 12) draft.domains.push(want);
+      subject.value = "";
+      folderSel.value = "";
+      paintDomains();
+    });
+    api("GET", BRAIN_API + "/agent/" + encodeURIComponent(agent.id)).then(function (res) {
+      if (!res.ok || !Array.isArray(res.body.folders)) return;
+      res.body.folders.slice().sort(function (a, b) { return a.path.localeCompare(b.path); }).forEach(function (f) {
+        if (/^systems\/bots\//.test(f.path)) return;
+        var o = el("option", "", { value: f.path }); o.textContent = "brain/" + f.path;
+        folderSel.appendChild(o);
+      });
+    }).catch(function () { /* the new-subject box still works */ });
+    domWrap.appendChild(dl); domWrap.appendChild(chips); domWrap.appendChild(addLine);
+    box.appendChild(domWrap);
+    paintDomains();
 
     var msg = el("p", "bzag-msg", { role: "status", "aria-live": "polite" });
     box.appendChild(msg);
@@ -1243,6 +1811,7 @@
         var wasCurrent = S.current === agent.id;
         render();
         closeModal();
+        if (S.panel.open && S.panel.agentId === agent.id) closePanel();
         if (wasCurrent && window.BeeZillaTalk && window.BeeZillaTalk.talkAs) window.BeeZillaTalk.talkAs(null);
       }).catch(function () { del.disabled = false; msg.textContent = "Couldn't reach BeeZilla. Try again."; });
     });
@@ -1254,6 +1823,13 @@
       if (role.value.trim() !== (agent.role || "")) patch.role = role.value.trim();
       if (face.value.trim() !== (agent.face || "")) patch.face = face.value.trim();
       if (draft.look !== (agent.look || "")) { patch.look = draft.look; patch.color = draft.color; }
+      if (draft.creature !== (agent.creature || "")) {
+        // A new picture: the server gives it that Zilla's colour, unless a colour was picked too.
+        patch.creature = draft.creature;
+        patch.look = draft.look;
+        if (draft.look === (agent.look || "")) delete patch.color;
+      }
+      if (draft.domains.join("|") !== (agent.domains || []).join("|")) patch.domains = draft.domains.slice();
       if (draft.size !== (agent.size || "m")) patch.size = draft.size;
       var wantColony = colonySel.value;
       var colonyChanged = wantColony !== (agent.colonyId && colonyById(agent.colonyId) ? agent.colonyId : "");
@@ -1394,6 +1970,20 @@
     // /buzzy/talk?agent=<id> (a link, or the fallback above): Talk opens as that agent.
     var wanted = null;
     try { wanted = /^\/buzzy(\/talk)?$/.test(pathNow()) ? new URLSearchParams(location.search).get("agent") : null; } catch { wanted = null; }
+    var pw = parseInt(lsGet(LS_PW) || "", 10);
+    if (pw >= PANEL_MIN && pw <= PANEL_MAX) S.panel.width = pw;
+    loadBrainKit();
+    // The Memory tab chose a folder: light up the bots that work there, and the panel follows.
+    window.addEventListener("bz:brain-folder", function (e) {
+      var d = (e && e.detail) || {};
+      if (d.from !== "brain") return;
+      if (d.closed) { if (!(S.panel.open && S.panel.view === "folder")) clearHighlight(); return; }
+      showFolder(d.path || "", d.info || null, true);
+    });
+    // BeeZilla made an agent in a turn (make_agent): the strip reads the list again.
+    window.addEventListener("bz:agents", function () {
+      load().then(function () { if (S.panel.open) loadPanel(S.panel.agentId); });
+    });
     load().then(function () {
       if (!rail) return;
       root.classList.add("bz-has-agents");
@@ -1417,6 +2007,16 @@
     noteSession: noteSession,
     refresh: load,
     hive: openHive,
+    // The panel (folders and History) and the Memory tab's way back in.
+    panel: function (id) { openPanel(id || S.current || "bzilla"); },
+    closePanel: closePanel,
+    showFolder: function (path) { showFolder(path, null, false); },
+    edit: function (id, opener) { var a = byId(id); if (a && !isBz(a)) editDialog(a, opener || null); },
+    // Who the person is talking to and the folder in view, for the History tab's filter.
+    focus: function () {
+      var a = S.current && S.current !== "bzilla" ? byId(S.current) : null;
+      return { agent: a ? { id: a.id, name: a.name } : null, folder: S.panel.open && S.panel.view === "folder" ? S.panel.folder : null };
+    },
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);

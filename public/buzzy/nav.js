@@ -2171,8 +2171,9 @@
         // So do the chrome's header and the website's header (#bzHead): they stay
         // above every page, in that order. The Feedback panel and the tooltip too.
         if (k.id === "bzHead" || k.id === "bzFeedback" || k.id === "bzTip" || k.id === "bzHeadSoon") return;
-        // The Zilla agents (agents.js): the strip down the left, its phone tab and its dialog.
-        if (k.id === "bzAgents" || k.id === "bzAgentsTab" || k.id === "bzAgentsModal" || k.id === "bzHive") return;
+        // The Zilla agents (agents.js): the strip down the left, its phone tab, its dialog, the
+        // Hive window and the panel of an agent's folders and History.
+        if (k.id === "bzAgents" || k.id === "bzAgentsTab" || k.id === "bzAgentsModal" || k.id === "bzHive" || k.id === "bzAgentPanel") return;
         if (k.tagName === "HEADER" && k.querySelector("#bzChrome, #bzNav")) return;
         // Scripts stay where they ran; moving them changes nothing but the markup.
         if (k.tagName === "SCRIPT") return;
@@ -2397,7 +2398,7 @@
   // Left on <body>: the shell's own nodes, the chrome (its header, the settings dock,
   // the Feedback panel), BeeZilla's step-by-step card (pilot.js styles itself and
   // follows its own "go" steps across pages), and tags that draw nothing.
-  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback", "bzHead", "bzTip", "bzAgents", "bzAgentsTab", "bzAgentsModal", "bzHive"];
+  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback", "bzHead", "bzTip", "bzAgents", "bzAgentsTab", "bzAgentsModal", "bzHive", "bzAgentPanel"];
   function adoptStrays(page) {
     if (!page) return;
     Array.prototype.slice.call(document.body.children).forEach(function (n) {

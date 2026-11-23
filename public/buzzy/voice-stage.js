@@ -363,6 +363,11 @@
     if ((data.tools || []).some(function (t) { return t && /^ask_(bzilla|agent)$/.test(t.name); })) {
       try { window.dispatchEvent(new CustomEvent("bz:hive")); } catch (_) { /* old browsers */ }
     }
+    // BeeZilla made a new agent (make_agent, orchestrate.ts): the strip reads the list again so it
+    // shows up at once, and the Hive has a line about it.
+    if ((data.tools || []).some(function (t) { return t && t.name === "make_agent"; })) {
+      try { window.dispatchEvent(new CustomEvent("bz:agents")); window.dispatchEvent(new CustomEvent("bz:hive")); } catch (_) { /* old browsers */ }
+    }
     var outs = [];
     (data.artifacts || []).forEach(function (a) { if (a && a.url) outs.push({ url: a.url, title: a.name, contentType: a.contentType }); });
     [data.audio, data.image].forEach(function (a) { if (a && a.url) outs.push({ url: a.url, title: a.name, contentType: a.type }); });

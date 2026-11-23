@@ -1,0 +1,136 @@
+/* The brain: the Memory tab's folder tree (brain.js).
+ *
+ * Owner, 2026-11-23: "using colors and shapes to help ground people's thinking and where they
+ * are in the greater tree of knowledge… you need to be able to just understand it logically,
+ * step by step." Each branch keeps one colour and one shape everywhere (--bc on the element):
+ * brain pink hexagon, knowledge blue circle, systems teal square, assets violet triangle.
+ *
+ * Pages style bare `button`, `h2` and `pre` (Talk paints every button yellow), so every rule
+ * here is under .bzb and resets what it uses. This sheet is the document's (agents.js loads it),
+ * never switched off between pages. */
+
+.bzb { --bzb-line: #262626; --bzb-panel: #121212; --bzb-text: #f0f0f0; --bzb-muted: #9b9b9b; --here: #F472B6;
+  position: relative; color: var(--bzb-text); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px; line-height: 1.45; text-align: left; margin: 0.4rem 0 2rem; }
+.bzb *, .bzb *::before, .bzb *::after { box-sizing: border-box; }
+.bzb button { all: unset; box-sizing: border-box; cursor: pointer; font: inherit; color: inherit; }
+.bzb button:focus-visible { outline: 2px solid var(--bzag-text, #ffd40d); outline-offset: 2px; border-radius: 6px; }
+.bzb .bzb-shape { display: inline-flex; flex: 0 0 auto; color: var(--bc, #F472B6); }
+.bzb .bzb-shape svg { display: block; fill: color-mix(in srgb, var(--bc, #F472B6) 28%, transparent); stroke: var(--bc, #F472B6); stroke-width: 2.2; }
+
+/* ── The top: where you are, and the tools ─────────────────────────────── */
+.bzb .bzb-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; justify-content: space-between;
+  padding: 10px 12px; border: 1px solid var(--bzb-line); border-radius: 14px; background: var(--bzb-panel); }
+.bzb .bzb-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.bzb .bzb-crumb { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; border: 1px solid transparent;
+  font-weight: 600; color: #dcdcdc; }
+.bzb .bzb-crumb:hover { border-color: color-mix(in srgb, var(--bc) 55%, transparent); background: color-mix(in srgb, var(--bc) 10%, transparent); }
+.bzb .bzb-crumb.is-here { color: #fff; border-color: color-mix(in srgb, var(--bc) 70%, transparent); background: color-mix(in srgb, var(--bc) 16%, transparent); }
+.bzb .bzb-sep { color: #5f5f5f; font-weight: 700; padding: 0 1px; }
+.bzb .bzb-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bzb .bzb-tidy-note { color: var(--bzb-muted); font-size: 12.5px; max-width: 46ch; }
+.bzb .bzb-btn { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 999px; border: 1px solid #3a3a3a; background: #181818;
+  font-size: 13px; font-weight: 600; color: #ececec; }
+.bzb .bzb-btn:hover { border-color: var(--bzag, #ffd40d); color: #fff; }
+.bzb .bzb-btn.primary { background: var(--bzag, #ffd40d); border-color: var(--bzag, #ffd40d); color: var(--bzag-ink, #141414); }
+.bzb .bzb-btn[disabled], .bzb .bzb-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+
+/* ── The tree and the folder page, side by side ────────────────────────── */
+.bzb .bzb-cols { display: flex; align-items: flex-start; gap: 14px; margin-top: 12px; }
+.bzb .bzb-tree { flex: 0 0 auto; width: 270px; min-width: 190px; max-width: 520px; max-height: 76vh; overflow: auto; resize: horizontal;
+  border: 1px solid var(--bzb-line); border-radius: 14px; background: var(--bzb-panel); padding: 8px 6px; position: sticky; top: 12px; }
+.bzb .bzb-tree ul { list-style: none; margin: 0; padding: 0; }
+.bzb .bzb-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px 5px calc(6px + var(--lvl, 0) * 16px); border-radius: 8px;
+  color: #d6d6d6; cursor: pointer; user-select: none; }
+.bzb .bzb-row:hover { background: #1b1b1b; color: #fff; }
+.bzb .bzb-row.is-here { background: color-mix(in srgb, var(--bc) 18%, #141414); color: #fff; box-shadow: inset 3px 0 0 var(--bc); font-weight: 600; }
+.bzb .bzb-row[draggable="true"] { cursor: grab; }
+.bzb .bzb-chev { display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; color: #8a8a8a; flex: 0 0 auto; }
+.bzb .bzb-chev svg { stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.12s ease; }
+.bzb .bzb-chev.is-leaf { visibility: hidden; }
+.bzb li[aria-expanded="true"] > .bzb-row .bzb-chev svg { transform: rotate(90deg); }
+.bzb .bzb-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bzb .bzb-count { flex: 0 0 auto; font-size: 11.5px; color: #8e8e8e; background: #1d1d1d; border-radius: 999px; padding: 0 7px; }
+
+.bzb .bzb-main { flex: 1 1 auto; min-width: 0; }
+.bzb .bzb-hero { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--bc) 45%, #262626); background: linear-gradient(180deg, color-mix(in srgb, var(--bc) 12%, #121212), #111 70%); }
+.bzb .bzb-hero .bzb-shape { margin-top: 2px; }
+.bzb .bzb-h2 { margin: 0; font-size: 1.35rem; line-height: 1.2; font-weight: 800; color: #fff; letter-spacing: 0; text-transform: none; border: 0; padding: 0; }
+.bzb .bzb-addr { margin: 4px 0 0; }
+.bzb .bzb-addr code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: color-mix(in srgb, var(--bc) 75%, #fff);
+  background: #0c0c0c; border: 1px solid #262626; border-radius: 6px; padding: 2px 7px; user-select: all; }
+.bzb .bzb-note { margin: 8px 0 0; color: #bdbdbd; font-size: 13.5px; max-width: 70ch; }
+.bzb .bzb-h3 { margin: 22px 0 8px; font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bzb-muted); font-weight: 700; border: 0; padding: 0; }
+.bzb .bzb-empty { color: var(--bzb-muted); margin: 16px 2px; }
+.bzb .bzb-msg { position: sticky; bottom: 12px; margin: 12px 0 0; padding: 8px 12px; border-radius: 10px; background: #1b1b1b; border: 1px solid #333; color: #eee; width: fit-content; }
+
+/* The three branches, at brain itself. */
+.bzb .bzb-branches { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 12px; }
+.bzb .bzb-branch { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 4px; align-items: center;
+  padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--bc) 50%, #262626); background: color-mix(in srgb, var(--bc) 8%, #121212); }
+.bzb .bzb-branch:hover { background: color-mix(in srgb, var(--bc) 16%, #121212); }
+.bzb .bzb-branch-name { font-weight: 800; font-size: 1.05rem; color: #fff; }
+.bzb .bzb-branch-count { grid-column: 2; font-size: 12px; color: color-mix(in srgb, var(--bc) 70%, #fff); }
+.bzb .bzb-branch-blurb { grid-column: 1 / -1; color: #bcbcbc; font-size: 13px; }
+
+/* Who works here. */
+.bzb .bzb-workers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.bzb .bzb-w-label { color: var(--bzb-muted); font-size: 12.5px; margin-right: 2px; }
+.bzb .bzb-worker { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; border-radius: 999px; border: 1px solid #333; background: #161616; font-size: 13px; }
+.bzb .bzb-worker.is-top { border-color: var(--c); box-shadow: 0 0 10px color-mix(in srgb, var(--c) 40%, transparent); }
+.bzb .bzb-worker img { width: 24px; height: 24px; object-fit: contain; display: block; }
+
+/* Folders inside this one. */
+.bzb .bzb-subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-top: 14px; }
+.bzb .bzb-sub-folder { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid #2a2a2a; background: #141414; cursor: grab; }
+.bzb .bzb-sub-folder:hover { border-color: var(--bc); }
+.bzb .bzb-sub-name { font-weight: 700; color: #f1f1f1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bzb .bzb-sub-count { grid-column: 2; color: var(--bzb-muted); font-size: 12px; }
+
+/* What is in it. */
+.bzb .bzb-sortbar { display: flex; gap: 4px; margin: 16px 0 6px; }
+.bzb .bzb-sort { padding: 3px 10px; border-radius: 999px; border: 1px solid #2f2f2f; font-size: 12.5px; color: #bbb; }
+.bzb .bzb-sort[aria-checked="true"] { color: #fff; border-color: var(--here); background: color-mix(in srgb, var(--here) 14%, transparent); }
+.bzb .bzb-items { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bzb .bzb-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid #252525; background: #131313; cursor: grab; }
+.bzb .bzb-item:active { cursor: grabbing; }
+.bzb .bzb-lead { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; background: #1b1b1b; display: inline-flex; align-items: center; justify-content: center; font-size: 17px; overflow: hidden; }
+.bzb .bzb-lead img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.bzb .bzb-mid { flex: 1 1 auto; min-width: 0; }
+.bzb .bzb-title { margin: 0; font-weight: 700; color: #f4f4f4; overflow-wrap: anywhere; }
+.bzb .bzb-body { margin: 3px 0 0; color: #e2e2e2; overflow-wrap: anywhere; }
+.bzb .bzb-sub { margin: 3px 0 0; color: var(--bzb-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.bzb .bzb-pin { margin: 4px 0 0; font-size: 12px; color: color-mix(in srgb, var(--here) 70%, #fff); }
+.bzb .bzb-md { margin: 6px 0 0; padding: 8px 10px; background: #0d0d0d; border: 1px solid #242424; border-radius: 8px; white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: #d9d9d9; max-height: 260px; overflow: auto; }
+.bzb .bzb-where { display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 12px; color: #a9a9a9; }
+.bzb .bzb-where:hover { color: #fff; }
+.bzb .bzb-acts { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 46%; }
+.bzb .bzb-act { padding: 4px 10px; border-radius: 999px; border: 1px solid #343434; font-size: 12.5px; color: #e9e9e9; background: #181818; }
+.bzb .bzb-act:hover { border-color: var(--bzag, #ffd40d); color: #fff; }
+
+/* Dialogs: only Esc or the X closes them (no click outside). */
+.bzb .bzb-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); padding: 16px; }
+.bzb .bzb-box { width: min(520px, 100%); max-height: 86vh; overflow: auto; resize: both; min-width: 280px; background: #141414; border: 1px solid #333; border-radius: 16px; padding: 16px 18px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+.bzb .bzb-box-head { display: flex; align-items: center; gap: 10px; }
+.bzb .bzb-box-title { margin: 0; flex: 1 1 auto; font-size: 1.05rem; font-weight: 800; color: #fff; text-transform: none; letter-spacing: 0; border: 0; padding: 0; }
+.bzb .bzb-x { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #333; color: #ddd; }
+.bzb .bzb-x:hover { border-color: #888; color: #fff; }
+.bzb .bzb-box-text { color: #bdbdbd; font-size: 13.5px; margin: 10px 0; }
+.bzb .bzb-box-msg { color: #ffb4a8; font-size: 13px; min-height: 1em; margin: 8px 0 0; }
+.bzb .bzb-box-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.bzb .bzb-gap { flex: 1 1 auto; }
+.bzb .bzb-select, .bzb .bzb-input { width: 100%; padding: 9px 11px; border-radius: 10px; border: 1px solid #3a3a3a; background: #0e0e0e; color: #f1f1f1; font: inherit; }
+.bzb .bzb-select:focus, .bzb .bzb-input:focus { outline: 2px solid var(--bzag-text, #ffd40d); outline-offset: 1px; }
+
+/* A phone: the tree sits above the folder page and scrolls inside itself. */
+@media (max-width: 700px) {
+  .bzb .bzb-cols { flex-direction: column; }
+  .bzb .bzb-tree { width: 100%; max-width: none; max-height: 40vh; position: static; resize: vertical; }
+  .bzb .bzb-item { flex-wrap: wrap; }
+  .bzb .bzb-acts { max-width: none; width: 100%; justify-content: flex-start; }
+  .bzb .bzb-tidy-note { max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { .bzb * { transition: none !important; } }

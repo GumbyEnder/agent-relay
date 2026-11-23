@@ -636,3 +636,174 @@ html[data-bz-agent] .bz-brand .bz-agent-face.is-picture { background-color: tran
 #bzAgentsModal .bzag-btn.danger { color: #ffb4b4; border-color: #5b2a2e; }
 #bzAgentsModal .bzag-btn.danger:hover { border-color: #ff7a7a; color: #ff9a9a; }
 #bzAgentsModal .bzag-btn[disabled] { opacity: 0.55; cursor: default; }
+
+/* ── The whole interface in the colour of the agent you are talking to ────
+   Owner, 2026-11-23: "You should also change the standard color based on the one you have
+   loaded of the button and the interface and all that. In this case, that color should be hex
+   B8591F for CodeMonkey." agents.js sets --bzag (the exact colour: the Talk button and the
+   underlines are filled with it) and --bzag-text (the same colour, lightened only as far as it
+   takes to read as words on the dark page). The site's own accent variables follow, on the page
+   and in the header's copy of Talk's sheets (where :root became #bzHead, so it is set there
+   too). The privacy modes never use these: Open stays green, Advocate yellow, Lockdown red. */
+html[data-bz-agent] {
+  --bz-yellow: var(--bzag-text, var(--bzag)) !important;
+  --bz-yellow-dim: var(--bzag-lo, var(--bzag)) !important;
+  --yellow: var(--bzag-text, var(--bzag)) !important;
+  --accent: var(--bzag-text, var(--bzag)) !important;
+  --ob-yellow: var(--bzag-text, var(--bzag)) !important;
+}
+html[data-bz-agent] #bzHead,
+html[data-bz-agent] .bz-talk-own {
+  --bz-yellow: var(--bzag-text, var(--bzag)) !important;
+  --bz-yellow-dim: var(--bzag-lo, var(--bzag)) !important;
+  --ob-yellow: var(--bzag-text, var(--bzag)) !important;
+}
+/* The yellow written into a few sheets by hand: the pane's links, back to top, the Feedback pill. */
+html[data-bz-agent] .bz-pane-link { color: var(--bzag-text, var(--bzag)) !important; }
+html[data-bz-agent] .bz-totop { background: var(--bzag) !important; color: var(--bzag-ink, #141414) !important; }
+html[data-bz-agent] #bzChrome button.bz-ask { background: var(--bzag) !important; color: var(--bzag-ink, #141414) !important; }
+/* The row of places: the open place's word and underline. */
+html[data-bz-agent] .bz-tabs button.on,
+html[data-bz-agent] .bz-tabs > button.here,
+html[data-bz-agent] .bz-places > a.on { color: var(--bzag-text, var(--bzag)) !important; }
+html[data-bz-agent] .bz-tabs button.on::after,
+html[data-bz-agent] .bz-tabs > button.here::after,
+html[data-bz-agent] .bz-places > a.on::after { background: var(--bzag) !important; }
+html[data-bz-agent] .bz-tabs button:focus-visible,
+html[data-bz-agent] .bz-places > a:focus-visible,
+html[data-bz-agent] #bzNav a:focus-visible,
+html[data-bz-agent] #bzHead :focus-visible { outline-color: var(--bzag-text, var(--bzag)) !important; }
+html[data-bz-agent] #bzNav a.active { color: var(--bzag-text, var(--bzag)) !important; }
+/* A warning stays a warning whoever is talking: the context meter keeps its yellow. */
+html[data-bz-agent] .ctx-meter.warn .ctx-bar > span { background: #FFC107 !important; }
+html[data-bz-agent] .ctx-meter.warn .ctx-text { color: #FFC107 !important; }
+
+/* ── The panel: an agent's folders and History, beside the strip ──────────
+   A column the width of --bzap-w, right of the strip; the page moves over for it, so it never
+   covers anything. Lit folders on top in their branch's colour and shape, the rest grey. */
+html.bz-has-agents.bz-agent-panel { padding-left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px)) !important; scroll-padding-left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px)); }
+html.bz-has-agents.bz-agent-panel #bzFeedback.min { left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px) + 1rem); }
+#bzAgentPanel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--bzag-w, 72px);
+  z-index: 43;
+  width: var(--bzap-w, 300px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #0f0f0f;
+  border-right: 1px solid #232323;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--c, #ffd40d) 70%, transparent);
+  color: #e8e8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: left;
+  transition: left 0.16s ease;
+}
+#bzAgentPanel[hidden] { display: none; }
+#bzAgentPanel *, #bzAgentPanel *::before, #bzAgentPanel *::after { box-sizing: border-box; }
+#bzAgentPanel button { all: unset; box-sizing: border-box; cursor: pointer; font: inherit; color: inherit; }
+#bzAgentPanel button:focus-visible { outline: 2px solid var(--bzag-text, #ffd40d); outline-offset: 2px; border-radius: 8px; }
+#bzAgentPanel .bzap-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 12px 14px; border-bottom: 1px solid #1f1f1f; }
+#bzAgentPanel .bzap-title { flex: 1 1 auto; min-width: 0; }
+#bzAgentPanel .bzap-name { margin: 0; font-size: 1.02rem; font-weight: 800; color: #fff; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; border: 0; padding: 0; }
+#bzAgentPanel .bzap-job { margin: 2px 0 0; color: #a5a5a5; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-x, #bzAgentPanel .bzap-back { flex: 0 0 auto; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #2f2f2f; color: #d8d8d8; }
+#bzAgentPanel .bzap-x:hover, #bzAgentPanel .bzap-back:hover { border-color: #777; color: #fff; }
+#bzAgentPanel .bzap-back svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+#bzAgentPanel .bzap-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px 18px; scrollbar-width: thin; }
+#bzAgentPanel .bzap-sec { margin-top: 12px; }
+#bzAgentPanel .bzap-h { margin: 0 4px; font-size: 11.5px; letter-spacing: 0.09em; text-transform: uppercase; color: #9a9a9a; font-weight: 800; border: 0; padding: 0; }
+#bzAgentPanel .bzap-hint { margin: 3px 4px 6px; color: #7f7f7f; font-size: 12px; }
+#bzAgentPanel .bzap-note { margin: 6px 4px; color: #9b9b9b; font-size: 12.5px; }
+#bzAgentPanel .bzap-sep { margin: 12px 4px 4px; color: #6f6f6f; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+#bzAgentPanel .bzap-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#bzAgentPanel .bzap-shape { display: inline-flex; flex: 0 0 auto; }
+#bzAgentPanel .bzap-shape svg { display: block; fill: color-mix(in srgb, var(--bc, #F472B6) 28%, transparent); stroke: var(--bc, #F472B6); stroke-width: 2.2; }
+#bzAgentPanel .bzap-folder, #bzAgentPanel .bzap-worker, #bzAgentPanel .bzap-chat {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px; border-radius: 10px; border: 1px solid transparent;
+}
+#bzAgentPanel .bzap-folder { cursor: pointer; }
+#bzAgentPanel .bzap-folder[draggable="true"]:active { cursor: grabbing; }
+#bzAgentPanel .bzap-folder.is-hot { background: color-mix(in srgb, var(--bc) 12%, #141414); border-color: color-mix(in srgb, var(--bc) 38%, transparent); color: #fff; }
+#bzAgentPanel .bzap-folder.is-hot:hover { background: color-mix(in srgb, var(--bc) 20%, #141414); }
+#bzAgentPanel .bzap-folder.is-grey { color: #8c8c8c; }
+#bzAgentPanel .bzap-folder.is-grey .bzap-shape svg { fill: transparent; stroke: #5d5d5d; }
+#bzAgentPanel .bzap-folder.is-grey:hover { color: #e2e2e2; background: #171717; }
+#bzAgentPanel .bzap-folder.is-grey:hover .bzap-shape svg { stroke: var(--bc); }
+#bzAgentPanel .bzap-ftext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+#bzAgentPanel .bzap-fname { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-fpath { font-size: 11.5px; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-folder.is-grey .bzap-fpath { color: #626262; }
+#bzAgentPanel .bzap-count { flex: 0 0 auto; font-size: 11.5px; color: #9a9a9a; background: #1c1c1c; border-radius: 999px; padding: 0 7px; }
+#bzAgentPanel .bzap-chat { flex-direction: column; align-items: flex-start; gap: 1px; }
+#bzAgentPanel .bzap-chat:hover, #bzAgentPanel .bzap-worker:hover { background: #181818; border-color: #2a2a2a; }
+#bzAgentPanel .bzap-chat-title { font-weight: 700; color: #f0f0f0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-chat-sub { font-size: 12px; color: #8d8d8d; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-worker { border-color: color-mix(in srgb, var(--c) 30%, transparent); }
+#bzAgentPanel .bzap-worker img { width: 30px; height: 30px; object-fit: contain; }
+#bzAgentPanel .bzap-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 10px 2px 0; }
+#bzAgentPanel .bzap-crumb { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; border: 1px solid #2a2a2a; font-size: 12.5px; color: #cfcfcf; }
+#bzAgentPanel .bzap-crumb:hover { border-color: var(--bc); color: #fff; }
+#bzAgentPanel .bzap-crumb.is-here { border-color: var(--bc); background: color-mix(in srgb, var(--bc) 16%, transparent); color: #fff; font-weight: 700; }
+#bzAgentPanel .bzap-crumb-sep { color: #555; font-weight: 700; }
+#bzAgentPanel .bzap-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 2px 0; }
+#bzAgentPanel .bzap-link { padding: 6px 11px; border-radius: 999px; border: 1px solid #333; font-size: 12.5px; font-weight: 600; color: #e9e9e9; }
+#bzAgentPanel .bzap-link:hover { border-color: var(--bzag-text, #ffd40d); color: #fff; }
+#bzAgentPanel .bzap-edge { position: absolute; top: 0; right: -4px; bottom: 0; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
+#bzAgentPanel .bzap-edge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background 0.14s ease; }
+#bzAgentPanel .bzap-edge:hover::after, #bzAgentPanel .bzap-edge:focus-visible::after, #bzAgentPanel.bzap-sizing .bzap-edge::after { background: var(--c, #ffd40d); }
+#bzAgentPanel.bzap-sizing, #bzAgentPanel.bzap-sizing * { transition: none !important; user-select: none; }
+/* An agent's face in the panel: the same picture, ring and corner Zilla as in the strip. */
+#bzAgentPanel .bzag-av { position: relative; flex: 0 0 auto; display: block; width: var(--s, 42px); height: var(--s, 42px); }
+#bzAgentPanel .bzag-pic { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+#bzAgentPanel .bzag-ring { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: color-mix(in srgb, var(--c, #ffd40d) 22%, #121212); border: 2px solid var(--c, #ffd40d); }
+#bzAgentPanel .bzag-face { font-size: calc(var(--s, 42px) * 0.52); line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif; }
+#bzAgentPanel .bzag-badge { position: absolute; right: -6px; bottom: -6px; width: calc(var(--s, 42px) * 0.52); height: calc(var(--s, 42px) * 0.52); object-fit: contain; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+
+/* The Hive window opens beside the panel when the panel is open, so neither covers the other. */
+html.bz-agent-panel #bzHive { left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px) + 18px); max-width: calc(100vw - var(--bzag-w, 72px) - var(--bzap-w, 300px) - 36px); }
+
+/* A folder in view: the bots that work there light up in the strip; the others step back. */
+html.bzag-folder-focus #bzAgents .bzag-item[data-agent] { opacity: 0.38; transition: opacity 0.14s ease; }
+html.bzag-folder-focus #bzAgents .bzag-item.bzag-works { opacity: 1; }
+html.bzag-folder-focus #bzAgents .bzag-item.bzag-works .bzag-slot {
+  border-radius: 16px;
+  box-shadow: 0 0 0 2px var(--c), 0 0 16px color-mix(in srgb, var(--c) 55%, transparent);
+}
+
+/* The Edit window: the picture choice and the folders it works in. */
+#bzAgentsModal .bzag-pics { display: flex; flex-wrap: wrap; gap: 6px; }
+#bzAgentsModal .bzag-pick { all: unset; box-sizing: border-box; cursor: pointer; width: 52px; height: 52px; border-radius: 12px; border: 2px solid #2c2c2c; background: #141414; display: inline-flex; align-items: center; justify-content: center; }
+#bzAgentsModal .bzag-pick img { width: 42px; height: 42px; object-fit: contain; display: block; pointer-events: none; }
+#bzAgentsModal .bzag-pick[aria-pressed="true"] { border-color: #ffd40d; }
+#bzAgentsModal .bzag-pick:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+#bzAgentsModal .bzag-domains { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+#bzAgentsModal .bzag-domain { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--bc) 55%, #2c2c2c); background: color-mix(in srgb, var(--bc) 10%, #141414); font-size: 12.5px; color: #ececec; }
+#bzAgentsModal .bzag-domain .bzap-shape svg { display: block; fill: color-mix(in srgb, var(--bc) 28%, transparent); stroke: var(--bc); stroke-width: 2.2; }
+#bzAgentsModal .bzag-domain-x { all: unset; box-sizing: border-box; cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #bdbdbd; font-size: 11px; }
+#bzAgentsModal .bzag-domain-x:hover { background: #2a2a2a; color: #fff; }
+#bzAgentsModal .bzag-domain-x:focus-visible { outline: 2px solid #ffd40d; outline-offset: 1px; }
+#bzAgentsModal .bzag-domain-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#bzAgentsModal .bzag-domain-add .bzag-select { flex: 1 1 160px; min-width: 0; }
+#bzAgentsModal .bzag-domain-add input { flex: 1 1 140px; min-width: 0; }
+
+@media (max-width: 700px) {
+  html.bz-has-agents.bz-agent-panel { padding-left: 0 !important; }
+  #bzAgentPanel { left: 0; right: 0; width: auto; z-index: 46; box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
+  #bzAgentPanel .bzap-edge { display: none; }
+}
+@media print { #bzAgentPanel { display: none !important; } }
+@media (prefers-reduced-motion: reduce) { #bzAgentPanel, #bzAgentPanel * { transition: none !important; } }
+
+/* History, while you talk to one of your agents: its conversations, and a way to see everything. */
+.ob-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0.6rem 0.7rem; padding: 8px 12px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--bzag, #ffd40d) 45%, #262626); background: color-mix(in srgb, var(--bzag, #ffd40d) 9%, #121212); color: #e6e6e6; font-size: 0.92rem; }
+.ob-filter b { color: var(--bzag-text, #ffd40d); }
+.ob-filter button { all: unset; box-sizing: border-box; cursor: pointer; padding: 4px 11px; border-radius: 999px; border: 1px solid #3a3a3a; font-size: 0.85rem; font-weight: 600; color: #eee; }
+.ob-filter button:hover { border-color: var(--bzag-text, #ffd40d); color: #fff; }
+.ob-filter button:focus-visible { outline: 2px solid var(--bzag-text, #ffd40d); outline-offset: 2px; }

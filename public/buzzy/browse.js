@@ -518,6 +518,8 @@
   // ── Tabs: Inspiration · Library · Memory · Experts ─────────────────────
   var current = null;
   var mounted = null;
+  // History shows everything again once, after "Show everything" (the next look filters again).
+  var historyAll = false;
 
   function parkRecent() {
     // Recent work belongs to Library; elsewhere it waits, hidden, in Talk's own page
@@ -584,6 +586,23 @@
       });
       getJSON("/api/buzzy/sessions").then(function (j) {
         var sessions = (j && Array.isArray(j.sessions)) ? j.sessions : [];
+        // Talking to one of your agents: its conversations first, the rest one press away (owner,
+        // 2026-11-23: "If you click a bot, it'll give you a list of recent sessions related to
+        // that bot under history").
+        var focus = window.BeeZillaAgents && window.BeeZillaAgents.focus ? window.BeeZillaAgents.focus() : null;
+        var who = focus && focus.agent;
+        if (who && !historyAll) {
+          var theirs = sessions.filter(function (c) { return c.agentId === who.id; });
+          var chip = document.createElement("div");
+          chip.className = "ob-filter";
+          chip.innerHTML = '<span>Conversations with <b></b></span><button type="button" data-all="1">Show everything</button>';
+          chip.querySelector("b").textContent = who.name;
+          listEl.parentNode.insertBefore(chip, listEl);
+          chip.querySelector("[data-all]").addEventListener("click", function () { historyAll = true; select("history"); });
+          sessions = theirs;
+          if (!sessions.length) { listEl.innerHTML = '<p class="ob-empty"></p>'; listEl.querySelector(".ob-empty").textContent = "No conversations with " + who.name + " yet. Press Talk to " + who.name + " at the top to start one."; return; }
+        }
+        historyAll = false;
         if (!sessions.length) { listEl.innerHTML = '<p class="ob-empty">Nothing yet. Talk to BeeZilla and your conversations collect here.</p>'; return; }
         listEl.innerHTML = sessions.slice(0, 60).map(function (c, i) {
           var n = c.messageCount != null ? c.messageCount + " message" + (c.messageCount === 1 ? "" : "s") : "";
@@ -652,8 +671,18 @@
       if (recent) { recent.classList.remove("bz-parked"); pane.appendChild(recent); }
     },
     memory: function () {
-      pane.innerHTML = '<div class="bz-pane-head"><h2>Memory</h2>' + link("/buzzy/memory", "Open Memory") + "</div>" +
-        '<p class="bz-pane-text">What BeeZilla has learned about you and your work — facts you confirmed, decisions per job — and what you asked it to remember. You can correct or delete any of it there.</p>';
+      // The brain (brain.js): the whole tree, from brain at the core down, A to Z (owner,
+      // 2026-11-23). A folder chosen in an agent's panel opens here, at that folder.
+      pane.innerHTML = '<div class="bz-pane-head"><h2>Memory</h2>' + link("/buzzy/memory", "Open as a full page") + "</div>" +
+        '<div class="bz-brain-mount"><p class="bz-pane-text">Loading your brain…</p></div>';
+      var host = pane.querySelector(".bz-brain-mount");
+      var mountBrain = function () {
+        if (!host.isConnected || current !== "memory") return;
+        var B = window.BeeZillaBrain;
+        mounted = B.mount(host, { path: B.wanted ? B.wanted() : null });
+      };
+      if (window.BeeZillaBrain && window.BeeZillaBrain.mount) mountBrain();
+      else window.addEventListener("bz:brain-ready", function once() { window.removeEventListener("bz:brain-ready", once); mountBrain(); });
     },
     experts: function () {
       var ex = window.BZ_EXPERTS || [];
