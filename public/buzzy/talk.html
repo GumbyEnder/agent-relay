@@ -7593,9 +7593,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     };
     document.getElementById("downloadPdf").onclick = onDownloadPdf;
     // ── Sessions drawer ───────────────────────────────────────
+    // The close timer owns two things: dropping `mounted` and hiding the overlay.
+    // A close followed by an open inside its 180ms window would otherwise fire
+    // after the new open and unmount the drawer that was just opened, so the
+    // handle is kept here and every open cancels any pending close.
+    var sessionsCloseTimer = null;
     function openSessionsDrawer() {
       const drawer = document.getElementById("sessionsDrawer");
       const overlay = document.getElementById("sessionsOverlay");
+      if (sessionsCloseTimer !== null) {
+        clearTimeout(sessionsCloseTimer);
+        sessionsCloseTimer = null;
+      }
       overlay.classList.remove("hidden");
       drawer.classList.add("mounted");
       // Resolve the off-canvas start position before `open`, or the panel is
@@ -7612,9 +7621,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const overlay = document.getElementById("sessionsOverlay");
       drawer.classList.remove("open");
       drawer.setAttribute("aria-hidden", "true");
-      setTimeout(function () {
+      if (sessionsCloseTimer !== null) clearTimeout(sessionsCloseTimer);
+      sessionsCloseTimer = setTimeout(function () {
         // Take the panel back out of layout once the slide-out has finished,
         // so the closed page is exactly the viewport wide again.
+        sessionsCloseTimer = null;
         drawer.classList.remove("mounted");
         overlay.classList.add("hidden");
       }, 180);
