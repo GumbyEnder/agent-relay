@@ -2483,6 +2483,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       workOfferDismissed: false,
     };
 
+    // ── Zilla agents: who is on the other end of this conversation ──────────
+    // null is BeeZilla itself; otherwise one of the person's agents (agents.js), whose
+    // job steers its side of the conversation: the conversation (session) carries the
+    // agent's id, and the server speaks as that agent.
+    var bzAgent = null;
+    function talkWho() { return bzAgent && bzAgent.name ? bzAgent.name : "BeeZilla"; }
+
     // ── Is this document actually Talk? ────────────────────────────────
     // Talk's markup is also the website's header, so nav.js fetches this page on every
     // other /buzzy/* page and runs its scripts (runScripts(talk, true)) with *that*
@@ -3835,13 +3842,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // press listens and the button becomes Pause; Pause keeps your words and it
         // becomes Continue; Continue listens again. Sending is the box's own act.
         var lab = m.querySelector(".tb-label");
-        var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to BeeZilla";
+        var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to " + talkWho();
         if (lab) lab.textContent = word;
         else m.textContent = voice.mic ? "\u23F8" : "\uD83C\uDFA4";
         m.classList.toggle("paused", !voice.mic && !!voice.paused);
         m.setAttribute("aria-label", voice.mic
-          ? "Pause: BeeZilla stops listening and your words stay in the box"
-          : voice.paused ? "Continue talking to BeeZilla" : "Talk to BeeZilla");
+          ? "Pause: " + talkWho() + " stops listening and your words stay in the box"
+          : voice.paused ? "Continue talking to " + talkWho() : "Talk to " + talkWho());
       }
       var s = document.getElementById("voiceStatus");
       if (s) {
@@ -5725,6 +5732,48 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           showRecentWork();
           return true;
         },
+        // Talk as one of the person's Zilla agents (agents.js calls this when you press
+        // one in the strip), or as BeeZilla again with null. A first visit to an agent
+        // opens a new conversation with the Idea Board open and asks what role it should
+        // play; an agent that has a job picks its last conversation back up.
+        talkAs: function (agent) {
+          var A = window.BeeZillaAgents;
+          var next = agent && agent.id && agent.id !== "bzilla" ? agent : null;
+          var same = (!next && !bzAgent) || (next && bzAgent && next.id === bzAgent.id);
+          bzAgent = next;
+          if (A && A.paint) A.paint(bzAgent);
+          paintVoice();
+          try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { window.scrollTo(0, 0); }
+          // Already in this conversation: leave it as it is.
+          if (same && (chatState.sessionId || chatState.messages.length)) return true;
+          resetContextMeter();
+          chatState.sessionId = null;
+          try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+          chatState.jobId = null;
+          chatState.jobContext = null;
+          chatState.slots = {};
+          chatState.paper = null;
+          resetDraftGate();
+          var resume = bzAgent && bzAgent.ready && bzAgent.lastSessionId;
+          if (resume) {
+            openSession({ id: bzAgent.lastSessionId });
+          } else {
+            chatState.messages = bzAgent ? [{ role: "assistant", content: bzAgent.opening || ("Hi, I'm " + bzAgent.name + ". What role do you want me to play?") }] : [];
+            renderChatMessages();
+            // A new conversation starts on a blank board.
+            if (window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.reset) window.BeeZillaWhiteboard.reset("talk");
+          }
+          updateChrome();
+          // The board follows the conversation now in front of you (voice-stage.js), and an
+          // agent's conversation opens with the board open; BeeZilla's own starts folded.
+          try { window.dispatchEvent(new StorageEvent("storage", { key: "bz_session_id" })); } catch (_) {}
+          var boardIsOpen = document.documentElement.classList.contains("ob-open");
+          var boardBtn = document.getElementById("boardToggle");
+          if (boardBtn && ((bzAgent && !boardIsOpen) || (!bzAgent && boardIsOpen))) boardBtn.click();
+          var box = document.getElementById("chatInput");
+          if (box && !box.disabled) { try { box.focus(); } catch (_) {} }
+          return true;
+        },
       };
       // ── Listen survives soft navigation, NOT a hard reload ─────────────
       // The recogniser lives in this document. The page shell keeps this
@@ -7029,7 +7078,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyId: coId || undefined, fresh: true }),
+        body: JSON.stringify({ companyId: coId || undefined, fresh: true, agentId: bzAgent ? bzAgent.id : undefined }),
       }).then(function (r) {
         if (r.status === 401) { window.location.href = "/buzzy/landing"; throw new Error("signed_out"); }
         return r.ok ? r.json() : null;
@@ -7039,12 +7088,57 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           chatState.sessionId = s.id;
           try { localStorage.setItem("bz_session_id", s.id); } catch (_) {}
           if (s.companyId) chatState.boundCompanyId = s.companyId;
+          if (bzAgent && window.BeeZillaAgents) window.BeeZillaAgents.noteSession(bzAgent.id, s.id);
         }
         return chatState.sessionId;
       }).catch(function (e) {
         if (e && e.message === "signed_out") throw e;
         return chatState.sessionId;
       });
+    }
+
+    // The first words said to a Zilla agent that has no job yet. POST /identity saves the
+    // job and picks its face, writes the exchange into the conversation (so History shows
+    // it) and returns what the agent says back; an empty or unclear answer is asked for
+    // again, not saved.
+    async function giveAgentItsJob(text) {
+      var input = document.getElementById("chatInput");
+      var send = document.getElementById("chatSend");
+      var agent = bzAgent;
+      input.value = "";
+      chatState.messages.push({ role: "user", content: text });
+      renderChatMessages();
+      input.disabled = true;
+      send.disabled = true;
+      var reply = "";
+      try {
+        var r = await fetch("/api/buzzy/agents/" + encodeURIComponent(agent.id) + "/identity", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text, sessionId: chatState.sessionId || undefined }),
+        });
+        var j = await r.json().catch(function () { return null; });
+        if (r.ok && j && j.ok) {
+          reply = j.reply || "";
+          if (j.saved && j.agent && bzAgent && bzAgent.id === agent.id) {
+            bzAgent = j.agent;
+            // update() repaints the header too, because this is the open agent.
+            if (window.BeeZillaAgents) window.BeeZillaAgents.update(j.agent);
+            paintVoice();
+          }
+        } else {
+          reply = (j && j.error) || "That didn't save. Say it to me again in a moment.";
+        }
+      } catch (_) {
+        reply = "I couldn't reach BeeZilla just now. Say it to me again in a moment.";
+      }
+      chatState.messages.push({ role: "assistant", content: reply });
+      renderChatMessages();
+      var out = !!chatState._signedOut;
+      input.disabled = out;
+      send.disabled = out;
+      if (!out) { try { input.focus(); } catch (_) {} }
     }
 
     // The composer's "Do it" control. A pressed button is a clearer instruction
@@ -7073,6 +7167,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { await ensureChatSession(); } catch (e) {
         if (e && e.message === "signed_out") return;
       }
+
+      // A Zilla agent with no job yet: what the person says first IS its job (owner,
+      // 2026-11-21: "you're prompted to give it an identity… 'my job is to help with
+      // calendars.' Got it."). The server turns it into a short job and a face, and the
+      // agent answers in its own words. It is not a turn for the model.
+      if (bzAgent && !bzAgent.ready) { await giveAgentItsJob(text); return; }
 
       input.value = "";
       const sentExecute = pendingExecute === true;
@@ -7515,6 +7615,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
       });
       function fit() {
+        // An empty box is one line, whatever its hint says: a hint too long for a narrow
+        // box (the Idea Board's top bar, with the agents sidebar open) used to wrap, and
+        // the box and the Talk button beside it grew to match.
+        if (!input.value) { input.style.height = ""; bar.classList.remove("has-text"); return; }
         var cs = window.getComputedStyle(input);
         var pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
         input.style.height = "auto";

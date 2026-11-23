@@ -1,0 +1,484 @@
+/* The Zilla agents: the sidebar down the left of every page (agents.js).
+ *
+ * Owner, 2026-11-21: "On the left side, we need to create an agent system… a series of
+ * agents that can do things on your behalf. Each agent should have a name by default
+ * given to them and a size and color… We're going to move everything on the Zilla
+ * website slightly to the right, and we're going to insert these as images."
+ *
+ * Pages style bare `button`, `a`, `h2` and `body`, and the shell rewrites their sheets,
+ * so every rule here names its own box with an id (#bzAgents, #bzAgentsModal) and sets
+ * what it needs. This sheet is the document's, not a page's: it is never switched off
+ * when you move between pages.
+ */
+
+/* ── The page moves over ──────────────────────────────────────────────────
+   agents.js sets --bzag-w on <html> (72px for the strip of faces, wider when it is
+   opened to show names) and everything in the flow of the page follows. */
+html.bz-has-agents { padding-left: var(--bzag-w, 72px) !important; }
+html.bz-agents-anim { transition: padding-left 0.16s ease; }
+html.bz-has-agents #bzFeedback.min { left: calc(var(--bzag-w, 72px) + 1rem); }
+html.bz-has-agents { scroll-padding-left: var(--bzag-w, 72px); }
+
+/* ── The strip ─────────────────────────────────────────────────────────── */
+#bzAgents {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 44;
+  width: var(--bzag-w, 72px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #0b0b0b;
+  border-right: 1px solid #232323;
+  color: #e8e8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: left;
+  transition: width 0.16s ease;
+}
+#bzAgents.bzag-noanim, #bzAgents.bzag-noanim * { transition: none !important; }
+#bzAgents[hidden] { display: none; }
+#bzAgents *, #bzAgents *::before, #bzAgents *::after { box-sizing: border-box; }
+#bzAgents .bzag-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding: 10px 0 0;
+}
+#bzAgents .bzag-scroll::-webkit-scrollbar { display: none; }
+#bzAgents .bzag-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+#bzAgents .bzag-row { position: relative; margin: 0; padding: 0; display: flex; align-items: center; }
+
+/* One agent: the face, and (when the strip is open) its name and what it helps with. */
+#bzAgents .bzag-item {
+  all: unset;
+  position: relative;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 6px 0 6px 8px;
+  cursor: grab;
+  color: #e8e8e8;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: element;
+}
+#bzAgents .bzag-item:active { cursor: grabbing; }
+#bzAgents .bzag-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 4px;
+  height: 0;
+  margin-top: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--c, #ffd40d);
+  transition: height 0.14s ease, margin-top 0.14s ease;
+}
+#bzAgents .bzag-item:hover::before { height: 20px; margin-top: -10px; }
+#bzAgents .bzag-item[aria-current="true"]::before { height: 38px; margin-top: -19px; }
+#bzAgents .bzag-item:focus-visible { outline: 2px solid var(--c, #ffd40d); outline-offset: -3px; border-radius: 12px; }
+#bzAgents .bzag-item.bzag-dragging { opacity: 0.45; }
+
+/* The faces sit in a column 56 px wide, so names line up whatever size each face is. */
+#bzAgents .bzag-slot { flex: 0 0 56px; width: 56px; display: flex; align-items: center; justify-content: center; }
+#bzAgents .bzag-av {
+  position: relative;
+  flex: 0 0 auto;
+  display: block;
+  width: var(--s, 46px);
+  height: var(--s, 46px);
+}
+#bzAgents .bzag-pic {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: filter 0.16s ease, opacity 0.16s ease;
+}
+/* Not given a job yet: grey, and quiet, like a seat waiting for someone. */
+#bzAgents .is-unset .bzag-pic { filter: grayscale(1); opacity: 0.5; }
+#bzAgents .is-unset:hover .bzag-pic, #bzAgents .is-unset:focus-visible .bzag-pic { opacity: 0.8; }
+/* Given a job: its face is the thing it helps with (an emoji), ringed in its own colour,
+   with the Zilla it is peeking from the corner. */
+#bzAgents .bzag-ring {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #1a1a1a;
+  background: color-mix(in srgb, var(--c, #ffd40d) 22%, #121212);
+  border: 2px solid var(--c, #ffd40d);
+  transition: transform 0.14s ease;
+}
+#bzAgents .bzag-item:hover .bzag-ring { transform: scale(1.06); }
+#bzAgents .bzag-face {
+  font-size: calc(var(--s, 46px) * 0.52);
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+  user-select: none;
+}
+#bzAgents .bzag-badge {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: calc(var(--s, 46px) * 0.52);
+  height: calc(var(--s, 46px) * 0.52);
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+#bzAgents .bzag-text { display: none; min-width: 0; flex: 1 1 auto; padding-right: 8px; }
+#bzAgents .bzag-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#bzAgents .bzag-role {
+  display: block;
+  font-size: 12px;
+  color: #9a9a9a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#bzAgents .is-unset .bzag-role { color: #7d7d7d; font-style: italic; }
+#bzAgents .bzag-more {
+  all: unset;
+  box-sizing: border-box;
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  border-radius: 8px;
+  color: #8d8d8d;
+  cursor: pointer;
+}
+#bzAgents .bzag-more svg { width: 18px; height: 18px; fill: currentColor; display: block; }
+#bzAgents .bzag-more:hover, #bzAgents .bzag-more:focus-visible { color: #ffd40d; background: #1b1b1b; }
+#bzAgents .bzag-more:focus-visible { outline: 2px solid #ffd40d; outline-offset: -2px; }
+
+/* The plus: add one more. Sticks to the bottom of the strip when the list is long. */
+#bzAgents .bzag-addrow {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  padding: 8px 0 10px 8px;
+  background: linear-gradient(180deg, rgba(11, 11, 11, 0), #0b0b0b 22%);
+}
+#bzAgents .bzag-add {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+  color: #9a9a9a;
+}
+#bzAgents .bzag-plus {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s, 46px);
+  height: var(--s, 46px);
+  border-radius: 50%;
+  border: 2px dashed #3b3b3b;
+  color: #9a9a9a;
+  transition: border-color 0.14s ease, color 0.14s ease;
+}
+#bzAgents .bzag-plus svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; }
+#bzAgents .bzag-add:hover .bzag-plus, #bzAgents .bzag-add:focus-visible .bzag-plus { border-color: #ffd40d; color: #ffd40d; }
+#bzAgents .bzag-add:focus-visible { outline: 2px solid #ffd40d; outline-offset: 3px; border-radius: 12px; }
+#bzAgents .bzag-add-text { display: none; font-size: 13px; font-weight: 600; color: #bdbdbd; white-space: nowrap; }
+#bzAgents .bzag-add[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+
+/* The foot: show or hide the names. */
+#bzAgents .bzag-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid #1f1f1f;
+}
+#bzAgents .bzag-toggle {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  cursor: pointer;
+  color: #8d8d8d;
+  font-size: 12px;
+  font-weight: 650;
+}
+#bzAgents .bzag-toggle svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.16s ease; }
+#bzAgents .bzag-toggle:hover, #bzAgents .bzag-toggle:focus-visible { color: #ffd40d; background: #141414; }
+#bzAgents .bzag-toggle:focus-visible { outline: 2px solid #ffd40d; outline-offset: -3px; }
+#bzAgents .bzag-toggle-text { display: none; }
+#bzAgents .bzag-msg {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #ffd54f;
+  background: #17140a;
+  border-top: 1px solid #3a3210;
+}
+#bzAgents .bzag-msg[hidden] { display: none; }
+
+/* The edge: drag it to make the opened strip wider or narrower. */
+#bzAgents .bzag-edge {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+#bzAgents .bzag-edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.14s ease;
+}
+#bzAgents .bzag-edge:hover::after, #bzAgents .bzag-edge:focus-visible::after, #bzAgents.bzag-sizing .bzag-edge::after { background: #ffd40d; }
+#bzAgents .bzag-edge:focus-visible { outline: none; }
+
+/* ── Opened: names and what each helps with ───────────────────────────── */
+html.bz-agents-open #bzAgents .bzag-text { display: block; }
+html.bz-agents-open #bzAgents .bzag-more { display: inline-flex; }
+html.bz-agents-open #bzAgents .bzag-add-text { display: block; }
+html.bz-agents-open #bzAgents .bzag-toggle-text { display: inline; }
+html.bz-agents-open #bzAgents .bzag-toggle svg { transform: rotate(180deg); }
+html.bz-agents-open #bzAgents .bzag-edge { display: block; }
+
+/* ── Phone width: the strip is a drawer you open, never a column eating the page ── */
+#bzAgentsTab { display: none; }
+@media (max-width: 700px) {
+  html.bz-has-agents { padding-left: 0 !important; }
+  html.bz-has-agents #bzFeedback.min { left: 1rem; }
+  #bzAgents { width: min(300px, 86vw); transform: translateX(-102%); transition: transform 0.18s ease; box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
+  html.bz-agents-drawer #bzAgents { transform: none; }
+  html.bz-agents-drawer #bzAgents .bzag-text { display: block; }
+  html.bz-agents-drawer #bzAgents .bzag-more { display: inline-flex; }
+  html.bz-agents-drawer #bzAgents .bzag-add-text { display: block; }
+  #bzAgents .bzag-foot { display: none; }
+  #bzAgents .bzag-edge { display: none !important; }
+  #bzAgentsTab {
+    all: unset;
+    position: fixed;
+    left: 0;
+    top: 118px;
+    z-index: 43;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 56px;
+    border-radius: 0 14px 14px 0;
+    background: #121212;
+    border: 1px solid #2c2c2c;
+    border-left: 0;
+    cursor: pointer;
+  }
+  #bzAgentsTab img { width: 26px; height: 26px; object-fit: contain; display: block; pointer-events: none; }
+  #bzAgentsTab:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+  html.bz-agents-drawer #bzAgentsTab { display: none; }
+  #bzAgents .bzag-close { display: flex; }
+}
+#bzAgents .bzag-close {
+  all: unset;
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #333;
+  color: #ddd;
+  background: #141414;
+  cursor: pointer;
+  font-size: 16px;
+}
+#bzAgents .bzag-close:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+/* ── The light palette (<html data-theme="light">, as inspiration.css and share.css have it) ── */
+html[data-theme="light"] #bzAgents { background: #f6f6f4; border-right-color: #dcdcd6; color: #1c1c1c; }
+html[data-theme="light"] #bzAgents .bzag-item, html[data-theme="light"] #bzAgents .bzag-name { color: #1c1c1c; }
+html[data-theme="light"] #bzAgents .bzag-role, html[data-theme="light"] #bzAgents .bzag-add-text { color: #5d5d58; }
+html[data-theme="light"] #bzAgents .bzag-ring { background: #ffffff; background: color-mix(in srgb, var(--c, #ffd40d) 16%, #ffffff); }
+html[data-theme="light"] #bzAgents .bzag-plus { border-color: #b9b9b2; color: #5d5d58; }
+html[data-theme="light"] #bzAgents .bzag-foot { border-top-color: #dcdcd6; }
+html[data-theme="light"] #bzAgents .bzag-toggle, html[data-theme="light"] #bzAgents .bzag-more { color: #5d5d58; }
+html[data-theme="light"] #bzAgents .bzag-toggle:hover, html[data-theme="light"] #bzAgents .bzag-more:hover { background: #ebebe6; color: #8a6a00; }
+html[data-theme="light"] #bzAgents .bzag-addrow { background: linear-gradient(180deg, rgba(246, 246, 244, 0), #f6f6f4 22%); }
+
+@media print { #bzAgents, #bzAgentsTab, #bzAgentsModal { display: none !important; } html.bz-has-agents { padding-left: 0 !important; } }
+@media (prefers-reduced-motion: reduce) {
+  #bzAgents, #bzAgents *, html.bz-agents-anim { transition: none !important; }
+}
+
+/* ── The agent you are talking to: the Talk button wears its colour ─────────
+   Owner: "the color of the button will change to the primary color of the creature in
+   question. In the case of the bunny, the most prominent color is probably the pink in
+   the ears. So it'd be pink." agents.js sets the --bzag-* colours on <html>, and
+   data-bz-agent says whose conversation is open. It follows the header onto every page. */
+html[data-bz-agent] #micBtn.talk-btn {
+  background: linear-gradient(180deg, var(--bzag-hi) 0%, var(--bzag) 55%, var(--bzag-lo) 100%);
+  color: var(--bzag-ink, #141414);
+  filter: drop-shadow(0 0 10px var(--bzag-glow));
+}
+html[data-bz-agent] #micBtn.talk-btn:hover { filter: drop-shadow(0 0 16px var(--bzag-glow-strong)); }
+html[data-bz-agent] #micBtn.talk-btn.on { animation: bzagPulse 1.6s ease-in-out infinite; }
+@keyframes bzagPulse {
+  0%, 100% { filter: drop-shadow(0 0 8px var(--bzag-glow)); }
+  50% { filter: drop-shadow(0 0 20px var(--bzag-glow-strong)); }
+}
+/* A long name must not stretch the bar: the words shorten with an ellipsis. */
+html[data-bz-agent] #micBtn .tb-label { display: inline-block; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* The strip leaves the board less room, and its header (the Talk bar, then New
+   conversation, Sell this orchestration, Fold away) has to wrap the way it does on a phone
+   or the box you type in shrinks to a sliver. */
+@media (min-width: 761px) {
+  html.bz-has-agents .wb-head { flex-wrap: wrap; }
+  html.bz-has-agents .wb-dock { flex: 1 1 600px; min-width: 600px; }
+  /* One line, clipped: a hint that is too long for the box must not wrap into a second line. */
+  html.bz-has-agents .wb-dock #chatInput::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+/* The face and name at the top left become the agent's. */
+.bz-brand .bz-agent-face { display: none; }
+html[data-bz-agent] .bz-brand .bz-face { display: none !important; }
+html[data-bz-agent] .bz-brand .bz-agent-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  background: color-mix(in srgb, var(--bzag) 22%, #121212);
+  border: 2px solid var(--bzag);
+  font-size: 24px;
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+  overflow: hidden;
+}
+html[data-bz-agent] .bz-brand .bz-agent-face.is-picture { background-color: transparent; background-size: contain; background-position: center; background-repeat: no-repeat; border-color: transparent; border-radius: 0; }
+
+/* ── The dialogs (edit an agent) ─────────────────────────────────────────
+   Nothing closes on a click outside it: only Esc or the X (owner, 2026-11-21: "a
+   fundamental principle of our design"), so what you typed is only lost on purpose.
+   The box can be pulled bigger or smaller by its corner. */
+#bzAgentsModal { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.55); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1.4; color: #e8e8e8; }
+#bzAgentsModal.open { display: flex; }
+#bzAgentsModal *, #bzAgentsModal *::before, #bzAgentsModal *::after { box-sizing: border-box; }
+#bzAgentsModal .bzag-box {
+  width: min(480px, 100%);
+  min-width: min(300px, 100%);
+  max-width: 100%;
+  min-height: 200px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  resize: both;
+  padding: 18px 20px 20px;
+  border-radius: 16px;
+  background: #151515;
+  border: 1px solid #2c2c2c;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#bzAgentsModal .bzag-head { display: flex; align-items: center; gap: 12px; }
+#bzAgentsModal .bzag-head img { width: 44px; height: 44px; object-fit: contain; flex: 0 0 auto; }
+#bzAgentsModal .bzag-head h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #f4f4f4; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentsModal .bzag-x {
+  all: unset;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #333;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 16px;
+}
+#bzAgentsModal .bzag-x:hover { color: #ffd40d; border-color: #ffd40d; }
+#bzAgentsModal .bzag-x:focus-visible, #bzAgentsModal .bzag-btn:focus-visible, #bzAgentsModal .bzag-sw:focus-visible, #bzAgentsModal .bzag-emo:focus-visible, #bzAgentsModal .bzag-size button:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+#bzAgentsModal .bzag-note { margin: 0; color: #a8a8a8; font-size: 0.88rem; line-height: 1.5; }
+#bzAgentsModal .bzag-field { display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; color: #bdbdbd; margin: 0; }
+#bzAgentsModal .bzag-field > span { font-weight: 600; }
+#bzAgentsModal input[type="text"] { all: unset; box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border-radius: 9px; border: 1px solid #333; background: #0d0d0d; color: #fff; font: inherit; }
+#bzAgentsModal input[type="text"]::placeholder { color: #707070; }
+#bzAgentsModal input[type="text"]:focus { border-color: #ffd40d; box-shadow: 0 0 0 2px rgba(255, 212, 13, 0.25); }
+#bzAgentsModal .bzag-faces { display: flex; flex-wrap: wrap; gap: 6px; }
+#bzAgentsModal .bzag-emo { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid #2c2c2c; background: #101010; cursor: pointer; font-size: 20px; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif; }
+#bzAgentsModal .bzag-emo:hover { border-color: #ffd40d; }
+#bzAgentsModal .bzag-emo[aria-pressed="true"] { border-color: #ffd40d; background: #231d06; }
+#bzAgentsModal .bzag-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+#bzAgentsModal .bzag-sw { all: unset; box-sizing: border-box; width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; background: var(--c); cursor: pointer; box-shadow: inset 0 0 0 2px #151515; }
+#bzAgentsModal .bzag-sw[aria-pressed="true"] { border-color: #fff; }
+#bzAgentsModal .bzag-sw.bzag-sw-own { background: conic-gradient(from 0deg, #ffc107, #f08ca0, #8cb83a, #ffc107); }
+#bzAgentsModal .bzag-size { display: flex; gap: 8px; }
+#bzAgentsModal .bzag-size button { all: unset; box-sizing: border-box; min-width: 64px; height: 38px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; border: 1px solid #3a3a3a; color: #e0e0e0; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+#bzAgentsModal .bzag-size button[aria-pressed="true"] { background: #ffd40d; border-color: #ffd40d; color: #141414; }
+#bzAgentsModal .bzag-msg { margin: 0; min-height: 1.2em; font-size: 0.88rem; color: #ffd54f; }
+#bzAgentsModal .bzag-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+#bzAgentsModal .bzag-row .bzag-gap { flex: 1 1 auto; }
+#bzAgentsModal .bzag-btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 18px; border-radius: 999px; border: 1px solid #3a3a3a; color: #e6e6e6; font-size: 0.92rem; font-weight: 600; cursor: pointer; }
+#bzAgentsModal .bzag-btn:hover { border-color: #ffd40d; color: #ffd40d; }
+#bzAgentsModal .bzag-btn.primary { background: #ffd40d; border-color: #ffd40d; color: #141414; font-weight: 700; }
+#bzAgentsModal .bzag-btn.primary:hover { background: #ffe14d; color: #141414; }
+#bzAgentsModal .bzag-btn.danger { color: #ffb4b4; border-color: #5b2a2e; }
+#bzAgentsModal .bzag-btn.danger:hover { border-color: #ff7a7a; color: #ff9a9a; }
+#bzAgentsModal .bzag-btn[disabled] { opacity: 0.55; cursor: default; }

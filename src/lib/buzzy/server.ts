@@ -57,6 +57,7 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
+import { agentPromptParts, readyAgents, type AgentTurn, type ReadyAgent } from "./agents";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
@@ -302,6 +303,14 @@ export interface ChatRequest {
    * Their instructions for this conversation — appended to the system prompt, capped.
    */
   boardInstructions?: string | null;
+  /**
+   * The Zilla agent this conversation is with (agents.ts), when it belongs to one of the
+   * person's agents: the turn is spoken BY that agent, with its name and its job in the
+   * prompt. Decided by the conversation (chat.nitro.ts reads it from the session), never
+   * by the request. null or absent: BeeZilla's own conversation, which also tells her who
+   * the person's agents are.
+   */
+  agent?: AgentTurn | null;
 }
 
 /** One step of a turn, as the whiteboard draws it. */
@@ -732,7 +741,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       "tool returns success. Never say a track is done, that a player is attached, or that it is in the " +
       "Library unless generate_music returned this turn; a description is not a deliverable."
     : "";
-  const persona = personaForMode(mode) + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
+  // The Zilla agents (agents.ts). A conversation with one of the person's agents is spoken
+  // by that agent: its name replaces BeeZilla's in the persona and its job follows it.
+  // BeeZilla's own conversation is told who the person's agents are instead (only when
+  // some have a job: a person without agents gets the prompt exactly as before).
+  let readyForRoster: ReadyAgent[] = [];
+  if (!req.agent) {
+    try { readyForRoster = await readyAgents(sql, userId); } catch { readyForRoster = []; }
+  }
+  const agentParts = agentPromptParts(req.agent, personaForMode(mode), readyForRoster);
+  const persona = agentParts.persona + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
   // Freshness: without a date the model cannot tell a superseded price from the
   // current one. It answered "78 cents" the day USPS's own page said 82.
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -881,7 +899,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     appPlan = kept.length ? kept : null;
   }
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
+    persona + agentParts.section + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this

@@ -124,7 +124,9 @@ check(/const partial = queryValue\(fullPath, "partial"\) === "1";[\s\S]{0,600}if
 // Talk → Pause → Continue (owner, 2026-11-19: "You can click on that pause anytime, think
 // as much as you want, and then continue clicking on it and dictate it"). What is said
 // collects in the box; only the person's own send reaches BeeZilla.
-check(talk.includes('var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to BeeZilla";'), "the button reads Talk to BeeZilla, then Pause, then Continue");
+// "Talk to <who>": BeeZilla unless the person is talking to one of their Zilla agents (talkWho()).
+check(talk.includes('var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to " + talkWho();') &&
+  talk.includes('return bzAgent && bzAgent.name ? bzAgent.name : "BeeZilla";'), "the button reads Talk to BeeZilla (or the agent), then Pause, then Continue");
 check((talk.match(/(?<!function )sendChatMessage\(\)/g) || []).length === 1 && talk.includes("Promise.resolve(sendChatMessage()).then(after, after);"), "only the person's own send reaches BeeZilla (no voice path sends by itself)");
 check(talk.includes('document.getElementById("chatSend").onclick = sendFromBox;'), "the Send arrow finishes the words still coming, then sends");
 check(talk.includes("function pauseVoice()") && /function pauseVoice\(\) \{\s*dictFinishWindow\(\);/.test(talk), "Pause keeps the words already said");
