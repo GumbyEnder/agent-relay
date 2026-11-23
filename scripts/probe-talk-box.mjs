@@ -16,7 +16,7 @@
 //   4. The limit follows the window's height.
 //   5. A long text typed on the page and carried onto the board (See board) is fitted again
 //      in the board's narrower top edge, and the title and buttons beside it stay level
-//      with the first line.
+//      with the first line (or, where the header wraps, on a row of their own under the bar).
 //   6. A phone: the same, with the button an icon.
 //
 // usage: node scripts/probe-talk-box.mjs [origin]      (BZ_PROBE_CDP=<DevTools URL> to reuse a browser)
@@ -193,7 +193,10 @@ const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: `$
   check("on the board the box was fitted again for its narrower place and stops at its limit", dock.grown && dock.scrolls && dock.input.h <= dock.maxPx + 24, JSON.stringify([dock.input.h, dock.maxPx]));
   check("on the board the limit is 30% of the window", near(dock.maxPx, Math.min(Math.max(dock.innerHeight * 0.3, 112), 224), 1.5), `${dock.maxPx}`);
   check("on the board the Talk button is one line tall (not the box's height)", dock.btn.h < 52 && near(dock.btn.y, dock.field.y), `${dock.btn.h}`);
-  check("on the board the title and the buttons stay level with the first line", dock.title && dock.tools && dock.title.y < dock.btn.y + 24 && dock.tools.y < dock.btn.y + 24, JSON.stringify([dock.title, dock.tools]));
+  // Level with the first line; or, where the board's header wraps (the Zilla agents sidebar open
+  // leaves the bar a row of its own), on a row of their own under the bar. Never adrift in the middle.
+  const levelOrBelow = (b) => b && (b.y < dock.btn.y + 24 || b.y >= dock.bar.b - 2);
+  check("on the board the title and the buttons stay level with the first line, or sit on their own row under the bar", levelOrBelow(dock.title) && levelOrBelow(dock.tools), JSON.stringify([dock.title, dock.tools, dock.bar]));
   check("on the board the bar is a rounded box too", await page.evaluate(() => parseFloat(getComputedStyle(document.getElementById("talkBar")).borderTopLeftRadius) < 60));
   await paste(page, "");
   const dockClear = await geometry(page);
