@@ -73,6 +73,14 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
       SELECT created_at, from_name, to_name, kind, body
       FROM buzzy_hive_messages WHERE user_id = ${userId} ORDER BY id ASC LIMIT 2000`;
   } catch { hive = []; }
+  // The brain (0068): the folders the person made and where they moved things themselves. What the
+  // tidy decided is not theirs to keep (it is worked out again from what they have).
+  let brainPlaces: any[] = [];
+  let brainFolders: any[] = [];
+  try {
+    brainPlaces = await sql`SELECT item, path, placed_at FROM buzzy_brain_places WHERE user_id = ${userId} AND placed_by = 'person' ORDER BY path ASC`;
+    brainFolders = await sql`SELECT path, created_at FROM buzzy_brain_folders WHERE user_id = ${userId} ORDER BY path ASC`;
+  } catch { brainPlaces = []; brainFolders = []; }
   const colonyOf = new Map<string, string>(seats.map((s: any) => [s.agent_id, s.name]));
   const colonies = new Map<string, { name: string; purpose: string; agents: string[] }>();
   for (const s of seats) {
@@ -97,6 +105,12 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   }
   if (colonies.size) {
     zip.file("zilla_colonies.csv", toCsv([...colonies.values()].map((c) => ({ name: c.name, purpose: c.purpose, agents: c.agents.join(" | ") }))));
+  }
+  if (brainPlaces.length || brainFolders.length) {
+    zip.file("brain_your_folders.csv", toCsv([
+      ...brainFolders.map((f: any) => ({ kind: "folder you made", path: "brain/" + f.path, thing: "" })),
+      ...brainPlaces.map((p: any) => ({ kind: "thing you moved", path: "brain/" + p.path, thing: p.item })),
+    ]));
   }
   if (hive.length) {
     zip.file("zilla_hive.csv", toCsv(hive.map((m: any) => ({
@@ -183,6 +197,13 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_agent_colonies: "DELETE FROM buzzy_agent_colonies WHERE user_id = $1 RETURNING 1",
   // What the agents asked each other and what came back (0067), the Hive's whole log.
   buzzy_hive_messages: "DELETE FROM buzzy_hive_messages WHERE user_id = $1 RETURNING 1",
+  // The brain (0068): where the person and the tidy filed things, the folders they made, which
+  // folders their turns were about, when it was last tidied, and the marker for Code Monkey.
+  buzzy_brain_places: "DELETE FROM buzzy_brain_places WHERE user_id = $1 RETURNING 1",
+  buzzy_brain_folders: "DELETE FROM buzzy_brain_folders WHERE user_id = $1 RETURNING 1",
+  buzzy_brain_touches: "DELETE FROM buzzy_brain_touches WHERE user_id = $1 RETURNING 1",
+  buzzy_brain_tidy: "DELETE FROM buzzy_brain_tidy WHERE user_id = $1 RETURNING 1",
+  buzzy_agent_starters: "DELETE FROM buzzy_agent_starters WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */

@@ -39,6 +39,12 @@
  *   DELETE /api/buzzy/agents/colonies/:id — ungroup it (its agents stay, in its place)
  *   PUT  /api/buzzy/agents/layout   — the whole order and who is in which colony ({ items })
  *   GET  /api/buzzy/hive            — what the agents asked each other, and what came back (?after=<id>, ?limit=)
+ *   GET  /api/buzzy/brain           — the brain: every folder and thing in it, A to Z (tidies when due)
+ *   GET  /api/buzzy/brain/folder    — one folder (?path=): the bots that work there, its recent conversations
+ *   GET  /api/buzzy/brain/agent/:id — an agent's folders (lit on top, grey below) and its History
+ *   POST /api/buzzy/brain/tidy      — tidy now
+ *   POST /api/buzzy/brain/folders   — make a folder ({ parent, name }); DELETE ?path= removes one you made
+ *   PUT  /api/buzzy/brain/place     — move a memory, conversation, file or recipe ({ item, path })
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
@@ -50,6 +56,7 @@ import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRec
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import { agentsRoute, agentForSession, ownsAgent, AGENT_BODY_MAX_BYTES, type AgentTurn } from "./agents";
 import { hiveRoute } from "./hive";
+import { brainRoute, noteTurn } from "./brain";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
@@ -1761,6 +1768,11 @@ export default defineEventHandler(async (event) => {
       } catch { /* memory is additive — never block the chat */ }
     }
 
+    // The brain (brain.ts): which folder this turn is about, and who is speaking, so an agent's
+    // panel can show the folders it often works in and a folder its recent conversations.
+    // One small write; it never throws, and a message about nothing in particular writes nothing.
+    await noteTurn(sql, userId, { agentId: agent?.id ?? null, sessionId, message });
+
     const turnStarted = Date.now();
     await recordTelemetry(sql, { userId, jobId, event: "run_started", props: { surface } });
 
@@ -3353,6 +3365,39 @@ export default defineEventHandler(async (event) => {
     const out = await hiveRoute(sql, user.id, method, path.slice("/api/buzzy/hive".length), {
       after: queryValue(fullPath, "after"),
       limit: queryValue(fullPath, "limit"),
+    });
+    setResponseStatus(event, out.status);
+    return out.body;
+  }
+
+  // ── /api/buzzy/brain — the brain: one tree for everything that is kept ────────────
+  // Owner, 2026-11-23: "/brain at the very core… /knowledge… /systems… assets". The tree, one
+  // folder (who works there, its recent conversations), an agent's folders and History, tidy
+  // now, make or remove a folder, move a thing. The person's own only; brain.ts has the rules.
+  if (path === "/api/buzzy/brain" || path.startsWith("/api/buzzy/brain/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let body: unknown = undefined;
+    if (method === "POST" || method === "PUT" || method === "DELETE") {
+      const tooBig = () => {
+        setResponseStatus(event, 413);
+        return { ok: false, error: "That is more than a folder needs.", code: "too_big" };
+      };
+      if (Number(getHeader(event, "content-length") || 0) > AGENT_BODY_MAX_BYTES) return tooBig();
+      let raw = "";
+      try { raw = await event.req.text(); } catch { raw = ""; }
+      if (new TextEncoder().encode(raw).length > AGENT_BODY_MAX_BYTES) return tooBig();
+      try { body = raw ? JSON.parse(raw) : {}; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+    }
+    const sql = await getSql();
+    const out = await brainRoute(sql, user.id, method, path.slice("/api/buzzy/brain".length), body, {
+      path: queryValue(fullPath, "path"),
     });
     setResponseStatus(event, out.status);
     return out.body;

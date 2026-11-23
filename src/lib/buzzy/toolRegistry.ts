@@ -29,6 +29,7 @@ import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
 import { GENERATE_VIDEO_TOOL } from "./video";
 import { ASK_AGENT_TOOL, ASK_BZILLA_TOOL } from "./hive";
+import { MAKE_AGENT_TOOL } from "./orchestrate";
 
 /**
  * `always`: offered on every turn that offers tools. `draft`: offered once the draft gate opens.
@@ -36,7 +37,8 @@ import { ASK_AGENT_TOOL, ASK_BZILLA_TOOL } from "./hive";
  */
 export type ToolGate = "always" | "draft" | "hive";
 export type ToolCost = "free" | "metered";
-export type ToolSideEffect = "read-only" | "render-to-memory";
+/** `writes-own-rows`: it changes only the person's own rows (make_agent: a new agent and a Hive line). */
+export type ToolSideEffect = "read-only" | "render-to-memory" | "writes-own-rows";
 
 export interface ToolPolicy {
   name: string;
@@ -67,6 +69,8 @@ export interface HiveFlags {
   askBzilla?: boolean;
   /** BeeZilla's turn may ask one of the person's agents. */
   askAgent?: boolean;
+  /** BeeZilla's turn may make the person a new agent (orchestrate.ts): the message asks for one. */
+  makeAgent?: boolean;
 }
 
 export const TOOL_POLICIES: ToolPolicy[] = [
@@ -247,6 +251,25 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     egress: false,
     withheldReason:
       "only BeeZilla herself can ask one of the person's agents, and only when what the person said is about one of them (it names one, or is about its job), which this message is not.",
+  },
+  // ── BeeZilla the orchestrator: she makes new agents (orchestrate.ts) ──
+  // Owner, 2026-11-23: "Bzilla is an orchestrator agent that can create new sub-agents itself,
+  // not only the human." Same gate as the Hive's: offered only on BeeZilla's own written turn
+  // when the message asks for a new agent. It writes only the person's own rows (an agent, and
+  // a line in their Hive); no model call and nothing leaves BeeZilla, so Lockdown leaves it on.
+  {
+    name: "make_agent",
+    schema: MAKE_AGENT_TOOL,
+    gate: "hive",
+    hiveFlag: "makeAgent",
+    offered: true,
+    timeoutMs: 10_000,
+    maxResultBytes: 2_000,
+    cost: "free",
+    sideEffects: "writes-own-rows",
+    egress: false,
+    withheldReason:
+      "only BeeZilla herself can make a new agent, and only when the person asks her for one, which this message does not.",
   },
 ];
 

@@ -15,8 +15,13 @@ The colour versions are stand-ins. The owner is having real colour Zillas drawn
 (Astra, through the Slack bridge); a real picture takes the place of a stand-in by
 using the same file name, and nothing else changes.
 
+Heads that come as a picture of their own (2026-11-23: the owner's Code Monkey, a
+monkey head in the same style, sent on its own) are listed in SINGLES: each is cut to
+its outline, scaled to the width the frog has (the widest of the four) and stood on the
+same chin line, so it sits in the strip at the same size as the others.
+
 Run:  python3 -I scripts/zilla-art.py <output folder>
-Needs Pillow (with WebP). The source picture is not in the repository.
+Needs Pillow (with WebP). The source pictures are not in the repository.
 """
 import sys, os, json
 sys.path.insert(0, "/Users/saveon/Library/Python/3.9/lib/python/site-packages")
@@ -83,6 +88,23 @@ def save(img, path):
     small.save(path, "WEBP", quality=88, alpha_quality=100, method=6)
     return os.path.getsize(path)
 
+# Heads that arrive as their own picture: file in the art folder, base hue of the coloured
+# parts (measured: the monkey's brown fur and ear cups sit at 21-31 degrees, median 23).
+SINGLES = {"monkey": ("/Users/saveon/Documents/BeeZilla art/code-monkey.png", 23)}
+# Where the four heads above land in a SIZE x SIZE picture: the frog (the widest) spans
+# 227 px and every chin sits on y = 247. A single head is fitted to the same.
+FIT_W, CHIN = 227 / 256, 247 / 256
+
+def single(path):
+    pic = Image.open(path).convert("RGBA")
+    bb = pic.getchannel("A").point(lambda p: 255 if p > 24 else 0).getbbox()
+    head = pic.crop(bb)
+    scale = min(FIT_W * SIZE * 4 / head.size[0], CHIN * SIZE * 4 / head.size[1])
+    big = head.resize((max(1, round(head.size[0] * scale)), max(1, round(head.size[1] * scale))), Image.LANCZOS)
+    canvas = Image.new("RGBA", (SIZE * 4, SIZE * 4), (0, 0, 0, 0))
+    canvas.paste(big, ((SIZE * 4 - big.size[0]) // 2, round(CHIN * SIZE * 4) - big.size[1]), big)
+    return canvas
+
 total = 0
 report = {}
 for name in quads:
@@ -93,5 +115,15 @@ for name in quads:
         v = shifted(base, delta)
         total += save(v, os.path.join(OUT, f"{name}-{cname}.webp"))
     report[name] = {"window": S, "bbox": boxes[name][1]}
+for name, (path, base_hue) in SINGLES.items():
+    if not os.path.exists(path):
+        print("skipped", name, "(no picture at", path + ")")
+        continue
+    base = single(path)
+    total += save(base, os.path.join(OUT, f"{name}.webp"))
+    for cname, hue in COLORS.items():
+        delta = ((hue - base_hue + 180) % 360) - 180
+        total += save(shifted(base, delta), os.path.join(OUT, f"{name}-{cname}.webp"))
+    report[name] = {"source": os.path.basename(path)}
 print("window", S, "files", len(os.listdir(OUT)), "total KB", total // 1024)
 json.dump(report, open(os.path.join(OUT, "_report.json"), "w"))

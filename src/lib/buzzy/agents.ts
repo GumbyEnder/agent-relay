@@ -38,6 +38,7 @@
  */
 import { randomBytes } from "node:crypto";
 import type { Sql } from "@/lib/db";
+import { cleanDomains, domainsForJob } from "./brainMap";
 
 // ── The roster ──────────────────────────────────────────────────────────────
 
@@ -47,6 +48,11 @@ export interface Creature {
   word: string;
   /** The colour of the Talk button for the picture as drawn (look ''). */
   color: string;
+  /**
+   * false: + never hands this one out by itself (it can still be chosen in an agent's Edit
+   * window). The monkey is Code Monkey's, so a new agent never arrives looking like it.
+   */
+  rotates?: boolean;
 }
 
 /**
@@ -61,6 +67,9 @@ export const CREATURES: Creature[] = [
   { id: "bunny", word: "Bunny", color: "#F08CA0" },
   { id: "bull", word: "Bull", color: "#E07B39" },
   { id: "frog", word: "Frog", color: "#8CB83A" },
+  // Owner, 2026-11-23: "this monkey… this is your coding monkey… that color should be hex
+  // B8591F for CodeMonkey." Its own picture is the owner's; the colours are stand-ins.
+  { id: "monkey", word: "Monkey", color: "#B8591F", rotates: false },
 ];
 
 export interface ZillaColor {
@@ -139,6 +148,12 @@ export interface Agent {
   opening: string;
   /** The conversation to carry on with, when there is one. */
   lastSessionId: string | null;
+  /**
+   * The folders of the brain it works in (brainMap.ts paths, "knowledge/programming"): its
+   * domains of expertise, given when it was made or worked out from its job. The person can
+   * change them; a new job moves them only while they are still the ones the old job gave.
+   */
+  domains: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -240,7 +255,7 @@ function lookOrder(): Array<{ creature: string; look: string }> {
     { creature: "bull", look: "" },
     { creature: "frog", look: "" },
   ];
-  for (const c of COLORS) for (const cr of CREATURES) out.push({ creature: cr.id, look: c.name });
+  for (const c of COLORS) for (const cr of CREATURES) if (cr.rotates !== false) out.push({ creature: cr.id, look: c.name });
   return out;
 }
 
@@ -335,6 +350,7 @@ export interface AgentFields {
   role: string;
   instructions: string;
   face: string;
+  domains: string[];
 }
 
 /**
@@ -379,6 +395,12 @@ export function checkFields(raw: Record<string, unknown>): { ok: true; fields: P
       return no(400, "bad_face", "A face is a single emoji, or nothing.");
     }
     f.face = e.trim();
+  }
+  if (own(raw, "domains")) {
+    // The folders it works in: paths under brain/ (brainMap.ts), at most a dozen.
+    const d = cleanDomains(raw.domains);
+    if (!d) return no(400, "bad_domains", "Folders are a list of places in the brain, like knowledge/programming.");
+    f.domains = d;
   }
   return { ok: true, fields: f };
 }
@@ -741,9 +763,17 @@ interface AgentRow {
   face: string;
   pos: number | string;
   colony_id?: string | null;
+  domains?: unknown;
   created_at: Date | string;
   updated_at: Date | string;
   last_session_id?: string | null;
+}
+
+/** A jsonb list as either driver hands it back (parsed, or as text). */
+function domainsOf(v: unknown): string[] {
+  let raw = v;
+  if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { raw = []; } }
+  return cleanDomains(raw) ?? [];
 }
 
 const iso = (v: Date | string): string => (v instanceof Date ? v.toISOString() : String(v));
@@ -766,6 +796,7 @@ function rowToAgent(r: AgentRow): Agent {
     image: agentImage(r.creature, r.look),
     opening: agentOpening({ name: r.name, role }),
     lastSessionId: r.last_session_id ?? null,
+    domains: domainsOf(r.domains),
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -783,13 +814,84 @@ const notFound = () => no(404, "not_found", "There is no agent like that on your
 const colonyNotFound = () => no(404, "not_found", "There is no colony like that on your account.");
 
 /**
- * Give a person their starter agent: one greyed-out bunny, made once. The marker and
- * the agent are written by one statement, so two first visits at the same moment make
- * one bunny, and a bunny that was deleted never comes back. True when this call made it.
+ * Code Monkey, the coding agent every account starts with, right under BeeZilla (owner,
+ * 2026-11-23: "By default, there's going to be this monkey on the left side underneath the
+ * Bzilla thing… this is your coding monkey… that color should be hex B8591F"). Unlike the
+ * grey bunny it arrives with its job, so it is ready to talk to at once, and with the folders
+ * of the brain it works in. It wears its own picture rather than an emoji (face ''). It is an
+ * agent like any other after that: the person can rename it, recolour it, change its job or
+ * its folders, put it in a colony or remove it (and then it stays removed).
+ */
+export const CODE_MONKEY = {
+  starter: "code-monkey",
+  name: "Code Monkey",
+  creature: "monkey",
+  look: "",
+  color: "#B8591F",
+  size: "m" as Size,
+  role: "coding",
+  domains: ["knowledge/programming", "knowledge/web-design", "systems/skills/programming", "systems/skills/web-design"],
+};
+
+/**
+ * Give a person Code Monkey, once (buzzy_agent_starters, migration 0068). The marker and the
+ * agent are written by one statement, like the bunny's. It goes first, above every agent and
+ * colony the person already has, so it sits right under BeeZilla. True when this call made
+ * it. An older database without the marker table gets no Code Monkey and no error.
+ */
+/**
+ * Which starter agents a new account is given: BZ_STARTER_AGENTS, a comma list of "bunny" and
+ * "code-monkey", both when it is not set. A deployment can leave Code Monkey out; the older
+ * test suites that check one agent at a time run with "bunny" (scripts/test-brain.ts checks
+ * the default, with both).
+ */
+export function starterAgents(): Set<string> {
+  const raw = process.env.BZ_STARTER_AGENTS;
+  if (raw === undefined || !raw.trim()) return new Set(["bunny", CODE_MONKEY.starter]);
+  return new Set(raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+}
+
+async function ensureCodeMonkey(sql: Sql, userId: string): Promise<boolean> {
+  if (!starterAgents().has(CODE_MONKEY.starter)) return false;
+  try {
+    const done = await sql<{ n: number }>`
+      SELECT count(*)::int AS n FROM buzzy_agent_starters WHERE user_id = ${userId} AND starter = ${CODE_MONKEY.starter}
+    `;
+    if (Number(done[0]?.n ?? 0) > 0) return false;
+    const made = await sql<{ id: string }>`
+      WITH marker AS (
+        INSERT INTO buzzy_agent_starters (user_id, starter) VALUES (${userId}, ${CODE_MONKEY.starter})
+        ON CONFLICT (user_id, starter) DO NOTHING
+        RETURNING user_id
+      )
+      INSERT INTO buzzy_agents (id, user_id, creature, look, name, color, size, role, instructions, face, pos, domains)
+      SELECT ${newId()}::text, marker.user_id, ${CODE_MONKEY.creature}::text, ''::text, ${CODE_MONKEY.name}::text,
+             ${CODE_MONKEY.color}::text, ${CODE_MONKEY.size}::text, ${CODE_MONKEY.role}::text, ''::text, ''::text,
+             LEAST(
+               COALESCE((SELECT MIN(pos) FROM buzzy_agents WHERE user_id = ${userId}), 0),
+               COALESCE((SELECT MIN(pos) FROM buzzy_agent_colonies WHERE user_id = ${userId}), 0)
+             ) - 1,
+             ${JSON.stringify(CODE_MONKEY.domains)}::jsonb
+      FROM marker
+      RETURNING id
+    `;
+    return made.length > 0;
+  } catch (err) {
+    console.warn("[buzzy/agents] Code Monkey was not added:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
+/**
+ * Give a person their starter agents: one greyed-out bunny, made once, and Code Monkey above
+ * it (ensureCodeMonkey). The bunny's marker and the bunny are written by one statement, so two
+ * first visits at the same moment make one bunny, and a bunny that was deleted never comes
+ * back. True when this call made the bunny.
  */
 export async function ensureSeeded(sql: Sql, userId: string): Promise<boolean> {
+  if (!starterAgents().has("bunny")) { await ensureCodeMonkey(sql, userId); return false; }
   const done = await sql<{ user_id: string }>`SELECT user_id FROM buzzy_agent_seed WHERE user_id = ${userId}`;
-  if (done.length) return false;
+  if (done.length) { await ensureCodeMonkey(sql, userId); return false; }
   const bunny = creatureOf("bunny")!;
   const made = await sql<{ id: string }>`
     WITH marker AS (
@@ -803,6 +905,7 @@ export async function ensureSeeded(sql: Sql, userId: string): Promise<boolean> {
     FROM marker
     RETURNING id
   `;
+  await ensureCodeMonkey(sql, userId);
   return made.length > 0;
 }
 
@@ -816,7 +919,7 @@ export async function listAgents(sql: Sql, userId: string): Promise<AgentList> {
   await ensureSeeded(sql, userId);
   const rows = await sql<AgentRow>`
     SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos, a.colony_id,
-           a.created_at, a.updated_at,
+           a.domains, a.created_at, a.updated_at,
            (SELECT s.id FROM buzzy_sessions s
              WHERE s.user_id = a.user_id AND s.agent_id = a.id
              ORDER BY s.updated_at DESC LIMIT 1) AS last_session_id
@@ -837,7 +940,7 @@ async function getAgent(sql: Sql, userId: string, id: string): Promise<Agent | n
   if (!AGENT_ID.test(id)) return null;
   const rows = await sql<AgentRow>`
     SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos, a.colony_id,
-           a.created_at, a.updated_at,
+           a.domains, a.created_at, a.updated_at,
            (SELECT s.id FROM buzzy_sessions s
              WHERE s.user_id = a.user_id AND s.agent_id = a.id
              ORDER BY s.updated_at DESC LIMIT 1) AS last_session_id
@@ -893,7 +996,7 @@ export async function createAgent(
   const rows = await sql<AgentRow>`
     INSERT INTO buzzy_agents (id, user_id, creature, look, name, color, size, role, instructions, face, pos)
     VALUES (${id}, ${userId}, ${creature}, ${look}, ${name}, ${color}, ${size}, '', '', '', ${Number(next[0]?.n ?? 0)})
-    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, created_at, updated_at
+    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, domains, created_at, updated_at
   `;
   return { ok: true, agent: rowToAgent(rows[0]!) };
 }
@@ -915,7 +1018,7 @@ export async function updateAgent(
   if (!checked.ok) return checked;
   const f = checked.fields;
   if (!Object.keys(f).length) {
-    return no(400, "nothing_to_change", "Say what to change: its name, colour, size, job or face.");
+    return no(400, "nothing_to_change", "Say what to change: its name, colour, size, job, face or folders.");
   }
   const creature = f.creature ?? now.creature;
   const look = f.look ?? now.look;
@@ -927,16 +1030,62 @@ export async function updateAgent(
   let face = now.face;
   if (f.face !== undefined) face = f.face;
   else if (f.role !== undefined && (now.face === "" || now.face === faceForRole(now.role))) face = faceForRole(role);
+  // Its folders: what was sent, or, when only the job changed, the new job's folders, as long
+  // as the old ones were still the old job's (the person's own choice of folders is kept).
+  let domains = now.domains;
+  if (f.domains !== undefined) domains = f.domains;
+  else if (f.role !== undefined && followsJob(now.domains, now.role)) domains = domainsForJob(role);
   const rows = await sql<AgentRow>`
     UPDATE buzzy_agents
     SET creature = ${creature}, look = ${look}, name = ${f.name ?? now.name}, color = ${color},
         size = ${f.size ?? now.size}, role = ${role}, instructions = ${f.instructions ?? now.instructions},
-        face = ${face}, updated_at = now()
+        face = ${face}, domains = ${JSON.stringify(domains)}::jsonb, updated_at = now()
     WHERE id = ${id} AND user_id = ${userId}
-    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, created_at, updated_at
+    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, domains, created_at, updated_at
   `;
   if (!rows[0]) return notFound();
   return { ok: true, agent: { ...rowToAgent(rows[0]), lastSessionId: now.lastSessionId } };
+}
+
+/** Are these folders still the ones a job gave (or none at all)? Then a new job may move them. */
+function followsJob(domains: string[], role: string): boolean {
+  if (!domains.length) return true;
+  const auto = domainsForJob(role);
+  return auto.length === domains.length && auto.every((d, i) => d === domains[i]);
+}
+
+/**
+ * Make an agent that arrives with its job: what BeeZilla does when the person asks her for a
+ * new agent (make_agent, orchestrate.ts). The picture comes from what + would add next unless
+ * one is asked for; the face from the job; the folders are the ones given, or the job's.
+ * `words` are the person's own words that asked for it, kept as its instructions (they describe
+ * the job and never change the rules, as everywhere else).
+ */
+export async function createAgentWithJob(
+  sql: Sql,
+  userId: string,
+  want: { name?: unknown; job: unknown; words?: unknown; domains?: unknown; creature?: unknown; look?: unknown },
+): Promise<{ ok: true; agent: Agent } | Refusal> {
+  const role = line(want.job, ROLE_MAX, true);
+  if (!role) return no(400, "no_job", "Say what the new agent should help with.");
+  const pick: Record<string, unknown> = {};
+  if (typeof want.creature === "string" && creatureOf(want.creature)) pick.creature = want.creature;
+  if (typeof want.look === "string" && (want.look === "" || colorOf(want.look))) pick.look = want.look;
+  if (pick.creature === "bee" && !pick.look) delete pick.creature;
+  const name = line(want.name, NAME_MAX, true);
+  if (name) pick.name = name;
+  const made = await createAgent(sql, userId, pick);
+  if (!made.ok) return made;
+  const domains = cleanDomains(want.domains);
+  const rows = await sql<AgentRow>`
+    UPDATE buzzy_agents
+    SET role = ${role}, instructions = ${line(want.words, INSTRUCTIONS_MAX)}, face = ${faceForRole(role)},
+        domains = ${JSON.stringify(domains && domains.length ? domains : domainsForJob(role))}::jsonb, updated_at = now()
+    WHERE id = ${made.agent.id} AND user_id = ${userId}
+    RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, domains, created_at, updated_at
+  `;
+  if (!rows[0]) return no(500, "not_saved", "That agent couldn't be made. Try again.");
+  return { ok: true, agent: rowToAgent(rows[0]) };
 }
 
 /**
@@ -1038,11 +1187,14 @@ export async function setIdentity(
 
   let saved: Agent | null = null;
   if (role) {
+    // The folders it works in come with the job, unless the person chose their own.
+    const domains = followsJob(agent.domains, agent.role) ? domainsForJob(role) : agent.domains;
     const rows = await sql<AgentRow>`
       UPDATE buzzy_agents
-      SET role = ${role}, instructions = ${line(said, INSTRUCTIONS_MAX)}, face = ${faceForRole(role)}, updated_at = now()
+      SET role = ${role}, instructions = ${line(said, INSTRUCTIONS_MAX)}, face = ${faceForRole(role)},
+          domains = ${JSON.stringify(domains)}::jsonb, updated_at = now()
       WHERE id = ${id} AND user_id = ${userId}
-      RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, created_at, updated_at
+      RETURNING id, creature, look, name, color, size, role, instructions, face, pos, colony_id, domains, created_at, updated_at
     `;
     if (rows[0]) saved = { ...rowToAgent(rows[0]), lastSessionId: agent.lastSessionId };
   }
@@ -1094,7 +1246,7 @@ export async function agentForSession(sql: Sql, userId: string, sessionId: strin
   if (!sessionId) return null;
   const rows = await sql<AgentRow>`
     SELECT a.id, a.creature, a.look, a.name, a.color, a.size, a.role, a.instructions, a.face, a.pos, a.colony_id,
-           a.created_at, a.updated_at
+           a.domains, a.created_at, a.updated_at
     FROM buzzy_sessions s
     JOIN buzzy_agents a ON a.id = s.agent_id AND a.user_id = s.user_id
     WHERE s.id = ${sessionId} AND s.user_id = ${userId}
@@ -1560,7 +1712,7 @@ const refuse = (r: Refusal): AgentsReply => reply(r.status, { ok: false, error: 
  *
  *   GET  /                   { bzilla, agents, colonies, layout, next, colors, creatures }
  *   POST /                   add one: { creature?, look?, name?, size?, color? } → 201 { agent }
- *   PATCH /<id>              change: { name?, color?, size?, role?, instructions?, face?, look?, creature? }
+ *   PATCH /<id>              change: { name?, color?, size?, role?, instructions?, face?, look?, creature?, domains? }
  *   DELETE /<id>             remove it (a colony that loses its last agent goes too)
  *   POST /<id>/identity      tell it its job: { text, sessionId? } → { saved, agent?, reply }
  *                            (a job that was saved leaves a note in the Hive: "<Name> took on a job: <job>")

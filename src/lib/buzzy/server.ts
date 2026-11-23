@@ -59,6 +59,7 @@ import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { agentPromptParts, readyAgents, ROSTER_LINES, type AgentTurn, type ReadyAgent } from "./agents";
 import { askAgent, askBzilla, hiveOffer, readyNames, sentence, HIVE_MAX_PER_TURN } from "./hive";
+import { makeAgent, makeAgentOffer, madeMessage, MAKE_AGENT_MAX_PER_TURN, MAKE_AGENT_SENTENCE } from "./orchestrate";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
@@ -342,6 +343,7 @@ const TOOL_SKILL_NAMES: Record<string, string> = {
   calculate: "Calculator",
   ask_bzilla: "Ask BeeZilla",
   ask_agent: "Ask an agent",
+  make_agent: "Make an agent",
 };
 export function toolSkillTitle(name: string): string {
   const n = String(name || "");
@@ -766,10 +768,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     const all = await readyNames(sql, userId);
     if (all.length) hiveAgents = all;
   }
-  const hive = hiveOffer({ agent: req.agent, ready: hiveAgents, message, spoken: spokenLane });
+  // BeeZilla the orchestrator (orchestrate.ts): on her own written turn, when the person asks for a
+  // new agent, she is offered make_agent and told how to use it. Decided with the Hive's tools, for
+  // the same reason: the prompt only mentions a tool that is really offered.
+  const hive = {
+    ...hiveOffer({ agent: req.agent, ready: hiveAgents, message, spoken: spokenLane }),
+    makeAgent: makeAgentOffer({ agent: req.agent, message, spoken: spokenLane }),
+  };
   const agentParts = agentPromptParts(req.agent, personaForMode(mode), readyForRoster, req.agent ? hive.askBzilla : hive.askAgent);
   // (agentParts.section rides with the persona, so the system prompt below is built as before.)
-  const persona = agentParts.persona + agentParts.section + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
+  const persona = agentParts.persona + agentParts.section + (hive.makeAgent ? MAKE_AGENT_SENTENCE : "") + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
   // Freshness: without a date the model cannot tell a superseded price from the
   // current one. It answered "78 cents" the day USPS's own page said 82.
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -1553,7 +1561,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // How many times this turn has asked someone else (the Hive, hive.ts). A turn may ask at most
     // HIVE_MAX_PER_TURN times, counted for each tool and in all, on top of the loop's own cap: the
     // loop allows three rounds, and one round may carry several calls.
-    const asked: Record<string, number> = { ask_bzilla: 0, ask_agent: 0, total: 0 };
+    const asked: Record<string, number> = { ask_bzilla: 0, ask_agent: 0, total: 0, make_agent: 0 };
     // Bounded model-paced loop: execute render_document calls and feed the
     // result back until the model returns a final answer or we hit the cap.
     for (let iteration = 0; iteration < toolMax && reply.toolCalls.length > 0; iteration++) {
@@ -1600,6 +1608,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           }
           asked.total++;
           asked[tc.name]!++;
+        }
+        if (tc.name === "make_agent") {
+          // At most MAKE_AGENT_MAX_PER_TURN new agents in one turn, however many the model asks for.
+          if (asked.make_agent! >= MAKE_AGENT_MAX_PER_TURN) {
+            followUpMessages.push({
+              role: "user",
+              content: `tool_refused (make_agent): one turn makes at most ${MAKE_AGENT_MAX_PER_TURN} agents and this one already has. Tell the person which you made, and that they can ask for more next.`,
+            });
+            await recordToolCall(sql, {
+              userId, jobId, sessionId, turnId: req.attemptId ?? null,
+              tool: tc.name, gate: policyFor(tc.name)?.gate ?? null, ok: false, errorCode: "too_many",
+            });
+            continue;
+          }
+          asked.make_agent!++;
         }
 
         req.onTool?.({ name: tc.name, state: "running" });
@@ -1832,6 +1855,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 errorCode: "render_failed",
               };
             }
+            if (tc.name === "make_agent") {
+              // BeeZilla makes the person a new agent (orchestrate.ts): a real row, in the sidebar at
+              // once, with a line in the Hive. Only on her own turn; the person's message is kept as
+              // the new agent's instructions (their own words about its job).
+              if (req.agent) return { message: "make_agent is only for BeeZilla's own conversation.", errorCode: "refused" };
+              const made = await makeAgent(sql, userId, {
+                name: content.name, job: content.job, subjects: content.subjects,
+                creature: content.creature, colour: content.colour, words: message, sessionId,
+              });
+              if (!made.ok) return { message: `make_agent could not make it: ${made.message}`, errorCode: made.code };
+              const text = madeMessage(made.agent);
+              return { message: text, bytes: text.length };
+            }
             if (tc.name === "ask_bzilla" || tc.name === "ask_agent") {
               // The Hive (hive.ts): ONE completion with no tools, so nothing here can ask again, and the
               // question and its answer are written to the log once the answer is in. A model that fails
@@ -1900,7 +1936,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // not an answer, and it would have been saved as the deliverable. Ask once
     // for the prose; if it still comes back as an echo, fail the turn honestly
     // rather than storing junk in the owner's Library.
-    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation|ask_bzilla|ask_agent)\s*[:(]/i;
+    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation|ask_bzilla|ask_agent|make_agent)\s*[:(]/i;
     const URL_ONLY = /^\s*https?:\/\/\S+\s*$/i;
     if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
       console.warn("[buzzy/chat] tool echo in reply — asking for prose once");

@@ -889,11 +889,19 @@
   {
     "id": "sk-043",
     "q": "What is Memory?",
-    "a": "What BeeZilla has learned from your chats. If it is empty, chat with BeeZilla and what it learns will show up there.",
+    "a": "Your brain: one tree of everything BeeZilla and your agents keep. It starts at brain and splits into knowledge (what they learned, filed by subject), systems (your agents with their agent.md and picture, the skills by what they are for, your recipes) and assets (pictures, videos, music and files to use again). New things are filed by subject and the tree is tidied once a day; you can move things, make folders and forget a memory. If it is empty, talk to BeeZilla or your agents and what they learn will show up there.",
     "sources": [
       {
-        "file": "public/buzzy/memory.html",
-        "symbol": "chat with BeeZilla and what it learns will appear here"
+        "file": "public/buzzy/brain.js",
+        "symbol": "Nothing remembered yet. As you talk to BeeZilla and your agents"
+      },
+      {
+        "file": "src/lib/buzzy/brainMap.ts",
+        "symbol": "id: \"knowledge\""
+      },
+      {
+        "file": "src/lib/buzzy/brain.ts",
+        "symbol": "export const TIDY_EVERY_MS"
       }
     ],
     "surfaces": [
