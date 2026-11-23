@@ -26,6 +26,18 @@ const DIST = join(ROOT, "dist-desktop");
 
 const log = (msg) => console.log(`[dist] ${msg}`);
 
+/**
+ * Pins the runtime will actually honour.
+ *
+ * Mirrors `loadPinFile()` in src/lib/recipe-seal/trust.ts: a row counts only if
+ * it carries a non-empty `publicKey` string. `keyId` is optional there (it is
+ * derived from the key), so it must not be required here.
+ */
+function usablePins(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row) => row && typeof row === "object" && typeof row.publicKey === "string" && row.publicKey.trim() !== "");
+}
+
 function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, { cwd: ROOT, stdio: "inherit", ...opts });
 }
@@ -65,11 +77,19 @@ function stage() {
   const pinsFile = process.env.BZ_RECIPE_PUBLISHER_FILE || join(ROOT, "publishers.json");
   if (existsSync(pinsFile)) {
     cpSync(pinsFile, join(APP, "publishers.json"));
-    const pins = JSON.parse(readFileSync(pinsFile, "utf8")).publishers ?? [];
-    log(`publisher pins: ${pins.length} (from ${pinsFile})`);
+    const rows = JSON.parse(readFileSync(pinsFile, "utf8")).publishers;
+    const pins = usablePins(rows);
+    // Count what the runtime will actually trust, not the number of JSON rows.
+    // `loadPinFile()` silently drops an entry with no `publicKey`, so a file of
+    // `{ id, key }` rows produced "publisher pins: 1" while the packaged app
+    // trusted nothing — a release gate that passed on its own bookkeeping.
+    log(
+      `publisher pins: ${pins.length} usable (${Array.isArray(rows) ? rows.length : 0} rows, from ${pinsFile})`,
+    );
     if (pins.length === 0 && mode === "all") {
       throw new Error(
-        "refusing to build a release with no publisher pins — point BZ_RECIPE_PUBLISHER_FILE at the production key set",
+        `refusing to build a release with no usable publisher pins — ${Array.isArray(rows) ? rows.length : 0} row(s) in the pin file, none with a publicKey; ` +
+          "point BZ_RECIPE_PUBLISHER_FILE at the production key set",
       );
     }
   } else if (mode === "all") {
