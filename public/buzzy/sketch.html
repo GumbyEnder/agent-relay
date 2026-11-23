@@ -47,7 +47,11 @@
   #layers { position:absolute; inset:0; pointer-events:none; }
   .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
   .img-wrap.selected { border-color: var(--bz-yellow); }
-  .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none; }
+  .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none;
+                  /* #296: the canvas paints the image in its stacking position; this
+                     element stays only as the drag/resize handle, so it must not paint
+                     a second copy on top of the canvas. */
+                  visibility:hidden; }
   .img-wrap .handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--bz-yellow);
                       border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
   /* The right padding keeps the bar's last words clear of the settings gear, which
@@ -95,6 +99,10 @@
             padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
   @media (max-width: 640px) { #selHint, #textbar .hint { display:none; } }
   #selbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  #orderbar { display:flex; visibility:hidden; align-items:center; gap:0.35rem; flex-wrap:wrap;
+              padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0d0d0d; }
+  #orderbar.on { visibility:visible; }
+  #orderbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
   #canvasPanel { position:absolute; z-index:8; right:12px; top:12px; width:250px; display:none;
                  background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
                  padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
@@ -233,6 +241,17 @@
   <span class="hint" id="selHint">Drag a box, or a free shape, then move / copy / cut / crop it.</span>
 </div>
 
+<!-- #296: stacking order for the selected mark or image. Only visible while one is
+     selected — the buttons act on the selection, not on a marquee. -->
+<div id="orderbar">
+  <span class="lbl">Order</span>
+  <button id="ordBack" title="Send to back">⤓ Back</button>
+  <button id="ordDown" title="Move back one ( [ )">↓ Down</button>
+  <button id="ordUp" title="Move forward one ( ] )">↑ Up</button>
+  <button id="ordFront" title="Bring to front">⤒ Front</button>
+  <span class="hint" id="ordHint"></span>
+</div>
+
 <div id="work">
   <div id="stage">
     <canvas id="board"></canvas>
@@ -308,7 +327,7 @@
     var promptEl = document.getElementById("prompt");
     var titleEl = document.getElementById("pTitle");
 
-    var doc = { w: 1, h: 1, bg: "#141414", raster: null, strokes: [], images: [] };
+    var doc = { w: 1, h: 1, bg: "#141414", raster: null, strokes: [], images: [], order: [] };
     var view = { zoom: 1, panX: 0, panY: 0 };
     var tool = "select";
     var colorP = "#ffd40d";
@@ -329,6 +348,98 @@
 
     function newId() { return "s_" + Math.random().toString(36).slice(2, 9); }
     function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+    // ── stacking order (#296) ─────────────────────────────────────────
+    // One list describes what is above what, bottom first, for the two things that
+    // can overlap: dropped images and vector marks. It stores {kind,id}, never an
+    // index, because notes are anchored by mark id (`anchor=<stroke id>`) — a
+    // reorder must move a mark, not rewrite it.
+    // A board saved before this existed has no `order`; anything missing from the
+    // list is appended images-then-strokes, which is exactly the order the old
+    // painter used, so old boards look identical.
+    function orderSync() {
+      var seen = {};
+      var next = [];
+      function known(kind, id) {
+        if (kind === "image") return doc.images.some(function (i) { return i.id === id; });
+        return doc.strokes.some(function (s) { return s.id === id; });
+      }
+      (doc.order || []).forEach(function (e) {
+        if (!e || !e.id || (e.kind !== "image" && e.kind !== "stroke")) return;
+        var key = e.kind + ":" + e.id;
+        if (seen[key] || !known(e.kind, e.id)) return;
+        seen[key] = 1;
+        next.push({ kind: e.kind, id: e.id });
+      });
+      doc.images.forEach(function (i) {
+        var key = "image:" + i.id;
+        if (!seen[key]) { seen[key] = 1; next.push({ kind: "image", id: i.id }); }
+      });
+      doc.strokes.forEach(function (s) {
+        var key = "stroke:" + s.id;
+        if (!seen[key]) { seen[key] = 1; next.push({ kind: "stroke", id: s.id }); }
+      });
+      doc.order = next;
+      return next;
+    }
+    function orderIndexOf(kind, id) {
+      orderSync();
+      for (var i = 0; i < doc.order.length; i++) {
+        if (doc.order[i].kind === kind && doc.order[i].id === id) return i;
+      }
+      return -1;
+    }
+    // move: -1 backward, +1 forward, "front", "back"
+    function orderMove(kind, id, how) {
+      var at = orderIndexOf(kind, id);
+      if (at < 0) return false;
+      var list = doc.order.slice();
+      var item = list.splice(at, 1)[0];
+      if (how === "front") list.push(item);
+      else if (how === "back") list.unshift(item);
+      else {
+        var to = clamp(at + (how === 1 ? 1 : -1), 0, list.length);
+        list.splice(to, 0, item);
+      }
+      doc.order = list;
+      return true;
+    }
+    function orderTarget() {
+      if (selected) return { kind: "image", id: selected };
+      if (selectedStroke) return { kind: "stroke", id: selectedStroke };
+      return null;
+    }
+    function refreshOrderBar() {
+      var bar = document.getElementById("orderbar");
+      if (!bar) return;
+      var t = orderTarget();
+      if (t) bar.classList.add("on"); else bar.classList.remove("on");
+      var hint = document.getElementById("ordHint");
+      if (!hint) return;
+      if (!t) { hint.textContent = ""; return; }
+      var at = orderIndexOf(t.kind, t.id);
+      hint.textContent = (t.kind === "image" ? "image " : "mark ") + (at + 1) + " of " + doc.order.length;
+    }
+    function reorder(kind, id, how) {
+      snapshot();                       // one snapshot: order, like pixels, is document state
+      if (!orderMove(kind, id, how)) return;
+      renderImages();
+      paint();
+      refreshOrderBar();
+      autoSave();
+    }
+    (function bindOrderBar() {
+      var map = [["ordBack", "back"], ["ordDown", -1], ["ordUp", 1], ["ordFront", "front"]];
+      map.forEach(function (pair) {
+        var btn = document.getElementById(pair[0]);
+        if (!btn) return;
+        btn.addEventListener("click", function () {
+          var t = orderTarget();
+          if (!t) return;
+          reorder(t.kind, t.id, pair[1]);
+        });
+      });
+    })();
 
     // ── pixel layer ───────────────────────────────────────────────────
     function ensureRaster() {
@@ -607,7 +718,23 @@
       g.save();
       g.beginPath(); g.rect(0, 0, doc.w, doc.h); g.clip();
       if (rasterCv) g.drawImage(rasterCv, 0, 0, doc.w, doc.h);
-      doc.strokes.forEach(function (st) { if (st !== editingMark) drawMark(g, st, false); });
+      // Walking `doc.order` is what makes stacking editable (#296): a mark can sit
+      // above an image, and an image can sit above a mark, instead of images always
+      // winning because they were DOM above the canvas.
+      orderSync();
+      doc.order.forEach(function (e) {
+        if (e.kind === "image") {
+          var im = doc.images.find(function (x) { return x.id === e.id; });
+          if (!im) return;
+          var el = imageEl(im.id, im.url);
+          if (el.complete && el.naturalWidth) {
+            try { g.drawImage(el, im.x, im.y, im.w, im.h); } catch (err) { /* not decodable yet */ }
+          }
+          return;
+        }
+        var st = doc.strokes.find(function (x) { return x.id === e.id; });
+        if (st && st !== editingMark) drawMark(g, st, false);
+      });
       if (draft) drawMark(g, draft, true);
       if (floating) g.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
       // Gridlines go ON TOP of the art. Under the raster they were invisible the moment
@@ -622,6 +749,7 @@
       if (showRulers) drawRulers(g);
       syncImages();
       positionEditor();
+      refreshOrderBar();
     }
 
     // Screen (CSS px inside #stage) → document coordinates.
@@ -640,9 +768,15 @@
       return Math.sqrt(dx * dx + dy * dy);
     }
     // Which mark is under the cursor? Bounding box first (cheap), segments for lines.
+    // Walked in stacking order, front to back (#296) — the mark you can see on top is
+    // the one a click should select, which is no longer the same as the array order.
     function hitTest(p) {
-      for (var i = doc.strokes.length - 1; i >= 0; i--) {
-        var st = doc.strokes[i];
+      orderSync();
+      for (var oi = doc.order.length - 1; oi >= 0; oi--) {
+        var entry = doc.order[oi];
+        if (entry.kind !== "stroke") continue;
+        var st = doc.strokes.find(function (x) { return x.id === entry.id; });
+        if (!st) continue;
         if (st.tool === "line" || st.tool === "arrow" || st.tool === "curve") {
           var d = segDist(p, { x: st.x1, y: st.y1 }, { x: st.x2, y: st.y2 });
           if (d < Math.max(8, (st.width || 3) / 2 + 4)) return st;
@@ -755,10 +889,14 @@
     document.addEventListener("visibilitychange", function () { if (document.hidden) flushSave(); });
 
     function boardJson() {
+      orderSync();
       return {
-        version: 2, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
+        version: 3, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
         strokes: doc.strokes,
-        images: doc.images.map(function (i) { return { x: i.x, y: i.y, w: i.w, h: i.h, url: i.url }; }),
+        // id is persisted so `order` (and any anchor pointing at a mark) still
+        // resolves after a reload — it used to be dropped and regenerated.
+        images: doc.images.map(function (i) { return { id: i.id, x: i.x, y: i.y, w: i.w, h: i.h, url: i.url }; }),
+        order: doc.order,
       };
     }
 
@@ -1069,6 +1207,20 @@
       var wrap = layers.querySelector('[data-id="' + id + '"]');
       return wrap ? wrap.querySelector("img") : null;
     }
+    // Decoded copy for canvas painting. The DOM <img> is only a drag handle now
+    // (hidden by CSS), so the canvas must own its own element per image — and it
+    // must exist independently of whether the wrap has been rendered yet.
+    var imgCache = {};
+    function imageEl(id, url) {
+      var el = imgCache[id];
+      if (!el) {
+        el = new Image();
+        el.onload = function () { paint(); };
+        el.src = url;
+        imgCache[id] = el;
+      }
+      return el;
+    }
     function flattenAll() {
       if (!doc.strokes.length && !doc.images.length) { ensureRaster(); return; }
       ensureRaster();
@@ -1076,13 +1228,22 @@
       c.width = rasterCv.width; c.height = rasterCv.height;
       var g = c.getContext("2d");
       g.drawImage(rasterCv, 0, 0);
-      doc.strokes.forEach(function (st) { drawMark(g, st, false); });
-      doc.images.forEach(function (im) {
-        var el = layerImg(im.id);
-        if (el) { try { g.drawImage(el, im.x, im.y, im.w, im.h); } catch (e) { /* not decoded yet */ } }
+      orderSync();
+      doc.order.forEach(function (e) {
+        if (e.kind === "image") {
+          var im = doc.images.find(function (x) { return x.id === e.id; });
+          var el = im && imageEl(im.id, im.url);
+          if (im && el && el.complete && el.naturalWidth) {
+            try { g.drawImage(el, im.x, im.y, im.w, im.h); } catch (err) { /* not decoded yet */ }
+          }
+          return;
+        }
+        var st = doc.strokes.find(function (x) { return x.id === e.id; });
+        if (st) drawMark(g, st, false);
       });
       doc.strokes = [];
       doc.images = [];
+      doc.order = [];
       selectedStroke = null;
       selected = null;
       rasterCv = c;
@@ -1667,7 +1828,12 @@
     }
     function renderImages() {
       layers.innerHTML = "";
-      doc.images.forEach(function (im) {
+      orderSync();
+      // DOM order decides who wins a click, so it follows the stacking order too.
+      var ordered = doc.images.slice().sort(function (a, b) {
+        return orderIndexOf("image", a.id) - orderIndexOf("image", b.id);
+      });
+      ordered.forEach(function (im) {
         var wrap = document.createElement("div");
         wrap.className = "img-wrap" + (selected === im.id ? " selected" : "");
         wrap.setAttribute("data-id", im.id);
@@ -1824,6 +1990,15 @@
       if (e.key === "-" || e.key === "_") { e.preventDefault(); setZoom(view.zoom / 1.25); return; }
       if (e.key === "0") { e.preventDefault(); setZoom(1); return; }
       if (e.key === "Enter" && polyDraft) { e.preventDefault(); closePolygon(); return; }
+      // #296: layer order for whatever is selected. "]" forward (toward the front),
+      // "[" backward. No-op when nothing is selected, so the keys stay free.
+      if (e.key === "]" || e.key === "[") {
+        var tgt = orderTarget();
+        if (!tgt) return;
+        e.preventDefault();
+        reorder(tgt.kind, tgt.id, e.key === "]" ? 1 : -1);
+        return;
+      }
       if (e.key === "Escape") {
         if (floating) { dropFloating(); return; }
         if (sel) { sel = null; paint(); syncSelBar(); return; }
@@ -1976,18 +2151,33 @@
       c.fillStyle = type === "image/jpeg" ? "#ffffff" : doc.bg;
       c.fillRect(0, 0, doc.w, doc.h);
       if (rasterCv) c.drawImage(rasterCv, 0, 0, doc.w, doc.h);
-      c.save(); c.beginPath(); c.rect(0, 0, doc.w, doc.h); c.clip();
-      doc.strokes.forEach(function (st) { drawMark(c, st, false); });
-      c.restore();
+      // Images are decoded first and then painted in `doc.order` interleaved with the
+      // vector marks, so the PNG is the board and not a re-drawing of it.
+      var loaded = {};
       var pending = doc.images.map(function (im) {
         return new Promise(function (resolve) {
           var img = new Image();
-          img.onload = function () { c.drawImage(img, im.x, im.y, im.w, im.h); resolve(); };
+          img.onload = function () { loaded[im.id] = img; resolve(); };
           img.onerror = function () { resolve(); };
           img.src = im.url;
         });
       });
-      return Promise.all(pending).then(function () { return out.toDataURL(type || "image/png", 0.92); });
+      return Promise.all(pending).then(function () {
+        c.save(); c.beginPath(); c.rect(0, 0, doc.w, doc.h); c.clip();
+        orderSync();
+        doc.order.forEach(function (e) {
+          if (e.kind === "image") {
+            var im = doc.images.find(function (x) { return x.id === e.id; });
+            var img = loaded[e.id];
+            if (im && img) { try { c.drawImage(img, im.x, im.y, im.w, im.h); } catch (err) { /* undecodable */ } }
+            return;
+          }
+          var st = doc.strokes.find(function (x) { return x.id === e.id; });
+          if (st) drawMark(c, st, false);
+        });
+        c.restore();
+        return out.toDataURL(type || "image/png", 0.92);
+      });
     }
     function flatten() {
       // The model gets a sane size, not a 4K plate.
@@ -2268,6 +2458,14 @@
             if (d.board.bg) doc.bg = d.board.bg;
             doc.strokes = d.board.strokes || [];
             doc.images = d.board.images || [];
+            // Boards saved before #296 have no image ids and no order. Give the
+            // images stable ids here (dragging and order resolution both key on
+            // them) and let orderSync() rebuild the old images-then-strokes order.
+            doc.images.forEach(function (im, ix) {
+              if (!im.id) im.id = "im_" + ix.toString(36) + Math.random().toString(36).slice(2, 7);
+            });
+            doc.order = Array.isArray(d.board.order) ? d.board.order : [];
+            orderSync();
             doc.raster = d.board.raster || null;
           }
           if (d && d.images && d.images.length) {
