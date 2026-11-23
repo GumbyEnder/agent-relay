@@ -47,11 +47,13 @@
   #layers { position:absolute; inset:0; pointer-events:none; }
   .img-wrap { position:absolute; pointer-events:auto; cursor:move; border:1px solid transparent; }
   .img-wrap.selected { border-color: var(--bz-yellow); }
-  .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none;
-                  /* #296: the canvas paints the image in its stacking position; this
-                     element stays only as the drag/resize handle, so it must not paint
-                     a second copy on top of the canvas. */
-                  visibility:hidden; }
+  .img-wrap img { width:100%; height:100%; object-fit:fill; display:block; user-select:none; -webkit-user-drag:none; }
+  /* #296: once the canvas has a decoded copy it paints the image in its stacking
+     position, so the element here must not paint a second copy on top of it. The
+     class is set from paint() only when the cache copy really decoded — an image the
+     canvas cannot draw (dead blob URL, undecodable data) stays visible instead of
+     turning into an invisible hole. */
+  .img-wrap.painted img { visibility:hidden; }
   .img-wrap .handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--bz-yellow);
                       border-radius:2px; cursor:nwse-resize; pointer-events:auto; }
   /* The right padding keeps the bar's last words clear of the settings gear, which
@@ -748,8 +750,21 @@
       paintOverlays(g);
       if (showRulers) drawRulers(g);
       syncImages();
+      markImagePainted();
       positionEditor();
       refreshOrderBar();
+    }
+
+    // Hide a DOM copy only when the canvas actually has a decoded one (#296). Called
+    // from paint() so it re-runs as images decode and on every renderImages() rebuild.
+    function markImagePainted() {
+      doc.images.forEach(function (im) {
+        var wrap = layers.querySelector('[data-id="' + im.id + '"]');
+        if (!wrap) return;
+        var el = imageEl(im.id, im.url);
+        if (el.complete && el.naturalWidth) wrap.classList.add("painted");
+        else wrap.classList.remove("painted");
+      });
     }
 
     // Screen (CSS px inside #stage) → document coordinates.
@@ -1854,6 +1869,7 @@
         layers.appendChild(wrap);
       });
       syncImages();
+      markImagePainted();
     }
     var drag = null;
     window.addEventListener("pointermove", function (e) {
