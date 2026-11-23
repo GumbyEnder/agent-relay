@@ -170,7 +170,7 @@ export const RECIPES: Recipe[] = [
     outputContract: ["audience + message brief", "channel drafts", "asset checklist", "claims table with evidence"],
     domainChecks: ["each claim has an evidence row", "no testimonial or price not supplied", "publishing gate stated"],
     boundary: "No invented testimonials, prices or promises. Publishing is a later approval gate.",
-    forbiddenClaims: [/\b(\"[^\"]{0,60}\" — (?:happy|satisfied) customer|best in the world|#1 rated|customers say)\b/i],
+    forbiddenClaims: [/\b("[^"]{0,60}" — (?:happy|satisfied) customer|best in the world|#1 rated|customers say)\b/i],
     firstQuestion: "What's the offer, and which claims can you actually prove?",
   },
   {

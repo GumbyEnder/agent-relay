@@ -74,9 +74,9 @@ const MONEY = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b
 const DATE =
   /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},?\s+\d{4}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/i;
 
-const FROM_RE = /^(?:from|vendor|supplier|issued by|billed from|seller)\s*[:\-]\s*(.+)$/i;
-const TO_RE = /^(?:to|bill to|billed to|sold to|customer|client)\s*[:\-]\s*(.+)$/i;
-const ASK_RE = /^(?:for|description|re|subject|regarding|services|work)\s*[:\-]\s*(.+)$/i;
+const FROM_RE = /^(?:from|vendor|supplier|issued by|billed from|seller)\s*[:-]\s*(.+)$/i;
+const TO_RE = /^(?:to|bill to|billed to|sold to|customer|client)\s*[:-]\s*(.+)$/i;
+const ASK_RE = /^(?:for|description|re|subject|regarding|services|work)\s*[:-]\s*(.+)$/i;
 
 function cleanLine(raw: string): string {
   return raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();

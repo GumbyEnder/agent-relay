@@ -475,5 +475,5 @@ export function reviewDraft(draftText: string, ownerText: string): ReviewCheck[]
 }
 
 function normMoney(s: string): string {
-  return s.replace(/[\$,\s]/g, "").toLowerCase();
+  return s.replace(/[$,\s]/g, "").toLowerCase();
 }

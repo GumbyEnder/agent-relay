@@ -2078,7 +2078,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // learned the filename from project memory, so it survived removing it from the
   // prompt; and cleanReply is copied here, so stripping afterwards changed nothing.
   const cleanReply = renderedImage
-    ? finalReply.replace(/^\s*(?:\/api\/buzzy\/assets\/\d+|art-[\w.\-]+\.png)\s*/i, "")
+    ? finalReply.replace(/^\s*(?:\/api\/buzzy\/assets\/\d+|art-[\w.-]+\.png)\s*/i, "")
     : finalReply;
 
   // ── Same voice, always ──────────────────────────────────────────────
