@@ -36,8 +36,17 @@ import { openpanelClientId } from "@/lib/analytics-id";
 const opSnippet = (host: string | undefined) =>
   [
     "<script>",
-    "window.op=window.op||function(){var n=[];return new Proxy(function(){arguments.length&&n.push([].slice.call(arguments))},{get:function(t,r){return\"q\"===r?n:function(){n.push([r].concat([].slice.call(arguments)))}} ,has:function(t,r){return\"q\"===r}}) }();",
-    `window.op('init',{clientId:'${openpanelClientId(host)}',trackScreenViews:true,trackOutgoingLinks:false,trackAttributes:true});`,
+    // `window.op = window.op || shim` is what OpenPanel documents, and it is a trap
+    // in this repo: the snippet is injected at the LAST </body>, i.e. after the page's
+    // own markup, so any element with id="op" has already created a `window.op`
+    // named-access global (an element, truthy, not callable). The `||` kept the
+    // element and the very next line threw "window.op is not a function" — that is
+    // how /buzzy/sketch lost its analytics. Install only when there is no callable
+    // op, and keep the IIFE so a throw cannot take the page's later scripts with it.
+    "(function(){",
+    "if(typeof window.op!=='function'){window.op=function(){var n=[];return new Proxy(function(){arguments.length&&n.push([].slice.call(arguments))},{get:function(t,r){return\"q\"===r?n:function(){n.push([r].concat([].slice.call(arguments)))}} ,has:function(t,r){return\"q\"===r}}) }();}",
+    `try{window.op('init',{clientId:'${openpanelClientId(host)}',trackScreenViews:true,trackOutgoingLinks:false,trackAttributes:true});}catch(err){if(window.console)console.warn('[analytics] op init skipped:',err&&err.message);}`,
+    "})();",
     "</script>",
     '<script src="https://openpanel.dev/op1.js" defer async></script>',
   ].join("");
