@@ -126,9 +126,48 @@ try {
   if (lib.status !== 200) fail(`/buzzy/library -> ${lib.status}`);
   console.log(`PASS  /buzzy/library 200`);
   ok++;
+
+  // CR-8: the desktop's chrome must be the website's chrome, not a lookalike. The row
+  // is written once in src/lib/buzzy/pages.nitro.ts (NAV_ROW) and substituted into
+  // every page, so a single assertion on the served markup catches the drift that
+  // mattered: a different order (Capabilities before Sketch), different words
+  // ("Capabilities", "Honey Drops"), Library opening a new tab, and a literal
+  // "Sign in" for a signed-in reader.
+  const NAV_ORDER = [
+    ["talk", "Talk"],
+    ["library", "Library"],
+    ["memory", "Memory"],
+    ["experts", "Experts"],
+    ["recipes", "Recipes"],
+    ["sketch", "Sketch"],
+    ["studio", "Music studio"],
+    ["capabilities", "What BeeZilla can do"],
+    ["download", "Download"],
+    ["wallet", "Honey"],
+    ["publish", "Publish"],
+  ];
+  const row = talk.body.slice(talk.body.indexOf('<nav id="bzNav"'));
+  const rowEnd = row.indexOf("</nav>");
+  const served = row.slice(0, rowEnd === -1 ? row.length : rowEnd);
+  const found = [...served.matchAll(/<a href="([^"]+)" data-nav="([^"]+)">([^<]*)<\/a>/g)].map(
+    (m) => [m[2], m[3]],
+  );
+  if (found.length !== NAV_ORDER.length) {
+    fail(`#bzNav carries ${found.length} links, expected ${NAV_ORDER.length}: ${JSON.stringify(found)}`);
+  }
+  NAV_ORDER.forEach(([id, label], i) => {
+    if (found[i][0] !== id || found[i][1] !== label) {
+      fail(`#bzNav slot ${i + 1} is ${JSON.stringify(found[i])}, expected ${JSON.stringify([id, label])}`);
+    }
+  });
+  if (/data-nav="library"[^>]*target=/.test(served)) fail('Library still opens a new tab');
+  if (!talk.body.includes('src="/buzzy/nav.js"')) fail("/buzzy/talk never loads nav.js");
+  if (!talk.body.includes('href="/buzzy/nav.css"')) fail("/buzzy/talk never loads nav.css");
+  console.log(`PASS  #bzNav ${found.length} links in web order, nav.js + nav.css linked`);
+  ok++;
 } catch (err) {
   fail(`threw: ${err?.message ?? err}`);
 }
 
-console.log(`\nsmoke: ${ok}/4 checks passed against ${APP}`);
+console.log(`\nsmoke: ${ok}/5 checks passed against ${APP}`);
 stop(0);

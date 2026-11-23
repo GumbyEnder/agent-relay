@@ -120,5 +120,46 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     return html("<h1>Not found</h1>", 404);
   }
-  return html(body.toString("utf8"));
+  // CR-8: one chrome, the same one the website ships. The desktop used to hand-write
+  // its own <nav> into every page and it drifted from web main — different order
+  // (Capabilities before Sketch), different words ("Capabilities", "Honey Drops"),
+  // Library still opening a new tab, and a literal "Sign in" for signed-in readers.
+  // web main fixed that by writing the row ONCE in pages.nitro.ts and letting
+  // nav.js own state; this is the same seam, copied rather than re-derived, so the
+  // two release lines cannot describe two different products.
+  const NAV_ROW = [
+    '<a href="/buzzy/talk" data-nav="talk">Talk</a>',
+    '<a href="/buzzy/library" data-nav="library">Library</a>',
+    '<a href="/buzzy/memory" data-nav="memory">Memory</a>',
+    '<a href="/buzzy/experts" data-nav="experts">Experts</a>',
+    '<a href="/buzzy/recipes" data-nav="recipes">Recipes</a>',
+    '<a href="/buzzy/sketch" data-nav="sketch">Sketch</a>',
+    '<a href="/buzzy/studio" data-nav="studio">Music studio</a>',
+    '<a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>',
+    '<a href="/buzzy/download" data-nav="download">Download</a>',
+    '<a href="/buzzy/wallet" data-nav="wallet">Honey</a>',
+    '<a href="/buzzy/upload" data-nav="publish">Publish</a>',
+    // Blank on purpose: the row cannot know who is signed in, and the word "Sign in"
+    // over a real name is a lie. nav.js paints the cached identity, then the truth.
+    '<a href="/buzzy/landing" class="account-link" id="accountLink" aria-label="Account"></a>',
+  ].join("\n      ");
+
+  let page = body.toString("utf8");
+  page = page.replace(
+    /(<nav id="bzNav"[^>]*>)[\s\S]*?(<\/nav>)/,
+    (_m, open: string, close: string) => `${open}\n      ${NAV_ROW}\n    ${close}`,
+  );
+  if (!page.includes("/buzzy/nav.js")) {
+    const at = page.lastIndexOf("</body>");
+    if (at > 0) {
+      page = page.slice(0, at) + '<script src="/buzzy/nav.js" defer></script>' + page.slice(at);
+    }
+  }
+  if (!page.includes("/buzzy/nav.css")) {
+    const at = page.lastIndexOf("</head>");
+    if (at > 0) {
+      page = page.slice(0, at) + '<link rel="stylesheet" href="/buzzy/nav.css" />' + page.slice(at);
+    }
+  }
+  return html(page);
 });
