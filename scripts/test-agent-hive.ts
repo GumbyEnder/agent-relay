@@ -45,6 +45,10 @@ import { buildExportBundle, deleteAccountData, DELETION_STATEMENTS } from "../sr
 // This test must never reach a real database: the in-memory one is what getSql() gives
 // when no DATABASE_URL is set, and that is checked before anything else loads.
 delete process.env.DATABASE_URL;
+// These checks follow one agent at a time from the grey bunny, so the accounts here start with the
+// bunny only. Code Monkey, the second starter every account gets by default, is checked in
+// scripts/test-brain.ts (with both starters, as a real account has them).
+process.env.BZ_STARTER_AGENTS = "bunny";
 
 let pass = 0;
 let fail = 0;

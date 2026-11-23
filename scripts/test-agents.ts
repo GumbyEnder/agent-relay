@@ -36,6 +36,10 @@ import { deleteAccountData, DELETION_STATEMENTS } from "../src/lib/buzzy/portabi
 // This test must never reach a real database: the in-memory one is what getSql() gives
 // when no DATABASE_URL is set, and that is checked before anything else loads.
 delete process.env.DATABASE_URL;
+// These checks follow one agent at a time from the grey bunny, so the accounts here start with the
+// bunny only. Code Monkey, the second starter every account gets by default, is checked in
+// scripts/test-brain.ts (with both starters, as a real account has them).
+process.env.BZ_STARTER_AGENTS = "bunny";
 
 let pass = 0;
 let fail = 0;
@@ -85,11 +89,12 @@ const model = http.createServer((req, res) => {
 
   console.log("\nThe roster\n");
 
-  await ok("twelve named colours, each a #RRGGBB, and four creatures", () => {
+  await ok("twelve named colours, each a #RRGGBB, and five creatures (the monkey is Code Monkey's)", () => {
     eq(ag.COLORS.map((c) => c.name), ["red", "orange", "yellow", "lime", "green", "teal", "sky", "blue", "indigo", "purple", "magenta", "pink"]);
     for (const c of ag.COLORS) truthy(/^#[0-9A-F]{6}$/.test(c.hex), `${c.name} ${c.hex}`);
-    eq(ag.CREATURES.map((c) => c.id), ["bee", "bunny", "bull", "frog"]);
+    eq(ag.CREATURES.map((c) => c.id), ["bee", "bunny", "bull", "frog", "monkey"]);
     eq(ag.creatureOf("bunny")?.color, "#F08CA0", "the bunny is pink, as the owner said");
+    eq(ag.creatureOf("monkey")?.color, "#B8591F", "Code Monkey's colour, as the owner said");
     eq(ag.colorOf("red")?.hex, "#E44449", "hsl(358, 75%, 58%)");
     eq(ag.colorOf("sky")?.hex, ag.COLORS[6]!.hex);
   });
@@ -104,7 +109,7 @@ const model = http.createServer((req, res) => {
         n++;
       }
     }
-    eq(n, 52);
+    eq(n, 65);
   });
   await ok("BeeZilla herself is fixed: large, ready, the bee's own art", () => {
     eq([ag.BZILLA.id, ag.BZILLA.name, ag.BZILLA.size, ag.BZILLA.ready, ag.BZILLA.image], ["bzilla", "BeeZilla", "l", true, "/buzzy/zillas/bee.webp"]);
@@ -230,7 +235,7 @@ const model = http.createServer((req, res) => {
     eq(out.body.bzilla, ag.BZILLA);
     eq((out.body.next as ag.DefaultAgent).name, "Bullzilla", "+ would add the bull next");
     eq((out.body.colors as unknown[]).length, 12);
-    eq((out.body.creatures as Array<{ name: string }>).map((c) => c.name), ["Beezilla", "Bunnyzilla", "Bullzilla", "Frogzilla"]);
+    eq((out.body.creatures as Array<{ name: string }>).map((c) => c.name), ["Beezilla", "Bunnyzilla", "Bullzilla", "Frogzilla", "Monkeyzilla"]);
     if (process.env.AGENTS_SHOW) console.log(JSON.stringify(out.body, null, 2));
   });
   await ok("looking again never makes a second one, even when five first visits race", async () => {

@@ -74,6 +74,7 @@
     "private:verify": "node scripts/sync-private.mjs --check --require-private",
     "test:surface": "npx tsx scripts/test-surface-routing.ts",
     "test:recipes": "npx tsx scripts/test-recipe-bundle.ts && npx tsx scripts/test-recipe-checks.ts && npx tsx scripts/test-recipe-listing.ts",
+    "posttest:recipes": "npx tsx scripts/test-brain.ts",
     "test:wallet": "npx tsx scripts/test-wallet.ts",
     "test:buzzy-art": "node scripts/test-buzzy-art-cap.mjs"
   },
