@@ -1526,7 +1526,10 @@ export default defineEventHandler(async (event) => {
     }
     const parts = path.split("/");
     const graphId = parts[4]!;
-    if (parts[5]) {
+    // parts = ["", "api", "buzzy", "graphs", <id>, "revisions", <rev>?] — the segment
+    // after "revisions" is the revision. Testing parts[5] (always "revisions") made the
+    // list branch unreachable and answered every /revisions call with 400 bad_revision.
+    if (parts[6]) {
       const rev = Number(parts[6]);
       if (!Number.isInteger(rev) || rev < 1) {
         setResponseStatus(event, 400);
