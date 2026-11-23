@@ -82,8 +82,8 @@ Say no quickly and explain the reason in one sentence:
 
 Tracked, visible, and sized so someone can pick it up:
 
-- **ESLint: 25 errors / ~73 warnings.** Mostly `no-useless-escape` and `no-control-regex` in sanitizers where the control-char regexes are deliberate. CI runs lint as advisory until this is burned down — the fix is inline `eslint-disable-next-line` with a one-line justification where intentional, real fixes elsewhere. Good first issue material.
-- **`test:ci` is the hermetic subset.** Browser/Playwright and live-key paths (`test:api`, `test:buzzy-jobs`, `test:webpage-routing`) are not in CI — they need a running server, a render provider, or real keys. Do not claim they are covered.
+- **ESLint: 0 errors / 181 warnings.** The errors are gone (#265); CI now blocks on lint errors and still only reports warnings. Warnings are mostly unused-vars and the deliberate control-char regexes; burn them down before making warnings block.
+- **`test:ci` is the hermetic subset.** Browser/Playwright and live-key paths (`test:api`, `test:webpage-routing`) are not in CI — they need a running server, a render provider, or real keys. Do not claim they are covered. (`test:buzzy-jobs` is hermetic and does run in `test:ci`.)
 
 ## Adding a maintainer
 

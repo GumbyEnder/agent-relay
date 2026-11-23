@@ -222,7 +222,7 @@ function tokenise(src: string): Tok[] | { error: string } {
     }
     if (c === "$") {
       let j = i + 1, s = "";
-      while (j < src.length && /[A-Za-z0-9_.\[\]]/.test(src[j]!)) s += src[j++];
+      while (j < src.length && /[A-Za-z0-9_.[\]]/.test(src[j]!)) s += src[j++];
       const m = /^([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z0-9_]+|\[\d+\])+)$/.exec(s);
       if (!m) return { error: `bad binding "$${s}"` };
       out.push({ t: "ref", v: s });
@@ -325,8 +325,7 @@ function rootOf(ref: string): { kind: "input"; name: string } | { kind: "node"; 
 function interpolations(s: string): string[] {
   const out: string[] = [];
   const re = /\{\{([\s\S]*?)\}\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s))) out.push(m[1]!.trim());
+  for (let m = re.exec(s); m; m = re.exec(s)) out.push(m[1]!.trim());
   return out;
 }
 
@@ -528,10 +527,6 @@ export function validateOrchestration(input: unknown): ValidateResult {
         declared.set(id, new Set([oname]));
       }
     }
-    if (type === "end" && isObj(c.outputs)) {
-      // end outputs are bindings, not declarations; their keys must be unique by JSON.
-    }
-
     // binding fields
     for (const key of ["inputs", "args"] as const) {
       if (!isObj(c[key])) continue;
@@ -540,6 +535,7 @@ export function validateOrchestration(input: unknown): ValidateResult {
         if (v.startsWith("$")) checkBinding(v, id);
       }
     }
+    // end outputs are bindings, not declarations; their keys must be unique by JSON.
     if (type === "end" && isObj(c.outputs)) {
       for (const [k, v] of Object.entries(c.outputs)) {
         if (typeof v !== "string" || !v.startsWith("$")) {

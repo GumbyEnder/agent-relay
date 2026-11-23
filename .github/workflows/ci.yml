@@ -41,10 +41,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Lint debt is tracked as its own issue (see docs/MAINTAINING.md). Until it is
-      # burned down, lint reports here but does not block contributor PRs.
-      - name: Lint (advisory — reports, does not block)
-        continue-on-error: true
+      # Lint errors block: main is at zero (issue #265). Warnings are still
+      # reported and do not block — burn those down separately.
+      - name: Lint (errors block, warnings report)
         run: npm run lint
 
       # The Build step is the ONE step that must not inherit the job's development

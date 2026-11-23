@@ -148,7 +148,7 @@ var BZOrchestration = (() => {
       }
       if (c === "$") {
         let j = i + 1, s = "";
-        while (j < src.length && /[A-Za-z0-9_.\[\]]/.test(src[j])) s += src[j++];
+        while (j < src.length && /[A-Za-z0-9_.[\]]/.test(src[j])) s += src[j++];
         const m = /^([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z0-9_]+|\[\d+\])+)$/.exec(s);
         if (!m) return { error: `bad binding "$${s}"` };
         out.push({ t: "ref", v: s });
@@ -266,8 +266,7 @@ var BZOrchestration = (() => {
   function interpolations(s) {
     const out = [];
     const re = /\{\{([\s\S]*?)\}\}/g;
-    let m;
-    while (m = re.exec(s)) out.push(m[1].trim());
+    for (let m = re.exec(s); m; m = re.exec(s)) out.push(m[1].trim());
     return out;
   }
   function emptySpec() {
@@ -452,8 +451,6 @@ var BZOrchestration = (() => {
           if (declared.has(id)) add("ORCH013", "error", `"${id}" declares more than one output.`, id);
           declared.set(id, /* @__PURE__ */ new Set([oname]));
         }
-      }
-      if (type === "end" && isObj(c.outputs)) {
       }
       for (const key of ["inputs", "args"]) {
         if (!isObj(c[key])) continue;
