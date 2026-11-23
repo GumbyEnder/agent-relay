@@ -87,7 +87,8 @@ const strip = () => page.evaluate(() => {
 });
 const hop = async (path) => {
   await page.evaluate((p) => window.BeeZillaShell.go(p), path);
-  await page.waitForFunction((p) => window.BeeZillaShell.currentKey === p && !window.BeeZillaShell.busy, path);
+  // A cold server answers its first request for a page slowly, so this waits a good while.
+  await page.waitForFunction((p) => window.BeeZillaShell.currentKey === p && !window.BeeZillaShell.busy, path, { timeout: 90000 });
   await page.waitForTimeout(500);
 };
 const thread = () => page.evaluate(() => (document.getElementById("chatMessages")?.innerText || "").replace(/\s+/g, " "));
