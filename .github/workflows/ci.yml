@@ -47,7 +47,20 @@ jobs:
         continue-on-error: true
         run: npm run lint
 
+      # The Build step is the ONE step that must not inherit the job's development
+      # NODE_ENV. `vite build` under NODE_ENV=development emits the DEV JSX runtime into
+      # .output/server/_ssr/router-*.mjs, and every suite that boots the built server
+      # spawns it with NODE_ENV=production (test-buzzy-jobs-ownership.mjs:101, and the
+      # board/art suites the same way), where react resolves jsx-dev-runtime to its
+      # production shape and jsxDEV does not exist:
+      #   TypeError: (0 , import_jsx_dev_runtime.jsxDEV) is not a function
+      #   FAIL server never became healthy
+      # test:ci is an && chain, so that killed the seventh suite and every suite after
+      # it — board-connect and the search-placeholder test never ran on main at all.
+      # Install has already happened by now, so devDependencies survive this override.
       - name: Build
+        env:
+          NODE_ENV: production
         run: npm run build
 
       - name: Tests (hermetic subset)
