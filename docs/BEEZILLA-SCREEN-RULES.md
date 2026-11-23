@@ -95,7 +95,14 @@ Owner, 2026-11-21 (agents.js, agents.css; the server side is src/lib/buzzy/agent
    it); pulling its corner resizes it.
 6. On a phone the strip is a drawer: a small tab at the left edge opens it, and only its X or
    Esc closes it.
-7. More Zillas arrive as files: a picture named `<creature>.webp` (and `<creature>-<colour>.webp`
+7. Colonies (owner: "you can drop it on another agent, just like you can drop a Discord server
+   on another Discord server"): dragging one agent onto the middle of another makes a colony
+   and asks for its name and purpose, with grey examples chosen from what the agents inside
+   help with ("These agents are dedicated to my real estate business", "…my personal
+   productivity", "…fun and hobbies"). Onto a colony adds to it; between two rows reorders; out
+   to a gap leaves. A colony opens and closes like a folder and can be ungrouped (its agents
+   stay). Dragging is never the only way: an agent's Edit window has a Colony choice.
+8. More Zillas arrive as files: a picture named `<creature>.webp` (and `<creature>-<colour>.webp`
    for each colour) in `public/buzzy/zillas`, and one line in the roster in agents.ts. The
    colour versions there now are stand-ins made from the owner's starter picture
    (`scripts/zilla-art.py`); a real picture takes a stand-in's place by using its file name.

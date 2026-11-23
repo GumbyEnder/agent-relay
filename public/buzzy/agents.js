@@ -36,6 +36,14 @@
  *    its own colour, with its Zilla peeking from the corner.
  *  - Everything in the strip can be dragged to the Idea Board (the site's critical rule):
  *    it carries a picture card with the agent's name and job.
+ *  - Colonies (owner: "you can drop it on another agent, just like you can drop a Discord
+ *    server on another Discord server… It creates a folder of agents, and prompts: name your
+ *    new colony, name and purpose, with a grayed-out example tailored to the agents inside"):
+ *    drag one agent onto the middle of another and a window asks for the colony's name and
+ *    purpose (the examples in it are chosen from what the agents help with); drag onto a
+ *    colony to add to it, between two to reorder, out to a gap to leave. A colony opens and
+ *    closes like a folder. Everything here is also a button: the agent's Edit window has a
+ *    Colony choice, and a colony has its own Edit window (name, purpose, ungroup).
  *  - "Edit" (the ⋯ button, or a right-click) changes the name, job, face, colour and size,
  *    or removes the agent. It is a dialog that only Esc or its X closes (no click-outside
  *    close, ever), and its box can be pulled bigger by the corner.
@@ -67,6 +75,8 @@
   var S = {
     bzilla: null,
     agents: [],
+    colonies: [],         // [{ id, name, purpose, open, agentIds: [] }]
+    layout: [],           // the top-level order: [{ type: "agent"|"colony", id }]
     colors: [],
     creatures: [],
     open: false,
@@ -165,8 +175,8 @@
   }
   function sizeOf(a) { return SIZES[a && a.size] || SIZES.m; }
 
-  function rowFor(a) {
-    var li = el("li", "bzag-row");
+  function rowFor(a, colony) {
+    var li = el("li", "bzag-row" + (colony ? " in-colony" : ""));
     var set = isSet(a);
     var item = el("div", "bzag-item" + (set ? "" : " is-unset"), {
       role: "button",
@@ -198,11 +208,27 @@
   function render() {
     if (!rail) return;
     var keep = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("data-agent") : null;
+    var keepColony = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("data-colony") : null;
     list.textContent = "";
-    if (S.bzilla) list.appendChild(rowFor(S.bzilla));
-    S.agents.forEach(function (a) { list.appendChild(rowFor(a)); });
+    if (S.bzilla) list.appendChild(rowFor(S.bzilla, null));
+    // The order is the server's layout: agents and colonies together; an open colony shows
+    // its agents under it. Anything the layout forgot (a stale answer) still shows, last.
+    var shown = {};
+    S.layout.forEach(function (it) {
+      if (it.type === "colony") {
+        var c = colonyById(it.id);
+        if (!c) return;
+        list.appendChild(colonyRow(c));
+        membersOf(c).forEach(function (a) { shown[a.id] = true; if (c.open) list.appendChild(rowFor(a, c)); });
+      } else {
+        var a = byId(it.id);
+        if (a && !a.colonyId) { shown[a.id] = true; list.appendChild(rowFor(a, null)); }
+      }
+    });
+    S.agents.forEach(function (a) { if (!shown[a.id]) list.appendChild(rowFor(a, null)); });
     syncTitles();
     if (keep) { var again = list.querySelector('[data-agent="' + keep + '"]'); if (again) again.focus({ preventScroll: true }); }
+    else if (keepColony) { var c2 = list.querySelector('[data-colony="' + keepColony + '"]'); if (c2) c2.focus({ preventScroll: true }); }
     root.setAttribute("data-bz-agent-count", String(S.agents.length));
   }
   // The strip shows faces only, so each face carries its words as a tooltip; opened, the
@@ -218,6 +244,248 @@
       if (open) { addBtn.removeAttribute("title"); addBtn.removeAttribute("data-bz-tip"); }
       else if (!addBtn.hasAttribute("data-bz-tip")) addBtn.setAttribute("title", "Add an agent");
     }
+  }
+
+  // ── colonies ─────────────────────────────────────────────────────────────
+  function colonyById(id) { return S.colonies.filter(function (c) { return c.id === id; })[0] || null; }
+  function membersOf(c) { return c.agentIds.map(function (id) { return byId(id); }).filter(Boolean); }
+  function colonyName(c) { return c.name || "New colony"; }
+  function colonyWords(c) {
+    if (c.purpose) return c.purpose;
+    var n = membersOf(c).length;
+    return n + (n === 1 ? " agent" : " agents");
+  }
+  // A colony on the Idea Board: a note with its purpose and who is in it.
+  function colonyCard(c) {
+    var who = membersOf(c).map(function (a) { return a.name + (a.role ? " (helps with " + a.role + ")" : ""); });
+    return { kind: "note", title: "Colony: " + colonyName(c), body: (c.purpose ? c.purpose + "\n" : "") + "Agents: " + (who.join(", ") || "none yet") };
+  }
+  function colonyRow(c) {
+    var li = el("li", "bzag-row bzag-colony-row");
+    var item = el("div", "bzag-item bzag-colony", {
+      role: "button", tabindex: "0", draggable: "true", "data-colony": c.id,
+      "aria-expanded": c.open ? "true" : "false",
+      "aria-label": "Colony " + colonyName(c) + ", " + colonyWords(c) + (c.open ? ", open" : ", closed"),
+    });
+    item.style.setProperty("--c", "#ffd40d");
+    item.setAttribute("data-tip", "Colony " + colonyName(c) + ": " + colonyWords(c) + ". Press to " + (c.open ? "close" : "open") + " it.");
+    var slot = el("span", "bzag-slot");
+    var folder = el("span", "bzag-folder");
+    folder.style.setProperty("--s", SIZES.m + "px");
+    membersOf(c).slice(0, 4).forEach(function (a) { folder.appendChild(el("img", "", { alt: "", src: safeImage(a.image), draggable: "false" })); });
+    slot.appendChild(folder);
+    item.appendChild(slot);
+    var text = el("span", "bzag-text");
+    var name = el("span", "bzag-name"); name.textContent = colonyName(c);
+    var words = el("span", "bzag-role"); words.textContent = colonyWords(c);
+    text.appendChild(name); text.appendChild(words);
+    item.appendChild(text);
+    var fold = el("span", "bzag-fold");
+    fold.appendChild(svg(ICON_CHEV));
+    item.appendChild(fold);
+    li.appendChild(item);
+    var more = el("button", "bzag-more", { type: "button", "aria-label": "Edit colony " + colonyName(c), "data-more-colony": c.id });
+    more.appendChild(svg(ICON_MORE));
+    li.appendChild(more);
+    return li;
+  }
+  function toggleColony(id) {
+    var c = colonyById(id);
+    if (!c) return;
+    c.open = !c.open;
+    render();
+    api("PATCH", API + "/colonies/" + encodeURIComponent(id), { open: c.open }).catch(function () { /* the order on screen is what you see; the next load settles it */ });
+  }
+
+  // The examples in the naming window are chosen from what the agents inside help with:
+  // "These agents are dedicated to my real estate business", "…my personal productivity",
+  // "…fun and hobbies" (owner, 2026-11-21).
+  var THEMES = [
+    { re: /real estate|propert|landlord|tenant|rental|mortgage|listing|house|apartment|lease/i, name: "Real estate", purpose: "These agents are dedicated to my real estate business" },
+    { re: /to-?do|task|calendar|schedul|e-?mail|inbox|reminder|notes?\b|organi[sz]|productiv|plan(?:ning)?\b|meeting/i, name: "Personal productivity", purpose: "These agents are dedicated to my personal productivity" },
+    { re: /music|game|gaming|hobb|movie|film|photo|garden|craft|sport|travel|trip|vacation|fun\b|book|read|cook|recipe|bak|art\b|draw/i, name: "Fun and hobbies", purpose: "These agents are dedicated to my fun and hobbies" },
+    { re: /budget|tax|bills?\b|invoice|money|financ|account|invest|expens|payroll/i, name: "Money", purpose: "These agents are dedicated to keeping my money in order" },
+    { re: /fitness|workout|health|doctor|diet|sleep|medic|meditat|wellness|gym/i, name: "Health", purpose: "These agents are dedicated to my health and wellbeing" },
+    { re: /school|homework|study|learn|class|course|exam|tutor|language/i, name: "Learning", purpose: "These agents are dedicated to my learning" },
+    { re: /sales|customer|client|market|crm|\bads?\b|campaign|social media|brand|shop|store|etsy|business/i, name: "My business", purpose: "These agents are dedicated to my business" },
+    { re: /kid|child|parent|family|baby|\bpets?\b|\bdog|\bcat\b|home\b/i, name: "Home and family", purpose: "These agents are dedicated to my home and family" },
+  ];
+  function colonyExamples(members) {
+    var text = members.map(function (a) { return (a.role || "") + " " + (a.name || ""); }).join(" ");
+    var best = null, bestN = 0;
+    THEMES.forEach(function (t) {
+      var m = text.match(new RegExp(t.re.source, "gi"));
+      var n = m ? m.length : 0;
+      if (n > bestN) { best = t; bestN = n; }
+    });
+    return best || { name: "My agents", purpose: "These agents are dedicated to…" };
+  }
+
+  // The layout: the top-level order as the server takes it, [{ agent: id } | { colony: id, agents: [ids] }].
+  function itemsNow() {
+    return S.layout.map(function (it) {
+      if (it.type === "colony") { var c = colonyById(it.id); return { colony: it.id, agents: c ? c.agentIds.slice() : [] }; }
+      return { agent: it.id };
+    });
+  }
+  function withoutAgent(items, id) {
+    return items.filter(function (it) { return it.agent !== id; })
+      .map(function (it) { return it.colony ? { colony: it.colony, agents: it.agents.filter(function (x) { return x !== id; }) } : it; })
+      .filter(function (it) { return !(it.colony && !it.agents.length); });   // a colony with nobody in it is gone
+  }
+  function topIndex(items, target) {
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (target.agent && (it.agent === target.agent || (it.agents && it.agents.indexOf(target.agent) >= 0))) return i;
+      if (target.colony && it.colony === target.colony) return i;
+    }
+    return -1;
+  }
+  // Where an agent goes: next to another agent (inside its colony, if it is in one), next to
+  // a colony, into a colony, or (no target) to the end.
+  function moveAgentTo(id, target, where) {
+    var items = withoutAgent(itemsNow(), id);
+    if (!target) { items.push({ agent: id }); return items; }
+    if (target.colony && where === "into") {
+      var into = items.filter(function (it) { return it.colony === target.colony; })[0];
+      if (into) { into.agents.push(id); return items; }
+      items.push({ agent: id });
+      return items;
+    }
+    if (target.agent) {
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (it.agents && it.agents.indexOf(target.agent) >= 0) {
+          it.agents.splice(it.agents.indexOf(target.agent) + (where === "after" ? 1 : 0), 0, id);
+          return items;
+        }
+      }
+    }
+    var at = topIndex(items, target);
+    if (at < 0) { items.push({ agent: id }); return items; }
+    items.splice(at + (where === "after" ? 1 : 0), 0, { agent: id });
+    return items;
+  }
+  function moveColonyTo(id, target, where) {
+    var items = itemsNow();
+    var me = items.filter(function (it) { return it.colony === id; })[0];
+    if (!me) return items;
+    items = items.filter(function (it) { return it !== me; });
+    var at = target ? topIndex(items, target) : -1;
+    if (at < 0) { items.push(me); return items; }
+    items.splice(at + (where === "after" ? 1 : 0), 0, me);
+    return items;
+  }
+  function applyLocal(items) {
+    var cols = [];
+    var inColony = {};
+    S.layout = items.map(function (it) {
+      if (it.colony) {
+        var old = colonyById(it.colony) || { id: it.colony, name: "", purpose: "", open: true };
+        cols.push({ id: old.id, name: old.name, purpose: old.purpose, open: old.open, agentIds: it.agents.slice() });
+        it.agents.forEach(function (a) { inColony[a] = it.colony; });
+        return { type: "colony", id: it.colony };
+      }
+      return { type: "agent", id: it.agent };
+    });
+    S.colonies = cols;
+    S.agents.forEach(function (a) { a.colonyId = inColony[a.id] || null; });
+    render();
+  }
+  // Take the server's order (and who is in which colony) as the truth.
+  function adopt(b) {
+    if (!b) return;
+    if (Array.isArray(b.colonies)) S.colonies = b.colonies;
+    if (Array.isArray(b.layout)) S.layout = b.layout;
+    if (Array.isArray(b.agents)) b.agents.forEach(function (m) { var a = byId(m.id); if (a) a.colonyId = m.colonyId || null; });
+    render();
+  }
+  // The move shows at once; the server keeps it. If the server refuses, its order comes back.
+  function saveItems(items) {
+    applyLocal(items);
+    return api("PUT", API + "/layout", { items: items }).then(function (res) {
+      if (!res.ok) throw new Error("layout");
+      adopt(res.body);
+    }).catch(function () {
+      say("That move couldn't be saved. Putting things back.");
+      load();
+    });
+  }
+
+  // Dragging inside the strip. `drag` is what is being carried; the row under the pointer
+  // shows where it would land: a line above or below, or a dashed ring for "into".
+  var drag = null, dropRow = null;
+  function clearMark() {
+    if (dropRow) dropRow.classList.remove("bzag-drop-before", "bzag-drop-after", "bzag-drop-into");
+    dropRow = null;
+  }
+  function mark(li, zone) {
+    if (dropRow !== li) clearMark();
+    dropRow = li;
+    li.classList.remove("bzag-drop-before", "bzag-drop-after", "bzag-drop-into");
+    li.classList.add("bzag-drop-" + zone);
+  }
+  function endDrag() {
+    clearMark();
+    drag = null;
+    if (rail) Array.prototype.forEach.call(rail.querySelectorAll(".bzag-dragging"), function (n) { n.classList.remove("bzag-dragging"); });
+  }
+  function zoneFor(e, li, canInto) {
+    var r = li.getBoundingClientRect();
+    var f = r.height ? (e.clientY - r.top) / r.height : 0.5;
+    if (canInto) return f < 0.28 ? "before" : f > 0.72 ? "after" : "into";
+    return f < 0.5 ? "before" : "after";
+  }
+  // What the pointer is over, and what dropping there would do. null: nothing here takes it.
+  function dropTarget(e) {
+    if (!drag) return null;
+    var item = e.target.closest && e.target.closest(".bzag-item");
+    if (!item) {
+      var bare = e.target === scroll || e.target === list || (e.target.closest && e.target.closest(".bzag-addrow"));
+      return bare ? { end: true } : null;
+    }
+    var li = item.closest(".bzag-row");
+    var aid = item.getAttribute("data-agent");
+    var cid = item.getAttribute("data-colony");
+    if (aid === "bzilla") return { li: li, first: true };            // BeeZilla stays on top: under her is the first place
+    if (cid) return { li: li, target: { colony: cid }, zone: zoneFor(e, li, !!drag.agent) };
+    var a = byId(aid);
+    if (!a || drag.agent === aid) return { self: true };
+    var canMake = !!drag.agent && !a.colonyId;                         // agent onto agent: two loose agents make a colony
+    return { li: li, target: { agent: aid }, zone: zoneFor(e, li, canMake) };
+  }
+  function firstPlace() {
+    var f = S.layout[0];
+    return f ? (f.type === "colony" ? { colony: f.id } : { agent: f.id }) : null;
+  }
+  function dropOn(d, t) {
+    if (t.self) return;
+    var target = t.end ? null : t.first ? firstPlace() : t.target;
+    var zone = t.end ? null : t.first ? "before" : t.zone;
+    if (d.colony) {
+      if (target && target.colony === d.colony) return;
+      saveItems(moveColonyTo(d.colony, target, zone === "into" ? "after" : zone));
+      return;
+    }
+    if (target && target.agent === d.agent) return;
+    if (target && target.agent && zone === "into") { makeColony(d.agent, target.agent); return; }
+    saveItems(moveAgentTo(d.agent, target, zone || "after"));
+  }
+
+  // Two agents, one dropped on the other: the window that names the colony they make.
+  function makeColony(draggedId, targetId) {
+    var a = byId(draggedId), b = byId(targetId);
+    if (!a || !b) return;
+    colonyDialog({
+      members: [b, a],
+      onSave: function (name, purpose) {
+        return api("POST", API + "/colonies", { name: name, purpose: purpose, agents: [targetId, draggedId] }).then(function (res) {
+          if (!res.ok) return (res.body && res.body.error) || "That colony couldn't be made. Try again.";
+          adopt(res.body);
+          return "";
+        });
+      },
+    });
   }
 
   // ── the strip: build, open, size ─────────────────────────────────────────
@@ -347,6 +615,7 @@
       addBtn.removeAttribute("aria-busy");
       if (!res.ok || !res.body.agent) { say((res.body && res.body.error) || "That agent couldn't be added. Try again in a moment."); return; }
       S.agents.push(res.body.agent);
+      S.layout.push({ type: "agent", id: res.body.agent.id });
       render();
       scrollTo(res.body.agent.id);
       openAgent(res.body.agent);
@@ -439,7 +708,12 @@
   function update(a) {
     if (!a || !a.id || isBz(a)) return;
     var found = false;
-    S.agents = S.agents.map(function (x) { if (x.id === a.id) { found = true; return a; } return x; });
+    S.agents = S.agents.map(function (x) {
+      if (x.id !== a.id) return x;
+      found = true;
+      if (a.colonyId === undefined) a.colonyId = x.colonyId || null;   // an answer that doesn't say keeps where it is
+      return a;
+    });
     if (!found) S.agents.push(a);
     render();
     if (S.current === a.id) paint(a);
@@ -464,6 +738,8 @@
       var b = res.body;
       S.bzilla = b.bzilla || { id: "bzilla", name: "BeeZilla", role: "your executive assistant", color: "#FFC107", size: "l", image: "/buzzy/zillas/bee.webp", ready: true };
       S.agents = Array.isArray(b.agents) ? b.agents : [];
+      S.colonies = Array.isArray(b.colonies) ? b.colonies : [];
+      S.layout = Array.isArray(b.layout) ? b.layout : S.agents.map(function (a) { return { type: "agent", id: a.id }; });
       S.colors = Array.isArray(b.colors) ? b.colors : [];
       S.creatures = Array.isArray(b.creatures) ? b.creatures : [];
       S.loaded = true; S.failed = false;
@@ -488,8 +764,10 @@
   function wire(closeBtn) {
     rail.addEventListener("click", function (e) {
       var more = e.target.closest && e.target.closest(".bzag-more");
+      if (more && more.getAttribute("data-more-colony")) { var mc = colonyById(more.getAttribute("data-more-colony")); if (mc) colonyDialog({ colony: mc, opener: more }); return; }
       if (more) { var m = byId(more.getAttribute("data-more")); if (m) editDialog(m, more); return; }
       var item = e.target.closest && e.target.closest(".bzag-item");
+      if (item && item.getAttribute("data-colony")) { toggleColony(item.getAttribute("data-colony")); return; }
       if (item) { openAgent(byId(item.getAttribute("data-agent"))); return; }
       if (e.target.closest(".bzag-add")) { add(); return; }
       if (e.target.closest(".bzag-toggle")) { toggle(); return; }
@@ -500,6 +778,7 @@
     });
     rail.addEventListener("keydown", function (e) {
       var item = e.target.closest && e.target.closest(".bzag-item");
+      if (item && item.getAttribute("data-colony") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleColony(item.getAttribute("data-colony")); return; }
       if (item && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openAgent(byId(item.getAttribute("data-agent"))); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         var fs = focusables();
@@ -523,19 +802,40 @@
     rail.addEventListener("dragstart", function (e) {
       var item = e.target.closest && e.target.closest(".bzag-item");
       if (!item) return;
-      var a = byId(item.getAttribute("data-agent"));
-      if (!a) return;
+      var col = item.getAttribute("data-colony") ? colonyById(item.getAttribute("data-colony")) : null;
+      var a = col ? null : byId(item.getAttribute("data-agent"));
+      if (!a && !col) return;
       item.classList.add("bzag-dragging");
+      // BeeZilla stays where she is: she can go on the board, but not into a colony.
+      drag = col ? { colony: col.id } : isBz(a) ? null : { agent: a.id };
       try {
-        e.dataTransfer.setData("application/x-beezilla-card", JSON.stringify(cardFor(a)));
-        e.dataTransfer.setData("application/x-bz-agent", a.id);
-        e.dataTransfer.setData("text/plain", a.name);
+        e.dataTransfer.setData("application/x-beezilla-card", JSON.stringify(col ? colonyCard(col) : cardFor(a)));
+        e.dataTransfer.setData(col ? "application/x-bz-colony" : "application/x-bz-agent", col ? col.id : a.id);
+        e.dataTransfer.setData("text/plain", col ? colonyName(col) : a.name);
         e.dataTransfer.effectAllowed = "copyMove";
       } catch { /* best effort */ }
     });
-    rail.addEventListener("dragend", function (e) {
-      var item = e.target.closest && e.target.closest(".bzag-item");
-      if (item) item.classList.remove("bzag-dragging");
+    rail.addEventListener("dragend", endDrag);
+    rail.addEventListener("dragover", function (e) {
+      if (!drag) return;
+      var t = dropTarget(e);
+      if (!t) { clearMark(); return; }
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch { /* best effort */ }
+      if (t.self || t.end) { clearMark(); return; }
+      mark(t.li, t.first ? "after" : t.zone);
+    });
+    rail.addEventListener("dragleave", function (e) {
+      if (!e.relatedTarget || !rail.contains(e.relatedTarget)) clearMark();
+    });
+    rail.addEventListener("drop", function (e) {
+      if (!drag) return;
+      var t = dropTarget(e);
+      var d = drag;
+      endDrag();
+      if (!t) return;
+      e.preventDefault();
+      dropOn(d, t);
     });
     closeBtn.addEventListener("click", closeDrawer);
     tab.addEventListener("click", openDrawer);
@@ -656,6 +956,16 @@
     faceWrap.appendChild(faces);
     box.appendChild(faceWrap);
 
+    // Colony: the same move as dragging, for the keyboard and for a phone.
+    var colonySel = el("select", "bzag-select");
+    var optNone = el("option", "", { value: "" }); optNone.textContent = "On its own";
+    colonySel.appendChild(optNone);
+    S.colonies.forEach(function (c) { var o = el("option", "", { value: c.id }); o.textContent = colonyName(c); colonySel.appendChild(o); });
+    var optNew = el("option", "", { value: "__new" }); optNew.textContent = "A new colony…";
+    colonySel.appendChild(optNew);
+    colonySel.value = agent.colonyId && colonyById(agent.colonyId) ? agent.colonyId : "";
+    box.appendChild(field("Colony", colonySel));
+
     var swatchesWrap = el("div", "bzag-field", { role: "group", "aria-label": "Colour" });
     var sl = el("span"); sl.textContent = "Colour";
     var swatches = el("div", "bzag-swatches");
@@ -719,6 +1029,10 @@
       api("DELETE", API + "/" + encodeURIComponent(agent.id)).then(function (res) {
         if (!res.ok) { del.disabled = false; msg.textContent = (res.body && res.body.error) || "That agent couldn't be removed."; return; }
         S.agents = S.agents.filter(function (a) { return a.id !== agent.id; });
+        S.layout = S.layout.filter(function (it) { return !(it.type === "agent" && it.id === agent.id); });
+        S.colonies.forEach(function (c) { c.agentIds = c.agentIds.filter(function (x) { return x !== agent.id; }); });
+        S.colonies = S.colonies.filter(function (c) { return c.agentIds.length; });          // an empty colony is gone
+        S.layout = S.layout.filter(function (it) { return it.type !== "colony" || colonyById(it.id); });
         var wasCurrent = S.current === agent.id;
         render();
         closeModal();
@@ -734,7 +1048,29 @@
       if (face.value.trim() !== (agent.face || "")) patch.face = face.value.trim();
       if (draft.look !== (agent.look || "")) { patch.look = draft.look; patch.color = draft.color; }
       if (draft.size !== (agent.size || "m")) patch.size = draft.size;
-      if (!Object.keys(patch).length) { closeModal(); return; }
+      var wantColony = colonySel.value;
+      var colonyChanged = wantColony !== (agent.colonyId && colonyById(agent.colonyId) ? agent.colonyId : "");
+      if (!Object.keys(patch).length && !colonyChanged) { closeModal(); return; }
+      var afterwards = function () {
+        // The colony choice is a move: out, into one, or the window that names a new one.
+        if (!colonyChanged) return;
+        if (wantColony === "__new") {
+          colonyDialog({
+            members: [byId(agent.id) || agent],
+            opener: opener,
+            onSave: function (name, purpose) {
+              return api("POST", API + "/colonies", { name: name, purpose: purpose, agents: [agent.id] }).then(function (res) {
+                if (!res.ok) return (res.body && res.body.error) || "That colony couldn't be made. Try again.";
+                adopt(res.body);
+                return "";
+              });
+            },
+          });
+        } else {
+          saveItems(moveAgentTo(agent.id, wantColony ? { colony: wantColony } : null, wantColony ? "into" : undefined));
+        }
+      };
+      if (!Object.keys(patch).length) { closeModal(); afterwards(); return; }
       save.disabled = true;
       msg.textContent = "";
       api("PATCH", API + "/" + encodeURIComponent(agent.id), patch).then(function (res) {
@@ -742,12 +1078,95 @@
         if (!res.ok || !res.body.agent) { msg.textContent = (res.body && res.body.error) || "That couldn't be saved."; return; }
         update(res.body.agent);
         closeModal();
+        afterwards();
       }).catch(function () { save.disabled = false; msg.textContent = "Couldn't reach BeeZilla. Try again."; });
     });
     x.addEventListener("click", closeModal);
     openModal(box, opener);
     name.focus();
     name.select();
+  }
+
+  // The window that names a colony. Made by a drop it says "Name your new colony", with
+  // grey examples chosen from the agents inside; opened on a colony it edits it. Like every
+  // window here only Esc or its X closes it, so what you typed is only lost on purpose; and
+  // it can be filled in later, but the person is encouraged to fill it in now (owner).
+  function colonyDialog(o) {
+    var editing = !!o.colony;
+    var members = o.members || membersOf(o.colony);
+    var ex = colonyExamples(members);
+    var box = el("div", "bzag-box", { role: "dialog", "aria-modal": "true", "aria-labelledby": "bzagTitle" });
+    var head = el("div", "bzag-head");
+    var h2 = el("h2", "", { id: "bzagTitle" });
+    h2.textContent = editing ? "Edit " + colonyName(o.colony) : "Name your new colony";
+    var x = el("button", "bzag-x", { type: "button", "aria-label": "Close" }); x.innerHTML = "&#10005;";
+    head.appendChild(h2); head.appendChild(x);
+    box.appendChild(head);
+    if (!editing) {
+      var intro = el("p", "bzag-note");
+      intro.textContent = "A colony is a group of agents that work on the same thing. A name and a purpose tell BeeZilla, and the agents inside, what this group is for.";
+      box.appendChild(intro);
+    }
+    var who = el("div", "bzag-members");
+    members.forEach(function (a) {
+      var chip = el("span", "bzag-chip");
+      chip.appendChild(el("img", "", { alt: "", src: safeImage(a.image), draggable: "false" }));
+      var t = el("span"); t.textContent = a.name;
+      chip.appendChild(t);
+      who.appendChild(chip);
+    });
+    box.appendChild(who);
+    var name = el("input", "", { type: "text", maxlength: "40", autocomplete: "off", spellcheck: "false", placeholder: ex.name });
+    var purpose = el("input", "", { type: "text", maxlength: "200", autocomplete: "off", placeholder: ex.purpose });
+    if (editing) { name.value = o.colony.name || ""; purpose.value = o.colony.purpose || ""; }
+    box.appendChild(field("Name", name));
+    box.appendChild(field("Purpose", purpose, editing ? "" : "Filling these in helps. You can change them any time, from the colony's ⋯ button."));
+    var msg = el("p", "bzag-msg", { role: "status", "aria-live": "polite" });
+    box.appendChild(msg);
+    var row = el("div", "bzag-row");
+    var ungroup = null;
+    if (editing) { ungroup = el("button", "bzag-btn danger", { type: "button" }); ungroup.textContent = "Ungroup"; row.appendChild(ungroup); }
+    row.appendChild(el("span", "bzag-gap"));
+    var save = el("button", "bzag-btn primary", { type: "button" });
+    save.textContent = editing ? "Save" : "Create colony";
+    row.appendChild(save);
+    box.appendChild(row);
+
+    var armed = false;
+    if (ungroup) ungroup.addEventListener("click", function () {
+      if (!armed) { armed = true; ungroup.textContent = "Yes, ungroup"; msg.textContent = "The agents stay, one after another, in the colony's place. Press again to ungroup."; return; }
+      ungroup.disabled = true;
+      api("DELETE", API + "/colonies/" + encodeURIComponent(o.colony.id)).then(function (res) {
+        if (!res.ok) { ungroup.disabled = false; msg.textContent = (res.body && res.body.error) || "That couldn't be ungrouped."; return; }
+        closeModal();
+        load();
+      }).catch(function () { ungroup.disabled = false; msg.textContent = "Couldn't reach BeeZilla. Try again."; });
+    });
+    function submit() {
+      var nm = name.value.replace(/\s+/g, " ").trim();
+      var pu = purpose.value.replace(/\s+/g, " ").trim();
+      save.disabled = true;
+      msg.textContent = "";
+      var done = editing
+        ? api("PATCH", API + "/colonies/" + encodeURIComponent(o.colony.id), { name: nm, purpose: pu }).then(function (res) {
+            if (!res.ok) return (res.body && res.body.error) || "That couldn't be saved.";
+            var c = colonyById(o.colony.id);
+            if (c) { c.name = (res.body.colony && res.body.colony.name) || nm; c.purpose = (res.body.colony && res.body.colony.purpose) || pu; }
+            render();
+            return "";
+          })
+        : o.onSave(nm, pu);
+      Promise.resolve(done).then(function (problem) {
+        save.disabled = false;
+        if (problem) { msg.textContent = problem; return; }
+        closeModal();
+      }).catch(function () { save.disabled = false; msg.textContent = "Couldn't reach BeeZilla. Try again."; });
+    }
+    save.addEventListener("click", submit);
+    box.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); submit(); } });
+    x.addEventListener("click", closeModal);
+    openModal(box, o.opener || null);
+    name.focus();
   }
 
   // ── start ────────────────────────────────────────────────────────────────

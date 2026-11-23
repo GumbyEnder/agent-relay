@@ -183,6 +183,55 @@ html.bz-has-agents { scroll-padding-left: var(--bzag-w, 72px); }
 #bzAgents .bzag-more:hover, #bzAgents .bzag-more:focus-visible { color: #ffd40d; background: #1b1b1b; }
 #bzAgents .bzag-more:focus-visible { outline: 2px solid #ffd40d; outline-offset: -2px; }
 
+/* ── Colonies: folders of agents ─────────────────────────────────────────
+   A colony is a rounded square with up to four of its agents' faces in it; open, its
+   agents sit under it behind a thin line. While something is dragged, the row under the
+   pointer shows where it would land: a line above or below, or a dashed ring for "into". */
+#bzAgents .bzag-folder {
+  width: var(--s, 46px);
+  height: var(--s, 46px);
+  border-radius: 14px;
+  background: #171717;
+  border: 2px solid #3a3a3a;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  align-content: center;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  overflow: hidden;
+  transition: border-color 0.14s ease;
+}
+#bzAgents .bzag-folder img { width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: contain; display: block; pointer-events: none; -webkit-user-drag: none; }
+#bzAgents .bzag-colony[aria-expanded="true"] .bzag-folder { border-color: #ffd40d; }
+#bzAgents .bzag-colony:hover .bzag-folder { border-color: #ffd40d; }
+#bzAgents .bzag-fold { display: none; flex: 0 0 auto; align-items: center; margin-right: 6px; color: #8d8d8d; }
+#bzAgents .bzag-fold svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.14s ease; }
+#bzAgents .bzag-colony[aria-expanded="true"] .bzag-fold svg { transform: rotate(90deg); }
+html.bz-agents-open #bzAgents .bzag-fold, html.bz-agents-drawer #bzAgents .bzag-fold { display: flex; }
+#bzAgents .bzag-row.in-colony { margin-left: 6px; border-left: 2px solid #2f2f2f; }
+#bzAgents .bzag-row.in-colony .bzag-item { padding-left: 2px; }
+#bzAgents .bzag-row.bzag-drop-before::before, #bzAgents .bzag-row.bzag-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: #ffd40d;
+  z-index: 3;
+  pointer-events: none;
+}
+#bzAgents .bzag-row.bzag-drop-before::before { top: -2px; }
+#bzAgents .bzag-row.bzag-drop-after::after { bottom: -2px; }
+#bzAgents .bzag-row.bzag-drop-into .bzag-item {
+  background: rgba(255, 212, 13, 0.1);
+  outline: 2px dashed #ffd40d;
+  outline-offset: -5px;
+  border-radius: 14px;
+}
+
 /* The plus: add one more. Sticks to the bottom of the strip when the list is long. */
 #bzAgents .bzag-addrow {
   position: sticky;
@@ -467,6 +516,11 @@ html[data-bz-agent] .bz-brand .bz-agent-face.is-picture { background-color: tran
 #bzAgentsModal input[type="text"] { all: unset; box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border-radius: 9px; border: 1px solid #333; background: #0d0d0d; color: #fff; font: inherit; }
 #bzAgentsModal input[type="text"]::placeholder { color: #707070; }
 #bzAgentsModal input[type="text"]:focus { border-color: #ffd40d; box-shadow: 0 0 0 2px rgba(255, 212, 13, 0.25); }
+#bzAgentsModal .bzag-members { display: flex; flex-wrap: wrap; gap: 8px; }
+#bzAgentsModal .bzag-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px 3px 4px; border-radius: 999px; background: #101010; border: 1px solid #2c2c2c; font-size: 0.85rem; color: #e0e0e0; }
+#bzAgentsModal .bzag-chip img { width: 28px; height: 28px; object-fit: contain; display: block; }
+#bzAgentsModal select.bzag-select { box-sizing: border-box; width: 100%; height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid #333; background: #0d0d0d; color: #fff; font: inherit; }
+#bzAgentsModal select.bzag-select:focus { outline: none; border-color: #ffd40d; box-shadow: 0 0 0 2px rgba(255, 212, 13, 0.25); }
 #bzAgentsModal .bzag-faces { display: flex; flex-wrap: wrap; gap: 6px; }
 #bzAgentsModal .bzag-emo { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid #2c2c2c; background: #101010; cursor: pointer; font-size: 20px; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif; }
 #bzAgentsModal .bzag-emo:hover { border-color: #ffd40d; }
