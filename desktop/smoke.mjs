@@ -165,9 +165,22 @@ try {
   if (!talk.body.includes('href="/buzzy/nav.css"')) fail("/buzzy/talk never loads nav.css");
   console.log(`PASS  #bzNav ${found.length} links in web order, nav.js + nav.css linked`);
   ok++;
+
+  // CR-8: every link the row names must answer 200 on this line. The row is shared
+  // with the website, so a 404 here is the desktop having inherited a word it cannot
+  // keep — /buzzy/studio and /buzzy/download were exactly that until this increment.
+  for (const [id] of NAV_ORDER) {
+    const href = served.match(new RegExp(`<a href="([^"]+)" data-nav="${id}"`))?.[1];
+    if (!href) fail(`#bzNav has no anchor for ${id}`);
+    const page = await get(href);
+    if (page.status !== 200) fail(`#bzNav link ${id} → ${href} answered ${page.status}`);
+    if (!page.body.includes('id="bzNav"')) fail(`${href} rendered without the nav`);
+  }
+  console.log(`PASS  every #bzNav link answers 200 and carries the nav`);
+  ok++;
 } catch (err) {
   fail(`threw: ${err?.message ?? err}`);
 }
 
-console.log(`\nsmoke: ${ok}/5 checks passed against ${APP}`);
+console.log(`\nsmoke: ${ok}/6 checks passed against ${APP}`);
 stop(0);
