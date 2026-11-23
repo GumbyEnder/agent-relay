@@ -188,6 +188,227 @@
     return moves;
   }
 
+  // ── What the owner sees, for BeeZilla ──────────────────────────────────────
+  // Owner, 2026-11-21: "it should always have a picture of what's on the whiteboard…
+  // including where the user's mouse is at any given moment. Maybe not… a clear
+  // understanding of everything that the user is seeing. So it could hover over
+  // something or grab something and say, what do I do with this? Or how do I do that?
+  // And it knows what this or that is."
+  //
+  // Each turn carries one description of the board as the owner sees it (viewOf):
+  // what is in view, nearest the pointer first, with what each thing is, says, sits in
+  // and is joined to; what is under the pointer, held, or being dragged in from the
+  // page; what is selected; and a count of what is off screen. It is frozen as the
+  // turn starts — when they press send, or as they START speaking (the words arrive
+  // later, and the mouse may have moved by then) — and goes to BeeZilla with that one
+  // message only (src/lib/buzzy/boardView.ts writes it into the turn; it is never
+  // stored with the conversation).
+  var CARD_TYPE = "application/x-beezilla-card";
+  var VIEW_ITEMS = 30;        // things described in view, nearest the pointer first
+  var VIEW_OFF = 8;           // things off screen named (the rest are counted)
+  var DWELL_MS = 400;         // resting on a card this long is pointing at it
+  var FROZEN_MS = 180000;     // a view frozen as they spoke still counts this long
+  // "this", "that", "it": one thing. "them", "these", "the selection": the selection.
+  var ONE_THING = /^(?:it|this|that|this one|that one|this card|that card|the (?:one|thing|card) (?:im|i am) (?:holding|dragging|moving)|what (?:im|i am) (?:holding|dragging))$/;
+  var SELECTION_WORDS = /^(?:them|these|those|the selection|selected|the selected (?:cards?|ones?))$/;
+
+  // A card's content in a line: what it says, or what it is.
+  function gistOf(c, cards) {
+    var k = kindOf(c);
+    var body = String(c.body || "").replace(/\s+/g, " ").trim();
+    var bits = [];
+    if (k === "area") {
+      var inside = areaMembers(c, cards || []);
+      bits.push(inside.length ? "holds " + inside.length + ": " + inside.slice(0, 6).map(function (m) { return String(m.title || "Untitled").slice(0, 40); }).join(", ") : "nothing inside yet");
+    } else if (k === "sketch") {
+      var marks = 0;
+      try { var m = JSON.parse(c.drawing || "[]"); marks = Array.isArray(m) ? m.length : 0; } catch (_) { marks = 0; }
+      bits.push(marks ? "a drawing, " + marks + (marks === 1 ? " stroke" : " strokes") : "an empty drawing");
+      if (body) bits.push("to become: " + body);
+    } else if (k === "chat") {
+      bits.push("the conversation with BeeZilla");
+    } else if (body) {
+      bits.push(body);
+    }
+    var url = String(c.url || "");
+    if (/^https?:\/\//i.test(url)) { try { bits.push("a link to " + new URL(url).host); } catch (_) { /* not a link after all */ } }
+    if (c.state === "running") bits.push("still being made");
+    else if (c.state === "failed") bits.push("didn't work" + (c.err ? ": " + String(c.err).slice(0, 80) : ""));
+    return bits.join(" · ").slice(0, 160);
+  }
+
+  // The board as the owner sees it, from plain numbers the page gathers (see seeing()
+  // in mount): board units throughout, `pointer` null when it isn't on the board.
+  // Pure, so scripts/test-board-view.ts can hold it to account.
+  function viewOf(o) {
+    o = o || {};
+    var cards = (o.cards || []).filter(function (c) { return c && c.id != null && num(c.x) && num(c.y); });
+    var sizes = o.sizes || {};
+    var vp = o.viewport || null;
+    var P = o.pointer && num(o.pointer.x) && num(o.pointer.y) ? o.pointer : null;
+    var z = o.zoom && num(o.zoom) ? o.zoom : 1;
+    var byId = {};
+    cards.forEach(function (c) { byId[c.id] = c; });
+    function sz(c) { var s = sizes[c.id]; return { w: s && num(s.w) ? s.w : 200, h: s && num(s.h) ? s.h : 120 }; }
+    function dist(c, p) {
+      var s = sz(c);
+      var dx = Math.max(c.x - p.x, 0, p.x - (c.x + s.w)), dy = Math.max(c.y - p.y, 0, p.y - (c.y + s.h));
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    function inView(c) { var s = sz(c); return !!vp && c.x < vp.x + vp.w && c.x + s.w > vp.x && c.y < vp.y + vp.h && c.y + s.h > vp.y; }
+    var from = P || (vp ? { x: vp.x + vp.w / 2, y: vp.y + vp.h / 2 } : { x: 0, y: 0 });
+    var areas = cards.filter(function (c) { return kindOf(c) === "area"; });
+    function areaOf(c) {
+      var best = null;
+      areas.forEach(function (a) { if (inArea(a, c) && (!best || (Number(a.w) || 0) * (Number(a.h) || 0) < (Number(best.w) || 0) * (Number(best.h) || 0))) best = a; });
+      return best;
+    }
+    var links = (o.links || []).filter(function (l) { return l && byId[l.from] && byId[l.to] && l.from !== l.to; });
+    var selected = o.selected || {};
+    function item(c) {
+      var s = sz(c), k = kindOf(c);
+      var it = {
+        id: String(c.id), kind: KIND_LABEL[k] || "File",
+        title: String(k === "agent" && /^agent\.?md$/i.test(String(c.title || "")) ? "Core identity" : (c.title || KIND_LABEL[k] || "Untitled")).replace(/\s+/g, " ").trim().slice(0, 80),
+        x: Math.round(c.x), y: Math.round(c.y), w: Math.round(s.w), h: Math.round(s.h),
+        d: Math.round(dist(c, from)),
+      };
+      var g = gistOf(c, cards);
+      if (g) it.gist = g;
+      var file = /\/api\/buzzy\/assets\/(\d+)/.exec(String(c.url || ""));
+      if (file) it.file = Number(file[1]);
+      var a = k === "area" ? null : areaOf(c);
+      if (a) it.area = String(a.id);
+      var to = links.filter(function (l) { return l.from === c.id; }).map(function (l) { return String(l.to); });
+      var fromIds = links.filter(function (l) { return l.to === c.id; }).map(function (l) { return String(l.from); });
+      if (to.length) it.to = to.slice(0, 6);
+      if (fromIds.length) it.from = fromIds.slice(0, 6);
+      if (selected[c.id]) it.sel = true;
+      return it;
+    }
+    // Nearest first; at the same distance a card before the area around it.
+    function nearest(a, b) { return dist(a, from) - dist(b, from) || (kindOf(a) === "area" ? 1 : 0) - (kindOf(b) === "area" ? 1 : 0); }
+    var seen = cards.filter(inView).sort(nearest);
+    var off = cards.filter(function (c) { return !inView(c); }).sort(nearest);
+    var offKinds = {};
+    off.forEach(function (c) { var k = KIND_LABEL[kindOf(c)] || "File"; offKinds[k] = (offKinds[k] || 0) + 1; });
+
+    // Under the pointer: the card it is on (an area only when it is on nothing else);
+    // the page says which one is on top when cards overlap.
+    var under = null, near = null, between = null;
+    if (P) {
+      var hits = cards.filter(function (c) { return dist(c, P) === 0; });
+      var flat = hits.filter(function (c) { return kindOf(c) !== "area"; });
+      if (o.over && byId[o.over] && hits.indexOf(byId[o.over]) >= 0 && kindOf(byId[o.over]) !== "area") under = byId[o.over];
+      else if (flat.length) under = flat[flat.length - 1];
+      else if (hits.length) under = hits.sort(function (a, b) { return (Number(a.w) || 0) * (Number(a.h) || 0) - (Number(b.w) || 0) * (Number(b.h) || 0); })[0];
+      if (!under || kindOf(under) === "area") {
+        // On empty board (or an area's empty part): the card right beside the pointer,
+        // or two about as near, when it is honestly between them.
+        var close = cards.filter(function (c) { return kindOf(c) !== "area" && dist(c, P) * z <= 48; })
+          .sort(function (a, b) { return dist(a, P) - dist(b, P); });
+        if (close.length > 1 && (dist(close[1], P) - dist(close[0], P)) * z < 16) between = [String(close[0].id), String(close[1].id)];
+        else if (close.length) near = close[0];
+      }
+    }
+    var held = o.held && byId[o.held.id] ? { id: String(o.held.id), how: String(o.held.how || "moving") } : null;
+    var incoming = o.incoming && o.incoming.title ? {
+      kind: String(o.incoming.kind || "file"), title: String(o.incoming.title).replace(/\s+/g, " ").trim().slice(0, 100),
+      over: !!o.incoming.over, from: String(o.incoming.from || "the page"),
+    } : null;
+    var pointed = !P && o.pointed && byId[o.pointed.id] && num(o.pointed.agoMs) && o.pointed.agoMs < 60000 ? o.pointed : null;
+    var selIds = cards.filter(function (c) { return selected[c.id]; }).map(function (c) { return String(c.id); });
+
+    // What "this" / "that" / "it" most likely means, in this order: what they hold,
+    // what they drag in, what the pointer is on (or right beside), what they last
+    // rested the pointer on before it left the board, the one card selected.
+    // (An area counts only when the pointer is on its empty part, away from any card.)
+    var onCard = under && kindOf(under) !== "area" ? under : null;
+    var focus = null;
+    if (held) focus = { id: held.id, why: "holding" };
+    else if (incoming) focus = { id: "incoming", why: "dragging in" };
+    else if (onCard) focus = { id: String(onCard.id), why: "under the pointer" };
+    else if (near) focus = { id: String(near.id), why: "right beside the pointer" };
+    else if (between) focus = null;
+    else if (under) focus = { id: String(under.id), why: "under the pointer" };
+    else if (pointed) focus = { id: String(pointed.id), why: "last pointed at", agoMs: Math.round(pointed.agoMs) };
+    else if (selIds.length === 1) focus = { id: selIds[0], why: "selected" };
+
+    var out = {
+      v: 1,
+      open: o.open !== false,
+      zoom: Math.round(z * 100) / 100,
+      total: cards.length,
+      selected: selIds.slice(0, 20),
+      items: seen.slice(0, VIEW_ITEMS).map(item),
+      offItems: off.slice(0, VIEW_OFF).map(item),
+      offCount: off.length,
+      offKinds: offKinds,
+    };
+    if (vp) out.view = { x: Math.round(vp.x), y: Math.round(vp.y), w: Math.round(vp.w), h: Math.round(vp.h) };
+    out.pointer = P ? { x: Math.round(P.x), y: Math.round(P.y) } : null;
+    if (under) out.under = String(under.id);
+    if (near) out.near = String(near.id);
+    if (between) out.between = between;
+    if (held) out.held = held;
+    if (incoming) out.incoming = incoming;
+    if (pointed) out.pointed = { id: String(pointed.id), agoMs: Math.round(pointed.agoMs) };
+    if (focus) out.focus = focus;
+    // Anything named above but not listed (held or under the pointer off the list's
+    // end) is listed too, so every name has its card.
+    [out.under, out.near, out.held && out.held.id, out.pointed && out.pointed.id, out.focus && out.focus.id].concat(out.between || []).forEach(function (id) {
+      if (!id || id === "incoming" || !byId[id]) return;
+      var listed = out.items.some(function (x) { return x.id === id; }) || out.offItems.some(function (x) { return x.id === id; });
+      if (!listed) (inView(byId[id]) ? out.items : out.offItems).push(item(byId[id]));
+    });
+    return out;
+  }
+
+  // Something on its way to the board from elsewhere: a card from Inspiration, a
+  // picture or link from any page (voice-stage.js gives each drag a card), or files
+  // from the computer. Watched here, outside any one board, so a folded board knows too.
+  var incoming = null;
+  function dragKind(card) { return card && card.kind ? kindOf(card) : "file"; }
+  function dragNow() { return incoming && Date.now() - incoming.at < 5000 ? incoming : null; }
+  if (typeof document !== "undefined" && document.addEventListener) {
+    // Bubbling, so it reads what the page put on the drag (voice-stage.js and the
+    // Inspiration wall set it as the drag starts).
+    document.addEventListener("dragstart", function (e) {
+      var t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
+      if (!t || !t.closest || t.closest(".wb-panel")) return;      // moving things on the board itself
+      var card = null, dt = e.dataTransfer;
+      try { var raw = dt && dt.getData(CARD_TYPE); if (raw) card = JSON.parse(raw); } catch (_) { card = null; }
+      if (!card && dt) {
+        var uri = "";
+        try { uri = String(dt.getData("text/uri-list") || "").split("\n")[0].trim(); } catch (_) { uri = ""; }
+        var words = "";
+        try { words = String(dt.getData("text/plain") || "").trim(); } catch (_) { words = ""; }
+        if (uri || words) card = { kind: uri ? "file" : "note", title: (words || uri).slice(0, 100), url: uri };
+      }
+      if (!card) card = { kind: "file", title: String(t.getAttribute("aria-label") || t.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100) };
+      incoming = card.title ? { kind: KIND_LABEL[dragKind(card)] || "File", title: String(card.title), from: t.closest(".insp-card") ? "Inspiration" : "the page", over: false, at: Date.now() } : null;
+    });
+    // Files from the computer never fire dragstart in the page.
+    document.addEventListener("dragenter", function (e) {
+      if (incoming) return;
+      var dt = e.dataTransfer;
+      var types = dt && dt.types ? Array.prototype.slice.call(dt.types) : [];
+      if (types.indexOf("Files") < 0) return;
+      var n = dt.items ? dt.items.length : 0;
+      incoming = { kind: "File", title: n > 1 ? n + " files from their computer" : "a file from their computer", from: "their computer", over: false, at: Date.now(), files: true };
+    }, true);
+    document.addEventListener("dragover", function (e) {
+      if (!incoming) return;
+      incoming.over = !!(e.target && e.target.closest && (e.target.closest(".wb-panel") || e.target.closest(".bz-dropstrip")));
+      incoming.at = Date.now();
+    }, true);
+    var dragDone = function () { incoming = null; };
+    // A drag is alive while the browser keeps saying where it is (several times a second).
+    document.addEventListener("dragend", dragDone, true);
+    document.addEventListener("drop", function () { setTimeout(dragDone, 0); }, true);
+    document.addEventListener("dragleave", function (e) { if (incoming && incoming.files && !e.relatedTarget) incoming = null; }, true);
+  }
+
   // What a card is, from whatever the source called it.
   function kindOf(c) {
     var k = String(c.kind || "").toLowerCase();
@@ -1828,6 +2049,73 @@
         if (out) lost.textContent = n === 1 ? "Your card is out of sight. Show it" : "Your " + n + " cards are out of sight. Show them";
       });
     }
+
+    // ── What the owner sees right now, for BeeZilla (see viewOf) ─────────────────
+    // The pointer's last place over the board and the card it is on, read at most once a
+    // frame so drawing and dragging stay smooth. A card the pointer rested on and then
+    // left (to press Send, say) is remembered as the one last pointed at.
+    var look = { cx: 0, cy: 0, on: false, over: null, since: 0, pointed: null };
+    var lookEv = null, lookAsk = 0;
+    function rested(now) {
+      if (look.over && now - look.since >= DWELL_MS) look.pointed = { id: look.over, at: now };
+    }
+    function readLook() {
+      lookAsk = 0;
+      var e = lookEv;
+      if (!e) return;
+      var now = Date.now();
+      look.cx = e.clientX; look.cy = e.clientY; look.on = true;
+      var t = e.target && e.target.closest ? e.target.closest(".wb-card") : null;
+      var id = t && canvas.contains(t) ? t.getAttribute("data-id") : null;
+      if (id !== look.over) { rested(now); look.over = id; look.since = now; }
+    }
+    function noticePointer(e) {
+      lookEv = e;
+      if (!lookAsk) lookAsk = typeof requestAnimationFrame === "function" ? requestAnimationFrame(readLook) : 0;
+    }
+    function pointerGone() {
+      if (lookAsk) { cancelAnimationFrame(lookAsk); readLook(); }
+      rested(Date.now());
+      look.on = false;
+      look.over = null;
+      lookEv = null;
+    }
+    canvas.addEventListener("pointermove", noticePointer, { passive: true });
+    canvas.addEventListener("pointerdown", noticePointer, { passive: true });
+    canvas.addEventListener("pointerleave", pointerGone);
+    // A drag from elsewhere on the page, over the board.
+    canvas.addEventListener("dragover", noticePointer);
+    canvas.addEventListener("dragleave", function (e) { if (!canvas.contains(e.relatedTarget)) pointerGone(); });
+
+    // The board as the owner sees it this moment.
+    function seeing() {
+      if (lookAsk) { cancelAnimationFrame(lookAsk); readLook(); }   // the very latest place
+      var r = canvas.getBoundingClientRect();
+      var open = !!(root.isConnected && r.width && r.height);
+      var now = Date.now();
+      var sizes = {};
+      state.cards.forEach(function (c) { var n = nodes[c.id]; if (n) sizes[c.id] = { w: n.offsetWidth, h: n.offsetHeight }; });
+      var inside = open && look.on && look.cx >= r.left && look.cx <= r.right && look.cy >= r.top && look.cy <= r.bottom;
+      return viewOf({
+        open: open,
+        cards: state.cards,
+        links: state.links,
+        sizes: sizes,
+        zoom: view.z,
+        viewport: open ? { x: -view.x / view.z, y: -view.y / view.z, w: r.width / view.z, h: r.height / view.z } : null,
+        pointer: inside ? toWorld(look.cx, look.cy) : null,
+        over: inside ? look.over : null,
+        held: dragging && dragging.held ? dragging.held : null,
+        incoming: dragNow(),
+        selected: selected,
+        pointed: !inside && look.pointed ? { id: look.pointed.id, agoMs: now - look.pointed.at } : null,
+      });
+    }
+    // What "this" meant as the person's latest turn started (turnFocus, kept outside any
+    // one board: a new conversation's board takes over as the first turn is sent, with
+    // the same cards): BeeZilla's board steps for that turn ("remove this", "make this
+    // bigger") work on it (findCards).
+    function focusCard() { return turnFocus && Date.now() - turnFocus.at < 120000 ? cardById(turnFocus.id) : null; }
     function zoomBy(f) { var r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, view.z * f); }
     function zoomTo(z) { var r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, z); }
     function bounds(list) {
@@ -2035,6 +2323,7 @@
       var n = el("div", "wb-card");
       n.tabIndex = 0;
       n.setAttribute("role", "group");
+      n.setAttribute("data-id", String(c.id));     // which card the pointer is on (seeing())
       n.style.left = c.x + "px";
       n.style.top = c.y + "px";
       fillCard(n, c);
@@ -2246,7 +2535,7 @@
             link(c.id, toId, corner, th ? th.getAttribute("data-corner") : nearestCorner(to, toWorld(ev.clientX, ev.clientY)));
             persist();
           };
-          follow(n, e.pointerId, move, up, function () { if (preview) { preview.remove(); preview = null; } });
+          follow(n, e.pointerId, move, up, function () { if (preview) { preview.remove(); preview = null; } }).held = { id: c.id, how: "joining it to another card" };
           return;
         }
         var hadSel = Object.assign({}, selected);
@@ -2270,7 +2559,7 @@
           selbar.classList.remove("wb-quiet");
           if (moved) persist();
         };
-        follow(n, e.pointerId, mv, upm, function () {
+        var moveDrag = follow(n, e.pointerId, mv, upm, function () {
           // Taken back: every card where it was, and the selection as it was.
           orig.forEach(function (o) { o.c.x = o.x; o.c.y = o.y; place(o.c); });
           if (moved) undo.pop();
@@ -2280,6 +2569,7 @@
           drawLinks();
           paintSelection();
         });
+        moveDrag.held = { id: c.id, how: "moving it" };
       });
       n.addEventListener("dblclick", function (e) {
         if (c.id === CHAT_ID) return;
@@ -2561,6 +2851,7 @@
       };
       var up = function (ev) { done(ev, false); };
       var drag = follow(n, e.pointerId, move, up, function () { done(null, true); });
+      drag.held = { id: c.id, how: "drawing a line from it" };
       var esc = function (ev) { if (ev.key === "Escape") { ev.stopPropagation(); ev.preventDefault(); drag.abort(); } };
       document.addEventListener("keydown", esc, true);
     }
@@ -2668,12 +2959,13 @@
       var upr = function () {
         if (moved) { fillCard(n, c); persist(); }
       };
-      follow(n, e.pointerId, mv, upr, function () {
+      var sizing = follow(n, e.pointerId, mv, upr, function () {
         c.w = w0; c.h = h0;
         if (moved) undo.pop();
         sizeArea(c, n);
         drawLinks();
       });
+      sizing.held = { id: c.id, how: "resizing it" };
     }
 
     // ── Sell this orchestration (coming soon) ───────────────────────────────
@@ -3533,7 +3825,7 @@
         follow(cv, e.pointerId, mv, up, function () {
           undo.pop();
           setMarks(c, before);
-        }, up);
+        }, up).held = { id: c.id, how: "drawing on it" };
         void g;
       });
     }
@@ -3777,8 +4069,14 @@
       var p = lower(phrase);
       var list = state.cards.slice();
       if (!p) return { cards: [] };
-      if (/^(?:it|this|that|this one|that one|them|these|those|the selection|selected|the selected (?:cards?|ones?))$/.test(p)) {
-        return { cards: list.filter(function (c) { return selected[c.id]; }) };
+      if (ONE_THING.test(p) || SELECTION_WORDS.test(p)) {
+        // "this" / "that": what the person held or pointed at as their turn started
+        // (seeing()); "it" keeps to the selection when there is one, as before; "them",
+        // "these", "the selection": the selection.
+        var sel = list.filter(function (c) { return selected[c.id]; });
+        var f = ONE_THING.test(p) ? focusCard() : null;
+        if (f && (turnFocus.why === "holding" || p !== "it" || !sel.length)) return { cards: [f] };
+        return { cards: sel };
       }
       if (/^(?:everything|all|all of it|all of them|every card|all (?:the )?cards|(?:the )?whole board|the board)$/.test(p)) {
         return { cards: list.filter(function (c) { return kindOf(c) !== "area"; }), all: true };
@@ -3892,6 +4190,14 @@
           world.classList.add("wb-glide"); frame(r.cards, 1.5); setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
           lightUp(r.cards);
           return ok(r.cards.length === 1 ? "Here's " + nameOf(r.cards[0]) + "." : "Here they are.");
+        case "enlarge":
+          // "make this bigger": the card the person pointed at, as big as the screen allows.
+          r = findCards(a.target || "this");
+          if (!r.cards.length) return no(notFound(r, a.target || "this"));
+          selectOnly(r.cards);
+          world.classList.add("wb-glide"); frame(r.cards, 2.5); setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
+          lightUp(r.cards);
+          return ok(r.cards.length === 1 ? "Here's " + nameOf(r.cards[0]) + ", bigger." : "Here they are, bigger.");
         // Making cards
         case "note":
           c = made({ kind: "note", title: a.title || "Note", body: a.text || "", user: true });
@@ -4278,6 +4584,8 @@
         return !!id;
       },
       instructions: instructions,
+      /** The board as the owner sees it this moment (viewOf). */
+      seeing: seeing,
       fit: fit,
       say: say,
       clear: function () { snapshot(); state.cards = []; state.links = []; rebuild(); persist(); },
@@ -4307,8 +4615,58 @@
     return api;
   }
 
+  // ── The view that goes with a turn ─────────────────────────────────────────
+  // talk.html calls markSpeech() the instant the microphone hears speech, freezeView()
+  // once that speech's first words reach the box (a cough never freezes anything), and
+  // takeView() as the turn is sent: the view frozen as they started speaking, or the
+  // view at the moment they press send. dropView() when they empty the box.
+  var frozen = null;          // the view as this turn started (speech), until it is sent
+  var onset = null;           // the view the instant speech was heard, until words follow
+  var turnFocus = null;       // what "this" meant in the turn last sent: { id, why, at }
+  function viewNow(why) {
+    var b = mountedBoard && mountedBoard.isOpen() ? mountedBoard : null;
+    var v = b ? b.seeing() : viewOf({ open: false, incoming: dragNow() });
+    if (!b) v.open = false;
+    v.why = why;
+    v.at = Date.now();
+    return v;
+  }
+  function markSpeech() {
+    if (frozen && Date.now() - frozen.at < FROZEN_MS) return;
+    onset = viewNow("speaking");
+  }
+  function freezeView(why) {
+    var now = Date.now();
+    if (frozen && now - frozen.at < FROZEN_MS) return frozen;
+    // Speech's first words follow its first sound within a few seconds; an older sound
+    // was something else (a cough, the room), so the view is taken now instead.
+    frozen = onset && now - onset.at < 6000 ? onset : viewNow(why || "speaking");
+    onset = null;
+    return frozen;
+  }
+  function takeView() {
+    var now = Date.now();
+    var v = frozen && now - frozen.at < FROZEN_MS ? frozen : viewNow("send");
+    frozen = null;
+    onset = null;
+    v.ageMs = Math.max(0, now - v.at);
+    delete v.at;
+    var f = v.focus;
+    turnFocus = f && f.id && f.id !== "incoming" ? { id: String(f.id), why: String(f.why || ""), at: now } : null;
+    return v;
+  }
+  function dropView() { frozen = null; onset = null; }
+
   window.BeeZillaWhiteboard = {
     mount: mount,
+    /** The board as the owner sees it now (viewOf), on screen or folded away. */
+    seeing: function () { return viewNow("now"); },
+    markSpeech: markSpeech,
+    freezeView: freezeView,
+    takeView: takeView,
+    dropView: dropView,
+    /** The description itself, from plain numbers (scripts/test-board-view.ts). */
+    viewOf: viewOf,
     /** The board open on the page, or null: BeeZilla's steps run on it (board.act). */
     current: function () { return mountedBoard && mountedBoard.isOpen() ? mountedBoard : null; },
     kindOf: kindOf,

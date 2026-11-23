@@ -3985,6 +3985,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var heard = e.results[e.resultIndex || 0];
           if (heard && heard[0] && String(heard[0].transcript || "").trim()) {
             voice.firstInterimAt = performance.now();
+            bzSpeechHeard();
           }
         }
         var finalText = "";
@@ -5011,7 +5012,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { speechSeen = true; quietSince = 0; }
+            if (rms > 0.02) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
             // Live words: the clip so far, shown while the person is still talking.
@@ -5155,7 +5156,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var q = 0; q < copy.length; q++) sum += copy[q] * copy[q];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { capState.speechSeen = true; capState.quietSince = 0; }
+            if (rms > 0.02) { if (!capState.speechSeen) bzSpeechHeard(); capState.speechSeen = true; capState.quietSince = 0; }
             else if (capState.speechSeen && !capState.quietSince) capState.quietSince = Date.now();
             if (voice.bargeClip && capState.speechSeen && capState.quietSince &&
                 Date.now() - capState.quietSince > 1200) sendTurnClip();
@@ -5318,6 +5319,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
     }
 
+    // ── What the owner is looking at on the Idea Board, for this turn ─────────
+    // Owner, 2026-11-21: "it could hover over something or grab something and say, what
+    // do I do with this?… And it knows what this or that is." The board's view is taken
+    // the instant speech is heard (the words come later, and the mouse may have moved by
+    // then), kept once that speech's words reach the box (a cough keeps nothing), and
+    // sent with the turn; a typed turn sends the view as it is sent (whiteboard.js).
+    function bzBoard() { return window.BeeZillaWhiteboard || null; }
+    function bzSpeechHeard() {
+      var W = bzBoard();
+      if (W && W.markSpeech) setTimeout(function () { try { W.markSpeech(); } catch (_) { /* the board's view is a help, never a gate */ } }, 0);
+    }
+    function bzFreezeView() {
+      var W = bzBoard();
+      if (W && W.freezeView) { try { W.freezeView("speaking"); } catch (_) { /* as above */ } }
+    }
+    function bzTakeView() {
+      var W = bzBoard();
+      try { return W && W.takeView ? W.takeView() : undefined; } catch (_) { return undefined; }
+    }
+
     // ── Dictation: what you say collects in the box until you send it ─────
     // Owner, 2026-11-19: "When you click on it the first time, it should switch to
     // a pause button. You can click on that pause anytime, think as much as you
@@ -5370,6 +5391,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var t = String(text || "").trim();
       var seg = dictSeg(id, !!t);
       if (!seg || seg.done) return;
+      if (t) bzFreezeView();
       seg.text = t;
       dictRender();
     }
@@ -5381,6 +5403,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     // The words that count for a stretch ("" when nothing was said).
     function dictFinal(id, text) {
+      if (String(text || "").trim()) bzFreezeView();
       var seg = dictSeg(id, !!text);
       if (seg) { seg.text = String(text || "").trim(); seg.done = true; }
       dictSettle();
@@ -7072,6 +7095,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
       if (!text) return;
+      // What they are looking at on the Idea Board: taken first, before sending changes
+      // the board (the conversation card appears, a new conversation's board takes over):
+      // as they started speaking, or now as they send (whiteboard.js takeView).
+      const boardView = bzTakeView();
       var pastedPaper = readThisBody(text);
       if (pastedPaper !== null) {
         input.value = "";
@@ -7193,6 +7220,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
           // The person's own edits to the process on the whiteboard (or a recipe they ran).
           boardInstructions: (window.bzBoardInstructions && window.bzBoardInstructions()) || undefined,
+          // What they were looking at on the Idea Board as this turn started (above).
+          boardView: boardView,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
@@ -7704,6 +7733,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         toggle.setAttribute("aria-expanded", "false");
       }
     };
+    // The person cleared the box: the board view kept for what they had said goes too.
+    document.getElementById("chatInput").addEventListener("input", function (e) {
+      var W = bzBoard();
+      if (W && W.dropView && !String(e.target.value || "").trim()) W.dropView();
+    });
     document.getElementById("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();

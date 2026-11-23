@@ -43,7 +43,8 @@ import { generateImage, storeImage, artConfigured, imageModel } from "./art";
 import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, getEntitlement, recordUsage } from "./entitlements";
-import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
+import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, BOARD_VIEW_BUDGET_CHARS, type ContextState } from "./context";
+import { boardViewBlock, boardViewFocusNote, pointedPicture, type BoardView } from "./boardView";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
@@ -302,6 +303,13 @@ export interface ChatRequest {
    * Their instructions for this conversation — appended to the system prompt, capped.
    */
   boardInstructions?: string | null;
+  /**
+   * What the owner is looking at on the Idea Board as this turn started (owner,
+   * 2026-11-21: "a clear understanding of everything that the user is seeing… it knows
+   * what this or that is"): cleaned by boardView.ts, written into this turn's
+   * instructions only, never stored with the conversation.
+   */
+  boardView?: BoardView | null;
 }
 
 /** One step of a turn, as the whiteboard draws it. */
@@ -826,10 +834,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // picture maker draws the new version from it (owner: "I can iterate on that image
   // by just talking about the image"). Only when the newest thing made is a picture.
   const newestMade = madeThings.length ? madeThings[madeThings.length - 1]! : null;
-  const pictureToChange =
-    newestMade && String(newestMade.contentType || "").toLowerCase().startsWith("image/") &&
+  // One of their pictures they point at or hold on the board as they ask ("make this
+  // darker") is the one changed, newest or not (boardView.ts).
+  const pointedPictureId = pointedPicture(req.boardView ?? null);
+  const pictureToChange: { id: number } | null =
     !isNewPictureAsk(message) && isPictureChange(message)
-      ? newestMade
+      ? pointedPictureId !== null
+        ? { id: pointedPictureId }
+        : newestMade && String(newestMade.contentType || "").toLowerCase().startsWith("image/") ? newestMade : null
       : null;
   // A picture connected on the board is the one a change is about.
   // Only when the words are about how something looks: "make it shorter" with a
@@ -880,8 +892,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
     appPlan = kept.length ? kept : null;
   }
+  // What the owner is looking at right now (the board as they started speaking or
+  // pressed send): last, nearest their words; rebuilt every turn, never stored.
+  const boardViewText = boardViewBlock(req.boardView ?? null, BOARD_VIEW_BUDGET_CHARS);
+  const boardViewSection = boardViewText ? "\n\n" + boardViewText : "";
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings) + boardViewSection;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
@@ -905,13 +921,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let videoJob: { jobId: string; recipe: string; etaMinutes: number; state: string } | null = null;
   let videoRefusal: { code: string; error: string } | null = null;
 
+  // "what is this?": the card it is on their board, in their own words, on the message
+  // the model reads this turn only (boardView.ts); the stored message stays theirs.
+  const focusNote = boardViewFocusNote(req.boardView ?? null, message);
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
     ...history.map((h) => ({
       role: h.role as "user" | "assistant" | "system",
       content: h.content,
     })),
-    { role: "user", content: message },
+    { role: "user", content: focusNote ? `${message}\n\n${focusNote}` : message },
   ];
 
   // ── Music pre-pass ────────────────────────────────────────────────

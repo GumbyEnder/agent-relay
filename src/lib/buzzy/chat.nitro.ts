@@ -33,6 +33,7 @@
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
 import { chatLoop, type FlowStep } from "./server";
+import { cleanBoardView } from "./boardView";
 import { withLlmOverride } from "./llm";
 import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
 import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
@@ -1641,6 +1642,9 @@ export default defineEventHandler(async (event) => {
     const boardInstructions = typeof body.boardInstructions === "string"
       ? body.boardInstructions.slice(0, 8200)    // the summary (up to 7,800) and its pictures line
       : null;
+    // What the owner is looking at on the Idea Board as this turn started (whiteboard.js
+    // viewOf): read for this turn only, never stored with the conversation (boardView.ts).
+    const boardView = cleanBoardView(body.boardView);
     // The Talk bar's privacy control. Unknown values mean the default (no change).
     let privacy: "advocate" | "lockdown" | "open" | undefined =
       body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
@@ -1809,6 +1813,7 @@ export default defineEventHandler(async (event) => {
         onStage: (st) => { turnStages.push({ ...st, atMs: Date.now() - turnStarted }); opts?.onStage?.(st); },
         onFlow: opts?.onFlow,
         boardInstructions,
+        boardView,
       })).then(async (result) => {
         try {
           await sql`

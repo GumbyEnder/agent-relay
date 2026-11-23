@@ -18,7 +18,7 @@
 
 export interface BoardStep {
   do: "board";
-  /** The verb: fit, zoomIn, zoomOut, zoom100, focus, note, step, agent, end, connect,
+  /** The verb: fit, zoomIn, zoomOut, zoom100, focus, enlarge, note, step, agent, end, connect,
    *  disconnect, select, deselect, remove, rename, write, edit, duplicate, move, area,
    *  sell, recipe, history, keys, undo, redo, find, start. */
   value: string;
@@ -56,6 +56,12 @@ const OF_NOUN = new RegExp(`^(?:the |my |that |this )?(?:${NOUNS}) (?:of|with|ab
 const BOARD = "(?:the |my |this )?(?:idea board|white ?board|board)";
 const ON_BOARD = new RegExp(`\\s+(?:on|from|in|off) ${BOARD}$`);
 
+// "this card", "the one I'm holding": a card the owner is pointing at or holding as they
+// speak (owner, 2026-11-21: "it could hover over something or grab something and say,
+// what do I do with this?… And it knows what this or that is").
+const HOLDING = /^(?:this card|that card|the (?:one|thing|card) (?:i'?m|i am) (?:holding|dragging|moving)|what (?:i'?m|i am) (?:holding|dragging))$/;
+const POINTED = /^(?:this|that|this one|that one|this card|that card|the (?:one|thing|card) (?:i'?m|i am) (?:holding|dragging|moving)|what (?:i'?m|i am) (?:holding|dragging))$/;
+
 /** "the beach photo" or "the beach photo on the board" — names a card. */
 function cardPhrase(s: string | undefined): string | null {
   let t = String(s || "").trim().replace(/^["“]|["”]$/g, "").trim();
@@ -66,6 +72,8 @@ function cardPhrase(s: string | undefined): string | null {
   // not a card ("the picture of the dog" is a card).
   if (/\b(?:from|in|inside|at|on|onto|into)\b/.test(t)) return null;
   if (/^(?:it|this|that|this one|that one|them|these|those|everything|all of it|all of them|the selection)$/.test(t)) return t;
+  // What they point at or hold as they speak (whiteboard.js knows which card that is).
+  if (HOLDING.test(t)) return t;
   if (OF_NOUN.test(t)) return t;            // "the picture of the dog", "the note about prices"
   return ENDS_IN_NOUN.test(t) ? t : null;
 }
@@ -111,6 +119,13 @@ const RULES: Rule[] = [
   {
     re: new RegExp(`^(?:show me|find|where(?:'s| is)|take me to|go to|jump to|look at) (.+?) on ${BOARD}$`),
     make: (m) => (/\b(?:and|put|add|drop|stick)\b/.test(m[1]!) ? null : { do: "board", value: "focus", target: clean(m[1]), say: `Show ${quote(m[1]!)}` }),
+  },
+  {
+    // "make this bigger": the card they point at or hold, shown as big as the screen
+    // allows. Only for "this"/"that": "make it bigger" right after a picture stays a
+    // change to that picture (pictureChange.ts).
+    re: /^(?:make|show) (.+?) (?:bigger|larger)(?: on (?:the |my )?screen)?$/,
+    make: (m) => { const t = clean(m[1]); return POINTED.test(t) ? { do: "board", value: "enlarge", target: t, say: "Show it bigger" } : null; },
   },
   // ── Making cards ─────────────────────────────────────────────────────
   {
