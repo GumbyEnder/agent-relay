@@ -880,6 +880,16 @@
       var el = document.getElementById("savedFlag");
       if (el) { clearTimeout(el._t); el.textContent = "Too large to save"; el.style.color = "#ff6b6b"; }
     }
+    // The route refused this board even though it passed the client cap. Do not claim the
+    // board is "over the limit" — it is not; say the save was refused and leave the work on
+    // screen. The size is included because a mismatched limit is the usual cause.
+    function rejectedByServer(bytes) {
+      setSaved(false);
+      var mb = (bytes / (1024 * 1024)).toFixed(1);
+      setStatus("The server refused this save (" + mb + " MB, 413). The board is still here — try Save again, or Create the board as a file.");
+      var el = document.getElementById("savedFlag");
+      if (el) { clearTimeout(el._t); el.textContent = "Not saved — server refused"; el.style.color = "#ff6b6b"; }
+    }
     // Second shrink pass, for boards that accumulated images: the import path already
     // caps a single image at 2560 px, this re-encodes the largest one smaller.
     function shrinkLargestImage() {
@@ -962,7 +972,10 @@
       }).then(function (r) {
         // The route enforces the same limit; a 413 here means the client cap and the
         // server cap disagreed or another caller raced us. Say it, do not retry blindly.
-        if (r.status === 413) { tooBig(bytes); return; }
+        // Measured: reusing tooBig() here prints "Board is 0.4 MB — over the 8 MB save
+        // limit", which reads as nonsense and hides what happened. A 413 is the server
+        // refusing, not the client cap, so it gets its own words.
+        if (r.status === 413) { rejectedByServer(bytes); return; }
         if (!r.ok) throw new Error("save failed");
         setSaved(true);
       })
