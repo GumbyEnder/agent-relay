@@ -26,12 +26,22 @@ const args = process.argv.slice(2);
 const docPath = args[0] === "--doc" ? args[1] : join(root, "docs/RECIPE-MARKETPLACE-PROTOCOL.md");
 const doc = readFileSync(docPath, "utf8");
 
-/** `stubs/*.ts` from the private clone, wherever sync-private.mjs found it. */
+/**
+ * `stubs/*.ts` from the private clone, wherever sync-private.mjs found it.
+ *
+ * The env var comes first: sync-private.mjs resolves the clone from
+ * BZ_PRIVATE_LOCAL_PATH, so when that is set the stubs are next to THAT clone,
+ * not next to this worktree. Before this, a local private build (real modules in
+ * src/lib/private) failed this check even though the code it wanted was one
+ * directory away — `test:protocol-doc` could not pass in the dev layout at all.
+ */
 function stubFiles() {
   const dirs = [
+    process.env.BZ_PRIVATE_LOCAL_PATH ? join(process.env.BZ_PRIVATE_LOCAL_PATH, "stubs") : null,
+    join(root, ".private-stub"),
     join(root, ".private/beezilla-recipes/stubs"),
     join(root, "../beezilla-recipes/stubs"),
-  ];
+  ].filter(Boolean);
   for (const d of dirs) {
     if (existsSync(d)) return readdirSync(d).filter((f) => f.endsWith(".ts")).map((f) => join(d, f));
   }
