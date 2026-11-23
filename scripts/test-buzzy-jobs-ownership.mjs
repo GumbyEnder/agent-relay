@@ -2,24 +2,161 @@
 /**
  * test-buzzy-jobs-ownership.mjs — BZ-F002 / issue #158 E2E ownership evidence.
  *
- * Drives a RUNNING server (default http://127.0.0.1:3000) through the
- * magic-link dev-inbox auth path for two accounts, then asserts:
+ * OWNS ITS OWN SERVER (issue #266). With no arguments it builds nothing, but it
+ * boots the built server on an ephemeral port, points the dev mail inbox at a
+ * fresh temp directory, waits for health, and tears both down on success AND on
+ * failure. `npm run build` must have run first. Pass `[baseUrl] [mailLogPath]`
+ * to drive an already-running server instead (that is what the local wrapper
+ * does, so the two paths stay interchangeable).
+ *
+ * Hermetic on purpose: a suite that leans on an external server silently
+ * produces zero coverage the day nobody starts the server.
+ *
+ * Asserts:
  *
  *   QA-05  cross-account denial: list isolation, PATCH 404, DELETE no-op,
  *          upsert 409 conflict, document 404
  *   QA-06  fresh sign-in (new cookie) still sees the job — server is SoT,
  *          no localStorage reliance
  *   QA-17  export (portability) returns a zip; owner delete removes the job
+ *   F035   sessions / companies / scheduled / connections isolation, QA-13
+ *          (paper text is data, never instructions), account deletion propagates
  *
- * Requires the dev mail inbox (.data/outbound-mail.jsonl in server cwd),
- * i.e. server started WITHOUT SMTP/RESEND env.
+ * The dev mail inbox is what makes magic-link sign-in testable: the server is
+ * booted WITHOUT SMTP/RESEND env, so mailer.ts writes each message into
+ * $AGENT_RELAY_MAIL_LOG_DIR/outbound-mail.jsonl.
  *
  * Usage: node scripts/test-buzzy-jobs-ownership.mjs [baseUrl] [mailLogPath]
  */
-import { readFileSync, existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const BASE = process.argv[2] || "http://127.0.0.1:3000";
-const MAIL_LOG = process.argv[3] || ".data/outbound-mail.jsonl";
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SERVER_ENTRY = join(ROOT, ".output", "server", "index.mjs");
+
+// ── harness: own the server unless a base URL was passed in ─────────────────
+let BASE = process.argv[2] || "";
+let MAIL_LOG = process.argv[3] || "";
+let child = null;
+let mailDir = null;
+let serverLog = "";
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function freePort() {
+  const srv = createServer();
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const { port } = srv.address();
+  await new Promise((r) => srv.close(r));
+  return port;
+}
+
+/**
+ * The PGlite WASM files live in .output/server/_libs and `npm run build` wipes
+ * that directory, so a built-but-unserved checkout 500s with ENOENT on
+ * pglite.data. Copying them here makes this suite self-sufficient instead of
+ * handing the next person that trap.
+ */
+function ensurePgliteAssets() {
+  const libs = join(ROOT, ".output", "server", "_libs");
+  const src = join(ROOT, "node_modules", "@electric-sql", "pglite", "dist");
+  for (const file of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+    const dest = join(libs, file);
+    if (!existsSync(dest) && existsSync(join(src, file))) {
+      copyFileSync(join(src, file), dest);
+    }
+  }
+}
+
+async function boot() {
+  MAIL_LOG = process.argv[3] || "";
+  if (BASE) return; // external server: caller owns lifecycle
+
+  if (!existsSync(SERVER_ENTRY)) {
+    console.error(`FAIL  no built server at ${SERVER_ENTRY}\n      run: npm run build`);
+    process.exit(2);
+  }
+  ensurePgliteAssets();
+
+  mailDir = mkdtempSync(join(tmpdir(), "bz-jobs-"));
+  MAIL_LOG = join(mailDir, "outbound-mail.jsonl");
+  const port = await freePort();
+  BASE = `http://127.0.0.1:${port}`;
+
+  // Drop the provider credentials: their presence alone disables the dev inbox
+  // and the magic-link test has nowhere to read the URL from.
+  const env = { ...process.env };
+  for (const key of ["RESEND_API_KEY", "SMTP_URL", "SMTP_HOST"]) delete env[key];
+
+  child = spawn(process.execPath, [SERVER_ENTRY], {
+    cwd: ROOT,
+    env: {
+      ...env,
+      PORT: String(port),
+      HOST: "127.0.0.1",
+      NODE_ENV: "production",
+      AGENT_RELAY_DEV_MAIL: "1",
+      AGENT_RELAY_MAIL_LOG_DIR: mailDir,
+      // The magic-link actionUrl is built from this, and the suite fetches it
+      // directly — leave it unset and the URL says :8090 while the server
+      // listens on the ephemeral port (the "Invalid origin" trap).
+      BETTER_AUTH_URL: BASE,
+      BETTER_AUTH_TRUSTED_ORIGINS: BASE,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const keep = (chunk) => {
+    serverLog = (serverLog + chunk.toString()).slice(-8000);
+  };
+  child.stdout.on("data", keep);
+  child.stderr.on("data", keep);
+
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) break;
+    try {
+      const res = await fetch(`${BASE}/`, { signal: AbortSignal.timeout(1500) });
+      if (res.status < 500) return;
+    } catch { /* not up yet */ }
+    await sleep(500);
+  }
+  const tail = serverLog.trim().split("\n").slice(-25).join("\n");
+  console.error(
+    `FAIL  server never became healthy on ${BASE}${child.exitCode !== null ? ` (exited ${child.exitCode})` : ""}` +
+      `\n      second line of defence: run 'npm run build' and try again` +
+      (tail ? `\n------ server output (tail) ------\n${tail}\n---------------------------------` : ""),
+  );
+  await stop();
+  process.exit(3);
+}
+
+async function stop() {
+  if (child && child.exitCode === null) {
+    child.kill("SIGTERM");
+    for (let i = 0; i < 20 && child.exitCode === null; i++) await sleep(250);
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
+  child = null;
+  if (mailDir) {
+    rmSync(mailDir, { recursive: true, force: true });
+    mailDir = null;
+  }
+}
+
+// A crash or Ctrl-C must not leave a server or a temp dir behind.
+process.on("exit", () => {
+  if (child && child.exitCode === null) child.kill("SIGKILL");
+  if (mailDir) rmSync(mailDir, { recursive: true, force: true });
+});
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    stop().finally(() => process.exit(130));
+  });
+}
 
 let failures = 0;
 function check(name, cond, detail = "") {
@@ -84,6 +221,8 @@ async function api(cookie, method, path, body) {
   return { status: res.status, json, headers: res.headers };
 }
 
+// ── the suite proper ────────────────────────────────────────────────────────
+async function suite() {
 const run = `qa${Date.now().toString(36)}`;
 const emailA = `bz-owner-${run}@test.local`;
 const emailB = `bz-other-${run}@test.local`;
@@ -240,6 +379,18 @@ for (const [path, key] of [["/api/buzzy/jobs", "jobs"], ["/api/buzzy/sessions", 
 r = await api(cookieB, "POST", "/api/buzzy/jobs", { id: `job_${run}_b1`, title: "B survives", data: {} });
 const bList = await api(cookieB, "GET", "/api/buzzy/jobs");
 check("QA-17 unrelated account unaffected", r.status === 200 && (bList.json?.jobs ?? []).some((j) => j.title === "B survives"));
+}
+
+// ── run, always tear down ───────────────────────────────────────────────────
+try {
+  await boot();
+  await suite();
+} catch (err) {
+  failures++;
+  console.error(`FAIL  suite threw: ${err?.stack || err}`);
+} finally {
+  await stop();
+}
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
