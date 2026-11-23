@@ -64,6 +64,15 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
       WHERE a.user_id = ${userId}
       ORDER BY c.pos ASC, c.created_at ASC, a.pos ASC, a.created_at ASC`;
   } catch { seats = []; }
+  // What the agents asked each other and what came back, kept by the Hive (0067): their own
+  // agents' words, so they leave with them. The kept lines only (the newest 2000), oldest first;
+  // an older database without the table exports none.
+  let hive: any[] = [];
+  try {
+    hive = await sql`
+      SELECT created_at, from_name, to_name, kind, body
+      FROM buzzy_hive_messages WHERE user_id = ${userId} ORDER BY id ASC LIMIT 2000`;
+  } catch { hive = []; }
   const colonyOf = new Map<string, string>(seats.map((s: any) => [s.agent_id, s.name]));
   const colonies = new Map<string, { name: string; purpose: string; agents: string[] }>();
   for (const s of seats) {
@@ -88,6 +97,12 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   }
   if (colonies.size) {
     zip.file("zilla_colonies.csv", toCsv([...colonies.values()].map((c) => ({ name: c.name, purpose: c.purpose, agents: c.agents.join(" | ") }))));
+  }
+  if (hive.length) {
+    zip.file("zilla_hive.csv", toCsv(hive.map((m: any) => ({
+      time: m.created_at instanceof Date ? m.created_at.toISOString() : m.created_at,
+      from: m.from_name, to: m.to_name, kind: m.kind, text: m.body,
+    }))));
   }
 
   // Approved documents as markdown files
@@ -166,6 +181,8 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_agent_seed: "DELETE FROM buzzy_agent_seed WHERE user_id = $1 RETURNING 1",
   // The colonies those agents are grouped into (0066), with the purpose the person wrote for each.
   buzzy_agent_colonies: "DELETE FROM buzzy_agent_colonies WHERE user_id = $1 RETURNING 1",
+  // What the agents asked each other and what came back (0067), the Hive's whole log.
+  buzzy_hive_messages: "DELETE FROM buzzy_hive_messages WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */

@@ -51,13 +51,14 @@ import { DbMemory } from "./memory";
 import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
-import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
+import { offeredTools, offeredHiveTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { agentPromptParts, readyAgents, type AgentTurn, type ReadyAgent } from "./agents";
+import { agentPromptParts, readyAgents, ROSTER_LINES, type AgentTurn, type ReadyAgent } from "./agents";
+import { askAgent, askBzilla, hiveOffer, readyNames, sentence, HIVE_MAX_PER_TURN } from "./hive";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
@@ -339,6 +340,8 @@ const TOOL_SKILL_NAMES: Record<string, string> = {
   generate_music: "Music maker",
   generate_image: "Picture maker",
   calculate: "Calculator",
+  ask_bzilla: "Ask BeeZilla",
+  ask_agent: "Ask an agent",
 };
 export function toolSkillTitle(name: string): string {
   const n = String(name || "");
@@ -749,7 +752,22 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (!req.agent) {
     try { readyForRoster = await readyAgents(sql, userId); } catch { readyForRoster = []; }
   }
-  const agentParts = agentPromptParts(req.agent, personaForMode(mode), readyForRoster);
+  // The Hive (hive.ts): the two ways one agent asks another. An agent's turn may ask BeeZilla for
+  // what is outside its job; BeeZilla's own turn may ask one of the person's agents, but only when
+  // the message is about one of them. It is decided here, before the prompt is written, because the
+  // prompt only mentions a tool that is really offered (a sentence that says "call ask_bzilla" over
+  // a tool list that does not have it is how a model ends up saying it asked when it did not).
+  // A spoken turn on the voice lane has no tools at all, and sending it to the text lane for a
+  // possible question would slow every spoken conversation with an agent, so it offers neither.
+  const spokenLane = surface === "voice" && !!req.speech && voiceAvailable();
+  let hiveAgents = readyForRoster;
+  if (!req.agent && readyForRoster.length > ROSTER_LINES) {
+    // The roster BeeZilla is shown stops at twenty agents; the person may name the thirtieth.
+    const all = await readyNames(sql, userId);
+    if (all.length) hiveAgents = all;
+  }
+  const hive = hiveOffer({ agent: req.agent, ready: hiveAgents, message, spoken: spokenLane });
+  const agentParts = agentPromptParts(req.agent, personaForMode(mode), readyForRoster, req.agent ? hive.askBzilla : hive.askAgent);
   // (agentParts.section rides with the persona, so the system prompt below is built as before.)
   const persona = agentParts.persona + agentParts.section + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
   // Freshness: without a date the model cannot tell a superseded price from the
@@ -1379,14 +1397,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
-  const toolCtx = { draftGateOpen, lockdown };
+  const toolCtx = { draftGateOpen, lockdown, hive };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
   // non-empty tool list is what disables streaming), which is the 12s answer.
   // Web lookups are already handled by the deterministic research pre-pass.
+  // The Hive's tools (hive.ts) are the exception, and only on the turns that are offered one:
+  // an agent's turn, and a BeeZilla turn about one of the person's agents. Those turns carry
+  // them (alone, when nothing else is offered), which makes them buffered instead of streamed:
+  // an agent that can ask for help pays that price, accepted. Every other turn offers none and
+  // is exactly what it was.
   const loopTools = (draftGateOpen || isExplicitDocumentRequest(message))
     ? (offeredTools(toolCtx) as unknown[])
-    : [];
+    : (offeredHiveTools(toolCtx) as unknown[]);
   // glm-class models treat an optional tool as optional and answer in prose.
   // When the owner EXPLICITLY asks for the file, force the tool call (plan doc
   // 23, open decision #3: native tool_calls with a fallback path).
@@ -1513,10 +1536,24 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       );
       llmMs = Date.now() - llmStarted;
     } else {
-      reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
+      try {
+        reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
+      } catch (err) {
+        // A model that refuses a tool list must not cost the person their agents. When the only
+        // tools on this turn were the Hive's (an ordinary chat turn used to carry none), a request
+        // the model rejected as malformed is answered once more as the ordinary turn it used to be.
+        const onlyHive = loopTools.length > 0 && !(draftGateOpen || explicitDocumentRequest);
+        if (!onlyHive || !/LLM request failed \((400|404|415|422)\)/.test(err instanceof Error ? err.message : "")) throw err;
+        console.warn("[buzzy/hive] the model rejected the delegation tools; answering this turn without them");
+        reply = await chatCompletionFull(messages, { model: routedModel, maxTokens: 4096 });
+      }
       llmMs = Date.now() - llmStarted;
     }
 
+    // How many times this turn has asked someone else (the Hive, hive.ts). A turn may ask at most
+    // HIVE_MAX_PER_TURN times, counted for each tool and in all, on top of the loop's own cap: the
+    // loop allows three rounds, and one round may carry several calls.
+    const asked: Record<string, number> = { ask_bzilla: 0, ask_agent: 0, total: 0 };
     // Bounded model-paced loop: execute render_document calls and feed the
     // result back until the model returns a final answer or we hit the cap.
     for (let iteration = 0; iteration < toolMax && reply.toolCalls.length > 0; iteration++) {
@@ -1548,6 +1585,21 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
             tool: tc.name, gate: policyFor(tc.name)?.gate ?? null, ok: false, errorCode: "bad_arguments",
           });
           continue;
+        }
+        if (tc.name === "ask_bzilla" || tc.name === "ask_agent") {
+          if (asked.total >= HIVE_MAX_PER_TURN || asked[tc.name]! >= HIVE_MAX_PER_TURN) {
+            followUpMessages.push({
+              role: "user",
+              content: `tool_refused (${tc.name}): one turn may ask at most ${HIVE_MAX_PER_TURN} times and this one already has. Answer the person now with what you have; do not ask again.`,
+            });
+            await recordToolCall(sql, {
+              userId, jobId, sessionId, turnId: req.attemptId ?? null,
+              tool: tc.name, gate: policyFor(tc.name)?.gate ?? null, ok: false, errorCode: "too_many",
+            });
+            continue;
+          }
+          asked.total++;
+          asked[tc.name]!++;
         }
 
         req.onTool?.({ name: tc.name, state: "running" });
@@ -1780,6 +1832,31 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 errorCode: "render_failed",
               };
             }
+            if (tc.name === "ask_bzilla" || tc.name === "ask_agent") {
+              // The Hive (hive.ts): ONE completion with no tools, so nothing here can ask again, and the
+              // question and its answer are written to the log once the answer is in. A model that fails
+              // or is too slow comes back as plain words, never as an exception, and nothing is logged.
+              // The nested call is sent to the model this turn was routed to, on the person's own key
+              // when the turn runs on it.
+              if (tc.name === "ask_bzilla") {
+                if (!req.agent) return { message: "ask_bzilla is only for an agent's own conversation.", errorCode: "refused" };
+                const answer = await askBzilla(sql, userId, { agent: req.agent, question: String(content.question ?? ""), sessionId, model: routedModel });
+                if (!answer.ok) return { message: `ask_bzilla could not ask: ${answer.message}`, errorCode: answer.code };
+                const text = clampResult("ask_bzilla", answer.text);
+                return {
+                  message: `ask_bzilla answered: ${sentence(text)} Tell the person what BeeZilla said, in your own words, as the agent you are.`,
+                  bytes: text.length,
+                };
+              }
+              const answer = await askAgent(sql, userId, { agentRef: String(content.agent ?? ""), question: String(content.question ?? ""), sessionId, model: routedModel });
+              if (!answer.ok) return { message: `ask_agent could not ask: ${answer.message}`, errorCode: answer.code };
+              const text = clampResult("ask_agent", answer.text);
+              const who = answer.agentName ?? "The agent";
+              return {
+                message: `ask_agent answered (${who}): ${sentence(text)} Tell the person what ${who} said and who said it.`,
+                bytes: text.length,
+              };
+            }
             return { message: `Tool ${tc.name} is not available.`, errorCode: "unknown_tool" };
           },
         );
@@ -1823,7 +1900,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // not an answer, and it would have been saved as the deliverable. Ask once
     // for the prose; if it still comes back as an echo, fail the turn honestly
     // rather than storing junk in the owner's Library.
-    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation)\s*[:(]/i;
+    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation|ask_bzilla|ask_agent)\s*[:(]/i;
     const URL_ONLY = /^\s*https?:\/\/\S+\s*$/i;
     if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
       console.warn("[buzzy/chat] tool echo in reply — asking for prose once");

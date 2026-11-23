@@ -38,6 +38,7 @@
  *   PATCH /api/buzzy/agents/colonies/:id — change its name, purpose or whether it is open
  *   DELETE /api/buzzy/agents/colonies/:id — ungroup it (its agents stay, in its place)
  *   PUT  /api/buzzy/agents/layout   — the whole order and who is in which colony ({ items })
+ *   GET  /api/buzzy/hive            — what the agents asked each other, and what came back (?after=<id>, ?limit=)
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
@@ -48,6 +49,7 @@ import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
 import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import { agentsRoute, agentForSession, ownsAgent, AGENT_BODY_MAX_BYTES, type AgentTurn } from "./agents";
+import { hiveRoute } from "./hive";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
@@ -3331,6 +3333,27 @@ export default defineEventHandler(async (event) => {
     }
     const sql = await getSql();
     const out = await agentsRoute(sql, user.id, method, path.slice("/api/buzzy/agents".length), body);
+    setResponseStatus(event, out.status);
+    return out.body;
+  }
+
+  // ── /api/buzzy/hive — the Hive: what the Zilla agents asked each other ────
+  // Owner, 2026-11-21: "you can see your agents talking to each other to get things done,
+  // agent-to-agent chat, and observe it happening in the background". The window in the sidebar
+  // (public/buzzy/agents.js) polls this for the lines after the last one it has. It only reads,
+  // and only the signed-in person's own lines; the lines themselves are written by the agents'
+  // turns (hive.ts: ask_bzilla, ask_agent) and by notes, never by a request.
+  if (path === "/api/buzzy/hive" || path.startsWith("/api/buzzy/hive/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const out = await hiveRoute(sql, user.id, method, path.slice("/api/buzzy/hive".length), {
+      after: queryValue(fullPath, "after"),
+      limit: queryValue(fullPath, "limit"),
+    });
     setResponseStatus(event, out.status);
     return out.body;
   }

@@ -23,7 +23,10 @@
  *   - colonies: named folders of agents with a purpose, and the one order the sidebar
  *     shows agents and colonies in (see "Colonies" below);
  *   - the rows (buzzy_agents, migration 0065; buzzy_agent_colonies, migration 0066) and
- *     the route /api/buzzy/agents.
+ *     the route /api/buzzy/agents;
+ *   - two short notes for the Hive (hive.ts, migration 0067): one when an agent takes on a
+ *     job, one when a colony is made. Everything else the Hive holds (an agent asking
+ *     BeeZilla, BeeZilla asking an agent) lives in hive.ts, which reads this file.
  *
  * BeeZilla herself is never a row. The sidebar always starts with her, she cannot be
  * renamed, moved, grouped or deleted, and a conversation with no agent is hers (BZILLA
@@ -285,6 +288,29 @@ function line(v: unknown, max: number, noTags = false): string {
   s = s.replace(LONE_SURROGATE, "\uFFFD").replace(NON_TEXT, "");
   if (noTags) s = s.replace(/[<>]/g, "");
   s = s.replace(/\s+/g, " ").trim();
+  const chars = Array.from(s);
+  return chars.length > max ? chars.slice(0, max).join("").trim() : s;
+}
+
+/** U+FFFD, what half of an emoji is turned into (the same character line() writes). */
+const REPLACEMENT = String.fromCharCode(0xfffd);
+
+/**
+ * Free text that may run to a few paragraphs (what an agent and BeeZilla say to each other in
+ * the Hive): cleaned as line() cleans a line, with no control characters and no half of an
+ * emoji, and cut at `max` whole characters, but the line breaks stay (the Hive window shows
+ * them as written). Spaces at the end of a line go, other white space is one space, and no
+ * more than one blank line runs on.
+ */
+export function cleanBody(v: unknown, max: number): string {
+  let s = typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+  s = s.replace(LONE_SURROGATE, REPLACEMENT).replace(NON_TEXT, "");
+  s = s
+    .replace(/\r\n?|[\p{Zl}\p{Zp}]/gu, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ ?\n ?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   const chars = Array.from(s);
   return chars.length > max ? chars.slice(0, max).join("").trim() : s;
 }
@@ -559,11 +585,23 @@ function confirmation(role: string, hadJob: boolean): string {
 }
 
 /**
+ * The one sentence an agent is told when it may ask BeeZilla for help (the ask_bzilla tool,
+ * hive.ts). It is only ever in the prompt of a turn that really offers the tool: telling a
+ * model to "call ask_bzilla" over a tool list that does not have it is how it ends up
+ * saying it asked when it did not, so the prompt and the tool list are decided together.
+ */
+const ASK_BZILLA_SENTENCE =
+  "If something is outside your job, or needs another of the person's agents, call ask_bzilla with your question and use her answer. " +
+  "Never say you did something you did not.";
+
+/**
  * The part of the system prompt for a turn spoken by an agent: who it is and what its
  * job is. What the person wrote about the job is quoted as theirs: it describes the job
- * and never changes the rules above it.
+ * and never changes the rules above it. `canAsk` is true only on a turn that offers the
+ * agent the ask_bzilla tool (see hive.ts), and adds the sentence that says how to use it;
+ * an agent that has no job yet has nothing to ask for and is never given it.
  */
-export function agentIdentityBlock(agent: AgentTurn): string {
+export function agentIdentityBlock(agent: AgentTurn, canAsk = false): string {
   const name = agent.name || "your agent";
   if (!agent.role) {
     return (
@@ -582,7 +620,8 @@ export function agentIdentityBlock(agent: AgentTurn): string {
     `remember what they have told you here, and keep track of what is still open. Speak as ${name}, never as BeeZilla ` +
     `(don't introduce yourself as BeeZilla). If they ask for something that belongs to another part of their life, say so in ` +
     `one short sentence and tell them BeeZilla, their executive assistant who looks after all their agents, can take it; ` +
-    `don't refuse to talk to them. Be warm, brief and practical.`
+    `don't refuse to talk to them. Be warm, brief and practical.` +
+    (canAsk ? ` ${ASK_BZILLA_SENTENCE}` : ``)
   );
 }
 
@@ -607,7 +646,9 @@ export interface ReadyAgent {
   colony?: { id: string; name: string; purpose: string } | null;
 }
 
-const ROSTER_LINES = 20;
+/** How many agents BeeZilla is told about by name in her own prompt; the rest are counted. Exported so
+ *  the Hive knows when the list she was shown is not the whole list. */
+export const ROSTER_LINES = 20;
 
 /** The person's words, as data: in double quotes, any double quote of theirs turned into a single one. */
 const quoted = (s: string) => `"${String(s).replace(/"/g, "'")}"`;
@@ -621,8 +662,14 @@ const quoted = (s: string) => `"${String(s).replace(/"/g, "'")}"`;
  * the person's words, quoted as theirs, and what they write there never changes the
  * rules), then the agents on their own, one line each. A person with no colonies gets the
  * text they have always got, byte for byte.
+ *
+ * `canAsk` is true only on a turn that offers BeeZilla the ask_agent tool (hive.ts: the
+ * message names one of these agents, or is about its job). Then the closing caution is
+ * replaced by how to ask, and by the rule that she may only say an agent answered when the
+ * tool returned its answer this turn. Everywhere else (the default) the caution is the one
+ * she has always had: she cannot hand anything over, and saying so would be false.
  */
-export function agentsRosterBlock(agents: ReadyAgent[]): string {
+export function agentsRosterBlock(agents: ReadyAgent[], canAsk = false): string {
   const ready = agents.filter((a) => a && a.name && a.role);
   if (!ready.length) return "";
   const shown = ready.slice(0, ROSTER_LINES);
@@ -650,8 +697,13 @@ export function agentsRosterBlock(agents: ReadyAgent[]): string {
     ` are what the person typed):\n${lines.join("\n")}${more}\n` +
     `When what they ask clearly belongs to one of these, say which agent looks after it` +
     (grouped ? ` (and the colony it is in, if it is in one)` : ``) +
-    `: they open an agent by clicking its Zilla in the sidebar on the left. Don't say you have asked an agent, passed ` +
-    `something on or checked with one: you can't do that yet, and saying so would be false.`
+    `: they open an agent by clicking its Zilla in the sidebar on the left. ` +
+    (canAsk
+      ? `You can also ask one of them yourself: call ask_agent with its name and your question, and tell the person which ` +
+        `agent answered and what it said. Only say an agent answered if ask_agent returned its answer this turn; otherwise ` +
+        `don't say you have asked an agent, passed something on or checked with one.`
+      : `Don't say you have asked an agent, passed something on or checked with one: you can't do that yet, and saying so ` +
+        `would be false.`)
   );
 }
 
@@ -660,14 +712,19 @@ export function agentsRosterBlock(agents: ReadyAgent[]): string {
  * tested: the persona (spoken by the agent, or BeeZilla's own, untouched) and the
  * section that follows it (the agent's job, or BeeZilla's agent list). A person with no
  * agents gets { persona: basePersona, section: "" }, byte for byte.
+ *
+ * `canAsk` says that this turn offers the delegation tool that belongs to the speaker (the Hive,
+ * hive.ts): ask_bzilla when an agent is speaking, ask_agent when BeeZilla is. False by default,
+ * which is every turn that offers none, and then the text is exactly what it was before.
  */
 export function agentPromptParts(
   agent: AgentTurn | null | undefined,
   basePersona: string,
   ready: ReadyAgent[],
+  canAsk = false,
 ): { persona: string; section: string } {
-  if (agent) return { persona: personaFor(agent, basePersona), section: agentIdentityBlock(agent) };
-  return { persona: basePersona, section: agentsRosterBlock(ready) };
+  if (agent) return { persona: personaFor(agent, basePersona), section: agentIdentityBlock(agent, canAsk) };
+  return { persona: basePersona, section: agentsRosterBlock(ready, canAsk) };
 }
 
 // ── Rows ────────────────────────────────────────────────────────────────────
@@ -905,6 +962,55 @@ export async function deleteAgent(sql: Sql, userId: string, id: string): Promise
   return true;
 }
 
+// ── Notes for the Hive ──────────────────────────────────────────────────────
+//
+// The Hive window (hive.ts) shows what the agents asked each other, and among it a short
+// note whenever something happens to them that the person would want to see in that
+// history: an agent takes on a job, a colony is made. Both are written from this file, after
+// the work they describe is already done, and neither can ever stop it: a note that cannot be
+// written (the table is missing on an older database, the write fails) is dropped, and the
+// call that asked for it goes on exactly as it would have.
+//
+// hive.ts is loaded here when the first note is written, not when this file is. It reads this
+// file (the persona, the roster, the agents' jobs) and it loads the model client, which takes
+// its address from the environment as it is first loaded; this file is loaded by tests, and by
+// anything else that needs only the agents, long before that matters. A note is the end of a
+// call, so loading hive.ts on first use costs the call nothing it was waiting for.
+
+/** The most agent names a colony's note lists; the rest are counted. */
+const NOTE_NAMES = 6;
+
+async function hiveNote(
+  sql: Sql,
+  userId: string,
+  who: { id: string; name: string },
+  body: string,
+  sessionId?: string | null,
+): Promise<void> {
+  try {
+    const { noteHive } = await import("./hive");
+    await noteHive(sql, userId, who, body, sessionId);
+  } catch (err) {
+    console.warn("[buzzy/agents] a note for the Hive was dropped:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** "A colony was made: Travel (Bullzilla, Bunnyzilla)" for a colony that has just been made. */
+async function noteColony(sql: Sql, userId: string, colony: Colony): Promise<void> {
+  try {
+    const inside = await sql<{ name: string }>`
+      SELECT name FROM buzzy_agents
+      WHERE user_id = ${userId} AND colony_id = ${colony.id}
+      ORDER BY pos ASC, created_at ASC, id ASC
+    `;
+    const names = inside.map((r) => r.name);
+    const listed = names.slice(0, NOTE_NAMES).join(", ") + (names.length > NOTE_NAMES ? `, and ${names.length - NOTE_NAMES} more` : "");
+    await hiveNote(sql, userId, { id: BZILLA.id, name: BZILLA.name }, `A colony was made: ${colony.name} (${listed})`);
+  } catch (err) {
+    console.warn("[buzzy/agents] a note for the Hive was dropped:", err instanceof Error ? err.message : err);
+  }
+}
+
 export type IdentityResult =
   | { ok: true; saved: true; agent: Agent; reply: string }
   | { ok: true; saved: false; reply: string }
@@ -942,9 +1048,12 @@ export async function setIdentity(
   }
 
   const sid = typeof sessionId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(sessionId) ? sessionId : "";
+  // The conversation the exchange was kept in, when there was one and it is the person's.
+  let keptIn: string | null = null;
   if (sid && said) {
     const mine = await sql<{ id: string }>`SELECT id FROM buzzy_sessions WHERE id = ${sid} AND user_id = ${userId}`;
     if (mine.length) {
+      keptIn = sid;
       const before = await sql<{ n: number }>`
         SELECT count(*)::int AS n FROM buzzy_chat_messages WHERE user_id = ${userId} AND session_id = ${sid}
       `;
@@ -970,6 +1079,9 @@ export async function setIdentity(
       `;
     }
   }
+  // The Hive remembers when an agent was given its job ("Bunnyzilla took on a job: calendars").
+  // Only a job that was really saved; words with no job in them change nothing and say nothing.
+  if (saved) await hiveNote(sql, userId, { id: saved.id, name: saved.name }, `${saved.name} took on a job: ${saved.role}`, keptIn);
   return saved ? { ok: true, saved: true, agent: saved, reply } : { ok: true, saved: false, reply };
 }
 
@@ -1451,8 +1563,10 @@ const refuse = (r: Refusal): AgentsReply => reply(r.status, { ok: false, error: 
  *   PATCH /<id>              change: { name?, color?, size?, role?, instructions?, face?, look?, creature? }
  *   DELETE /<id>             remove it (a colony that loses its last agent goes too)
  *   POST /<id>/identity      tell it its job: { text, sessionId? } → { saved, agent?, reply }
+ *                            (a job that was saved leaves a note in the Hive: "<Name> took on a job: <job>")
  *
  *   POST /colonies           make one from a drop: { name?, purpose?, agents: [id, …] } → 201 { colony, layout, colonies, agents }
+ *                            (and a note in the Hive: "A colony was made: <name> (<its agents>)")
  *   PATCH /colonies/<id>     change: { name?, purpose?, open? } → { colony }
  *   DELETE /colonies/<id>    ungroup it: its agents stand on their own, in its place → { layout, colonies, agents }
  *   PUT  /layout             the whole order and who is in which colony:
@@ -1495,6 +1609,7 @@ export async function agentsRoute(
       if (method !== "POST") return reply(405, { ok: false, error: "Use POST.", code: "method_not_allowed" });
       const made = await createColony(sql, userId, obj);
       if (!made.ok) return refuse(made);
+      await noteColony(sql, userId, made.colony);
       return reply(201, { ok: true, colony: made.colony, layout: made.layout, colonies: made.colonies, agents: made.agents });
     }
     const cid = parts[1]!;
