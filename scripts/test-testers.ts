@@ -50,12 +50,12 @@ check(/export function isAdminEmail/.test(fb) && /BZ_ADMIN_EMAILS/.test(fb), "ad
 // ── the routes ───────────────────────────────────────────────────────────────
 const nit = read("src/lib/buzzy/chat.nitro.ts");
 check(/const shot = checkScreenshot\(raw\?\.screenshot \?\? null\)/.test(nit), "POST /api/buzzy/feedback validates the picture");
-check(/screenshot\)\n          VALUES \(/.test(nit) && /\$\{shot\.value\}/.test(nit), "the picture is stored in the same row as the report");
+check(/screenshot\)\n {10}VALUES \(/.test(nit) && /\$\{shot\.value\}/.test(nit), "the picture is stored in the same row as the report");
 check(/\?id=<report> returns that report's screenshot/.test(nit), "GET /api/buzzy/admin/feedback documents ?id=");
 check(/if \(method === "GET" && path === "\/api\/buzzy\/admin\/feedback"\)/.test(nit), "the admin read exists");
-check(/const one = queryValue\(fullPath, "id"\);\n    if \(one\) return \{ ok: true, id: one/.test(nit), "the id is passed through as a string — no Number() to turn it into NaN");
+check(/const one = queryValue\(fullPath, "id"\);\n {4}if \(one\) return \{ ok: true, id: one/.test(nit), "the id is passed through as a string — no Number() to turn it into NaN");
 check(/async function adminAuthorized/.test(nit), "adminAuthorized exists");
-check(/if \(!\(await adminAuthorized\(event\)\)\) \{\n      setResponseStatus\(event, 403\);\n      return \{ ok: false, error: "Only BeeZilla admins can read feedback/.test(nit), "reading reports is gated by admin, not by being signed in");
+check(/if \(!\(await adminAuthorized\(event\)\)\) \{\n {6}setResponseStatus\(event, 403\);\n {6}return \{ ok: false, error: "Only BeeZilla admins can read feedback/.test(nit), "reading reports is gated by admin, not by being signed in");
 check(/let userId = String\(body\.user \?\? body\.userId \?\? ""\)\.trim\(\);/.test(nit), "the plan route still accepts an internal id");
 check(/if \(!userId && body\.email\)/.test(nit) && /userIdForEmail\(await getSql\(\), String\(body\.email\)\)/.test(nit), "the plan route resolves a tester by email");
 check(/code: "no_account"/.test(nit), "an unknown email is a 404, not a silent no-op");
