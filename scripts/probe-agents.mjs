@@ -88,7 +88,8 @@ const strip = () => page.evaluate(() => {
 const hop = async (path) => {
   await page.evaluate((p) => window.BeeZillaShell.go(p), path);
   // A cold server answers its first request for a page slowly, so this waits a good while.
-  await page.waitForFunction((p) => window.BeeZillaShell.currentKey === p && !window.BeeZillaShell.busy, path, { timeout: 90000 });
+  // (Music studio gives itself a ?job= address as it opens, so only the path is compared.)
+  await page.waitForFunction((p) => window.BeeZillaShell.currentKey.split("?")[0] === p && !window.BeeZillaShell.busy, path, { timeout: 90000 });
   await page.waitForTimeout(500);
 };
 const thread = () => page.evaluate(() => (document.getElementById("chatMessages")?.innerText || "").replace(/\s+/g, " "));
