@@ -42,6 +42,18 @@ Tracked as issues, not as this document:
 - #290 art/sketch surface — **now ported** (see below), keep an eye on `art.ts`.
 - #291 this document (closes when the parity gate reads it).
 - #292 Library card job titles — **fixed** by the assets join in 0.3.0.
+- **CR-8, the nav slice (done on this branch):** the chrome is web main's chrome, not a
+  lookalike — `public/buzzy/nav.js` is byte-identical to what beezilla.net serves
+  (135,298 B, md5 35613e333dc6b6db1ebf3cccab063f5e), `nav.css` is web's, and
+  `src/lib/buzzy/pages.nitro.ts` writes NAV_ROW once and substitutes it into every page
+  (plus the nav.js/nav.css links). `desktop/smoke.mjs` now fails if the served row is
+  not the eleven links in web order. Before: eight or ten hand-written anchors, order
+  Talk / Capabilities / Sketch / Memory / Experts / Recipes / Honey Drops / Publish,
+  `target="_blank"` on Library, literal "Sign in".
+- **CR-8, still open:** the row names `Music studio` (`/buzzy/studio`) and `Download`
+  (`/buzzy/download`); neither page exists on this line yet, so both answer 404 here
+  while they are 200 on the website. Those two surfaces are the next increment — the
+  row is theirs to inherit, not theirs to re-declare (do not fork nav.js per host).
 
 ## Verifying
 
