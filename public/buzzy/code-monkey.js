@@ -26,9 +26,11 @@
     diamond: '<path d="M8 1.8 14.2 8 8 14.2 1.8 8z" fill="currentColor"/>',
     target: '<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="8" r="2.2" fill="currentColor"/>',
     check: '<path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
-    dot: '<circle cx="8" cy="8" r="6" fill="currentColor"/>',
-    square: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor"/>',
-    triangle: '<path d="M8 1.8 14.6 13.8H1.4z" fill="currentColor"/>',
+    // Stakes are "care bars" (1-3), so they never borrow the brain's shapes
+    // (circle, square, triangle, hexagon mean knowledge/systems/assets/brain).
+    bars1: '<rect x="2" y="9" width="3" height="5" rx="1" fill="currentColor"/><rect x="6.5" y="6" width="3" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="11" y="2.5" width="3" height="11.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>',
+    bars2: '<rect x="2" y="9" width="3" height="5" rx="1" fill="currentColor"/><rect x="6.5" y="6" width="3" height="8" rx="1" fill="currentColor"/><rect x="11" y="2.5" width="3" height="11.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>',
+    bars3: '<rect x="2" y="9" width="3" height="5" rx="1" fill="currentColor"/><rect x="6.5" y="6" width="3" height="8" rx="1" fill="currentColor"/><rect x="11" y="2.5" width="3" height="11.5" rx="1" fill="currentColor"/>',
     undo: '<path d="M5 5H10a3.5 3.5 0 0 1 0 7H6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6.5 2.5 3.5 5l3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     stop: '<path d="M5.3 1.5h5.4l3.8 3.8v5.4l-3.8 3.8H5.3l-3.8-3.8V5.3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 4.8v3.6M8 10.9v.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   };
@@ -43,9 +45,9 @@
     done: { label: "Done", shape: "check" },
   };
   var STAKES = {
-    play: { label: "Play", shape: "dot", hint: "for you and people close to you" },
-    product: { label: "Product", shape: "square", hint: "other people will use it" },
-    critical: { label: "Critical", shape: "triangle", hint: "a mistake would really hurt" },
+    play: { label: "Play", shape: "bars1", hint: "for you and people close to you" },
+    product: { label: "Product", shape: "bars2", hint: "other people will use it" },
+    critical: { label: "Critical", shape: "bars3", hint: "a mistake would really hurt" },
   };
 
   var panel = null;

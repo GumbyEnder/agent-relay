@@ -78,6 +78,7 @@ Every step: independent review by another company's model first.
 | **product** | done once reviewed, with proof | reviewed, then authorized, then the step runs |
 | **critical** | reviewed, then the owner looks | reviewed, then authorized, then the step runs |
 
+Stakes show as 1–3 "care bars", never the brain's circle/square/triangle/hexagon shapes.
 Proof grows with the stakes: play = tests, a try-it link, screenshots; product adds a short
 recording of a person's path through it; critical adds a security check and an undo note.
 Delivered without proof → sent back, never Done.
