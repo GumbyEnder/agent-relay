@@ -84,18 +84,23 @@ Two rules the probe encodes, both learned the hard way:
   "Jobs", `wallet-chip.js` inserted the Drops chip as the first child. Address nodes by
   id or `data-*`, never `children[0]`.
 
-## Baselines (measured 2026-11-23, 75609cc, signed in, built server)
+## Baselines (measured 2026-11-23, signed in, built server — with the #367 drawer fix in)
+
+These rows are the **clean** tree: main after `d457c42` (#367), the commit that takes the
+closed conversations drawer out of layout. They are not a 75609cc measurement; the
+pre-fix numbers are in the paragraph under the table.
 
 | measurement | 390 | 1280 |
 |---|---|---|
 | overhang, every page, every drawer state | 0 | 0 |
 | `docScrollWidth` | 390 | 1280 (client 1280) |
-| `.bz-brandrow` height | 128–146 (wraps, intended) | 56 (fixed in `nav.js`) |
-| `#bzHead` height | 549 on app pages | 357 |
+| `.bz-brandrow` height | 172 (wraps, intended; 146 at 414, 56 from 768 up) | 56 (fixed in `nav.js`) |
+| `#bzHead` height | 549 on app pages (597 at 360) | 357 |
 
 `#bzHead` height is content-dependent (it contains the search block) — it is printed for
 comparison, never asserted. The brand row is asserted at ≥1000px only, because below that
-it is allowed to wrap. On 75609cc the same probe reports **10 elements past the right edge
+it is allowed to wrap; the phone band is 172 at 360–390, 146 at 414, so read the value,
+never pin it. On 75609cc the same probe reports **10 elements past the right edge
 on Talk, worst `#sessionsDrawer` at +359px (390) / +380px (1280)**; with the drawer fix it
 reports 0 across 18 measurements. Use that pair as the regression's living proof.
 
