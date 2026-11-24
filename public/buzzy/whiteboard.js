@@ -1332,7 +1332,12 @@
     function moreEsc(e) { if (e.key === "Escape" && !more.hidden) closeMore(); }
     function toggleMore() { if (more.hidden) openMore(); else closeMore(); }
     function openMore() {
-      closeEditor(); closeNodes(); hist.hidden = true; keyList.hidden = true; closeSell();
+      // Not closeNodes(): opening this list used to close the node window, and closing a
+      // browser node ends its server browser (DELETE /api/buzzy/nodes/browser/<id>) — so
+      // pressing M while a job was recording stopped the recording and left it billing.
+      // The owner's rule is that only Esc or an X closes a pop-up (2026-11-21); a menu
+      // being opened is not a reason to end someone's browser.
+      closeEditor(); hist.hidden = true; keyList.hidden = true; closeSell();
       more.hidden = false;
       document.addEventListener("keydown", moreEsc);
       moreBtn.classList.add("on");
