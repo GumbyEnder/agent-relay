@@ -81,7 +81,12 @@ try {
         heroH: h("#obStart"),
       };
     });
-    note(layout.barH !== null && layout.barH <= (width === 390 ? 340 : 200), width, "the bar row (#bzBrowse) is one bar, not a stack", `${layout.barH}px`);
+    // The ceiling is main's own layout, measured, not this line's hand-copied CSS:
+    // at 1280 #bzBrowse is 205px = search 58 + its note 18 + #bzPlaces 99 (the tab row
+    // 46 over the places row 46), and at 390 it is 337px (the places row wraps to four
+    // lines). The check exists to catch a second copy of the bar being painted into the
+    // page, which pushes these numbers up by hundreds, not by five.
+    note(layout.barH !== null && layout.barH <= (width === 390 ? 360 : 220), width, "the bar row (#bzBrowse) is one bar, not a stack", `${layout.barH}px`);
     note(layout.scrollW <= layout.innerW + 1, width, "no horizontal overflow at rest", `scrollWidth ${layout.scrollW} vs ${layout.innerW}`);
 
     // Open it the way a turn does, then measure what a person would see.
