@@ -241,7 +241,10 @@ try {
     ["the bar (#obStart)", 'id="obStart"'],
     ["the one box (#chatInput)", 'id="chatInput"'],
     ["the search (#bzSearch)", 'id="bzSearch"'],
-    ["the search wiring", 'src="/buzzy/head-search.js"'],
+    // The search is wired by the website's own browse.js. This line used to ship a
+    // second, head-search.js, written before main had one; two files answering the
+    // same box is how the box and the row drift apart. Main's wiring, asserted here.
+    ["the search wiring", 'src="/buzzy/browse.js"'],
   ]) {
     if (!talk.body.includes(needle)) await die(`/buzzy/talk has no ${what}`);
   }
@@ -252,12 +255,23 @@ try {
   }
   if (!/function buildPlacesRow\(/.test(navjs.body)) await die("/buzzy/nav.js does not build #bzPlaces from LINKS");
   if (!/l\.id === "talk"/.test(navjs.body)) await die("/buzzy/nav.js does not drop Talk from the row when the bar exists");
-  const headjs = await get("/buzzy/head-search.js");
-  if (headjs.status !== 200) await die(`/buzzy/head-search.js -> ${headjs.status}`);
-  for (const route of ["/api/buzzy/search", "/api/buzzy/read", "/api/buzzy/search-status"]) {
-    if (!headjs.body.includes(route)) await die(`/buzzy/head-search.js never calls ${route}`);
+  const browsejs = await get("/buzzy/browse.js");
+  if (browsejs.status !== 200) await die(`/buzzy/browse.js -> ${browsejs.status}`);
+  for (const route of ["/api/buzzy/search", "/api/buzzy/read"]) {
+    if (!browsejs.body.includes(route)) await die(`/buzzy/browse.js never calls ${route}`);
   }
-  console.log(`PASS  #bzHead carries the bar + search, head-search.js answers, #bzPlaces is generated from LINKS`);
+  // The box has a wiring; it also needs an answer. search-status is this line's own
+  // route (main has none): the page asks it whether search is on, whose quota, and
+  // whether the session is stale — and it must answer the signed-in caller.
+  const status = await request("GET", "/api/buzzy/search-status");
+  if (status.status !== 200) await die(`/api/buzzy/search-status -> ${status.status} (the search box cannot say whether search is on)`);
+  const statusBody = JSON.parse(status.body);
+  if (typeof statusBody.available !== "boolean" || !("needsReconnect" in statusBody) || !("provider" in statusBody)) {
+    await die(`/api/buzzy/search-status answered ${status.body.slice(0, 120)} — no available/provider/needsReconnect`);
+  }
+  const noAuth = await request("GET", "/api/buzzy/search-status", undefined, { auth: false });
+  if (noAuth.status !== 401) await die(`/api/buzzy/search-status without the token -> ${noAuth.status}, expected 401`);
+  console.log(`PASS  #bzHead carries the bar + search, browse.js answers, search-status ok (provider ${statusBody.provider ?? "null"}), #bzPlaces is generated from LINKS`);
   ok++;
 
   // CR-12: the Idea Board is on this line now. The board is a surface, not a
