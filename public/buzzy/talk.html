@@ -1819,6 +1819,26 @@
   .bz-reader-out { display: none; }
   .bz-reader-body { padding: 1rem; }
 }
+
+/* ── The Idea Board's place on the page ───────────────────────────────────
+   The board's own look is whiteboard.css (it defines its own --ob-* tokens).
+   These are the four rules the page owns: where it sits (#bzHead, under the
+   Talk bar, which voice-stage.js moves into it while it is open), how wide it
+   is, and what happens on a phone. Deliberately NOT copied from web's
+   oneboard.css wholesale: that sheet is the web page's whole shell (header
+   order, hidden chat header, .bz-head layout) and this line already has its
+   own shell, measured at 77px desktop / 114px phone (slice 3). */
+#obBoard { order: 2; margin-top: 10px; height: clamp(520px, 72vh, 1100px); display: flex; width: 100%; }
+#obBoard.hidden { display: none; }
+#obBoard .wb-panel {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  border-radius: 18px; border: 1px solid var(--ob-slate-edge);
+  background: #1b1e23; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45); overflow: hidden;
+}
+@media (max-width: 760px) {
+  #obBoard { height: auto; min-height: 80vh; }
+  #obBoard .wb-panel { min-height: 80vh; }
+}
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
   <link rel="stylesheet" href="/buzzy/browse.css" />
@@ -2134,6 +2154,19 @@
         </nav>
       </div>
     </section>
+    <!-- The Idea Board: what the agent read, each step as it runs, and what it
+         made — plus anything dragged onto it from anywhere on the site.
+         voice-stage.js mounts it here and moves the Talk bar into its top edge
+         while it is open; whiteboard.js draws on it. Folded, it is empty and
+         hidden, so a visit starts on a blank board (owner, 2026-11-20). -->
+    <div id="obBoard" class="ob-board hidden" aria-label="Idea Board"></div>
+    <!-- Where the board's own controls wait while it is folded. #boardToggle is
+         the script handle voice-stage.js reads for aria-pressed; the visible way
+         in is the Talk bar (talking or sending opens the board), and the way out
+         is Fold on the board itself — same as web. -->
+    <div id="obParking" hidden>
+      <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open or fold the Idea Board">Idea Board</button>
+    </div>
   </div>
   <main>
     <div id="chatScreen">
@@ -7561,6 +7594,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return out;
         };
 
+        // The board opens as the turn starts (voice-stage.js), so the person
+        // watches the work instead of a spinner; the reply's own cards land below.
+        if (window.__bzTurnStart) window.__bzTurnStart();
         let data = await sendTurn();
 
         // A managed token is good for 15 minutes. The desktop shell can mint a new
@@ -7606,6 +7642,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         // Hide error if present
         document.getElementById("chatError").classList.add("hidden");
+
+        // Everything this turn produced goes on the board as a card (voice-stage.js):
+        // a document, a picture, a track. Nothing is drawn from prose.
+        if (window.__bzTurnDone) window.__bzTurnDone(data);
 
         // Add assistant reply. A turn that produced a file carries the file
         // descriptor with it so the chat renders the link inline.
