@@ -7,9 +7,8 @@
 //   1. a click handler on a backdrop / scrim / overlay that closes the box, and
 //   2. a document-level click listener that checks `contains(e.target)` and closes.
 // The few that remain are menus that hold nothing to lose (they close when you choose
-// something, on Esc, or on a press away) and the QR code pop-up that the share window
-// replaces; each is listed below with its reason. A new one is a decision: fix it, or add
-// it here with the reason, where a reviewer sees it.
+// something, on Esc, or on a press away); each is listed below with its reason. A new one
+// is a decision: fix it, or add it here with the reason, where a reviewer sees it.
 //
 // usage: node scripts/test-no-outside-close.mjs
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -17,12 +16,11 @@ import { join, relative } from "node:path";
 
 const ROOT = new URL("../public/buzzy/", import.meta.url).pathname;
 
-/** Menus (nothing typed in them) and the QR pop-up awaiting its replacement. */
+/** Menus (nothing typed in them). */
 const ALLOWED = [
   { file: "nav.js", has: "!more.contains(e.target)", why: "the More menu (no longer shown: the places row replaced it)" },
   { file: "nav.js", has: "a.contains(e.target) || menu.contains(e.target)", why: "the account menu: a plain menu, nothing typed in it" },
   { file: "talk.html", has: "menu.contains(e.target)", why: "Talk's More menu (hidden since the places row)" },
-  { file: "browse.js", has: "qrPop.contains(e.target)", why: "the QR code pop-up; the share window (page-share.js) replaces it and asks first" },
 ];
 
 function walk(dir, out = []) {
