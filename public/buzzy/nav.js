@@ -1984,7 +1984,9 @@
     setInterval(function () { paint(); }, 1500);
   }
 
-  window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed };
+  // `links` is the one place list, published so the shell can build #bzPlaces from
+  // the same array it builds the nav row from. Two lists is how rows drift.
+  window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed, links: LINKS };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
@@ -2034,6 +2036,47 @@
     return /^\/buzzy(\/talk)?$/.test(String(key || "").replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, ""));
   }
 
+  // ── The row of places is LINKS, not a second hand-written list ───────────
+  // #bzPlaces used to carry its own eleven anchors while nav.js carried the same
+  // eleven in LINKS. Two lists, one order to keep — so they drifted (web shipped
+  // Download out of order for exactly that reason). The row is built here from
+  // LINKS, minus DESKTOP_ABSENT, and Talk is dropped once the Talk-to-BeeZilla bar
+  // exists because the bar IS the way back (same rule as the website).
+  function buildPlacesRow() {
+    var row = document.getElementById("bzPlaces");
+    if (!row) return;
+    var list = row.querySelector("nav.bz-places");
+    if (!list) {
+      list = document.createElement("nav");
+      list.className = "bz-places";
+      list.setAttribute("aria-label", "Places");
+      row.appendChild(list);
+    }
+    var bar = document.querySelector("#bzHead #obStart, #bzHead .talk-bar");
+    // LINKS lives in the chrome IIFE above; read it through the one export rather
+    // than re-declaring a second list here.
+    var links = (window.BeeZillaChrome && window.BeeZillaChrome.links) || [];
+    var wanted = links.filter(function (l) { return !(bar && l.id === "talk"); });
+    Array.prototype.forEach.call(list.querySelectorAll("a[data-place]"), function (a) {
+      var id = a.getAttribute("data-place");
+      var keep = wanted.some(function (l) { return l.id === id; });
+      if (!keep) list.removeChild(a);
+    });
+    wanted.forEach(function (l) {
+      var a = list.querySelector('a[data-place="' + l.id + '"]');
+      if (!a) {
+        a = document.createElement("a");
+        a.setAttribute("data-place", l.id);
+      }
+      a.textContent = l.label;
+      a.href = l.href;
+      // Append in LINKS order: reusing an anchor that is already in the row keeps
+      // its old position, so the row would still be whatever the markup shipped.
+      list.appendChild(a);
+    });
+  }
+  window.bzBuildPlacesRow = buildPlacesRow;
+
   // ── Who lights the places row, and when ──────────────────────────────────
   // #bzPlaces belongs to Talk's header, which this shell paints onto every other
   // page — so its "you are here" state must be painted by the thing that paints
@@ -2044,6 +2087,7 @@
   // mapping and one answer. On Talk the open TAB is Talk's own state (the pane you
   // have open), which browse.js owns; this only clears the row off Talk.
   function paintPlacesRow() {
+    buildPlacesRow();
     var row = document.getElementById("bzPlaces");
     if (!row) return;
     var chrome = window.BeeZillaChrome;
@@ -2764,6 +2808,10 @@
       // Talk opened directly: its header is in its own markup; copy its sheets for it.
       ensurePageWrapper();
       buildHeadCss(firstSheets);
+      // Build the row now: on a soft navigation finish() paints it, but a direct
+      // load of Talk never goes through finish(), and the markup no longer carries
+      // a hand-written list to fall back on.
+      paintPlacesRow();
     } else {
       // Another page opened directly: its sheets keep out of the header, then the
       // header is fetched.
