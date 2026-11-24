@@ -82,7 +82,7 @@
     <audio id="player" controls preload="metadata"></audio>
 
     <div class="row" style="margin-top:.8rem">
-      <input type="text" id="instruction" placeholder="Tell BeeZilla what to change in the selected passage — e.g. 'bring the cello forward, drop the synth bass'" />
+      <input type="text" id="instruction" placeholder="Describe a change…" aria-label="Tell BeeZilla what to change in the selected passage — for example, bring the cello forward, drop the synth bass" />
       <button class="primary" id="editBtn" disabled>Change this passage</button>
     </div>
     <div class="status" id="status"></div>
@@ -96,7 +96,7 @@
       <h2>Brief</h2>
       <textarea id="prompt" rows="3" placeholder="Orchestral-electronic, 96 BPM, A minor…"></textarea>
       <div class="row" style="margin-top:.5rem">
-        <input type="text" id="tempo" placeholder="Tempo (96 BPM)" style="flex:1;min-width:120px" />
+        <input type="text" id="tempo" placeholder="Tempo" aria-label="Tempo in BPM" style="flex:1;min-width:120px" />
         <input type="text" id="key" placeholder="Key (A minor)" style="flex:1;min-width:120px" />
         <input type="number" id="seconds" min="3" max="300" step="1" style="width:90px" />
       </div>
@@ -483,7 +483,8 @@
       window.BeeZillaChat.mount(document.getElementById("aiSlot"), {
         title: "BeeZilla",
         jobId: jobId,
-        placeholder: "e.g. make the second verse darker, or add a cello line",
+        placeholder: "Describe a change…",
+        "aria-label": "Describe the change — for example, make the second verse darker or add a cello line",
       });
       // The agent edits the track server-side; refresh so its change shows up here.
       setInterval(function () {

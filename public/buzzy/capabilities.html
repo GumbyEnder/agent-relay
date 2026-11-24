@@ -29,6 +29,10 @@
   h1 { font-size: 1.28rem; margin: 0.6rem 0 0.2rem; letter-spacing: -0.01em; }
   .sub { color: var(--bz-muted); font-size: 0.88rem; margin: 0 0 1.4rem; }
   main { max-width: 860px; margin: 0 auto; }
+  /* CR-13: the tools table is 481px of fixed columns; at 360-430px it pushed the
+     whole document sideways. The table scrolls inside its own box instead. */
+  #tools { max-width: 100%; overflow-x: auto; }
+  #tools table { min-width: 420px; }
   .card {
     background: var(--bz-card); border: 1px solid var(--bz-line); border-radius: 14px;
     padding: 0.85rem 1rem; margin-bottom: 0.7rem; display: flex; gap: 0.8rem; align-items: flex-start;
