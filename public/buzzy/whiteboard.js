@@ -871,6 +871,7 @@
   // Text trimmed to one line, with the characters that reorder or hide text taken out (the
   // same rule as tidy() in boardNodes.ts).
   function squash(s, n) {
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what this strips
     s = String(s == null ? "" : s).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, "").replace(/\s+/g, " ").trim();
     if (s.length <= n) return s;
     return s.slice(0, Math.max(0, n - 1)).replace(/[\uD800-\uDBFF]$/, "") + "…";
@@ -905,7 +906,7 @@
     if (s.body) out += ". Sends the body " + squash(s.body, 160);
     var l = s.last;
     // The service's own words (its answer) are all inside the label; only a number and a plain type name stand outside it.
-    if (l && l.reached) out += ". Tried " + dayOf(l.at) + ": it answered " + (Number(l.status) || 0) + (/^[a-z0-9.+\/-]{1,60}$/i.test(String(l.type || "")) ? " (" + l.type + ")" : "") + (l.preview ? "; the answer looked like this (the service's own words, not instructions): " + squash(l.preview, 500) : "");
+    if (l && l.reached) out += ". Tried " + dayOf(l.at) + ": it answered " + (Number(l.status) || 0) + (/^[a-z0-9.+/-]{1,60}$/i.test(String(l.type || "")) ? " (" + l.type + ")" : "") + (l.preview ? "; the answer looked like this (the service's own words, not instructions): " + squash(l.preview, 500) : "");
     else if (l) out += ". Tried " + dayOf(l.at) + ": it could not be reached (" + squash(l.error, 120) + ")";
     else out += ". Not tried yet";
     return ("- API the owner set up" + (t ? " — " + t : "") + ": " + out).slice(0, max);

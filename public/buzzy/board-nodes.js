@@ -160,7 +160,7 @@
   // The words around it are left alone: this is prose, not a body.
   function scrubLine(t) {
     var text = String(t || "");
-    return text.replace(/([A-Za-z0-9_.\-]{1,40})=(?!\s)([^\s&"',;)]+)/g, function (m, name, value) {
+    return text.replace(/([A-Za-z0-9_.-]{1,40})=(?!\s)([^\s&"',;)]+)/g, function (m, name) {
       return isSecretQueryName(name) ? name + "=" : m;
     });
   }
