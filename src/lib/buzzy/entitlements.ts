@@ -143,32 +143,6 @@ export async function checkQuota(opts: {
   const ent = await getEntitlement(opts.userId);
   const rules = PLANS[ent.plan] ?? PLANS.free;
 
-  if (opts.scope === "image") {
-    // An image is the second most expensive unit we buy after audio, and unlike
-    // audio it is priced per picture, so the counter is a count, not seconds.
-    const want = Math.max(1, Math.round(opts.units ?? 1));
-    if (rules.imagesPerDay <= 0) {
-      return {
-        ok: false,
-        code: "plan_required",
-        plan: ent.plan,
-        error: `the ${ent.plan} plan does not include image generation — pictures are part of the paid plans`,
-      };
-    }
-    const used = await unitsInWindow(opts.userId, "image");
-    if (used + want > rules.imagesPerDay) {
-      return {
-        ok: false,
-        code: "quota_exhausted",
-        plan: ent.plan,
-        used,
-        limit: rules.imagesPerDay,
-        error: `image quota for the ${ent.plan} plan is ${rules.imagesPerDay} per day — ${Math.max(0, rules.imagesPerDay - used)} left`,
-      };
-    }
-    return { ok: true, plan: ent.plan, used, limit: rules.imagesPerDay };
-  }
-
   if (opts.scope === "music") {
     const want = Math.max(1, Math.round(opts.units ?? 0));
     if (rules.musicSecondsPerDay <= 0) {
