@@ -38,16 +38,18 @@
 
   var input = $("bzSearch");
   // ── The placeholder has to FIT ──────────────────────────────────────────
-  // Measured on live at 390px: the input's content box is 79px wide (two 48px
-  // tap-target tools next to it), while the shipped placeholder needs 551px at
-  // 16px — so a phone rendered "Search eve…", a cut-off sentence that reads as a
-  // broken field. Pick the longest wording that actually fits and re-pick on
-  // resize; the markup keeps the long line for a wide window and for no-JS.
+  // The markup carries a SHORT wording and the full sentence in
+  // data-placeholder-full. It used to carry the sentence itself: at 390px that
+  // needs 551px in a 120px content box, so every moment before this script runs
+  // (a slow phone, a blocked/errored bundle) painted "Search eve…" — a cut-off
+  // sentence that reads as a broken field. A JS-only fix cannot cover that
+  // first paint; the markup must be honest on its own. JS then lengthens the
+  // wording to the longest that fits and re-picks on resize.
   var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search your work or a link", "Search your work", "Search"];
   (function () {
     if (!input) return;
-    var long = input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
-    var all = [long].concat(PLACEHOLDER_SHRINKS);
+    var long = input.getAttribute("data-placeholder-full") || input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
+    var all = [long].concat(PLACEHOLDER_SHRINKS.filter(function (s) { return s !== long; }));
     var canvas = null;
     var tries = 0;
     function pick() {

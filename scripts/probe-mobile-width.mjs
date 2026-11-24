@@ -167,7 +167,6 @@ for (const width of WIDTHS) {
   page.on("pageerror", (e) => pageErrors.push(`${width}px ${e.message.slice(0, 120)}`));
 
   const fail = (msg) => { failed = true; failures.push(`${width}px ${msg}`); };
-
   for (const name of PAGES) {
     const res = await page.goto(`${BASE}/buzzy/${name}`, { waitUntil: "load" });
     if (!res || res.status() >= 400) { notes.push(`${name} @${width}: HTTP ${res ? res.status() : "no response"} — not measured`); continue; }
@@ -221,6 +220,32 @@ for (const width of WIDTHS) {
     }
   }
   await ctx.close();
+}
+
+// The first paint has no JS at all, and that is exactly when a phone showed
+// "Search eve…": the markup's placeholder must fit before browse.js can shorten
+// it. Measure Talk with JavaScript disabled. This needs a session — signed out,
+// /buzzy/talk is a redirect to landing and there is no search field to measure.
+if (STATE) {
+  for (const width of [360, 390, 430]) {
+    const ctx = await browser.newContext({ viewport: { width, height: 844 }, javaScriptEnabled: false, storageState: STATE });
+    const page = await ctx.newPage();
+    const res = await page.goto(`${BASE}/buzzy/talk`, { waitUntil: "load" });
+    if (!res || res.status() >= 400) {
+      notes.push(`talk (no JS) @${width}: HTTP ${res ? res.status() : "no response"} — not measured`);
+      await ctx.close();
+      continue;
+    }
+    const m = await page.evaluate(measure);
+    rows.push({ width, page: "talk (no JS)", ...m });
+    if (m.fits.length) {
+      failed = true;
+      failures.push(`${width}px talk (no JS): the markup placeholder does not fit before scripts run — ${m.fits.join("; ")}`);
+    }
+    await ctx.close();
+  }
+} else {
+  notes.push("no-JS first-paint pass skipped: it needs a signed-in storageState (signed-out /buzzy/talk redirects to landing)");
 }
 
 await browser.close();
