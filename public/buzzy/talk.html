@@ -7394,6 +7394,81 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
     }
 
+    // ── Plan handed over from Orchestrate ──────────────────────────
+    // orchestrate.html saves the canonical spec under bz_orch_handoff and then
+    // hops to Talk?fromOrchestration=1. Nothing read either one, so a plan
+    // built on the canvas arrived as a blank composer and the query hint meant
+    // nothing. One-shot by design: the key is removed the moment it is read, so
+    // a reload cannot re-plant a stale plan. It FILLS the box and never sends —
+    // the person still owns the turn and the draft gate is untouched.
+    var ORCH_KINDS = {
+      start: "Start", end: "End", agent: "Agent", tool: "Tool", decision: "Decision",
+      parallel: "Parallel", loop: "Loop", approval: "Approval", trigger: "Trigger",
+      subflow: "Subflow", note: "Note",
+    };
+    function orchHandoffText(spec) {
+      var nodes = (spec && spec.nodes) || [];
+      var steps = [];
+      var skipped = 0;
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i] || {};
+        if (n.type === "note") { skipped++; continue; }
+        var kind = ORCH_KINDS[n.type] || n.type || "node";
+        var label = n.name || kind;
+        var cfg = n.config || {};
+        var detail = cfg.prompt || cfg.tool || cfg.text || n.notes || cfg.expression || "";
+        detail = String(detail).replace(/\s+/g, " ").trim();
+        if (detail.length > 140) detail = detail.slice(0, 137) + "…";
+        steps.push((steps.length + 1) + ". " + kind + " \u201c" + label + "\u201d" + (detail ? " \u2014 " + detail : ""));
+        if (steps.length >= 12) break;
+      }
+      var total = 0;
+      for (var j = 0; j < nodes.length; j++) if (nodes[j] && nodes[j].type !== "note") total++;
+      var head = "Here is the plan I built in Orchestrate" + (spec.name ? " \u2014 \u201c" + spec.name + "\u201d" : "") + ".";
+      var desc = String(spec.description || "").replace(/\s+/g, " ").trim();
+      if (desc) head += " " + (desc.length > 240 ? desc.slice(0, 237) + "…" : desc);
+      var body = steps.length ? "\n\nSteps:\n" + steps.join("\n") : "";
+      if (total > steps.length) body += "\n(+" + (total - steps.length) + " more)";
+      return head + body + "\n\nPlease turn it into a draft.";
+    }
+    function applyOrchHandoff() {
+      if (chatState._orchHandoffRead) return;
+      var raw = null;
+      try { raw = window.localStorage.getItem("bz_orch_handoff"); } catch (e) { return; }
+      if (!raw) return;
+      chatState._orchHandoffRead = true;
+      try { window.localStorage.removeItem("bz_orch_handoff"); } catch (e) {}
+      var input = document.getElementById("chatInput");
+      if (!input) return;
+      var spec = null;
+      try { spec = JSON.parse(raw); } catch (e) {}
+      var text = spec && spec.nodes ? orchHandoffText(spec) : String(raw).slice(0, 4000);
+      // Never throw away something the person already typed: a kept-alive Talk can
+      // come back with a draft in the box, and the plan goes under it, not over it.
+      var typed = String(input.value || "").replace(/\s+$/, "");
+      input.value = typed ? typed + "\n\n" + text : text;
+      // The query hint is not state: drop it so a reload is an ordinary Talk load.
+      try {
+        if (window.history && window.history.replaceState) {
+          var u = new URL(window.location.href);
+          if (u.searchParams.has("fromOrchestration")) {
+            u.searchParams.delete("fromOrchestration");
+            window.history.replaceState({}, "", u.pathname + (u.search ? u.search : "") + (u.hash || ""));
+          }
+        }
+      } catch (e) {}
+      try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+      if (!input.disabled) input.focus();
+    }
+    // Orchestrate -> Talk is a SOFT navigation (nav.js BeeZillaShell.go). When Talk is
+    // already the kept-alive page, the shell only restores it and no script of ours
+    // runs again — so the handoff needs a second door: the shell announces every page
+    // it finishes with bz:page, and a restore of Talk is one of those.
+    window.addEventListener("bz:page", function (e) {
+      var key = e && e.detail && e.detail.key ? String(e.detail.key).split("?")[0] : "";
+      if (key === "/buzzy/talk") applyOrchHandoff();
+    });
+
     function checkAuthAndEnableInput() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
         // An outage is not a logout here either: a 500 used to disable the composer
@@ -7413,6 +7488,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             chatState._signedOut = false;
             document.getElementById("chatInput").disabled = false;
             document.getElementById("chatSend").disabled = false;
+            applyOrchHandoff();
           }
         })
         .catch(function () {
@@ -7425,6 +7501,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             chatState._signedOut = false;
             document.getElementById("chatInput").disabled = false;
             document.getElementById("chatSend").disabled = false;
+            applyOrchHandoff();
           }
         });
     }

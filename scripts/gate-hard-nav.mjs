@@ -44,14 +44,14 @@ const HARD_NAV_ALLOW = {
 // `location.href = "..."`, `location.assign("...")`, `window.location.replace("...")`
 const ASSIGN = /(?:window\.)?location\s*(?:\.href\s*=\s*|\.assign\(\s*|\.replace\(\s*)["'`](\/buzzy[^"'`]*)/g;
 
-const files = (await fs.readdir(path.join(root, "public/buzzy")))
-  .filter((f) => /\.(html|js)$/.test(f))
-  .sort();
-
-const hits = [];
-for (const f of files) {
-  const rel = `public/buzzy/${f}`;
-  const text = await fs.readFile(path.join(root, rel), "utf8");
+// One scanner, used for the working tree AND for the bytes production serves.
+// It was two copies once, and they disagreed: the tree pass skipped comment
+// lines, the served pass did not, so a comment that NAMES the trap (e.g. "the
+// old `else location.href = \"/buzzy/talk\"` could only fire…") failed the gate
+// against production while the tree was clean. A gate that only agrees with
+// itself is not a gate.
+function scanText(text, rel) {
+  const hits = [];
   text.split("\n").forEach((line, i) => {
     const trimmed = line.trim();
     // A comment can name the trap without committing it.
@@ -64,6 +64,18 @@ for (const f of files) {
       hits.push({ file: rel, line: i + 1, target, reason: fileReason ? allow[fileReason] : authReason ? AUTH_EJECT[authReason] : null });
     }
   });
+  return hits;
+}
+
+const files = (await fs.readdir(path.join(root, "public/buzzy")))
+  .filter((f) => /\.(html|js)$/.test(f))
+  .sort();
+
+const hits = [];
+for (const f of files) {
+  const rel = `public/buzzy/${f}`;
+  const text = await fs.readFile(path.join(root, rel), "utf8");
+  hits.push(...scanText(text, rel));
 }
 
 const bad = hits.filter((h) => !h.reason);
@@ -93,18 +105,13 @@ if (ORIGIN) {
       unchecked.push(`${route} fetch failed: ${e.message}`);
       continue;
     }
-    const found = [...html.matchAll(ASSIGN)].map((m) => m[1]);
-    const isAllowed = (t) =>
-      Object.keys(AUTH_EJECT).some((p) => t === p || t.startsWith(p + "?")) ||
-      Object.keys(HARD_NAV_ALLOW[`public/buzzy/${f}`] || {}).some((p) => t === p || t.startsWith(p + "?"));
-    const strays = found.filter((t) => !isAllowed(t));
+    const found = scanText(html, `public/buzzy/${f}`);
+    const strays = found.filter((h) => !h.reason).map((h) => h.target);
     console.log(`  ${route}  assignments=${found.length}  ${strays.length ? "STRAY: " + strays.join(", ") : "ok"}`);
     if (strays.length) servedBad.push({ route, strays });
   }
   const nav = await (await fetch(ORIGIN + "/buzzy/nav.js", { headers: { "cache-control": "no-cache" } })).text();
-  const navStrays = [...nav.matchAll(ASSIGN)]
-    .map((m) => m[1])
-    .filter((t) => !Object.keys(HARD_NAV_ALLOW["public/buzzy/nav.js"]).some((p) => t === p || t.startsWith(p + "?")));
+  const navStrays = scanText(nav, "public/buzzy/nav.js").filter((h) => !h.reason).map((h) => h.target);
   console.log(`  /buzzy/nav.js  ${navStrays.length ? "STRAY: " + navStrays.join(", ") : "ok"}`);
   if (navStrays.length) servedBad.push({ route: "/buzzy/nav.js", strays: navStrays });
 }
