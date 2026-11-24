@@ -754,7 +754,8 @@
   // you were reading is put away, the QR code closes, and Inspiration is under the row
   // again, as on a fresh visit. Only called once Talk is the page showing.
   window.bzBrowseHome = function () {
-    if (typeof closeQr === "function") closeQr(false);   // (a function only while the QR popover exists)
+    // The share window stands in for the old QR popover: going home closes it.
+    if (window.BeeZillaPageShare) window.BeeZillaPageShare.close();
     readSeq++;            // a page still being fetched must not open itself afterwards
     closeSearch();        // also hides the reader and brings the row and its pane back
     // Already on a mounted Inspiration wall: leave it, rather than rebuild it for nothing.

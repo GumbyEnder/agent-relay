@@ -173,7 +173,7 @@ await settle(300);
 
 // 6. Advocate refuses
 await api("PUT", "/api/buzzy/privacy", { mode: "advocate" });
-await page.evaluate(() => { try { localStorage.setItem("bz.privacy", "advocate"); } catch (_) {} });
+await page.evaluate(() => { try { localStorage.setItem("bz.privacy", "advocate"); } catch (_) { /* storage can be off; the server value still stands */ } });
 await page.locator("#bzCopy").click();
 await box().waitFor({ state: "visible" });
 await page.waitForFunction(() => /can't be shared right now/.test(document.querySelector(".pshare-box")?.innerText || ""), null, { timeout: 8000 });
@@ -185,7 +185,7 @@ await page.keyboard.press("Escape");
 const advPost = await api("POST", "/api/buzzy/page-shares", { board: "talk", confirm: true });
 note("6: the server refuses too", advPost.status === 409 && advPost.json.code === "privacy_advocate");
 await api("PUT", "/api/buzzy/privacy", { mode: "open" });
-await page.evaluate(() => { try { localStorage.setItem("bz.privacy", "open"); } catch (_) {} });
+await page.evaluate(() => { try { localStorage.setItem("bz.privacy", "open"); } catch (_) { /* storage can be off; the server value still stands */ } });
 
 // 7. From another page, styled; a corner resizes
 await page.evaluate(() => window.BeeZillaShell.go("/buzzy/library"));
