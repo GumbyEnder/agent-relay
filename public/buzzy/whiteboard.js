@@ -922,10 +922,13 @@
     if (r) {
       // What a played job ends on can carry a secret (?token=…), and this sentence is
       // told to BeeZilla. board-nodes.js scrubs at both ends; this is the last one, and
-      // it also covers a value already saved on the card by an older build.
+      // it also covers a value already saved on the card by an older build. If the card
+      // module is not on the page, the address at least loses its query and the sentence
+      // keeps the page's words — dropping them silently is a worse answer than a scrub
+      // that is one generation old.
       var N = window.BeeZillaBoardNodes;
       var endUrl = r.finalUrl ? (N && N.scrubUrl ? N.scrubUrl(r.finalUrl) : String(r.finalUrl).replace(/\?.*$/, "")) : "";
-      var said = r.text ? (N && N.scrubLine ? N.scrubLine(r.text) : "") : "";
+      var said = r.text ? (N && N.scrubLine ? N.scrubLine(r.text) : String(r.text)) : "";
       tail = " Last played " + dayOf(r.at) + ": " + (r.ok ? "it worked" : "it stopped" + (r.note ? " (" + squash(r.note, 100) + ")" : "")) + (endUrl ? ", ending on " + squash(endUrl, 160) : "") + (said ? "; the page said: “" + plain(said, 300) + "”" : "") + ".";
     }
     var room = Math.max(120, max - head.length - tail.length);
