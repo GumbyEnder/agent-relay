@@ -1537,6 +1537,55 @@
 .work-offer p { margin: 0; font-size: 0.86rem; color: #DADADA; }
 .work-offer .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .work-offer button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.85rem; }
+
+/* ── The website's header (#bzHead) ──────────────────────────────────────
+   Owner, 2026-11-20: "What you see as a talk area is actually just the header of
+   the entire website." nav.js only collapses the header on a phone where #bzHead
+   exists (html.bz-has-head hides #bzNav at ≤760px); without it the bar cost three
+   rows — brand, identity cluster, links — 211.6px at 390px.
+
+   This line can honestly carry the row of places today, and only the places that
+   exist here. The Talk-to-BeeZilla bar and the search are web-only until their
+   scripts (voice-stage.js, browse.js) are ported: a search box that cannot search
+   is worse than no search box. nav.js paints the current place (paintPlacesRow),
+   so the row cannot disagree with the one LINK list. */
+.bz-head {
+  display: flex; flex-direction: column; box-sizing: border-box; width: 100%;
+  padding: 0 var(--ob-gutter, 24px) 6px; background: var(--bz-panel, #141414);
+  border-bottom: 1px solid #1E1E1E; text-align: left;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px; line-height: 1.55; color: #e8e8e8;
+}
+.bz-head > * { order: 3; }
+.bz-head > .bz-browse { order: 5; }
+.bz-browse { margin-top: 18px; }
+.bz-tabrow {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 36px;
+  margin: 1.1rem 0.6rem 0.4rem; border-bottom: 1px solid #1e1e1e;
+}
+.bz-tabrow .bz-places {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 36px;
+  margin: 0; padding: 0; border: 0; overflow: visible;
+}
+.bz-tabrow .bz-places > a { flex: 0 0 auto; }
+.bz-places > a {
+  position: relative; padding: 0.55rem 0.1rem 0.75rem; color: #b5b5b5;
+  font-size: 1.02rem; text-decoration: none; white-space: nowrap;
+}
+.bz-places > a:hover { color: #f2f2f2; }
+.bz-places > a:focus-visible { outline: 2px solid #ffc107; outline-offset: 2px; border-radius: 4px; }
+.bz-places > a.on { color: #ffc107; font-weight: 700; }
+.bz-places > a.on::after {
+  content: ""; position: absolute; left: -0.4rem; right: -0.4rem; bottom: -1px;
+  height: 3px; border-radius: 3px; background: #ffc107;
+}
+@media (max-width: 760px) {
+  .bz-head { padding: 0 16px 6px; }
+  .bz-tabrow { gap: 2px 14px; }
+  /* One wrap group, not two: two flex containers wrapped independently and made
+     five rows of places at 360px (web, CR-13). */
+  .bz-tabrow .bz-places { display: contents; }
+}
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
   <link rel="stylesheet" href="/buzzy/browse.css" />
