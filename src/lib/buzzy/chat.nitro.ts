@@ -7,6 +7,7 @@
  * Routes:
  *   POST /api/buzzy/chat            — send a message, get a reply
  *   GET  /api/buzzy/models          — list available models (labels + ids)
+ *   GET  /api/buzzy/search-status   — is search on, whose quota, is the session stale (never the key)
  *   GET  /api/buzzy/memory          — aggregate memory for the Memory page
  *   GET  /api/buzzy/transcript      — restore chat (jobId or sessionId)
  *   GET  /api/buzzy/profile         — account-scoped business profile + defaults
@@ -106,6 +107,8 @@ import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 import { buildExportBundle, deleteAccountData } from "./portability";
 import { recordJobEvent } from "./jobEvents";
+import { searchAvailable, searchNeedsReconnect, searchProvider } from "./search";
+import { fetchPageText } from "./webpage";
 import { dueScheduledJobs, markScheduledRun, saveScheduledDraft } from "./scheduled";
 import { setDocumentAcceptance, materializeDraft, summarizeChanges } from "./documents";
 import { ensureExecutionBoard } from "./execution";
