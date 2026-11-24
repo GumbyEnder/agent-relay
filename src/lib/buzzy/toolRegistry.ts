@@ -17,7 +17,6 @@
  */
 
 import { CALCULATE_TOOL } from "./calc";
-import { GENERATE_MUSIC_TOOL } from "./music";
 import { RENDER_DOCUMENT_TOOL, RENDER_PRESENTATION_TOOL, RENDER_SHEET_TOOL } from "./artifact";
 import { LOOKUP_MARKET_RATE_TOOL, FETCH_WEBSITE_TOOL, SEARCH_KNOWLEDGE_TOOL } from "./info";
 import { SEARCH_INSPIRATION_TOOL } from "./inspirationSearch";
@@ -189,16 +188,6 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     cost: "metered",
     sideEffects: "acts-on-websites",
     withheldReason: "it is offered when the board has a browser node or the owner asks for something to be done on a website.",
-  },
-  {
-    name: "generate_music",
-    schema: GENERATE_MUSIC_TOOL,
-    gate: "draft",
-    offered: true,
-    timeoutMs: 130_000,
-    maxResultBytes: 4_000,
-    cost: "metered",
-    sideEffects: "render-to-memory",
   },
   {
     name: "render_document",
