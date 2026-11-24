@@ -48,6 +48,59 @@ BeeZilla's coding agent (the owner's own report is kept, word for word, outside 
 - Still open, and not to be invented here: approval modes (manual / automatic / reduced
   safeguards), automatic reasoning-effort choice, the skill library, agent counts.
 
+## The new way forward (owner, 2026-11-23)
+
+The owner's write-up "The new way forward" (kept outside the repo with their report) sets
+how BeeZilla's agents work. They added two conditions: **look at other projects on
+BeeZilla first**, and **restrict how many searches we do based on budget — no bankrupting
+people for small projects; get an idea of how much this matters to people, as a budget,
+before you go.** In the workshop that means:
+
+- **Start with the why.** The card keeps *why* they want it (`why`) apart from their first
+  idea of *what* to make (`making`). Agents optimise for the why; the idea is a starting
+  point, not a specification. If the person didn't say why, the model infers it and lists
+  it under assumptions instead of asking.
+- **Guardrails, not specifications.** `walls` are hard limits that change what's possible:
+  time, who may see it, what must never happen. Features and technology are never walls.
+  The only questions the owner gets are about the why and the walls.
+- **Budget before going** (`src/lib/buzzy/budget.ts`). `start_code_project` requires
+  `budgetDollars`, and the server accepts it only if the amount appears in the owner's own
+  words: their request, or their answer to the one question *"How much should I spend on
+  this, at most? I'll keep my work under that amount."*. Answers are sized to the stakes
+  (play $2 / **$5** / $20, product $20 / **$50** / $200, critical $100 / **$200** / $1,000;
+  the middle one suggested). One mode (PR #371) asks the same question with the same
+  words. A price of the thing being made ("lemonade costs $2.50") is never taken as the
+  budget unless the model says it is and the owner said it.
+- **The budget sets the effort** (`effortFor`): searches = 20% of the budget ÷ the cost of
+  one search (about a cent, including reading it), in ⌈searches ÷ 50⌉ categorically
+  different areas (at most 10, at most 1,000 searches each); versions of the first step to
+  compare = 20% of the budget ÷ the cost of one quick version (about $3), from 1 to 50. So
+  $5 buys 100 searches in 2 areas; $50 buys 1,000 in 10 areas and 3 versions; $500 reaches
+  the write-up's full 1,000 searches in each of 10 areas. Unit costs are env settings
+  (`BZ_SEARCH_CENTS`, `BZ_VERSION_CENTS`) so the effort grows as prices fall.
+- **The budget is a ceiling, enforced by the server, not the prompt.** Every delivery's
+  cost is counted once: the agent's own `estimated_usd`, else its tokens at a default price
+  (`BZ_CODE_IN_CENTS_PER_MTOK`, `BZ_CODE_OUT_CENTS_PER_MTOK`), else a floor
+  (`BZ_CODE_STEP_FLOOR_CENTS`, 50¢) so an agent that reports nothing can't run free. Close
+  to the ceiling (money.ts `budgetVerdict`: the last 10%, at least 50¢) and at it, nothing
+  new starts — no next step, review, redo or go-ahead — until the owner taps **Add $X
+  more** in the workshop. Accepting finished work costs nothing and always goes through.
+  Only the owner can raise a budget.
+- **Look on BeeZilla first, then the world** (`lookFirst`). Before anything is built, the
+  owner's own earlier coding projects (with the links their finished steps delivered) and
+  BeeZilla's archive (`search_inspiration`: starting boards, their recipes, documents and
+  Library) are searched — free, nothing leaves BeeZilla. Other people's projects are never
+  searched; once BeeZilla has a way to share projects openly, shared ones can join. What
+  fits goes into every first step's brief, followed by the wider-world search allowance
+  and "borrow before you build": reuse what fits, check each license allows it, keep the
+  credits, and only make what's missing. Later steps reuse what earlier ones found.
+- **Explore by building.** When the budget buys two or more versions, the first step makes
+  that many genuinely different quick versions (one of them the owner's own idea), keeps
+  the one that best serves the why, says why, and links the rest so the owner can switch.
+- **A source of truth outside the AI's own judgment**: tests, the running app, a model from
+  another company, and the owner's own "looks right" — already the workshop's review
+  policy below.
+
 ## How a project starts
 
 A Talk turn that asks for software to be made or changed (`isCodeRequest` in
@@ -63,6 +116,12 @@ it talk to model providers). The model fills a **result card** and **slices**; c
 - **Decides each slice's door**: `one-way` when it sends messages to people, moves money,
   publishes, deletes or overwrites data, or changes who can sign in; otherwise `two-way`.
   The model's `oneWayHint` can add caution, never remove it.
+
+- **Settles the budget** from the owner's own words (above); without one, nothing is
+  created and the model is told to ask the budget question. The turn that answers it
+  ("$5", "the middle one") is offered the tool again, and the owner's words for the
+  request run from the message that asked for software to that answer.
+- **Looks on BeeZilla first** (`lookFirst`) and hands what fits to the agents.
 
 Then `startCodeProject` (`codeMonkey.server.ts`) creates a BeeZilla job (template `code`),
 a Dev Boards board, a builder agent and a reviewer agent, and one mission per slice. Talk
@@ -124,10 +183,13 @@ to attach). No role-play, no capital-letter rules.
 `/api/buzzy/code` (`codeMonkey.nitro.ts`, signed in):
 
 - `GET` → the person's coding projects; `GET ?job=<id>` → card, slices, proof, questions.
-- `POST {action:"start", card, slices}` — what the Talk tool calls.
+- `POST {action:"start", card, slices, words, budgetDollars}` — what the Talk tool calls.
 - `POST {action:"answer", jobId, callId, text}` — reply to an agent's question.
 - `POST {action:"looks-right"|"not-yet", jobId, slice, text?}` — the owner's look ("Go ahead"
-  on a one-way step; on a launch it also sets the project's launch policy).
+  on a one-way step; on a launch it also sets the project's launch policy). Refused with
+  `budget_used_up` when it would start paid work past the budget.
+- `POST {action:"add-budget", jobId, dollars}` — the owner's top-up ($1 to $100,000); the
+  only way a budget grows.
 
 ## Screen
 
@@ -139,12 +201,18 @@ the Talk box (Talk stays the one place to talk).
 ## Tests
 
 - `scripts/test-code-monkey.ts` — the policy (stakes floors, doors, vague checks, slices,
-  brief text).
+  brief text) and the budget: reading amounts from the owner's words, the question and its
+  answers, the effort equation, counting each delivery once, the ceiling's verdicts.
 - `scripts/test-code-monkey-flow.ts` — end to end on the real board store (PGlite): release
   order, a review for every step, a question reaching the owner, no proof → sent back, a
   failed then passed review, a one-way door with go-ahead, a launch authorized by the
   owner's own words, a go-ahead becoming the launch policy, "not independently reviewed"
-  when no other company is set up, the owner's words kept as typed, privacy between accounts.
+  when no other company is set up, the owner's words kept as typed, privacy between accounts;
+  no budget → nothing created, an invented amount refused, prices of the thing being made
+  not taken as the budget, an answer recorded as theirs; the ceiling (counted once, review
+  held near the limit, redo refused, the owner's top-up resumes it, finished work still
+  accepted, the next step held at the limit); looking first finds the owner's earlier
+  project with its links and never another person's.
 - `scripts/test-tool-registry.ts` — the `code` gate.
 
 Both new scripts run in CI through the `posttest:buzzy-jobs` hook.
@@ -158,3 +226,11 @@ Both new scripts run in CI through the `posttest:buzzy-jobs` hook.
   once both land.
 - Where the built software runs for the owner to try (preview hosting) is whatever the
   builder harness reports as its try-it link; a BeeZilla-hosted preview is a later step.
+- The search allowance is a number in the brief; an outside agent's own searches are only
+  counted through the cost its delivery reports, and the ceiling stops it at the next step.
+  Counting each search exactly would need agents to search through BeeZilla's own gateway
+  (`/api/search`) with a per-project allowance.
+- Looking first covers the owner's own work and BeeZilla's starting boards. Other people's
+  projects can join once BeeZilla has a way to share a project openly (and its license).
+- The budget answers are tap buttons once one mode (PR #371) lands; until then the model
+  asks in words and the owner types an amount.

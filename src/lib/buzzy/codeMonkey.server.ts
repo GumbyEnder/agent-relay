@@ -24,12 +24,35 @@
  * Every state change here is idempotent: reading a project twice never
  * releases, reviews or accepts anything twice. Other steps keep moving while one
  * waits for the owner.
+ *
+ * Budget (owner, 2026-11-23, budget.ts): no project starts without an amount the owner
+ * said themselves; each delivery's cost is counted once; once the budget is used up,
+ * nothing new starts (no new step, review, redo or go-ahead) until the owner adds more.
+ * Accepting finished work costs nothing and always goes through. Before anything is
+ * built, the owner's earlier projects and BeeZilla's archive are searched (`lookFirst`)
+ * and what fits is handed to the agents.
  */
 import type { Sql } from "@/lib/db";
 // The consumer product writes into the console only through this alias, like
 // execution.ts, so scripts/check-buzzy-boundary.mjs can see it is deliberate.
 import { boardOps } from "@/lib/board-server";
 import {
+  addToBudget,
+  budgetView,
+  countDelivery,
+  effortFor,
+  emptySpend,
+  settleBudget,
+  type Budget,
+  type BudgetChoice,
+  type BudgetSettled,
+  type BudgetView,
+  type Effort,
+  type Spend,
+} from "./budget";
+import { searchInspiration } from "./inspirationSearch";
+import {
+  type Found,
   type ResultCard,
   type Slice,
   type SliceState,
@@ -87,6 +110,14 @@ export interface CodeMonkeyLink {
   /** The owner's original request, exactly as typed. Never summarised over. */
   source: { words: string; at: string };
   launch?: LaunchPolicy;
+  /** Set from the owner's own words before anything started (absent on projects from before 2026-11-23's rule). */
+  budget?: Budget;
+  /** What has been spent so far, each delivery counted once. */
+  spend?: Spend;
+  /** What the budget buys: searches, areas, versions. */
+  effort?: Effort;
+  /** What was already on BeeZilla when the project started, handed to the agents. */
+  found?: Found[];
   slices: LinkedSlice[];
   createdAt: string;
 }
@@ -124,6 +155,12 @@ export interface CodeProjectView {
   builderProvider: string | null;
   reviewerProvider: string | null;
   launch?: LaunchPolicy;
+  /** The budget and what's used; null on projects from before budgets. */
+  budget: BudgetView | null;
+  effort?: Effort;
+  found: Found[];
+  /** New work is waiting for the owner to add to the budget. */
+  heldForBudget: boolean;
   slices: SliceView[];
   counts: Record<SliceState, number>;
 }
@@ -147,16 +184,86 @@ function parseData(v: unknown): Record<string, unknown> {
   return (v as Record<string, unknown>) ?? {};
 }
 
-type StartInput = { card: unknown; slices: unknown; words?: string; companyId?: string | null };
+type StartInput = {
+  card: unknown;
+  slices: unknown;
+  /** Everything the owner typed for this request, oldest first, exactly as typed. */
+  words?: string;
+  /** The budget the model read from the owner, in dollars. Checked against their words. */
+  budgetDollars?: unknown;
+  /** The owner's reply to the budget question, when this turn is one. */
+  budgetAnswer?: string;
+  companyId?: string | null;
+};
 export type StartResult =
   | { ok: true; jobId: string; project: CodeProjectView }
-  | { ok: false; code: "invalid"; problems: string[] };
+  | { ok: false; code: "invalid"; problems: string[] }
+  | { ok: false; code: "needs-budget"; stakes: Stakes; reason: Exclude<BudgetSettled, { ok: true }>["reason"]; choices: BudgetChoice[] };
+
+const STOP_WORDS = new Set(
+  "the and for with that this from your you our their them they make made want build game app apps site website page tool something simple little new"
+    .split(" "),
+);
+function keyWords(text: string): string[] {
+  return [...new Set(String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w)))];
+}
+
+/**
+ * Look on BeeZilla first (owner, 2026-11-23): the owner's own earlier coding projects,
+ * then BeeZilla's archive (starting boards, their recipes, documents and Library). Only
+ * the owner's own work and BeeZilla's public starting boards are searched: other
+ * people's private projects never are. Free: nothing here reaches the internet.
+ */
+export async function lookFirst(sql: Sql, userId: string, card: Pick<ResultCard, "making" | "why" | "forWhom">): Promise<Found[]> {
+  const found: Found[] = [];
+  const want = keyWords(`${card.making} ${card.why} ${card.forWhom}`);
+  try {
+    const rows = await sql<{ id: string; title: string | null; data: unknown }>`
+      SELECT id, title, data FROM buzzy_jobs
+      WHERE user_id = ${userId} AND template = 'code'
+      ORDER BY updated_at DESC LIMIT 50
+    `;
+    const scored = rows
+      .map((r) => {
+        const link = parseData(r.data).codeMonkey as CodeMonkeyLink | undefined;
+        const have = keyWords(`${r.title ?? ""} ${link?.card?.making ?? ""} ${link?.card?.why ?? ""}`);
+        const shared = want.filter((w) => have.includes(w)).length;
+        return { r, link, shared };
+      })
+      .filter((x) => x.link && x.shared >= Math.min(2, want.length))
+      .sort((a, b) => b.shared - a.shared)
+      .slice(0, 2);
+    for (const { r, link } of scored) {
+      const links: string[] = [];
+      for (const s of link!.slices ?? []) {
+        const m = await mission(s.missionId);
+        if (m && (m.column === "done" || m.column === "review")) links.push(...(m.artifacts ?? []), ...linksIn(m.delivery ?? ""));
+        if (links.length >= 6) break;
+      }
+      found.push({
+        source: "Your earlier project",
+        title: String(r.title || link!.card?.making || "an earlier project").slice(0, 120),
+        about: link!.card?.why ? `made so that ${link!.card.why}`.slice(0, 200) : `Code Monkey project ${r.id}`,
+        links: [...new Set(links)].slice(0, 6),
+      });
+    }
+  } catch {
+    /* no jobs table yet: the archive below still answers */
+  }
+  try {
+    const hits = await searchInspiration(sql, userId, card.making);
+    for (const h of hits.slice(0, 4)) found.push({ source: h.source, title: h.title, about: h.about });
+  } catch {
+    /* the archive is a bonus */
+  }
+  return found.slice(0, 6);
+}
 
 /** Validate the card and steps, then create the job, the board, the agents and the missions. */
 export async function startCodeProject(sql: Sql, userId: string, input: StartInput): Promise<StartResult> {
   const card = normalizeCard((input.card ?? {}) as Record<string, unknown>);
   const ownerWords = String(input.words ?? "").slice(0, 8000);
-  const words = [ownerWords, card.making, card.forWhom, card.outcome, ...card.doneWhen.map((c) => c.text)].filter(Boolean).join("\n");
+  const words = [ownerWords, card.making, card.why, card.forWhom, card.outcome, ...card.doneWhen.map((c) => c.text)].filter(Boolean).join("\n");
   const settled = settleStakes(card.stakes, words);
   const stakesRaisedFrom = settled.raised ? card.stakes : undefined;
   if (settled.raised) {
@@ -166,7 +273,15 @@ export async function startCodeProject(sql: Sql, userId: string, input: StartInp
   const sliceInputs = normalizeSlices(input.slices);
   const problems = [...validateCard(card), ...validateSlices(sliceInputs)];
   if (problems.length) return { ok: false, code: "invalid", problems };
+  // Budget before going: only an amount the owner said themselves (budget.ts).
+  const settledBudget = settleBudget({ words: ownerWords, answer: input.budgetAnswer, modelDollars: input.budgetDollars, stakes: card.stakes });
+  if (!settledBudget.ok) {
+    return { ok: false, code: "needs-budget", stakes: card.stakes, reason: settledBudget.reason, choices: settledBudget.choices };
+  }
+  const budget = settledBudget.budget;
+  const effort = effortFor(budget.cents);
   const slices = settleSlices(sliceInputs);
+  const found = await lookFirst(sql, userId, card);
 
   const builderProvider = providerOf(HARNESS(), process.env.BZ_CODE_PROVIDER);
   const reviewerProvider = providerOf(REVIEW_HARNESS(), process.env.BZ_CODE_REVIEW_PROVIDER);
@@ -191,7 +306,7 @@ export async function startCodeProject(sql: Sql, userId: string, input: StartInp
   for (const key of topoOrder(slices) ?? slices.map((s) => s.key)) {
     const slice = slices.find((s) => s.key === key)!;
     const authorizedBy = authorizedFor(slice);
-    const brief = missionBrief(card, slice, slices, authorizedBy);
+    const brief = missionBrief(card, slice, slices, authorizedBy, { budget, effort, found });
     const made = await boardOps.createMission({
       ...brief,
       priority: "p2",
@@ -214,6 +329,10 @@ export async function startCodeProject(sql: Sql, userId: string, input: StartInp
     stakesRaisedFrom,
     source: { words: ownerWords, at: now },
     launch: publishWords ? { authorized: true, source: "your words", evidence: publishWords, scope: "this project", at: now } : undefined,
+    budget,
+    spend: emptySpend(),
+    effort,
+    found,
     slices: linked,
     createdAt: now,
   };
@@ -245,7 +364,14 @@ async function saveLink(sql: Sql, userId: string, jobId: string, link: CodeMonke
   `;
 }
 
-type MissionRow = { id: string; column: string; delivery?: string; artifacts?: string[]; progressNote?: string };
+type MissionRow = {
+  id: string;
+  column: string;
+  delivery?: string;
+  artifacts?: string[];
+  progressNote?: string;
+  usage?: { tokensIn?: number; tokensOut?: number; estimatedUsd?: number } | null;
+};
 
 async function mission(id: string | undefined): Promise<MissionRow | null> {
   if (!id) return null;
@@ -295,6 +421,21 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
   for (const s of link.slices) rows.set(s.key, await mission(s.missionId));
   const columnOf = Object.fromEntries(link.slices.map((s) => [s.key, rows.get(s.key)?.column ?? "inbox"]));
 
+  // 0. Count what finished work cost, each delivery once (builders' and reviewers'), and
+  //    decide whether new work may start. Projects from before budgets have no ceiling.
+  const spend = link.spend ?? emptySpend();
+  for (const s of link.slices) {
+    const m = rows.get(s.key);
+    if (m && (m.column === "review" || m.column === "done") && countDelivery(spend, m.id, m.delivery, m.usage)) changed = true;
+    const r = s.reviewMissionId ? await mission(s.reviewMissionId) : null;
+    if (r && (r.column === "review" || r.column === "done") && countDelivery(spend, r.id, r.delivery, r.usage)) changed = true;
+  }
+  link.spend = spend;
+  const budgetNow = budgetView(link.budget, spend);
+  // "ask" (close to the ceiling) and "refuse" (at it) both wait for the owner's tap.
+  const mayStartWork = !budgetNow || budgetNow.verdict === "allow";
+  let heldForBudget = false;
+
   // 1. Delivered work: review, accept, send back, or hand to the owner.
   for (const s of link.slices) {
     if (columnOf[s.key] !== "review") continue;
@@ -312,6 +453,10 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
     // Every step is reviewed by another company's model — when one is set up.
     if (link.reviewIndependent) {
       if (!s.reviewMissionId) {
+        if (!mayStartWork) {
+          heldForBudget = true;
+          continue;
+        }
         const made = await boardOps.createMission({
           title: `Review: ${s.title}`.slice(0, 120),
           objective: `Check, with a fresh pair of eyes, that "${s.title}" really does what its done checks say. You did not build it, and you are from a different company than the model that did.`,
@@ -337,6 +482,11 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
       const verdict = await reviewVerdict(s.reviewMissionId);
       if (verdict === "pending") continue;
       if (verdict === "fail") {
+        // A redo costs money: it waits while the budget is used up.
+        if (!mayStartWork) {
+          heldForBudget = true;
+          continue;
+        }
         // Back to the builder with the reviewer's findings; a fresh review follows the next delivery.
         const r = await mission(s.reviewMissionId);
         await boardOps.comment(s.missionId, "code-monkey", `Independent review found problems:\n${(r?.delivery ?? "").slice(0, 2000)}`);
@@ -358,6 +508,10 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
     }
 
     if (s.door === "one-way" && authorizedNow(link, s)) {
+      if (!mayStartWork) {
+        heldForBudget = true;
+        continue;
+      }
       const why = s.authorizedBy ? `the owner asked for it: "${s.authorizedBy}"` : `the project's launch policy (${link.launch?.source}: ${link.launch?.evidence})`;
       if (await goAhead(s, `Reviewed. Go ahead with the irreversible step — ${why}. Then deliver with proof of what happened.`)) columnOf[s.key] = "ready";
       changed = true;
@@ -367,6 +521,8 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
       if (proofLinks.length > 0) {
         const done = await boardOps.moveMission(s.missionId, "done", "code-monkey", "system");
         if (done.ok) columnOf[s.key] = "done";
+      } else if (!mayStartWork) {
+        heldForBudget = true;
       } else {
         // "Done" needs evidence the owner can look at, not a claim (owner's decision, 2026-11-23).
         await boardOps.comment(s.missionId, "code-monkey", `Delivered without proof. Attach ${policy.proof.map((p) => PROOF_WORDS[p]).slice(0, 3).join("; ")}.`);
@@ -380,8 +536,13 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
   }
 
   // 2. Release steps whose prerequisites are done — including any finished just above,
-  //    so the next step starts in the same read instead of one poll later.
+  //    so the next step starts in the same read instead of one poll later. Not while
+  //    the budget is used up: those steps wait for the owner to add more.
   for (const key of slicesToRelease(link.slices, columnOf)) {
+    if (!mayStartWork) {
+      heldForBudget = true;
+      break;
+    }
     const s = link.slices.find((x) => x.key === key)!;
     const moved = await boardOps.moveMission(s.missionId, "ready", "code-monkey", "system");
     if (moved.ok) {
@@ -439,6 +600,10 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
     builderProvider: link.builderProvider ?? null,
     reviewerProvider: link.reviewerProvider ?? null,
     launch: link.launch,
+    budget: budgetNow,
+    effort: link.effort,
+    found: link.found ?? [],
+    heldForBudget,
     slices: views,
     counts,
   };
@@ -447,12 +612,20 @@ export async function readCodeProject(sql: Sql, userId: string, jobId: string): 
 export type OwnerAction =
   | { kind: "answer"; callId: string; text: string }
   | { kind: "looks-right"; sliceKey: string }
-  | { kind: "not-yet"; sliceKey: string; text: string };
+  | { kind: "not-yet"; sliceKey: string; text: string }
+  | { kind: "add-budget"; dollars: number };
 
-/** The three things a person can do in the workshop. Everything else moves on its own. */
+/** The things a person can do in the workshop. Everything else moves on its own. */
 export async function ownerActs(sql: Sql, userId: string, jobId: string, action: OwnerAction, ownerName = "owner"): Promise<{ ok: boolean; error?: string }> {
   const link = await loadLink(sql, userId, jobId);
   if (!link) return { ok: false, error: "not_found" };
+  if (action.kind === "add-budget") {
+    // Only the owner raises the ceiling, one tap at a time; nothing else can.
+    if (!link.budget) return { ok: false, error: "no_budget" };
+    if (!addToBudget(link.budget, Math.round(Number(action.dollars) * 100))) return { ok: false, error: "bad_amount" };
+    await saveLink(sql, userId, jobId, link);
+    return { ok: true };
+  }
   if (action.kind === "answer") {
     const text = String(action.text || "").trim().slice(0, 2000);
     if (!text) return { ok: false, error: "empty_answer" };
@@ -466,6 +639,11 @@ export async function ownerActs(sql: Sql, userId: string, jobId: string, action:
   if (!s) return { ok: false, error: "not_found" };
   const m = await mission(s.missionId);
   if (!m || m.column !== "review") return { ok: false, error: "not_waiting_for_you" };
+  // A go-ahead or a redo starts paid work: not past the owner's own ceiling. (Accepting
+  // finished work is free and always allowed.)
+  const startsWork = action.kind === "not-yet" || s.door === "one-way";
+  const ceiling = budgetView(link.budget, link.spend);
+  if (startsWork && ceiling && ceiling.verdict !== "allow") return { ok: false, error: "budget_used_up" };
   if (action.kind === "looks-right") {
     if (s.door === "one-way") {
       // Approving a one-way step is the go-ahead for the part it held back. Approving

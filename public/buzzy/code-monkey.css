@@ -85,7 +85,7 @@
 .bzcm-line { margin: 0 0 4px; }
 .bzcm-sub { margin-top: 10px; }
 .bzcm-sub-h { margin: 0 0 4px; font-size: 0.78rem; font-weight: 700; color: var(--cm-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.bzcm-checks, .bzcm-not, .bzcm-assume, .bzcm-proof { margin: 0; padding-left: 1.2em; }
+.bzcm-checks, .bzcm-not, .bzcm-walls, .bzcm-assume, .bzcm-proof { margin: 0; padding-left: 1.2em; }
 .bzcm-checks li::marker { content: "☐  "; color: var(--cm-text); }
 .bzcm-checks.small { font-size: 0.92rem; color: var(--cm-ink); margin-top: 6px; }
 .bzcm-not li { color: var(--cm-muted); }
@@ -147,6 +147,26 @@
 .bzcm-btn.ghost:hover, .bzcm-btn.ghost:focus-visible { background: var(--cm-soft); color: var(--cm-text); }
 .bzcm h2, .bzcm h3, .bzcm h4, .bzcm-talk-card b { color: var(--cm-ink); }
 .bzcm-notyet { margin-top: 8px; }
+
+/* The budget: a meter in Code Monkey's orange (never the privacy modes' green/yellow/red);
+ * the held state adds the stop shape, so it reads without colour. */
+.bzcm-why b, .bzcm-why { color: var(--cm-ink); }
+.bzcm-budget {
+  display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--cm-line); background: var(--cm-surface);
+}
+.bzcm-budget.is-held { border-color: var(--cm); }
+.bzcm-budget-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.bzcm-budget-top span { color: var(--cm-text); font-weight: 700; }
+.bzcm-meter { height: 8px; border-radius: 99px; background: var(--cm-line); overflow: hidden; }
+.bzcm-meter span { display: block; height: 100%; background: var(--cm); border-radius: 99px; }
+.bzcm-budget-note { margin: 0; font-size: 0.88rem; color: var(--cm-muted); }
+.bzcm-held { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--cm-text); }
+.bzcm-held p { margin: 0; flex: 1; min-width: 200px; color: var(--cm-ink); font-size: 0.92rem; }
+.bzcm-found ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: 0.92rem; }
+.bzcm-found a { color: var(--cm-text); }
+.bzcm-found-src { color: var(--cm-muted); font-size: 0.8rem; }
+.bzcm-found-about { color: var(--cm-muted); }
 
 /* The card under a Talk reply that started a project. */
 .bzcm-talk-card {

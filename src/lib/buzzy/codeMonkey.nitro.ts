@@ -3,10 +3,11 @@
  *
  *   GET  /api/buzzy/code                → { projects: [...] } the person's coding projects
  *   GET  /api/buzzy/code?job=<id>       → one project: result card, slices, proof, questions
- *   POST /api/buzzy/code                → { action: "start", card, slices, words? }
+ *   POST /api/buzzy/code                → { action: "start", card, slices, words?, budgetDollars? }
  *                                       → { action: "answer", jobId, callId, text }
  *                                       → { action: "looks-right", jobId, slice }
  *                                       → { action: "not-yet", jobId, slice, text }
+ *                                       → { action: "add-budget", jobId, dollars }
  *
  * Reading a project also moves it along (releases slices, opens reviews, accepts
  * what the policy allows), so the page only ever polls GET.
@@ -64,11 +65,17 @@ export default defineEventHandler(async (event) => {
       card: body.card,
       slices: body.slices,
       words: typeof body.words === "string" ? body.words.slice(0, 4000) : undefined,
+      budgetDollars: body.budgetDollars,
       companyId: typeof body.companyId === "string" ? body.companyId : null,
     });
     return r.ok ? json(200, r) : json(422, r);
   }
   const owner = user.email || "owner";
+  if (action === "add-budget") {
+    // The owner's own tap is the only way a budget grows.
+    const r = await ownerActs(sql, user.id, jobId, { kind: "add-budget", dollars: Number(body.dollars) }, owner);
+    return json(r.ok ? 200 : r.error === "not_found" ? 404 : 400, r);
+  }
   if (action === "answer") {
     const r = await ownerActs(sql, user.id, jobId, { kind: "answer", callId: String(body.callId || ""), text: String(body.text || "") }, owner);
     return json(r.ok ? 200 : r.error === "not_found" ? 404 : 400, r);

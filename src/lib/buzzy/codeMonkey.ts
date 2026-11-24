@@ -32,8 +32,25 @@
  *     so many words; after that the project's launch policy governs.
  *   - People see a plain checklist of steps; the dependency graph stays inside.
  *
+ * The owner's "new way forward" (2026-11-23) adds:
+ *   - Start with the WHY. The card keeps why they want it apart from their first idea
+ *     of what to make: the idea is a starting point, not a specification.
+ *   - Guardrails, not specifications. "Walls" are hard limits (time, who may see it,
+ *     what must never happen); the budget is the first wall. Features and technology
+ *     are never walls: agents decide those.
+ *   - Budget before going (budget.ts). No project starts without an amount the person
+ *     said themselves. The budget sets how hard to look and how many versions to try,
+ *     and nothing new starts once it is used up.
+ *   - Look on BeeZilla first, then the world. The person's earlier projects and
+ *     BeeZilla's archive are searched before anything is built. Agents then search the
+ *     wider world within the budget, borrow what fits (licenses checked, credits kept),
+ *     and only make what's missing.
+ *   - Explore by building. When the budget allows, the first step tries several real
+ *     versions instead of guessing at the best one.
+ *
  * Everything that can be wrong here is checked by scripts/test-code-monkey.ts.
  */
+import { BUDGET_QUESTION, budgetChoices, money, type Budget, type BudgetSettled, type Effort } from "./budget";
 
 export type Stakes = "play" | "product" | "critical";
 export type Door = "two-way" | "one-way";
@@ -49,8 +66,13 @@ export interface DoneCheck {
 }
 
 export interface ResultCard {
-  /** What we're making, in the person's own words. */
+  /** What we're making, in the person's own words: their first idea, not a specification. */
   making: string;
+  /** Why they want it: what they're really trying to achieve. Agents optimise for this. */
+  why: string;
+  /** Hard limits that change what's possible (time, who may see it, what must never
+   *  happen). Never features or technology. The budget is kept apart, as a number. */
+  walls: string[];
   /** Who it is for. */
   forWhom: string;
   /** What changes for them when it exists. */
@@ -284,6 +306,8 @@ export function normalizeCard(raw: Partial<ResultCard> & Record<string, unknown>
   const stakes = (["play", "product", "critical"] as Stakes[]).includes(raw.stakes as Stakes) ? (raw.stakes as Stakes) : "product";
   return {
     making: clip(raw.making, 160),
+    why: clip(raw.why, 240),
+    walls: list(raw.walls, 6),
     forWhom: clip(raw.forWhom, 160),
     outcome: clip(raw.outcome, 240),
     doneWhen: list(raw.doneWhen, LIMITS.doneChecks.max).map((text) => ({ text })),
@@ -297,6 +321,7 @@ export function normalizeCard(raw: Partial<ResultCard> & Record<string, unknown>
 export function validateCard(card: ResultCard): string[] {
   const problems: string[] = [];
   if (!card.making) problems.push("Say what we're making.");
+  if (!card.why) problems.push("Say why they want it — what they're really trying to achieve. If they didn't say, infer it and list it under assumptions.");
   if (!card.forWhom) problems.push("Say who it is for.");
   if (!card.outcome) problems.push("Say what changes for them when it exists.");
   if (card.doneWhen.length < LIMITS.doneChecks.min) problems.push("Add at least one 'done when' check.");
@@ -406,19 +431,76 @@ export interface MissionBrief {
   tags: string[];
 }
 
+/** Something already on BeeZilla that a new project can start from. */
+export interface Found {
+  source: "Your earlier project" | "Starting board" | "Your recipe" | "Your Library" | "Your document";
+  title: string;
+  about: string;
+  /** Links an agent can open: an earlier project's previews, repository, screenshots. */
+  links?: string[];
+}
+
+/** What the start settled, carried by every brief: the budget, what it buys, what's already on BeeZilla. */
+export interface BriefExtras {
+  budget?: Budget;
+  effort?: Effort;
+  found?: Found[];
+}
+
+/** "Look first" for a first step: BeeZilla, then the wider world within the budget, then borrow. */
+export function lookFirstNote(found: Found[], effort?: Effort): string {
+  const onBeeZilla = found.length
+    ? found
+        .map((f) => `   - ${f.source}: "${f.title}"${f.about ? ` — ${f.about}` : ""}${f.links?.length ? ` (${f.links.slice(0, 4).join(", ")})` : ""}`)
+        .join("\n")
+    : "   - Nothing on BeeZilla fits yet.";
+  const world =
+    effort && effort.searches > 0
+      ? `2. Then the wider world: up to ${effort.searches.toLocaleString("en-US")} searches across ${effort.areas} categorically different ` +
+        `area${effort.areas === 1 ? "" : "s"} (for example: open-source projects that already do this, reusable parts and assets, how ` +
+        "experts design this kind of thing, and how to set the work up so it lasts). Make the queries genuinely different, skip " +
+        "duplicates, and prefer sources from the last three months for anything about AI."
+      : "2. The budget leaves no room for searching the wider world: build from what you already know.";
+  return [
+    "Look first, before building anything:",
+    `1. Already on BeeZilla — start from these and reuse whatever fits:\n${onBeeZilla}`,
+    world,
+    "3. Borrow before you build: copy what fits, from BeeZilla and from open source, after checking each license allows it, " +
+      "and keep the credits. Only make what's missing.",
+  ].join("\n");
+}
+
 /**
  * Written the way top engineers brief a capable coworker: the task, the
  * guardrails, what done looks like and the proof to bring back. No role-play,
  * no capital-letter rules — those make current models over-apply instructions.
  */
-export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[], authorizedBy?: string | null): MissionBrief {
+export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[], authorizedBy?: string | null, extras: BriefExtras = {}): MissionBrief {
   const policy = reviewPolicy(card.stakes, slice.door);
   const waitsFor = slice.after
     .map((k) => allSlices.find((s) => s.key === k))
     .filter(Boolean)
     .map((s) => `"${s!.title}"`);
   const lines = (xs: string[]) => xs.map((x) => `- ${x}`).join("\n");
+  const first = slice.after.length === 0;
+  const walls = [
+    extras.budget
+      ? `The whole project may cost at most ${money(extras.budget.cents)}; BeeZilla starts no new work past that. ` +
+        "Report what your delivery cost (usage: tokens and model, or estimated_usd)."
+      : "",
+    ...(card.walls ?? []),
+  ].filter(Boolean);
+  const versions = extras.effort?.versions ?? 1;
   const constraints = [
+    walls.length ? `Walls (hard limits — never cross them):\n${lines(walls)}` : "",
+    first
+      ? lookFirstNote(extras.found ?? [], extras.effort)
+      : "Borrow before you build: reuse what earlier steps found and made, and search only for what is genuinely new.",
+    first && versions >= 2
+      ? `Explore by building: before settling on one approach, make ${versions} quick, genuinely different versions of this step — ` +
+        "one of them their own idea as they described it — try each, keep the one that best serves why they want it, and say why. " +
+        "Put every version's link in your delivery so the owner can switch."
+      : "",
     card.notDoing.length ? `Not part of this project:\n${lines(card.notDoing)}` : "",
     card.assumptions.length ? `Already decided for the owner (keep these unless a done check can't pass):\n${lines(card.assumptions)}` : "",
     slice.door === "one-way"
@@ -428,7 +510,8 @@ export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[],
           : "It runs only after the independent review passes and the owner says go ahead.")
       : "This slice can be undone, so make reasonable decisions yourself and note them in your delivery instead of asking.",
     "Test it the way the owner will use it: run the real app and go through each done check like a person would, not only unit tests.",
-    "If a done check truly can't pass without the owner, escalate ONE short question with your recommended answer; otherwise keep going.",
+    "If a done check truly can't pass without the owner, escalate ONE short question about what they want (never about technology " +
+      "or features: those are yours to decide), with your recommended answer; otherwise keep going.",
     "Leave the codebase easier to change than you found it: match existing patterns and names, and turn any fix for a repeated mistake into a test or lint check rather than a comment.",
   ].filter(Boolean);
   return {
@@ -436,10 +519,12 @@ export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[],
     objective: `${slice.title}. The owner tries it by: ${slice.shows}`,
     context: [
       `Project: ${card.making} — for ${card.forWhom}.`,
-      `Why it matters: ${card.outcome}`,
+      card.why ? `Why they want it: ${card.why}` : "",
+      `What changes for them: ${card.outcome}`,
+      "Their idea of what to make is a starting point, not a specification: within the done checks, choose whatever approach best serves why they want it.",
       `Stakes: ${card.stakes}${card.stakesWhy ? ` (${card.stakesWhy})` : ""}.`,
       waitsFor.length ? `Builds on: ${waitsFor.join(", ")}.` : "This is a first slice: get something the owner can try, end to end, before polishing anything.",
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
     constraints: constraints.join("\n\n"),
     acceptance: [
       "Done when (each must pass):",
@@ -472,6 +557,19 @@ export function isCodeRequest(message: string): boolean {
   );
 }
 
+/**
+ * The person's messages that belong to the current coding request: from the last one
+ * that asked for software, to now. Their budget answer and any other replies are part
+ * of it; an unrelated earlier request is not (its words must never authorize anything
+ * here). Null when no message in the list asked for software.
+ */
+export function codeRequestThread(turns: string[]): string[] | null {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (isCodeRequest(turns[i] ?? "")) return turns.slice(i);
+  }
+  return null;
+}
+
 /** The one tool Talk gets for coding work. The schema mirrors ResultCard + SliceInput. */
 export const START_CODE_PROJECT_TOOL = {
   type: "function",
@@ -479,14 +577,34 @@ export const START_CODE_PROJECT_TOOL = {
     name: "start_code_project",
     description:
       "Start a coding project in Code Monkey's workshop when the owner wants software made or changed. " +
+      "Start from WHY they want it; what they asked for is their first idea, a starting point rather than a specification. " +
       "Describe the RESULT (who it is for, what changes for them, checks that pass or fail), never a plan. " +
       "Cut the work into 1-8 thin slices that each work end to end and can be tried; use `after` only when one slice truly needs another first. " +
-      "Decide reasonable details yourself and list them as assumptions instead of asking. " +
-      "Set each check's bar as high as the owner would want — agents keep working until they reach it.",
+      "Decide reasonable details yourself (all technology, all features) and list them as assumptions instead of asking. " +
+      "Set each check's bar as high as the owner would want — agents keep working until they reach it. " +
+      "It needs the owner's budget in their own words: if they haven't named one, ask the budget question first.",
     parameters: {
       type: "object",
       properties: {
-        making: { type: "string", description: "What we're making, in the owner's words." },
+        making: { type: "string", description: "What we're making, in the owner's words: their idea, not a specification." },
+        why: {
+          type: "string",
+          description:
+            "Why they want it — what they're really trying to achieve, in their words (e.g. 'two unforgettable hours each evening with my son'). " +
+            "If they didn't say, infer it and add your guess to assumptions.",
+        },
+        walls: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Hard limits that change what's possible, in plain words: time ('playable by Friday'), who must or must not see it, what must never happen. " +
+            "Never features or technology. The budget goes in budgetDollars.",
+        },
+        budgetDollars: {
+          type: "number",
+          description:
+            "The most the owner wants the whole project to cost, in dollars, as they said it. BeeZilla checks the amount is in their own words and won't start without one.",
+        },
         forWhom: { type: "string", description: "Who it is for." },
         outcome: { type: "string", description: "What changes for them when it exists." },
         doneWhen: { type: "array", items: { type: "string" }, description: "1-6 checks someone can answer yes or no, e.g. 'Tapping Start shows the first scene on an iPad'." },
@@ -510,30 +628,73 @@ export const START_CODE_PROJECT_TOOL = {
           },
         },
       },
-      required: ["making", "forWhom", "outcome", "doneWhen", "stakes", "slices"],
+      required: ["making", "why", "forWhom", "outcome", "doneWhen", "stakes", "slices", "budgetDollars"],
     },
   },
 } as const;
 
-/** Split the tool's flat arguments into the card and the slices. */
-export function argsToProject(args: Record<string, unknown>): { card: Record<string, unknown>; slices: unknown } {
-  const { slices, ...card } = args || {};
-  return { card, slices };
+/** Split the tool's flat arguments into the card, the slices and the budget the model read. */
+export function argsToProject(args: Record<string, unknown>): { card: Record<string, unknown>; slices: unknown; budgetDollars: unknown } {
+  const { slices, budgetDollars, ...card } = args || {};
+  return { card, slices, budgetDollars };
 }
 
-/** Appended to the system prompt on coding turns only. Short on purpose: the tool description carries the rest. */
-export const CODE_MONKEY_GUIDE = [
-  "Coding turn: if the owner wants software made or changed, call start_code_project once the result is clear enough to build.",
-  "Clear or undoable work: just start it. Only ask first when the request is genuinely unclear AND significant, and then ask one quick choice: a few questions first, or just go for it?",
-  "After starting, tell the owner in one or two sentences what is being made and that they can watch it in the workshop; do not paste the slices back.",
-].join(" ");
+/** The budget question with its three answers, as the model should ask it. */
+export function budgetQuestionText(stakes: Stakes): string {
+  const choices = budgetChoices(stakes);
+  return `"${BUDGET_QUESTION}" Offer these answers: ${choices.map((c) => c.label + (c.suggested ? " (suggested)" : "")).join(", ")}.`;
+}
 
-export function codeProjectStartedMessage(view: { jobId: string; card: ResultCard; slices: { title: string }[]; stakesRaisedFrom?: Stakes }): string {
+/**
+ * Appended to the system prompt on coding turns only. Short on purpose: the tool
+ * description carries the rest. `stakes` sizes the budget answers it offers.
+ */
+export function codeMonkeyGuide(stakes: Stakes): string {
+  return [
+    "Coding turn: if the owner wants software made or changed, call start_code_project once the result is clear enough to build.",
+    "Before it starts, the budget has to come from the owner (owner's rule: no bankrupting people for small projects). If they named an amount, pass it as budgetDollars. " +
+      `If not, ask this one question and nothing else: ${budgetQuestionText(stakes)} Start on their answer.`,
+    "Start from why they want it. Ask only about the why and hard limits (time, money, who it's for, what must never happen), never about features or technology: decide those yourself.",
+    "Clear or undoable work: just start it. Only ask more first when the request is genuinely unclear AND significant, and then ask one quick choice: a few questions first, or just go for it?",
+    "After starting, tell the owner in one or two sentences what is being made, the budget, and anything it builds on from BeeZilla; they can watch it in the workshop. Do not paste the slices back.",
+  ].join(" ");
+}
+
+export function codeProjectStartedMessage(view: {
+  jobId: string;
+  card: ResultCard;
+  slices: { title: string }[];
+  stakesRaisedFrom?: Stakes;
+  budget?: { capCents: number; source: string; words: string } | null;
+  effort?: Effort;
+  found?: Found[];
+}): string {
   const raised = view.stakesRaisedFrom ? ` Stakes were raised from ${view.stakesRaisedFrom} to ${view.card.stakes} because ${view.card.stakesWhy}; mention this in one short clause.` : "";
-  return `start_code_project: started "${view.card.making}" as ${view.slices.length} slice(s), stakes ${view.card.stakes}. ` +
+  const budget = view.budget ? ` Budget: at most ${money(view.budget.capCents)} (${view.budget.source}: "${view.budget.words}").` : "";
+  const effort = view.effort
+    ? ` It buys looking first (up to ${view.effort.searches} searches in ${view.effort.areas} area${view.effort.areas === 1 ? "" : "s"})` +
+      `${view.effort.versions >= 2 ? ` and ${view.effort.versions} versions of the first step to choose from` : ""}.`
+    : "";
+  const found = view.found?.length
+    ? ` Already on BeeZilla, and handed to the agents to build on: ${view.found.slice(0, 4).map((f) => `${f.source.toLowerCase()} "${f.title}"`).join("; ")} — mention what it builds on.`
+    : " Nothing on BeeZilla fits yet, so the agents start fresh.";
+  return `start_code_project: started "${view.card.making}" as ${view.slices.length} slice(s), stakes ${view.card.stakes}.${budget}${effort}${found} ` +
     `Agents are picking it up now; the owner sees progress and proof in Code Monkey's workshop (a card under your reply opens it).${raised}`;
 }
 
 export function codeProjectRefusedMessage(problems: string[]): string {
   return `start_code_project was not started — fix these and call it again: ${problems.slice(0, 6).join(" ")}`;
+}
+
+/** Not started for want of the owner's own budget: what to ask, and how to call again. */
+export function codeProjectNeedsBudgetMessage(stakes: Stakes, reason: Exclude<BudgetSettled, { ok: true }>["reason"]): string {
+  const why = {
+    missing: "the owner hasn't named a budget",
+    "not-their-words": "that amount isn't one the owner said — only their own words set the budget",
+    ambiguous: "the owner named more than one amount and none clearly says how much to spend on the work",
+    "too-small": "that's less than one step costs (the smallest budget is $1)",
+    "too-large": "that's more than any single project may be given — check the amount with them",
+  }[reason];
+  return `start_code_project was not started: ${why}. Ask this one question and nothing else: ${budgetQuestionText(stakes)} ` +
+    "When they answer, call start_code_project again with budgetDollars set to their amount.";
 }

@@ -53,7 +53,17 @@ import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
-import { isCodeRequest, argsToProject, CODE_MONKEY_GUIDE, codeProjectStartedMessage, codeProjectRefusedMessage } from "./codeMonkey";
+import {
+  isCodeRequest,
+  codeRequestThread,
+  argsToProject,
+  codeMonkeyGuide,
+  codeProjectStartedMessage,
+  codeProjectRefusedMessage,
+  codeProjectNeedsBudgetMessage,
+  settleStakes,
+} from "./codeMonkey";
+import { askedForBudget, money } from "./budget";
 import { startCodeProject } from "./codeMonkey.server";
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
@@ -367,7 +377,7 @@ export interface TurnTimings {
 
 export interface ChatResponse {
   /** A coding project Code Monkey started this turn; Talk shows a card that opens its workshop. */
-  codeProject?: { jobId: string; making: string; stakes: "play" | "product" | "critical"; slices: number };
+  codeProject?: { jobId: string; making: string; stakes: "play" | "product" | "critical"; slices: number; budget?: string };
   ok: boolean;
   reply: string;
   slots?: Record<string, string>;
@@ -625,8 +635,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const lockdown = req.privacy === "lockdown";
   // Code Monkey: a turn that asks for software to be made or changed gets the
   // workshop tool (codeMonkey.ts). Lockdown withholds it with everything else
-  // that reaches an outside provider.
-  const codeRequest = isCodeRequest(message);
+  // that reaches an outside provider. So does the turn that answers its budget
+  // question ("$5"), which names no software but finishes the same request.
+  const lastAssistantTurn = [...history].reverse().find((h) => h.role === "assistant");
+  const budgetAsked = typeof lastAssistantTurn?.content === "string" && askedForBudget(lastAssistantTurn.content);
+  const codeThread = codeRequestThread([
+    ...history.filter((h) => h.role === "user" && typeof h.content === "string").map((h) => String(h.content)).slice(-6),
+    message,
+  ]);
+  const codeRequest = isCodeRequest(message) || (budgetAsked && codeThread !== null);
   let codeProject: ChatResponse["codeProject"] = undefined;
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
@@ -1357,7 +1374,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "Never say it is finished or attached, and never answer with JSON or a tool call.",
     );
   }
-  if (codeRequest && !lockdown) afterNotes.push(CODE_MONKEY_GUIDE);
+  if (codeRequest && !lockdown) afterNotes.push(codeMonkeyGuide(settleStakes(undefined, (codeThread ?? [message]).join("\n")).stakes));
   if (afterNotes.length) messages.push({ role: "system", content: afterNotes.join("\n\n") });
 
   // ── Context accounting ─────────────────────────────────────────────
@@ -1619,16 +1636,35 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
               };
             }
             if (tc.name === "start_code_project") {
-              const { card, slices } = argsToProject(content);
-              const started = await startCodeProject(sql, userId, { card, slices, words: message });
-              if (!started.ok) return { message: codeProjectRefusedMessage(started.problems), errorCode: "invalid_project" };
+              const { card, slices, budgetDollars } = argsToProject(content);
+              // The owner's own words for this request — from the message that asked for
+              // software to this one — kept as typed; they alone can set the budget.
+              const started = await startCodeProject(sql, userId, {
+                card,
+                slices,
+                words: (codeThread ?? [message]).join("\n\n"),
+                budgetDollars,
+                budgetAnswer: budgetAsked ? message : undefined,
+              });
+              if (!started.ok) {
+                if (started.code === "needs-budget") return { message: codeProjectNeedsBudgetMessage(started.stakes, started.reason), errorCode: "needs_budget" };
+                return { message: codeProjectRefusedMessage(started.problems), errorCode: "invalid_project" };
+              }
               codeProject = {
                 jobId: started.jobId,
                 making: started.project.card.making,
                 stakes: started.project.card.stakes,
                 slices: started.project.slices.length,
+                budget: started.project.budget ? money(started.project.budget.capCents) : undefined,
               };
-              return { message: codeProjectStartedMessage(started.project) };
+              return {
+                message: codeProjectStartedMessage({
+                  ...started.project,
+                  budget: started.project.budget,
+                  effort: started.project.effort,
+                  found: started.project.found,
+                }),
+              };
             }
             if (tc.name === "calculate") {
               // BZ-F038: arithmetic runs HERE, deterministically — never in the

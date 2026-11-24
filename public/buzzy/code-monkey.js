@@ -153,8 +153,8 @@
       var list = (r.j && r.j.projects) || [];
       if (!list.length) {
         body.innerHTML = '<div class="bzcm-empty"><p><b>Nothing being made yet.</b></p>' +
-          "<p>Tell Code Monkey what you want in Talk — what it is and who it's for. Small or clear things start straight away; " +
-          "big or unclear ones get one quick question first.</p></div>";
+          "<p>Tell Code Monkey in Talk what you'd like made, who it's for and why — and how much it may spend " +
+          "(“up to $5”), or it will ask. It looks at what you already have before building anything new.</p></div>";
         return;
       }
       body.innerHTML = '<ul class="bzcm-list">' + list.map(function (p) {
@@ -192,9 +192,11 @@
       '<div class="bzcm-card-top"><span class="bzcm-stakes" title="' + esc(st.hint) + '">' + icon(st.shape) + " " + esc(st.label) + "</span>" +
       (p.stakesRaisedFrom ? '<span class="bzcm-raised">raised from ' + esc(p.stakesRaisedFrom) + " — " + esc(c.stakesWhy) + "</span>" : "") + "</div>" +
       '<h3 class="bzcm-making">' + esc(c.making) + "</h3>" +
+      (c.why ? '<p class="bzcm-line bzcm-why"><b>Why</b> ' + esc(c.why) + "</p>" : "") +
       '<p class="bzcm-line"><b>For</b> ' + esc(c.forWhom) + "</p>" +
       '<p class="bzcm-line"><b>So that</b> ' + esc(c.outcome) + "</p>" +
       list("Done when", (c.doneWhen || []).map(function (d) { return d.text; }), "bzcm-checks") +
+      ((c.walls || []).length ? list("Limits", c.walls, "bzcm-walls") : "") +
       ((c.notDoing || []).length ? list("Not doing", c.notDoing, "bzcm-not") : "") +
       ((c.assumptions || []).length
         ? '<div class="bzcm-sub"><p class="bzcm-sub-h">Decisions I made for you</p><ul class="bzcm-assume">' +
@@ -203,6 +205,8 @@
           }).join("") + "</ul></div>"
         : "") +
       "</section>";
+    html += budgetHtml(p);
+    html += foundHtml(p.found || []);
     // The owner's own words, kept exactly as typed; the card above is only a summary of them.
     if (p.source && p.source.words) {
       html += '<details class="bzcm-words"><summary>Your words' + (p.source.at ? " · " + esc(new Date(p.source.at).toLocaleString()) : "") + "</summary>" +
@@ -221,6 +225,59 @@
     html += '<div class="bzcm-counts">' + summary + "</div>";
     html += '<p class="bzcm-sub-h">Steps</p><ol class="bzcm-slices">' + (p.slices || []).map(sliceHtml).join("") + "</ol>";
     body.innerHTML = html;
+  }
+
+  function dollars(cents) {
+    var c = Math.max(0, Math.round(Number(cents) || 0));
+    return "$" + (c % 100 === 0
+      ? (c / 100).toLocaleString("en-US")
+      : (c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  }
+
+  // The owner's budget: how much is used, where it came from, and — at the limit — the
+  // one tap that lets work go on. Nothing new starts past it (owner, 2026-11-23).
+  function budgetHtml(p) {
+    var b = p.budget;
+    if (!b) return "";
+    var pct = b.capCents > 0 ? Math.min(100, Math.round((b.usedCents / b.capCents) * 100)) : 0;
+    var base = Math.max(100, b.capCents - (b.addedCents || 0));
+    var held = b.verdict !== "allow";
+    var e = p.effort;
+    var out = '<section class="bzcm-budget' + (held ? " is-held" : "") + '" aria-label="Budget">' +
+      '<div class="bzcm-budget-top"><b>Budget</b><span>' + esc(b.line) + "</span></div>" +
+      '<div class="bzcm-meter" role="meter" aria-label="Budget used" aria-valuemin="0" aria-valuemax="' + b.capCents +
+        '" aria-valuenow="' + Math.min(b.usedCents, b.capCents) + '" aria-valuetext="' + esc(b.line) + '"><span style="width:' + pct + '%"></span></div>' +
+      '<p class="bzcm-budget-note">' + (b.source === "your answer" ? "You chose it: “" : "Your words: “") + esc(b.words) + "”." +
+      (e && e.searches > 0
+        ? " It looks at what already exists first: up to " + Number(e.searches).toLocaleString("en-US") + " searches in " + e.areas +
+          " area" + (e.areas === 1 ? "" : "s") + (e.versions > 1 ? ", then tries " + e.versions + " versions of the first step" : "") + "."
+        : "") + "</p>";
+    if (b.unreported) {
+      out += '<p class="bzcm-budget-note">' + b.unreported + " step" + (b.unreported === 1 ? "" : "s") +
+        " didn't say what they cost, so each counted as a small fixed amount.</p>";
+    }
+    if (held) {
+      out += '<div class="bzcm-held">' + icon("stop") + "<p>" +
+        (b.verdict === "refuse"
+          ? "<b>Paused at your limit.</b> Nothing new starts until you add more. Finished work stays yours."
+          : "<b>Almost at your limit.</b> New work waits until you say it can spend more.") +
+        '</p><button type="button" class="bzcm-btn" data-cm-addbudget="' + base + '">Add ' + dollars(base) + " more</button></div>";
+    }
+    return out + "</section>";
+  }
+
+  // Look on BeeZilla first: what the project starts from instead of from scratch.
+  function foundHtml(found) {
+    if (!found.length) return "";
+    return '<div class="bzcm-sub bzcm-found"><p class="bzcm-sub-h">Built on what you already have</p><ul>' +
+      found.map(function (f) {
+        var links = (f.links || []).filter(function (u) { return /^https?:\/\//i.test(u); }).slice(0, 3);
+        return "<li><b>" + esc(f.title) + "</b> <span class=\"bzcm-found-src\">" + esc(f.source) + "</span>" +
+          (f.about ? "<br><span class=\"bzcm-found-about\">" + esc(f.about) + "</span>" : "") +
+          (links.length ? "<br>" + links.map(function (u) {
+            return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(u.replace(/^https?:\/\//, "").slice(0, 60)) + "</a>";
+          }).join(" · ") : "") + "</li>";
+      }).join("") + "</ul></div>";
   }
 
   function list(title, items, cls) {
@@ -303,9 +360,17 @@
       t.disabled = true;
       return post({ action: "answer", jobId: current, callId: callId, text: text }).then(function () { loadProject(true); });
     }
+    if (t.hasAttribute("data-cm-addbudget")) {
+      t.disabled = true;
+      var cents = Number(t.getAttribute("data-cm-addbudget")) || 0;
+      return post({ action: "add-budget", jobId: current, dollars: cents / 100 }).then(function () { loadProject(true); });
+    }
     if (t.hasAttribute("data-cm-ok")) {
       t.disabled = true;
-      return post({ action: "looks-right", jobId: current, slice: t.getAttribute("data-cm-ok") }).then(function () { loadProject(true); });
+      return post({ action: "looks-right", jobId: current, slice: t.getAttribute("data-cm-ok") }).then(function (r) {
+        if (r && r.j && r.j.error === "budget_used_up") t.disabled = false;
+        loadProject(true);
+      });
     }
     if (t.hasAttribute("data-cm-notyet")) {
       var box = panel.querySelector('[data-cm-notyet-box="' + t.getAttribute("data-cm-notyet").replace(/"/g, "") + '"]');
@@ -351,7 +416,8 @@
       return '<div class="bzcm-talk-card" draggable="true" data-bz-card="' + cardAttr(cp.making, "Code Monkey is making this · " + cp.slices + " steps") + '">' +
         '<span class="bzcm-talk-shape">' + icon(st.shape) + "</span>" +
         '<span class="bzcm-talk-text"><b>Code Monkey is making:</b> ' + esc(cp.making) + ' <span class="bzcm-talk-sub">· ' +
-        esc(String(cp.slices)) + " step" + (cp.slices === 1 ? "" : "s") + " · " + esc(st.label) + "</span></span>" +
+        esc(String(cp.slices)) + " step" + (cp.slices === 1 ? "" : "s") + " · " + esc(st.label) +
+        (cp.budget ? " · up to " + esc(cp.budget) : "") + "</span></span>" +
         '<button type="button" class="bzcm-btn" data-code-job="' + esc(cp.jobId) + '">Open the workshop</button></div>';
     },
   };

@@ -11,6 +11,11 @@
  *   4. launch authorized in the owner's own words: no stop, but only after review
  *   5. go-ahead on the first launch becomes this project's launch policy
  *   6. no reviewer from another company: "not independently reviewed", never "passed"
+ * and the owner's "new way forward" (2026-11-23, budget.ts):
+ *   7. no budget in the owner's own words → nothing starts, the budget question comes back
+ *   8. the budget is a ceiling: deliveries are counted once, new work waits at the limit,
+ *      the owner's tap adds more and work goes on
+ *   9. look on BeeZilla first: an earlier project of theirs is found and handed over
  * Run: npx tsx scripts/test-code-monkey-flow.ts
  */
 import { durableBoard as board, ensureBoardReady } from "../src/lib/board-store.server";
@@ -62,17 +67,21 @@ async function main() {
 
   console.log("refuses a vague project before anything is created:");
   const vague = await startCodeProject(sql, user, {
-    card: { making: "an app", forWhom: "people", outcome: "it is useful", doneWhen: ["It looks professional"], stakes: "product" },
+    card: { making: "an app", why: "", forWhom: "people", outcome: "it is useful", doneWhen: ["It looks professional"], stakes: "product" },
     slices: [{ key: "s1", title: "Set up the database", shows: "", doneWhen: ["Tables exist"] }],
   });
-  check("refused with reasons", !vague.ok && vague.problems.length >= 2, vague.ok ? "started" : vague.problems);
+  check("refused with reasons", !vague.ok && vague.code === "invalid" && vague.problems.length >= 2, vague);
+  check("…including the missing why", !vague.ok && vague.code === "invalid" && vague.problems.some((p) => /why they want it/i.test(p)));
 
   console.log("1. a bedtime game (play):");
-  const words = "Can you build a bedtime adventure game for my kids? They're 8 and 10.";
+  const words = "Can you build a bedtime adventure game for my kids? They're 8 and 10. Keep it under $20.";
   const game = await startCodeProject(sql, user, {
     words,
+    budgetDollars: 20,
     card: {
       making: "a bedtime adventure game",
+      why: "a calm, fun ten minutes with my kids before lights out",
+      walls: ["Plays on the iPad without installing anything"],
       forWhom: "me and my two kids (8 and 10)",
       outcome: "we play a ten-minute story together before lights out",
       doneWhen: ["The kids can pick a hero and start a story on the iPad", "Every story ends within ten minutes"],
@@ -93,6 +102,13 @@ async function main() {
   const g1 = await ids(g, "s1");
   check("first step is claimable, second parked", (await column(g1.missionId)) === "ready" && (await column((await ids(g, "s2")).missionId)) === "blocked");
   check("the brief asks for the running app to be tested", /run the real app/.test((await board.getMission(g1.missionId))?.constraints ?? ""));
+  const g1m = await board.getMission(g1.missionId);
+  check("the budget came from the owner's own words", game.project.budget?.capCents === 2000 && game.project.budget.source === "your words" && /under \$20/.test(game.project.budget.words), game.project.budget);
+  check("the brief starts from the why", /Why they want it: a calm, fun ten minutes/.test(g1m?.context ?? "") && /starting point, not a specification/.test(g1m?.context ?? ""));
+  check("the brief carries the walls, budget first", /Walls \(hard limits/.test(g1m?.constraints ?? "") && /at most \$20/.test(g1m?.constraints ?? "") && /without installing anything/.test(g1m?.constraints ?? ""));
+  check("a first step looks first: BeeZilla, then searches sized by the budget, then borrow", /Look first/.test(g1m?.constraints ?? "") && /up to 400 searches across 8/.test(g1m?.constraints ?? "") && /checking each license/.test(g1m?.constraints ?? ""), g1m?.constraints);
+  check("a $20 project tries one version, not several", !/genuinely different versions/.test(g1m?.constraints ?? ""));
+  check("a later step borrows instead of searching again", /Borrow before you build: reuse what earlier steps found/.test((await board.getMission((await ids(g, "s2")).missionId))?.constraints ?? ""));
 
   await board.claim(g1.missionId, g1.agent);
   check("owner sees Working", (await states(g)).s1 === "working");
@@ -132,13 +148,15 @@ async function main() {
 
   console.log("2. a game for kids everywhere (product, failed then passed review):");
   const pub = await startCodeProject(sql, user, {
-    words: "make a puzzle game kids everywhere will enjoy",
-    card: { making: "a puzzle game", forWhom: "kids everywhere", outcome: "kids solve a puzzle a day", doneWhen: ["A new puzzle appears every day at midnight"], stakes: "play" },
+    words: "make a puzzle game kids everywhere will enjoy. Spend up to $50.",
+    card: { making: "a puzzle game", why: "kids get a small daily win", forWhom: "kids everywhere", outcome: "kids solve a puzzle a day", doneWhen: ["A new puzzle appears every day at midnight"], stakes: "play" },
     slices: [{ key: "s1", title: "Solve today's puzzle", shows: "open the link and drag the pieces", doneWhen: ["Placing every piece shows 'Solved!'"] }],
   });
   check("started", pub.ok);
   if (!pub.ok) return;
   check("stakes raised to product by the words, not the model", pub.project.card.stakes === "product" && pub.project.stakesRaisedFrom === "play");
+  const pubBrief = (await board.getMission((await ids(pub.jobId, "s1")).missionId))?.constraints ?? "";
+  check("a $50 budget buys 1,000 searches in 10 areas and 3 versions to compare", /up to 1,000 searches across 10/.test(pubBrief) && /make 3 quick, genuinely different versions/.test(pubBrief), pubBrief);
   await buildAndReview(pub.jobId, "s1", ["https://preview.example/puzzle"], "FAIL");
   const p1 = await ids(pub.jobId, "s1");
   const back = await states(pub.jobId);
@@ -151,8 +169,8 @@ async function main() {
 
   console.log("3. a one-way door, not authorized (email):");
   const mail = await startCodeProject(sql, user, {
-    words: "write a launch announcement for the game",
-    card: { making: "a launch announcement", forWhom: "my newsletter subscribers", outcome: "they hear about the game", doneWhen: ["Each subscriber gets one email with the link"], stakes: "product" },
+    words: "write a launch announcement for the game, budget $30",
+    card: { making: "a launch announcement", why: "people who follow us hear the game is out", forWhom: "my newsletter subscribers", outcome: "they hear about the game", doneWhen: ["Each subscriber gets one email with the link"], stakes: "product" },
     slices: [{ key: "s1", title: "Email every subscriber the launch news", shows: "check your own inbox first", doneWhen: ["The email arrives with a working link"] }],
   });
   check("started", mail.ok);
@@ -172,8 +190,8 @@ async function main() {
 
   console.log("4. a launch the owner asked for in their own words:");
   const launch = await startCodeProject(sql, user, {
-    words: "Make a colouring page for my niece. When it works, publish it on itch.io so the family can find it.",
-    card: { making: "a colouring page", forWhom: "my niece", outcome: "she colours animals on a tablet", doneWhen: ["Tapping a colour then an area fills it"], stakes: "play" },
+    words: "Make a colouring page for my niece. When it works, publish it on itch.io so the family can find it. $10 max.",
+    card: { making: "a colouring page", why: "she has something of her own to colour on the tablet", forWhom: "my niece", outcome: "she colours animals on a tablet", doneWhen: ["Tapping a colour then an area fills it"], stakes: "play" },
     slices: [
       { key: "s1", title: "Colour in the first picture", shows: "open the link and tap", doneWhen: ["Tapping a colour then an area fills it"] },
       { key: "s2", title: "Publish it on itch.io", shows: "open the itch.io page", doneWhen: ["The itch.io page loads the game"], after: ["s1"] },
@@ -198,8 +216,8 @@ async function main() {
 
   console.log("5. the first launch's go-ahead becomes this project's launch policy:");
   const two = await startCodeProject(sql, user, {
-    words: "Make a tiny recipe site for my cooking club.",
-    card: { making: "a recipe site", forWhom: "my cooking club", outcome: "members find this week's recipe", doneWhen: ["The home page shows this week's recipe"], stakes: "play" },
+    words: "Make a tiny recipe site for my cooking club. My budget is 15",
+    card: { making: "a recipe site", why: "members stop asking which recipe is this week's", forWhom: "my cooking club", outcome: "members find this week's recipe", doneWhen: ["The home page shows this week's recipe"], stakes: "play" },
     slices: [
       { key: "s1", title: "Publish the first version", shows: "open the site", doneWhen: ["The site loads this week's recipe"] },
       { key: "s2", title: "Publish the update with the archive", shows: "open the archive", doneWhen: ["The archive lists past recipes"], after: ["s1"] },
@@ -224,7 +242,9 @@ async function main() {
   process.env.BZ_CODE_REVIEW_HARNESS = "claude_code";
   const solo = await startCodeProject(sql, user, {
     words: "a dice roller for our board-game night",
-    card: { making: "a dice roller", forWhom: "our board-game night", outcome: "we roll dice on a phone", doneWhen: ["Tapping Roll shows a number from 1 to 6"], stakes: "play" },
+    budgetAnswer: "five dollars",
+    budgetDollars: 5,
+    card: { making: "a dice roller", why: "nobody hunts for lost dice", forWhom: "our board-game night", outcome: "we roll dice on a phone", doneWhen: ["Tapping Roll shows a number from 1 to 6"], stakes: "play" },
     slices: [{ key: "s1", title: "Roll a die", shows: "tap Roll", doneWhen: ["Tapping Roll shows a number from 1 to 6"] }],
   });
   process.env.BZ_CODE_REVIEW_HARNESS = "codex";
@@ -235,10 +255,88 @@ async function main() {
   const sv = await readCodeProject(sql, user, solo.jobId);
   check("it finishes, reported 'not independently reviewed' — never 'passed'", sv?.slices[0].state === "done" && sv.slices[0].reviewed === "not-available", sv?.slices[0]);
 
+  check("a budget given as an answer is recorded as theirs", solo.project.budget?.source === "your answer" && solo.project.budget.capCents === 500, solo.project.budget);
+
+  console.log("7. no budget in the owner's own words:");
+  const quizCard = { making: "a quiz app", why: "my students practise spelling at home", forWhom: "my class", outcome: "they take a 5-question quiz", doneWhen: ["Answering 5 questions shows a score"], stakes: "play" };
+  const quizSlices = [{ key: "s1", title: "Take a quiz", shows: "open the link", doneWhen: ["Answering 5 questions shows a score"] }];
+  const before = (await listCodeProjects(sql, user)).length;
+  const nobudget = await startCodeProject(sql, user, { words: "Build a quiz app for my class", card: quizCard, slices: quizSlices });
+  check("nothing starts without a budget", !nobudget.ok && nobudget.code === "needs-budget" && nobudget.reason === "missing", nobudget);
+  check("…and nothing was created", (await listCodeProjects(sql, user)).length === before);
+  check(
+    "the question offers three amounts sized to the stakes, the middle one suggested",
+    !nobudget.ok && nobudget.code === "needs-budget" && nobudget.choices.map((c) => c.dollars).join(",") === "2,5,20" && nobudget.choices[1].suggested,
+  );
+  const invented = await startCodeProject(sql, user, { words: "Build a quiz app for my class, keep it under $5", budgetDollars: 50, card: quizCard, slices: quizSlices });
+  check("an amount the owner never said is refused", !invented.ok && invented.code === "needs-budget" && invented.reason === "not-their-words", invented);
+  const ambiguous = await startCodeProject(sql, user, { words: "Build a quiz app for my class; the paid version costs $3 and ads bring $40", card: quizCard, slices: quizSlices });
+  check("prices of the thing being made are not taken as the budget", !ambiguous.ok && ambiguous.code === "needs-budget" && ambiguous.reason === "ambiguous", ambiguous);
+  const quiz = await startCodeProject(sql, user, { words: "Build a quiz app for my class", budgetAnswer: "the middle one", budgetDollars: 5, card: quizCard, slices: quizSlices });
+  check("their pick among the offered answers sets it", quiz.ok && quiz.project.budget?.capCents === 500 && quiz.project.budget.source === "your answer", quiz.ok ? quiz.project.budget : quiz);
+
+  console.log("8. the budget is a ceiling:");
+  const tight = await startCodeProject(sql, user, {
+    words: "Make a tip calculator for my book club, up to $1",
+    card: { making: "a tip calculator", why: "splitting the bill takes seconds, not ten minutes", forWhom: "my book club", outcome: "we split the bill fast", doneWhen: ["Typing the bill and 6 people shows each share"], stakes: "play" },
+    slices: [
+      { key: "s1", title: "Split a bill", shows: "type the bill", doneWhen: ["Typing the bill and 6 people shows each share"] },
+      { key: "s2", title: "Add the tip", shows: "pick 15%", doneWhen: ["Picking 15% adds the tip to each share"], after: ["s1"] },
+    ],
+  });
+  check("started with $1", tight.ok && tight.project.budget?.capCents === 100, tight.ok ? tight.project.budget : tight);
+  if (!tight.ok) return;
+  const t = tight.jobId;
+  const k1 = await ids(t, "s1");
+  await board.claim(k1.missionId, k1.agent);
+  await board.deliver(k1.missionId, k1.agent, "Bill splitting works: https://preview.example/tip", ["https://preview.example/tip"], { estimatedUsd: 0.8 });
+  const near = await readCodeProject(sql, user, t);
+  check("a delivery's own cost is counted", near?.budget?.usedCents === 80, near?.budget);
+  check("near the limit, new work waits: no review starts", near?.heldForBudget === true && near.budget?.verdict === "ask" && !(await ids(t, "s1")).reviewMissionId, near?.budget);
+  check("reading again counts nothing twice", (await readCodeProject(sql, user, t))?.budget?.usedCents === 80);
+  check("a redo can't start past the limit", (await ownerActs(sql, user, t, { kind: "not-yet", sliceKey: "s1", text: "bigger numbers" })).error === "budget_used_up");
+  check("a stranger can't raise the budget", !(await ownerActs(sql, stranger, t, { kind: "add-budget", dollars: 5 })).ok);
+  check("a top-up below $1 is refused", (await ownerActs(sql, user, t, { kind: "add-budget", dollars: 0.5 })).error === "bad_amount");
+  check("the owner adds $1", (await ownerActs(sql, user, t, { kind: "add-budget", dollars: 1 })).ok);
+  const resumed = await readCodeProject(sql, user, t);
+  const k1r = await ids(t, "s1");
+  check("…and the held review starts", Boolean(k1r.reviewMissionId) && resumed?.heldForBudget === false && resumed.budget?.capCents === 200, resumed?.budget);
+  await board.claim(k1r.reviewMissionId!, k1r.reviewer);
+  await board.deliver(k1r.reviewMissionId!, k1r.reviewer, "- PASS each share shown for 6 people\nVERDICT PASS", [], { estimatedUsd: 1.5 });
+  const capped = await readCodeProject(sql, user, t);
+  check("the reviewer's cost counts too", capped?.budget?.usedCents === 230 && capped.budget.line === "$2.30 of $2 used", capped?.budget);
+  check("finished work is still accepted at the limit (that costs nothing)", capped?.slices[0].state === "done", capped?.slices[0]);
+  check("…but the next step is not released", capped?.heldForBudget === true && capped.budget?.verdict === "refuse" && (await column((await ids(t, "s2")).missionId)) === "blocked");
+  await ownerActs(sql, user, t, { kind: "add-budget", dollars: 5 });
+  await readCodeProject(sql, user, t);
+  check("after the owner adds more, it goes on", (await column((await ids(t, "s2")).missionId)) === "ready");
+  const unpriced = await readCodeProject(sql, user, g);
+  check("deliveries that report no cost count at the floor", (unpriced?.budget?.unreported ?? 0) >= 2 && (unpriced?.budget?.usedCents ?? 0) >= 100, unpriced?.budget);
+
+  console.log("9. look on BeeZilla first:");
+  const theirs = await startCodeProject(sql, stranger, {
+    words: "a bedtime dragon lullaby app for my kids, $5 max",
+    card: { making: "a bedtime dragon lullaby app", why: "my kids fall asleep to a dragon's song", forWhom: "my kids", outcome: "a lullaby plays", doneWhen: ["Tapping play starts the lullaby"], stakes: "play" },
+    slices: [{ key: "s1", title: "Play the lullaby", shows: "tap play", doneWhen: ["Tapping play starts the lullaby"] }],
+  });
+  check("a stranger's similar project exists", theirs.ok);
+  const again = await startCodeProject(sql, user, {
+    words: "Build a bedtime dragon story game for my kids, budget $5",
+    card: { making: "a bedtime dragon story game", why: "help my kids wind down at bedtime", forWhom: "my kids", outcome: "they fall asleep happy", doneWhen: ["Tapping the dragon starts a story"], stakes: "play" },
+    slices: [{ key: "s1", title: "Meet the dragon", shows: "tap the dragon", doneWhen: ["Tapping the dragon starts a story"] }],
+  });
+  check("started", again.ok);
+  if (!again.ok) return;
+  const earlier = again.project.found.find((f) => f.source === "Your earlier project");
+  check("their own earlier bedtime game is found first", earlier?.title === "a bedtime adventure game", again.project.found);
+  check("…with the links its finished steps delivered", (earlier?.links ?? []).includes("https://preview.example/game"), earlier);
+  check("…and handed to the agents in the first brief", /Your earlier project: "a bedtime adventure game"/.test((await board.getMission((await ids(again.jobId, "s1")).missionId))?.constraints ?? ""));
+  check("another person's project is never searched", !again.project.found.some((f) => /lullaby/i.test(f.title)), again.project.found);
+
   console.log("listing and privacy:");
   const mine = await listCodeProjects(sql, user);
-  check("the owner's list has the six projects", mine.length === 6, mine.length);
-  check("a stranger sees none of them", (await listCodeProjects(sql, stranger)).length === 0);
+  check("the owner's list has their nine projects", mine.length === 9, mine.length);
+  check("a stranger sees only their own", (await listCodeProjects(sql, stranger)).map((p) => p.making).join() === "a bedtime dragon lullaby app");
   check("a stranger can't read one", (await readCodeProject(sql, stranger, g)) === null);
   check("reading twice changes nothing more", JSON.stringify(await states(g)) === JSON.stringify(await states(g)));
 }

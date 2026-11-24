@@ -4,6 +4,9 @@
  * Pins the rules that must never drift: the model can raise caution but never
  * lower it, vague checks are refused, slices are end-to-end and acyclic, and the
  * brief a worker gets carries the guardrails and the proof to bring back.
+ * And the owner's "new way forward" (2026-11-23): the budget only ever comes from the
+ * owner's own words, it sets how hard agents look and how many versions they try, it
+ * is counted once per delivery, and briefs start from the why and look first.
  * Run: npx tsx scripts/test-code-monkey.ts
  */
 import {
@@ -24,7 +27,27 @@ import {
   authorizedByWords,
   providerOf,
   reviewIsIndependent,
+  codeRequestThread,
+  lookFirstNote,
+  codeMonkeyGuide,
+  codeProjectNeedsBudgetMessage,
+  argsToProject,
+  START_CODE_PROJECT_TOOL,
 } from "../src/lib/buzzy/codeMonkey";
+import {
+  BUDGET_QUESTION,
+  amountsIn,
+  askedForBudget,
+  budgetChoices,
+  budgetView,
+  countDelivery,
+  deliveryCents,
+  effortFor,
+  emptySpend,
+  money,
+  settleBudget,
+  addToBudget,
+} from "../src/lib/buzzy/budget";
 
 let failures = 0;
 function check(label: string, condition: boolean, detail?: string) {
@@ -91,6 +114,8 @@ check("too short is vague", isVagueCheck("works"));
 console.log("result card:");
 const card = normalizeCard({
   making: "  a bedtime adventure game  ",
+  why: "a calm, fun ten minutes with my kids before lights out",
+  walls: ["Plays on the iPad without installing anything"],
   forWhom: "me and my two kids (8 and 10)",
   outcome: "we play a 10-minute story together before lights out",
   doneWhen: ["The kids can pick a hero and start a story on the iPad", { text: "A story ends in under 10 minutes" }, "It looks professional"],
@@ -159,6 +184,94 @@ check("…and it waits for the review and the owner's go", /owner says go ahead/
 const authorizedBrief = missionBrief({ ...card, stakes: "product" }, oneWay[0], oneWay, "Email my subscribers the news.");
 check("an authorized one-way slice still holds the step until the review passes", /do not run the irreversible step/.test(authorizedBrief.constraints) && /once the independent review passes/.test(authorizedBrief.constraints) && /Email my subscribers/.test(authorizedBrief.constraints));
 check("one-way slice asks for an undo note", /how to undo/.test(oneWayBrief.acceptance));
+
+console.log("the why and the walls:");
+check("the card keeps the why apart from their idea", card.why.startsWith("a calm, fun") && card.making === "a bedtime adventure game");
+check("walls are kept", card.walls.length === 1 && /installing/.test(card.walls[0]));
+check("a card with no why is refused (the model infers one instead of asking)", validateCard({ ...card, why: "" }).some((p) => /why they want it/i.test(p) && /infer it/.test(p)));
+const whyBrief = missionBrief(card, settled[0], settled, null, { budget: { cents: 500, source: "your words", words: "under $5", setAt: "" }, effort: effortFor(500), found: [] });
+check("the brief starts from the why, and their idea is not a spec", /Why they want it: a calm, fun/.test(whyBrief.context) && /starting point, not a specification/.test(whyBrief.context));
+check("walls lead the guardrails, the budget first", /Walls \(hard limits — never cross them\):\n- The whole project may cost at most \$5/.test(whyBrief.constraints) && /installing anything/.test(whyBrief.constraints), whyBrief.constraints);
+check("agents report what a delivery cost", /Report what your delivery cost/.test(whyBrief.constraints));
+check("questions to the owner are never about technology", /never about technology/.test(brief.constraints));
+
+console.log("look first:");
+check("a first step looks on BeeZilla, then the world within the budget, then borrows", /Look first/.test(whyBrief.constraints) && /up to 100 searches across 2/.test(whyBrief.constraints) && /checking each license/.test(whyBrief.constraints));
+check("nothing found says so", /Nothing on BeeZilla fits yet/.test(whyBrief.constraints));
+const note = lookFirstNote([{ source: "Your earlier project", title: "Fox game", about: "made for bedtime", links: ["https://x.example/fox"] }], effortFor(200));
+check("found work is listed with its links", /Your earlier project: "Fox game" — made for bedtime \(https:\/\/x\.example\/fox\)/.test(note), note);
+check("searches stay in the last three months for AI", /last three months/.test(note));
+check("a later step borrows rather than searching again", /Borrow before you build: reuse what earlier steps found/.test(brief.constraints) && !/Look first/.test(brief.constraints));
+const many = missionBrief(card, settled[0], settled, null, { effort: effortFor(5000), found: [] });
+check("a $50 budget tries 3 versions before settling", /make 3 quick, genuinely different versions/.test(many.constraints) && /their own idea/.test(many.constraints));
+check("a $5 budget doesn't", !/genuinely different versions/.test(whyBrief.constraints));
+
+console.log("the budget question:");
+check("the wording matches one mode's, word for word", BUDGET_QUESTION === "How much should I spend on this, at most? I'll keep my work under that amount.");
+check("play answers: $2 / $5 / $20, the middle suggested", budgetChoices("play").map((c) => c.label).join(" | ") === "$2 — a quick try | $5 — a solid start | $20 — lots of care" && budgetChoices("play")[1].suggested);
+check("product and critical answers scale up", budgetChoices("product").map((c) => c.dollars).join() === "20,50,200" && budgetChoices("critical").map((c) => c.dollars).join() === "100,200,1000");
+check("a reply that asked it is recognised", askedForBudget("Happy to! " + BUDGET_QUESTION) && !askedForBudget("How much time do you have?"));
+check("the guide tells the model to ask it with the answers", /How much should I spend on this/.test(codeMonkeyGuide("product")) && /\$50 — a solid start \(suggested\)/.test(codeMonkeyGuide("product")));
+check("the guide keeps questions to the why and hard limits", /never about features or technology/.test(codeMonkeyGuide("play")));
+check("a refusal for want of a budget says what to ask", /How much should I spend/.test(codeProjectNeedsBudgetMessage("play", "missing")) && /budgetDollars/.test(codeProjectNeedsBudgetMessage("play", "missing")));
+const schema = START_CODE_PROJECT_TOOL.function.parameters;
+check("the tool requires the why and the budget", (schema.required as readonly string[]).includes("why") && (schema.required as readonly string[]).includes("budgetDollars"));
+check("the budget is split from the card", argsToProject({ making: "x", budgetDollars: 5, slices: [] }).budgetDollars === 5 && !("budgetDollars" in argsToProject({ making: "x", budgetDollars: 5 }).card));
+
+console.log("reading amounts — only the owner's own words count:");
+const cents = (t: string, o?: Parameters<typeof amountsIn>[1]) => amountsIn(t, o).map((a) => a.cents).join(",");
+check("$5, $1,000, $2.50, $2k", cents("$5") === "500" && cents("$1,000") === "100000" && cents("$2.50") === "250" && cents("$2k") === "200000");
+check("20 dollars, 50 bucks, USD 30", cents("20 dollars") === "2000" && cents("50 bucks") === "5000" && cents("USD 30") === "3000");
+check("words: twenty-five bucks, a hundred dollars", cents("twenty-five bucks") === "2500" && cents("a hundred dollars") === "10000");
+check("'my budget is 15' counts; '3 kids and 20 minutes' doesn't", cents("my budget is 15") === "1500" && cents("I have 3 kids and 20 minutes") === "");
+check("$20 USD is one amount", cents("$20 USD") === "2000");
+check("answers: '5', 'let's do 20', 'option 3', 'the middle one', 'five'",
+  cents("5", { answer: true, stakes: "play" }) === "500" && cents("let's do 20", { answer: true }) === "2000" &&
+  cents("option 3", { answer: true, stakes: "play" }) === "2000" && cents("the middle one", { answer: true, stakes: "product" }) === "5000" &&
+  cents("five", { answer: true, stakes: "play" }) === "500");
+check("'20 minutes' is not an answer", cents("20 minutes", { answer: true, stakes: "play" }) === "");
+check("a budget word marks the amount: 'keep it under $5', '$20 max', 'spend up to $40'", amountsIn("keep it under $5")[0]?.cued && amountsIn("$20 max")[0]?.cued && amountsIn("spend up to $40")[0]?.cued);
+check("a price of the thing being made is not marked: 'lemonade costs $2.50'", !amountsIn("lemonade costs $2.50")[0]?.cued);
+const ok5 = settleBudget({ words: "Build a game, keep it under $5.", stakes: "play" });
+check("their marked amount settles it, in their words", ok5.ok && ok5.budget.cents === 500 && ok5.budget.source === "your words" && ok5.budget.words === "Build a game, keep it under $5.");
+check("the model's reading must be an amount they said", (() => { const r = settleBudget({ words: "under $5", stakes: "play", modelDollars: 50 }); return !r.ok && r.reason === "not-their-words"; })());
+check("no amount at all: ask", (() => { const r = settleBudget({ words: "Build a game", stakes: "play" }); return !r.ok && r.reason === "missing"; })());
+check("an unmarked price alone is never taken as the budget", (() => { const r = settleBudget({ words: "a lemonade game where lemonade costs $2.50", stakes: "play" }); return !r.ok && r.reason === "ambiguous"; })());
+check("…but the model can say it is (when they did mean it)", settleBudget({ words: "Do it for $2.50", stakes: "play", modelDollars: 2.5 }).ok);
+check("their answer settles it as 'your answer'", (() => { const r = settleBudget({ words: "Build a game", answer: "the middle one", stakes: "play", modelDollars: 5 }); return r.ok && r.budget.source === "your answer" && r.budget.cents === 500; })());
+check("under $1 is too small", (() => { const r = settleBudget({ words: "keep it under $0.50", stakes: "play" }); return !r.ok && r.reason === "too-small"; })());
+check("over $100,000 is checked with them", (() => { const r = settleBudget({ words: "spend up to $500,000", stakes: "critical" }); return !r.ok && r.reason === "too-large"; })());
+check("money reads naturally", money(500) === "$5" && money(120) === "$1.20" && money(100000) === "$1,000");
+
+console.log("what the budget buys:");
+const e = (d: number) => { const x = effortFor(d * 100); return `${x.searches}/${x.areas}/${x.versions}`; };
+check("$2 → 40 searches, 1 area, 1 version", e(2) === "40/1/1", e(2));
+check("$5 → 100 searches, 2 areas, 1 version", e(5) === "100/2/1", e(5));
+check("$50 → 1,000 searches, 10 areas, 3 versions", e(50) === "1000/10/3", e(50));
+check("$500 → the write-up's full 1,000 searches in each of 10 areas", e(500) === "10000/10/33", e(500));
+check("never more than 10,000 searches or 50 versions", e(5000) === "10000/10/50", e(5000));
+
+console.log("counting what was spent:");
+check("a delivery's own estimate counts", deliveryCents({ estimatedUsd: 0.42 }).cents === 42);
+check("tokens count at the default price", deliveryCents({ tokensIn: 1_000_000, tokensOut: 100_000 }).cents === 450);
+check("no cost reported → the floor (an agent can't run free past the limit)", deliveryCents(null).cents === 50 && !deliveryCents(null).reported);
+const sp = emptySpend();
+check("a delivery is counted once", countDelivery(sp, "m1", "done", { estimatedUsd: 1 }) && !countDelivery(sp, "m1", "done", { estimatedUsd: 1, model: "x" } as never) && sp.usedCents === 100);
+check("…however the board shapes the usage when it reads it back", !countDelivery(sp, "m1", "done", { tokensIn: undefined, estimatedUsd: 1 }) && sp.usedCents === 100);
+check("a redo is a new delivery", countDelivery(sp, "m1", "done again", { estimatedUsd: 1 }) && sp.usedCents === 200);
+const b = { cents: 500, source: "your words" as const, words: "$5", setAt: "" };
+check("under the limit: work goes on", budgetView(b, { usedCents: 100, counted: {}, unreported: 0 })?.verdict === "allow");
+check("close to it: new work waits for a tap", budgetView(b, { usedCents: 460, counted: {}, unreported: 0 })?.verdict === "ask");
+check("at it: nothing new starts", budgetView(b, { usedCents: 500, counted: {}, unreported: 0 })?.verdict === "refuse");
+check("the line reads '$1.20 of $5 used'", budgetView(b, { usedCents: 120, counted: {}, unreported: 0 })?.line === "$1.20 of $5 used");
+const bb = { ...b };
+check("only the owner's top-up raises it, within range", addToBudget(bb, 500) && bb.cents === 1000 && !addToBudget(bb, 10) && bb.cents === 1000);
+check("projects from before budgets have none", budgetView(undefined, undefined) === null);
+
+console.log("Talk: the request thread:");
+check("the thread starts at the message that asked for software", codeRequestThread(["write a poem", "build me a tip calculator app", "$5"])?.join("|") === "build me a tip calculator app|$5");
+check("an unrelated earlier request is left out (its words authorize nothing here)", !codeRequestThread(["publish my poem", "build me a game", "$5"])!.includes("publish my poem"));
+check("no software asked for: no thread", codeRequestThread(["write a poem", "$5"]) === null);
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
