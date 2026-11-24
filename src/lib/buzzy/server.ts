@@ -382,6 +382,25 @@ export function toolSkillTitle(name: string): string {
   return TOOL_SKILL_NAMES[n] || n.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
 
+/**
+ * One step of a turn, as the Idea Board draws it.
+ *
+ * The board is not decoration: it is how the person sees what the agent read and
+ * what it is doing while it does it, so they can change the process. Every step
+ * is named by a stable id, so the same skill used twice is one card.
+ */
+export interface FlowStep {
+  kind: "agent" | "memory" | "skill" | "output";
+  id: string;
+  title: string;
+  detail?: string;
+  /** The card this one hangs from (agent.md for a skill, the skill for an output). */
+  parent?: string;
+  state?: "running" | "done" | "failed";
+  url?: string;
+  contentType?: string;
+}
+
 /** Per-turn latency breakdown. Product metric — surfaced to the client and
  *  written to buzzy_voice_metrics so "it feels slow" becomes a number. */
 export interface TurnTimings {
@@ -1213,6 +1232,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // A command for the page ("add a step called draw the poster") makes nothing itself.
   if (!lockdown && !appPlan && !wants3d && !wantsVideo && isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
+    req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "running", detail: brief.slice(0, 240) });
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
       ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
@@ -1271,6 +1291,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "sentences and stop.";
     } else if (!made.ok) {
       musicRefusal = { code: String(made.code ?? "music_failed"), error: String(made.error ?? "unknown error") };
+      req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "failed", detail: String(made.error ?? "no audio came back").slice(0, 240) });
       messages[0]!.content +=
         `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
         "Tell the owner this exact reason. Do not claim any audio exists.";

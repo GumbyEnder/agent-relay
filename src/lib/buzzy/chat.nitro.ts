@@ -44,6 +44,8 @@ import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRec
 import { boardBuildResponse, readBuildRequest } from "./boardOrchestrator";
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import type { VoiceHandlers } from "./voice";
+import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
+import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
@@ -1652,6 +1654,81 @@ export default defineEventHandler(async (event) => {
     return { ok: false, error: "Use GET, POST or DELETE.", code: "method_not_allowed" };
   }
 
+  // ── /api/buzzy/board-recipes — recipes made from a whiteboard selection ──
+  // Select a part of the board and "Create recipe" turns it into something the
+  // person can run again; the graph is cleaned and capped in boardRecipes.ts.
+  if (path === "/api/buzzy/board-recipes" || path.startsWith("/api/buzzy/board-recipes/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const id = path.startsWith("/api/buzzy/board-recipes/") ? decodeURIComponent(path.split("/").pop() || "") : "";
+    if (method === "GET" && !id) return { ok: true, recipes: await listBoardRecipes(sql, user.id) };
+    if (method === "POST" && !id) {
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await event.req.json()) as Record<string, unknown>;
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { name, graph }.", code: "bad_json" };
+      }
+      const saved = await saveBoardRecipe(sql, user.id, body);
+      if (!saved.ok) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: saved.error, code: "bad_recipe" };
+      }
+      return { ok: true, recipe: saved.recipe };
+    }
+    if (method === "DELETE" && id) {
+      const gone = await deleteBoardRecipe(sql, user.id, id);
+      if (!gone) setResponseStatus(event, 404);
+      return { ok: gone };
+    }
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET, POST or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── /api/buzzy/whiteboards/:id — the Talk page's board, kept in the account ──
+  // The board follows the person to any computer, with a history to go back to.
+  // Only the person's own boards; whiteboards.ts has the rules (GET/PUT the
+  // board, GET its versions, POST versions/:vid/restore). The page keeps its own
+  // localStorage copy as the buffer while the account cannot be reached.
+  if (path.startsWith("/api/buzzy/whiteboards/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let body: unknown = undefined;
+    if (method === "PUT" || method === "POST") {
+      const tooBig = () => {
+        setResponseStatus(event, 413);
+        return { ok: false, error: `A board saved to your account is up to ${WHITEBOARD_MAX_BYTES / 1048576} MB. Remove a few cards, then it saves again.`, code: "too_big" };
+      };
+      if (Number(getHeader(event, "content-length") || 0) > WHITEBOARD_MAX_REQUEST_BYTES) return tooBig();
+      let raw = "";
+      try {
+        raw = await event.req.text();
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "The board could not be read.", code: "bad_body" };
+      }
+      if (new TextEncoder().encode(raw).length > WHITEBOARD_MAX_REQUEST_BYTES) return tooBig();
+      try {
+        body = raw ? JSON.parse(raw) : {};
+      } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { state, baseRev }.", code: "bad_json" };
+      }
+    }
+    const sql = await getSql();
+    const out = await whiteboardRoute(sql, user.id, method, path.slice("/api/buzzy/whiteboards/".length), body);
+    setResponseStatus(event, out.status);
+    return out.body;
+  }
+
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
   if (method === "POST" && path === "/api/buzzy/chat") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
@@ -1706,6 +1783,12 @@ export default defineEventHandler(async (event) => {
     const voice = body.voice === true;
     const voiceName = typeof body.voiceName === "string" ? body.voiceName.trim().slice(0, 24) : undefined;
     const surface: "text" | "voice" = voice ? "voice" : "text";
+    // The person's edits on the Idea Board ride the message as instructions
+    // (voice-stage.js window.bzBoardInstructions). Capped in chatLoop.
+    const boardInstructions: string | undefined =
+      typeof body.boardInstructions === "string" && body.boardInstructions.trim()
+        ? body.boardInstructions.slice(0, 20000)
+        : undefined;
 
     const sql = await getSql();
 

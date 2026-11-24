@@ -68,7 +68,11 @@ const child = spawn(process.execPath, [".output/server/index.mjs"], {
     HOST: "127.0.0.1",
     NODE_ENV: "production",
     BZ_RUNTIME: "local",
-    BZ_RUNTIME_TOKEN: TOKEN,
+    // The token the runtime actually gates on is BZ_LOCAL_TOKEN (scripts/
+    // beezilla-local.mjs sets it; local-owner.ts reads it). This used to say
+    // BZ_RUNTIME_TOKEN, a name no code reads, so every smoke run was an ungated
+    // runtime and "the request carried the token" was not being tested at all.
+    BZ_LOCAL_TOKEN: TOKEN,
     BZ_DATA_DIR: join(APP, ".smoke-data"),
     BZ_LOCAL_OWNER_NAME: "Smoke Test",
     BZ_LOCAL_OWNER_EMAIL: "smoke@example.invalid",
@@ -121,6 +125,23 @@ if (!up) {
   fail(`the runtime never listened on 127.0.0.1:${PORT} within 60 s`);
 }
 
+// Writes, and reads that must prove a route is gated, need more than a GET: the
+// board's save is a PUT with a JSON body, and "401 without the token" is its own
+// check. Every call goes through the same door the window's own fetches do — the
+// per-launch bearer token on the Host allowlist (verify.server.ts → local-owner).
+const request = async (method, path, body, opts = {}) => {
+  const headers = {};
+  if (opts.auth !== false) headers.Authorization = `Bearer ${TOKEN}`;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
+  });
+  return { status: res.status, body: await res.text() };
+};
+
 const get = async (path) => {
   const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     headers: { Authorization: `Bearer ${TOKEN}` },
@@ -130,7 +151,7 @@ const get = async (path) => {
 };
 
 let ok = 0;
-const TOTAL = 7;
+const TOTAL = 10;
 try {
   const health = await get("/api/agent/health");
   if (health.status !== 200) await die(`/api/agent/health -> ${health.status}`);
@@ -237,6 +258,84 @@ try {
     if (!headjs.body.includes(route)) await die(`/buzzy/head-search.js never calls ${route}`);
   }
   console.log(`PASS  #bzHead carries the bar + search, head-search.js answers, #bzPlaces is generated from LINKS`);
+  ok++;
+
+  // CR-12: the Idea Board is on this line now. The board is a surface, not a
+  // decoration: `#obBoard` is the mount, folded (`hidden`) so a visit starts blank,
+  // and `#boardToggle` is the handle voice-stage.js reads for aria-pressed while the
+  // board's controls wait in `#obParking`. Assert the mount exists in the page the
+  // runtime actually serves, then the assets it names — a board whose script 404s
+  // renders as an empty box and reads as "the feature is broken".
+  for (const [what, needle] of [
+    ["the board's mount (#obBoard)", 'id="obBoard"'],
+    ["the board folded at rest", 'class="ob-board hidden"'],
+    ["the board's toggle (#boardToggle)", 'id="boardToggle"'],
+    ["its parking place (#obParking)", 'id="obParking"'],
+    ["the stage's sheet (voice-stage.css)", 'href="/buzzy/voice-stage.css"'],
+    ["the board's sheet (whiteboard.css)", 'href="/buzzy/whiteboard.css"'],
+    ["the player (waveform.js)", 'src="/buzzy/waveform.js"'],
+    ["the board itself (whiteboard.js)", 'src="/buzzy/whiteboard.js"'],
+    ["the stage (voice-stage.js)", 'src="/buzzy/voice-stage.js"'],
+  ]) {
+    if (!talk.body.includes(needle)) await die(`/buzzy/talk has no ${what} — the Idea Board never mounts`);
+  }
+  // Load order is a real dependency: whiteboard.js defines window.BeeZillaWhiteboard,
+  // and voice-stage.js mounts what it defines. Reversed, the stage finds no board.
+  if (!(talk.body.indexOf('src="/buzzy/whiteboard.js"') < talk.body.indexOf('src="/buzzy/voice-stage.js"'))) {
+    await die("/buzzy/voice-stage.js is loaded before /buzzy/whiteboard.js, the board it mounts");
+  }
+  console.log(`PASS  /buzzy/talk mounts the Idea Board (#obBoard, folded) and loads its 2 sheets + 3 scripts in dependency order`);
+  ok++;
+
+  // The assets have to be the real files, not a 200 from a placeholder: each one
+  // publishes the global the next one reads (and the page's own turn hooks).
+  const assets = [];
+  for (const [path, symbol] of [
+    ["/buzzy/whiteboard.js", "window.BeeZillaWhiteboard"],
+    ["/buzzy/voice-stage.js", "window.__bzFlow"],
+    ["/buzzy/waveform.js", "window.BeeZillaWave"],
+  ]) {
+    const asset = await get(path);
+    if (asset.status !== 200) await die(`${path} -> ${asset.status}`);
+    if (!asset.body.includes(symbol)) await die(`${path} answered 200 but never defines ${symbol}`);
+    assets.push(`${path.split("/").pop()} ${asset.body.length} B`);
+  }
+  console.log(`PASS  the board's assets answer 200 and define their globals: ${assets.join(", ")}`);
+  ok++;
+
+  // CR-12: the board follows the person to another computer, so the store has to
+  // answer through the same door the window uses. A save is a PUT naming the
+  // revision it started from; the read must come back with that revision and the
+  // card. And without the runtime token the route is 401 — a board shelf that
+  // answers anyone on the loopback port would be one account's notes served to
+  // whatever else is running on the machine.
+  const BOARD = "/api/buzzy/whiteboards/talk";
+  const anon = await request("GET", BOARD, undefined, { auth: false });
+  if (anon.status !== 401) await die(`${BOARD} without the runtime token -> ${anon.status}, expected 401`);
+  const readBefore = await get(BOARD);
+  if (readBefore.status !== 200) await die(`${BOARD} -> ${readBefore.status} ${readBefore.body.slice(0, 200)}`);
+  const before = JSON.parse(readBefore.body);
+  if (!before.ok) await die(`${BOARD} refused the read: ${readBefore.body.slice(0, 200)}`);
+  const baseRev = before.board && typeof before.board.rev === "number" ? before.board.rev : null;
+  const CARD = { id: "smoke-card", kind: "note", title: "Smoke board", body: "written by desktop/smoke.mjs" };
+  const saved = await request("PUT", BOARD, {
+    state: { v: 2, cards: [CARD], links: [], view: { x: 0, y: 0, z: 1 } },
+    baseRev,
+  });
+  if (saved.status !== 200) await die(`PUT ${BOARD} -> ${saved.status} ${saved.body.slice(0, 300)}`);
+  const savedJson = JSON.parse(saved.body);
+  if (!savedJson.ok || !(savedJson.rev >= 1)) await die(`PUT ${BOARD} returned no revision: ${saved.body.slice(0, 300)}`);
+  const readAfter = await get(BOARD);
+  if (readAfter.status !== 200) await die(`GET ${BOARD} after the save -> ${readAfter.status}`);
+  const board = JSON.parse(readAfter.body).board;
+  if (!board || board.rev !== savedJson.rev) {
+    await die(`the board came back at rev ${board && board.rev}, saved at rev ${savedJson.rev}`);
+  }
+  const cards = (board.state && board.state.cards) || [];
+  if (cards.length !== 1 || cards[0].id !== CARD.id || cards[0].title !== CARD.title) {
+    await die(`the saved card did not come back: ${JSON.stringify(cards).slice(0, 300)}`);
+  }
+  console.log(`PASS  ${BOARD} GET→PUT→GET through the runtime token: rev ${board.rev}, 1 card, 401 without the token`);
   ok++;
 } catch (err) {
   await die(`threw: ${err?.message ?? err}`);
