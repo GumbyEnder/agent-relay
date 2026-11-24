@@ -45,7 +45,14 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Typecheck
-        run: npx tsc -p tsconfig.json --noEmit
+        # `npm run typecheck`, not `npx tsc` directly: the script carries the
+        # pretypecheck hook that runs scripts/sync-private.mjs. `tsc` on its own
+        # skips the hook, so src/lib/private/ is never populated and any file
+        # importing it dies with TS2307 — which is exactly how this job failed
+        # on main's wallet.nitro.ts (`@/lib/private/registry`) while a dev
+        # machine with a synced checkout passed. With no credential the sync
+        # writes the committed .private-stub/, so CI typechecks the public build.
+        run: npm run typecheck
 
       - name: Build runtime
         run: npm run build
