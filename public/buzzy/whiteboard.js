@@ -53,6 +53,7 @@
  *   board.addCard(card)     // a file, a note, anything
  *   board.addGraph(graph)   // a saved recipe, back on the board to edit or run
  *   board.instructions()    // the person's own edits, sent with their next message
+ *   board.orchestrate(words) // BeeZilla builds an orchestration here, live (see below)
  *   board.dock / board.side // slots the page fills: the Talk bar and the conversation
  *
  * One board per conversation, saved to the person's account so it follows them to any
@@ -123,6 +124,15 @@
     if (text != null) n.textContent = text;
     return n;
   }
+  // Orchestration cards (owner, 2026-11-24: orchestrate "on the normal whiteboard").
+  ICONS.start = "M8 5v14l11-7z";
+  ICONS.tool = "M14.7 6.3a4 4 0 00-5.2 5.2L3.8 17.2a1.6 1.6 0 002.3 2.3l5.7-5.7a4 4 0 005.2-5.2l-2.4 2.4-2.2-.5-.5-2.2z";
+  ICONS.decision = "M12 3l9 9-9 9-9-9z";
+  ICONS.parallel = "M3 12h5M8 12c2.5 0 3-5 6-5h6M8 12c2.5 0 3 5 6 5h6M8 12h12";
+  ICONS.loop = "M4 12a8 8 0 0113.7-5.6M20 4v5h-5M20 12a8 8 0 01-13.7 5.6M4 20v-5h5";
+  ICONS.approval = "M12 21a9 9 0 100-18 9 9 0 000 18zM8 12.5l2.7 2.7L16.5 9.3";
+  ICONS.trigger = "M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3.5 2";
+  ICONS.subflow = "M3 3h12v12H3zM9 9h12v12H9z";
   function uid() { return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function typingInto(t) {
@@ -408,12 +418,16 @@
     document.addEventListener("drop", function () { setTimeout(dragDone, 0); }, true);
     document.addEventListener("dragleave", function (e) { if (incoming && incoming.files && !e.relatedTarget) incoming = null; }, true);
   }
+  // The cards of an orchestration (orchestration.ts BOARD_FLOW_KINDS): a skill is an
+  // agent step and an end result is the end, as before; these are the rest of a flow.
+  var FLOW = { start: 1, tool: 1, decision: 1, parallel: 1, loop: 1, approval: 1, trigger: 1, subflow: 1 };
 
   // What a card is, from whatever the source called it.
   function kindOf(c) {
     var k = String(c.kind || "").toLowerCase();
     if (k === "area" || k === "sketch" || k === "person" || k === "api" || k === "browser") return k;
     if (k === "agent" || k === "skill" || k === "memory" || k === "note" || k === "chat") return k;
+    if (FLOW[k]) return k;
     var name = String(c.title || c.url || "").toLowerCase();
     var t = String(c.contentType || "").toLowerCase();
     if (k === "photo" || k === "image" || /^image\//.test(t) || /\.(png|jpe?g|gif|webp|svg|avif)$/.test(name)) return "image";
@@ -435,12 +449,18 @@
   var ROLE = { agent: "agent", skill: "skill", memory: "skill", note: "note", chat: "chat", area: "area", person: "person", api: "node", browser: "node" };
   var CHAT_ID = "chat";
   function roleOf(kind) { return ROLE[kind] || "output"; }
+  Object.keys(FLOW).forEach(function (k) { ROLE[k] = "flow"; });
   var GLYPH = { document: "W", sheet: "E", slides: "P", pdf: "PDF" };
   var KIND_LABEL = {
     agent: "Core identity", skill: "Skill", memory: "Memory", note: "Note", chat: "Conversation", image: "Picture", track: "Music",
     model: "3D model", video: "Video", document: "Document", sheet: "Spreadsheet", slides: "Slides", pdf: "PDF", file: "File",
     area: "Area", sketch: "Drawing", person: "Who it serves", api: "API use", browser: "Browser use",
   };
+  var FLOW_LABEL = {
+    start: "Start", tool: "Tool", decision: "Decision", parallel: "At the same time", loop: "Repeat",
+    approval: "Approval", trigger: "When", subflow: "Orchestration",
+  };
+  Object.keys(FLOW_LABEL).forEach(function (k) { KIND_LABEL[k] = FLOW_LABEL[k]; });
 
   // ── Saving: this browser at once, then the person's account ───────────────
   //
@@ -510,7 +530,20 @@
     var o = { id: l.id, from: l.from, to: l.to };
     if (l.fc) o.fc = l.fc;
     if (l.tc) o.tc = l.tc;
+    if (l.label) o.label = l.label;
+    // From the Orchestrate editor: which port and under what condition (a round trip keeps them).
+    if (l.fp) o.fp = l.fp;
+    if (l.tp) o.tp = l.tp;
+    if (l.cond) o.cond = l.cond;
     return o;
+  }
+  // One line per pair of cards, either way round: a second drag onto the same card does
+  // nothing. A line that SAYS something ("yes", "approved", "again") is its own line, one
+  // way only: a flow needs "again" back into a loop that already leads to the step.
+  function pairKey(l) {
+    var label = String(l.label || "").trim().toLowerCase();
+    if (label) return l.from + ">" + l.to + ">" + label;
+    return l.from < l.to ? l.from + "|" + l.to : l.to + "|" + l.from;
   }
   function contentOf(s) { return { cards: (s && s.cards) || [], links: ((s && s.links) || []).map(linkOut) }; }
   function sigOf(s) { return canon(contentOf(s)); }
@@ -609,7 +642,7 @@
       return l;
     }).filter(function (l) {
       if (!have[l.from] || !have[l.to] || l.from === l.to) return false;
-      var k = l.from < l.to ? l.from + "|" + l.to : l.to + "|" + l.from;
+      var k = pairKey(l);
       if (pairs[k]) return false;
       pairs[k] = 1;
       return true;
@@ -651,16 +684,20 @@
     }
     added.forEach(function (c) { cards.push(c); });
     var pairs = {};
-    links.forEach(function (l) { pairs[l.from < l.to ? l.from + "|" + l.to : l.to + "|" + l.from] = 1; });
+    links.forEach(function (l) { pairs[pairKey(l)] = 1; });
     (from.links || []).forEach(function (l0) {
       var a = map[l0.from], b = map[l0.to];
       if (!a || !b || a === b) return;
-      var k = a < b ? a + "|" + b : b + "|" + a;
+      var k = pairKey({ from: a, to: b, label: l0.label });
       if (pairs[k]) return;
       pairs[k] = 1;
       var l = { id: uid(), from: a, to: b };
       if (l0.fc) l.fc = l0.fc;
       if (l0.tc) l.tc = l0.tc;
+      if (l0.label) l.label = l0.label;
+      if (l0.fp) l.fp = l0.fp;
+      if (l0.tp) l.tp = l0.tp;
+      if (l0.cond) l.cond = l0.cond;
       links.push(l);
     });
     return { cards: cards, links: links };
@@ -1243,10 +1280,60 @@
       lines.push("Also on the board:");
       Array.prototype.push.apply(lines, also);
     }
-    var text = lines.join("\n").slice(0, feeds.length ? BOARD_TEXT_MAX : 4000);
+    // An orchestration on the board (a start, decisions, approvals…): the plan the person
+    // had laid out, card by card with where each line goes. Last, after what is only there
+    // to see, and said to be a plan: its words came from BeeZilla, so they are not the
+    // person's instructions word for word (cards they write themselves still are, above).
+    var flow = flowText(order, links);
+    if (flow.length) {
+      if (lines.length) lines.push("");
+      lines.push("The orchestration on the board, in order — the plan they had laid out here; follow it when they ask you to run it or do this work (each card, then where its lines go):");
+      Array.prototype.push.apply(lines, flow);
+    }
+    var text = lines.join("\n").slice(0, feeds.length || flow.length ? BOARD_TEXT_MAX : 4000);
     return pictures.length ? "[[board-pictures: " + pictures.join(",") + "]]\n" + text : text;
   }
   var BOARD_TEXT_MAX = 7800;
+  // The flow part of compile(): only on a board that has orchestration cards, so a
+  // board of steps and pictures reads exactly as before.
+  function flowText(cards, links) {
+    var list = (cards || []).filter(Boolean);
+    if (!list.some(function (c) { return FLOW[kindOf(c)]; })) return [];
+    var inFlow = list.filter(function (c) {
+      var k = kindOf(c);
+      return FLOW[k] || k === "skill" || k === "memory" || (k === "document" && !c.url && !c.contentType);
+    });
+    var byId = {};
+    inFlow.forEach(function (c) { byId[c.id] = c; });
+    var outs = {}, ins = {};
+    (links || []).forEach(function (l) {
+      if (!l || !byId[l.from] || !byId[l.to]) return;
+      (outs[l.from] = outs[l.from] || []).push(l);
+      if (!/^(?:again|back)$/i.test(String(l.label || "").trim())) ins[l.to] = true;
+    });
+    // In the order the work happens: from what nothing leads into, along the lines.
+    var order = [], seen = {};
+    var queue = inFlow.filter(function (c) { return !ins[c.id]; }).sort(byPlace).map(function (c) { return c.id; });
+    while (queue.length) {
+      var id = queue.shift();
+      if (seen[id]) continue;
+      seen[id] = true;
+      order.push(byId[id]);
+      (outs[id] || []).forEach(function (l) { if (!seen[l.to]) queue.push(l.to); });
+    }
+    inFlow.sort(byPlace).forEach(function (c) { if (!seen[c.id]) order.push(c); });
+    var name = function (c) { return "“" + String(c.title || KIND_LABEL[kindOf(c)] || "Untitled").replace(/\s+/g, " ").trim().slice(0, 60) + "”"; };
+    return order.slice(0, 40).map(function (c) {
+      var k = kindOf(c);
+      var label = k === "skill" || k === "memory" ? "Step" : roleOf(k) === "output" ? "End result" : KIND_LABEL[k];
+      var body = String(c.body || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      var to = (outs[c.id] || []).map(function (l) {
+        var said = String(l.label || "").replace(/\s+/g, " ").trim().slice(0, 30);
+        return (said ? said + ": " : "") + name(byId[l.to]);
+      });
+      return "- " + label + " " + name(c) + (body ? ": " + body : "") + (to.length ? " → " + to.join("; ") : "");
+    });
+  }
   var ASSET_URL = /^\/api\/buzzy\/assets\/(\d{1,12})(?:[/?#]|$)/;
   var MADE_NAME = /^(?:art|music|video|model|model3d|clip|track)-\d{4}-\d\d-\d\d/i;
   function byPlace(a, b) { return a.x - b.x || a.y - b.y; }
@@ -1288,7 +1375,7 @@
     if (String(c.kind || "") === "chat") return true;
     var k = kindOf(c);
     if (k === "area" || k === "sketch" || k === "person") return false;
-    return k === "agent" || k === "skill" || k === "memory" || (roleOf(k) === "output" && !c.url && !c.contentType);
+    return k === "agent" || k === "skill" || k === "memory" || !!FLOW[k] || (roleOf(k) === "output" && !c.url && !c.contentType);
   }
   function inArea(area, c) {
     if (!c || c === area || c.id === area.id || kindOf(c) === "area") return false;
@@ -1819,6 +1906,19 @@
       if (area) openSell(area.id);
     });
     selbar.appendChild(selSellBtn);
+    // The flow in what is selected, in the Orchestrate editor (validator, Mermaid, save).
+    var orchBtn = el("button", "wb-selbtn wb-orch-btn");
+    orchBtn.type = "button";
+    orchBtn.appendChild(icon("subflow"));
+    orchBtn.appendChild(el("span", null, "Open in Orchestrate"));
+    orchBtn.title = "Open this flow in the Orchestrate editor: check it, export it, save it";
+    orchBtn.setAttribute("aria-label", "Open in Orchestrate");
+    orchBtn.hidden = true;
+    orchBtn.addEventListener("click", function () {
+      var r = openInOrchestrate(state.cards.filter(function (c) { return selected[c.id]; }));
+      if (!r.ok) say(r.note, 4200);
+    });
+    selbar.appendChild(orchBtn);
     var removeBtn = el("button", "wb-selbtn");
     removeBtn.type = "button";
     removeBtn.appendChild(icon("trash"));
@@ -2225,6 +2325,16 @@
       if (c.state === "running") top.appendChild(el("span", "wb-badge wb-badge-run", "Working"));
       else if (c.state === "failed") top.appendChild(el("span", "wb-badge wb-badge-fail", "Didn't work"));
       n.appendChild(top);
+      // An orchestration card shows its own type's icon.
+      if (FLOW[k] && top.firstChild) top.replaceChild(icon(k, "wb-cico"), top.firstChild);
+      // An end result that is still a description (no file yet) reads as the end of the
+      // flow, not as a Word file: its own label and flag, no document glyph.
+      if (k === "document" && !c.url && !c.contentType) {
+        n.classList.add("wb-end");
+        var endLabel = top.querySelector(".wb-ckind");
+        if (endLabel) endLabel.textContent = "End result";
+        if (top.firstChild) top.replaceChild(icon("output", "wb-cico"), top.firstChild);
+      }
       // "agent.md" means nothing to most people (owner, 2026-11-20): it reads Core identity.
       n.appendChild(el("span", "wb-name", k === "agent" && /^agent\.?md$/i.test(String(c.title || "")) ? "Core identity" : (c.title || "Untitled")));
       if (k === "image" && c.url) {
@@ -2266,6 +2376,8 @@
       } else if ((k === "agent" || k === "skill" || k === "note" || k === "person") && !c.body) {
         n.appendChild(el("p", "wb-body-text wb-empty", "Double-click to write it."));
       }
+      // An orchestration card's words (a decision's question, an approval's ask…).
+      if (FLOW[k] && c.body) n.appendChild(el("p", "wb-body-text", c.body));
       if (c.state === "failed" && c.err) n.appendChild(el("p", "wb-err", c.err));
       keep.forEach(function (x) { n.appendChild(x); });
       if (!keep.length) {
@@ -2433,6 +2545,8 @@
       if (n === 0) { namer.hidden = true; recipeBtn.hidden = false; }
       selCount.textContent = n === 1 ? "1 card" : n + " cards";
       areaBtn.hidden = !state.cards.some(function (c) { return selected[c.id] && kindOf(c) !== "area"; });
+      // Shown when what is selected is part of a flow (a step joined to an approval counts).
+      orchBtn.hidden = !n || !flowAround(withAreaContents(state.cards.filter(function (c) { return selected[c.id]; }))).some(function (c) { return FLOW[kindOf(c)]; });
       positionSelbar();
     }
     function positionSelbar() {
@@ -2672,12 +2786,17 @@
     }
 
     // ── Lines ────────────────────────────────────────────────────────────
-    function link(fromId, toId, fc, tc, flowLink) {
-      var dup = state.links.some(function (l) { return (l.from === fromId && l.to === toId) || (l.from === toId && l.to === fromId); });
+    function link(fromId, toId, fc, tc, flowLink, label, ports) {
+      var key = pairKey({ from: fromId, to: toId, label: label });
+      var dup = state.links.some(function (l) { return pairKey(l) === key; });
       if (dup) return null;
       var l = { id: uid(), from: fromId, to: toId };
       if (fc) l.fc = fc;
       if (tc) l.tc = tc;
+      if (label) l.label = String(label).slice(0, 40);
+      if (ports && ports.fp) l.fp = String(ports.fp).slice(0, 12);
+      if (ports && ports.tp) l.tp = String(ports.tp).slice(0, 12);
+      if (ports && ports.cond) l.cond = String(ports.cond).slice(0, 500);
       if (flowLink) l.fresh = true;
       state.links.push(l);
       drawLinks();
@@ -2710,6 +2829,43 @@
       var dx = Math.max(40, Math.abs(q.x - p.x) * 0.5);
       return "M" + p.x + "," + p.y + " C" + (p.x + dx) + "," + p.y + " " + (q.x - dx) + "," + q.y + " " + q.x + "," + q.y;
     }
+    // A flow line that goes back ("again" into a loop, or any line that says something
+    // and points left) runs under both cards, so it reads as going round, not across.
+    function goesBack(l, a, b) {
+      if (!l.label) return false;
+      var na = nodes[a.id], nb = nodes[b.id];
+      return b.x + (nb ? nb.offsetWidth : 210) / 2 < a.x + (na ? na.offsetWidth : 210) / 2;
+    }
+    function backCurve(a, b) {
+      var p = portXY(a), q = inXY(b);
+      var na = nodes[a.id], nb = nodes[b.id];
+      var low = Math.max(a.y + (na ? na.offsetHeight : 120), b.y + (nb ? nb.offsetHeight : 120)) + 46;
+      return "M" + p.x + "," + p.y + " C" + (p.x + 70) + "," + p.y + " " + (p.x + 70) + "," + low + " " + (p.x - 10) + "," + low +
+        " L" + (q.x + 10) + "," + low + " C" + (q.x - 70) + "," + low + " " + (q.x - 70) + "," + q.y + " " + q.x + "," + q.y;
+    }
+    // What a line says ("yes", "approved", "again"), on a small pill at its middle.
+    function lineLabel(path, l, sel) {
+      try {
+        var mid = path.getPointAtLength(path.getTotalLength() / 2);
+        var g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "wb-llabel" + (sel ? " wb-sel" : ""));
+        var box = document.createElementNS(SVGNS, "rect");
+        var t = document.createElementNS(SVGNS, "text");
+        t.textContent = String(l.label).slice(0, 40);
+        t.setAttribute("x", String(mid.x));
+        t.setAttribute("y", String(mid.y + 4));
+        t.setAttribute("text-anchor", "middle");
+        g.appendChild(box);
+        g.appendChild(t);
+        svg.appendChild(g);
+        var w = (t.getComputedTextLength ? t.getComputedTextLength() : String(l.label).length * 7) + 16;
+        box.setAttribute("x", String(mid.x - w / 2));
+        box.setAttribute("y", String(mid.y - 10));
+        box.setAttribute("width", String(w));
+        box.setAttribute("height", "20");
+        box.setAttribute("rx", "10");
+      } catch (_) { /* not laid out yet: drawn on the next pass */ }
+    }
     // What lights up: everything feeding the one step that is selected.
     function litFor() {
       var ids = Object.keys(selected);
@@ -2717,7 +2873,7 @@
       return c && isStep(c) ? upstreamOf(c.id, state.cards, state.links) : { cards: {}, links: {} };
     }
     function drawLinks() {
-      Array.prototype.slice.call(svg.querySelectorAll(".wb-link:not(.wb-preview), .wb-hit")).forEach(function (p) { p.remove(); });
+      Array.prototype.slice.call(svg.querySelectorAll(".wb-link:not(.wb-preview), .wb-hit, .wb-llabel")).forEach(function (p) { p.remove(); });
       var lit = litFor();
       var feeding = {}, live = {};
       state.cards.forEach(function (c) {
@@ -2738,6 +2894,7 @@
         if (!a || !b) return;
         var d;
         if (l.fc && l.tc) d = curve(cornerXY(a, l.fc), cornerXY(b, l.tc));
+        else if (goesBack(l, a, b)) d = backCurve(a, b);
         else d = flowCurve(portXY(a), inXY(b));
         var p = document.createElementNS(SVGNS, "path");
         var running = b.state === "running" || live[l.id];
@@ -2747,6 +2904,7 @@
         p.setAttribute("d", d);
         p.setAttribute("marker-end", "url(#" + arrowId + "-" + (sel ? "sel" : feeding[l.id] || lit.links[l.id] ? "feed" : "plain") + ")");
         svg.appendChild(p);
+        if (l.label || l.cond) lineLabel(p, l.label ? l : { label: String(l.cond).slice(0, 28) + (String(l.cond).length > 28 ? "…" : "") }, sel);
         if (sel) selPath = p;
         if (l.fresh) { delete l.fresh; }
         var hit = document.createElementNS(SVGNS, "path");
@@ -3321,11 +3479,12 @@
       if (mod && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y") && pointerBusy) { e.preventDefault(); return; }
       if (mod && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
+        stopBuild();   // an undo mid-build ends the build: nothing lands on the board it took back
         if (e.shiftKey) { if (redo.length) { undo.push(JSON.stringify({ cards: state.cards, links: state.links })); restore(redo.pop()); } }
         else if (undo.length) { redo.push(JSON.stringify({ cards: state.cards, links: state.links })); restore(undo.pop()); }
         return;
       }
-      if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); if (redo.length) { undo.push(JSON.stringify({ cards: state.cards, links: state.links })); restore(redo.pop()); } return; }
+      if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); stopBuild(); if (redo.length) { undo.push(JSON.stringify({ cards: state.cards, links: state.links })); restore(redo.pop()); } return; }
       if (mod && (e.key === "a" || e.key === "A")) { e.preventDefault(); selected = {}; state.cards.forEach(function (c) { selected[c.id] = true; }); paintSelection(); return; }
       if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && drawing) { e.preventDefault(); return; }   // drawing: never removes the card
@@ -4169,6 +4328,575 @@
         .catch(function () { return { ok: false, note: "The recipe could not be saved — check the connection." }; });
     }
 
+    // ── BeeZilla builds an orchestration here, live ───────────────────────
+    // Owner, 2026-11-24: "tell the AI what we want to orchestrate, and it can put the
+    // pieces together live in front of us… look at the board, say what's where, what
+    // would logically need to be placed where… and then to actually do it."
+    //  - LOOK: the board in words (orchestration.ts describeBoard), sent with what the
+    //    person said to POST /api/buzzy/board-orchestrate (boardOrchestrator.ts).
+    //  - SAY: BeeZilla's first line says what it sees and where the pieces go; it shows
+    //    on the board's build bar while the cards arrive.
+    //  - DO: cards and lines stream back one by one. Each card is placed here, from the
+    //    lines already known (orchestration.ts placeCard): after what it follows, a
+    //    branch's second answer under its first, a join level with what it joins; a
+    //    card put between two others makes room (makeRoom). The camera follows.
+    // The whole build is one Undo, Stop keeps what is already up, and BeeZilla can only
+    // change or remove flow cards (never pictures, files, notes or the conversation).
+    var BUILD_KIND = { start: "start", step: "skill", tool: "tool", decision: "decision", parallel: "parallel", loop: "loop", approval: "approval", trigger: "trigger", subflow: "subflow", end: "document", note: "note" };
+    var CARD_W = 210, CARD_H = 130;
+    var building = null;
+    var buildBar = el("div", "wb-buildbar");
+    buildBar.hidden = true;
+    buildBar.setAttribute("role", "status");
+    buildBar.setAttribute("aria-live", "polite");
+    var buildDot = el("span", "wb-build-dot");
+    buildDot.setAttribute("aria-hidden", "true");
+    var buildText = el("span", "wb-build-text", "");
+    var buildStop = el("button", "wb-build-stop", "Stop");
+    buildStop.type = "button";
+    buildStop.title = "Stop building (what's on the board stays; Ctrl/⌘+Z takes it all back)";
+    buildStop.addEventListener("click", function () { stopBuild(); });
+    buildBar.appendChild(buildDot);
+    buildBar.appendChild(buildText);
+    buildBar.appendChild(buildStop);
+    body.appendChild(buildBar);
+    function showBuild(text) {
+      buildText.textContent = text;
+      buildBar.hidden = false;
+      root.classList.add("wb-building");
+    }
+    function hideBuild() {
+      buildBar.hidden = true;
+      root.classList.remove("wb-building");
+    }
+    // A flow card BeeZilla may change or take away: never a picture, a file, a note
+    // the person wrote, the core identity, who it serves or the conversation.
+    function flowCard(c) {
+      if (!c) return false;
+      var k = kindOf(c);
+      return !!FLOW[k] || k === "skill" || k === "memory" || (k === "document" && !c.url && !c.contentType);
+    }
+    function boxOf(c) {
+      var n = nodes[c.id];
+      return { id: c.id, x: c.x, y: c.y, w: n ? n.offsetWidth : CARD_W, h: n ? n.offsetHeight : CARD_H, kind: kindOf(c) };
+    }
+    function boardBoxes() { return state.cards.filter(function (c) { return kindOf(c) !== "area"; }).map(boxOf); }
+    function seenRect() {
+      var r = canvas.getBoundingClientRect(), a = openArea();
+      if (!r.width) return null;
+      var p = toWorld(r.left + a.x, r.top + a.y), q = toWorld(r.left + a.x + a.w, r.top + a.y + a.h);
+      return { x1: p.x, y1: p.y, x2: q.x, y2: q.y, z: view.z };
+    }
+    // The board, in a few hundred words: what BeeZilla looks at before it builds.
+    function boardInWords() {
+      var O = window.BZOrchestration;
+      // The conversation card is the chat itself, not something to build with.
+      var cards = state.cards.filter(function (c) { return kindOf(c) !== "area" && kindOf(c) !== "chat"; }).map(function (c) {
+        var b = boxOf(c);
+        return { id: c.id, kind: kindOf(c), title: c.title, body: c.body, url: c.url, x: b.x, y: b.y, w: b.w, h: b.h, selected: !!selected[c.id] };
+      });
+      var areas = state.cards.filter(function (c) { return kindOf(c) === "area"; }).map(function (a) {
+        return { id: a.id, title: a.title, holds: areaMembers(a, state.cards).map(function (m) { return m.id; }) };
+      });
+      var lines = state.links.map(function (l) { return { from: l.from, to: l.to, label: l.label || "" }; });
+      return O.describeBoard({ cards: cards, links: lines, areas: areas, view: seenRect() });
+    }
+    // Where a new flow starts when nothing on the board leads into it: the top-left of
+    // the part you can see on an empty board, else right of what is there, level with
+    // the top of the view.
+    function buildOrigin() {
+      var O = window.BZOrchestration;
+      var seen = seenRect();
+      var start = seen ? { x: seen.x1 + 40 / view.z, y: seen.y1 + 40 / view.z } : viewCentre();
+      // From the top-left of what you can see: past the conversation card or anything else
+      // where the first card would go, then down until a whole row fits, so the flow is
+      // built in front of you and reads level from its first card.
+      return O && O.flowOrigin ? O.flowOrigin(start.x, start.y, boardBoxes(), { cardW: CARD_W, cardH: CARD_H, colGap: COL_GAP }) : start;
+    }
+    function stopBuild() {
+      var run = building;
+      if (!run || run.stopped) return;
+      run.stopped = true;
+      try { run.ctrl.abort(); } catch (_) { /* already finished */ }
+    }
+    // Text/event-stream frames from a fetch body: "event: x\ndata: {...}\n\n".
+    function readEvents(stream, onEvent) {
+      var reader = stream.getReader();
+      var decoder = new TextDecoder();
+      var buf = "";
+      function frame(chunk) {
+        var ev = "message", data = "";
+        chunk.split("\n").forEach(function (line) {
+          if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
+          else if (line.indexOf("data:") === 0) data += line.slice(5).trim();
+        });
+        if (!data) return;
+        var parsed = null;
+        try { parsed = JSON.parse(data); } catch (_) { return; }
+        onEvent(ev, parsed);
+      }
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) { if (buf.trim()) frame(buf); return; }
+          buf += decoder.decode(r.value, { stream: true });
+          var i;
+          while ((i = buf.indexOf("\n\n")) >= 0) { frame(buf.slice(0, i)); buf = buf.slice(i + 2); }
+          return pump();
+        });
+      }
+      return pump();
+    }
+    // One build: the commands (from BeeZilla's stream, or a flow handed over from the
+    // Orchestrate editor) are put on the board one at a time, at a pace you can follow.
+    function newRun(hooks) {
+      var run = {
+        stopped: false, ctrl: typeof AbortController === "function" ? new AbortController() : { abort: function () {}, signal: undefined },
+        ids: {}, made: [], touched: [], queue: [], applied: [], streamDone: false, wake: null, blind: {},
+        name: "", said: "", doneText: "", error: "", snapped: false, origin: buildOrigin(), hooks: hooks || {},
+        counts: { add: 0, link: 0, change: 0 },
+      };
+      building = run;
+      return run;
+    }
+    function realId(run, short) {
+      if (!short) return null;
+      var id = run.ids[short];
+      return id && cardById(id) ? id : null;
+    }
+    function changing(run) {
+      if (run.snapped) return;
+      run.snapped = true;
+      snapshot();
+    }
+    // The lines this card will have, read ahead in what BeeZilla already said.
+    function linesFor(run, op, tmp) {
+      var out = [];
+      function idFor(s) { return s === op.id ? tmp : realId(run, s); }
+      run.applied.concat(run.queue).forEach(function (o) {
+        if (o.op !== "link") return;
+        var a = idFor(o.from), b = idFor(o.to);
+        if (a && b) out.push({ from: a, to: b, label: o.label || "" });
+      });
+      state.links.forEach(function (l) { out.push({ from: l.from, to: l.to, label: l.label || "" }); });
+      return out;
+    }
+    function mentioned(run, short) {
+      return run.queue.some(function (o) { return o.op === "link" && (o.from === short || o.to === short); });
+    }
+    function waitForLines(run, short) {
+      // A card's line usually comes on the very next line of the answer, but a slow model
+      // takes a second or two per line: wait for it (or for the model to move on to the
+      // next card) so the card goes where it belongs instead of being moved there after.
+      var start = Date.now();
+      return new Promise(function (resolve) {
+        (function check() {
+          var movedOn = run.queue.some(function (o) { return o.op === "add"; });
+          if (run.stopped || run.streamDone || mentioned(run, short) || movedOn || Date.now() - start > 6000) resolve();
+          else setTimeout(check, 80);
+        })();
+      });
+    }
+    function glideCards(moves) {
+      if (!moves.length) return;
+      moves.forEach(function (m) {
+        var c = cardById(m.id);
+        var n = nodes[m.id];
+        if (!c) return;
+        if (n) n.classList.add("wb-shift");
+        c.x = m.x; c.y = m.y;
+        place(c);
+        if (n) setTimeout(function () { n.classList.remove("wb-shift"); }, 460);
+      });
+      drawLinks();
+      setTimeout(drawLinks, 470);
+    }
+    function follow(c) {
+      // Keep the newest card in sight, gliding, the way you'd look at what's being built.
+      reveal(c);
+    }
+    function applyOp(run, op) {
+      var O = window.BZOrchestration;
+      var c, a, b;
+      if (op.op === "add") {
+        var kind = BUILD_KIND[op.type] || "skill";
+        var tmp = "new:" + op.id;
+        return waitForLines(run, op.id).then(function () {
+          if (run.stopped) return;
+          var known = linesFor(run, op, tmp);
+          var blind = !known.some(function (l) { return l.from === tmp || l.to === tmp; });
+          var at = O.placeInFlow(tmp, { w: CARD_W, h: CARD_H }, boardBoxes(), known, { colGap: COL_GAP, rowGap: 40, origin: run.origin });
+          changing(run);
+          // Its place is taken by what comes after it: those slide right first.
+          glideCards(at.moves || []);
+          // Not marked as the person's own (user): compile() reads the flow as the plan they
+          // asked for (flowText), never as their instructions word for word, so a card's
+          // words BeeZilla was talked into can't become an order. Their own edit makes it theirs.
+          c = addCard({ kind: kind, title: op.title, body: op.detail || "", exact: true }, at, true);
+          if (!c) { run.error = "The board is full — remove a few cards first."; run.stopped = true; return; }
+          run.ids[op.id] = c.id;
+          run.made.push(c.id);
+          if (blind) run.blind[c.id] = true;
+          run.counts.add++;
+          var n = nodes[c.id];
+          if (n) {
+            n.classList.add("wb-arrive");
+            setTimeout(function () { n.classList.remove("wb-arrive"); }, 700);
+            // Now that its real height is known, nothing may sit under it.
+            var spot = O.freeSpotNear(c.x, c.y, n.offsetWidth, n.offsetHeight, boardBoxes(), { has: function (id) { return id === c.id; } });
+            if (spot.y !== c.y || spot.x !== c.x) { c.x = spot.x; c.y = spot.y; place(c); }
+          }
+          lightUp([c]);
+          follow(c);
+          if (run.hooks.progress) run.hooks.progress("Added " + nameOf(c));
+        });
+      }
+      if (op.op === "link") {
+        a = realId(run, op.from); b = realId(run, op.to);
+        if (!a || !b || a === b) return Promise.resolve();
+        // "repeat"/"done" only leave a loop, "again" only goes back into one…
+        var label = O.tidyLineLabel ? O.tidyLineLabel(String(op.label || ""), kindOf(cardById(a)), kindOf(cardById(b))) : String(op.label || "").slice(0, 40);
+        var key = pairKey({ from: a, to: b, label: label });
+        if (state.links.some(function (l) { return pairKey(l) === key; })) return Promise.resolve();
+        changing(run);
+        var all = state.links.map(function (l) { return { from: l.from, to: l.to, label: l.label || "" }; }).concat([{ from: a, to: b, label: label }]);
+        // A card that went up before any of its lines were known goes where it belongs now.
+        var lost = run.blind[b] ? b : run.blind[a] ? a : null;
+        if (lost) {
+          delete run.blind[lost];
+          var lc = cardById(lost), ln = nodes[lost];
+          var others = boardBoxes().filter(function (x) { return x.id !== lost; });
+          // With what BeeZilla has said since, read ahead: the line after this one may be
+          // the one that says what follows the card.
+          var ahead = all.slice();
+          run.queue.forEach(function (o) {
+            if (o.op !== "link") return;
+            var qa = realId(run, o.from), qb = realId(run, o.to);
+            if (qa && qb) ahead.push({ from: qa, to: qb, label: o.label || "" });
+          });
+          var spot = O.placeInFlow(lost, { w: ln ? ln.offsetWidth : CARD_W, h: ln ? ln.offsetHeight : CARD_H }, others, ahead, { colGap: COL_GAP, rowGap: 40, origin: run.origin });
+          glideCards((spot.moves || []).concat(lc ? [{ id: lost, x: spot.x, y: spot.y }] : []));
+          if (lc) follow(lc);
+        }
+        glideCards(O.makeRoom(a, b, boardBoxes(), all, { colGap: COL_GAP }, label));
+        // Ports and a condition only come with a flow from the editor (addOrchestration), never from the model.
+        link(a, b, null, null, true, label, op.fromEditor ? { fp: op.fp, tp: op.tp, cond: op.cond } : null);
+        run.counts.link++;
+        run.touched.push(a, b);
+        return Promise.resolve();
+      }
+      if (op.op === "unlink") {
+        a = realId(run, op.from); b = realId(run, op.to);
+        if (!a || !b) return Promise.resolve();
+        var gone = state.links.filter(function (l) { return l.from === a && l.to === b; });
+        if (!gone.length) return Promise.resolve();
+        changing(run);
+        state.links = state.links.filter(function (l) { return gone.indexOf(l) < 0; });
+        drawLinks();
+        run.counts.change++;
+        return Promise.resolve();
+      }
+      if (op.op === "edit") {
+        c = cardById(realId(run, op.id));
+        if (!flowCard(c)) return Promise.resolve();
+        changing(run);
+        if (op.title) c.title = String(op.title).slice(0, 140);
+        if (op.detail) c.body = String(op.detail).slice(0, 4000);
+        fillCard(nodes[c.id], c);
+        drawLinks();
+        lightUp([c]);
+        follow(c);
+        run.counts.change++;
+        return Promise.resolve();
+      }
+      if (op.op === "remove") {
+        c = cardById(realId(run, op.id));
+        if (!flowCard(c)) return Promise.resolve();
+        lightUp([c]);
+        return wait(450).then(function () {
+          if (run.stopped || !cardById(c.id)) return;
+          changing(run);
+          removeCards([c.id]);
+          run.counts.change++;
+        });
+      }
+      return Promise.resolve();
+    }
+    // Apply what has arrived, one at a time, then wait for more until the stream ends.
+    function playRun(run) {
+      return new Promise(function (resolve) {
+        (function next() {
+          if (run.stopped) return resolve();
+          var op = run.queue.shift();
+          if (!op) {
+            if (run.streamDone) return resolve();
+            run.wake = next;
+            return;
+          }
+          run.applied.push(op);
+          applyOp(run, op).then(function () {
+            persist();
+            setTimeout(next, run.stopped ? 0 : op.op === "add" ? 360 : 160);
+          }, function () { setTimeout(next, 0); });
+        })();
+      });
+    }
+    function wakeRun(run) {
+      var w = run.wake;
+      run.wake = null;
+      if (w) w();
+    }
+    // Put between two cards that were already joined (A → new → B), the old A → B
+    // line goes: BeeZilla often forgets that unlink, and a person would take it away.
+    // Never out of a decision or a parallel card, whose lines all mean something.
+    function tidyInserts(run) {
+      var made = {};
+      run.made.forEach(function (id) { made[id] = true; });
+      var drop = [];
+      run.made.forEach(function (nid) {
+        var ins = state.links.filter(function (l) { return l.to === nid; });
+        var outs = state.links.filter(function (l) { return l.from === nid && !/^(?:again|back)$/i.test(String(l.label || "")); });
+        ins.forEach(function (li) {
+          outs.forEach(function (lo) {
+            var A = li.from, B = lo.to;
+            if (A === B || made[A] || made[B]) return;
+            var ka = kindOf(cardById(A) || {});
+            if (ka === "decision" || ka === "parallel") return;
+            state.links.forEach(function (l) { if (l.from === A && l.to === B && !l.label && drop.indexOf(l) < 0) drop.push(l); });
+          });
+        });
+      });
+      if (!drop.length) return;
+      changing(run);
+      state.links = state.links.filter(function (l) { return drop.indexOf(l) < 0; });
+      run.counts.change += drop.length;
+    }
+    // A card that just follows on from one card sits level with it when there is room:
+    // the row reads straight even where a card had to step round something on the way.
+    function straighten(run) {
+      var moves = [];
+      run.made.forEach(function (id) {
+        var c = cardById(id);
+        if (!c) return;
+        var ins = state.links.filter(function (l) { return l.to === id && !/^(?:again|back)$/i.test(String(l.label || "")); });
+        if (ins.length !== 1) return;
+        var p = cardById(ins[0].from);
+        if (!p || p.y === c.y || Math.abs(p.y - c.y) > 200 || c.x <= p.x) return;
+        // Only the first card out of it: a branch's other answers stay under the first.
+        var first = state.links.filter(function (l) { return l.from === p.id && !/^(?:again|back)$/i.test(String(l.label || "")); })[0];
+        if (!first || first.to !== id) return;
+        var n = nodes[id];
+        var me = { x: c.x, y: p.y, w: n ? n.offsetWidth : CARD_W, h: n ? n.offsetHeight : CARD_H };
+        var blocked = boardBoxes().some(function (b) {
+          return b.id !== id && me.x < b.x + b.w + 24 && me.x + me.w + 24 > b.x && me.y < b.y + b.h + 24 && me.y + me.h + 24 > b.y;
+        });
+        if (!blocked) { moves.push({ id: id, x: c.x, y: p.y }); c.y = p.y; }
+      });
+      if (moves.length) glideCards(moves);
+    }
+    function finishRun(run) {
+      var newer = building && building !== run;
+      if (building === run) building = null;
+      if (run.name) lastBuildName = run.name;
+      if (run.made.length) lastBuildCards = run.made.slice();
+      if (!run.stopped) { tidyInserts(run); straighten(run); }
+      if (newer) { persist(); return { ok: true, note: "Stopped: a newer build took over." }; }
+      hideBuild();
+      var list = run.made.map(cardById).filter(Boolean);
+      run.touched.forEach(function (id) { var t = cardById(id); if (t && list.indexOf(t) < 0) list.push(t); });
+      if (list.length) {
+        world.classList.add("wb-glide");
+        frame(list, 1);
+        setTimeout(function () { world.classList.remove("wb-glide"); }, 420);
+        selectOnly(run.made.map(cardById).filter(Boolean));
+      }
+      drawLinks();
+      persist();
+      var did = run.counts.add || run.counts.link || run.counts.change;
+      if (run.error && !did) return { ok: false, note: run.error };
+      if (run.stopped && !run.error) {
+        return { ok: true, note: did ? "Stopped. What's on the board stays; Ctrl/⌘+Z takes it all back." : "Stopped before anything changed." };
+      }
+      if (!did) return { ok: false, note: run.error || "Nothing changed on the board." };
+      var note = run.doneText || ("Put " + run.counts.add + " card" + (run.counts.add === 1 ? "" : "s") + " on the board.");
+      say(note + " Ctrl/⌘+Z takes it back.", 5200);
+      return { ok: true, note: note };
+    }
+    // "Orchestrate …": BeeZilla looks at the board, says where things go, and builds.
+    function orchestrate(request, hooks) {
+      var O = window.BZOrchestration;
+      if (!O || !O.describeBoard || !O.placeInFlow) return Promise.resolve({ ok: false, note: "The orchestration builder didn't load. Reload the page and try again." });
+      if (building) stopBuild();
+      closeEditor();
+      var words = boardInWords();
+      var run = newRun(hooks);
+      Object.keys(words.ids).forEach(function (s) { run.ids[s] = words.ids[s]; });
+      showBuild("BeeZilla is looking at the board…");
+      if (hooks && hooks.progress) hooks.progress("Looking at the board…");
+      var done = playRun(run);
+      return fetch("/api/buzzy/board-orchestrate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: String(request || "").slice(0, 1500), map: words.text, known: Object.keys(words.ids) }),
+        signal: run.ctrl.signal,
+      }).then(function (res) {
+        if (!res.ok || !res.body) {
+          return res.json().catch(function () { return null; }).then(function (j) {
+            run.error = (j && j.error) || (res.status === 401 ? "Sign in, then ask again." : "BeeZilla couldn't build that just now.");
+          });
+        }
+        return readEvents(res.body, function (ev, data) {
+          if (ev === "say" && data && data.text) {
+            run.said = String(data.text);
+            showBuild(run.said);
+            if (run.hooks.progress) run.hooks.progress(run.said);
+          } else if (ev === "name" && data && data.text) run.name = String(data.text);
+          else if (ev === "op" && data && data.op) { run.queue.push(data); wakeRun(run); }
+          else if (ev === "done" && data) run.doneText = String(data.text || "");
+          else if (ev === "error" && data) run.error = String(data.error || "BeeZilla couldn't build that just now.");
+        });
+      }).catch(function (err) {
+        if (!run.stopped) run.error = "Can't reach BeeZilla right now — check the connection and try again.";
+        return err;
+      }).then(function () {
+        run.streamDone = true;
+        wakeRun(run);
+        return done;
+      }).then(function () { return finishRun(run); });
+    }
+    // A flow from the Orchestrate editor ("Put on the Idea Board"), built the same way:
+    // in the order the work happens, each card placed after what leads into it.
+    function addOrchestration(payload) {
+      var O = window.BZOrchestration;
+      if (!O || !O.placeInFlow) return Promise.resolve({ ok: false, note: "The orchestration builder didn't load." });
+      var cards = (payload && Array.isArray(payload.cards) ? payload.cards : []).slice(0, 60);
+      if (!cards.length) return Promise.resolve({ ok: false, note: "That orchestration is empty." });
+      if (building) stopBuild();
+      var links = (Array.isArray(payload.links) ? payload.links : []).filter(function (l) { return l && l.from && l.to; });
+      var byId = {};
+      cards.forEach(function (c) { byId[c.id] = c; });
+      // Breadth-first from what nothing leads into: the order a person would draw it.
+      var into = {};
+      links.forEach(function (l) { if (!/^(?:again|back)$/i.test(String(l.label || ""))) into[l.to] = (into[l.to] || 0) + 1; });
+      var order = [], seen = {};
+      var queue = cards.filter(function (c) { return !into[c.id]; }).sort(function (a, b) { return (a.x || 0) - (b.x || 0) || (a.y || 0) - (b.y || 0); }).map(function (c) { return c.id; });
+      while (queue.length) {
+        var id = queue.shift();
+        if (seen[id] || !byId[id]) continue;
+        seen[id] = true;
+        order.push(id);
+        links.forEach(function (l) { if (l.from === id && !seen[l.to]) queue.push(l.to); });
+      }
+      cards.forEach(function (c) { if (!seen[c.id]) order.push(c.id); });
+      var short = {}, ops = [];
+      var TYPE = { skill: "step", memory: "step", document: "end", output: "end" };
+      order.forEach(function (id, i) { short[id] = "n" + (i + 1); });
+      var linked = {};
+      order.forEach(function (id) {
+        var c = byId[id];
+        var k = String(c.kind || "skill");
+        ops.push({ op: "add", id: short[id], type: TYPE[k] || (BUILD_KIND[k] ? k : "step"), title: String(c.title || "Step").slice(0, 80), detail: String(c.body || "").slice(0, 400), orch: c.orch });
+        links.forEach(function (l, li) {
+          if (linked[li] || !short[l.from] || !short[l.to]) return;
+          var fromDone = order.indexOf(l.from) <= order.indexOf(id), toDone = order.indexOf(l.to) <= order.indexOf(id);
+          if (fromDone && toDone) {
+            linked[li] = true;
+            ops.push({ op: "link", from: short[l.from], to: short[l.to], label: String(l.label || "").slice(0, 40), fromEditor: true, fp: l.fp, tp: l.tp, cond: l.cond });
+          }
+        });
+      });
+      var run = newRun(null);
+      run.name = String(payload.name || "");
+      run.queue = ops;
+      run.streamDone = true;
+      showBuild("Putting “" + (run.name || "the orchestration").slice(0, 60) + "” on the board…");
+      return playRun(run).then(function () {
+        // Keep the Orchestrate editor's settings on each card, so it opens there again unchanged.
+        ops.forEach(function (o) {
+          if (o.op !== "add" || !o.orch) return;
+          var made = cardById(run.ids[o.id]);
+          if (made) made.orch = String(o.orch).slice(0, 4000);
+        });
+        run.doneText = "Put “" + (run.name || "the orchestration").slice(0, 60) + "” on the board: " + run.counts.add + " cards.";
+        return finishRun(run);
+      });
+    }
+    // The flow on the board (or in what is selected), opened in the Orchestrate editor:
+    // its validator, Mermaid, run sheet, saving and versions.
+    // The whole flow a card belongs to: everything joined to it by lines, either way.
+    function flowAround(list) {
+      var O = window.BZOrchestration;
+      var isFlow = function (c) { return !!c && (O && O.boardCardType ? !!O.boardCardType(c) : flowCard(c)); };
+      var seen = {}, out = [];
+      var queue = list.filter(isFlow).map(function (c) { return c.id; });
+      while (queue.length) {
+        var id = queue.shift();
+        if (seen[id]) continue;
+        seen[id] = true;
+        var c = cardById(id);
+        if (!isFlow(c)) continue;
+        out.push(c);
+        state.links.forEach(function (l) {
+          if (l.from === id && !seen[l.to]) queue.push(l.to);
+          if (l.to === id && !seen[l.from]) queue.push(l.from);
+        });
+      }
+      return out;
+    }
+    function openInOrchestrate(list) {
+      var O = window.BZOrchestration;
+      // What is selected (an area: what is in it), and the rest of its flow; with nothing
+      // of a flow selected, every flow on the board.
+      var picked = list && list.length ? withAreaContents(list) : [];
+      var around = flowAround(picked);
+      if (!around.length) around = flowAround(lastBuildCards.map(cardById).filter(Boolean));
+      if (!around.length) {
+        // The biggest flow on the board: one Start, so the editor opens it without problems.
+        var done = {};
+        state.cards.forEach(function (c) {
+          if (done[c.id]) return;
+          var group = flowAround([c]);
+          group.forEach(function (g) { done[g.id] = true; });
+          if (group.length > around.length) around = group;
+        });
+      }
+      var pick = around.length ? around : state.cards;
+      var cards = pick.filter(function (c) { return O && O.boardCardType ? O.boardCardType(c) : flowCard(c); });
+      if (!cards.some(function (c) { return kindOf(c) !== "note"; })) {
+        return { ok: false, note: "There's no orchestration on the board yet. Say “orchestrate …” and BeeZilla builds one here." };
+      }
+      var ids = {};
+      cards.forEach(function (c) { ids[c.id] = true; });
+      var area = (list || []).filter(function (c) { return kindOf(c) === "area"; })[0];
+      var payload = {
+        name: (area && area.title) || lastBuildName || "Orchestration from the Idea Board",
+        cards: cards.map(function (c) {
+          var o = { id: c.id, kind: kindOf(c), title: c.title, body: c.body, x: c.x, y: c.y };
+          if (c.url) o.url = c.url;
+          if (c.contentType) o.contentType = c.contentType;
+          if (c.orch) o.orch = c.orch;
+          return o;
+        }),
+        links: state.links.filter(function (l) { return ids[l.from] && ids[l.to]; }).map(function (l) {
+          var o = { from: l.from, to: l.to, label: l.label || "" };
+          if (l.fp) o.fp = l.fp;
+          if (l.tp) o.tp = l.tp;
+          if (l.cond) o.cond = l.cond;
+          return o;
+        }),
+      };
+      try { localStorage.setItem("bz_board_to_orch", JSON.stringify(payload)); } catch (_) {
+        return { ok: false, note: "This browser wouldn't hand the flow over. Try again." };
+      }
+      // The board sits in the header on every page: folded away, so the editor is what you
+      // see (it keeps everything, and opens again from the Idea Board button).
+      if (opts.onFold) opts.onFold();
+      if (window.BeeZillaShell && window.BeeZillaShell.go) window.BeeZillaShell.go("/buzzy/orchestrate?fromBoard=1");
+      return { ok: true, note: "Opening it in Orchestrate." };
+    }
+    var lastBuildName = "";
+    var lastBuildCards = [];
+
     function act(a) {
       a = a || {};
       var ok = function (note) { return Promise.resolve({ ok: true, note: note || "" }); };
@@ -4402,11 +5130,13 @@
         case "history": showHistory(true); return ok("Here's the board's History: pick a version to go back to.");
         case "keys": showKeys(true); return ok("Here are the board's shortcuts.");
         case "undo":
+          stopBuild();
           if (!undo.length) return no("There's nothing to undo.");
           redo.push(JSON.stringify({ cards: state.cards, links: state.links }));
           restore(undo.pop());
           return ok("Undone.");
         case "redo":
+          stopBuild();
           if (!redo.length) return no("There's nothing to redo.");
           undo.push(JSON.stringify({ cards: state.cards, links: state.links }));
           restore(redo.pop());
@@ -4425,6 +5155,11 @@
           if (g.nodes.length > 6) return no("That one is too big to start from; ask for a simpler one.");
           addGraph(g);
           return ok("Put a simple starting board for “" + String(a.title || "it").slice(0, 60) + "” on your board. Change any card to make it yours.");
+        // An orchestration: BeeZilla builds or changes one here, live (see above)
+        case "orchestrate":
+          return orchestrate(a.query || a.text || "", { progress: typeof a.progress === "function" ? a.progress : null });
+        case "openOrchestrate":
+          return Promise.resolve(openInOrchestrate(state.cards.filter(function (x) { return selected[x.id]; })));
         default:
           return no("BeeZilla doesn't know how to do that on the board yet.");
       }
@@ -4555,6 +5290,14 @@
       },
       addGraph: addGraph,
       act: act,
+      /** BeeZilla builds an orchestration from these words, live; resolves { ok, note }. */
+      orchestrate: function (words, hooks) { return orchestrate(words, hooks); },
+      /** Stop a build in progress (what is already up stays). */
+      stopBuild: stopBuild,
+      /** A flow from the Orchestrate editor, put up card by card. */
+      addOrchestration: addOrchestration,
+      /** Resolves once this board has finished its saves and reads (e.g. a visit's reset). */
+      settled: function () { return eng.chain; },
       /** The conversation, as a card on the board: put it there once there is one to show. */
       conversation: function () {
         var c = cardById(CHAT_ID);
@@ -4602,6 +5345,7 @@
         window.removeEventListener("pagehide", leaving);
         window.removeEventListener("pointerup", pointerDone, true);
         window.removeEventListener("pointercancel", pointerDone, true);
+        stopBuild();   // folded away mid-build: what is up is saved now, nothing more arrives
         writeNow();
         gone = true;
         if (eng.live && eng.live.state === state) eng.live = null;

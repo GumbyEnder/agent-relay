@@ -61,7 +61,7 @@ import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
-import { appActionsNote, planAppActions, type AppAction } from "./pilot";
+import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
 import { inspirationNote, inspirationResult, searchInspiration, wantsInspiration } from "./inspirationSearch";
@@ -782,6 +782,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     : "";
 
   // ── The live whiteboard: what the agent read, before it does anything else ──
+  // Not on a turn that builds an orchestration on the board: the build is what goes up
+  // there (boardOrchestrator.ts), and a "Your board" card would land in the middle of it.
+  const flowOnBoard = boardHasFlow(boardText);
+  const orchestrating = asksToOrchestrate(message, { boardHasFlow: flowOnBoard });
   req.onFlow?.({
     kind: "agent",
     id: "agent",
@@ -789,16 +793,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     detail: persona.replace(/\s+/g, " ").trim().slice(0, 600),
     state: "done",
   });
-  if (factsText.length) {
+  if (factsText.length && !orchestrating) {
     req.onFlow?.({
       kind: "memory", id: "memory", title: "Memory", parent: "agent", state: "done",
       detail: `${factsText.length} thing${factsText.length === 1 ? "" : "s"} it already knows about this work`,
     });
   }
-  if (boardText) {
+  if (boardText && !orchestrating) {
     req.onFlow?.({ kind: "skill", id: "board", title: "Your board", parent: "agent", state: "done", detail: boardText.slice(0, 400) });
   }
-  if (mode === "work" && playbookBlock) {
+  if (mode === "work" && playbookBlock && !orchestrating) {
     req.onFlow?.({
       kind: "skill", id: "skill:" + jobType, parent: "agent", state: "done",
       title: jobType.charAt(0).toUpperCase() + jobType.slice(1) + " playbook",
@@ -857,6 +861,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let appPlan: AppAction[] | null = planAppActions(message, req.privacy ?? null, {
     lastReply,
     startingBoards: STARTING_BOARDS.map((b) => b.title),
+    boardHasFlow: flowOnBoard,
   });
   let boardFound = false;
   const boardNotes: string[] = [];
@@ -1287,7 +1292,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // So when the request is a lookup, the harness does it and hands the model
   // what it read, with the URLs. The model cannot skip the research.
   const researchIntent = /\b(research|look ?up|find out|check|verify|current|latest|today|right now|how much|price|cost|deadline|hours)\b/i.test(message);
-  const runWebPrepass = !lockdown && (surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent))));
+  // A turn that builds on the board answers in one sentence: nothing to look up.
+  const runWebPrepass = !lockdown && !orchestrating && (surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent))));
   if (runWebPrepass) {
     const webCtx = await buildVoiceWebContext(message);
     for (const call of webCtx.calls) {
@@ -1312,6 +1318,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The lying checks further down stay the guarantee; this exists so the audio
   // lane is not already speaking the wrong sentence before any text can repair it.
   const afterNotes: string[] = [];
+  // Building on the board this turn (pilot.ts ORCHESTRATE_USER_LINE says why it goes here).
+  if (appPlan && appPlan.some((s) => s.do === "board" && s.value === "orchestrate")) {
+    const own = messages[messages.length - 1];
+    if (own && own.role === "user") own.content = String(own.content) + "\n\n" + ORCHESTRATE_USER_LINE;
+  }
   if (renderedImage) {
     afterNotes.push(
       "A picture was already made for this request and is attached to this reply. " +

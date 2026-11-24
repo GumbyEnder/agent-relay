@@ -20,7 +20,7 @@ export interface BoardStep {
   do: "board";
   /** The verb: fit, zoomIn, zoomOut, zoom100, focus, enlarge, note, step, agent, end, connect,
    *  disconnect, select, deselect, remove, rename, write, edit, duplicate, move, area,
-   *  sell, recipe, history, keys, undo, redo, find, start. */
+   *  sell, recipe, history, keys, undo, redo, find, start, orchestrate. */
   value: string;
   /** The card(s) it works on, in the person's words ("the beach photo", "everything"). */
   target?: string;
@@ -34,7 +34,7 @@ export interface BoardStep {
   dir?: string;
   /** sell: drops | honey | open. */
   choice?: string;
-  /** find: what to look for; start: what to start from. */
+  /** find: what to look for; start: what to start from; orchestrate: what the person said. */
   query?: string;
   /** find: picture | music | video | 3d | file. */
   kind?: string;
@@ -316,6 +316,12 @@ const RULES: Rule[] = [
   },
   { re: /^(?:undo(?: that| it| the last (?:thing|change|step))?|take that back|go back one step)$/, make: () => ({ do: "board", value: "undo", say: "Undo" }) },
   { re: /^redo(?: that| it)?$/, make: () => ({ do: "board", value: "redo", say: "Redo" }) },
+  // The flow on the board, in the Orchestrate editor (validator, Mermaid, save).
+  {
+    re: /^(?:open|show|put|send|take|move)(?: me)?(?: it| this| that| (?:the|my|this) (?:flow|orchestration|workflow|pipeline|automation))?(?: (?:up )?in| into| to| over to) (?:the )?orchestrat(?:e|ion|or)(?: editor| page| mode| tab)?$/,
+    make: () => ({ do: "board", value: "openOrchestrate", say: "Open the flow in Orchestrate" }),
+    closed: true,
+  },
   // ── Grabbing something you already have, or a simple starting board ──
   {
     re: new RegExp(
@@ -370,6 +376,70 @@ export function boardStep(clause: string): BoardStep | null {
     }
   }
   return null;
+}
+
+// ── Orchestrations: BeeZilla builds a flow on the board, live ───────────────
+// Owner, 2026-11-24: "tell the AI what we want to orchestrate, and it can put the
+// pieces together live in front of us… you should just be able to talk to Beezilla,
+// and that should be all you need to do to make an orchestration." These are the
+// words that ask for one: "orchestrate …", "make me a workflow / pipeline / automation
+// / agent team that …", or a change to a flow on the board ("add an approval before
+// sending", "make the research run in parallel", "make the draft repeat until it's
+// good"). The board then asks BeeZilla for the pieces (boardOrchestrator.ts) and puts
+// them up one by one. A question about orchestrations ("what's an orchestration?")
+// stays chat, and "a starting board / template" stays the simple starting boards.
+const FLOW_NOUN =
+  "(?:orchestrations?|work ?flows?|flow ?charts?|flows?|pipelines?|automations?|process(?:es)?|agent teams?|teams? of (?:ai )?agents|" +
+  "multi-?agent (?:systems?|teams?|flows?|workflows?|setups?)|(?:ai )?agents? (?:flows?|workflows?|pipelines?|teams?|setups?)|sequences? of (?:steps|agents))";
+const MAKE_VERB =
+  "(?:make|build|create|design|set up|setup|put together|lay out|layout|map out|draw|sketch(?: out)?|plan(?: out)?|wire up|give me|draft|generate|construct|assemble|whip up|spin up|come up with)";
+// Asking for a new one: "orchestrate …", "an orchestration for …", "build me a workflow …".
+const MAKE_RULES: RegExp[] = [
+  // "orchestrate a weekly newsletter…", "orchestrate this"
+  /^orchestrate\b\s*\S/,
+  // "an orchestration for onboarding new clients"
+  /^(?:an? |the |my |our )?orchestration (?:for|to|that|of|about|where|which|so|when)\b/,
+  // "build me a workflow that…", "set up an automation for…", "make a content pipeline"
+  new RegExp(`^${MAKE_VERB}(?: me| us)?(?: an?| the| my| our| another| one)?(?: (?!of\\b|for\\b|with\\b)[a-z0-9'-]+){0,2}? ${FLOW_NOUN}\\b`),
+];
+// Changing the one on the board. Only when the board has one (the server knows from the
+// board it is sent), so "make the song repeat" or "add a review after the intro" with
+// no flow on the board stay what they were.
+const CHANGE_RULES: RegExp[] = [
+  // A piece of a flow put before / after / between others.
+  // ("add a spelling check before my approval", "put a quick human review after the draft")
+  /^(?:add|put|insert|place|drop|stick|slot)(?: in)?(?: an?| another| one more| the)?(?: (?!of\b|for\b|with\b|called\b|named\b)[a-z'-]+){0,2}? (?:steps?|approvals?(?: steps?)?|decisions?|checks?|reviews?|loops?|branch(?:es)?|triggers?|schedules?|parallel steps?|agents?(?: steps?)?|tools?(?: calls?)?|end results?)\b.*\b(?:before|after|between|in between|at the (?:start|end|beginning)|in parallel)\b/,
+  // "make the research run in parallel", "run these at the same time"
+  /^(?:make|have|let|run) (?:the )?.{2,60}? (?:run |happen |go )?(?:in parallel|at the same time)$/,
+  // "make the draft repeat until it's good", "wrap the review in a loop"
+  /^(?:make|have) (?:the )?.{2,60}? (?:repeat|loop)(?: (?:until|up to|at most|while) .+)?$/,
+  /^(?:wrap|put) .{2,60}? in a loop\b/,
+];
+const STARTER_WORDS = /\b(?:starting|starter|template|example|sample|ready-?made)\b/;
+// A thing to make, not a flow to draw: "a sales pipeline report", "a process document".
+const DELIVERABLE = new RegExp(
+  `${FLOW_NOUN} (?:reports?|documents?|docs?|decks?|slides?|presentations?|spreadsheets?|sheets?|pdfs?|summar(?:y|ies)|memos?|emails?|letters?|articles?|templates?|checklists?|write-?ups?|one-?pagers?|briefs?|proposals?|guides?|manuals?|polic(?:y|ies)|sops?|videos?|songs?|pictures?|images?)\\b`,
+);
+// Software plumbing, not an orchestration: "set up a data pipeline in Python", "a CI pipeline".
+const CODE = /\b(?:in|with|using) (?:python|javascript|typescript|js|ts|node(?:\.js)?|sql|bash|shell|java|kotlin|swift|golang|rust|c\+\+|c#|php|ruby|scala|dbt|airflow|spark|kafka|terraform|yaml)\b|\b(?:ci(?:\/cd)?|github actions|cron ?jobs?|etl|dag|repo|repository)\b/;
+// Music, video and pictures loop and repeat too: "make the beat loop", "make the song repeat".
+const MEDIA = /\b(?:songs?|beats?|tracks?|music|melod(?:y|ies)|chorus|verses?|riffs?|samples?|videos?|clips?|gifs?|animations?|sounds?|audio|drums?|bass|tunes?|playlists?|pictures?|images?|photos?|logos?|slides?)\b/;
+
+/**
+ * The person asked BeeZilla to build an orchestration on the board, or (when the board
+ * has one) to change it. `boardHasFlow` comes from the board the turn was sent with.
+ */
+export function orchestrateStep(body: string, opts: { boardHasFlow?: boolean } = {}): BoardStep | null {
+  // "I want to build…", "help me set up…", "let's make…", "can we draw…": the ask itself.
+  const t = String(body || "").trim()
+    .replace(/^(?:(?:i|we) (?:want|need|would like|'d like|wanna)(?: you)?(?: to)?|help me(?: to)?|let'?s|lets|(?:can|could) we|please)\s+/, "");
+  if (!t || STARTER_WORDS.test(t) || CODE.test(t)) return null;
+  // A question is not a request ("what is an orchestration?", "how do I build a workflow?").
+  if (/^(?:what|why|how|who|when|where|which|is|are|does|do|did|can orchestration|should)\b/.test(t) || /\?$/.test(t)) return null;
+  const making = MAKE_RULES.some((re) => re.test(t)) && !DELIVERABLE.test(t);
+  const changing = !making && !!opts.boardHasFlow && !MEDIA.test(t) && CHANGE_RULES.some((re) => re.test(t));
+  if (!making && !changing) return null;
+  return { do: "board", value: "orchestrate", query: t, say: "Build it on the Idea Board, piece by piece" };
 }
 
 // ── Lost on the board, and "yes" to BeeZilla's own offers ──────────────────

@@ -995,3 +995,678 @@ export function parseGraphDetailPath(
   if (!Number.isInteger(n) || n < 1) return { graphId, revision: null, bad: raw };
   return { graphId, revision: n };
 }
+
+// ── The Idea Board ⇄ the spec ─────────────────────────────────────────
+//
+// Owner, 2026-11-24: "we can actually just use it on the normal whiteboard and tell
+// the AI what we want to orchestrate, and it can put the pieces together live in
+// front of us." The Idea Board (public/buzzy/whiteboard.js) holds an orchestration as
+// ordinary cards joined by lines; these functions turn that into this spec and back,
+// so a flow built by talking opens in the Orchestrate editor (validator, Mermaid, run
+// sheet, save, versions) and a flow drawn there can be put on the board. The board's
+// own card kinds are the vocabulary: a skill is an agent step, an end result (a
+// document card with no file yet) is the end, and the rest are named for their type.
+
+/** Board card kinds that stand for an orchestration node (whiteboard.js kindOf). */
+export const BOARD_FLOW_KINDS = ["start", "tool", "decision", "parallel", "loop", "approval", "trigger", "subflow"] as const;
+/** The board card kind each node type becomes. */
+export const BOARD_KIND_OF_TYPE: Record<NodeType, string> = {
+  start: "start", agent: "skill", tool: "tool", decision: "decision", parallel: "parallel", loop: "loop",
+  approval: "approval", trigger: "trigger", subflow: "subflow", end: "document", note: "note",
+};
+
+export interface BoardCard {
+  id: string;
+  kind?: string;
+  title?: string;
+  body?: string;
+  url?: string;
+  contentType?: string;
+  x?: number;
+  y?: number;
+  /**
+   * What the Orchestrate editor knew about this node, as JSON text, so a round trip loses
+   * nothing: `{ "node": "n_research", "config": {…} }`, and on the first card the
+   * orchestration's own settings too (`"spec": { params, policy, description }`).
+   */
+  orch?: string;
+}
+export interface BoardLink {
+  id?: string;
+  from: string;
+  to: string;
+  label?: string;
+  /** The ports and condition from the Orchestrate editor, kept so a round trip loses nothing. */
+  fp?: string;
+  tp?: string;
+  cond?: string;
+}
+export interface BoardOrchestration { name?: string; cards: BoardCard[]; links: BoardLink[] }
+
+/** The node type a board card stands for, or null when it is not part of a flow. */
+export function boardCardType(c: BoardCard | null | undefined): NodeType | null {
+  if (!c) return null;
+  const k = String(c.kind || "").toLowerCase();
+  if ((BOARD_FLOW_KINDS as readonly string[]).includes(k)) return k as NodeType;
+  if (k === "skill" || k === "memory") return "agent";
+  if (k === "note") return "note";
+  // An end result is a document card that is still a description (no file yet).
+  if ((k === "document" || k === "output") && !c.url && !c.contentType) return "end";
+  return null;
+}
+
+const oneLine = (v: unknown, max: number): string => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+function slug(s: string, fallback: string): string {
+  const out = s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+  return /^[a-z_]/.test(out) ? out : out ? "t_" + out : fallback;
+}
+const SCHEDULE_WORDS = /\b(?:every|each|daily|weekly|monthly|hourly|weekdays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|mornings?|evenings?|nights?|noon|midnight|cron|schedule[ds]?|at \d{1,2}(?::\d\d)?|\d{1,2}(?::\d\d)?\s*(?:am|pm))\b/i;
+
+function savedOrch(c: BoardCard): { node: string; config: Record<string, unknown>; spec: Record<string, unknown> | null } {
+  const none = { node: "", config: {}, spec: null };
+  if (!c.orch) return none;
+  try {
+    const j = JSON.parse(c.orch) as unknown;
+    if (!isObj(j)) return none;
+    // The wrapped form (node + config + spec), or a bare config from before it existed.
+    if (isObj(j.config) || typeof j.node === "string") {
+      return { node: /^n_[A-Za-z0-9_]{1,60}$/.test(str(j.node)) ? str(j.node) : "", config: isObj(j.config) ? j.config : {}, spec: isObj(j.spec) ? j.spec : null };
+    }
+    return { node: "", config: j, spec: null };
+  } catch {
+    return none;
+  }
+}
+function savedConfig(c: BoardCard): Record<string, unknown> {
+  return savedOrch(c).config;
+}
+/** A saved output name, if it is one the validator takes; else "output". */
+function outputOf(saved: Record<string, unknown>): { name: string } {
+  const name = isObj(saved.output) ? str(saved.output.name) : "";
+  return { name: /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : "output" };
+}
+
+/** A node's config from what the card says, keeping whatever it carried before. */
+function configFor(type: NodeType, title: string, body: string, saved: Record<string, unknown>, outs: number, ins: number): Record<string, unknown> {
+  const text = body || title;
+  const keep = (key: string, fallback: unknown) => (saved[key] !== undefined ? saved[key] : fallback);
+  switch (type) {
+    case "agent":
+      return {
+        prompt: str(saved.prompt) || text,
+        ...(str(saved.agent) ? { agent: str(saved.agent) } : {}),
+        model: keep("model", null),
+        tools: Array.isArray(saved.tools) ? saved.tools : [],
+        inputs: isObj(saved.inputs) ? saved.inputs : {},
+        output: outputOf(saved),
+        timeoutSec: int(saved.timeoutSec, 1, 86400) ?? 180,
+        retries: int(saved.retries, 0, 10) ?? 1,
+        onError: isObj(saved.onError) ? saved.onError : { policy: "stop" },
+        needsApproval: saved.needsApproval === true,
+      };
+    case "tool":
+      return {
+        tool: str(saved.tool) || slug(text.split(/[\n.:]/)[0] || "", slug(title, "tool")),
+        args: isObj(saved.args) ? saved.args : {},
+        inputs: isObj(saved.inputs) ? saved.inputs : {},
+        output: outputOf(saved),
+        timeoutSec: int(saved.timeoutSec, 1, 86400) ?? 120,
+        retries: int(saved.retries, 0, 10) ?? 0,
+        onError: isObj(saved.onError) ? saved.onError : { policy: "stop" },
+        needsApproval: saved.needsApproval === true,
+      };
+    case "parallel": {
+      const mode = str(saved.mode) === "join" || str(saved.mode) === "fan-out" ? str(saved.mode) : ins >= 2 && outs <= 1 ? "join" : "fan-out";
+      return mode === "join"
+        ? { mode, join: ["all", "any", "first"].includes(str(saved.join)) ? str(saved.join) : "all", maxConcurrency: int(saved.maxConcurrency, 1, 16) ?? 2, output: outputOf(saved) }
+        : { mode, maxConcurrency: int(saved.maxConcurrency, 1, 16) ?? 2 };
+    }
+    case "loop": {
+      // "at most 3 times", "up to 5 tries", "max 4": the cap, not any number in the words.
+      const n = /(?:at most|max(?:imum)?|up to|no more than)\s*(\d{1,2})|(\d{1,2})\s*(?:times|tries|rounds|attempts|passes|goes)\b/i.exec(text);
+      const cap = n ? Number(n[1] || n[2]) : 3;
+      return {
+        until: str(saved.until) || text,
+        maxIterations: int(saved.maxIterations, 1, 50) ?? Math.min(50, Math.max(1, cap)),
+      };
+    }
+    case "approval":
+      return {
+        prompt: str(saved.prompt) || text,
+        approver: str(saved.approver) === "ops" ? "ops" : "owner",
+        timeoutSec: int(saved.timeoutSec, 1, 2592000) ?? 86400,
+        onTimeout: str(saved.onTimeout) === "reject" ? "reject" : "stop",
+      };
+    case "trigger": {
+      const old = isObj(saved.trigger) ? saved.trigger : null;
+      if (old && ["schedule", "webhook", "event"].includes(str(old.kind))) {
+        return { mode: str(saved.mode) === "wait" || str(saved.mode) === "entry" ? str(saved.mode) : ins ? "wait" : "entry", trigger: old };
+      }
+      const kind = /\bweb ?hook\b/i.test(text) ? "webhook" : SCHEDULE_WORDS.test(text) ? "schedule" : "event";
+      const trigger =
+        kind === "schedule" ? { kind, schedule: text.slice(0, 200) }
+          : kind === "webhook" ? { kind, webhook: "/hooks/" + slug(title, "hook") }
+            : { kind, event: slug(text, "event") };
+      return { mode: ins ? "wait" : "entry", trigger };
+    }
+    case "subflow": {
+      const ref = isObj(saved.ref) ? saved.ref : {};
+      return { ref: { graphId: str(ref.graphId), revision: ref.revision ?? null }, inputs: isObj(saved.inputs) ? saved.inputs : {}, output: outputOf(saved) };
+    }
+    case "end":
+      return { outputs: isObj(saved.outputs) ? saved.outputs : {} };
+    case "note":
+      return { text };
+    default:
+      return {};
+  }
+}
+
+const DEFAULT_NAME: Record<NodeType, string> = {
+  start: "Start", agent: "Step", tool: "Tool", decision: "Decision", parallel: "At the same time", loop: "Repeat",
+  approval: "Your approval", trigger: "When", subflow: "Another orchestration", end: "End result", note: "Note",
+};
+
+/**
+ * An orchestration spec from cards and lines on the Idea Board. Only the cards that
+ * are part of a flow count (steps, decisions, approvals… and end results); pictures,
+ * files and the conversation are left out. Lines get their port from what they say:
+ * "approved"/"rejected" out of an approval, "repeat"/"done" out of a loop, and a line
+ * back into a loop from a step it repeats is the loop's back port. A board with no
+ * Start gets one in front of the steps nothing leads into, and one with no end
+ * result gets an End after the steps that lead nowhere, so the spec is runnable.
+ */
+export function boardToSpec(board: BoardOrchestration): OrchSpec {
+  const cards = (Array.isArray(board?.cards) ? board.cards : []).filter((c) => c && c.id && boardCardType(c));
+  const idOf = new Map<string, string>();
+  const used = new Set<string>();
+  // A node keeps the id it had in the editor (bindings like $n_research.findings name it);
+  // a card made on the board gets one from its own id.
+  for (const c of cards) {
+    const kept = savedOrch(c).node;
+    if (kept && !used.has(kept)) { used.add(kept); idOf.set(String(c.id), kept); }
+  }
+  for (const c of cards) {
+    if (idOf.has(String(c.id))) continue;
+    let nid = "n_" + String(c.id).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40);
+    while (used.has(nid)) nid += "_";
+    used.add(nid);
+    idOf.set(String(c.id), nid);
+  }
+  const typeOf = new Map<string, NodeType>();
+  for (const c of cards) typeOf.set(String(c.id), boardCardType(c)!);
+  const seenPair = new Set<string>();
+  const links = (Array.isArray(board?.links) ? board.links : []).filter((l) => {
+    if (!l || !idOf.has(String(l.from)) || !idOf.has(String(l.to)) || l.from === l.to) return false;
+    // A note is a comment: it cannot be connected (ORCH012), so its lines stay on the board only.
+    if (typeOf.get(String(l.from)) === "note" || typeOf.get(String(l.to)) === "note") return false;
+    const k = l.from + ">" + l.to + ">" + oneLine(l.label, 40);
+    if (seenPair.has(k)) return false;
+    seenPair.add(k);
+    return true;
+  });
+
+  const nodes: OrchNode[] = [];
+  let minX = Infinity, minY = Infinity;
+  for (const c of cards) { minX = Math.min(minX, num(c.x) ?? 0); minY = Math.min(minY, num(c.y) ?? 0); }
+  if (!Number.isFinite(minX)) { minX = 0; minY = 0; }
+  for (const c of cards) {
+    const id = String(c.id);
+    const type = typeOf.get(id)!;
+    const title = oneLine(c.title, 160) || DEFAULT_NAME[type];
+    const body = String(c.body ?? "").trim().slice(0, 4000);
+    const outs = links.filter((l) => l.from === id).length;
+    const ins = links.filter((l) => l.to === id).length;
+    const config = configFor(type, title, body, savedConfig(c), outs, ins);
+    // The card's own words stay with the node, except where its settings already hold them
+    // (an agent's prompt, an approval's ask, a note's text): they come back on the board.
+    const prose = type !== "agent" && type !== "approval" && type !== "note";
+    nodes.push({
+      id: idOf.get(id)!,
+      type,
+      name: title,
+      x: snap(64 + ((num(c.x) ?? 0) - minX) * 0.8, 16),
+      y: snap(64 + ((num(c.y) ?? 0) - minY) * 0.6, 16),
+      notes: prose ? body.slice(0, 2000) : "",
+      config,
+    });
+  }
+  const byNode = new Map(nodes.map((n) => [n.id, n]));
+
+  // Forward reach (for back edges into a loop): which cards a card leads to.
+  const next = new Map<string, string[]>();
+  for (const l of links) (next.get(String(l.from)) ?? next.set(String(l.from), []).get(String(l.from))!).push(String(l.to));
+  function reaches(from: string, target: string, skip: string): boolean {
+    const seen = new Set<string>([from]);
+    const q = [from];
+    while (q.length) {
+      const at = q.shift()!;
+      for (const to of next.get(at) || []) {
+        if (to === target) return true;
+        if (to === skip || seen.has(to)) continue;
+        seen.add(to);
+        q.push(to);
+      }
+    }
+    return false;
+  }
+
+  const edges: OrchEdge[] = [];
+  const outCount = new Map<string, number>();
+  for (const l of links) {
+    const from = String(l.from), to = String(l.to);
+    const a = byNode.get(idOf.get(from)!)!, b = byNode.get(idOf.get(to)!)!;
+    const label = oneLine(l.label, 60);
+    const nth = outCount.get(from) ?? 0;
+    outCount.set(from, nth + 1);
+    let fromPort: Port = "out";
+    const keptFrom = str(l.fp) as Port, keptTo = str(l.tp) as Port;
+    if (keptFrom && PORTS[a.type].includes(keptFrom)) {
+      fromPort = keptFrom;
+    } else if (a.type === "approval") {
+      fromPort = /\b(?:reject\w*|no|denied|declin\w*|not ok|refus\w*)\b/i.test(label) ? "rejected"
+        : /\b(?:approv\w*|yes|ok|okay|accept\w*)\b/i.test(label) ? "approved" : nth === 0 ? "approved" : "rejected";
+    } else if (a.type === "loop") {
+      fromPort = /\b(?:done|exit|finish\w*|after|then|next|end|stop|leave)\b/i.test(label) ? "exit"
+        : /\b(?:repeat|body|each|again|loop|try|do|run)\b/i.test(label) ? "body" : nth === 0 ? "body" : "exit";
+    } else if (!PORTS[a.type].includes("out")) {
+      continue;
+    }
+    let toPort: Port = "in";
+    if (keptTo && PORTS[b.type].includes(keptTo)) toPort = keptTo;
+    else if (b.type === "loop" && (/\b(?:again|back|repeat|retry|loop)\b/i.test(label) || reaches(to, from, ""))) toPort = "back";
+    if (!PORTS[b.type].includes(toPort)) continue;
+    const condition = str(l.cond).trim().slice(0, 500) || null;
+    edges.push({ id: "e_" + (edges.length + 1), from: { node: a.id, port: fromPort }, to: { node: b.id, port: toPort }, label, condition });
+  }
+
+  // A Start in front, an End after, when the board has none.
+  const hasStart = nodes.some((n) => n.type === "start") || nodes.some((n) => n.type === "trigger" && (n.config as { mode?: string }).mode === "entry");
+  const flowNodes = nodes.filter((n) => n.type !== "note");
+  if (!hasStart && flowNodes.length) {
+    const firsts = flowNodes.filter((n) => !edges.some((e) => e.to.node === n.id && e.to.port !== "back"));
+    const x0 = Math.min(...flowNodes.map((n) => n.x));
+    let sid = "n_start";
+    while (byNode.has(sid)) sid += "_";
+    const s: OrchNode = { id: sid, type: "start", name: "Start", x: snap(x0 - 240, 16), y: snap(Math.min(...flowNodes.map((n) => n.y)), 16), notes: "", config: {} };
+    nodes.unshift(s);
+    byNode.set(sid, s);
+    for (const f of firsts.length ? firsts : [flowNodes[0]!]) {
+      edges.push({ id: "e_" + (edges.length + 1), from: { node: sid, port: "out" }, to: { node: f.id, port: "in" }, label: "", condition: null });
+    }
+  }
+  if (!nodes.some((n) => n.type === "end")) {
+    const lasts = nodes.filter((n) => n.type !== "note" && n.type !== "end" && PORTS[n.type].includes("out") && !edges.some((e) => e.from.node === n.id));
+    const x1 = Math.max(64, ...nodes.map((n) => n.x));
+    let eid = "n_end";
+    while (byNode.has(eid)) eid += "_";
+    const e: OrchNode = { id: eid, type: "end", name: "End", x: snap(x1 + 240, 16), y: snap(Math.min(...nodes.map((n) => n.y), 64), 16), notes: "", config: { outputs: {} } };
+    nodes.push(e);
+    byNode.set(eid, e);
+    for (const l of lasts) edges.push({ id: "e_" + (edges.length + 1), from: { node: l.id, port: "out" }, to: { node: eid, port: "in" }, label: "", condition: null });
+  }
+
+  const start = nodes.find((n) => n.type === "start") || nodes.find((n) => n.type === "trigger" && (n.config as { mode?: string }).mode === "entry");
+  // The orchestration's own settings, when the flow came from the editor (kept on a card).
+  const kept = cards.map((c) => savedOrch(c).spec).find((x) => !!x) || null;
+  const spec = {
+    schema: ORCH_SCHEMA,
+    schemaVersion: ORCH_SCHEMA_VERSION,
+    name: oneLine(board?.name, 160) || "Orchestration from the Idea Board",
+    description: kept ? str(kept.description).slice(0, 2000) : "",
+    direction: "LR" as const,
+    grid: 16,
+    entry: start ? start.id : "",
+    params: kept && Array.isArray(kept.params) ? kept.params : [{ name: "goal", type: "string" as const, required: true, default: null, description: "What this run is for" }],
+    policy: kept && isObj(kept.policy) ? kept.policy : { maxConcurrency: 4, budgetSec: 900, onError: "stop" as const },
+    nodes,
+    edges,
+    meta: { generator: "import" as const, from: "idea-board" },
+  };
+  return validateOrchestration(spec).spec;
+}
+
+/** What a node's card says on the board. */
+function boardBody(n: OrchNode): string {
+  const c = n.config || {};
+  switch (n.type) {
+    case "agent": return str(c.prompt);
+    case "approval": return str(c.prompt);
+    case "note": return str(c.text);
+    case "tool": return n.notes || (str(c.tool) ? "Tool: " + str(c.tool) : "");
+    case "loop": return n.notes || (str(c.until) ? "Until " + str(c.until) : "Repeat") + (int(c.maxIterations, 1, 50) ? " · at most " + c.maxIterations + " times" : "");
+    case "trigger": {
+      const t = isObj(c.trigger) ? c.trigger : {};
+      return n.notes || str(t.schedule) || (str(t.webhook) ? "Webhook " + str(t.webhook) : "") || (str(t.event) ? "When " + str(t.event) + " happens" : "");
+    }
+    case "subflow": {
+      const ref = isObj(c.ref) ? c.ref : {};
+      return n.notes || (str(ref.graphId) ? "Runs " + str(ref.graphId) : "");
+    }
+    default: return n.notes || "";
+  }
+}
+
+/** Cards and lines for the Idea Board from a spec (the Orchestrate editor's "Put on the Idea Board"). */
+export function specToBoard(spec: OrchSpec): BoardOrchestration {
+  const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const first = nodes.find((n) => n.id === spec?.entry) || nodes[0];
+  const cards: BoardCard[] = nodes.map((n) => {
+    const card: BoardCard = {
+      id: n.id,
+      kind: BOARD_KIND_OF_TYPE[n.type] || "note",
+      title: oneLine(n.name, 140) || DEFAULT_NAME[n.type],
+      body: boardBody(n).slice(0, 4000),
+      x: Math.round(n.x),
+      y: Math.round(n.y),
+    };
+    const keep: Record<string, unknown> = { node: n.id, config: n.config || {} };
+    if (n === first) keep.spec = { params: spec.params || [], policy: spec.policy || {}, description: spec.description || "" };
+    let orch = JSON.stringify(keep);
+    // Too long to keep whole: the id and the settings, then the id alone.
+    if (orch.length > 4000) orch = JSON.stringify({ node: n.id, config: n.config || {} });
+    if (orch.length > 4000) orch = JSON.stringify({ node: n.id });
+    card.orch = orch;
+    return card;
+  });
+  const links: BoardLink[] = [];
+  for (const e of Array.isArray(spec?.edges) ? spec.edges : []) {
+    const a = byId.get(e.from.node), b = byId.get(e.to.node);
+    if (!a || !b || a.type === "note" || b.type === "note") continue;
+    const portWord: Partial<Record<Port, string>> = { approved: "approved", rejected: "rejected", body: "repeat", exit: "done" };
+    const label = oneLine(e.label, 40) || (e.to.port === "back" ? "again" : portWord[e.from.port] || "");
+    const line: BoardLink = { from: a.id, to: b.id, fp: e.from.port, tp: e.to.port };
+    if (label) line.label = label;
+    if (e.condition) line.cond = String(e.condition).slice(0, 500);
+    links.push(line);
+  }
+  return { name: spec?.name || "", cards, links };
+}
+
+// ── Placing a flow on the board, piece by piece ──────────────────────────
+//
+// BeeZilla says WHAT goes on the board and how it connects; WHERE is worked out here,
+// from the cards already there and the lines known so far. A model asked for
+// coordinates gets the target right far more often than the placement (CanvasObs,
+// arXiv 2610.27176: "Correct placement remains a distinct bottleneck"), so the model
+// never writes a coordinate. The rules are a person's: the work reads left to right,
+// a branch's second answer goes under its first, a join sits level with what it
+// joins, and a card put between two others makes room by moving what follows.
+
+export interface FlowBox { id: string; x: number; y: number; w: number; h: number; kind?: string }
+export interface FlowLine { from: string; to: string; label?: string }
+export interface PlaceOptions {
+  /** Space between columns (the board's COL_GAP is 120). */
+  colGap?: number;
+  /** Space between cards stacked in one column. */
+  rowGap?: number;
+  /** Where a flow with nothing to hang on starts. */
+  origin?: { x: number; y: number };
+}
+
+const BACK_WORDS = /^(?:again|back|loop back|go back|retry|try again|repeat again)$/i;
+
+/** A line that goes back to repeat earlier work (into a loop), not forward. */
+export function isBackLine(line: FlowLine, boxes: Map<string, FlowBox> | FlowBox[]): boolean {
+  const m = boxes instanceof Map ? boxes : new Map(boxes.map((b) => [b.id, b]));
+  const to = m.get(line.to);
+  if (BACK_WORDS.test(String(line.label || "").trim())) return true;
+  return !!(to && to.kind === "loop" && /\bagain\b/i.test(String(line.label || "")));
+}
+
+function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }, pad: number): boolean {
+  return a.x < b.x + b.w + pad && a.x + a.w + pad > b.x && a.y < b.y + b.h + pad && a.y + a.h + pad > b.y;
+}
+
+/** The first free spot at (x, y) or below it, so nothing overlaps; above only when nothing below is free. */
+export function freeSpotNear(x: number, y: number, w: number, h: number, boxes: FlowBox[], skip?: Set<string>, pad = 24): { x: number; y: number } {
+  const others = boxes.filter((b) => !skip || !skip.has(b.id));
+  const free = (yy: number) => !others.some((b) => overlaps({ x, y: yy, w, h }, b, pad));
+  for (let i = 0; i < 120; i++) if (free(y + i * 24)) return { x: Math.round(x), y: Math.round(y + i * 24) };
+  for (let i = 1; i < 40; i++) if (free(y - i * 24)) return { x: Math.round(x), y: Math.round(y - i * 24) };
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+/**
+ * Where a new flow starts: the first spot from (x, y) where a whole row of cards fits —
+ * past anything sitting where the first card would go (the conversation card, say), then
+ * lower down if the row is still blocked — so the flow reads level from its first card.
+ */
+export function flowOrigin(x: number, y: number, boxes: FlowBox[], opts: { cardW?: number; cardH?: number; colGap?: number; columns?: number } = {}): { x: number; y: number } {
+  const w = opts.cardW ?? 210, h = (opts.cardH ?? 130) + 20, step = w + (opts.colGap ?? 120);
+  const width = step * (opts.columns ?? 5);
+  let at = x;
+  for (let k = 0; k < 8; k++) {
+    const hit = boxes.filter((b) => overlaps({ x: at, y, w, h }, b, 24));
+    if (!hit.length) break;
+    at = Math.max(...hit.map((b) => b.x + b.w)) + 60;
+  }
+  for (let i = 0; i < 80; i++) {
+    const yy = y + i * 40;
+    if (!boxes.some((b) => overlaps({ x: at, y: yy, w: width, h }, b, 24))) return { x: Math.round(at), y: Math.round(yy) };
+  }
+  return { x: Math.round(at), y: Math.round(y) };
+}
+
+/** Everything a card leads to (forward lines only), not counting `stop`. */
+function downstream(id: string, lines: FlowLine[], boxes: Map<string, FlowBox>, stop?: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>([id]);
+  const q = [id];
+  while (q.length) {
+    const at = q.shift()!;
+    for (const l of lines) {
+      if (l.from !== at || seen.has(l.to) || l.to === stop) continue;
+      if (isBackLine(l, boxes)) continue;
+      seen.add(l.to);
+      out.push(l.to);
+      q.push(l.to);
+    }
+  }
+  return out;
+}
+
+/** Where a card belongs in the flow, before anything else on the board is considered. */
+function idealSpot(id: string, size: { w: number; h: number }, boxes: FlowBox[], lines: FlowLine[], opts: PlaceOptions): { x: number; y: number } {
+  const colGap = opts.colGap ?? 120, rowGap = opts.rowGap ?? 40;
+  const m = new Map(boxes.map((b) => [b.id, b]));
+  const forwardIn = lines.filter((l) => l.to === id && m.has(l.from) && !isBackLine(l, m));
+  const preds = forwardIn.map((l) => m.get(l.from)!);
+  if (preds.length) {
+    // After a loop's "done": past the end of what the loop repeats.
+    let right = Math.max(...preds.map((p) => p.x + p.w));
+    for (const l of forwardIn) {
+      const p = m.get(l.from)!;
+      if (p.kind === "loop" && /\b(?:done|exit|finish|after|then|next)\b/i.test(String(l.label || ""))) {
+        for (const d of downstream(p.id, lines.filter((x) => !(x.from === p.id && x.to === id)), m)) {
+          const b = m.get(d);
+          if (b) right = Math.max(right, b.x + b.w);
+        }
+      }
+    }
+    const x = right + colGap;
+    if (preds.length >= 2) {
+      // A join: level with the middle of what it joins.
+      return { x, y: preds.reduce((s, p) => s + p.y + p.h / 2, 0) / preds.length - size.h / 2 };
+    }
+    const p = preds[0]!;
+    // The n-th answer of a branch goes under the ones before it.
+    const siblings = lines.filter((l) => l.from === p.id && l.to !== id && m.has(l.to) && !isBackLine(l, m)).map((l) => m.get(l.to)!).filter((b) => b.x >= p.x + p.w);
+    // …but a card that only follows on (no branch yet) stays level with what it follows.
+    const after = new Set(downstream(id, lines, m));
+    const others = siblings.filter((b) => !after.has(b.id));
+    return { x, y: others.length ? Math.max(...others.map((s) => s.y + s.h)) + rowGap : p.y };
+  }
+  // Only what follows is known: just before it.
+  const succIds = lines.filter((l) => l.from === id && m.has(l.to) && !isBackLine(l, m)).map((l) => l.to);
+  if (succIds.length) {
+    const s = m.get(succIds[0]!)!;
+    return { x: s.x - colGap - size.w, y: s.y };
+  }
+  return opts.origin ?? { x: 0, y: 0 };
+}
+
+/**
+ * Where a new card goes. `lines` are the lines known so far, including the ones that
+ * will join this card (read ahead from what BeeZilla already said).
+ */
+export function placeCard(id: string, size: { w: number; h: number }, boxes: FlowBox[], lines: FlowLine[], opts: PlaceOptions = {}): { x: number; y: number } {
+  const at = idealSpot(id, size, boxes, lines, opts);
+  return freeSpotNear(at.x, at.y, size.w, size.h, boxes, new Set([id]));
+}
+
+/**
+ * Where a new card goes in a flow, making room when its place is taken by what comes
+ * after it: put between "Write" and "Publish", it takes Publish's place and Publish
+ * (with everything after it) moves right, the way a person would slide them over.
+ * Anything else in the way, it goes under instead.
+ */
+export function placeInFlow(id: string, size: { w: number; h: number }, boxes: FlowBox[], lines: FlowLine[], opts: PlaceOptions = {}): { x: number; y: number; moves: Array<{ id: string; x: number; y: number }> } {
+  const colGap = opts.colGap ?? 120;
+  const at = idealSpot(id, size, boxes, lines, opts);
+  const m = new Map(boxes.map((b) => [b.id, b]));
+  const here = { x: at.x, y: at.y, w: size.w, h: size.h };
+  const blocking = boxes.filter((b) => b.id !== id && overlaps(here, b, 24));
+  if (blocking.length) {
+    const after = new Set(downstream(id, lines, m));
+    if (blocking.every((b) => after.has(b.id))) {
+      const dx = Math.round(at.x + size.w + colGap - Math.min(...blocking.map((b) => b.x)));
+      const moves = Array.from(after).map((bid) => m.get(bid)).filter((b): b is FlowBox => !!b && b.x >= at.x - size.w)
+        .map((b) => ({ id: b.id, x: Math.round(b.x + dx), y: Math.round(b.y) }));
+      const moved = new Map(moves.map((v) => [v.id, v]));
+      const after2 = boxes.map((b) => (moved.has(b.id) ? { ...b, x: moved.get(b.id)!.x } : b));
+      const spot = freeSpotNear(at.x, at.y, size.w, size.h, after2, new Set([id]));
+      return { x: spot.x, y: spot.y, moves };
+    }
+  }
+  const spot = freeSpotNear(at.x, at.y, size.w, size.h, boxes, new Set([id]));
+  return { x: spot.x, y: spot.y, moves: [] };
+}
+
+/**
+ * What a line in a flow should say, given the cards at its ends: "repeat" and "done"
+ * only leave a loop, "again" only goes back into one, "approved"/"rejected" only leave
+ * an approval. A word in the wrong place is dropped rather than shown, so the board
+ * never says something the flow doesn't mean.
+ */
+export function tidyLineLabel(label: string, fromKind: string, toKind: string): string {
+  const l = String(label || "").replace(/\s+/g, " ").trim().slice(0, 40);
+  if (!l) return "";
+  const low = l.toLowerCase();
+  if (/^(?:again|back|loop back|go back|retry|try again|repeat again)$/.test(low)) return toKind === "loop" ? "again" : "";
+  if (/^(?:repeat|body|each|loop|do|run)$/.test(low)) return fromKind === "loop" ? "repeat" : "";
+  if (/^(?:done|exit|finished|finish|after|then|next)$/.test(low)) return fromKind === "loop" ? "done" : fromKind === "decision" ? l : "";
+  if (/^(?:approved|rejected|approve|reject)$/.test(low)) return fromKind === "approval" ? (low.startsWith("approve") ? "approved" : "rejected") : fromKind === "decision" ? l : "";
+  return l;
+}
+
+/**
+ * A line from `from` to `to` where `to` does not sit after `from`: the cards from
+ * `to` onwards move right (and only those), so the flow still reads left to right.
+ * Returns the new places of the cards that move; nothing for a line back into a loop.
+ */
+export function makeRoom(from: string, to: string, boxes: FlowBox[], lines: FlowLine[], opts: PlaceOptions = {}, label?: string): Array<{ id: string; x: number; y: number }> {
+  const colGap = opts.colGap ?? 120;
+  const m = new Map(boxes.map((b) => [b.id, b]));
+  const a = m.get(from), b = m.get(to);
+  if (!a || !b || isBackLine({ from, to, label }, m)) return [];
+  const need = a.x + a.w + colGap - b.x;
+  if (need <= 0) return [];
+  // Only cards that are really after `to` move: never `from` itself or what leads to it.
+  const chain = [to, ...downstream(to, lines, m, from)].filter((id) => id !== from);
+  const before = new Set(lines.filter((l) => l.to === from).map((l) => l.from));
+  return chain.filter((id) => !before.has(id) && m.has(id)).map((id) => {
+    const c = m.get(id)!;
+    return { id, x: Math.round(c.x + need), y: Math.round(c.y) };
+  });
+}
+
+// ── The board, described for the model ──────────────────────────────────
+//
+// What BeeZilla is shown before it builds: every card as one short line (a short id,
+// what it is, its words, where it is and whether it is in view), the lines between
+// them with what they say, which area holds what, what is selected, and where there
+// is room. Short ids and rounded numbers keep it small (tldraw's agent kit does the
+// same: "round numbers before sending them to the model"); cards far out of view are
+// counted rather than listed once the board is big.
+
+export interface MapCard { id: string; kind: string; title?: string; body?: string; url?: string; x: number; y: number; w: number; h: number; selected?: boolean }
+export interface MapArea { id: string; title?: string; holds: string[] }
+export interface BoardView { x1: number; y1: number; x2: number; y2: number; z: number }
+
+/** The model's name for each board card kind. */
+const MAP_KIND: Record<string, string> = {
+  skill: "step", memory: "step", agent: "core-identity", person: "who-it-serves", chat: "conversation", note: "note",
+  image: "picture", track: "music", model: "3d-model", video: "video", document: "document", sheet: "spreadsheet",
+  slides: "slides", pdf: "pdf", file: "file", sketch: "drawing", area: "area",
+  start: "start", tool: "tool", decision: "decision", parallel: "parallel", loop: "loop", approval: "approval",
+  trigger: "trigger", subflow: "subflow",
+};
+
+export function describeBoard(input: { cards: MapCard[]; links: FlowLine[]; areas?: MapArea[]; view?: BoardView | null; budget?: number }): { text: string; ids: Record<string, string> } {
+  const budget = input.budget ?? 3200;
+  const cards = (input.cards || []).filter((c) => c && c.id && c.kind !== "area");
+  const view = input.view;
+  const r10 = (v: number) => Math.round(v / 10) * 10;
+  const inView = (c: MapCard) => !!view && c.x < view.x2 && c.x + c.w > view.x1 && c.y < view.y2 && c.y + c.h > view.y1;
+  const where = (c: MapCard): string => {
+    if (!view || inView(c)) return "";
+    const s: string[] = [];
+    if (c.y + c.h < view.y1) s.push("above");
+    else if (c.y > view.y2) s.push("below");
+    if (c.x + c.w < view.x1) s.push("left");
+    else if (c.x > view.x2) s.push("right");
+    return " off view " + s.join("-");
+  };
+  // Reading order: left to right, then top to bottom.
+  const ordered = cards.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  const ids: Record<string, string> = {};
+  const short = new Map<string, string>();
+  ordered.forEach((c, i) => { const s = "c" + (i + 1); ids[s] = c.id; short.set(c.id, s); });
+  const linked = new Set<string>();
+  for (const l of input.links || []) { linked.add(l.from); linked.add(l.to); }
+  const cx = view ? (view.x1 + view.x2) / 2 : 0, cy = view ? (view.y1 + view.y2) / 2 : 0;
+  const rank = (c: MapCard) => (c.selected ? 0 : inView(c) ? 1 : linked.has(c.id) ? 2 : 3) * 1e7 + Math.hypot(c.x - cx, c.y - cy);
+  const listed = new Set(cards.slice().sort((a, b) => rank(a) - rank(b)).slice(0, 80).map((c) => c.id));
+
+  const head: string[] = [];
+  const links = (input.links || []).filter((l) => short.has(l.from) && short.has(l.to));
+  head.push(`Board: ${cards.length} card${cards.length === 1 ? "" : "s"}, ${links.length} line${links.length === 1 ? "" : "s"}.` +
+    (view ? ` In view: x ${r10(view.x1)}..${r10(view.x2)}, y ${r10(view.y1)}..${r10(view.y2)} at ${Math.round(view.z * 100)}%.` : ""));
+  const lines: string[] = [];
+  let used = head.join("\n").length;
+  const skipped: MapCard[] = [];
+  for (const c of ordered) {
+    if (!listed.has(c.id)) { skipped.push(c); continue; }
+    const kind = MAP_KIND[c.kind] || c.kind || "card";
+    const title = oneLine(c.title, 60).replace(/"/g, "'");
+    const body = oneLine(c.body, 90);
+    const web = /^https?:\/\//i.test(String(c.url || "")) ? " " + String(c.url).slice(0, 80) : "";
+    const line = `${short.get(c.id)} ${kind === "file" && web ? "link" : kind} "${title}"${body ? " — " + body : ""}${web} @${r10(c.x)},${r10(c.y)} ${r10(c.w)}x${r10(c.h)}${where(c)}`;
+    if (used + line.length + 1 > budget - 400) { skipped.push(c); continue; }
+    lines.push(line);
+    used += line.length + 1;
+  }
+  const out = head.concat(lines);
+  if (skipped.length) {
+    const kinds = Array.from(new Set(skipped.map((c) => MAP_KIND[c.kind] || c.kind))).slice(0, 5).join(", ");
+    out.push(`(+${skipped.length} more card${skipped.length === 1 ? "" : "s"} not listed: ${kinds})`);
+  }
+  if (links.length) {
+    const parts = links.slice(0, 120).map((l) => `${short.get(l.from)}>${short.get(l.to)}${oneLine(l.label, 24) ? ' "' + oneLine(l.label, 24).replace(/"/g, "'") + '"' : ""}`);
+    out.push("Lines: " + parts.join(", "));
+  }
+  for (const a of input.areas || []) {
+    const held = (a.holds || []).map((id) => short.get(id)).filter(Boolean);
+    if (held.length) out.push(`Area "${oneLine(a.title, 40).replace(/"/g, "'")}" holds ${held.join(" ")}`);
+  }
+  const sel = cards.filter((c) => c.selected).map((c) => short.get(c.id));
+  if (sel.length) out.push("Selected: " + sel.join(" "));
+  if (cards.length) {
+    const right = Math.max(...cards.map((c) => c.x + c.w));
+    const below = Math.max(...cards.map((c) => c.y + c.h));
+    out.push(`Room: right of x ${r10(right)}; below y ${r10(below)}.`);
+  } else out.push("The board is empty.");
+  return { text: out.join("\n").slice(0, budget), ids };
+}

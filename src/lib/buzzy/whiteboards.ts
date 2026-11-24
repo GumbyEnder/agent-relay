@@ -68,6 +68,10 @@ const CARD_FIELDS: Record<string, Field> = {
   user: { kind: "flag" },
   taskId: { kind: "text", max: 160 },
   err: { kind: "text", max: 400 },
+  // An orchestration card (start, decision, approval, loop…; orchestration.ts
+  // boardToSpec): the node's settings from the Orchestrate editor, as JSON text, so a
+  // flow put on the board and opened there again loses nothing. Checked below.
+  orch: { kind: "text", max: 4000 },
   // An area (kind "area"): its size, and "Sell this orchestration" (coming soon) —
   // how it would be shared (drops | honey | open), whether what it made may show as
   // examples (yes | no), and when that was chosen.
@@ -84,7 +88,20 @@ const CARD_FIELDS: Record<string, Field> = {
 };
 
 export type WhiteboardCard = Record<string, string | number | boolean>;
-export interface WhiteboardLink { id: string; from: string; to: string; fc?: string; tc?: string }
+export interface WhiteboardLink {
+  id: string;
+  from: string;
+  to: string;
+  fc?: string;
+  tc?: string;
+  /** What a line says in a flow ("yes", "approved", "again"). */
+  label?: string;
+  /** From the Orchestrate editor: the line's ports and condition (orchestration.ts specToBoard). */
+  fp?: string;
+  tp?: string;
+  cond?: string;
+}
+const PORT_NAMES = new Set(["in", "out", "yes", "no", "body", "back", "exit", "approved", "rejected"]);
 export interface WhiteboardState {
   v: 2;
   cards: WhiteboardCard[];
@@ -152,6 +169,18 @@ function cleanCard(raw: unknown): WhiteboardCard | null {
   return typeof out.id === "string" && out.id ? out : null;
 }
 
+/** An orchestration card's settings must be a JSON object; anything else is dropped. */
+function checkOrch(card: WhiteboardCard): WhiteboardCard {
+  if (!own(card, "orch")) return card;
+  try {
+    const j = JSON.parse(String(card.orch)) as unknown;
+    if (!j || typeof j !== "object" || Array.isArray(j)) delete card.orch;
+  } catch {
+    delete card.orch;
+  }
+  return card;
+}
+
 /** The last few titles on the board, newest first: what the history list shows. */
 function titlesOf(cards: WhiteboardCard[]): string {
   const seen = new Set<string>();
@@ -184,7 +213,7 @@ export function cleanWhiteboard(raw: unknown): CleanBoard | Refusal {
     const card = cleanCard(c);
     if (!card || ids.has(String(card.id))) continue;
     ids.add(String(card.id));
-    cards.push(card);
+    cards.push(checkOrch(card));
   }
   const links: WhiteboardLink[] = [];
   rawLinks.forEach((raw, i) => {
@@ -196,6 +225,13 @@ export function cleanWhiteboard(raw: unknown): CleanBoard | Refusal {
     const link: WhiteboardLink = { id: text(l.id, 40) || `l${i}`, from, to };
     if (CORNERS.has(String(l.fc))) link.fc = String(l.fc);
     if (CORNERS.has(String(l.tc))) link.tc = String(l.tc);
+    // What a line says in a flow: "yes", "no", "approved", "again"… (a few words).
+    const label = text(l.label, 60).replace(/\s+/g, " ").trim();
+    if (label) link.label = label;
+    if (PORT_NAMES.has(String(l.fp))) link.fp = String(l.fp);
+    if (PORT_NAMES.has(String(l.tp))) link.tp = String(l.tp);
+    const cond = text(l.cond, 500).trim();
+    if (cond) link.cond = cond;
     links.push(link);
   });
   const v = (s.view && typeof s.view === "object" ? s.view : {}) as Record<string, unknown>;
