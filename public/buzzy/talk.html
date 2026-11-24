@@ -1540,15 +1540,16 @@
 
 /* ── The website's header (#bzHead) ──────────────────────────────────────
    Owner, 2026-11-20: "What you see as a talk area is actually just the header of
-   the entire website." nav.js only collapses the header on a phone where #bzHead
-   exists (html.bz-has-head hides #bzNav at ≤760px); without it the bar cost three
-   rows — brand, identity cluster, links — 211.6px at 390px.
+   the entire website. That's why we can fold it away… The URL bar and menu of the
+   website lives below the talk area." So, top to bottom: the Talk-to-BeeZilla bar
+   (#obStart), the search / web address, then #bzPlaces. nav.js keeps this element
+   above every page and hides the top link row where it exists (html.bz-has-head).
 
-   This line can honestly carry the row of places today, and only the places that
-   exist here. The Talk-to-BeeZilla bar and the search are web-only until their
-   scripts (voice-stage.js, browse.js) are ported: a search box that cannot search
-   is worse than no search box. nav.js paints the current place (paintPlacesRow),
-   so the row cannot disagree with the one LINK list. */
+   Ported from web's talk.html (the bar) and browse.css (the search + reader). The
+   one deliberate difference: web's #bzPlaces also carries the inline pane tabs
+   (Inspiration/History/Library/…) because its browse.js owns those panes. This line
+   serves them as their own pages, so #bzPlaces is anchors only, built from LINKS by
+   nav.js — one list, so the row and the nav cannot drift. */
 .bz-head {
   display: flex; flex-direction: column; box-sizing: border-box; width: 100%;
   padding: 0 var(--ob-gutter, 24px) 6px; background: var(--bz-panel, #141414);
@@ -1557,8 +1558,220 @@
   font-size: 16px; line-height: 1.55; color: #e8e8e8;
 }
 .bz-head > * { order: 3; }
+.bz-head > .ob-start { order: 1; }
 .bz-head > .bz-browse { order: 5; }
-.bz-browse { margin-top: 18px; }
+.ob-start { margin-top: 10px; }
+.bz-browse { margin-top: 14px; }
+
+/* ── Talk to BeeZilla (reference A6b7ky7) ────────────────────────────────── */
+.talk-card {
+  border: none; background: transparent; padding: 0;
+}
+.talk-bar {
+  position: relative; display: flex; align-items: stretch; gap: 0.6rem;
+  padding: 0.55rem; border-radius: 999px;
+  background: linear-gradient(180deg, #171717, #121212);
+  border: 1px solid #2A2A2A;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 30px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.talk-bar:focus-within { border-color: #3A3A3A; }
+.talk-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.6rem;
+  padding: 0 1.6rem 0 1.3rem; min-height: 3.25rem; min-width: 0;
+  border: none; color: #141414; font: inherit; font-size: 1.12rem;
+  font-weight: 800; letter-spacing: 0.01em; white-space: nowrap; cursor: pointer;
+  background: linear-gradient(180deg, #FFD54F 0%, #FFC107 55%, #FFB300 100%);
+  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+  filter: drop-shadow(0 0 10px rgba(255, 193, 7, 0.45));
+  transition: filter 0.15s, transform 0.1s;
+}
+.talk-btn:hover { filter: drop-shadow(0 0 16px rgba(255, 193, 7, 0.7)); }
+.talk-btn:active { transform: scale(0.98); }
+.talk-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.talk-btn .tb-glyph { font-size: 1.3rem; line-height: 1; flex: 0 0 auto; }
+.talk-btn.on { animation: talkPulse 1.6s ease-in-out infinite; }
+@keyframes talkPulse {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.45)); }
+  50% { filter: drop-shadow(0 0 20px rgba(255, 193, 7, 0.9)); }
+}
+.talk-field {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 0.4rem;
+  padding: 0 0.45rem 0 1.15rem; border-radius: 999px;
+  background: #0D0D0D; border: 1px solid #1F1F1F;
+}
+.composer-card .talk-field #chatInput {
+  flex: 1 1 auto; min-height: 0; height: 1.6rem; max-height: 9rem;
+  padding: 0.95rem 0 0.9rem; box-sizing: content-box;
+  background: transparent; border: none; color: #F2F2F2;
+  font-size: 1.02rem; line-height: 1.6rem; resize: none; overflow-y: auto;
+}
+.composer-card .talk-field #chatInput:focus { outline: none; box-shadow: none; }
+.composer-card .talk-field #chatInput::placeholder { color: #6F6F6F; }
+.talk-actions { display: none; align-items: center; gap: 0.35rem; flex: 0 0 auto; }
+.talk-bar.has-text .talk-actions { display: inline-flex; }
+.talk-send {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.5rem; height: 2.5rem; min-height: 0; min-width: 0; padding: 0;
+  border-radius: 50%; border: none;
+  background: var(--bz-yellow, #FFC107); color: #141414; cursor: pointer;
+}
+.talk-send svg { width: 1.25rem; height: 1.25rem; fill: currentColor; }
+.talk-send:disabled { opacity: 0.45; cursor: default; }
+.talk-extras { display: inline-flex; align-items: center; gap: 0.35rem; flex: 0 0 auto; }
+.talk-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.6rem; height: 2.6rem; min-height: 0; min-width: 0; padding: 0;
+  border: 1px solid #2E2E2E; border-radius: 50%; background: transparent;
+  color: #C9C9C9; cursor: pointer;
+}
+.talk-icon svg { width: 1.3rem; height: 1.3rem; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.talk-icon:hover { color: var(--bz-yellow, #FFC107); border-color: #6B5A1E; }
+.talk-drop-hint {
+  display: none; position: absolute; inset: 0; margin: 0;
+  align-items: center; justify-content: center; border-radius: 999px;
+  background: rgba(20, 20, 20, 0.92); color: var(--bz-yellow, #FFC107);
+  font-weight: 700; pointer-events: none;
+}
+.talk-bar.over { border-color: var(--bz-yellow, #FFC107); box-shadow: 0 0 0 1px var(--bz-yellow, #FFC107), 0 0 24px rgba(255, 193, 7, 0.35); }
+.talk-bar.over .talk-drop-hint { display: flex; }
+.talk-sub {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.6rem; margin: 0.55rem 0.4rem 0;
+}
+.talk-sub .mode-tabs { margin: 0; }
+.talk-sub .mode-tab { padding: 0.24rem 0.8rem; font-size: 0.76rem; }
+.talk-attach {
+  margin: 0; font-size: 0.78rem; padding: 0.24rem 0.7rem;
+  border-radius: 999px; border: 1px solid #2E2E2E; background: transparent;
+  color: #B5B5B5; font: inherit; cursor: pointer;
+}
+.talk-attach:hover { color: var(--bz-yellow, #FFC107); border-color: #6B5A1E; }
+.talk-sub-right { display: inline-flex; align-items: center; gap: 0.45rem; }
+.bz-head .voice-status { margin: 0.4rem 0.4rem 0; }
+.bz-head .ctx-meter { margin: 0.4rem 0.4rem 0; }
+
+/* ── Search or enter a web address (browse.css) ─────────────────────────── */
+.bz-search {
+  position: relative; display: flex; align-items: center; gap: 0.75rem;
+  padding: 0 0.6rem 0 1.25rem; min-height: 3.6rem; border-radius: 999px;
+  background: #121212; border: 1px solid #2A2A2A;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.bz-search:focus-within {
+  border-color: #FFC107;
+  box-shadow: 0 0 0 1px #FFC107, 0 0 22px rgba(255, 193, 7, 0.35);
+}
+.bz-search-ico { width: 1.35rem; height: 1.35rem; fill: none; stroke: #D8D8D8; stroke-width: 2; flex: 0 0 auto; }
+.bz-search input {
+  flex: 1 1 auto; min-width: 0; width: auto; height: 3.4rem;
+  border: none; outline: none; background: transparent; color: #F2F2F2;
+  font: inherit; font-size: 1.1rem; padding: 0;
+}
+.bz-search input:focus { outline: none; box-shadow: none; border: none; }
+.bz-search input::placeholder { color: #8A8A8A; }
+.bz-search input::-webkit-search-cancel-button { display: none; }
+.bz-search-tools {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding-left: 0.6rem; border-left: 1px solid #2E2E2E;
+}
+.bz-search-note { min-height: 1.1rem; margin: 0.4rem 1.2rem 0; font-size: 0.8rem; color: #FFC107; }
+.bz-share-btn {
+  display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.2rem;
+  padding: 0.2rem 0.7rem; border: 1px solid #2E2E2E; border-radius: 999px;
+  background: #161616; color: #D8D8D8; font: inherit; font-size: 0.78rem;
+  font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.bz-share-btn:hover { color: #FFC107; border-color: #6B5A1E; background: #1C1C1C; }
+.bz-share-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 1px; }
+.bz-share-btn svg { width: 1rem; height: 1rem; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.bz-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.5rem; height: 2.5rem; min-height: 0; min-width: 0; padding: 0;
+  border: none; border-radius: 10px; background: transparent;
+  color: #D8D8D8; font-size: 1.15rem; cursor: pointer;
+}
+.bz-icon-btn:hover { color: #FFC107; background: #1C1C1C; }
+.bz-icon-btn:focus-visible { outline: 2px solid #FFC107; outline-offset: 1px; }
+
+/* ── Search results ─────────────────────────────────────────────────────── */
+.bz-results {
+  margin-top: 0.6rem; padding: 1.2rem 1.3rem 1.4rem; border-radius: 14px;
+  background: #141414; border: 1px solid #232323;
+}
+.bz-results-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.bz-results-head h2 { margin: 0; font-size: 1.45rem; font-weight: 700; color: #F4F4F4; letter-spacing: -0.01em; }
+.bz-chips { display: flex; align-items: center; flex-wrap: wrap; margin: 1rem 0 1.1rem; }
+.bz-chips button {
+  display: inline-flex; align-items: center; gap: 0.4rem; min-height: 0; min-width: 0;
+  padding: 0.42rem 1.1rem; border: none; border-radius: 999px;
+  background: transparent; color: #A8A8A8; font: inherit; font-size: 0.95rem; cursor: pointer;
+}
+.bz-chips button + button { border-radius: 0; border-left: 1px solid #333; }
+.bz-chips button.on { background: #FFC107; color: #141414; font-weight: 700; border-radius: 999px; border-left-color: transparent; }
+.bz-chips button.on + button { border-left-color: transparent; }
+.bz-chip-n { font-size: 0.75rem; opacity: 0.75; }
+.bz-chip-n:empty { display: none; }
+.bz-results-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.9rem;
+}
+.bz-result {
+  display: flex; align-items: center; gap: 1rem; min-height: 0;
+  padding: 1.1rem; border-radius: 10px; background: #171717;
+  border: 1px solid #272727; color: inherit; font: inherit; text-align: left;
+  text-decoration: none; cursor: pointer;
+}
+.bz-result:hover, .bz-result:focus-visible { border-color: #FFC107; outline: none; background: #1A1A1A; }
+.bz-result-text { display: flex; flex-direction: column; min-width: 0; }
+.bz-result-title { color: #F2F2F2; font-size: 1.02rem; font-weight: 600; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.bz-result-type { color: #9A9A9A; font-size: 0.85rem; margin-top: 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bz-results-empty { color: #9A9A9A; margin: 0.4rem 0; }
+.bz-ico {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.7rem; height: 2.7rem; border-radius: 7px; font-weight: 800;
+  font-size: 1.25rem; color: #fff; background: #2A2A2A;
+}
+.bz-ico-word { background: linear-gradient(135deg, #2B7CD3, #185ABD); }
+.bz-ico-sheet { background: linear-gradient(135deg, #21A366, #107C41); }
+.bz-ico-pdf { background: linear-gradient(135deg, #E5484D, #B4232A); font-size: 0.78rem; }
+.bz-ico-work, .bz-ico-chat, .bz-ico-web { color: #FFC107; background: #232323; }
+
+/* ── Reader: a typed web address opened as text ─────────────────────────── */
+.bz-reader {
+  margin-top: 0.6rem; border-radius: 14px; background: #141414;
+  border: 1px solid #232323; overflow: hidden;
+}
+.bz-reader-bar {
+  display: flex; align-items: center; gap: 0.35rem; padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid #222; background: #121212;
+}
+.bz-crumbs { display: flex; align-items: center; gap: 0.25rem; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.bz-crumb {
+  min-height: 0; min-width: 0; padding: 0.25rem 0.6rem; border: 1px solid transparent;
+  border-radius: 999px; background: transparent; color: #A9A9A9; font: inherit;
+  font-size: 0.82rem; white-space: nowrap; cursor: pointer;
+}
+.bz-crumb:hover { color: #F2F2F2; }
+.bz-crumb.on { color: #141414; background: #FFC107; font-weight: 700; }
+.bz-crumb-sep { color: #555; }
+.bz-reader-out { flex: 0 0 auto; color: #FFC107; font-size: 0.82rem; text-decoration: none; white-space: nowrap; }
+.bz-reader-out:hover { text-decoration: underline; }
+.bz-reader-body { max-height: 70vh; overflow-y: auto; padding: 1.1rem 1.4rem 1.4rem; color: #DADADA; }
+.bz-reader-body h2 { margin: 0 0 0.25rem; color: #F4F4F4; font-size: 1.35rem; line-height: 1.25; }
+.bz-reader-url { margin: 0 0 1rem; color: #8A8A8A; font-size: 0.8rem; overflow-wrap: anywhere; }
+.bz-reader-text p { margin: 0 0 0.7rem; line-height: 1.6; max-width: 72ch; }
+.bz-reader-body h3 { margin: 1.4rem 0 0.5rem; font-size: 0.95rem; color: #F2F2F2; }
+.bz-reader-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.bz-reader-links li { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.bz-reader-links button {
+  min-height: 0; min-width: 0; padding: 0; border: none; background: none;
+  color: #FFC107; font: inherit; text-align: left; cursor: pointer;
+}
+.bz-reader-links button:hover { text-decoration: underline; }
+.bz-reader-links span { color: #6F6F6F; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bz-reader-msg { color: #BDBDBD; }
+
+/* ── The row of places (anchors from LINKS) ─────────────────────────────── */
 .bz-tabrow {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 36px;
   margin: 1.1rem 0.6rem 0.4rem; border-bottom: 1px solid #1e1e1e;
@@ -1579,12 +1792,32 @@
   content: ""; position: absolute; left: -0.4rem; right: -0.4rem; bottom: -1px;
   height: 3px; border-radius: 3px; background: #ffc107;
 }
+
 @media (max-width: 760px) {
   .bz-head { padding: 0 16px 6px; }
   .bz-tabrow { gap: 2px 14px; }
   /* One wrap group, not two: two flex containers wrapped independently and made
      five rows of places at 360px (web, CR-13). */
   .bz-tabrow .bz-places { display: contents; }
+}
+@media (max-width: 640px) {
+  .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; flex-wrap: wrap; row-gap: 6px; }
+  .talk-btn {
+    padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
+    clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+  }
+  .talk-btn .tb-label { display: none; }
+  .talk-field { flex: 1 1 calc(100% - 4.4rem); padding-left: 0.85rem; border-radius: 18px; }
+  .composer-card .talk-field #chatInput { font-size: 16px; padding: 0.7rem 0; }
+  .talk-extras { flex: 1 0 100%; justify-content: flex-end; }
+  .bz-search { min-height: 3.1rem; padding-left: 1rem; gap: 0.5rem; }
+  .bz-search input { height: 3rem; font-size: 16px; }
+  .bz-share-btn { font-size: 0.74rem; padding: 0.2rem 0.55rem; }
+  .bz-share-btn span { display: none; }
+  .bz-results { padding: 1rem; }
+  .bz-results-grid { grid-template-columns: 1fr; }
+  .bz-reader-out { display: none; }
+  .bz-reader-body { padding: 1rem; }
 }
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
@@ -1973,6 +2206,10 @@
   <script src="/buzzy/promise-check.js"></script>
   <script src="/buzzy/avatar.js"></script>
   <script src="/buzzy/sow-pdf.js"></script>
+  <!-- The header's search half: your work through /api/buzzy/search, a typed web
+       address through /api/buzzy/read. Loaded here, so nav.js's fetch of this page
+       for its header brings the wiring along and the bar is live on every page. -->
+  <script src="/buzzy/head-search.js"></script>
   <script>
     const QUESTIONS = [
       { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
@@ -7806,6 +8043,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sendFromBox();
       }
     });
+    // The send arrow is part of the bar, not always on screen: it appears with the
+    // first character and leaves when the box is empty (the bar's own rule).
+    document.getElementById("chatInput").addEventListener("input", function () {
+      var bar = document.getElementById("talkBar");
+      var box = document.getElementById("chatInput");
+      if (bar) bar.classList.toggle("has-text", !!(box && box.value.trim()));
+    });
     document.getElementById("approveDraft").onclick = onApproveDraft;
     document.getElementById("draftSend").onclick = onDraftSend;
     document.getElementById("confirmOutward").onclick = onConfirmOutward;
@@ -7955,6 +8199,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sessionsError("Couldn't open that session. Try again in a moment.");
       }
     }
+    // The header's search lives on every page, but the transcript lives here. One
+    // exported opener lets a chat result open through the same code the History
+    // drawer uses (no second fetch-and-render path to drift).
+    window.bzOpenSessionById = async function (id) {
+      try {
+        var co = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.activeId() : null;
+        var r = await fetch(SESSIONS_BASE + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" });
+        if (!r.ok) return;
+        var data = await r.json();
+        var hit = (data.sessions || []).filter(function (s) { return s && s.id === id; })[0];
+        if (hit) openSession(hit);
+      } catch (_) { /* the drawer still works */ }
+    };
     function renameSession(s, card) {
       const current = s.title || "";
       const next = prompt("Rename this session:", current);
