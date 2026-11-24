@@ -60,11 +60,20 @@ Tracked as issues, not as this document:
   if the order is not web's, then follows every href and fails on non-200, a page without
   the nav, or a page that never loads nav.js — so a place the row inherits from the
   website cannot 404 here unnoticed.
-- **Next slice — `#bzHead`:** the phone header still costs three rows on this line
-  (brand, identity cluster, link row) because `public/buzzy/talk.html` predates the
-  website's header (`#bzHead`: Talk to BeeZilla, the search, the row of places). nav.js
-  collapses the header on web only where `#bzHead` exists; without it `bz-has-head` is
-  never set and `#bzNav` cannot hide at ≤760px.
+- **`#bzHead`, slice 1 (done on this branch):** `public/buzzy/talk.html` now carries the
+  shell's header element — `#bzHead.bz-head` with the row of places (`#bzPlaces`) and the
+  oneboard.css row styling — so nav.js sets `html.bz-has-head` and hides the top link row
+  where it exists, as on web. The phone bar went from three rows to two: **211.6 → 166.5px
+  at 390** (web 172.1; the 5.6px is the Feedback pill web has and this line does not),
+  places row 4 rows, `scrollWidth == 390`, one `#bzHead` after soft navigation. At 1280 the
+  bar is 76px (web 77) and the row is one line. The row names Talk itself because web gets
+  Talk from the Talk-to-BeeZilla bar, which this line has not ported — drop that anchor the
+  day the bar lands.
+- **Next slice — the head's bar and search:** the Talk-to-BeeZilla composer, the search and
+  its QR/copy live in web's `#bzHead` and depend on `voice-stage.js`, `browse.js` and
+  `/api/buzzy/search-status`, none of which exist on `feat/local-runtime`. They were left
+  out deliberately: a search box that cannot search, or a talk button with no engine, is
+  worse than its absence.
 
 ## Verifying
 
