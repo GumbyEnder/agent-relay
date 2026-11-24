@@ -62,6 +62,12 @@ const SPEC = {
   meta: { generator: "human" },
 };
 
+async function waitConsumed(page, ms = 4000) {
+  // The door drops the key only after the document has stayed put for a beat, so
+  // the checks below wait for the drop instead of racing it.
+  await page.waitForFunction(() => window.localStorage.getItem("bz_orch_handoff") === null, null, { timeout: ms }).catch(() => {});
+}
+
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok: !!ok, detail });
@@ -105,6 +111,7 @@ check("skips the note node", !value.includes("scratch"));
 check("does not send it", (await page.$$eval(".msg, .message, [data-role='user']", (n) => n.length)) === 0);
 check("ends with the ask", /turn it into a draft/.test(value));
 
+await waitConsumed(page);
 const handoffLeft = await page.evaluate(() => window.localStorage.getItem("bz_orch_handoff"));
 check("one-shot: key consumed", handoffLeft === null, String(handoffLeft).slice(0, 40));
 const href = page.url();
@@ -118,6 +125,35 @@ await page.waitForFunction(() => {
 }, null, { timeout: 25000 }).catch(() => {});
 const afterReload = await page.$eval("#chatInput", (el) => el.value);
 check("reload leaves the box empty", afterReload.trim() === "", afterReload.slice(0, 80));
+
+// The first-run flake, modelled: a late get-session callback from an earlier Talk
+// document fires the door in a document that has no composer. Before the fix the
+// door consumed the key anyway, so the plan was gone and neither bz:page nor the
+// auth callback could retry. No composer must mean "not yet", never "delivered".
+await page.goto(`${ORIGIN}${TALK_PATH}`, { waitUntil: "domcontentloaded" });
+const survived = await page.evaluate((spec) => {
+  window.localStorage.setItem("bz_orch_handoff", JSON.stringify(spec));
+  const real = document.getElementById.bind(document);
+  document.getElementById = (id) => (id === "chatInput" ? null : real(id));
+  try {
+    window.dispatchEvent(new CustomEvent("bz:page", { detail: { key: "/buzzy/talk" } }));
+  } finally {
+    document.getElementById = real;
+  }
+  return window.localStorage.getItem("bz_orch_handoff");
+}, SPEC);
+check("no composer: the handoff is not consumed", survived !== null, String(survived).slice(0, 40));
+
+// ...and the next load still delivers it, which is the whole point of not eating it.
+await page.goto(`${ORIGIN}${TALK_PATH}?fromOrchestration=1`, { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => {
+  const el = document.getElementById("chatInput");
+  return el && !el.disabled;
+}, null, { timeout: 25000 }).catch(() => {});
+const retried = await page.$eval("#chatInput", (el) => el.value);
+check("next load still delivers the plan", /Quote follow-up/.test(retried) && /Orchestrate/.test(retried), retried.slice(0, 90));
+await waitConsumed(page);
+check("retry consumed it", (await page.evaluate(() => window.localStorage.getItem("bz_orch_handoff"))) === null);
 
 // The route a person actually takes: on the canvas, press Send, land on Talk.
 // Two orders, because they exercise different doors:
@@ -146,6 +182,7 @@ await sendFromCanvas();
 const freshValue = await composerValue();
 check("Send from a fresh Orchestrate fills Talk", /Orchestrate/.test(freshValue) && /Quote follow-up/.test(freshValue), freshValue.slice(0, 90));
 check("landed on Talk", /\/buzzy\/talk/.test(page.url()), page.url());
+await waitConsumed(page);
 check("handoff consumed (fresh load)", (await page.evaluate(() => window.localStorage.getItem("bz_orch_handoff"))) === null);
 
 // B — Talk kept alive, orchestrate visited through the shell, Send comes back.
@@ -164,6 +201,7 @@ check("shell hop to Orchestrate", softHop === "hopped", softHop);
 await sendFromCanvas();
 const keptValue = await composerValue();
 check("Send to a kept-alive Talk still fills it", /Orchestrate/.test(keptValue) && /Quote follow-up/.test(keptValue), keptValue.slice(0, 90));
+await waitConsumed(page);
 check("handoff consumed (kept-alive Talk)", (await page.evaluate(() => window.localStorage.getItem("bz_orch_handoff"))) === null);
 
 check("no page errors", errors.length === 0, errors.slice(0, 2).join(" | "));

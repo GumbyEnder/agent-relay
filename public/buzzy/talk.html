@@ -7436,30 +7436,72 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var raw = null;
       try { raw = window.localStorage.getItem("bz_orch_handoff"); } catch (e) { return; }
       if (!raw) return;
-      chatState._orchHandoffRead = true;
-      try { window.localStorage.removeItem("bz_orch_handoff"); } catch (e) {}
+      // No composer means "not yet", never "delivered". A late session callback
+      // from an earlier Talk document can land here after its composer is gone;
+      // consuming the key there threw the plan away with no door left to retry.
       var input = document.getElementById("chatInput");
       if (!input) return;
-      var spec = null;
-      try { spec = JSON.parse(raw); } catch (e) {}
-      var text = spec && spec.nodes ? orchHandoffText(spec) : String(raw).slice(0, 4000);
-      // Never throw away something the person already typed: a kept-alive Talk can
-      // come back with a draft in the box, and the plan goes under it, not over it.
-      var typed = String(input.value || "").replace(/\s+$/, "");
-      input.value = typed ? typed + "\n\n" + text : text;
-      // The query hint is not state: drop it so a reload is an ordinary Talk load.
-      try {
-        if (window.history && window.history.replaceState) {
-          var u = new URL(window.location.href);
-          if (u.searchParams.has("fromOrchestration")) {
-            u.searchParams.delete("fromOrchestration");
-            window.history.replaceState({}, "", u.pathname + (u.search ? u.search : "") + (u.hash || ""));
-          }
-        }
-      } catch (e) {}
-      try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
-      if (!input.disabled) input.focus();
+      if (chatState._orchHandoffRaw !== raw) {
+        var spec = null;
+        try { spec = JSON.parse(raw); } catch (e) {}
+        var text = spec && spec.nodes ? orchHandoffText(spec) : String(raw).slice(0, 4000);
+        // Never throw away something the person already typed: a kept-alive Talk can
+        // come back with a draft in the box, and the plan goes under it, not over it.
+        var typed = String(input.value || "").replace(/\s+$/, "");
+        var fill = typed ? typed + "\n\n" + text : text;
+        try { input.value = fill; } catch (e) { return; }
+        // A refused write (readOnly, a detached box) is not a delivery.
+        if (input.value !== fill) return;
+        chatState._orchHandoffRaw = raw;
+        try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+        if (!input.disabled) input.focus();
+      }
+      armOrchHandoffConsume(raw);
     }
+    // Consuming the key is a claim that the plan reached the person. A fill in a
+    // document that is already on its way out is not delivery: the first Talk of a
+    // just-started server can finish its get-session call after the plan was
+    // planted but while the browser is navigating, fill a box that is about to be
+    // discarded, and take the key with it — the Talk the person lands on never sees
+    // the plan. So the fill happens now; the key is dropped only once this document
+    // has stayed put for a beat, and a cross-document navigation cancels the drop.
+    function armOrchHandoffConsume(raw) {
+      clearTimeout(chatState._orchHandoffTimer);
+      chatState._orchHandoffTimer = setTimeout(function () {
+        if (chatState._orchHandoffRead || chatState._orchHandoffLeaving) return;
+        if (chatState._orchHandoffRaw !== raw) return;
+        var box = document.getElementById("chatInput");
+        if (!box) return;
+        chatState._orchHandoffRead = true;
+        try { window.localStorage.removeItem("bz_orch_handoff"); } catch (e) {}
+        // The query hint is not state: drop it so a reload is an ordinary Talk load.
+        try {
+          if (window.history && window.history.replaceState) {
+            var u = new URL(window.location.href);
+            if (u.searchParams.has("fromOrchestration")) {
+              u.searchParams.delete("fromOrchestration");
+              window.history.replaceState({}, "", u.pathname + (u.search ? u.search : "") + (u.hash || ""));
+            }
+          }
+        } catch (e) {}
+      }, 350);
+    }
+    function orchHandoffLeaving() {
+      chatState._orchHandoffLeaving = true;
+      clearTimeout(chatState._orchHandoffTimer);
+    }
+    try {
+      if (window.navigation && window.navigation.addEventListener) {
+        window.navigation.addEventListener("navigate", function (e) {
+          // A same-document hop is the shell keeping this Talk alive, not a door
+          // closing on it: only a cross-document navigation cancels the drop.
+          if (e && e.destination && e.destination.sameDocument) return;
+          orchHandoffLeaving();
+        });
+      }
+    } catch (e) {}
+    window.addEventListener("pagehide", orchHandoffLeaving);
+
     // Orchestrate -> Talk is a SOFT navigation (nav.js BeeZillaShell.go). When Talk is
     // already the kept-alive page, the shell only restores it and no script of ours
     // runs again — so the handoff needs a second door: the shell announces every page
