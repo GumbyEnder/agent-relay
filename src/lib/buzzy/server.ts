@@ -84,7 +84,6 @@ import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
-import { generateMusic, musicConfigured, storeAudio } from "./music";
 import { webSearch } from "./search";
 import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
@@ -382,25 +381,6 @@ export function toolSkillTitle(name: string): string {
   return TOOL_SKILL_NAMES[n] || n.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
 
-/**
- * One step of a turn, as the Idea Board draws it.
- *
- * The board is not decoration: it is how the person sees what the agent read and
- * what it is doing while it does it, so they can change the process. Every step
- * is named by a stable id, so the same skill used twice is one card.
- */
-export interface FlowStep {
-  kind: "agent" | "memory" | "skill" | "output";
-  id: string;
-  title: string;
-  detail?: string;
-  /** The card this one hangs from (agent.md for a skill, the skill for an output). */
-  parent?: string;
-  state?: "running" | "done" | "failed";
-  url?: string;
-  contentType?: string;
-}
-
 /** Per-turn latency breakdown. Product metric — surfaced to the client and
  *  written to buzzy_voice_metrics so "it feels slow" becomes a number. */
 export interface TurnTimings {
@@ -428,8 +408,6 @@ export interface ChatResponse {
   done?: boolean;
   warning?: string;
   jobId?: string;
-  /** a picture this turn rendered — the card is built from this, never from prose */
-  image?: { url: string; name: string; bytes: number; type: string };
   previousDraft?: string;
   review?: Array<{ label: string; verdict: "verified" | "stated" | "warning"; detail?: string }>;
   estimate?: { estimateLow: number; estimateHigh: number; civilian: string; free: boolean };
@@ -510,13 +488,6 @@ function confirmedCompanySection(
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const { userId, jobId, sessionId, message, model, jobContext, companyName, companyFacts } = req;
   const surface: "text" | "voice" = req.surface === "voice" ? "voice" : "text";
-  // Audio actually produced this turn. The reply may only claim a track when this
-  // is set — the whole reason a person hears "I don't produce audio" from a product
-  // that has a music tool is that nothing tracked the difference.
-  let renderedAudio: { url: string; name: string; bytes: number; type: string } | null = null;
-  let musicRefusal: { code: string; error: string } | null = null;
-  let renderedImage: { url: string; name: string; bytes: number; type: string } | null = null;
-  let artRefusal: { code: string; error: string } | null = null;
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
   let extractMs = 0;
@@ -529,19 +500,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   if (!message?.trim()) {
     return { ok: false, reply: "", error: "message is required", code: "bad_request" };
-  }
-
-  // A managed token that has expired is a SESSION problem, not a bad credential.
-  // Say "reconnect" and stop: spending the request would surface a provider 401,
-  // which reads to a user as "my key is wrong" and sends them to the wrong fix.
-  if (process.env.BZ_MANAGED_EXPIRED === "1") {
-    return {
-      ok: false,
-      reply:
-        "Your BeeZilla sign-in has expired. Reconnect from Settings (BeeZilla → Settings) and I'll pick up where we left off — nothing was sent.",
-      error: "managed token expired",
-      code: "managed_expired",
-    };
   }
 
   // ── Validate model against catalog (client sends a label; resolve to id) ──
@@ -1232,7 +1190,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // A command for the page ("add a step called draw the poster") makes nothing itself.
   if (!lockdown && !appPlan && !wants3d && !wantsVideo && isMusicRequest(message) && musicConfigured()) {
     const brief = message.slice(0, 2000);
-    req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "running", detail: brief.slice(0, 240) });
     const said = brief.match(/\b(\d+(?:\.\d+)?)\s*(minute|min|second|sec)s?\b/i);
     const implied = said
       ? said[2].toLowerCase().startsWith("m") ? Number(said[1]) * 60 : Number(said[1])
@@ -1291,7 +1248,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "sentences and stop.";
     } else if (!made.ok) {
       musicRefusal = { code: String(made.code ?? "music_failed"), error: String(made.error ?? "unknown error") };
-      req.onFlow?.({ kind: "skill", id: "skill:music", title: "Music maker", parent: "agent", state: "failed", detail: String(made.error ?? "no audio came back").slice(0, 240) });
       messages[0]!.content +=
         `\n\nMusic generation was attempted and FAILED (${made.code}): ${made.error}. ` +
         "Tell the owner this exact reason. Do not claim any audio exists.";

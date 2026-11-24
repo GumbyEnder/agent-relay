@@ -25,7 +25,7 @@ export const DEFAULT_TTL_SECONDS = 900; // 15 minutes
 export const MAX_TTL_SECONDS = 3600;
 
 /** What a token is allowed to be used for. Nothing else is mintable. */
-export type TokenScope = "inference" | "search" | "music" | "image";
+export type TokenScope = "inference" | "search" | "music";
 
 export interface InferenceClaims {
   /** the account the token was minted for */
@@ -50,7 +50,7 @@ export interface InferenceClaims {
 
 export type VerifyFailure = "malformed" | "bad_signature" | "expired" | "scope" | "no_secret";
 
-const SCOPES: readonly TokenScope[] = ["inference", "search", "music", "image"];
+const SCOPES: readonly TokenScope[] = ["inference", "search", "music"];
 
 export interface VerifyResult {
   ok: boolean;
