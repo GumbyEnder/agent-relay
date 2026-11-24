@@ -4510,7 +4510,7 @@
       drawLinks();
       setTimeout(drawLinks, 470);
     }
-    function follow(c) {
+    function keepInSight(c) {
       // Keep the newest card in sight, gliding, the way you'd look at what's being built.
       reveal(c);
     }
@@ -4546,7 +4546,7 @@
             if (spot.y !== c.y || spot.x !== c.x) { c.x = spot.x; c.y = spot.y; place(c); }
           }
           lightUp([c]);
-          follow(c);
+          keepInSight(c);
           if (run.hooks.progress) run.hooks.progress("Added " + nameOf(c));
         });
       }
@@ -4575,7 +4575,7 @@
           });
           var spot = O.placeInFlow(lost, { w: ln ? ln.offsetWidth : CARD_W, h: ln ? ln.offsetHeight : CARD_H }, others, ahead, { colGap: COL_GAP, rowGap: 40, origin: run.origin });
           glideCards((spot.moves || []).concat(lc ? [{ id: lost, x: spot.x, y: spot.y }] : []));
-          if (lc) follow(lc);
+          if (lc) keepInSight(lc);
         }
         glideCards(O.makeRoom(a, b, boardBoxes(), all, { colGap: COL_GAP }, label));
         // Ports and a condition only come with a flow from the editor (addOrchestration), never from the model.
@@ -4604,7 +4604,7 @@
         fillCard(nodes[c.id], c);
         drawLinks();
         lightUp([c]);
-        follow(c);
+        keepInSight(c);
         run.counts.change++;
         return Promise.resolve();
       }

@@ -150,6 +150,29 @@ check("cards arrived", flow.cards.length >= 4, kinds);
 check("it has flow cards (a trigger or start, an approval…)", kinds.some((k) => k === "trigger" || k === "start") && kinds.some((k) => k === "approval"), kinds);
 check("nothing sits on top of anything", overlapping(flow.cards).length === 0, overlapping(flow.cards));
 const firstCount = flow.cards.length;
+
+// Cards still drag (a build must never break the board's own drag, which goes through follow()).
+const dragged = await page.evaluate(() => {
+  const n = document.querySelector(".wb-panel .wb-card.wb-k-approval .wb-name") || document.querySelector(".wb-panel .wb-card .wb-name");
+  if (!n) return null;
+  const r = n.getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), left: n.closest(".wb-card").offsetLeft };
+});
+if (dragged) {
+  await page.mouse.move(dragged.x, dragged.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(dragged.x + i * 10, dragged.y + i * 4);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => (document.querySelector(".wb-panel .wb-card.wb-k-approval") || document.querySelector(".wb-panel .wb-card")).offsetLeft);
+  check("cards still drag after a build", after !== dragged.left, { before: dragged.left, after });
+  // …and back where it was, so the rest of the run sees the board as built.
+  await page.mouse.move(dragged.x + 80, dragged.y + 32);
+  await page.mouse.down();
+  for (let i = 7; i >= 0; i--) await page.mouse.move(dragged.x + i * 10, dragged.y + i * 4);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+}
 const firstFlow = flow.cards.filter((c) => FLOWISH.test(c.kind)).length;
 
 // 2. A change to it.
