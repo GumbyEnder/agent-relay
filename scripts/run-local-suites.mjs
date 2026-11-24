@@ -29,6 +29,7 @@ const LADDER = [
   { name: "search live", cmd: "node", args: ["scripts/test-search-live.mjs"] },
   { name: "search managed", cmd: "node", args: ["scripts/test-search-managed.mjs"] },
   { name: "search reconnect", cmd: "node", args: ["scripts/test-search-reconnect.mjs"] },
+  { name: "buzzy read", cmd: "npx", args: ["tsx", "scripts/test-buzzy-read.ts"] },
   { name: "recipe trust + cache", cmd: "npx", args: ["tsx", "scripts/test-recipe-trust.ts"] },
   { name: "recipe catalog", cmd: "npx", args: ["tsx", "scripts/test-recipe-catalog.ts"] },
   { name: "local recipe API", cmd: "npx", args: ["tsx", "scripts/test-recipe-local-api.ts"] },

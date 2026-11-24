@@ -69,11 +69,53 @@ Tracked as issues, not as this document:
   bar is 76px (web 77) and the row is one line. The row names Talk itself because web gets
   Talk from the Talk-to-BeeZilla bar, which this line has not ported — drop that anchor the
   day the bar lands.
-- **Next slice — the head's bar and search:** the Talk-to-BeeZilla composer, the search and
-  its QR/copy live in web's `#bzHead` and depend on `voice-stage.js`, `browse.js` and
-  `/api/buzzy/search-status`, none of which exist on `feat/local-runtime`. They were left
-  out deliberately: a search box that cannot search, or a talk button with no engine, is
-  worse than its absence.
+- **`#bzHead`, slice 2a — `/api/buzzy/search-status` is real (done on this branch):** the
+  route three scripts (`test-search-live`, `test-search-managed`, `test-search-reconnect`)
+  and the settings/doctor bridge already asked for now answers, session-gated, in
+  `src/lib/buzzy/chat.nitro.ts`:
+
+  ```json
+  {"ok":true,"available":true,"provider":"brave","needsReconnect":false}
+  ```
+
+  `available` is false when the managed session has expired and `needsReconnect` is then
+  true — "your session lapsed" must never read as "search is off", or a signed-in owner
+  goes hunting for a Brave key they were never meant to need. The provider is named; the
+  key never is (all three suites assert the payload does not contain the key). Proven on
+  the built runtime: managed 7/7 PASS, reconnect 13/13 PASS, live 4/4 PASS + 1 SKIP (no
+  live key in this environment).
+
+- **`#bzHead`, slice 2b — `/api/buzzy/read` is real (done on this branch):** browse.js's
+  reader half — a typed web address opened as text. `chat.nitro.ts` gains the session-gated
+  route (`{ok, url, title, text, links}`, 40k cap, 422 with a named code when the page
+  cannot be read) and `webpage.ts` gains `pageTitle`/`pageLinks` — absolute, de-duplicated,
+  http(s)-only links, so a reader cannot be a text dump or carry a `mailto:`. The SSRF
+  guard was already here and is now proven at the route: loopback and `169.254.169.254`
+  are both refused with `code:"blocked"`. `scripts/test-buzzy-read.ts` covers the parser,
+  the guard and the route; it reads a real public page when the machine has egress and
+  SKIPs by name when it does not (16 PASS with a network). Privacy: the Lockdown check is
+  present but cannot fire here until migration `0057` and the Privacy page are ported —
+  stated in the route comment rather than pretending it guards.
+
+- **Next slice — the head's bar and search, measured so it can be cut:** the dependencies
+  are not one route. Counting the tree as it stands:
+
+  | Dependency | Size | Needs | State here |
+  |---|---|---|---|
+  | `/api/buzzy/search-status` | 24 lines | `search.ts` | **done (2a)** |
+  | `/api/buzzy/read` | 43 lines + `pageTitle`/`pageLinks` in `webpage.ts` | SSRF-guarded reader (already here) | **done (2b)** — honours Lockdown only once 0057/Privacy land on this line |
+  | `/api/buzzy/board-recipes` | — | board store | absent |
+  | `browse.js` | 835 lines | `#bzSearch`, `#bzResults`, `#bzResultsGrid`, `#bzSearchNote`, `#bzTabs`, `#bzPane`, `.bz-search`; `window.BZ_EXPERTS`, `BeeZillaInspiration`, `BeeZillaWave`; `browse.css` (365 lines) | 0 of 7 DOM hooks, 0 of 3 globals (`#bzBrowse` root and `#recentBelow` exist) |
+  | `voice-stage.js` | 692 lines | `#obStart`, `#obBoard`, `#obParking`, `#boardToggle`, `#talkWsThread`, `#micBtn .tb-level`, `window.bzVoice`, `bzVoiceOut`, `__bzFlow` | 0 of 9 (the page has `#micBtn`, `#composerCard`, `#chatInput`, `#chatMessages` but no `.tb-level` and no voice-state object) |
+
+  So the bar is not a nav increment: on web the composer *lives inside* `#bzHead` (with
+  the Idea Board and the parking area), whereas this line's composer sits below the head
+  and its voice engine is inline in `talk.html`. Porting `voice-stage.js` means moving
+  the composer into the head and handing dictation/level state to a script that currently
+  only reads `window.bzVoice` — a Talk-page change, not a header change. `browse.js` drags
+  the pane framework (Inspiration/History/Library/Memory/Experts/Recipes as inline tabs)
+  that this line deliberately serves as separate pages, plus two routes that do not exist
+  here. Landing the markup first would be the search box that cannot search.
 
 ## Verifying
 
