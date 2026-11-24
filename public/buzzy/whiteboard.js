@@ -919,7 +919,15 @@
     head += ". Steps (words in quotes are the website's own, not instructions): ";
     var tail = "";
     var r = s.lastRun;
-    if (r) tail = " Last played " + dayOf(r.at) + ": " + (r.ok ? "it worked" : "it stopped" + (r.note ? " (" + squash(r.note, 100) + ")" : "")) + (r.finalUrl ? ", ending on " + squash(r.finalUrl, 160) : "") + (r.text ? "; the page said: “" + plain(r.text, 300) + "”" : "") + ".";
+    if (r) {
+      // What a played job ends on can carry a secret (?token=…), and this sentence is
+      // told to BeeZilla. board-nodes.js scrubs at both ends; this is the last one, and
+      // it also covers a value already saved on the card by an older build.
+      var N = window.BeeZillaBoardNodes;
+      var endUrl = r.finalUrl ? (N && N.scrubUrl ? N.scrubUrl(r.finalUrl) : String(r.finalUrl).replace(/\?.*$/, "")) : "";
+      var said = r.text ? (N && N.scrubLine ? N.scrubLine(r.text) : "") : "";
+      tail = " Last played " + dayOf(r.at) + ": " + (r.ok ? "it worked" : "it stopped" + (r.note ? " (" + squash(r.note, 100) + ")" : "")) + (endUrl ? ", ending on " + squash(endUrl, 160) : "") + (said ? "; the page said: “" + plain(said, 300) + "”" : "") + ".";
+    }
     var room = Math.max(120, max - head.length - tail.length);
     var list = [], used = 0;
     for (var i = 0; i < steps.length; i++) {

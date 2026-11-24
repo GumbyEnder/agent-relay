@@ -39,7 +39,7 @@ import { promises as dnsPromises } from "node:dns";
 import { isIP } from "node:net";
 import { CdpConnection } from "./cdp";
 import { isPrivateIp } from "./website";
-import { MAX_STEPS, cleanSteps, cleanUrl, isRecordedKey, plain, tidy, type BrowserStep, type ElementHint } from "./boardNodes";
+import { MAX_STEPS, cleanSteps, cleanUrl, isRecordedKey, plain, stripSecretQuery, tidy, type BrowserStep, type ElementHint } from "./boardNodes";
 
 export const VIEW_W = 1280;
 export const VIEW_H = 800;
@@ -1157,7 +1157,11 @@ export class BrowserSession {
       await this.look();
       text = plain(await this.page("readText"), 700);
     } catch { /* the page is gone: say what we know */ }
-    this.emit({ type: "replay-done", ok, failedAt, note, steps: ran, finalUrl: this.url, title: plain(this.title, 140), text });
+    // Where it ended up is the one address that was never cleaned on the way here: the
+    // browser goes where the page sends it, so a job can finish on ?token=… . The card
+    // and the sentence BeeZilla is told both come from this event, so the value is taken
+    // out at the source, not at one of the two readers.
+    this.emit({ type: "replay-done", ok, failedAt, note, steps: ran, finalUrl: stripSecretQuery(this.url).url, title: plain(this.title, 140), text });
     this.lookSoon();
   }
 

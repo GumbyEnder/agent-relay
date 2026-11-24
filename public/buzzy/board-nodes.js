@@ -146,6 +146,25 @@
     return text;
   }
 
+  // Where a played job ended up, with the value of every secret query word emptied
+  // (?token=abc → ?token=). The server scrubs the same value at the source; this is
+  // the second half, for whatever a card already saved, and for a server that is older
+  // than this page.
+  function scrubUrl(u) {
+    var text = String(u || "");
+    return scrubBody(text.replace(/^[^?]*\?/, "")) === text.replace(/^[^?]*\?/, "")
+      ? text
+      : text.replace(/\?.*$/, "?" + scrubBody(text.replace(/^[^?]*\?/, "")));
+  }
+  // A sentence from a page, with `name=value` pairs whose name is a secret word emptied.
+  // The words around it are left alone: this is prose, not a body.
+  function scrubLine(t) {
+    var text = String(t || "");
+    return text.replace(/([A-Za-z0-9_.\-]{1,40})=(?!\s)([^\s&"',;)]+)/g, function (m, name, value) {
+      return isSecretQueryName(name) ? name + "=" : m;
+    });
+  }
+
   // ── The window ───────────────────────────────────────────────────────────
   // Docked in the corner History uses (bottom right, above the zoom controls), so it never
   // covers the tools. Resized by its left edge, top edge or top-left corner; the size is
@@ -896,7 +915,7 @@
       });
       on("replay-done", function (d) {
         st.replaying = false;
-        lastRun = { at: new Date().toISOString(), ok: !!d.ok, steps: d.steps || 0, failedAt: d.failedAt, note: d.note, finalUrl: d.finalUrl, title: d.title, text: d.text };
+        lastRun = { at: new Date().toISOString(), ok: !!d.ok, steps: d.steps || 0, failedAt: d.failedAt, note: d.note, finalUrl: scrubUrl(d.finalUrl), title: d.title, text: scrubLine(d.text) };
         runBox.textContent = "";
         runBox.hidden = false;
         runBox.appendChild(el("strong", d.ok ? "wb-nw-runok" : "wb-nw-runbad", d.ok ? "It worked." : "It stopped."));
@@ -1196,6 +1215,10 @@
     open: open,
     closeAll: closeAll,
     isOpen: function () { return !!current; },
-    info: browserInfo
+    info: browserInfo,
+    // whiteboard.js uses these when it writes what a played job did into the words
+    // BeeZilla is told; both are no-ops on text with nothing secret in it.
+    scrubUrl: scrubUrl,
+    scrubLine: scrubLine
   };
 })();
