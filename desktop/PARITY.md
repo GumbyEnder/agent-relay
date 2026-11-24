@@ -33,9 +33,9 @@ should fail the gate.
   rolling-24h quota, revocation. A cheap desktop would be a way around billing.
 - `public/buzzy/*.html` pages and the canonical nav.
 - `migrations/*` up to the highest applied number; the desktop must never invent a number
-  `main` has not used. (When this line is *behind* `main`, "used" and "free" are different
-  questions — CR-12's `0055`/`0056` collide with two other migrations on `main`, recorded
-  below as a rebase-time renumber rather than a new number.)
+  `main` has not used. The board's tables are `main`'s: `buzzy_board_recipes` comes from
+  `0060_buzzy_one_board.sql`, `buzzy_whiteboards` and `buzzy_whiteboard_versions` from
+  `0061_buzzy_whiteboards.sql`. This line adds no migration.
 
 ## Known open parity work
 
@@ -128,8 +128,8 @@ Tracked as issues, not as this document:
   | The board | `public/buzzy/whiteboard.js` (192,556 B), `public/buzzy/whiteboard.css` | Web's bytes: draws, saves, syncs, history. Publishes `window.BeeZillaWhiteboard`. |
   | The stage | `public/buzzy/voice-stage.js` (34,758 B), `public/buzzy/voice-stage.css` | Mounts the board, moves the Talk bar into its top edge while open, turns the page's voice state (`window.bzVoice`, `window.bzVoiceOut`) into the bar's words and face. Publishes `window.__bzFlow`, `__bzTurnStart`, `__bzTurnDone`, `bzBoardInstructions`. |
   | The player | `public/buzzy/waveform.js` | An audio card's player — `window.BeeZillaWave`. |
-  | The store | `src/lib/buzzy/whiteboards.ts` + `migrations/0055_buzzy_whiteboards.sql` | `GET/PUT /api/buzzy/whiteboards/:id`, `GET …/versions`, `POST …/versions/:vid/restore`. One board per person and conversation (or `talk`), revision-checked save, 30-version / 90-day history. |
-  | Board recipes | `src/lib/buzzy/boardRecipes.ts` + `migrations/0056_buzzy_board_recipes.sql` | `GET/POST /api/buzzy/board-recipes`, `DELETE …/:id` — a selection on the board becomes a recipe the person can run again. |
+  | The store | `src/lib/buzzy/whiteboards.ts` + `main`'s `migrations/0061_buzzy_whiteboards.sql` | `GET/PUT /api/buzzy/whiteboards/:id`, `GET …/versions`, `POST …/versions/:vid/restore`. One board per person and conversation (or `talk`), revision-checked save, 30-version / 90-day history. |
+  | Board recipes | `src/lib/buzzy/boardRecipes.ts` + `main`'s `migrations/0060_buzzy_one_board.sql` | `GET/POST /api/buzzy/board-recipes`, `DELETE …/:id` — a selection on the board becomes a recipe the person can run again. |
   | The turn's feed | `src/lib/buzzy/server.ts`, `chat.nitro.ts` | `FlowStep` events (`agent`, `memory`, `skill`, `output`) on the voice **and** typed lanes as SSE `flow`, sent before the model is called so the first card is agent.md and not a spinner. `boardInstructions` rides the message as instructions, appended to the persona — never substituted. |
 
   **Deliberate cuts (accepted, not drift):**
@@ -143,13 +143,13 @@ Tracked as issues, not as this document:
   - the "agent drawing" is the **real flow-step feed** (`FlowStep` → `window.__bzFlow`),
     not main's maker-carousel: the board draws what the turn actually read, ran and made.
 
-  **Migrations: `0055_buzzy_whiteboards.sql` and `0056_buzzy_board_recipes.sql` are right
-  for this line and wrong for a rebase.** Top here was `0054`; on `main`, `0055` is
-  `0055_stale_sweep_backfill.sql`, `0056` is `0056_buzzy_voice_preroll.sql` and the board
-  tables are `0060_buzzy_one_board.sql` / `0061_buzzy_whiteboards.sql`. Main is far ahead
-  of this line, so **a later rebase must renumber both files** (and the two comments that
-  name them). Not renumbered now: the numbers are correct on this branch and renumbering
-  twice would only create two chances to be wrong.
+  **Migrations: the board's tables are `main`'s, not this line's.** `buzzy_board_recipes`
+  is created in `0060_buzzy_one_board.sql`, and `buzzy_whiteboards` /
+  `buzzy_whiteboard_versions` in `0061_buzzy_whiteboards.sql` — both already on `main`,
+  with the schema this line's `boardRecipes.ts` / `whiteboards.ts` reads. This branch
+  carries no `0055`/`0056` and adds no migration of its own: the two files that briefly
+  existed here were dropped in the rebase, because renumbering them would have created a
+  second copy of tables `main` already owns.
 
   **What the smoke now proves** (`desktop/smoke.mjs`, 10/10 against `desktop/stage/app`):
   the mount, the folded state, `#boardToggle`, `#obParking`, both sheets and all three
