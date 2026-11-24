@@ -43,15 +43,23 @@
   // 16px — so a phone rendered "Search eve…", a cut-off sentence that reads as a
   // broken field. Pick the longest wording that actually fits and re-pick on
   // resize; the markup keeps the long line for a wide window and for no-JS.
-  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search or paste a link", "Search"];
+  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search your work or a link", "Search your work", "Search"];
   (function () {
     if (!input) return;
     var long = input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
     var all = [long].concat(PLACEHOLDER_SHRINKS);
     var canvas = null;
+    var tries = 0;
     function pick() {
       var room = input.clientWidth - (parseFloat(window.getComputedStyle(input).paddingLeft) || 0) - (parseFloat(window.getComputedStyle(input).paddingRight) || 0);
-      if (!(room > 0)) return;                       // not laid out yet: keep the long line
+      // Not laid out yet. The old code returned here and NEVER re-picked on its own,
+      // so Safari's first paint (before the input had width) kept the 551px sentence
+      // in a phone-sized field — "Search everything — your wor…" (CR-13). Wait for
+      // the box to exist, then measure; the ResizeObserver below covers later moves.
+      if (!(room > 0)) {
+        if (tries++ < 60) requestAnimationFrame(pick);
+        return;
+      }
       var cs = window.getComputedStyle(input);
       canvas = canvas || document.createElement("canvas");
       var ctx = canvas.getContext && canvas.getContext("2d");
@@ -62,6 +70,7 @@
         if (ctx.measureText(all[i]).width <= room) { chosen = all[i]; break; }
       }
       if (input.placeholder !== chosen) input.placeholder = chosen;
+      input.style.textOverflow = "ellipsis";
     }
     var t = null;
     function soon() { clearTimeout(t); t = setTimeout(pick, 60); }

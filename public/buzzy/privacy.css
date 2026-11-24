@@ -30,7 +30,9 @@
   position: absolute;
   top: calc(100% + 0.6rem);
   right: 0;
-  z-index: 60;
+  /* Above page content AND the settings dock (45); a popover that lets the page
+     show through its edge reads as broken (CR-13). */
+  z-index: 1000;
   width: min(23rem, calc(100vw - 2rem));
   padding: 0.85rem 0.95rem 0.95rem;
   border-radius: 14px;
@@ -39,6 +41,24 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 .privacy-pop.hidden { display: none; }
+/* A phone: anchor to the viewport, not to a control 20px from the right edge.
+   Absolutely placed, the panel measured left:-6 at 390px and worse on an iPhone
+   (CR-13: text clipped left, the Open thumb hanging off the right). From the
+   bottom it also stays clear of the composer's own buttons. */
+@media (max-width: 520px) {
+  .privacy-pop {
+    position: fixed;
+    left: 0.6rem;
+    right: 0.6rem;
+    top: auto;
+    bottom: 5.5rem;
+    width: auto;
+    max-width: none;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+  }
+  .pp-slider { width: 100%; }
+}
 .pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; }
 .pp-head strong { color: #F2F2F2; font-size: 0.98rem; }
 .pp-tools { display: inline-flex; gap: 0.2rem; }

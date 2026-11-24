@@ -6757,15 +6757,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // ── Work search across all of the user's companies ─────────────────
     var rwSearchQuery = "";
 
+    function workSearchPlaceholder() {
+      // The long sentence needs 300px+; a phone gives the field about 160, so it
+      // used to clip to "Search all work across your co" (CR-13). Short wording on
+      // a narrow field, the full sentence when there is room.
+      return window.matchMedia && window.matchMedia("(max-width: 700px)").matches
+        ? "Search your work…"
+        : "Search all work across your companies…";
+    }
+
     function workSearchBoxHtml() {
       return '<div class="rw-search"><input id="rwSearch" type="search" ' +
-        'placeholder="Search all work across your companies…" autocomplete="off" ' +
+        'placeholder="' + workSearchPlaceholder() + '" autocomplete="off" ' +
         'aria-label="Search all work across your companies" value="' + esc(rwSearchQuery) + '"></div>';
     }
 
     function bindWorkSearchBox(container) {
       var el = container.querySelector("#rwSearch");
       if (!el) return;
+      var fit = function () { if (!el.value) el.placeholder = workSearchPlaceholder(); };
+      window.addEventListener("resize", fit);
       var t = null;
       el.addEventListener("input", function () {
         var q = el.value.trim();

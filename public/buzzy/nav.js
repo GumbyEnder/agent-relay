@@ -396,18 +396,28 @@
       // (the desktop bar is one unbroken strip) — the inline value cannot be
       // outranked by a stylesheet any other way.
       "@media (max-width:640px){",
-      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.4rem;padding:.35rem 0}",
-      ".bz-brandrow .bz-cluster{margin-left:0;width:100%;flex-wrap:wrap;row-gap:.4rem;gap:.5rem}",
-      // The link row keeps its place under the brand on a phone, but it is the
-      // SAME row as the brand (no second bar a page can style away).
-      ".bz-brandrow #bzNav{order:3;flex:1 1 100%;width:100%;flex-wrap:wrap!important;justify-content:flex-start;gap:.3rem .85rem;overflow-x:visible}",
-      "#bzChrome{flex-wrap:wrap;row-gap:.35rem}",
-      "#bzChrome .bz-co-wrap{flex:1 1 8rem;min-width:0}",
-      "#bzChrome select.bz-co-select{max-width:100%;width:100%}",
+      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.35rem;padding:.35rem 0}",
+      ".bz-brandrow .bz-brand img{width:32px;height:32px}",
+      // CR-13: the identity cluster was one non-wrapping line inside a 390px bar, so
+      // the company select was squeezed to 87px (\"No co…\") beside a fixed 5.5rem
+      // account link and an 84px Feedback pill. Two rows instead: the company owns a
+      // row of its own and the select takes the full width; account and Feedback
+      // share the row under it, each whole.
+      ".bz-brandrow .bz-cluster{margin-left:0;width:100%;gap:.4rem}",
+      "#bzChrome{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem .5rem;width:100%;flex-wrap:nowrap}",
+      "#bzChrome .bz-co-wrap{grid-column:1 / -1;display:flex;align-items:center;gap:.45rem;min-width:0;width:100%}",
+      "#bzChrome .bz-co-label{flex:0 0 auto}",
+      "#bzChrome select.bz-co-select{flex:1 1 auto;min-width:0;max-width:100%;width:100%}",
+      "#bzChrome .bz-account{min-width:0!important;justify-self:start;font-size:.9rem;padding:.2rem 0}",
+      "#bzChrome button.bz-ask{justify-self:end;font-size:.78rem;padding:.28rem .6rem}",
+      ".bz-brandrow #bzNav{order:3;flex:1 1 100%;width:100%;flex-wrap:wrap!important;justify-content:flex-start;gap:.3rem .7rem;overflow-x:visible}",
+      ".bz-brandrow #bzNav a{font-size:.8rem}",
       ".bz-navbar{display:none}",
       ".bz-navbar::-webkit-scrollbar{display:none}",
-      "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
       "}",
+      // CR-13: where the places row exists it is the menu; the top link row does not
+      // repeat it on a phone, so there can never be a second nav (or a More) below it.
+      "@media (max-width:760px){html.bz-has-places #bzNav{display:none!important}}",
       // Honey Drops, plan and company: inside the menu under your name, never in the bar.
       ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
       // ── Pages with the website's header (#bzHead) ─────────────────────────────
@@ -515,7 +525,12 @@
         // it: pin the menu to the viewport under the button instead.
         var r = moreBtn.getBoundingClientRect();
         var w = moreMenu.offsetWidth || 180;
-        moreMenu.style.top = Math.round(r.bottom + 6) + "px";
+        var h = moreMenu.offsetHeight || 240;
+        var top = r.bottom + 6;
+        // A menu opened near the bottom of a phone must open upwards, or its last
+        // entries land off-screen (CR-13: every menu stays fully on-screen).
+        if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+        moreMenu.style.top = Math.round(top) + "px";
         moreMenu.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + "px";
       };
       window.addEventListener("resize", function () { setOpen(false); });
@@ -1256,6 +1271,9 @@
     // The website's header (#bzHead: Talk to BeeZilla, the search, the row of places)
     // is on every page that has it, so the old link row up here hides there too.
     document.documentElement.classList.toggle("bz-has-head", !!document.getElementById("bzHead"));
+    // The places row is the one menu on a phone (CR-13): where it exists, the top
+    // link row must not repeat it, and no "More" may hang off either of them.
+    document.documentElement.classList.toggle("bz-has-places", !!document.getElementById("bzPlaces"));
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();
@@ -1272,7 +1290,22 @@
     Array.prototype.forEach.call(document.querySelectorAll("#bzFeedback"), function (n) {
       n.remove();
     });
-    var header = nav.closest("header") || document.querySelector("header") || document.body;
+    // Which element is the site header? Only a header that already carries the site's
+    // nav or brand. A page with its own <header> that is really a page toolbar
+    // (Orchestrate's editor bar) used to be adopted, rebuilt into the chrome and
+    // dragged out of its app: the BeeZilla/company/Feedback bar then painted
+    // mid-page, under the places row (CR-13). Otherwise the chrome gets its own
+    // header at the top of <body> and the page keeps its toolbar untouched.
+    var header = nav.closest("header");
+    if (!header) {
+      var candidate = document.querySelector("header");
+      if (candidate && (candidate.contains(nav) || candidate.querySelector(".brand-link, .brand, .bz-brand, .header-inner"))) header = candidate;
+    }
+    if (!header) {
+      header = document.createElement("header");
+      if (document.body.firstChild) document.body.insertBefore(header, document.body.firstChild);
+      else document.body.appendChild(header);
+    }
     chromeBleedHeader = header;
 
     var brand = findBrand(header);

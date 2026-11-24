@@ -14,12 +14,16 @@
     --ok: #2f6b3a;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html, body { min-height: 100%; height: auto; }
   body {
     margin: 0; color: var(--ink); background: var(--paper);
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
   }
-  #app { display: grid; grid-template-rows: auto 1fr; height: calc(100vh - 56px); min-height: 480px; }
+  /* The chrome header and the shared #bzHead sit ABOVE this app, so a fixed
+     `100vh - 56px` was always wrong; the app takes what is left (CR-13: the editor
+     toolbar was pushed past the viewport). */
+  #app { display: grid; grid-template-rows: auto 1fr; flex: 1 1 auto; min-height: 420px; }
   header.bar {
     display: flex; align-items: center; gap: 10px; padding: 8px 14px;
     border-bottom: 1px solid var(--line); background: var(--paper); flex-wrap: wrap;
@@ -103,8 +107,32 @@
   dialog textarea { width: 100%; height: 260px; font: 12px/1.5 ui-monospace, monospace; }
   .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
   @media (max-width: 900px) {
-    main { grid-template-columns: 120px minmax(0, 1fr) 240px; }
-    #outputPane { height: 30vh; }
+    /* A phone: one column. The palette becomes a scrollable strip of node types
+       above the canvas, the inspector and problems stack under it, and nothing is
+       squeezed into a 168px + 1fr + 300px row on a 390px screen (CR-13: Import
+       clipped, gear over the canvas, "valid" fragment, cramped inspector). */
+    main { grid-template-columns: 1fr; grid-template-rows: auto minmax(360px, auto) auto; }
+    #palette { display: flex; align-items: center; gap: 8px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; }
+    #palette h2, #palette .hint { display: none; }
+    .pal-item { margin-bottom: 0; flex: 0 0 auto; }
+    #side { border-left: 0; border-top: 1px solid var(--line); grid-template-columns: 1fr; grid-template-rows: auto auto; }
+    #inspector, #issues { max-height: 260px; }
+    #outputPane { height: auto; min-height: 180px; }
+    #canvasWrap { min-height: 360px; }
+  }
+  @media (max-width: 640px) {
+    header.bar { row-gap: 6px; padding: 8px 10px; }
+    header.bar h1 { width: 100%; margin: 0; }
+    header.bar input#orchName { min-width: 0; flex: 1 1 100%; }
+    /* Buttons keep their whole word and wrap; the old row shrank "Auto-layout"
+       into "Auto-layou" (CR-13). */
+    header.bar button, header.bar .btn { flex: 0 0 auto; }
+    /* The settings gear is fixed in the bottom-right corner; leave its column
+       clear instead of letting it sit on "Send to agent". */
+    #app { padding-bottom: 64px; }
+    #canvasWrap { min-height: 300px; }
+    #minimap { display: none; }
+    #zoomHud { bottom: 8px; left: 8px; }
   }
 </style>
 </head>

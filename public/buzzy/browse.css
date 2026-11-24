@@ -194,9 +194,14 @@
 .bz-ico-recipe i:nth-child(3) { width: 1.2rem; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────── */
-.bz-tabs { display: flex; gap: 2rem; margin: 1.1rem 0.6rem 1rem; border-bottom: 1px solid #1E1E1E; overflow-x: auto; }
+/* The places row wraps; it never scrolls. `.bz-tabs` used to be its own
+   `overflow-x: auto` strip with shrinkable nowrap labels, which painted tab text
+   over its neighbour at 360–430px (CR-13: "Memo" was Memory clipped).
+   oneboard.css owns the row's wrap; this side must not fight it. */
+.bz-tabs { display: flex; flex-wrap: wrap; gap: 2rem; margin: 1.1rem 0.6rem 1rem; border-bottom: 1px solid #1E1E1E; }
 .bz-tabs button {
   position: relative;
+  flex: 0 0 auto;
   min-height: 0;
   padding: 0.55rem 0.1rem 0.75rem;
   border: none;
@@ -282,7 +287,7 @@
   .bz-search input { height: 3rem; font-size: 16px; }
   .bz-results { padding: 1rem; }
   .bz-results-grid { grid-template-columns: 1fr; }
-  .bz-tabs { gap: 1.3rem; }
+  .bz-tabs { gap: 0.6rem 1.1rem; }
   .bz-totop { right: calc(38px - 1.65rem); bottom: 72px; }
 }
 @media (prefers-reduced-motion: reduce) {
