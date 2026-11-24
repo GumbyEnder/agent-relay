@@ -66,9 +66,8 @@ Tracked as issues, not as this document:
   where it exists, as on web. The phone bar went from three rows to two: **211.6 → 166.5px
   at 390** (web 172.1; the 5.6px is the Feedback pill web has and this line does not),
   places row 4 rows, `scrollWidth == 390`, one `#bzHead` after soft navigation. At 1280 the
-  bar is 76px (web 77) and the row is one line. The row names Talk itself because web gets
-  Talk from the Talk-to-BeeZilla bar, which this line has not ported — drop that anchor the
-  day the bar lands.
+  bar is 76px (web 77) and the row is one line. Slice 3 lands the bar, so Talk is no longer
+  named in the row (the bar is the way back, as on web).
 - **`#bzHead`, slice 2a — `/api/buzzy/search-status` is real (done on this branch):** the
   route three scripts (`test-search-live`, `test-search-managed`, `test-search-reconnect`)
   and the settings/doctor bridge already asked for now answers, session-gated, in
@@ -97,25 +96,31 @@ Tracked as issues, not as this document:
   present but cannot fire here until migration `0057` and the Privacy page are ported —
   stated in the route comment rather than pretending it guards.
 
-- **Next slice — the head's bar and search, measured so it can be cut:** the dependencies
-  are not one route. Counting the tree as it stands:
+- **`#bzHead`, slice 3 — the bar and the search are real (done on this branch):** web's
+  Talk-to-BeeZilla bar and its search field now sit in `#bzHead` on this line. What was
+  ported and what was cut, because "port browse.js" and "port the search" are not the same
+  job:
 
-  | Dependency | Size | Needs | State here |
-  |---|---|---|---|
-  | `/api/buzzy/search-status` | 24 lines | `search.ts` | **done (2a)** |
-  | `/api/buzzy/read` | 43 lines + `pageTitle`/`pageLinks` in `webpage.ts` | SSRF-guarded reader (already here) | **done (2b)** — honours Lockdown only once 0057/Privacy land on this line |
-  | `/api/buzzy/board-recipes` | — | board store | absent |
-  | `browse.js` | 835 lines | `#bzSearch`, `#bzResults`, `#bzResultsGrid`, `#bzSearchNote`, `#bzTabs`, `#bzPane`, `.bz-search`; `window.BZ_EXPERTS`, `BeeZillaInspiration`, `BeeZillaWave`; `browse.css` (365 lines) | 0 of 7 DOM hooks, 0 of 3 globals (`#bzBrowse` root and `#recentBelow` exist) |
-  | `voice-stage.js` | 692 lines | `#obStart`, `#obBoard`, `#obParking`, `#boardToggle`, `#talkWsThread`, `#micBtn .tb-level`, `window.bzVoice`, `bzVoiceOut`, `__bzFlow` | 0 of 9 (the page has `#micBtn`, `#composerCard`, `#chatInput`, `#chatMessages` but no `.tb-level` and no voice-state object) |
+  | Web piece | Here | Why |
+  |---|---|---|
+  | `.talk-card` / `.talk-bar` / `.talk-btn` / `.talk-field` / `.talk-send` / `.talk-extras` (talk.html CSS) | **ported**, same markup arrangement and rule values | The bar is what the owner described: one yellow Talk button, one box, attach. `#micBtn`, `#chatInput`, `#chatSend`, `#paperToggle` keep their ids, so the page's existing voice/chat/paper code binds unchanged. `paintVoice()` now swaps `.tb-glyph` instead of `textContent`, or the first paint would wipe the label and the SVG. |
+  | `.bz-search`, results, chips, `.bz-icon-btn`, `.bz-share-btn` (browse.css) | **ported** | Search + copy-page-link. The QR button is not: no QR encoder is on this line, and a button that cannot draw a QR is the same theatre as a search box that cannot search. |
+  | `.bz-reader*` (browse.css) + the reader half of browse.js | **ported** to `public/buzzy/head-search.js` | A typed address opens as text through `/api/buzzy/read` (slice 2b): title, paragraphs, links, breadcrumbs, Home/Back. |
+  | Search across work | **ported, narrower** | `/api/buzzy/search` here returns jobs, chats and documents, so the chips are All / Work / Chats / Documents. Web's Pictures / Music / 3D / Skills / Recipes chips read `/api/buzzy/assets`, `/api/buzzy/recipes` and `window.BZ_EXPERTS`; those are Library's own surfaces on this line, and four empty chips would be worse than four honest ones. |
+  | `browse.js` pane framework (`#bzTabs`, `#bzPane`, Inspiration/History panes), `#api/buzzy/board-recipes`, `voice-stage.js` / the Idea Board | **not ported** | This line serves Library, Memory, Experts and Recipes as their own pages; the panes would be a second navigation inside the first. `board-recipes` needs the board store and `voice-stage.js` needs the board + composer-move, which is a separate increment. The bar and search do not need any of them. |
 
-  So the bar is not a nav increment: on web the composer *lives inside* `#bzHead` (with
-  the Idea Board and the parking area), whereas this line's composer sits below the head
-  and its voice engine is inline in `talk.html`. Porting `voice-stage.js` means moving
-  the composer into the head and handing dictation/level state to a script that currently
-  only reads `window.bzVoice` — a Talk-page change, not a header change. `browse.js` drags
-  the pane framework (Inspiration/History/Library/Memory/Experts/Recipes as inline tabs)
-  that this line deliberately serves as separate pages, plus two routes that do not exist
-  here. Landing the markup first would be the search box that cannot search.
+  `#bzPlaces` is no longer written in markup at all: `nav.js` builds its anchors from
+  `LINKS` (`buildPlacesRow`, called by `paintPlacesRow`), in LINKS order, minus
+  `DESKTOP_ABSENT`, and drops Talk because the bar is the way back. One list, so the row
+  and the top nav cannot disagree. `desktop/smoke.mjs` now fails if `#bzPlaces` ships an
+  anchor, if the bar/search markup is missing, or if `head-search.js` stops calling one of
+  the three routes it depends on.
+
+- **Next slice — the Idea Board and `voice-stage.js`:** the bar's mic already drives this
+  line's own voice engine, so the board is the remaining piece of web's Talk surface: the
+  whiteboard that opens while you talk, with `#obBoard`, `#obParking`, `#boardToggle`, the
+  agent drawing and the conversation inside it. That is a board-store increment (and
+  `board-recipes`), not a header one.
 
 ## Verifying
 

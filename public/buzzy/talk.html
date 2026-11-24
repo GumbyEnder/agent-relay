@@ -1567,6 +1567,25 @@
   text-align: left;
   max-width: 100%;
 }
+@media (max-width: 640px) {
+  .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; flex-wrap: wrap; row-gap: 6px; }
+  .talk-btn {
+    padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
+    clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+  }
+  .talk-btn .tb-label { display: none; }
+  .talk-field { flex: 1 1 calc(100% - 4.4rem); padding-left: 0.85rem; border-radius: 18px; }
+  .composer-card .talk-field #chatInput { font-size: 16px; padding: 0.7rem 0; }
+  .talk-extras { flex: 1 0 100%; justify-content: flex-end; }
+  .bz-search { min-height: 3.1rem; padding-left: 1rem; gap: 0.5rem; }
+  .bz-search input { height: 3rem; font-size: 16px; }
+  .bz-share-btn { font-size: 0.74rem; padding: 0.2rem 0.55rem; }
+  .bz-share-btn span { display: none; }
+  .bz-results { padding: 1rem; }
+  .bz-results-grid { grid-template-columns: 1fr; }
+  .bz-reader-out { display: none; }
+  .bz-reader-body { padding: 1rem; }
+}
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
   <link rel="stylesheet" href="/buzzy/browse.css" />
@@ -1954,6 +1973,10 @@
   <script src="/buzzy/promise-check.js"></script>
   <script src="/buzzy/avatar.js"></script>
   <script src="/buzzy/sow-pdf.js"></script>
+  <!-- The header's search half: your work through /api/buzzy/search, a typed web
+       address through /api/buzzy/read. Loaded here, so nav.js's fetch of this page
+       for its header brings the wiring along and the bar is live on every page. -->
+  <script src="/buzzy/head-search.js"></script>
   <script>
     const QUESTIONS = [
       { id: "what_happened", prompt: "What happened out there — which parts of the fence got damaged?", def: "Storm damage, full fence line affected." },
@@ -8152,6 +8175,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sendFromBox();
       }
     });
+    // The send arrow is part of the bar, not always on screen: it appears with the
+    // first character and leaves when the box is empty (the bar's own rule).
+    document.getElementById("chatInput").addEventListener("input", function () {
+      var bar = document.getElementById("talkBar");
+      var box = document.getElementById("chatInput");
+      if (bar) bar.classList.toggle("has-text", !!(box && box.value.trim()));
+    });
     document.getElementById("approveDraft").onclick = onApproveDraft;
     document.getElementById("draftSend").onclick = onDraftSend;
     document.getElementById("confirmOutward").onclick = onConfirmOutward;
@@ -8325,6 +8355,19 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         sessionsError("Couldn't open that session. Try again in a moment.");
       }
     }
+    // The header's search lives on every page, but the transcript lives here. One
+    // exported opener lets a chat result open through the same code the History
+    // drawer uses (no second fetch-and-render path to drift).
+    window.bzOpenSessionById = async function (id) {
+      try {
+        var co = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.activeId() : null;
+        var r = await fetch(SESSIONS_BASE + (co ? "?companyId=" + encodeURIComponent(co) : ""), { credentials: "same-origin" });
+        if (!r.ok) return;
+        var data = await r.json();
+        var hit = (data.sessions || []).filter(function (s) { return s && s.id === id; })[0];
+        if (hit) openSession(hit);
+      } catch (_) { /* the drawer still works */ }
+    };
     function renameSession(s, card) {
       const current = s.title || "";
       const next = prompt("Rename this session:", current);

@@ -130,7 +130,7 @@ const get = async (path) => {
 };
 
 let ok = 0;
-const TOTAL = 6;
+const TOTAL = 7;
 try {
   const health = await get("/api/agent/health");
   if (health.status !== 200) await die(`/api/agent/health -> ${health.status}`);
@@ -212,6 +212,31 @@ try {
     if (!page.body.includes('src="/buzzy/nav.js"')) await die(`${href} never loads nav.js`);
   }
   console.log(`PASS  every nav link answers 200, carries the nav, and loads nav.js`);
+  ok++;
+
+  // #bzHead slice 3: the website's Talk-to-BeeZilla bar and its search are on this
+  // line, and the row of places is generated from LINKS instead of hand-written.
+  for (const [what, needle] of [
+    ["the bar (#obStart)", 'id="obStart"'],
+    ["the one box (#chatInput)", 'id="chatInput"'],
+    ["the search (#bzSearch)", 'id="bzSearch"'],
+    ["the search wiring", 'src="/buzzy/head-search.js"'],
+  ]) {
+    if (!talk.body.includes(needle)) await die(`/buzzy/talk has no ${what}`);
+  }
+  const placesBlock = /<div class="bz-tabrow" id="bzPlaces">([\s\S]*?)<\/div>/.exec(talk.body);
+  if (!placesBlock) await die("/buzzy/talk has no #bzPlaces row");
+  if (/<a\b/i.test(placesBlock[1])) {
+    await die("#bzPlaces still ships hand-written anchors; nav.js must build them from LINKS");
+  }
+  if (!/function buildPlacesRow\(/.test(navjs.body)) await die("/buzzy/nav.js does not build #bzPlaces from LINKS");
+  if (!/l\.id === "talk"/.test(navjs.body)) await die("/buzzy/nav.js does not drop Talk from the row when the bar exists");
+  const headjs = await get("/buzzy/head-search.js");
+  if (headjs.status !== 200) await die(`/buzzy/head-search.js -> ${headjs.status}`);
+  for (const route of ["/api/buzzy/search", "/api/buzzy/read", "/api/buzzy/search-status"]) {
+    if (!headjs.body.includes(route)) await die(`/buzzy/head-search.js never calls ${route}`);
+  }
+  console.log(`PASS  #bzHead carries the bar + search, head-search.js answers, #bzPlaces is generated from LINKS`);
   ok++;
 } catch (err) {
   await die(`threw: ${err?.message ?? err}`);
