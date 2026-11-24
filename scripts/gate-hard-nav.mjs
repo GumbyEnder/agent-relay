@@ -32,6 +32,13 @@ const HARD_NAV_ALLOW = {
   "public/buzzy/nav.js": {
     "/buzzy/": "explicit sign-out: the session is gone, the engine must die with it",
   },
+  // The welcome page is served before the shell exists (nav.js is injected after it and
+  // this check runs first), it carries no header and owns no recogniser, so the cold
+  // load into Talk is the only route in and preserves nothing. The bfcache re-check
+  // still prefers the shell when one has since loaded.
+  "public/buzzy/landing.html": {
+    "/buzzy/talk": "welcome page, pre-shell: no header, no recogniser, nothing to keep alive",
+  },
 };
 
 // `location.href = "..."`, `location.assign("...")`, `window.location.replace("...")`

@@ -862,7 +862,10 @@
     // PR1 hands the spec to Talk through localStorage. Outbound sends (webhook,
     // Agent Bus, email) are explicitly not built — they need Shane's say-so first.
     try { localStorage.setItem("bz_orch_handoff", canonicalSpec(spec)); } catch (e) {}
-    location.href = "/buzzy/talk?fromOrchestration=1";
+    // The spec is already in localStorage; a hard load here reloaded the document and
+    // killed the shell's recogniser on the way. nav.js is injected on every served
+    // page, so it is the shell that takes us to Talk, in place.
+    if (window.BeeZillaShell && window.BeeZillaShell.go) window.BeeZillaShell.go("/buzzy/talk?fromOrchestration=1");
   });
 
   // ── account save / load / versions ─────────────────────────────────

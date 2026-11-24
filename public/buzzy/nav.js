@@ -1655,14 +1655,16 @@
       e.stopPropagation();
       close(false);
       if (window.bzOpenKeyDialog) { window.bzOpenKeyDialog(); return; }
+      // nav.js is what defines the shell (the BeeZillaShell export at the bottom of
+      // this file), so the old `else location.href = "/buzzy/talk"` could only fire
+      // if this very file had not run — and then there would be no panel to click.
+      // A hard load was never the reachable branch; it was just a way to lose the
+      // mic in the one place that is all about keeping it. No fallback.
       var shell = window.BeeZillaShell;
-      if (shell && shell.go) {
-        Promise.resolve(shell.go("/buzzy/talk")).then(function () {
-          if (window.bzOpenKeyDialog) window.bzOpenKeyDialog();
-        });
-      } else {
-        location.href = "/buzzy/talk";
-      }
+      if (!shell || !shell.go) return;
+      Promise.resolve(shell.go("/buzzy/talk")).then(function () {
+        if (window.bzOpenKeyDialog) window.bzOpenKeyDialog();
+      });
     });
     // Its links go somewhere (the shell soft-navigates /buzzy/ links), so the panel
     // has done its job and closes instead of hanging over the next page.
