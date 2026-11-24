@@ -18,6 +18,7 @@ import type { H3Event } from "h3";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { openpanelClientId } from "@/lib/analytics-id";
+import { isLocalRuntime } from "@/lib/runtime";
 
 /**
  * Product analytics for the static pages.
@@ -360,7 +361,14 @@ export default defineEventHandler(async (event) => {
   }
   // Analytics rides the same serve-time seam as nav.js, and is skipped when the
   // page already carries the snippet so a double-include cannot double-count.
-  if (!page.includes("openpanel.dev/op1.js")) {
+  //
+  // Desktop/local installs get none of it: the person's own machine is not one of
+  // our projects, there is no client id for `127.0.0.1`, and op1.js's beacon comes
+  // back 401 — a console error in the packaged app, from a tracker, on a page that
+  // otherwise works. `window.op` also stays undefined there, because nav.js's
+  // header donor strips the snippet it copies, and a shim with nothing to drain
+  // would only queue events that never leave the machine.
+  if (!isLocalRuntime() && !page.includes("openpanel.dev/op1.js")) {
     const at = page.lastIndexOf("</body>");
     // Host, not the build: this one process answers beezilla.net and
     // app.devboards.ai, and only the request knows which project it is.

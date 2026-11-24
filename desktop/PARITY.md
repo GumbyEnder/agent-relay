@@ -105,19 +105,21 @@ Tracked as issues, not as this document:
 
   | Web piece | Here | Why |
   |---|---|---|
-  | `.talk-card` / `.talk-bar` / `.talk-btn` / `.talk-field` / `.talk-send` / `.talk-extras` (talk.html CSS) | **ported**, same markup arrangement and rule values | The bar is what the owner described: one yellow Talk button, one box, attach. `#micBtn`, `#chatInput`, `#chatSend`, `#paperToggle` keep their ids, so the page's existing voice/chat/paper code binds unchanged. `paintVoice()` now swaps `.tb-glyph` instead of `textContent`, or the first paint would wipe the label and the SVG. |
-  | `.bz-search`, results, chips, `.bz-icon-btn`, `.bz-share-btn` (browse.css) | **ported** | Search + copy-page-link. The QR button is not: no QR encoder is on this line, and a button that cannot draw a QR is the same theatre as a search box that cannot search. |
-  | `.bz-reader*` (browse.css) + the reader half of browse.js | **ported** to `public/buzzy/head-search.js` | A typed address opens as text through `/api/buzzy/read` (slice 2b): title, paragraphs, links, breadcrumbs, Home/Back. |
-  | Search across work | **ported, narrower** | `/api/buzzy/search` here returns three kinds — `jobs`, `sessions`, `documents` — so the chips are All plus those three kinds: the markup labels them Work / Chats / Documents, and `data-f` is `work` / `chats` / `documents`. Web's Pictures / Music / 3D / Skills / Recipes chips read `/api/buzzy/assets`, `/api/buzzy/recipes` and `window.BZ_EXPERTS`; those are Library's own surfaces on this line and the assets stay in the Library grid, so four empty chips would be worse than four honest ones. |
-  | `browse.js` pane framework (`#bzTabs`, `#bzPane`, Inspiration/History panes) | **not ported** | This line serves Library, Memory, Experts and Recipes as their own pages; the panes would be a second navigation inside the first. The bar and search do not need them. |
+  | `.talk-card` / `.talk-bar` / `.talk-btn` / `.talk-field` / `.talk-send` / `.talk-extras` (main's talk.html CSS) | **main's** — this line no longer carries a copy | The bar is what the owner described: one yellow Talk button, one box, attach. `#micBtn`, `#chatInput`, `#chatSend`, `#paperToggle` keep their ids, so the page's existing voice/chat/paper code binds unchanged. `paintVoice()` now swaps `.tb-glyph` instead of `textContent`, or the first paint would wipe the label and the SVG. |
+  | `.bz-search`, results, chips, `.bz-icon-btn`, `.bz-share-btn` (browse.css) | **main's** — loaded from `/buzzy/browse.css`, not copied | Search + copy-page-link + the QR button, because main ships `qr.js` and the encoder with it. |
+  | `.bz-reader*` (browse.css) + the reader half of browse.js | **main's browse.js** | A typed address opens as text through `/api/buzzy/read`: title, paragraphs, links, breadcrumbs, Home/Back. This line's own `head-search.js` was a second wiring for the same box, written before main had one, and it is gone. |
+  | Search across work | **main's `/api/buzzy/search`** | main's route returns four kinds — `jobs`, `documents`, `sessions`, `assets` — and main's own browse.js renders the chips for them, so this line does not narrow or relabel the answer. The old note here described this line's own three-kind route; that route is gone with the rebase, because a second search route is a second answer to the same question. |
+  | `browse.js` pane framework (`#bzTabs`, `#bzPane`, Inspiration/History panes) | **main's, no longer a cut** | Slice 3 left it out; the rebase onto main brought `browse.js`, `inspiration.js` and the pane markup with the page. It is main's behavior now, and `#bzPlaces` still gets its anchors from `LINKS` (nav.js `buildPlacesRow`), so the row cannot drift. |
   | `voice-stage.js`, `whiteboard.js`, `waveform.js`, the Idea Board, `/api/buzzy/board-recipes`, `/api/buzzy/whiteboards` | **ported** in CR-12 (see below) | Was "not ported — the next slice" at slice 3. The board store, the surface and the small server increment landed together, because a board without its store is a drawing that vanishes and a store without the surface is invisible. |
 
   `#bzPlaces` is no longer written in markup at all: `nav.js` builds its anchors from
   `LINKS` (`buildPlacesRow`, called by `paintPlacesRow`), in LINKS order, minus
   `DESKTOP_ABSENT`, and drops Talk because the bar is the way back. One list, so the row
   and the top nav cannot disagree. `desktop/smoke.mjs` now fails if `#bzPlaces` ships an
-  anchor, if the bar/search markup is missing, or if `head-search.js` stops calling one of
-  the three routes it depends on.
+  anchor, if the bar/search markup is missing, if `browse.js` stops calling
+  `/api/buzzy/search` or `/api/buzzy/read`, or if `/api/buzzy/search-status` (this line's
+  own route — it answers whether search is on, whose quota, and whether the session is
+  stale) stops answering 200 to the token and 401 without it.
 
 - **CR-12 — the Idea Board, its store, and the turn's live feed (done on this branch):**
   the piece slice 3 named as the next increment. What landed:
