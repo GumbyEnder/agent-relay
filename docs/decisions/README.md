@@ -10,6 +10,9 @@ mark the old one "Superseded by …" — never edit the old reasoning away.
 
 | Decision | Date |
 |---|---|
+| [Budget before going](budget-before-going.md) | 2026-11-23 |
+| [Look on BeeZilla first, then the world](look-on-beezilla-first.md) | 2026-11-23 |
+| [Guardrails, not specifications](guardrails-not-specifications.md) | 2026-11-23 |
 | [Life first: friction has to pay for itself](life-first.md) | 2026-11-23 |
 | [Plan mode and do mode are one mode](one-mode.md) | 2026-11-23 |
 | [Every step is reviewed by another company's model](every-step-reviewed-by-another-company.md) | 2026-11-23 |

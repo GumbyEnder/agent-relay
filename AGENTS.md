@@ -21,6 +21,11 @@ only through allowlisted imports (`npm run test:boundary`).
 - **Words mean one thing.** Use the terms in `docs/beezilla/GLOSSARY.md`; add new ones there.
 - **Settled decisions stay settled.** `docs/decisions/` records them with the owner's words.
   Don't re-argue one; write a new decision that supersedes it.
+- **The new way forward** (owner, 2026-11-23): start from why, not the solution; ask only about
+  the why and hard limits, never features or technology; settle a budget before any work that
+  costs more than a reply, size the effort to it and stop at it; look on BeeZilla first, then
+  the world, and borrow before building; explore by building versions when the budget allows;
+  enforce limits in code. `docs/beezilla/PRINCIPLES.md` and three decisions in `docs/decisions/`.
 
 ## How a change lands
 
@@ -51,10 +56,18 @@ stand-in model, the windowless browser and every known trap: `docs/beezilla/LOCA
 
 ## How to work here
 
+- **Look first, borrow before building.** Before writing anything new, search this repo, its open
+  pull requests (`gh pr list --repo GumbyEnder/agent-relay --state all --search …`),
+  `docs/decisions/` and our earlier work, then open source. Reuse what fits (check the license,
+  keep the credit) and only build what's missing.
+- **Start from the why.** Know what the owner is trying to achieve before choosing how; their
+  first idea is a starting point, not a specification.
 - **Proof, not claims.** "Done" means a check passed: tests, plus the real app used the way a
   person would, with screenshots for anything on screen. Say what you did not verify.
-- **Every correction becomes a check.** When the owner corrects something, add a guard test or
-  lint rule that fails loudly (e.g. `scripts/test-no-outside-close.mjs`), not a note in a prompt.
+- **Every correction becomes a check; every limit is enforced.** When the owner corrects
+  something, add a guard test or lint rule that fails loudly (e.g.
+  `scripts/test-no-outside-close.mjs`), not a note in a prompt. A limit that matters (a budget, a
+  permission, a point of no return) is enforced by code, never only described to a model.
 - **Reviews come from another company's model**, with fresh context, against the evidence
   (owner's decision 2026-11-23 — `docs/decisions/every-step-reviewed-by-another-company.md`).
 - **Keep original words.** Quote the owner exactly in docs and decisions; a summary points to

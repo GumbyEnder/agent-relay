@@ -13,5 +13,9 @@ this project?" and "What would incredibly satisfy the team … with this project
 show proof; significant and easy to misread → one quick choice (questions, or just go), asked
 once per kind of work and remembered. Questions are about the product, never the technology.
 
+**Refined by:** [Guardrails, not specifications](guardrails-not-specifications.md) (questions are
+about the why and the walls) and [Budget before going](budget-before-going.md) (the one question
+that survives "just go").
+
 **Supersedes:** the draft gate's "four Decisions Made" interview, the plan-then-confirm step and
 the separate Work mode.

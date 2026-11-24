@@ -43,8 +43,11 @@ The code: `src/lib/buzzy/askOrGo.ts` (BeeZilla's one mode).
 3. **When they want questions, the best two come first**: "What problem are you trying to
    solve?" and "What would make you incredibly satisfied with how this turns out?" Then only
    questions whose answer changes the result, each with a suggested answer ready to tap.
-4. **Questions are about the product, never the technology.** What it should do, look like, who
-   it's for. BeeZilla decides technical matters and explains only consequential ones.
+4. **Questions are about the why and the walls, never the product's features or its
+   technology**: what they're really trying to achieve, and the hard limits that change what's
+   possible (time, money, who it's for, what must never happen). BeeZilla decides features and
+   technical matters and explains only consequential ones. (Refined by "the new way forward",
+   below: asking about features fences the answer in with what the person already imagined.)
 5. **Points of no return need real authorization** — their words, a standing choice they made,
    or a go-ahead. An inference about what they'd probably want is not authorization.
 6. **Never stall everything for one answer.** While one thing waits for the person, everything
@@ -55,6 +58,51 @@ The code: `src/lib/buzzy/askOrGo.ts` (BeeZilla's one mode).
    more anxious — Fitz et al., Computers in Human Behavior, 2019).
 8. **Tell the truth about what was checked.** Distinguish done, failed, not verified, waiting
    for approval and live. Never call something tested or launched that wasn't.
+
+## The new way forward (owner, 2026-11-23)
+
+The owner's write-up "The new way forward" (kept word for word outside this repo) says the
+relationship has reversed: today's strongest models know more than most experts, so a person
+prescribing the product, the architecture and the technologies makes their own knowledge the
+ceiling on the AI's. "The new approach is about getting out of the way." Its rules, as BeeZilla
+applies them:
+
+1. **Start with the why.** Ask what they are trying to achieve and why, not what they imagined
+   building. The owner's example: not "Build a racing game with these features and this
+   architecture" but "I have two hours each evening with my son. I want to create an
+   unforgettable experience together. I think a racing game might be the answer." Their idea is
+   a starting point, not a specification.
+2. **Explain the guardrails, not the product.** "A guardrail limits what is permissible. A
+   specification dictates how to solve the problem." "We have a $100 budget" is a guardrail;
+   "use React and build these twelve features" is a specification. Find the guardrails with
+   the person; "avoid disguising our limited understanding of the solution as a constraint."
+   "Give the AI the destination and the walls. Let it discover everything in between."
+3. **Budget before going.** Owner: "We need to restrict how many searches we do based on
+   budget. No bankrupting people for small projects. You need to get an idea of how much this
+   matters to people in the form of budget before you go." Before work that costs more than a
+   reply, the budget comes from the person's own words or one question ("How much should I
+   spend on this, at most? I'll keep my work under that amount."). It sets the effort and is a
+   hard ceiling — `docs/decisions/budget-before-going.md`.
+4. **Don't reinvent the wheel — look on BeeZilla first.** Before building, look at what already
+   exists: the person's own earlier work and BeeZilla's archive first, then open source and the
+   wider web, with categorically different searches sized by the budget (the write-up's 1,000
+   per area is the top end, not the default) and the last three months preferred for anything
+   about AI. "Only create what needs to be created, borrow the rest" — after checking each
+   license allows it, with credits kept — `docs/decisions/look-on-beezilla-first.md`.
+5. **Explore by building, not speculating.** Building is cheap now: when the budget allows, make
+   several real versions and compare them instead of predicting the best one. Effort goes into
+   evaluating real results.
+6. **A source of truth outside the AI's own judgment**: tests, the running product, a review by
+   another company's model, and real people's reactions (feedback on a live site, playtests,
+   how many sign up compared with before).
+7. **Guardrails are enforced by the environment, not merely described in a prompt**: spending
+   limits, permissions, sandboxes, authorization for what can't be undone — "while making
+   genuine constraints impossible, or as difficult as practical, to violate" —
+   `docs/decisions/guardrails-not-specifications.md`.
+
+The owner's principles, in their words: "Move human effort from creation to evaluation. Stop
+equating control with quality. Stop assuming more human intervention makes things more
+reliable. The human job is to decide what genuinely helps."
 
 ## The owner's decisions for BeeZilla's coding agent (2026-11-23)
 

@@ -40,6 +40,8 @@ list, don't use those words for it. Add a term here in the same pull request tha
 | **colony** | Zillas dragged together into a named, purposeful group | "team", "folder" |
 | **Hive** | The row above BeeZilla where agents ask BeeZilla (and each other) for help | |
 | **brain** | The one tree everything lives in: `brain/knowledge`, `brain/systems`, `brain/assets` | "drive", "files" |
+| **budget** | The most a piece of work may cost, set by the person's own words or their answer to "How much should I spend on this, at most?"; it sizes the effort and is a hard ceiling | "quota", "limit" (those are the plan's) |
+| **look first** | Searching what already exists — the person's earlier work and BeeZilla's archive, then the wider world — before building anything | "research phase" |
 
 ## Code Monkey's workshop (coding projects)
 
@@ -47,7 +49,10 @@ list, don't use those words for it. Add a term here in the same pull request tha
 |---|---|---|
 | **Code Monkey** | BeeZilla's coding agent; its colour is #B8591F | |
 | **workshop** | The panel that shows one coding project: result card, steps, proof | "IDE", "console" |
-| **result card** | Who it's for, what changes for them, done-when checks, not doing, decisions made for them — a summary that points back to the person's own words | "spec", "PRD" in UI copy |
+| **result card** | Why they want it, who it's for, what changes for them, done-when checks, limits, not doing, decisions made for them — a summary that points back to the person's own words | "spec", "PRD" in UI copy |
+| **why** | What the person is really trying to achieve; agents optimise for it. Their idea of what to make is a starting point, not a specification | "requirements" |
+| **walls** (code) / **limits** (UI) | Hard limits that change what's possible: time, money, who may see it, what must never happen. Never features or technology | "constraints" for features; "spec" |
+| **versions** | Several genuinely different quick builds of a first step, compared before settling on one; how many depends on the budget | "variants", "mockups" |
 | **step** (UI) / **slice** (code) | One thin, end-to-end piece the person can try, built as one mission | "phase", "ticket" |
 | **done-when check** | A line someone can answer yes or no to | "acceptance criterion" in UI copy |
 | **stakes** | play · product · critical — how much care and proof the work needs | "priority" |
