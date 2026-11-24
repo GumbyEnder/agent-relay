@@ -23,15 +23,23 @@ import { fileURLToPath } from "node:url";
 import { connect } from "node:net";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// `node desktop/dist.mjs stage` writes desktop/stage/app (there is no <root>/stage),
+// so both spellings are here: the documented one and the one that exists.
 const CANDIDATES = [
   process.argv[2],
   join(ROOT, "dist-desktop/win-unpacked/resources/app"),
   join(ROOT, "dist-desktop/linux-unpacked/resources/app"),
   join(ROOT, "dist-desktop/mac/BeeZilla.app/Contents/Resources/app"),
+  join(ROOT, "desktop/stage/app"),
   join(ROOT, "stage/app"),
 ].filter(Boolean);
 
-const APP = CANDIDATES.find((p) => existsSync(join(p, ".output/server/index.mjs")));
+// An app dir passed on the command line may be relative, and the child runs with
+// cwd = that dir: a relative path then resolves a second time inside the app and
+// PGlite lands in `…/desktop/stage/app/.smoke-data` (the runtime answers 500 on
+// health instead of failing honestly). Absolute from here on.
+const APP =
+  CANDIDATES.map((p) => resolve(p)).find((p) => existsSync(join(p, ".output/server/index.mjs")));
 if (!APP) {
   console.error(`smoke: no packaged runtime found. Looked in:\n  ${CANDIDATES.join("\n  ")}`);
   process.exit(2);
@@ -50,7 +58,7 @@ const reachable = (port, host = "127.0.0.1") =>
     sock.once("error", () => finish(false));
   });
 
-const fail = (msg) => { console.error(`FAIL  ${msg}`); console.error(`smoke: app dir ${APP}`); process.exit(1); };
+const fail = (msg) => { console.error(`FAIL  ${msg}`); console.error(`smoke: app dir ${APP}`); };
 
 const child = spawn(process.execPath, [".output/server/index.mjs"], {
   cwd: APP,
@@ -72,11 +80,30 @@ let output = "";
 child.stdout.on("data", (b) => { output += String(b); });
 child.stderr.on("data", (b) => { output += String(b); });
 
-const stop = (code) => {
-  try { child.kill("SIGTERM"); } catch { /* already gone */ }
-  setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } }, 1500).unref();
+// Exit only after the child is gone. The old version fired SIGTERM and called
+// process.exit() in the same tick, so the 1.5 s SIGKILL escalation was an unref'd
+// timer that never ran: a runtime that ignored SIGTERM kept 127.0.0.1:PORT and the
+// next smoke run found the port taken (and then measured the previous build).
+const stop = async (code) => {
+  const gone = () => new Promise((done) => setTimeout(done, 50));
+  const alive = child.exitCode === null && child.signalCode === null;
+  if (!alive) {
+    await gone();
+    process.exit(code);
+  }
+  await new Promise((done) => {
+    const hard = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* gone */ }
+    }, 3000);
+    child.once("exit", () => { clearTimeout(hard); done(); });
+    try { child.kill("SIGTERM"); } catch { clearTimeout(hard); done(); }
+  });
   process.exit(code);
 };
+
+// A failure must take the runtime down with it, or the next attempt talks to a
+// zombie on the port and reports the previous build's health.
+const die = async (msg) => { fail(msg); await stop(1); };
 
 // 60 s: the first boot also runs every migration.
 const deadline = Date.now() + 60_000;
@@ -103,36 +130,36 @@ const get = async (path) => {
 };
 
 let ok = 0;
+const TOTAL = 6;
 try {
   const health = await get("/api/agent/health");
-  if (health.status !== 200) fail(`/api/agent/health -> ${health.status}`);
+  if (health.status !== 200) await die(`/api/agent/health -> ${health.status}`);
   console.log(`PASS  health 200`);
   ok++;
 
   const talk = await get("/buzzy/talk");
-  if (talk.status !== 200) fail(`/buzzy/talk -> ${talk.status}`);
-  if (!talk.body.includes('id="chatInput"')) fail("/buzzy/talk rendered without #chatInput");
+  if (talk.status !== 200) await die(`/buzzy/talk -> ${talk.status}`);
+  if (!talk.body.includes('id="chatInput"')) await die("/buzzy/talk rendered without #chatInput");
   console.log(`PASS  /buzzy/talk ${talk.body.length} B, composer present`);
   ok++;
 
   const caps = await get("/api/buzzy/capabilities");
-  if (caps.status !== 200) fail(`/api/buzzy/capabilities -> ${caps.status}`);
+  if (caps.status !== 200) await die(`/api/buzzy/capabilities -> ${caps.status}`);
   const parsed = JSON.parse(caps.body);
-  if (!Array.isArray(parsed.tools) || parsed.tools.length === 0) fail("capabilities returned no tools");
+  if (!Array.isArray(parsed.tools) || parsed.tools.length === 0) await die("capabilities returned no tools");
   console.log(`PASS  /api/buzzy/capabilities: ${parsed.tools.length} tools, ${parsed.capabilities.length} capabilities`);
   ok++;
 
   const lib = await get("/buzzy/library");
-  if (lib.status !== 200) fail(`/buzzy/library -> ${lib.status}`);
+  if (lib.status !== 200) await die(`/buzzy/library -> ${lib.status}`);
   console.log(`PASS  /buzzy/library 200`);
   ok++;
 
-  // CR-8: the desktop's chrome must be the website's chrome, not a lookalike. The row
-  // is written once in src/lib/buzzy/pages.nitro.ts (NAV_ROW) and substituted into
-  // every page, so a single assertion on the served markup catches the drift that
-  // mattered: a different order (Capabilities before Sketch), different words
-  // ("Capabilities", "Honey Drops"), Library opening a new tab, and a literal
-  // "Sign in" for a signed-in reader.
+  // CR-8: the desktop's chrome must be the website's chrome, not a lookalike. Since
+  // this increment the row is not written into page markup at all — nav.js builds it
+  // from LINKS, exactly as it does on the website — so the contract to hold is the
+  // file every page loads. Assert the served nav.js declares the places in web order
+  // (minus the ones this line declares absent), and that every page links it.
   const NAV_ORDER = [
     ["talk", "Talk"],
     ["library", "Library"],
@@ -146,41 +173,49 @@ try {
     ["wallet", "Honey"],
     ["publish", "Publish"],
   ];
-  const row = talk.body.slice(talk.body.indexOf('<nav id="bzNav"'));
-  const rowEnd = row.indexOf("</nav>");
-  const served = row.slice(0, rowEnd === -1 ? row.length : rowEnd);
-  const found = [...served.matchAll(/<a href="([^"]+)" data-nav="([^"]+)">([^<]*)<\/a>/g)].map(
-    (m) => [m[2], m[3]],
+  const navjs = await get("/buzzy/nav.js");
+  if (navjs.status !== 200) await die(`/buzzy/nav.js -> ${navjs.status}`);
+  const absentBlock = /var DESKTOP_ABSENT = \{([^}]*)\}/.exec(navjs.body);
+  const absent = new Set(
+    absentBlock ? [...absentBlock[1].matchAll(/([a-z][a-z0-9-]*)\s*:/g)].map((m) => m[1]) : [],
   );
-  if (found.length !== NAV_ORDER.length) {
-    fail(`#bzNav carries ${found.length} links, expected ${NAV_ORDER.length}: ${JSON.stringify(found)}`);
+  const linksBlock = /var LINKS = \[([\s\S]*?)\]\.filter\(/.exec(navjs.body);
+  if (!linksBlock) await die("/buzzy/nav.js has no LINKS table to read (nav rebuilt by hand?)");
+  const links = [...linksBlock[1].matchAll(/\{ id: "([^"]+)", href: "([^"]+)", label: "([^"]+)"/g)].map(
+    (m) => ({ id: m[1], href: m[2], label: m[3] }),
+  );
+  const row = links.filter((l) => !absent.has(l.id));
+  if (row.length !== NAV_ORDER.length) {
+    await die(
+      `nav.js LINKS carries ${row.length} places after DESKTOP_ABSENT, expected ${NAV_ORDER.length}: ${JSON.stringify(row.map((l) => [l.id, l.label]))}`,
+    );
   }
   NAV_ORDER.forEach(([id, label], i) => {
-    if (found[i][0] !== id || found[i][1] !== label) {
-      fail(`#bzNav slot ${i + 1} is ${JSON.stringify(found[i])}, expected ${JSON.stringify([id, label])}`);
+    if (row[i].id !== id || row[i].label !== label) {
+      throw new Error(`nav.js slot ${i + 1} is ${JSON.stringify([row[i].id, row[i].label])}, expected ${JSON.stringify([id, label])}`);
     }
   });
-  if (/data-nav="library"[^>]*target=/.test(served)) fail('Library still opens a new tab');
-  if (!talk.body.includes('src="/buzzy/nav.js"')) fail("/buzzy/talk never loads nav.js");
-  if (!talk.body.includes('href="/buzzy/nav.css"')) fail("/buzzy/talk never loads nav.css");
-  console.log(`PASS  #bzNav ${found.length} links in web order, nav.js + nav.css linked`);
+  if (!talk.body.includes('src="/buzzy/nav.js"')) await die("/buzzy/talk never loads nav.js");
+  if (!talk.body.includes('href="/buzzy/nav.css"')) await die("/buzzy/talk never loads nav.css");
+  console.log(
+    `PASS  nav.js declares ${row.length} places in web order (absent: ${[...absent].join(", ") || "none"}), /buzzy/talk links nav.js + nav.css`,
+  );
   ok++;
 
-  // CR-8: every link the row names must answer 200 on this line. The row is shared
+  // CR-8: every place the row names must answer 200 on this line. The row is shared
   // with the website, so a 404 here is the desktop having inherited a word it cannot
   // keep — /buzzy/studio and /buzzy/download were exactly that until this increment.
-  for (const [id] of NAV_ORDER) {
-    const href = served.match(new RegExp(`<a href="([^"]+)" data-nav="${id}"`))?.[1];
-    if (!href) fail(`#bzNav has no anchor for ${id}`);
+  for (const { id, href } of row) {
     const page = await get(href);
-    if (page.status !== 200) fail(`#bzNav link ${id} → ${href} answered ${page.status}`);
-    if (!page.body.includes('id="bzNav"')) fail(`${href} rendered without the nav`);
+    if (page.status !== 200) await die(`nav link ${id} → ${href} answered ${page.status}`);
+    if (!page.body.includes('id="bzNav"')) await die(`${href} rendered without the nav`);
+    if (!page.body.includes('src="/buzzy/nav.js"')) await die(`${href} never loads nav.js`);
   }
-  console.log(`PASS  every #bzNav link answers 200 and carries the nav`);
+  console.log(`PASS  every nav link answers 200, carries the nav, and loads nav.js`);
   ok++;
 } catch (err) {
-  fail(`threw: ${err?.message ?? err}`);
+  await die(`threw: ${err?.message ?? err}`);
 }
 
-console.log(`\nsmoke: ${ok}/6 checks passed against ${APP}`);
-stop(0);
+console.log(`\nsmoke: ${ok}/${TOTAL} checks passed against ${APP}`);
+await stop(0);

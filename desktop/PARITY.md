@@ -43,21 +43,28 @@ Tracked as issues, not as this document:
 - #291 this document (closes when the parity gate reads it).
 - #292 Library card job titles — **fixed** by the assets join in 0.3.0.
 - **CR-8, the nav slice (done on this branch):** the chrome is web main's chrome, not a
-  lookalike — `public/buzzy/nav.js` is byte-identical to what beezilla.net serves
-  (135,298 B, md5 35613e333dc6b6db1ebf3cccab063f5e), `nav.css` is web's, and
-  `src/lib/buzzy/pages.nitro.ts` writes NAV_ROW once and substitutes it into every page
-  (plus the nav.js/nav.css links). `desktop/smoke.mjs` now fails if the served row is
-  not the eleven links in web order. Before: eight or ten hand-written anchors, order
-  Talk / Capabilities / Sketch / Memory / Experts / Recipes / Honey Drops / Publish,
-  `target="_blank"` on Library, literal "Sign in".
+  lookalike. `public/buzzy/nav.js` is what beezilla.net serves (138,099 B, md5
+  `0965f52ae4baccea450f276c9a2f97d4`) with one block — `DESKTOP_ABSENT`, which drops
+  Orchestrate, the only place whose page is not in this tree. `public/buzzy/nav.css` is
+  byte-identical to web's. `src/lib/buzzy/pages.nitro.ts` injects the sheet and the
+  script into every page it serves, idempotently, and nav.js builds the row from LINKS,
+  so there is one row and one owner of its order. Before: eight or ten hand-written
+  anchors per page, order Talk / Capabilities / Sketch / Memory / Experts / Recipes /
+  Honey Drops / Publish, `target="_blank"` on Library, literal "Sign in".
 - **CR-8, the two pages the row names (done on this branch):** `public/buzzy/studio.html`
   and `public/buzzy/download.html` are web main's bytes, `chat.js` is web main's, and
   `src/lib/buzzy/studio.ts` + `studio.nitro.ts` are ported with the `/api/buzzy/studio`
   route listed before the `/api/buzzy/**` catch-all in `vite.config.ts`. Migration
   `0054_buzzy_music_edits.sql` keeps web's number (the desktop must never invent one).
-  `desktop/smoke.mjs` now follows every `#bzNav` href and fails if any answers
-  non-200 or renders without the nav, so a link the row inherits from the website
-  cannot 404 here unnoticed.
+  `desktop/smoke.mjs` reads the served nav.js's LINKS (minus `DESKTOP_ABSENT`) and fails
+  if the order is not web's, then follows every href and fails on non-200, a page without
+  the nav, or a page that never loads nav.js — so a place the row inherits from the
+  website cannot 404 here unnoticed.
+- **Next slice — `#bzHead`:** the phone header still costs three rows on this line
+  (brand, identity cluster, link row) because `public/buzzy/talk.html` predates the
+  website's header (`#bzHead`: Talk to BeeZilla, the search, the row of places). nav.js
+  collapses the header on web only where `#bzHead` exists; without it `bz-has-head` is
+  never set and `#bzNav` cannot hide at ≤760px.
 
 ## Verifying
 

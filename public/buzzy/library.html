@@ -2096,5 +2096,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       });
     }
   </script>
+  <!-- /buzzy/ and /buzzy/index.html are answered by the static layer, not by
+       pages.nitro.ts, so the handler's injection cannot reach this file — the one
+       page that has to carry the chrome script itself. Idempotent: the handler
+       adds it to the pages it does serve and skips this one because it is here. -->
+  <script src="/buzzy/nav.js" defer></script>
 </body>
 </html>

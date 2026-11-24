@@ -17,6 +17,12 @@
  *     page is missing — by id, never by index.
  *
  * Loaded by pages.nitro.ts on every HTML page, so a new page inherits it for free.
+ *
+ * DESKTOP PORT (feat/local-runtime) — this file is web main's file verbatim, with
+ * one block: DESKTOP_ABSENT below. A place whose page is not in this tree is left
+ * out of LINKS, because a nav that 404s is worse than a nav with fewer places.
+ * When re-syncing, take main's whole file and re-apply that one block — nothing
+ * else in here may drift between the two lines.
  */
 (function () {
   "use strict";
@@ -177,6 +183,12 @@
     return bzRedact(d);
   }
 
+  // Desktop line only (see the file header): Orchestrate has no page in this
+  // tree — pages.nitro.ts answers 404 for it — so the row does not offer it.
+  // Music studio and Download ARE ported here (public/buzzy/studio.html and
+  // download.html), so they stay. Remove an id here the day its page lands.
+  var DESKTOP_ABSENT = { orchestrate: 1 };
+
   var LINKS = [
     // The owner's roadmap names five main places: Talk, Library, Memory, Experts,
     // Recipes. Everything else stays one click away under "More" (`more: true`).
@@ -199,7 +211,7 @@
     // anchor looks like on a page that did not hand-write one.
     { id: "wallet", href: "/buzzy/wallet", label: "Honey", more: true },
     { id: "publish", href: "/buzzy/upload", label: "Publish", more: true },
-  ];
+  ].filter(function (l) { return !DESKTOP_ABSENT[l.id]; });
 
   function section(pathname) {
     var p = (pathname || location.pathname).replace(/\.html$/, "").replace(/\/+$/, "");
@@ -812,18 +824,6 @@
     }
     var user = null;
 
-    /**
-     * The probe finished without an answer: a non-2xx, a body that is not JSON, or a
-     * server that answered with nothing at all. A known signed-in reader keeps their
-     * name (the cache painted it), but a reader we have never identified must not be
-     * left with an empty bordered label — that is the "blank account link" the
-     * packaged app showed at 390px, exactly where the web paints "Sign in". The link
-     * already points at /buzzy/landing in this state, so the honest label costs nothing.
-     */
-    function inconclusive() {
-      if (!user && !a.textContent) a.textContent = "Sign in";
-    }
-
     var cached = readIdentityCache();
     if (cached !== undefined) paint(cached ? cached.name : null, cached ? cached.email : null);
 
@@ -871,7 +871,7 @@
       // which is the same lie this cache exists to prevent.
       .then(function (r) { return r.ok ? r.json() : undefined; })
       .then(function (res) {
-        if (res === undefined) { inconclusive(); return; } // keep whatever we painted
+        if (res === undefined) return; // inconclusive: keep whatever we painted
         var u = res && res.user;
         if (u && (u.name || u.email)) {
           writeIdentityCache({ name: u.name || u.email, email: u.email || "" });
@@ -883,7 +883,7 @@
       })
       // A failed round trip proves nothing about who is signed in, so it must not
       // overwrite the cached identity or repaint "Sign in" over a real name.
-      .catch(inconclusive);
+      .catch(function () { /* keep whatever we painted */ });
 
     // Adopt a page-built menu as the dropdown. clone the link once so a page's own
     // click handler (Talk binds a toggle to `.account-link`) cannot double-toggle ours.
