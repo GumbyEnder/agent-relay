@@ -76,24 +76,39 @@ async function readJson(event: any, maxBytes: number): Promise<{ ok: true; body:
   return { ok: false, res: json(400, { ok: false, error: "That request could not be read.", code: "bad_request" }) };
 }
 
-const lockSeen = new Map<string, { v: boolean; at: number }>();
-async function lockedDown(userId: string, fresh = true): Promise<boolean> {
+const lockSeen = new Map<string, { v: LockState; at: number }>();
+/**
+ * "off", "on", or "unknown" — never a silent "off". The old shape caught the database
+ * error and set v = false, so a Postgres hiccup switched Lockdown off and both More
+ * nodes (API use, the server browser) happily made outbound calls. Everything else in
+ * this product fails closed; so does this. "unknown" is separate from "on" so the
+ * refusal can say what is actually wrong instead of claiming a mode the person never set.
+ */
+type LockState = "off" | "on" | "unknown";
+async function lockState(userId: string, fresh = true): Promise<LockState> {
   // A browser that is already open is checked every few seconds, not on every click.
   const hit = lockSeen.get(userId);
   if (!fresh && hit && Date.now() - hit.at < 5000) return hit.v;
-  let v = false;
+  let v: LockState = "unknown";
   try {
     const sql = await getSql();
     const rows = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${userId} LIMIT 1`;
-    v = rows[0]?.mode === "lockdown";
+    v = rows[0]?.mode === "lockdown" ? "on" : "off";
   } catch {
-    v = false;
+    v = "unknown";
   }
   if (lockSeen.size > 2000) lockSeen.clear();
   lockSeen.set(userId, { v, at: Date.now() });
   return v;
 }
 const LOCKDOWN_SAYS = "Lockdown is on, and nothing leaves BeeZilla in that mode. The privacy control on the Talk bar switches it back.";
+const LOCK_UNKNOWN_SAYS = "BeeZilla can't read your privacy setting right now, and nothing leaves it until it can. Try again in a moment.";
+/** Null when the state permits an outbound call; the refusal response otherwise. */
+function lockRefusal(state: LockState): Response | null {
+  if (state === "off") return null;
+  if (state === "on") return json(403, { ok: false, error: LOCKDOWN_SAYS, code: "lockdown" });
+  return json(503, { ok: false, error: LOCK_UNKNOWN_SAYS, code: "privacy_unknown" });
+}
 
 // ── Trying an API node: a few at a time ────────────────────────────────────
 
@@ -115,7 +130,15 @@ function apiAllowed(userId: string): { ok: true } | { ok: false; error: string }
 }
 
 async function tryApi(userId: string, body: Record<string, unknown>): Promise<Response> {
-  if (await lockedDown(userId)) return json(403, { ok: false, error: LOCKDOWN_SAYS, code: "lockdown" });
+  const refused = lockRefusal(await lockState(userId));
+  if (refused) return refused;
+  // The daily ceiling a plan gives (checkQuota, scope "api"). Without it a free account
+  // was a server-address egress proxy — the flood limiter below is per instance and in
+  // memory, so it reset on every restart and never counted what the day had spent.
+  const quota = await checkQuota({ userId, scope: "api", units: 1 });
+  if (!quota.ok) {
+    return json(quota.code === "usage_unknown" ? 503 : 403, { ok: false, code: quota.code ?? "quota_exhausted", error: quota.error ?? "API use is not available." });
+  }
   const gate = apiAllowed(userId);
   if (!gate.ok) return json(429, { ok: false, error: gate.error, code: "slow_down" });
   apiBusy.set(userId, (apiBusy.get(userId) ?? 0) + 1);
@@ -141,7 +164,14 @@ async function browserInfo(userId: string): Promise<Response> {
   const configured = browserConfigured();
   const ent = await getEntitlement(userId);
   const limit = PLANS[ent.plan]?.browserSecondsPerDay ?? 0;
-  const used = await unitsInWindow(userId, "browser");
+  // Display only: when the ledger cannot be read, say so rather than claiming either
+  // "nothing used" or "all used up". Opening goes through checkQuota, which refuses.
+  let used: number;
+  try {
+    used = await unitsInWindow(userId, "browser");
+  } catch {
+    return json(503, { ok: false, code: "usage_unknown", error: "BeeZilla can't read your server browser time right now. Try again in a moment." });
+  }
   const open = currentBrowserSession(userId);
   return json(200, {
     ok: true,
@@ -160,9 +190,12 @@ async function openBrowser(userId: string, body: Record<string, unknown>): Promi
   if (!browserConfigured()) {
     return json(503, { ok: false, code: "not_configured", error: "The server browser isn't set up on this BeeZilla yet, so it can't be opened." });
   }
-  if (await lockedDown(userId)) return json(403, { ok: false, error: LOCKDOWN_SAYS, code: "lockdown" });
+  const refused = lockRefusal(await lockState(userId));
+  if (refused) return refused;
   const quota = await checkQuota({ userId, scope: "browser", units: 30 });
-  if (!quota.ok) return json(403, { ok: false, code: quota.code ?? "quota_exhausted", error: `Not today: ${quota.error}.` });
+  if (!quota.ok) {
+    return json(quota.code === "usage_unknown" ? 503 : 403, { ok: false, code: quota.code ?? "quota_exhausted", error: `Not today: ${quota.error}.` });
+  }
   // The browser may stay open only as long as today's time lasts, not for the whole session limit.
   const left = Math.floor((quota.limit ?? 0) - (quota.used ?? 0));
   const startUrl = body.startUrl ? cleanUrl(body.startUrl, 2000) : "";
@@ -245,9 +278,15 @@ const gone = () => json(404, { ok: false, code: "gone", error: "That browser has
 async function browserCall(event: any, method: string, userId: string, id: string, action: string): Promise<Response> {
   const session = getBrowserSession(id, userId);
   // Lockdown switched on while a browser is open ends it: nothing leaves BeeZilla in that mode.
-  if (session && method !== "DELETE" && await lockedDown(userId, false)) {
-    await closeBrowserSession(id, userId, "closed");
-    return json(403, { ok: false, error: LOCKDOWN_SAYS, code: "lockdown" });
+  // A privacy setting that cannot be read refuses the action but keeps the session: a
+  // transient database hiccup must not destroy work (or bill for a browser nobody can use).
+  if (session && method !== "DELETE") {
+    const st = await lockState(userId, false);
+    if (st === "on") {
+      await closeBrowserSession(id, userId, "closed");
+      return json(403, { ok: false, error: LOCKDOWN_SAYS, code: "lockdown" });
+    }
+    if (st === "unknown") return lockRefusal(st) as Response;
   }
   if (method === "GET" && action === "stream") {
     if (!session) return gone();
