@@ -107,6 +107,21 @@
   #selbar { display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;
             padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
   @media (max-width: 640px) { #selHint, #textbar .hint { display:none; } }
+  /* CR-13: on a phone the page locked itself to 100vh with overflow:hidden, so the
+     toolbar's last row and the footer text ran off the right edge and nothing
+     could scroll to them. The page scrolls; the tool strip scrolls sideways in its
+     own box (a toolbar is not a nav row); the canvas keeps a usable height. */
+  @media (max-width: 760px) {
+    html, body { height: auto; overflow: auto; }
+    header { padding: 0.5rem 0.6rem 0.3rem; }
+    header .row { gap: 0.35rem; }
+    header .row .title { flex: 1 1 100%; font-size: 0.85rem; }
+    header .row button { font-size: 0.74rem; padding: 0.35rem 0.55rem; }
+    #toolbar { flex-wrap: nowrap; overflow-x: auto; padding: 0.4rem 0.6rem; -webkit-overflow-scrolling: touch; }
+    #work { min-height: 60vh; }
+    #stage { min-height: 60vh; }
+    footer { padding: 0.5rem 0.8rem; flex-wrap: wrap; }
+  }
   #selbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
   #orderbar { display:flex; visibility:hidden; align-items:center; gap:0.35rem; flex-wrap:wrap;
               padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0d0d0d; }

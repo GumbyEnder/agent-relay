@@ -294,8 +294,13 @@ a.ob-item { text-decoration: none; }
   :root { --ob-gutter: 16px; }
   .ob-board { height: auto; min-height: 80vh; }
   .ob-board .wb-panel { min-height: 80vh; }
-  .bz-tabrow, .bz-tabrow .bz-tabs, .bz-tabrow .bz-places { gap: 2px 22px; }
-  .bz-head .bz-browse { padding-right: 68px; } /* the gear sits 16px from the corner on a phone */
+  .bz-tabrow, .bz-tabrow .bz-tabs, .bz-tabrow .bz-places { gap: 2px 14px; }
+  /* CR-13: a phone has no room to reserve for the gear down here. The old 68px
+     reserve shrank the whole search block to 271px of a 342px column. */
+  .bz-head .bz-browse { padding-right: 0; }
+  /* One type scale for the row on a phone: the labels stay whole, the row stays
+     as short as its words allow. */
+  .bz-tabrow .bz-tabs > button, .bz-tabrow .bz-places > a { font-size: 0.95rem; }
   .talk-extras { gap: 4px; padding-right: 0; }
   .talk-icon, .talk-extras .privacy-btn { height: 2.3rem; }
   .talk-icon { width: 2.3rem; }

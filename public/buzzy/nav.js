@@ -232,6 +232,7 @@
     var padR = parseFloat(bcs.paddingRight) || 0;
     h.style.marginLeft = (-padL) + "px";
     h.style.marginRight = (-padR) + "px";
+    h.style.padding = window.innerWidth <= 640 ? "8px 16px 4px" : "12px 24px 8px";
   }
   window.addEventListener("resize", applyBleed);
 
@@ -396,14 +397,21 @@
       // (the desktop bar is one unbroken strip) — the inline value cannot be
       // outranked by a stylesheet any other way.
       "@media (max-width:640px){",
-      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.4rem;padding:.35rem 0}",
+      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.4rem;padding:.2rem 0}",
       ".bz-brandrow .bz-cluster{margin-left:0;width:100%;flex-wrap:wrap;row-gap:.4rem;gap:.5rem}",
       // The link row keeps its place under the brand on a phone, but it is the
       // SAME row as the brand (no second bar a page can style away).
       ".bz-brandrow #bzNav{order:3;flex:1 1 100%;width:100%;flex-wrap:wrap!important;justify-content:flex-start;gap:.3rem .85rem;overflow-x:visible}",
-      "#bzChrome{flex-wrap:wrap;row-gap:.35rem}",
-      "#bzChrome .bz-co-wrap{flex:1 1 8rem;min-width:0}",
-      "#bzChrome select.bz-co-select{max-width:100%;width:100%}",
+      // CR-13: the identity cluster was three cramped rows and the company label
+      // and value fought the account and the Feedback pill for 342px. On a phone
+      // the company takes a full row of its own (so its value is never ellipsised
+      // to "No company y"), and the account and Feedback share the next row —
+      // the account shrinking with an ellipsis, the pill keeping its size.
+      "#bzChrome{flex-wrap:wrap;row-gap:.4rem;width:100%}",
+      "#bzChrome .bz-co-wrap{flex:1 1 100%;min-width:0}",
+      "#bzChrome select.bz-co-select{flex:1 1 auto;max-width:100%;width:auto;min-width:0}",
+      "#bzChrome .bz-account{flex:1 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      "#bzChrome button.bz-ask{flex:0 0 auto;padding:.35rem .8rem}",
       ".bz-navbar{display:none}",
       ".bz-navbar::-webkit-scrollbar{display:none}",
       "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
@@ -417,7 +425,12 @@
       // than pinning over it. Talk to BeeZilla is the voice switch on every page, so
       // the Listening pill by the gear stays out of the way.
       "html.bz-has-head #bzNav,html.bz-has-head .bz-navbar{display:none!important}",
-      "html.bz-has-head header:has(#bzChrome){position:relative!important;top:auto!important;border-bottom:0!important;background:transparent!important}",
+      // CR-13: the website header is one dark surface on every page. Orchestrate
+      // and Studio ship a light body, so the copied Talk styles left the places
+      // row as grey words on white — nearly invisible. The bar brings its own
+      // background instead of inheriting the page's.
+      "#bzChromeHead,#bzHead{background:#0d0d0d}",
+      "html.bz-has-head header:has(#bzChrome){position:relative!important;top:auto!important;border-bottom:0!important;background:#0d0d0d!important}",
       "html.bz-has-head .bz-brandrow .bz-brand img{width:44px;height:44px;border-radius:10px;object-fit:contain}",
       "html.bz-has-head .bz-brandrow .bz-brand strong{font-size:1.1rem;font-weight:800;letter-spacing:.01em}",
       "html.bz-has-head #bzMicLive{display:none!important}",
@@ -515,7 +528,8 @@
         // it: pin the menu to the viewport under the button instead.
         var r = moreBtn.getBoundingClientRect();
         var w = moreMenu.offsetWidth || 180;
-        moreMenu.style.top = Math.round(r.bottom + 6) + "px";
+        var h = moreMenu.offsetHeight || 0;
+        moreMenu.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + "px";
         moreMenu.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + "px";
       };
       window.addEventListener("resize", function () { setOpen(false); });
@@ -539,6 +553,28 @@
       else nav.appendChild(a);
     });
     nav.appendChild(more);
+    // CR-13: on a phone the More menu is not a place. Its button wrapped onto a
+    // line of its own under the five main links on landing/login, and a "More ▾"
+    // hanging off the row reads as a broken nav. A phone has room for a wrapped
+    // list of words: put every link in the row and hide More. A resize back to a
+    // desktop width puts the extras back in the menu. (The #bzPlaces row on pages
+    // with #bzHead is separate and always shows every place.)
+    (function () {
+      var mq = window.matchMedia ? window.matchMedia("(max-width:640px)") : null;
+      function place() {
+        var phone = mq ? mq.matches : false;
+        ordered.forEach(function (a) { nav.appendChild(a); });
+        nav.appendChild(more);
+        if (!phone) ordered.forEach(function (a, i) { if (LINKS[i].more) menu.appendChild(a); });
+        more.style.display = phone ? "none" : "";
+        if (phone) menu.hidden = true;
+      }
+      place();
+      if (mq) {
+        if (mq.addEventListener) mq.addEventListener("change", place);
+        else if (mq.addListener) mq.addListener(place);
+      }
+    })();
     // Anchors too: `#bzNav a` is a page-owned id rule on sketch/studio/capabilities,
     // so an inherited value cannot reach them. 0.86rem is the shared nav.css size;
     // writing it inline keeps the label box identical wherever the row is rendered.
@@ -1272,7 +1308,43 @@
     Array.prototype.forEach.call(document.querySelectorAll("#bzFeedback"), function (n) {
       n.remove();
     });
-    var header = nav.closest("header") || document.querySelector("header") || document.body;
+    var header;
+    // CR-13: on a page with the website's header (#bzHead), the chrome row belongs
+    // in the DOCUMENT above it — not inside the page. boot() used to pick
+    // `document.querySelector("header")`, which on Orchestrate is the builder's own
+    // `<header class="bar">` inside #app: the brand row and company controls were
+    // planted in the middle of the page, under the places row, and the builder's
+    // toolbar was torn out of its slot. A chrome row of its own, inserted before
+    // #bzHead (or its placeholder — the header is fetched after this runs), keeps
+    // the page header where the page put it.
+    var headAnchor = document.getElementById("bzHead") || document.getElementById("bzHeadSoon");
+    // The sign-in pages have no website header; every other /buzzy page gets one
+    // (fetched by the shell after this runs).
+    var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+    var expectsHead = /^\/buzzy(\/|$)/.test(path) && !/^\/buzzy\/(landing|login|shared|join)$/.test(path);
+    if (headAnchor || expectsHead) {
+      var ownHeader = nav.closest("header");
+      var page = document.getElementById("bzPage");
+      // Talk ships its own header immediately above #bzHead: reuse it. Anywhere
+      // else the page header is inside the page, so it must not be used.
+      var above = ownHeader && (headAnchor
+        ? (ownHeader.compareDocumentPosition(headAnchor) & 4)
+        : !(page && page.contains(ownHeader)));
+      if (above) {
+        header = ownHeader;
+      } else {
+        header = document.getElementById("bzChromeHead");
+        if (!header) {
+          header = document.createElement("header");
+          header.id = "bzChromeHead";
+          var before = headAnchor || page;
+          if (before && before.parentNode) before.parentNode.insertBefore(header, before);
+          else document.body.insertBefore(header, document.body.firstChild);
+        }
+      }
+    } else {
+      header = nav.closest("header") || document.querySelector("header") || document.body;
+    }
     chromeBleedHeader = header;
 
     var brand = findBrand(header);
@@ -1314,7 +1386,7 @@
     header.style.boxSizing = "border-box";
     header.style.margin = "0";
     applyBleed();
-    header.style.padding = "12px 24px 8px";
+    header.style.padding = window.innerWidth <= 640 ? "8px 16px 4px" : "12px 24px 8px";
     header.innerHTML = "";
 
     var brandRow = document.createElement("div");
@@ -2396,7 +2468,7 @@
   // Left on <body>: the shell's own nodes, the chrome (its header, the settings dock,
   // the Feedback panel), BeeZilla's step-by-step card (pilot.js styles itself and
   // follows its own "go" steps across pages), and tags that draw nothing.
-  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback", "bzHead", "bzTip"];
+  var DOCUMENT_OWNED = ["bzPage", "bzPageCache", "bzDock", "bzFeedback", "bzHead", "bzChromeHead", "bzTip"];
   function adoptStrays(page) {
     if (!page) return;
     Array.prototype.slice.call(document.body.children).forEach(function (n) {

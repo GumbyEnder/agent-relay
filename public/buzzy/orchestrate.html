@@ -106,6 +106,23 @@
     main { grid-template-columns: 120px minmax(0, 1fr) 240px; }
     #outputPane { height: 30vh; }
   }
+  /* CR-13: a phone cannot hold a 168px palette, a canvas and a 300px inspector on
+     one line — the toolbar's Import button was clipped, the gear sat on the
+     inspector and "valid" was a fragment at the edge. One column, scrolling. */
+  @media (max-width: 760px) {
+    html, body { height: auto; }
+    #app { display: block; height: auto; min-height: 0; padding-bottom: 72px; }
+    header.bar { padding: 8px 56px 8px 10px; gap: 6px; flex-wrap: wrap; }
+    header.bar h1 { font-size: 1rem; margin: 0; flex: 0 0 auto; }
+    header.bar input#orchName { min-width: 0; flex: 1 1 100%; }
+    header.bar .spacer { display: none; }
+    header.bar button, header.bar select { flex: 0 0 auto; font-size: 0.8rem; padding: 6px 9px; }
+    main { display: block; }
+    #palette { border-right: 0; border-bottom: 1px solid var(--line); max-height: 190px; }
+    #center { min-height: 62vh; }
+    #side { border-left: 0; border-top: 1px solid var(--line); grid-template-rows: auto auto; }
+    #outputPane { height: auto; min-height: 220px; }
+  }
 </style>
 </head>
 <body>

@@ -43,16 +43,21 @@
   // 16px — so a phone rendered "Search eve…", a cut-off sentence that reads as a
   // broken field. Pick the longest wording that actually fits and re-pick on
   // resize; the markup keeps the long line for a wide window and for no-JS.
-  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search or paste a link", "Search"];
+  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search or paste a link", "Search your work", "Search or URL", "Search"];
+  var PLACEHOLDER_LONG = "Search everything — your work and Inspiration — or enter a web address";
   (function () {
     if (!input) return;
-    var long = input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
-    var all = [long].concat(PLACEHOLDER_SHRINKS);
+    // CR-13: the markup now ships the SHORT line, not the long one. The long line
+    // is an upgrade for a wide field, never a fallback: on an iPhone Safari the
+    // old shrink ran late (or never, before layout) and left "Search everything —
+    // your wor" clipped in the field. With a short default the worst case is a
+    // readable placeholder, and the long line is chosen only when it measures.
+    var all = [PLACEHOLDER_LONG].concat(PLACEHOLDER_SHRINKS);
     var canvas = null;
     function pick() {
-      var room = input.clientWidth - (parseFloat(window.getComputedStyle(input).paddingLeft) || 0) - (parseFloat(window.getComputedStyle(input).paddingRight) || 0);
-      if (!(room > 0)) return;                       // not laid out yet: keep the long line
       var cs = window.getComputedStyle(input);
+      var room = input.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      if (!(room > 0)) return;                       // not laid out yet: keep the short line
       canvas = canvas || document.createElement("canvas");
       var ctx = canvas.getContext && canvas.getContext("2d");
       if (!ctx) return;
@@ -66,6 +71,8 @@
     var t = null;
     function soon() { clearTimeout(t); t = setTimeout(pick, 60); }
     window.addEventListener("resize", soon);
+    window.addEventListener("load", soon);
+    window.addEventListener("pageshow", soon);
     if (window.ResizeObserver) new window.ResizeObserver(soon).observe(input);
     // A webfont that lands after first paint measures wider than it renders, so
     // re-pick once the fonts are ready rather than keeping the too-short word.

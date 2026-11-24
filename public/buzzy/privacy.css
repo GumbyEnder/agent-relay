@@ -30,13 +30,33 @@
   position: absolute;
   top: calc(100% + 0.6rem);
   right: 0;
-  z-index: 60;
+  left: auto;
+  z-index: 1000;
+  box-sizing: border-box;
   width: min(23rem, calc(100vw - 2rem));
+  max-height: min(75vh, calc(100vh - 2rem));
+  overflow-y: auto;
   padding: 0.85rem 0.95rem 0.95rem;
   border-radius: 14px;
   background: #151515;
   border: 1px solid #2C2C2C;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+/* CR-13: anchored to a control near the right edge, the panel's 23rem width ran
+   off the LEFT of a phone (measured left:-6 at 390px) and the Open thumb hung past
+   the right. Under 640px it is a bottom sheet: the viewport's own edges, above
+   every bar, opaque, and scrollable if the copy is long. */
+@media (max-width: 640px) {
+  .privacy-pop {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: auto;
+    max-height: calc(100vh - 24px);
+    z-index: 1000;
+  }
 }
 .privacy-pop.hidden { display: none; }
 .pp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; }
@@ -59,6 +79,7 @@
   border-radius: 999px;
   background: #0E0E0E;
   border: 1px solid #262626;
+  overflow: hidden;
 }
 .pp-thumb {
   position: absolute;

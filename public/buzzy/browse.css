@@ -108,6 +108,12 @@
   /* The label matters more than the icon on a phone: it is the only thing that
      says what the button does. */
   .bz-share-btn { font-size: 0.74rem; padding: 0.2rem 0.55rem; }
+  /* CR-13: the field was 106px wide because the icon, the paddings and two
+     pill-sized tools ate 236px of a 342px bar. The tools become square icon
+     buttons and the paddings tighten, so the placeholder has room to be read. */
+  .bz-search { padding: 0 0.4rem 0 0.9rem; gap: 0.5rem; }
+  .bz-search-tools { padding-left: 0.4rem; gap: 0.15rem; }
+  .bz-share-btn { width: 2.4rem; height: 2.4rem; padding: 0; justify-content: center; }
 }
 .bz-search-note { min-height: 1.1rem; margin: 0.4rem 1.2rem 0; font-size: 0.8rem; color: #FFC107; }
 
@@ -194,9 +200,15 @@
 .bz-ico-recipe i:nth-child(3) { width: 1.2rem; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────── */
-.bz-tabs { display: flex; gap: 2rem; margin: 1.1rem 0.6rem 1rem; border-bottom: 1px solid #1E1E1E; overflow-x: auto; }
+/* CR-13: this used to be `display:flex; gap:2rem; overflow-x:auto` with buttons
+   free to shrink. oneboard.css later wraps the same row, and the two rules fought:
+   nowrap labels squeezed under their neighbours and painted over them ("Memo" in
+   the phone shots is Memory clipped). The row's layout is oneboard.css's; this
+   file styles the labels only, and a tab never shrinks below its word. */
+.bz-tabs { display: flex; gap: 2rem; margin: 1.1rem 0.6rem 1rem; border-bottom: 1px solid #1E1E1E; overflow: visible; }
 .bz-tabs button {
   position: relative;
+  flex: 0 0 auto;
   min-height: 0;
   padding: 0.55rem 0.1rem 0.75rem;
   border: none;
@@ -282,7 +294,7 @@
   .bz-search input { height: 3rem; font-size: 16px; }
   .bz-results { padding: 1rem; }
   .bz-results-grid { grid-template-columns: 1fr; }
-  .bz-tabs { gap: 1.3rem; }
+  .bz-tabs { margin: 0.8rem 0.6rem 0.6rem; }
   .bz-totop { right: calc(38px - 1.65rem); bottom: 72px; }
 }
 @media (prefers-reduced-motion: reduce) {
