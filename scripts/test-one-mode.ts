@@ -240,6 +240,11 @@ for (const message of [
 for (const message of ["pay attention to the layout", "order a $5 coffee", "the pay page needs a tidier header"]) {
   check(tier(message) !== "critical", `no money signal here: "${message}" (got ${tier(message)})`);
 }
+// The legal arm knew "terms of service" but not the acronym, so "publish ToS" read as
+// product stakes and went ahead (1.2 ≤ 3). An acronym the owner types is still a door.
+for (const message of ["publish ToS", "update our T&Cs", "publish the terms of service"]) {
+  check(tier(message) === "critical", `a legal text is critical however it is spelled: "${message}" (got ${tier(message)})`);
+}
 check(assessRequest("I need this ASAP").hurried === true, "ASAP is a hurry");
 check(assessRequest("write a short story").hurried === false, "no hurry words, no hurry");
 check(assessRequest("Make me a game").size === "large", "a game is a project");
