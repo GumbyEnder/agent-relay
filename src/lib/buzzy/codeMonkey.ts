@@ -51,6 +51,7 @@
  * Everything that can be wrong here is checked by scripts/test-code-monkey.ts.
  */
 import { BUDGET_QUESTION, budgetChoices, money, type Budget, type BudgetSettled, type Effort } from "./budget";
+import { isCodeWork } from "./askOrGo";
 
 export type Stakes = "play" | "product" | "critical";
 export type Door = "two-way" | "one-way";
@@ -546,6 +547,9 @@ export function missionBrief(card: ResultCard, slice: Slice, allSlices: Slice[],
 /**
  * A request to MAKE or CHANGE software — the only turns that get the
  * start_code_project tool. Talking about code ("what is Python?") is not one.
+ * One mode's own reading of the same thing (askOrGo.ts isCodeWork) counts too: it
+ * decides when the budget question is asked first, so an ask it asked the budget
+ * for ("program an Arduino to water my plants") always reaches the workshop.
  */
 export function isCodeRequest(message: string): boolean {
   const m = String(message || "");
@@ -553,7 +557,8 @@ export function isCodeRequest(message: string): boolean {
   return (
     new RegExp(`\\b(build|make|create|code|program|develop|write|design|set up|put together|spin up)\\b[^.?!\\n]{0,60}\\b${thing}\\b`, "i").test(m) ||
     new RegExp(`\\b(add|change|fix|update|improve)\\b[^.?!\\n]{0,40}\\b(my|the|our|this)\\s+(${thing.slice(1, -1)}|code|codebase|repo|repository)\\b`, "i").test(m) ||
-    /\b(fix (the|a|this) bug|debug (my|the|this)|refactor|deploy (my|the|this)|code monkey)\b/i.test(m)
+    /\b(fix (the|a|this) bug|debug (my|the|this)|refactor|deploy (my|the|this)|code monkey)\b/i.test(m) ||
+    isCodeWork(m)
   );
 }
 

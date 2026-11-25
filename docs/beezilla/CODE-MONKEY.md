@@ -227,9 +227,8 @@ Both new scripts run in CI through the `posttest:buzzy-jobs` hook.
 
 - Clicking Code Monkey in the agents strip (the agents-sidebar PRs) should call
   `BeeZillaCodeMonkey.open()`; a one-line follow-up once both are merged.
-- The ask-or-go rule (when to ask before starting) is BeeZilla-wide and lives with the
-  one-mode change; the workshop takes the stakes tier as input and will use that rule
-  once both land.
+- One mode's stakes reading (askOrGo.ts `assessRequest`) isn't handed to the card yet;
+  the card still settles its own stakes from the owner's words (`settleStakes`).
 - Where the built software runs for the owner to try (preview hosting) is whatever the
   builder harness reports as its try-it link; a BeeZilla-hosted preview is a later step.
 - The search allowance is a number in the brief; an outside agent's own searches are only
@@ -238,8 +237,11 @@ Both new scripts run in CI through the `posttest:buzzy-jobs` hook.
   (`/api/search`) with a per-project allowance.
 - Looking first covers the owner's own work and BeeZilla's starting boards. Other people's
   projects can join once BeeZilla has a way to share a project openly (and its license).
-- The budget answers are tap buttons once one mode (PR #371) lands; until then the model
-  asks in words and the owner types an amount.
+- Since one mode landed (PR #371, 2026-11-25), it asks the budget question first, as tap
+  buttons, for work it hands to agents (askOrGo.ts `isCodeWork`, which `isCodeRequest`
+  now includes), and Code Monkey reads the tapped amount as the owner's answer. An ask
+  only Code Monkey's own words catch ("write a Python script to clean my CSV") still
+  gets the question from the model, in words, after `start_code_project` is refused.
 - Telling a flow from software is done with words, and the board decides first. An ask
   worded as a flow builds a flow even when it names software ("build me a workflow
   management web app"); asking for the software itself ("build me a web app for

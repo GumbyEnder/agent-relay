@@ -38,6 +38,8 @@ import {
 } from "../src/lib/buzzy/codeMonkey";
 import { readFileSync } from "node:fs";
 import { planAppActions } from "../src/lib/buzzy/pilot";
+import { isCodeWork } from "../src/lib/buzzy/askOrGo";
+import { BUDGET_ANSWERS, BUDGET_QUESTION as ONE_MODE_BUDGET_QUESTION } from "../src/lib/buzzy/oneMode";
 import {
   BUDGET_QUESTION,
   amountsIn,
@@ -346,6 +348,33 @@ for (const ask of [
   for (const boardHasFlow of [false, true]) {
     check(`never both${boardHasFlow ? " (flow on the board)" : ""}: "${ask.slice(0, 44)}"`, !(boardBuilds(ask, boardHasFlow) && turnOf(ask, { boardHasFlow })));
   }
+}
+
+console.log("One mode (PR #371) asks the budget first; Code Monkey takes it from there:");
+// One mode asks "How much should I spend…" with tap answers for work it hands to agents
+// (askOrGo.ts isCodeWork). Code Monkey must recognise every such ask, read the tapped
+// answer as the owner's own words, and ask the very same question when it asks itself.
+check("both ask the very same question", ONE_MODE_BUDGET_QUESTION === BUDGET_QUESTION && askedForBudget(ONE_MODE_BUDGET_QUESTION));
+const oneModeAsks = [
+  "build me a bedtime game for my kids", "make a tip calculator app", "fix the bug in my website's contact form",
+  "build a landing page for my bakery", "code a script that renames my files", "create a Chrome extension that blocks ads",
+  "build an API for my orders", "add a dark mode to my app", "develop a mobile app for my gym", "make a Discord bot for my server",
+  "refactor my code", "build me a CRM", "program an Arduino to water my plants", "build a scraper for job listings",
+];
+for (const ask of oneModeAsks.filter(isCodeWork)) {
+  check(`an ask one mode takes to agents is Code Monkey's: "${ask.slice(0, 40)}"`, isCodeRequest(ask));
+}
+check(
+  "after one mode's budget question, the tapped answer finishes the coding ask",
+  turnOf("$5 — a solid start", { budgetAsked: true, earlier: ["program an Arduino to water my plants"] }),
+);
+for (const [tier, labels] of Object.entries(BUDGET_ANSWERS) as Array<[keyof typeof BUDGET_ANSWERS, readonly string[]]>) {
+  const cents = labels.map((label) => {
+    const r = settleBudget({ words: "build me a tip calculator app", answer: label, stakes: tier });
+    return r.ok ? r.budget.cents : -1;
+  });
+  const want = budgetChoices(tier).map((c) => c.dollars * 100);
+  check(`each of one mode's ${tier} taps settles as that amount (${labels.join(" / ")})`, cents.join() === want.join(), cents.join());
 }
 
 if (failures) {
