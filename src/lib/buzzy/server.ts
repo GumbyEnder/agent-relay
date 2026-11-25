@@ -92,7 +92,7 @@ import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
-import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, type AppAction } from "./pilot";
+import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, setsUpBrowserJob, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
 import { inspirationNote, inspirationResult, searchInspiration, wantsInspiration } from "./inspirationSearch";
@@ -752,6 +752,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // reply is one sentence (pilot.ts ORCHESTRATE_USER_LINE: nothing asked first).
   const flowOnBoard = boardHasFlow(boardText);
   const orchestrating = asksToOrchestrate(message, { boardHasFlow: flowOnBoard });
+  // A job for BeeZilla's own browser told in so many words ("go to mureka.ai and make…",
+  // "use your browser to…"), or set up on a step ("when you get to the song step, go
+  // to…"): the job, or the globe the page puts on that step, is the go — like a build on
+  // the board. A quick choice would come back without it, and "Just go" after one would
+  // write a document instead of doing the job. A bare "do it" with globes on the board
+  // is left to one mode (it may be the answer to its own question).
+  const browserNodes = cleanToolNodes(req.browserNodes);
+  const browserGo = !lockdown && !orchestrating &&
+    ((browserConfigured() && browserCommand(message, [])) || setsUpBrowserJob(message));
 
   // ── One mode: ask first, or just go (oneMode.ts) ─────────────────────
   // Silently weigh the cost of misreading this request against the cost of asking.
@@ -788,7 +797,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     makerLane,
     agentWork,
     knownBudget,
-    buildsOnBoard: orchestrating,
+    buildsOnBoard: orchestrating || browserGo,
     canFollowUp: Boolean(conversationKey),
   });
   if (decided.remember) {
@@ -796,6 +805,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
   const oneModeWhy =
     (orchestrating ? "building on the Idea Board, nothing asked · " : "") +
+    (browserGo ? "a job for its own browser, nothing asked · " : "") +
     verdict.why +
     (remembered[assessment.stakes] ? ` · remembered for ${assessment.stakes} work: ${remembered[assessment.stakes]}` : "") +
     (decided.step.kind === "budget" || (decided.step.kind === "go" && decided.step.agentWork)
@@ -851,8 +861,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       carry = ticket.carry === true;
     }
   }
-  // A turn built on the board leaves a waiting question exactly as it was stored.
-  if (!orchestrating) {
+  // A turn built on the board (or a browser job) leaves a waiting question exactly as it was stored.
+  if (!orchestrating && !browserGo) {
     if (oneState) await memory.remember(STATE_KEY, encodeState(oneState));
     else if (savedStep) await memory.remember(STATE_KEY, "");
   }
@@ -917,9 +927,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // same as pressing Do it.
   const goHow = step.kind === "go" ? step.how : "fresh";
   // The rule's "go" on a request to make something real (a document, a plan, a project).
-  const goMakesSomething = step.kind === "go" && assessment.size !== "small" && !orchestrating;
+  const goMakesSomething = step.kind === "go" && assessment.size !== "small" && !orchestrating && !browserGo;
   if (goHow !== "fresh" && !wants3d && !wantsVideo) requestedDraft = true;
-  const oneModeNote = orchestrating ? "" : turnNote(goHow, {
+  const oneModeNote = orchestrating || browserGo ? "" : turnNote(goHow, {
     spoken: surface === "voice",
     interview: step.kind === "go" ? step.interview : undefined,
     budget: step.kind === "go" ? step.budget : undefined,
@@ -1623,7 +1633,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // function, and a gated tool must never leak into the offered set.
   // BeeZilla's own browser (the globe): a turn where the owner asks for something to be done on a
   // website, or tells it to get going while the board has a browser node (browserRun.ts).
-  const browserNodes = cleanToolNodes(req.browserNodes);
   // Not when the message set a browser job up on the board ("when you get to that step, go to…"):
   // the page does that (appPlan), and the job runs when the work gets there.
   const browserTurn = !lockdown && browserConfigured() && !appPlan &&

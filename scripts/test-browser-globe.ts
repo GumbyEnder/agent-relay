@@ -30,7 +30,9 @@ import { cleanFill, fillFor, personOnly, siteAllowed, siteOf, sitesIn, type Page
 import { browserCommand, cleanToolNodes, firstAddressIn, namedIn, runForCard, wantsBrowser } from "../src/lib/buzzy/browserRun";
 import { hideKeys } from "../src/lib/buzzy/boardNodes";
 import { offeredToolNames, policyFor, refusalFor } from "../src/lib/buzzy/toolRegistry";
-import { planAppActions } from "../src/lib/buzzy/pilot";
+import { planAppActions, setsUpBrowserJob } from "../src/lib/buzzy/pilot";
+import { askOrGo, assessRequest } from "../src/lib/buzzy/askOrGo";
+import { nextStep } from "../src/lib/buzzy/oneMode";
 
 let pass = 0;
 let fail = 0;
@@ -280,6 +282,38 @@ section("What BeeZilla is told about a globe");
   ok("an empty globe is not sent and says nothing", W.nodesFor(empty).length === 0 && W.instructionsFor(empty) === "");
   ok("the board and the account write the same words for a task node", W.node.body(taskNode) === bodyFor("browser", cleanBrowserSpec(JSON.parse(taskNode.node))), `${JSON.stringify(W.node.body(taskNode))} vs ${JSON.stringify(bodyFor("browser", cleanBrowserSpec(JSON.parse(taskNode.node))))}`);
   ok("…and for a recording with a blank", W.node.body(recNode) === bodyFor("browser", cleanBrowserSpec(JSON.parse(recNode.node))));
+}
+
+// ── One mode (ask first, or just go) and a browser job ────────────────────
+// A job told in so many words is the go itself, like a build on the board: one mode's
+// quick choice would come back without it, and "Just go" after one would write a
+// document instead of doing the job (server.ts browserGo).
+section("One mode lets a browser job go");
+{
+  const big = "Go to mureka.ai and make the theme song for our company launch video for investors next week, it has to match our brand and sound professional, then download it";
+  const assessment = assessRequest(big, { priorTurns: 2, knownFacts: 0, hasDraft: false, hasBoardBrief: false, makerLane: false });
+  const fresh = askOrGo(assessment);
+  const asIs = nextStep(null, { message: big, fresh, assessment, canFollowUp: true });
+  const asJob = nextStep(null, { message: big, fresh, assessment, canFollowUp: true, buildsOnBoard: true });
+  ok("a big job would stop for a quick choice on its own…", fresh.ask === true && asIs.step.kind !== "go", JSON.stringify({ fresh, step: asIs.step }));
+  ok("…so the server marks it a browser job, and it goes", asJob.step.kind === "go" && asJob.state === null);
+  ok("a job named in so many words is one (no globe needed)", browserCommand(big, []) && browserCommand("use your browser to make me a song", []));
+  ok("a bare “do it” is not, even with a globe on the board: one mode answers its own question first", !browserCommand("do it", []) && browserCommand("do it", [{ id: "n1", title: "Make the song", node: "{}" } as never]));
+  ok("the owner's “when you get to that step, go to …” sets a browser job up", setsUpBrowserJob("OK, when you get to that step, go to merica.com and, you know, go to /create and then type in these instructions to create the sound and then download the sound and send it elsewhere."));
+  ok("…and a step with nothing to do on a website does not", !setsUpBrowserJob("when you get to the song step, write a happy song") && !setsUpBrowserJob("for this step we need a website mockup"));
+  const src = readFileSync("src/lib/buzzy/server.ts", "utf8");
+  const at = (t: string) => src.indexOf(t);
+  ok("the server works it out before one mode decides, and tells one mode",
+    at("const browserGo = !lockdown && !orchestrating &&") > 0 && at("const browserGo =") < at("const decided = nextStep(savedStep") &&
+      /\n\s+buildsOnBoard: orchestrating \|\| browserGo,\n/.test(src) && /browserCommand\(message, \[\]\)\) \|\| setsUpBrowserJob\(message\)\)/.test(src));
+  ok("on that turn: no document, no one-mode note, and a waiting question is left alone",
+    /assessment\.size !== "small" && !orchestrating && !browserGo;/.test(src) &&
+      /const oneModeNote = orchestrating \|\| browserGo \? "" : turnNote\(/.test(src) &&
+      /if \(!orchestrating && !browserGo\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(src));
+  ok("the browser gate and one mode's documents-only gate are both on the turn",
+    /const toolCtx = \{\n\s+draftGateOpen,\n\s+lockdown,\n\s+browser: browserTurn,\n\s+documentsOnly: /.test(src) &&
+      /const toolTurnNeeded = explicitDocumentRequest \|\| browserTurn;/.test(src));
+  ok("documents-only never holds a browser job back", offeredToolNames({ draftGateOpen: true, browser: true, documentsOnly: true }).includes("use_browser") && refusalFor("use_browser", { draftGateOpen: true, browser: true, documentsOnly: true }) === null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
