@@ -1385,7 +1385,10 @@ export default defineEventHandler(async (event) => {
     }
     const row = rows[0]!;
     setResponseHeader(event, "content-type", row.content_type || "application/octet-stream");
-    setResponseHeader(event, "content-disposition", `inline; filename="${row.filename.replace(/"/g, "")}"`);
+    // A name with letters beyond plain ASCII (a song called “Don’t Stop”) can't go in a header as it
+    // is: an ASCII stand-in, and the real name encoded (RFC 6266).
+    const asciiName = row.filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "");
+    setResponseHeader(event, "content-disposition", `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`);
     return new Uint8Array(row.body);
   }
 
@@ -1669,6 +1672,9 @@ export default defineEventHandler(async (event) => {
     const boardInstructions = typeof body.boardInstructions === "string"
       ? body.boardInstructions.slice(0, 8200)    // the summary (up to 7,800) and its pictures line
       : null;
+    // The browser nodes (globes) on the board, with what BeeZilla needs to run one (browserRun.ts
+    // cleans them): at most six.
+    const browserNodes = Array.isArray(body.boardNodes) ? (body.boardNodes as unknown[]).slice(0, 6) : undefined;
     // What the owner is looking at on the Idea Board as this turn started (whiteboard.js
     // viewOf): read for this turn only, never stored with the conversation (boardView.ts).
     const boardView = cleanBoardView(body.boardView);
@@ -1851,6 +1857,7 @@ export default defineEventHandler(async (event) => {
         onFlow: opts?.onFlow,
         boardInstructions,
         boardView,
+        browserNodes,
       })).then(async (result) => {
         try {
           await sql`
@@ -1884,6 +1891,12 @@ export default defineEventHandler(async (event) => {
               closed = true;
             }
           };
+          // A turn that waits on a long tool (BeeZilla's browser doing a job) still says something
+          // every 15 s: a proxy on the way closes a connection that goes quiet.
+          const beat = setInterval(() => {
+            if (closed) return;
+            try { controller.enqueue(encoder.encode(": ping\n\n")); } catch { closed = true; }
+          }, 15_000);
           try {
             const result = await runTurn({
               speech: {
@@ -1922,6 +1935,7 @@ export default defineEventHandler(async (event) => {
             console.error("[buzzy/voice] turn failed:", err instanceof Error ? err.message : err);
             send("error", { error: "The voice turn failed. Try again — the text chat still works." });
           } finally {
+            clearInterval(beat);
             closed = true;
             try {
               controller.close();
@@ -1959,6 +1973,10 @@ export default defineEventHandler(async (event) => {
               closed = true;
             }
           };
+          const beat = setInterval(() => {
+            if (closed) return;
+            try { controller.enqueue(encoder.encode(": ping\n\n")); } catch { closed = true; }
+          }, 15_000);
           try {
             const result = await runTurn({
               onText: (t) => send("text", { t }),
@@ -1971,6 +1989,7 @@ export default defineEventHandler(async (event) => {
             console.error("[buzzy/text] turn failed:", err instanceof Error ? err.message : err);
             send("error", { error: "The turn failed. Try again." });
           } finally {
+            clearInterval(beat);
             closed = true;
             try { controller.close(); } catch { /* already closed */ }
           }

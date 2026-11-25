@@ -1,9 +1,100 @@
-# The Idea Board's "More" nodes: API use and Browser use
+# The Idea Board's "More" nodes: API use and Browser use (the globe)
 
 Owner, 2026-11-21: "On Beezilla, you should be able to add a node and connect nodes. But add
 a node under more for API use and add another one for browser use. And you should be able to
 record yourself using the browser in order to accomplish the task at hand. But the browser it
 pulls up should be via a non-residential IP, so you can see it as the AI would see it."
+
+Owner, 2026-11-23: "make it so that browser use absolutely works for Bzilla. So it's able to use
+its own browser to automate and complete tasks on your behalf as per your commands to it. You need
+to be able to record the steps yourself in the given browser using its IP address so that you have
+to follow the steps exactly. It should be something where that's something you could drag into the
+whiteboard. It should look like a globe icon… that globe icon means that you can begin to connect a
+skill to a browser and say, do this specifically, or follow this recording specifically. But mostly,
+it's just going to be orchestrated via Bzilla saying, OK, when you get to that step, go to [the
+site] and… go to /create and then type in these instructions to create the sound and then download
+the sound and send it elsewhere."
+
+## The globe: BeeZilla's own browser, doing the job
+
+- **The globe** is in the board's tools (key **B**). Drag it onto the board, or press it and click
+  where it goes; it is also under More → Browser use. A browser node is a card with a globe on it.
+- A node does one of two things (tabs in its window):
+  - **Do this** — the job in words ("Go to mureka.ai/create, type the song idea, press Create, wait
+    for the song, then download it"). BeeZilla does it itself in its browser, one step at a time
+    (`browserAgent.ts`): it looks at the page (the things on it, numbered, and its words), asks the
+    model for the next thing to do, does it, and so on until it is done or needs the person.
+  - **Follow a recording** — Record once in BeeZilla's browser; every step is followed exactly. A typed
+    step can be **Filled in each time** (a blank): BeeZilla types the words of the moment there (the
+    day's song idea) instead of what was recorded; run from the window, **Words for this run** asks
+    for them. A step waits for its button (a Download that
+    appears when the song is ready) for about twice as long as the person waited when recording.
+- **Run it now** runs it while the window shows the browser working, step by step; **Stop** hands the
+  browser back to the person. A job that worked from words can be **kept as the recording**: what
+  BeeZilla did becomes the steps, the box it typed the words of the moment into becomes a blank.
+- **Downloads** go to the person's Library (`browserFiles.ts`, `remoteBrowser.ts` downloads): the
+  window lists them (and plays a sound), the card links them, and on the board the file appears beside
+  the globe. Each is checked first: its name made safe, its type taken from its first bytes, anything
+  that could run as a page on BeeZilla's address (HTML, SVG…) kept as plain bytes to download.
+- **Staying signed in**: the person signs in to a site once, themselves, in the window (BeeZilla never
+  types a password). BeeZilla's browser remembers it — a cloud browser keeps a profile of the person's
+  own on the provider (found again by a hashed name; nothing is stored here), a browser of your own
+  keeps the cookies in this server's memory for 12 hours — until **Forget sign-ins**.
+- **Run by BeeZilla**: joined to a step (its dot onto the step: "use this here"), the globe is listed
+  under that step in what BeeZilla is told, with its id. When the work reaches it — "do it", "carry on",
+  the composer's Do it — BeeZilla calls its tool **use_browser** with that id and the words of the
+  moment, and the globe's card shows it working, then how it went. A job can also be asked for in words
+  alone ("go to mureka.ai and make a song about bees"): it becomes a globe on the board too. A clear
+  command ("use your browser to…", "go to … and make…", "do it" with a globe on the board) always calls
+  the tool (`browserCommand`); one turn can run one globe after another (make the song, then post it),
+  each round seeing the last one's result.
+- **Said to BeeZilla**: "when you get to the make the song step, go to mureka.ai/create, type the song
+  idea, press Create and download it" puts a globe with that job, in those words, on the board, joined
+  to that step (`boardPilot.ts` browserAtStep). "That step" is the step selected on the board.
+
+### What BeeZilla never does in its browser (in code, whatever the model asks)
+
+- It never types into a password, card or one-time-code box (a code sent to you, a card or bank
+  number — not a zip or promo code); it stops and says to sign in yourself. The words go only where the
+  cursor really is, and only if that is the box it meant: a page that lays a password box over a plain
+  one, or moves the cursor into one, gets nothing.
+- It never presses a button that pays, buys, subscribes, upgrades, starts a trial, adds a card, or
+  deletes or closes the account (`personOnly`, `MONEY_WORDS`, `ACCOUNT_WORDS`): it stops before it and
+  says it is the person's to press. That holds for recordings followed exactly, for Enter or Space
+  (what the cursor is on, and a form's own send button), for a button that is only a picture ("Buy
+  now" in its picture's words), and for whatever a click would really land on when something covers
+  the thing it meant.
+- It opens no private or internal address (the checks below). The browser's own download is checked
+  hop by hop (a download is a page load to the browser), and a file whose final address is inside is
+  not kept, not even from the browser's own copy.
+- It opens by address only the sites the job's own words name (or, when they name none, the first one
+  it went to before reading any page): a page's words can't send it to another site with what it saw.
+  Links on a page are still followed by clicking.
+- It hands a website only files it downloaded in that job (or earlier in the same turn), or a file
+  named whole in what the owner said or on their board's own cards — never one a website's words named.
+- After a tool has answered in a turn, a website's words are in the conversation: from then on only
+  the board's own globes can run, and nothing that reads or searches the web is offered.
+- The website's words reach the model labelled as the website's (data, never instructions), between
+  quote marks it can't close; the only instructions are the job's own words. Where a run ended is kept
+  on the card without anything that looks like a key.
+- Limits: a job may do 40 things and take 5 minutes (`BZ_BROWSER_TASK_ACTIONS`,
+  `BZ_BROWSER_TASK_SECONDS`), one step's thinking 90 seconds (`BZ_BROWSER_STEP_SECONDS`); the same
+  thing tried again and again stops it; Stop stops it. A job going on is never closed as idle.
+- Ads and their pop-ups are blocked (the cloud browser's own blocker; a short list of ad networks on a
+  browser of your own; `BZ_BROWSER_ADBLOCK=0` turns it off): on a real text-to-speech site a
+  full-height ad sat over the Download button. A pop-up that is the page's own (a dialog) is named to
+  the model to deal with; a see-through layer over a button is clicked through.
+- A "Download" that opens the file itself as the page (a song or a PDF in a new tab) is kept like a
+  download.
+
+### A long job and the conversation
+
+A turn waits for the job up to four minutes (`BZ_BROWSER_TURN_WAIT_SECONDS`, 240): a connection held
+open longer is cut on the way (Railway's edge). Past that, BeeZilla says it is still going, and the job
+finishes on its own — its files land in the Library, and the board picks up how it ended
+(`GET /api/buzzy/nodes/browser` → `lastRun`). While it works, the turn's stream sends a step every few
+seconds and a keep-alive every 15 seconds, and Talk waits as long as the browser is busy (up to 15
+minutes). A song it downloads plays in BeeZilla's reply.
 
 ## What a person sees
 
@@ -33,9 +124,10 @@ alone, under "Also on the board". Words that came from outside — an API's answ
 button names — are labelled as such and are never instructions (D5 in
 `TOOL-AND-BROWSER-PLAN.md`).
 
-This version does **not** give the model a tool to run a node by itself. Tools are offered only
-on a deliverable turn (`server.ts`), and running a node means calls and clicks that leave
-BeeZilla: that wants the approval design in `TOOL-AND-BROWSER-PLAN.md` (D4, B3) first.
+A browser node is told with its id and either its job in words or its steps (a blank named, with
+the words it was recorded with), and BeeZilla runs it with `use_browser` (above). The tool is offered
+only on a turn that is about a website or the board's globes (`browserRun.ts` wantsBrowser): a tool
+list turns off the streaming of an ordinary reply. The API node is still only told, not run.
 
 ## Where the browser runs, and why that is the point
 
@@ -48,17 +140,17 @@ Providers (`src/lib/buzzy/remoteBrowser.ts`):
 
 | | set | what it is |
 |---|---|---|
-| `hyperbrowser` | `BZ_HYPERBROWSER_KEY` | a fresh cloud session per recording, `useProxy: false`, stopped on close |
-| `cdp` | `BZ_BROWSER_CDP_URL` | a browser of your own that exposes a DevTools address (not one page's address). Each person gets a browser context of their own, so nobody opens it already signed in as someone else |
+| `hyperbrowser` | `BZ_HYPERBROWSER_KEY` | a fresh cloud session per browser, `useProxy: false`, `saveDownloads: true`, the person's own profile (`persistChanges`), stopped on close. `BZ_HYPERBROWSER_STATIC_IP_ID` (a static IP bought on the provider) makes every browser go out from that one address |
+| `cdp` | `BZ_BROWSER_CDP_URL` | a browser of your own that exposes a DevTools address (not one page's address). Each person gets a browser context of their own, so nobody opens it already signed in as someone else. `BZ_BROWSER_DOWNLOAD_DIR`: a folder it shares with this server, for downloads it can't hand over twice |
 
 `BZ_BROWSER_PROVIDER` picks one when both are set; hyperbrowser wins otherwise. With neither set the
 window says the server browser isn't set up here.
 
-The Hyperbrowser calls follow its documented session API (`POST /session` → `id`, `wsEndpoint`;
-`PUT /session/<id>/stop`) and are exercised against a stand-in for it
-(`scripts/probe-remote-browser.ts`). **They have not been run against the live service**, which
-needs a key: run that probe's first section with `BZ_BROWSER_PROVIDER=hyperbrowser` and a key to
-check it once on a deployment.
+The Hyperbrowser calls follow its documented API (docs.hyperbrowser.ai, read 2026-11-23: `POST
+/session` → `id`, `wsEndpoint`; `PUT /session/<id>/stop`; `GET /profiles?name=`, `POST /profile`,
+`DELETE /profile/<id>`; `GET /session/<id>/downloads-url` → `status`, `downloadsUrl`) and are
+exercised against a stand-in for it (`scripts/probe-remote-browser.ts`, `scripts/probe-browser-globe.ts`
+part 7). **They have not been run against the live service**, which needs a key.
 
 ## How it works
 
@@ -76,8 +168,14 @@ person's browser ── POST /api/buzzy/nodes/browser/<id>/input  ─▶  server
 - A recording is replayed by finding each thing again — selector, then its name, then where it was —
   so a page that moved a button still works. Passwords and codes are left for the person.
 - A list (`<select>`) is offered as a small menu in the window, since a screencast can't show the
-  page's own. A link that opens a new window opens in the same one. Downloads are refused, and so
-  are `file:`, `ftp:` and `chrome:` addresses.
+  page's own. A link that opens a new window opens in the same one. `file:`, `ftp:` and `chrome:`
+  addresses are refused.
+- Downloads: the browser says when one starts and ends (`Browser.downloadWillBegin`/`Progress`, only
+  for this person's page); the bytes are read through the browser itself (`Network.loadNetworkResource`:
+  its address, its sign-ins), or — for a file the page built itself (`blob:`) — read in the page, which
+  is kept from letting it go for a couple of minutes (`KEEP_BLOBS`); a link that works only once comes
+  from the browser's own copy (the provider's zip, or the shared folder). 25 MB at most (the Library's
+  limit).
 
 ## Safety
 
@@ -137,6 +235,21 @@ person's browser ── POST /api/buzzy/nodes/browser/<id>/input  ─▶  server
 
 ## Checks
 
+- `npm run test:browser-globe` (after `test:board-nodes` in `test:ci`): what a globe keeps, files made
+  safe, a zip read, BeeZilla's next step read from a model and the page shown to it, the buttons it
+  never presses, when a turn gets the tool, "when you get to that step…", what BeeZilla is told.
+- `BZ_TEST_CDP=<DevTools URL> npx tsx scripts/probe-browser-globe.ts`: a job for real against a small
+  make-a-sound site, with a stand-in model — signed out it stops for the person; signed in once (the
+  password typed by the person), it types, presses Create, waits, downloads (over the web, and a file
+  the page builds and lets go of at once); kept as a recording with a blank and followed with new
+  words; a file handed to another page; Pay now, a password box and Stop; the sign-in kept for the
+  next browser and kept from anyone else; the cloud provider's profile, downloads zip and forgetting.
+- `BZ_PROBE_CDP=… BZ_SERVER_CDP=… node scripts/probe-browser-globe-ui.mjs` (after `npm run build`):
+  the whole thing in a signed-in production build — drag the globe in, Run it now, the file in the
+  Library and on the card, keep it as a recording; then in Talk, a step, "when you get to the make the
+  sound step, go to …", "the sound idea is wind chimes. do it": BeeZilla runs it, the file lands on the
+  board beside the globe and plays in the reply.
+
 - `npm run test:board-nodes` (in `test:ci`): what the account keeps (and never keeps), what BeeZilla
   is told, the API call and every address it must refuse, the words for steps.
 - `BZ_TEST_CDP=<DevTools URL> npx tsx scripts/probe-remote-browser.ts`: the server browser for real —
@@ -149,8 +262,12 @@ person's browser ── POST /api/buzzy/nodes/browser/<id>/input  ─▶  server
 ## Not done
 - A hard network guard under the server browser (see Safety).
 - A key written into an address path, or under an unusual name.
-- BeeZilla running a node itself (see above).
+- The API node run by BeeZilla itself, and a file sent to an API (only the browser can send it on).
+- A recipe holding a globe: a recipe keeps a node as a note, so a recipe run doesn't run its globes yet.
+- Pages inside frames (an embedded editor, a payment box) are not seen by a job, and nor is a canvas
+  app's inside; turn on `BZ_BROWSER_AGENT_VISION=1` with a model that takes pictures to give it the
+  screen as well.
 - Keys kept for BeeZilla to use later: a sealed per-account store like `userKeys.ts`.
 - Typing with an input method: a finished composition is passed on as text, but not the steps of it.
-- File choosers and downloads in the server browser.
+- The person's own file chooser in the window (a job can hand a page a file; a person recording can't).
 - A cloud browser can't reach an address on the person's own computer; paste a public address.

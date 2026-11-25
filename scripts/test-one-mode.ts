@@ -187,6 +187,237 @@ check(assessRequest("rotate the passwords on our live server", { minStakes: "pro
 check(assessRequest("draft an NDA", { minStakes: "play" }).stakes === "critical", "and never lower it");
 check(assessRequest("Send it to all our customers").irreversible === true, "sending is irreversible");
 check(assessRequest("What happens if I send it?").irreversible === false, "a question about sending is not a send");
+
+// A performed one-way door is never silent, whatever the equation says. The weight
+// alone cannot lift a small, clear, product-stakes send (1.5 ≤ 3), so askFirst holds
+// the floor: at least the one choice, at every tier but play with a remembered "go".
+const door = (m: string, ctx = {}) => {
+  const a = assessRequest(m, ctx);
+  return { a, verdict: askOrGo(a), asked: askFirst(askOrGo(a), "go", a) };
+};
+for (const message of [
+  "Send it to all our customers",
+  "email all our customers the new price list",
+  "announce the price increase to everyone",
+  "publish the new pricing page",
+]) {
+  const { a, verdict, asked } = door(message);
+  check(
+    verdict.ask === false && a.performsDoor === true && asked !== "go",
+    `"${message}" performs a door, so it is offered even when the equation says go (got ${asked}, ${a.size}/${a.stakes})`,
+  );
+}
+// Money with an amount is critical now, so the equation stops it on its own; what
+// matters is that the door is recognised and never goes silently.
+for (const message of ["pay our contractor $2,000", "wire $5,000 to the new supplier"]) {
+  const { a, asked } = door(message);
+  check(a.performsDoor === true && asked !== "go", `"${message}" is a performed money door (got ${asked}, ${a.size}/${a.stakes})`);
+}
+// The same door inside work that makes something, or in play with a remembered "go",
+// is not performed here: "write a tweet announcing our sale" leaves nothing.
+for (const message of ["write a tweet announcing our sale", "draft the email to our customers", "write a post announcing the price rise"]) {
+  const { a, verdict } = door(message);
+  check(verdict.ask === false && a.performsDoor === false, `"${message}" mentions a door, it does not perform one`);
+}
+check(assessRequest("Send it later, maybe", { makerLane: true }).performsDoor === false, "a maker lane mentions doors, it does not perform them");
+{
+  const a = assessRequest("delete my old screenshots");
+  check(a.performsDoor === true, "deleting your own screenshots is still a door");
+  check(askFirst(askOrGo(a), "go", a) === "go", "play + a remembered 'just go': their own call, no tap");
+  check(askFirst(askOrGo(a), null, a) === "offer", "play and no answer yet: offered once");
+}
+
+// Money is critical when an amount rides with the verb, whatever noun follows it:
+// "pay our contractor $2,000" read as play before this test existed (0.32 → go).
+for (const message of [
+  "pay our contractor $2,000",
+  "wire $5,000 to the new supplier",
+  "transfer $500 to the landlord",
+  "send 2000 dollars to the vendor",
+]) {
+  check(tier(message) === "critical", `money with an amount is critical: "${message}" (got ${tier(message)})`);
+}
+for (const message of ["pay attention to the layout", "order a $5 coffee", "the pay page needs a tidier header"]) {
+  check(tier(message) !== "critical", `no money signal here: "${message}" (got ${tier(message)})`);
+}
+// The recipient is a door on its own, not only the amount. "owe the landlord" read
+// critical through MONEY_RECIPIENT but was neither irreversible nor a door, so a
+// remembered "just go" walked it through as a payment.
+for (const message of ["owe the landlord", "owe the landlord $500", "we owe the landlord $500"]) {
+  check(tier(message) === "critical", `owing a bill is critical: "${message}" (got ${tier(message)})`);
+}
+{
+  const a = assessRequest("owe the landlord");
+  check(a.irreversible === true && a.performsDoor === true, "owe with a payment recipient is irreversible and performs the door");
+  check(
+    askFirst(askOrGo(a), "go", a) === "offer",
+    `critical + irreversible is offered even after a remembered "just go" (got ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+// ... and only then: owing a favour is not owing money.
+for (const message of ["owe you one", "owe my team an apology", "owe it to myself to rest"]) {
+  const a = assessRequest(message);
+  check(
+    a.irreversible !== true && a.performsDoor !== true,
+    `not a payment: "${message}" (irreversible=${a.irreversible}, door=${a.performsDoor})`,
+  );
+}
+// An adverb of degree rides between the verb and the recipient. The bare `more|less`
+// guard that kept "pay more attention" out also swallowed "pay more to our suppliers",
+// a real payment that then read as play and went on a remembered "just go".
+for (const message of ["pay more to our suppliers", "pay less to our suppliers", "pay more to our landlord"]) {
+  const a = assessRequest(message);
+  const asked = askFirst(askOrGo(a), "go", a);
+  check(
+    a.stakes === "critical" && a.performsDoor === true && asked === "offer",
+    `a degree adverb still pays: "${message}" (${a.stakes}, door=${a.performsDoor}, ${asked})`,
+  );
+}
+for (const message of [
+  "pay more attention to our vendors",
+  "pay less attention to the bills",
+  "pay more heed to the warnings",
+  "pay closer attention to the invoice",
+  "pay more attention to the team's feedback",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.irreversible === false && a.performsDoor === false && a.stakes !== "critical",
+    `paying attention is not paying: "${message}" (${a.stakes}, irreversible=${a.irreversible}, door=${a.performsDoor})`,
+  );
+}
+// The legal arm knew "terms of service" but not the acronym, so "publish ToS" read as
+// product stakes and went ahead (1.2 ≤ 3). An acronym the owner types is still a door.
+for (const message of ["publish ToS", "update our T&Cs", "publish the terms of service", "publish the terms and conditions"]) {
+  check(tier(message) === "critical", `a legal text is critical however it is spelled: "${message}" (got ${tier(message)})`);
+}
+
+// ── The discriminator: the channel verb decides, not the content verb ────────
+// The same sentence can make a thing or send it. Only the verb that leads counts,
+// so this table is pinned as pairs: maker verb → go, channel verb → offer. Raising
+// the stakes to product is how the test says "other people see it", because at play
+// a remembered "just go" is the person's own call (checked above).
+const channel = (message: string) => assessRequest(message, { minStakes: "product" });
+for (const message of [
+  "write a tweet announcing our sale",
+  "draft the email to our customers",
+  "compose the newsletter for our customers",
+  "write a post announcing the price rise",
+]) {
+  const a = channel(message);
+  check(
+    a.performsDoor !== true && askFirst(askOrGo(a), "go", a) === "go",
+    `a maker verb makes the artifact, nothing leaves: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+for (const message of [
+  "post the tweet",
+  "publish the new pricing page",
+  "send it to the vendor",
+  "upload the video to youtube",
+  "share the video with my class",
+  "announce the price increase to everyone",
+]) {
+  const a = channel(message);
+  check(
+    a.performsDoor === true && askFirst(askOrGo(a), "go", a) !== "go",
+    `a channel verb leaves the account, so it is offered: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+// The object is not the signal; the verb is. The first version of this table gated
+// the door on IRREVERSIBLE's object arms, and only `send` accepted "our …", so
+// "email our customers the new price list" went at 0.15 while the same request with
+// `send` offered. These rows are the ones that went silently (#403's residual).
+for (const message of [
+  "email our customers the new price list",
+  "mail our customers the new price list",
+  "tweet our sale to our followers",
+  "post our price increase on facebook",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.performsDoor === true && a.stakes === "product" && askFirst(askOrGo(a), "go", a) === "offer",
+    `the leading channel verb is the door, whatever its object: "${message}" (door=${a.performsDoor}, ${a.stakes}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+// Two guards that must survive the widening.
+for (const message of ["share my screen", "share my screen with the team"]) {
+  const a = assessRequest(message);
+  check(
+    a.performsDoor !== true && a.irreversible === false && askFirst(askOrGo(a), null, a) === "go",
+    `sharing your screen leaves nothing: "${message}" (irr=${a.irreversible}, door=${a.performsDoor}, ${askFirst(askOrGo(a), null, a)})`,
+  );
+}
+// "send me …" leaves nothing either: the recipient is the person asking.
+for (const message of ["send me the notes", "email me the summary"]) {
+  const a = assessRequest(message);
+  check(
+    a.performsDoor !== true && askFirst(askOrGo(a), null, a) === "go",
+    `sending to yourself is not a channel door: "${message}" (irr=${a.irreversible}, door=${a.performsDoor}, ${askFirst(askOrGo(a), null, a)})`,
+  );
+}
+// Paying attention is not paying. The recipient arm reads a direct object now, so
+// "pay" + attention/closer/more never reaches the critical tier and never becomes a
+// door — otherwise the widened #404 arm charged a tap for ordinary instructions that
+// a remembered "just go" could not suppress.
+for (const message of [
+  "pay attention to the team's feedback",
+  "pay closer attention to our vendors' emails",
+  "pay attention to our staff survey",
+  "pay more attention to our suppliers",
+  "pay heed to the team's advice",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.stakes !== "critical" && a.performsDoor !== true &&
+      askFirst(askOrGo(a), "go", a) === "go" && askFirst(askOrGo(a), null, a) === "go",
+    `paying attention is not paying: "${message}" (${a.stakes}, irr=${a.irreversible}, door=${a.performsDoor}, go=${askFirst(askOrGo(a), "go", a)}, fresh=${askFirst(askOrGo(a), null, a)})`,
+  );
+}
+// The same arm must still catch a real payment whose recipient is the direct object.
+for (const message of [
+  "pay our contractor $2,000",
+  "pay the invoice",
+  "pay suppliers",
+  "pay for the invoice",
+  "owe the landlord last month's rent",
+]) {
+  check(tier(message) === "critical", `a payment's direct object is critical: "${message}" (got ${tier(message)})`);
+}
+
+// ── The money arms cannot drift apart ────────────────────────────────────────
+// One table carries both numbers the two arms read: the amount the sentence names
+// (2,000 / 5,000) and the score the equation gives the same words at play
+// (0.32 = 0.064 × 0.5 × 1 × 10). Move CANT_UNDO_WEIGHT or REDO_MINUTES.small and
+// 0.32 breaks; stop matching the amount and the tier falls back to play, which
+// scores 0.32 on the same row. Either drift lands here, as one failure.
+const MONEY_DOOR = [
+  { message: "pay our contractor $2,000", amount: "2,000" },
+  { message: "wire $5,000 to the new supplier", amount: "5,000" },
+];
+for (const { message, amount } of MONEY_DOOR) {
+  const a = assessRequest(message);
+  const playScore = askOrGo({ ...a, stakes: "play" }).costOfMisreading;
+  const why = a.why.find((w) => w.startsWith("critical (money):")) || "";
+  check(
+    a.stakes === "critical" && why.includes(amount),
+    `the money arm reads the amount: "${message}" (got ${a.stakes}, "${why}")`,
+  );
+  check(
+    a.performsDoor === true && askFirst(askOrGo(a), "go", a) !== "go",
+    `moving an amount is a door, not just a critical tier: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+  check(
+    Math.abs(playScore - 0.32) < 1e-9,
+    `the same words at play score 0.32, which is why the tier must carry them: "${message}" (got ${playScore})`,
+  );
+}
+// The row that was half-fixed: critical from the amount arm, but `irreversible` was
+// false, so a remembered "just go" walked the payment through on 0.4.
+{
+  const a = assessRequest("send 2000 dollars to the vendor");
+  check(a.stakes === "critical" && a.irreversible === true && a.performsDoor === true, "an amount and a recipient make a payment a door: \"send 2000 dollars to the vendor\"");
+}
 check(assessRequest("I need this ASAP").hurried === true, "ASAP is a hurry");
 check(assessRequest("write a short story").hurried === false, "no hurry words, no hurry");
 check(assessRequest("Make me a game").size === "large", "a game is a project");
@@ -808,6 +1039,15 @@ check(parseQuestion('{"question":"When do you need it by?","suggested":"Before t
   check(noBudget.step.kind === "go" && noBudget.step.agentWork !== true && noBudget.step.budget === undefined, "no budget question for a board build (one model call)");
   const critical = nextStep(null, { message: "build an automation that deletes customer records older than a year", fresh: ASK, assessment: { stakes: "critical", irreversible: true }, canFollowUp: true, buildsOnBoard: true });
   check(critical.step.kind === "go", "a one-way door in the words still goes: the board only lays the flow out, nothing in it runs");
+  // A browser job is different: the globe presses the buttons for real, so a door in its words
+  // does not step the ladder aside (server.ts browserGo → oneMode.ts). Measured before the fix:
+  // "post it to linkedin.com" went on #375 and was offered on main.
+  const browserDoor = nextStep(null, { message: "post it to linkedin.com", fresh: GO, assessment: { stakes: "product", irreversible: true, performsDoor: true }, canFollowUp: true, buildsOnBoard: true, browserGo: true });
+  check(browserDoor.step.kind === "offer", "a browser job that would press a door still gets the quick choice");
+  const boardDoor = nextStep(null, { message: "build an automation that posts my invoices to Slack every Monday", fresh: GO, assessment: { stakes: "product", irreversible: true, performsDoor: true }, canFollowUp: true, buildsOnBoard: true });
+  check(boardDoor.step.kind === "go", "a board build with a door in its words still goes: nothing in it runs until the person runs it");
+  const browserOpen = nextStep(null, { message: "go to mureka.ai/create and make a song", fresh: GO, assessment: { stakes: "product", irreversible: false, performsDoor: false }, canFollowUp: true, buildsOnBoard: true, browserGo: true });
+  check(browserOpen.step.kind === "go" && browserOpen.step.how === "fresh", "an ordinary browser job still goes at once, nothing asked");
   const waiting: OneModeState = { stage: "asking", request: "Build me a website for my bakery", stakes: "product", asked: [{ q: OPENING_QUESTIONS[0], suggested: "Regulars can't find our hours" }], answers: [] };
   const meanwhile = nextStep(waiting, { message: "Orchestrate a weekly newsletter: find this week's news, write it, I approve it, then email it every Monday.", fresh: GO, canFollowUp: true, buildsOnBoard: true });
   check(meanwhile.step.kind === "go" && meanwhile.state === waiting && !meanwhile.carry, "a question still waiting stays as it was: not carried under the one-sentence reply, not dropped");
@@ -827,14 +1067,14 @@ check(parseQuestion('{"question":"When do you need it by?","suggested":"Before t
     (serverSrc.match(/const orchestrating = asksToOrchestrate\(message, \{ boardHasFlow: flowOnBoard \}\)/g) ?? []).length === 1 &&
       (serverSrc.match(/takeBoardPictures\(/g) ?? []).length === 1 &&
       serverSrc.indexOf("const orchestrating = asksToOrchestrate(") < serverSrc.indexOf("const decided = nextStep(savedStep") &&
-      /\n\s+buildsOnBoard: orchestrating,\n/.test(serverSrc),
+      /\n\s+buildsOnBoard: orchestrating(?: \|\| browserGo)?,\n/.test(serverSrc),
     "the server tells one mode with the board's own flag, worked out once, before one mode decides",
   );
   check(
-    /const oneModeNote = orchestrating \? "" : turnNote\(/.test(serverSrc) &&
-      /assessment\.size !== "small" && !orchestrating;/.test(serverSrc) &&
+    /const oneModeNote = orchestrating(?: \|\| browserGo)? \? "" : turnNote\(/.test(serverSrc) &&
+      /assessment\.size !== "small" && !orchestrating(?: && !browserGo)?;/.test(serverSrc) &&
       /const playbookBlock = !orchestrating && \(requestedDraft \|\| hasExistingDraft\)/.test(serverSrc) &&
-      /if \(!orchestrating\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(serverSrc),
+      /if \(!orchestrating && !\(browserGo && !browserDoor\)\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(serverSrc),
     "and on that turn: no one-mode note, go reminder, redo or playbook, and the stored question is left alone",
   );
 }

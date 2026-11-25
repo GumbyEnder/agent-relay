@@ -6,6 +6,21 @@ import { readFileSync } from "node:fs";
 import { sendVerificationMail, latestDevMailFor, isDevMailInboxEnabled } from "../src/lib/mailer";
 import { handleAuthRequest } from "../src/lib/auth/server";
 
+// This file asserts the DEV transport, so the box's own mail config must not leak
+// in: with RESEND_API_KEY (or SMTP_*) exported, isDevMailInboxEnabled() is false,
+// the mail goes out for real and the dev-inbox assertions below fail. Same scrub
+// as scripts/test-mail-log.ts.
+for (const key of [
+  "RESEND_API_KEY",
+  "SMTP_URL",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "SMTP_PASSWORD",
+  "AGENT_RELAY_DEV_MAIL",
+]) delete process.env[key];
+
 assert.equal(isDevMailInboxEnabled(), true);
 
 const url = "http://127.0.0.1:8090/api/auth/verify-email?token=testtoken&callbackURL=%2Flogin%3Fverified%3D1";

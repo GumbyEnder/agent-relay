@@ -10,7 +10,10 @@
  *   POST /api/buzzy/nodes/browser/<id>/history      → { action: "back" | "forward" | "reload" }
  *   POST /api/buzzy/nodes/browser/<id>/record       → { on: boolean, keep?: boolean }
  *   POST /api/buzzy/nodes/browser/<id>/steps        → { delete: index } | { steps: [...] }
- *   POST /api/buzzy/nodes/browser/<id>/replay       → { steps? } : play the recording in this browser
+ *   POST /api/buzzy/nodes/browser/<id>/replay       → { steps?, fill? } : play the recording in this browser
+ *   POST /api/buzzy/nodes/browser/<id>/run          → { node, details?, fill? } : the node's job, done by BeeZilla here
+ *   POST /api/buzzy/nodes/browser/<id>/stop         → stop the job going on (the person takes over)
+ *   POST /api/buzzy/nodes/browser/forget            → forget every site signed in to in BeeZilla's browser
  *   DELETE /api/buzzy/nodes/browser/<id>            → close it
  *
  * Everything needs a signed-in person; a browser belongs to the person who opened it and
@@ -29,17 +32,21 @@ import {
   browserConfigured,
   closeBrowserSession,
   currentBrowserSession,
+  forgetSignIns,
   getBrowserSession,
   idleSeconds,
-  openBrowserSession,
   providerKind,
   sessionSeconds,
+  signInsKept,
   type InputEvent,
   type SessionEvent,
 } from "./remoteBrowser";
-import { cleanSteps, cleanUrl } from "./boardNodes";
-import { PLANS, checkQuota, getEntitlement, recordUsage, unitsInWindow } from "./entitlements";
+import { cleanSteps } from "./boardNodes";
+import { PLANS, checkQuota, getEntitlement, unitsInWindow } from "./entitlements";
 import { recordToolCall } from "./toolTelemetry";
+import { lastRunFor, openMeteredBrowser, runForCard, runNode } from "./browserRun";
+import { withLlmOverride } from "./llm";
+import { overrideFor } from "./userKeys";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -173,6 +180,7 @@ async function browserInfo(userId: string): Promise<Response> {
     return json(503, { ok: false, code: "usage_unknown", error: "BeeZilla can't read your server browser time right now. Try again in a moment." });
   }
   const open = currentBrowserSession(userId);
+  const last = lastRunFor(userId);
   return json(200, {
     ok: true,
     configured,
@@ -182,7 +190,11 @@ async function browserInfo(userId: string): Promise<Response> {
     secondsPerDay: limit,
     maxSeconds: sessionSeconds(),
     idleSeconds: idleSeconds(),
-    open: open ? { id: open.id, recording: open.recording } : null,
+    open: open ? { id: open.id, recording: open.recording, busy: open.busy() } : null,
+    // BeeZilla's browser remembers the sites the person signed in to (they can make it forget).
+    signIns: configured ? await signInsKept(userId) : false,
+    // How the last run ended: a board that missed the end of a long one picks it up from here.
+    lastRun: last ? { nodeId: last.nodeId ?? null, at: new Date(last.at).toISOString(), run: runForCard(last.result) } : null,
   });
 }
 
@@ -192,31 +204,22 @@ async function openBrowser(userId: string, body: Record<string, unknown>): Promi
   }
   const refused = lockRefusal(await lockState(userId));
   if (refused) return refused;
-  const quota = await checkQuota({ userId, scope: "browser", units: 30 });
-  if (!quota.ok) {
-    return json(quota.code === "usage_unknown" ? 503 : 403, { ok: false, code: quota.code ?? "quota_exhausted", error: `Not today: ${quota.error}.` });
-  }
-  // The browser may stay open only as long as today's time lasts, not for the whole session limit.
-  const left = Math.floor((quota.limit ?? 0) - (quota.used ?? 0));
-  const startUrl = body.startUrl ? cleanUrl(body.startUrl, 2000) : "";
+  // A window that opens while BeeZilla is working in the person's browser joins it (to watch it,
+  // or Stop it) instead of closing it to open another.
+  const already = currentBrowserSession(userId);
+  if (already && (body.join === true || already.busy())) return json(200, { ok: true, id: already.id, joined: true, busy: already.busy() });
+  // (Today's time is checked where every browser is opened, browserRun.ts openMeteredBrowser: a
+  // plan with none left is refused, and a ledger that can't be read refuses too — review item 2.)
   const started = Date.now();
   try {
-    const session = await openBrowserSession(userId, {
-      startUrl: startUrl || undefined,
+    const session = await openMeteredBrowser(userId, {
+      startUrl: typeof body.startUrl === "string" ? body.startUrl : undefined,
       steps: Array.isArray(body.steps) ? body.steps : undefined,
-      maxSeconds: left > 0 ? left : undefined,
-      // Counted as it goes (a crash or a restart loses at most the last minute), not only at the end.
-      onBill: (seconds) => { void recordUsage({ userId, scope: "browser", units: seconds, ms: seconds * 1000, status: "ok", code: "open" }); },
-      onClosed: ({ seconds, reason }) => {
-        void getSql().then((sql) => recordToolCall(sql, { userId, tool: "browser_node", ok: true, ms: seconds * 1000, errorCode: null, path: reason.slice(0, 40) })).catch(() => {});
-      },
     });
     return json(200, { ok: true, id: session.id, ms: Date.now() - started });
   } catch (e) {
     const err = e instanceof BrowserError ? e : new BrowserError("start_failed", "The browser could not be started.");
-    console.warn("[buzzy/browser-node] start failed:", err.code, err.message);
-    void getSql().then((sql) => recordToolCall(sql, { userId, tool: "browser_node", ok: false, ms: Date.now() - started, errorCode: err.code })).catch(() => {});
-    return json(err.code === "not_configured" ? 503 : 502, { ok: false, code: err.code, error: err.message });
+    return json(err.code === "not_configured" || err.code === "unavailable" ? 503 : err.code === "quota" ? 403 : err.code === "busy" ? 409 : 502, { ok: false, code: err.code === "unavailable" ? "usage_unknown" : err.code, error: err.message });
   }
 }
 
@@ -333,11 +336,40 @@ async function browserCall(event: any, method: string, userId: string, id: strin
     return json(200, { ok: true, steps: session.steps.length });
   }
   if (action === "replay") {
-    if (session.replaying) return json(409, { ok: false, error: "It is already playing.", code: "busy" });
+    if (session.busy()) return json(409, { ok: false, error: "It is already doing a job.", code: "busy" });
     const steps = Array.isArray(b.steps) ? b.steps : session.steps;
     // Runs on; progress comes back on the stream.
-    void session.replay(steps).catch(() => {});
+    void session.replay(steps, { fill: b.fill as Record<string, string> | undefined, by: "you", nodeId: typeof b.nodeId === "string" ? b.nodeId.slice(0, 60) : undefined }).catch(() => {});
     return json(200, { ok: true });
+  }
+  if (action === "run") {
+    // The node's job, done by BeeZilla in this browser while the person watches ("Run it now").
+    if (session.busy()) return json(409, { ok: false, error: "BeeZilla's browser is already doing a job. Wait for it, or press Stop.", code: "busy" });
+    let node: unknown = b.node;
+    if (typeof node === "string") { try { node = JSON.parse(node); } catch { node = null; } }
+    if (!node || typeof node !== "object") return json(400, { ok: false, error: "Which job? The node didn't come with it.", code: "bad_request" });
+    // On the person's own AI key when they saved one, like their conversations.
+    const own = await getSql().then((sql) => overrideFor(sql, userId)).catch(() => null);
+    const job = withLlmOverride(own, () => runNode({
+      userId, spec: node, by: "you", session,
+      details: typeof b.details === "string" ? b.details : undefined,
+      fill: b.fill && typeof b.fill === "object" ? (b.fill as Record<string, string>) : undefined,
+      nodeId: typeof b.nodeId === "string" ? b.nodeId.slice(0, 60) : undefined,
+    }));
+    // It may not even start (an empty node): say so now. Otherwise it runs on, and how it goes
+    // comes back on the stream.
+    const early = await Promise.race([
+      job.then(() => null, (e: unknown) => e),
+      new Promise<null>((r) => setTimeout(() => r(null), 300)),
+    ]);
+    if (early) {
+      const err = early instanceof BrowserError ? early : new BrowserError("start_failed", "It couldn't start.");
+      return json(err.code === "busy" ? 409 : 400, { ok: false, error: err.message, code: err.code });
+    }
+    return json(200, { ok: true });
+  }
+  if (action === "stop") {
+    return json(200, { ok: true, stopped: session.stopRun() });
   }
   return json(404, { ok: false, error: "not found" });
 }
@@ -361,6 +393,12 @@ export default defineEventHandler(async (event: any) => {
     return tryApi(user.id, read.body);
   }
   if (parts[0] === "browser") {
+    if (parts.length === 2 && parts[1] === "forget") {
+      if (method !== "POST") return json(405, { ok: false, error: "method not allowed" });
+      // Forgetting needs no browser open, and works in Lockdown too (it sends nothing anywhere new).
+      const done = await forgetSignIns(user.id);
+      return json(done ? 200 : 502, done ? { ok: true } : { ok: false, error: "BeeZilla couldn't reach the browser service to forget them. Try again in a moment.", code: "start_failed" });
+    }
     if (parts.length === 1) {
       if (method === "GET") return browserInfo(user.id);
       if (method === "POST") {

@@ -12,11 +12,15 @@
  *                 what came back on the card. Keys are used for that try and forgotten: the
  *                 board is saved to the account and can be shared, so it keeps only a key's
  *                 NAME.
- *   Browser use — a real browser on a server (not this computer: its address is a data
- *                 centre's, the same as the AI's) shown here as pictures you can click and
- *                 type into. Record, and every click, line typed, key and scroll becomes a
- *                 step in plain words; "Watch it run" plays them back. The steps are what
- *                 the node does: BeeZilla is handed them when the node is joined to a step.
+ *   Browser use — the globe (owner, 2026-11-23). BeeZilla's own browser: a real browser on a
+ *                 server (not this computer: its address is a data centre's, the same as the
+ *                 AI's) shown here as pictures you can click and type into. A node does one of
+ *                 two things: "Do this" — a job in words, which BeeZilla does itself, clicking
+ *                 and typing while you watch — or "Follow a recording" — Record once, and every
+ *                 click, line typed, key and scroll becomes a step in plain words, followed
+ *                 exactly (a typed step can be "filled in each time"). Joined to a step on the
+ *                 board, BeeZilla runs it when the work gets there (use_browser). Downloads go to
+ *                 the Library; sign-ins made here are remembered until "Forget sign-ins".
  *
  * whiteboard.js owns the cards (what they look like, what BeeZilla is told about them) and
  * hands this file a small `ctx` to save through. Everything on a card is text: nothing here
@@ -31,7 +35,7 @@
   var SVGNS = "http://www.w3.org/2000/svg";
   var ICONS = {
     api: "M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4",
-    browser: "M3 5h18v14H3zM3 9h18M6.5 7h.01M9.5 7h.01",
+    browser: "M12 3a9 9 0 100 18 9 9 0 000-18zM3.6 9h16.8M3.6 15h16.8M12 3c2.3 2.5 3.5 5.5 3.5 9s-1.2 6.5-3.5 9c-2.3-2.5-3.5-5.5-3.5-9s1.2-6.5 3.5-9z",
     close: "M6 6l12 12M18 6L6 18",
     back: "M15 5l-7 7 7 7",
     forward: "M9 5l7 7-7 7",
@@ -170,7 +174,7 @@
   // covers the tools. Resized by its left edge, top edge or top-left corner; the size is
   // remembered on this computer.
   var current = null;     // the window that is open: { close(), root, card }
-  var SIZES = { api: { w: 460, h: 560, minW: 360, minH: 340 }, browser: { w: 760, h: 700, minW: 520, minH: 460 } };
+  var SIZES = { api: { w: 460, h: 560, minW: 360, minH: 340 }, browser: { w: 760, h: 720, minW: 520, minH: 500 } };
 
   function savedSize(kind) {
     try { var v = JSON.parse(localStorage.getItem("bz.nodewin." + kind) || "null"); if (v && v.w > 0 && v.h > 0) return v; } catch (_) { /* none */ }
@@ -594,8 +598,10 @@
   function openBrowser(c, ctx) {
     var N = nodeApi();
     var spec = parse(c);
+    var startMode = spec.mode === "task" || spec.mode === "recording" ? spec.mode : (spec.steps && spec.steps.length ? "recording" : "task");
     var st = {
       phase: "idle",          // idle · starting · live · ended · error
+      mode: startMode,        // task: BeeZilla does it from words · recording: it follows the steps exactly
       steps: (spec.steps || []).slice(),
       recording: false,
       replaying: false,
@@ -606,7 +612,13 @@
       msg: "",
       id: "", es: null,
       info: null,             // is the server browser set up here, and how much time is left today
-      pendingAfterReplay: false
+      pendingAfterReplay: false,
+      running: null,          // the kind of job going on now ("task" | "recording"), or null
+      acts: [],               // what BeeZilla is doing, step by step (a task)
+      result: null,           // how the last job in this window ended
+      files: [],              // what this browser downloaded (saved to the Library)
+      signIns: false,
+      fill: {}                // the words for this run's blanks ("Filled in each time" steps)
     };
     var win = shell(ctx, "browser", "Browser use", "Browser use");
     var root = win.root;
@@ -623,22 +635,69 @@
     var saveName = debounce(function () { if (!ctx.alive(c)) return; if (!snapped) { ctx.snapshot(); snapped = true; } c.title = nameIn.value.trim() || "Browser job"; ctx.changed(c); }, 450);
     nameIn.addEventListener("input", saveName);
 
-    var bRec = button("wb-selbtn wb-nw-rec", "Record", null, function () { onRecord(); });
-    var recDot = el("span", "wb-nw-recdot");
-    recDot.setAttribute("aria-hidden", "true");
-    bRec.insertBefore(recDot, bRec.firstChild);
-    var bLook = button("wb-selbtn wb-nw-look", "Just look", "eye", function () { startBrowser({ startUrl: st.steps.length ? firstUrl() : "", record: false }); });
-    bLook.title = "Open the browser without recording, to see a page the way the AI would";
-    var bPlay = button("wb-selbtn wb-nw-play", "Watch it run", "play", function () { onPlay(); });
-    win.head.insertBefore(bRec, win.closeBtn);
-    win.head.insertBefore(bLook, win.closeBtn);
-    win.head.insertBefore(bPlay, win.closeBtn);
-
     var wrap = win.body;
     // Where it runs: said first, because it is the point.
     var where = el("div", "wb-nw-where");
     where.setAttribute("role", "status");
     wrap.appendChild(where);
+
+    // ── The two kinds of job (owner, 2026-11-23: "say, do this specifically, or follow this
+    // recording specifically") ──
+    var tabs = el("div", "wb-nw-tabs");
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "What this node does");
+    var tabTask = button("wb-nw-tab", "Do this", null, function () { setMode("task"); });
+    var tabRec = button("wb-nw-tab", "Follow a recording", null, function () { setMode("recording"); });
+    [tabTask, tabRec].forEach(function (t) { t.setAttribute("role", "tab"); tabs.appendChild(t); });
+    wrap.appendChild(tabs);
+
+    // "Do this": the job in words.
+    var taskBox = el("div", "wb-nw-task");
+    var taskLabel = el("label", "wb-nf-label", "What should BeeZilla do in its browser?");
+    var taskIn = el("textarea", "wb-nf-input wb-nw-taskin");
+    taskIn.id = "bzNwTask" + Math.random().toString(36).slice(2, 7);
+    taskLabel.htmlFor = taskIn.id;
+    taskIn.rows = 3;
+    taskIn.maxLength = 2000;
+    taskIn.placeholder = "Go to mureka.ai/create, type the song idea into the box, press Create, wait for the song, then download it.";
+    taskIn.value = spec.task || "";
+    var startRow = el("div", "wb-nf-row wb-nw-startrow");
+    var startIn = el("input", "wb-nf-input");
+    startIn.type = "text";
+    startIn.placeholder = "Start at (optional): mureka.ai/create";
+    startIn.setAttribute("aria-label", "Web address to start at (optional)");
+    startIn.autocomplete = "off";
+    startIn.spellcheck = false;
+    startIn.value = spec.startUrl || "";
+    startRow.appendChild(startIn);
+    taskBox.appendChild(taskLabel);
+    taskBox.appendChild(taskIn);
+    taskBox.appendChild(startRow);
+    taskBox.appendChild(el("p", "wb-nf-hint", "Say it step by step, in your own words. BeeZilla clicks and types for you, and you can watch it here. It never types a password or pays: when a site needs you, it stops and says so."));
+    wrap.appendChild(taskBox);
+    var saveTask = debounce(function () {
+      if (!ctx.alive(c)) return;
+      if (!snapped) { ctx.snapshot(); snapped = true; }
+      writeBack();
+    }, 500);
+    taskIn.addEventListener("input", function () { saveTask(); paintAll(); });
+    startIn.addEventListener("input", saveTask);
+
+    // The controls for either kind.
+    var ctl = el("div", "wb-nw-ctl");
+    var bRun = button("wb-selbtn wb-primary wb-nw-runbtn", "Run it now", "play", function () { onRun(); });
+    bRun.title = "BeeZilla does the job now, in its own browser, where you can watch";
+    var bStop = button("wb-selbtn wb-nw-stop", "Stop", "stop", function () { onStop(); });
+    bStop.title = "Stop BeeZilla and take over the browser yourself";
+    var bRec = button("wb-selbtn wb-nw-rec", "Record", null, function () { onRecord(); });
+    var recDot = el("span", "wb-nw-recdot");
+    recDot.setAttribute("aria-hidden", "true");
+    bRec.insertBefore(recDot, bRec.firstChild);
+    var bLook = button("wb-selbtn wb-nw-look", "Just look", "eye", function () { startBrowser({ startUrl: firstUrl(), record: false }); });
+    bLook.title = "Open BeeZilla's browser without recording: to see a page the way the AI would, or to sign in to a site once";
+    [bRun, bStop, bRec, bLook].forEach(function (b) { ctl.appendChild(b); });
+    wrap.appendChild(ctl);
+
     var grid = el("div", "wb-nw-grid");
     var left = el("div", "wb-nw-left");
     var right = el("div", "wb-nw-right");
@@ -675,22 +734,35 @@
     canvas.width = VIEW_W;
     canvas.height = VIEW_H;
     canvas.tabIndex = 0;
-    canvas.setAttribute("aria-label", "The server browser. Click in it, then type.");
+    canvas.setAttribute("aria-label", "BeeZilla's browser. Click in it, then type.");
     var g = canvas.getContext("2d");
     var veil = el("div", "wb-nw-veil");
     veil.setAttribute("role", "status");
+    // While BeeZilla works, the page is its: a strip over the picture says so (Stop hands it back).
+    var busyStrip = el("div", "wb-nw-busy");
+    busyStrip.setAttribute("role", "status");
+    busyStrip.hidden = true;
     var pickMenu = el("div", "wb-nw-pick wb-node-pop");
     pickMenu.hidden = true;
     stage.appendChild(canvas);
     stage.appendChild(veil);
+    stage.appendChild(busyStrip);
     stage.appendChild(pickMenu);
     left.appendChild(stage);
     var foot = el("p", "wb-nf-hint wb-nw-foot", "Click inside the page, then type. Keys go to the page while you are in it: click the title bar, then press Esc to close. Passwords you type are passed on but never written down.");
     left.appendChild(foot);
 
-    // The steps, beside the picture (under it in a narrow window).
+    // Beside the picture (under it in a narrow window): what it is doing, the steps, the files.
     var stepsHead = el("div", "wb-nw-stepshead");
     right.appendChild(stepsHead);
+    var actList = el("ol", "wb-nw-steps wb-nw-acts");
+    actList.setAttribute("aria-label", "What BeeZilla is doing");
+    actList.setAttribute("aria-live", "polite");
+    right.appendChild(actList);
+    // A recording's blanks: the words for this run (BeeZilla fills them itself when it runs it).
+    var blanksBox = el("div", "wb-nw-blanks");
+    blanksBox.hidden = true;
+    right.appendChild(blanksBox);
     var list = el("ol", "wb-nw-steps");
     list.setAttribute("aria-label", "Recorded steps");
     right.appendChild(list);
@@ -703,39 +775,67 @@
     runBox.setAttribute("aria-live", "polite");
     runBox.hidden = true;
     right.appendChild(runBox);
+    var filesBox = el("div", "wb-nw-files");
+    filesBox.hidden = true;
+    right.appendChild(filesBox);
+    // Staying signed in: said plainly, with the way to undo it.
+    var signBox = el("div", "wb-nw-signins");
+    right.appendChild(signBox);
 
     function firstUrl() {
+      if (st.mode === "task") {
+        var s0 = startIn.value.trim();
+        if (s0) return /^[a-z][a-z0-9+.-]*:/i.test(s0) ? s0 : "https://" + s0;
+      }
       for (var i = 0; i < st.steps.length; i++) if (st.steps[i].t === "goto" && st.steps[i].url) return st.steps[i].url;
       return spec.startUrl || "";
     }
 
-    // ---- saving what was recorded onto the card ----
-    function writeBack() {
+    // ---- saving onto the card ----
+    function specNow() {
       var s = parse(c);
       s.v = 1;
+      s.mode = st.mode;
+      s.task = taskIn.value.slice(0, 2000);
       s.steps = st.steps.slice();
-      s.startUrl = firstUrl();
-      if (st.steps.length) s.recordedAt = new Date().toISOString();
+      var start = startIn.value.trim();
+      s.startUrl = st.mode === "task" ? (start ? (/^[a-z][a-z0-9+.-]*:/i.test(start) ? start : "https://" + start) : "") : firstUrl();
       if (st.where) s.where = { label: st.where.label, ip: st.where.ip, org: st.where.org, kind: st.where.kind };
       if (lastRun) s.lastRun = lastRun;
+      return s;
+    }
+    function writeBack() {
+      var s = specNow();
+      if (st.steps.length && !s.recordedAt) s.recordedAt = new Date().toISOString();
       c.node = JSON.stringify(s);
       ctx.changed(c);
     }
     var saveSteps = debounce(function () {
       if (!ctx.alive(c)) return;
       if (!snapped) { ctx.snapshot(); snapped = true; }
+      var s = parse(c);
+      s.recordedAt = new Date().toISOString();
+      c.node = JSON.stringify(s);
       writeBack();
     }, 500);
+    function setMode(m) {
+      if (st.mode === m) return;
+      if (st.running || st.recording) { say("Wait for it to finish (or press Stop) before switching."); return; }
+      st.mode = m;
+      if (!snapped) { ctx.snapshot(); snapped = true; }
+      writeBack();
+      paintAll();
+    }
 
     // ---- painting ----
     function whereText() {
       var w = st.where;
-      if (!w) return st.phase === "idle" ? "A real browser on a server, not on this computer: its address is a data centre's, the same kind the AI's browser has." : "Server browser. Checking the address it goes out from…";
+      if (!w) return st.phase === "idle" ? "BeeZilla's own browser: a real browser on a server, not on this computer. Its address is a data centre's, the same kind the AI's browser has." : "BeeZilla's browser. Checking the address it goes out from…";
       var org = w.org ? " (" + w.org + ")" : "";
-      if (!w.ip) return "Server browser. Its address could not be checked.";
-      if (w.kind === "datacenter") return "Server browser, seen from " + w.ip + org + ": a data-centre address, the view BeeZilla's AI gets, not your home connection.";
+      if (!w.ip) return "BeeZilla's browser. Its address could not be checked.";
+      if (w.kind === "datacenter") return "BeeZilla's browser, seen from " + w.ip + org + ": a data-centre address, the view BeeZilla's AI gets, not your home connection.";
       if (w.kind === "home") return "Heads up: this browser goes out from " + w.ip + org + ", which looks like a home or office connection, not a server. The AI may see pages differently.";
-      return "Server browser, seen from " + w.ip + org + ".";
+      return "BeeZilla's browser, seen from " + w.ip + org + ".";
     }
     function paintWhere() {
       where.textContent = "";
@@ -748,26 +848,35 @@
       var live = st.phase === "live";
       veil.hidden = live;
       canvas.style.visibility = live ? "visible" : "hidden";
+      busyStrip.hidden = !(live && (st.running || st.replaying));
+      busyStrip.textContent = st.running === "task" ? "BeeZilla is doing the job in its browser. Press Stop to take over." : "BeeZilla is following the recording. Press Stop to take over.";
       if (live) return;
       veil.textContent = "";
       var m = el("div", "wb-nw-veilbox");
-      if (st.phase === "starting") { m.appendChild(el("div", "wb-nw-spin")); m.appendChild(el("p", null, "Starting a browser on a server… this takes a few seconds.")); }
+      if (st.phase === "starting") { m.appendChild(el("div", "wb-nw-spin")); m.appendChild(el("p", null, "Starting BeeZilla's browser on a server… this takes a few seconds.")); }
       else if (st.phase === "ended") {
         m.appendChild(el("p", null, st.msg || ENDED.closed));
-        m.appendChild(el("p", "wb-nf-hint", "What you recorded is saved on the card."));
-        m.appendChild(button("wb-selbtn wb-primary", "Open a new browser", null, function () { startBrowser({ startUrl: firstUrl(), record: false }); }));
+        m.appendChild(el("p", "wb-nf-hint", "What it did is saved on the card."));
+        m.appendChild(button("wb-selbtn wb-primary", "Open the browser again", null, function () { startBrowser({ startUrl: firstUrl(), record: false }); }));
       } else if (st.phase === "error") {
         m.appendChild(el("p", "wb-nw-err", st.msg || "The browser could not be opened."));
         m.appendChild(button("wb-selbtn", "Try again", null, function () { st.phase = "idle"; st.msg = ""; paintAll(); }));
       } else {
         var off = st.info && st.info.configured === false;
-        m.appendChild(el("p", "wb-nw-introhead", st.steps.length ? "A job you recorded is saved here." : "Show BeeZilla a job, once."));
-        m.appendChild(el("p", null, off
-          ? "The server browser isn't set up on this BeeZilla yet, so it can't be opened."
-          : "Press Record. A browser opens on a server. Do the job in it, and BeeZilla writes down every step. Press Just look to open it without recording."));
+        if (st.mode === "task") {
+          m.appendChild(el("p", "wb-nw-introhead", "Tell BeeZilla the job. It does it in its own browser."));
+          m.appendChild(el("p", null, off
+            ? "The server browser isn't set up on this BeeZilla yet, so it can't be opened."
+            : "Write what to do above, then press Run it now to watch it work. Join this globe to a step on the board, and BeeZilla does it when the work gets there."));
+        } else {
+          m.appendChild(el("p", "wb-nw-introhead", st.steps.length ? "A job you recorded is saved here." : "Show BeeZilla a job, once."));
+          m.appendChild(el("p", null, off
+            ? "The server browser isn't set up on this BeeZilla yet, so it can't be opened."
+            : "Press Record. BeeZilla's browser opens here. Do the job in it, and every step is written down. BeeZilla follows it exactly every time."));
+        }
         if (!off && st.info && st.info.secondsPerDay) {
-          var left = Math.floor(st.info.secondsLeft / 60);
-          m.appendChild(el("p", "wb-nf-hint", left > 0 ? "About " + left + (left === 1 ? " minute" : " minutes") + " of server browser left today." : "Today's server browser time is used up. It comes back on a rolling 24 hours."));
+          var mins = Math.floor(st.info.secondsLeft / 60);
+          m.appendChild(el("p", "wb-nf-hint", mins > 0 ? "About " + mins + (mins === 1 ? " minute" : " minutes") + " of BeeZilla's browser left today." : "Today's browser time is used up. It comes back on a rolling 24 hours."));
         }
       }
       veil.appendChild(m);
@@ -779,30 +888,69 @@
       var starting = st.phase === "starting";
       var off = st.phase !== "live" && st.info && st.info.configured === false;
       var out = st.phase !== "live" && st.info && st.info.secondsPerDay && st.info.secondsLeft <= 0;
+      var working = !!(st.running || st.replaying);
+      var task = st.mode === "task";
+      tabTask.setAttribute("aria-selected", task ? "true" : "false");
+      tabRec.setAttribute("aria-selected", task ? "false" : "true");
+      tabTask.classList.toggle("on", task);
+      tabRec.classList.toggle("on", !task);
+      tabTask.disabled = tabRec.disabled = working || st.recording;
+      taskBox.hidden = !task;
+      taskIn.readOnly = working;
       barRow.style.visibility = live ? "visible" : "hidden";
-      bBack.disabled = !st.canBack || st.replaying;
-      bFwd.disabled = !st.canForward || st.replaying;
-      bReload.disabled = st.replaying;
-      bGo.disabled = st.replaying;
+      bBack.disabled = !st.canBack || working;
+      bFwd.disabled = !st.canForward || working;
+      bReload.disabled = working;
+      bGo.disabled = working;
+      addr.disabled = working;
+      // Run it now: the task in words, or the recording.
+      bRun.hidden = working || st.recording || (!task && !st.steps.length);
+      bRun.disabled = starting || !!off || !!out || (task && !taskIn.value.trim());
+      bRun.querySelector("span").textContent = task ? "Run it now" : "Run the recording";
+      bStop.hidden = !working;
       // Record is a switch while a browser is open, and opens one when it is not.
-      bRec.disabled = starting || st.replaying || !!off || !!out;
+      bRec.hidden = task || working;
+      bRec.disabled = starting || !!off || !!out;
       bRec.classList.toggle("wb-nw-on", st.recording);
       bRec.querySelector("span:not(.wb-nw-recdot)").textContent = st.recording ? "Stop recording" : (st.steps.length ? "Record again" : "Record");
       bLook.hidden = live || starting;
       bLook.disabled = !!off || !!out;
-      bPlay.hidden = !st.steps.length;
-      bPlay.disabled = starting || st.replaying || !!off || !!out;
-      bPlay.querySelector("span").textContent = st.replaying ? "Playing…" : "Watch it run";
+      // The list beside the picture.
       stepsHead.textContent = "";
-      stepsHead.appendChild(el("strong", null, st.recording ? "Recording…" : st.steps.length ? "What you recorded" : "Nothing recorded yet"));
-      var when = lastRecorded();
-      if (st.steps.length) stepsHead.appendChild(el("span", "wb-nf-hint", st.steps.length + (st.steps.length === 1 ? " step" : " steps") + (when ? " · " + ago(when) : "")));
+      if (task) {
+        stepsHead.appendChild(el("strong", null, st.running === "task" ? (st.foreign ? "BeeZilla is working on another job…" : "BeeZilla is working…") : st.acts.length ? "What BeeZilla did" : "What BeeZilla does shows here"));
+        if (st.acts.length) stepsHead.appendChild(el("span", "wb-nf-hint", st.acts.length + (st.acts.length === 1 ? " step" : " steps")));
+      } else {
+        stepsHead.appendChild(el("strong", null, st.recording ? "Recording…" : st.steps.length ? "What you recorded" : "Nothing recorded yet"));
+        var when = lastRecorded();
+        if (st.steps.length) stepsHead.appendChild(el("span", "wb-nf-hint", st.steps.length + (st.steps.length === 1 ? " step" : " steps") + (when ? " · " + ago(when) : "")));
+      }
+      actList.hidden = !task || !st.acts.length;
+      paintActs();
+      list.hidden = task || !st.steps.length;
       paintSteps();
-      foot.hidden = !live;
+      paintBlanks(task);
+      paintFiles();
+      paintSignIns();
+      foot.hidden = !live || working;
     }
     function lastRecorded() { var s = parse(c); return s.recordedAt || ""; }
+    function paintActs() {
+      actList.textContent = "";
+      st.acts.forEach(function (a) {
+        var li = el("li", "wb-nw-step" + (a.state ? " wb-nw-m-" + (a.state === "failed" ? "failed" : a.state === "ok" ? "ok" : "running") : ""));
+        li.appendChild(el("span", "wb-nw-stepno", String(a.i + 1)));
+        var words = el("span", "wb-nw-stepsay");
+        words.appendChild(el("span", null, a.say));
+        if (a.note) words.appendChild(el("span", "wb-nw-stepnote", a.note));
+        li.appendChild(words);
+        actList.appendChild(li);
+      });
+      if (st.acts.length) actList.scrollTop = actList.scrollHeight;
+    }
     function paintSteps() {
       list.textContent = "";
+      var working = !!(st.running || st.replaying);
       st.steps.forEach(function (step, i) {
         var li = el("li", "wb-nw-step" + (st.marks[i] ? " wb-nw-m-" + st.marks[i] : ""));
         li.appendChild(el("span", "wb-nw-stepno", String(i + 1)));
@@ -810,16 +958,98 @@
         words.appendChild(el("span", null, step.say));
         if (step.t === "type" && !step.secret && step.v) words.appendChild(el("span", "wb-nw-chip", "“" + N.squash(step.v, 40) + "”"));
         if (step.t === "select" && step.v) words.appendChild(el("span", "wb-nw-chip", N.squash(step.v, 40)));
+        // A typed step can be filled in each time (the song idea of the day) or stay as recorded.
+        if (step.t === "type" && !step.secret) {
+          var fillBtn = button("wb-nw-fill" + (step.blank ? " on" : ""), step.blank ? "Filled in each time" : "Same each time", null, function () { toggleBlank(i); });
+          fillBtn.title = step.blank ? "BeeZilla types the words of the moment here (" + step.blank + "). Press to always type what you recorded." : "BeeZilla types exactly what you recorded. Press to have it filled in each time instead.";
+          fillBtn.disabled = working;
+          fillBtn.setAttribute("aria-pressed", step.blank ? "true" : "false");
+          words.appendChild(fillBtn);
+        }
         if (st.notes[i]) words.appendChild(el("span", "wb-nw-stepnote", st.notes[i]));
         li.appendChild(words);
         var rm = button("wb-nw-steprm", "", "trash", function () { removeStep(i); });
         rm.setAttribute("aria-label", "Remove step " + (i + 1));
         rm.title = "Remove this step";
-        rm.disabled = st.replaying;
+        rm.disabled = working;
         li.appendChild(rm);
         list.appendChild(li);
       });
-      list.hidden = !st.steps.length;
+    }
+    function paintBlanks(task) {
+      var names = [];
+      st.steps.forEach(function (x) { if (x.t === "type" && x.blank && names.indexOf(x.blank) < 0) names.push(x.blank); });
+      blanksBox.hidden = task || !names.length;
+      if (blanksBox.hidden) return;
+      // Kept while typing: only redrawn when the blanks themselves change.
+      var key = names.join("\u0001");
+      if (blanksBox.getAttribute("data-key") === key) return;
+      blanksBox.setAttribute("data-key", key);
+      blanksBox.textContent = "";
+      blanksBox.appendChild(el("strong", null, "Words for this run"));
+      names.forEach(function (name) {
+        var row = el("label", "wb-nw-blank");
+        row.appendChild(el("span", null, name));
+        var inp = el("input", "wb-nf-input");
+        inp.type = "text";
+        inp.maxLength = 4000;
+        var was = "";
+        st.steps.forEach(function (x) { if (x.blank === name && x.v && !was) was = x.v; });
+        inp.placeholder = was ? "As recorded: " + N.squash(was, 50) : "As recorded";
+        inp.value = st.fill[name] || "";
+        inp.addEventListener("input", function () { st.fill[name] = inp.value; });
+        row.appendChild(inp);
+        blanksBox.appendChild(row);
+      });
+      blanksBox.appendChild(el("p", "wb-nf-hint", "Left empty, a box gets what you recorded. BeeZilla fills these in itself when it runs the recording."));
+    }
+    function toggleBlank(i) {
+      var step = st.steps[i];
+      if (!step || step.t !== "type" || step.secret) return;
+      if (step.blank) delete step.blank;
+      else step.blank = N.squash((step.on && (step.on.name || step.on.placeholder)) || "The words", 40);
+      if (st.phase === "live") post(base() + "/steps", { steps: st.steps });
+      paintSteps();
+      saveSteps();
+    }
+    function paintFiles() {
+      filesBox.textContent = "";
+      var files = st.files.length ? st.files : (lastRun && lastRun.files) || [];
+      filesBox.hidden = !files.length;
+      if (!files.length) return;
+      filesBox.appendChild(el("strong", null, st.files.length ? "Downloaded, saved to your Library" : "Downloaded last time"));
+      var ul = el("ul");
+      files.slice(-8).forEach(function (f) {
+        if (!/^\/api\/buzzy\/assets\/\d+$/.test(String(f.url || ""))) return;
+        var li = el("li");
+        var a = el("a", null, N.squash(f.name, 60));
+        a.href = f.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        li.appendChild(a);
+        if (f.bytes) li.appendChild(el("span", "wb-nf-hint", " " + sizeText(f.bytes)));
+        if (/^audio\//.test(String(f.type || ""))) {
+          var au = el("audio");
+          au.controls = true;
+          au.preload = "none";
+          au.src = f.url;
+          li.appendChild(au);
+        }
+        ul.appendChild(li);
+      });
+      filesBox.appendChild(ul);
+    }
+    function paintSignIns() {
+      signBox.textContent = "";
+      var on = st.signIns || (st.info && st.info.signIns);
+      signBox.appendChild(el("span", "wb-nf-hint", on
+        ? "BeeZilla's browser remembers the sites you signed in to here, so it can use them for you. Passwords are never written down."
+        : "Does a site need you signed in? Open the browser (Just look), sign in once in the picture, and BeeZilla's browser remembers it."));
+      if (on) {
+        var f = button("wb-btn wb-nw-forget", "Forget sign-ins", null, function () { forget(); });
+        f.title = "Sign BeeZilla's browser out of every site";
+        signBox.appendChild(f);
+      }
     }
     function removeStep(i) {
       if (st.phase === "live") { post(base() + "/steps", { delete: i }); }
@@ -838,6 +1068,13 @@
       });
     }
     function say(t) { runBox.textContent = t; runBox.hidden = !t; }
+    function forget() {
+      post("/api/buzzy/nodes/browser/forget", {}).then(function (j) {
+        if (j && j.ok) { st.signIns = false; if (st.info) st.info.signIns = false; say("Done: BeeZilla's browser is signed out of every site. A browser that is open now forgets them when it closes."); }
+        else say((j && j.error) || "That didn't work. Try again in a moment.");
+        paintSignIns();
+      });
+    }
 
     function startBrowser(o) {
       if (st.phase === "starting") return;
@@ -849,8 +1086,8 @@
       say("");
       paintAll();
       var steps = o.fresh ? [] : st.steps;
-      post("/api/buzzy/nodes/browser", { startUrl: o.startUrl || "", steps: steps }).then(function (j) {
-        if (!ctx.alive(c) || current !== win) { if (j && j.id) fetch("/api/buzzy/nodes/browser/" + j.id, { method: "DELETE", credentials: "same-origin", keepalive: true }); return; }
+      post("/api/buzzy/nodes/browser", { startUrl: o.startUrl || "", steps: steps, join: !!o.join }).then(function (j) {
+        if (!ctx.alive(c) || current !== win) { if (j && j.id && !j.joined) fetch("/api/buzzy/nodes/browser/" + j.id, { method: "DELETE", credentials: "same-origin", keepalive: true }); return; }
         if (!j || j.ok !== true) {
           st.phase = "error";
           st.msg = (j && j.error) || "The browser could not be opened.";
@@ -858,6 +1095,7 @@
           return;
         }
         st.id = j.id;
+        st.joined = !!j.joined;
         if (o.fresh) st.steps = [];
         connect(o);
       }).catch(function () {
@@ -874,9 +1112,15 @@
       function on(name, fn) { es.addEventListener(name, function (e) { var d; try { d = JSON.parse(e.data); } catch (_) { return; } fn(d); }); }
       on("hello", function (d) {
         st.phase = "live";
-        st.steps = d.steps || [];
+        // A browser BeeZilla is already working in (joined to watch it) keeps this node's own steps.
+        if (!st.joined) st.steps = d.steps || [];
         st.recording = !!d.recording;
         st.replaying = !!d.replaying;
+        st.running = d.run ? d.run.kind : null;
+        st.foreign = !!(d.run && d.run.nodeId && d.run.nodeId !== c.id);
+        if (d.run && d.run.acts) st.acts = d.run.acts.slice();
+        st.files = d.files || st.files;
+        st.signIns = !!d.signIns;
         st.where = d.where || st.where;
         st.url = d.url || ""; st.title = d.title || "";
         st.canBack = !!d.canBack; st.canForward = !!d.canForward;
@@ -886,7 +1130,8 @@
         canvas.focus({ preventScroll: true });
         if (first) {
           first = false;
-          if (o.play && st.steps.length) onPlay();
+          if (o.run) runHere();
+          else if (o.play && st.steps.length) onPlay();
           else if (o.record) {
             if (o.playFirst && st.steps.length) { st.pendingAfterReplay = true; onPlay(); }
             else post(base() + "/record", { on: true, keep: !!o.keep });
@@ -897,12 +1142,12 @@
       on("nav", function (d) {
         st.url = d.url; st.title = d.title; st.canBack = d.canBack; st.canForward = d.canForward;
         if (document.activeElement !== addr) addr.value = /^https?:/i.test(d.url) ? d.url : "";
-        bBack.disabled = !st.canBack || st.replaying; bFwd.disabled = !st.canForward || st.replaying;
+        bBack.disabled = !st.canBack || !!st.running; bFwd.disabled = !st.canForward || !!st.running;
       });
       on("step", function (d) { st.steps.push(d.step); paintAll(); list.scrollTop = list.scrollHeight; saveSteps(); });
-      on("steps", function (d) { st.steps = d.steps || []; st.marks = {}; st.notes = {}; paintAll(); saveSteps(); });
+      on("steps", function (d) { if (st.joined && st.running) return; st.steps = d.steps || []; st.marks = {}; st.notes = {}; paintAll(); saveSteps(); });
       on("rec", function (d) { st.recording = !!d.on; paintAll(); if (!d.on) saveSteps.now(); });
-      on("where", function (d) { st.where = d.where; paintWhere(); saveSteps(); });
+      on("where", function (d) { st.where = d.where; paintWhere(); writeBack(); });
       on("notice", function (d) { say(d.text); });
       on("pick", function (d) { showPick(d); });
       on("replay", function (d) {
@@ -915,34 +1160,72 @@
       });
       on("replay-done", function (d) {
         st.replaying = false;
-        lastRun = { at: new Date().toISOString(), ok: !!d.ok, steps: d.steps || 0, failedAt: d.failedAt, note: d.note, finalUrl: scrubUrl(d.finalUrl), title: d.title, text: scrubLine(d.text) };
-        runBox.textContent = "";
-        runBox.hidden = false;
-        runBox.appendChild(el("strong", d.ok ? "wb-nw-runok" : "wb-nw-runbad", d.ok ? "It worked." : "It stopped."));
-        runBox.appendChild(el("span", null, " " + d.note));
-        if (d.text) runBox.appendChild(el("div", "wb-nw-runtext", "The page then said: " + N.squash(d.text, 240)));
-        paintAll();
-        saveSteps.now();
+        // (How it ended is written by the "run" handler below, for a recording and a task alike.)
         if (st.pendingAfterReplay) { st.pendingAfterReplay = false; if (d.ok) post(base() + "/record", { on: true, keep: true }); }
+        paintAll();
+      });
+      on("run", function (d) {
+        // Another node's job in the same browser (BeeZilla working on another globe): watched, not
+        // taken as this card's own.
+        var mine = function (nodeId) { return !nodeId || nodeId === c.id; };
+        if (d.state === "start") {
+          st.foreign = !mine(d.nodeId);
+          st.running = d.kind;
+          st.result = null;
+          if (d.kind === "task") st.acts = [];
+          if (d.kind === "recording") { st.marks = {}; st.notes = {}; }
+          say("");
+          paintAll();
+          return;
+        }
+        var r = d.result || {};
+        st.running = null;
+        st.replaying = false;
+        st.result = r;
+        if (!mine(r.nodeId)) {
+          st.foreign = false;
+          say("BeeZilla finished another job in this browser" + (r.note ? ": " + N.squash(r.note, 160) : "."));
+          paintAll();
+          return;
+        }
+        st.foreign = false;
+        // Where it ended, without a secret word's value or a key the page showed (review item 4).
+        lastRun = { at: new Date().toISOString(), ok: !!r.ok, steps: r.ran || 0, failedAt: r.failedAt, note: r.note, finalUrl: scrubUrl(r.finalUrl), title: r.title, text: scrubLine(r.text), by: r.by, kind: r.kind, files: (r.files || []).slice(0, 8), needs: r.needs };
+        showResult(r);
+        paintAll();
+        if (ctx.alive(c)) { if (!snapped) { ctx.snapshot(); snapped = true; } writeBack(); }
+      });
+      on("act", function (d) {
+        var at = -1;
+        for (var k = 0; k < st.acts.length; k++) if (st.acts[k].i === d.i) at = k;
+        var row = { i: d.i, say: d.say, state: d.state, note: d.note };
+        if (at >= 0) st.acts[at] = row; else st.acts.push(row);
+        if (st.mode === "task") { actList.hidden = false; paintActs(); }
+      });
+      on("file", function (d) {
+        if (d.state === "saved" && d.url) {
+          st.files = st.files.filter(function (f) { return f.url !== d.url; }).concat([{ name: d.name, url: d.url, type: d.fileType, bytes: d.bytes }]);
+          paintFiles();
+        } else if (d.state === "failed") say("A download didn't make it: " + (d.note || "BeeZilla couldn't read it."));
+        else if (d.state === "started") say("Downloading “" + N.squash(d.name, 60) + "”…");
       });
       on("ended", function (d) {
         st.phase = "ended";
-        st.recording = false; st.replaying = false;
+        st.recording = false; st.replaying = false; st.running = null;
         st.msg = ENDED[d.reason] || ENDED.closed;
         if (es) es.close();
         st.es = null;
         paintAll();
-        saveSteps.now();
+        if (st.mode === "recording") saveSteps.now();
       });
       es.onerror = function () {
         if (st.phase !== "live") return;
         if (es.readyState === 2) {
           // The server says there is no such browser any more (it closed, or restarted).
-          st.phase = "ended"; st.recording = false; st.replaying = false;
+          st.phase = "ended"; st.recording = false; st.replaying = false; st.running = null;
           st.msg = ENDED.closed;
           st.es = null;
           paintAll();
-          saveSteps.now();
           return;
         }
         say("The connection to the browser dropped. Trying again…");
@@ -950,7 +1233,56 @@
       es.onopen = function () { if (st.phase === "live") say(""); };
     }
 
-    // ---- recording and playing ----
+    // How a job ended, in words, with what to do next.
+    function showResult(r) {
+      runBox.textContent = "";
+      runBox.hidden = false;
+      var head = r.ok ? "It worked." : r.needs ? "It needs you." : r.stopped ? "Stopped." : "It stopped.";
+      runBox.appendChild(el("strong", r.ok ? "wb-nw-runok" : "wb-nw-runbad", head));
+      if (r.note) runBox.appendChild(el("span", null, " " + r.note));
+      if (r.text) runBox.appendChild(el("div", "wb-nw-runtext", "The page then said: " + N.squash(r.text, 240)));
+      // A job done from words that worked: keep it as the recording, followed exactly next time.
+      if (r.kind === "task" && r.ok && r.steps && r.steps.length) {
+        var keep = button("wb-selbtn wb-nw-keep", "Keep this as the recording", null, function () {
+          if (!ctx.alive(c)) return;
+          if (!snapped) { ctx.snapshot(); snapped = true; }
+          st.steps = r.steps.slice();
+          st.mode = "recording";
+          var s = parse(c);
+          s.recordedAt = new Date().toISOString();
+          c.node = JSON.stringify(s);
+          writeBack();
+          if (st.phase === "live") post(base() + "/steps", { steps: st.steps });
+          say("Kept: from now on BeeZilla follows these " + st.steps.length + " steps exactly. Typed words marked “Filled in each time” change with each run. Switch back to Do this any time.");
+          paintAll();
+        });
+        keep.title = "BeeZilla follows exactly these steps next time (faster, and the same every time)";
+        runBox.appendChild(keep);
+      }
+      if (r.needs && st.phase === "live") runBox.appendChild(el("div", "wb-nw-runtext", "Do it yourself in the picture (for example, sign in), then press Run it now again."));
+    }
+
+    // ---- running, recording and playing ----
+    function onRun() {
+      if (st.mode === "recording") { onPlay(); return; }
+      if (!taskIn.value.trim()) { taskIn.focus(); return; }
+      saveTask.flush();
+      if (st.phase !== "live") { startBrowser({ startUrl: "", record: false, run: true }); return; }
+      runHere();
+    }
+    function runHere() {
+      if (st.mode === "recording") { onPlay(); return; }
+      st.acts = [];
+      st.result = null;
+      say("");
+      post(base() + "/run", { node: specNow(), nodeId: c.id }).then(function (j) {
+        if (j && j.ok === false) { say(j.error || "It couldn't start."); paintAll(); }
+      });
+    }
+    function onStop() {
+      if (st.phase !== "live") return;
+      post(base() + "/stop", {}).then(function () { say("Stopping… The browser is yours when it does."); });
+    }
     function onRecord() {
       if (st.phase === "live") {
         if (st.recording) { post(base() + "/record", { on: false }); return; }
@@ -987,7 +1319,9 @@
       say("");
       st.replaying = true;
       paintAll();
-      post(base() + "/replay", { steps: st.steps }).then(function (j) { if (j && j.ok === false) { st.replaying = false; paintAll(); say(j.error || "It couldn't play."); } });
+      var fill = {};
+      Object.keys(st.fill).forEach(function (k) { if (String(st.fill[k] || "").trim()) fill[k] = st.fill[k]; });
+      post(base() + "/replay", { steps: st.steps, nodeId: c.id, fill: fill }).then(function (j) { if (j && j.ok === false) { st.replaying = false; paintAll(); say(j.error || "It couldn't play."); } });
     }
 
     // ---- the picture, and what is done to it ----
@@ -1018,10 +1352,10 @@
     if (ro) ro.observe(stage);
     root.onresized = fitStage;
 
-    // Input goes to the server in order, a few at a time.
+    // Input goes to the server in order, a few at a time. While BeeZilla works, the page is its.
     var queue = [], sending = false, moveAt = 0;
     function pushEv(ev) {
-      if (st.phase !== "live" || st.replaying) return;
+      if (st.phase !== "live" || st.replaying || st.running) return;
       queue.push(ev);
       flush();
     }
@@ -1139,7 +1473,9 @@
     // ---- leaving ----
     var alive = setInterval(function () { if (!ctx.alive(c)) win.close(); }, 2000);
     function release() {
-      if (st.id && st.phase !== "ended") {
+      // A browser BeeZilla is working in keeps going when the window closes: the job finishes, and
+      // the browser closes itself when it is done (and idle). One the person opened here closes now.
+      if (st.id && st.phase !== "ended" && !st.running && !st.replaying) {
         // Closes the browser on the server: it costs money while it is open.
         try { fetch("/api/buzzy/nodes/browser/" + st.id, { method: "DELETE", credentials: "same-origin", keepalive: true }); } catch (_) { /* it closes itself when idle */ }
       }
@@ -1152,6 +1488,7 @@
       window.removeEventListener("pagehide", onHide);
       if (ro) ro.disconnect();
       saveSteps.cancel();
+      saveTask.flush();
       saveName.flush();
       // What was recorded is on the card already (it saves as it goes); this makes sure.
       if (ctx.alive(c) && (st.steps.length || snapped)) {
@@ -1174,12 +1511,15 @@
     current = win;
     paintAll();
     fitStage();
-    // The saved recording shows at once; the browser itself opens on Record (it costs money).
-    bRec.focus({ preventScroll: true });
+    // The saved job shows at once; the browser itself opens on Run, Record or Just look (it costs
+    // money) — unless BeeZilla is already working in it, when the window joins it to watch.
+    (st.mode === "task" ? (taskIn.value ? bRun : taskIn) : bRec).focus({ preventScroll: true });
     browserInfo().then(function (info) {
       if (!info || current !== win) return;
       st.info = info;
+      st.signIns = !!info.signIns;
       paintAll();
+      if (info.open && info.open.busy && st.phase === "idle") startBrowser({ join: true });
     });
   }
 

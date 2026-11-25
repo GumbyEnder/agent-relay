@@ -20,6 +20,13 @@
  *     it needs, never the value; the value is typed again for each test);
  *   - the value of a secret query word (?api_key=…) in an address;
  *   - what was typed into a password, card-number or one-time-code field in a recording.
+ *
+ * Owner, 2026-11-23 — the globe: "make it so that browser use absolutely works for Bzilla…
+ * you can begin to connect a skill to a browser and say, do this specifically, or follow
+ * this recording specifically." So a browser node is one of two things (`mode`):
+ *   - "task": what to do, in words (`task`), done by BeeZilla in its own browser;
+ *   - "recording": the recorded `steps`, followed exactly. A typed step can be a blank
+ *     (`blank`), filled in with the words of the moment each time it runs.
  */
 
 export const NODE_KINDS = ["api", "browser"] as const;
@@ -305,7 +312,7 @@ export function cleanApiSpec(raw: unknown): ApiSpec {
 
 // ── Browser use ────────────────────────────────────────────────────────────
 
-export const STEP_TYPES = ["goto", "click", "type", "key", "scroll", "select", "back"] as const;
+export const STEP_TYPES = ["goto", "click", "type", "key", "scroll", "select", "back", "wait"] as const;
 export type StepType = (typeof STEP_TYPES)[number];
 
 /** How to find the same thing on the page again. */
@@ -339,6 +346,21 @@ export interface BrowserStep {
   y?: number;
   /** The pause before this step, in milliseconds. */
   ms?: number;
+  /**
+   * A typed step that is filled in each time it runs ("the song idea"): its name. `v` keeps
+   * the words it was recorded with, used when nothing else is given.
+   */
+  blank?: string;
+  /** A "wait" step: how long to give the page, in seconds (it moves on as soon as the page is still). */
+  wait?: number;
+}
+/** A file a run downloaded, as it was saved to the person's Library. */
+export interface RunFile {
+  name: string;
+  /** Always the person's own Library: /api/buzzy/assets/<id>. */
+  url: string;
+  type: string;
+  bytes: number;
 }
 export interface BrowserRun {
   at: string;
@@ -349,10 +371,27 @@ export interface BrowserRun {
   finalUrl?: string;
   title?: string;
   text?: string;
+  /** Who started it: the person (Run it now, Watch it run) or BeeZilla (a conversation). */
+  by?: "you" | "beezilla";
+  /** What it was: BeeZilla doing the task in words, or the recording followed exactly. */
+  kind?: BrowserMode;
+  /** The files it downloaded, saved to the Library. */
+  files?: RunFile[];
+  /** It stopped because the person has to do something (sign in, pay, decide): what. */
+  needs?: string;
 }
+export const BROWSER_MODES = ["task", "recording"] as const;
+export type BrowserMode = (typeof BROWSER_MODES)[number];
+/** A task in words: a few sentences, never a script. */
+export const TASK_MAX = 2000;
+export const MAX_RUN_FILES = 8;
 export interface BrowserSpec {
   v: 1;
   purpose: string;
+  /** "task": BeeZilla does `task` in its own browser. "recording": the `steps`, exactly. */
+  mode?: BrowserMode;
+  /** What to do, in the person's words ("Go to mureka.ai/create, type the song idea, press Create, download the song"). */
+  task?: string;
   startUrl: string;
   steps: BrowserStep[];
   recordedAt?: string;
@@ -397,6 +436,12 @@ export function cleanStep(raw: unknown): BrowserStep | null {
   if (secret) step.secret = true;
   else if (o.v != null && o.v !== "") step.v = tidy(o.v, 400);
   if (t === "key") step.key = tidy(o.key, 20);
+  // A blank is a typed step filled in each time, and never a secret one (those are the person's).
+  if (t === "type" && !secret && o.blank) {
+    const b = plain(o.blank, 40);
+    if (b) step.blank = b;
+  }
+  if (t === "wait") step.wait = num(o.wait, 1, 300) ?? 5;
   const dy = num(o.dy, -20_000, 20_000);
   if (t === "scroll" && dy !== undefined) step.dy = dy;
   const x = num(o.x, 0, 4000);
@@ -425,6 +470,10 @@ export function cleanBrowserSpec(raw: unknown): BrowserSpec {
     startUrl: cleanUrlNoSecrets(r.startUrl, 600),
     steps: cleanSteps(r.steps),
   };
+  const task = cleanTask(r.task);
+  if (task) spec.task = task;
+  // A node from before the globe has no mode: its recording is what it does.
+  spec.mode = r.mode === "task" || r.mode === "recording" ? r.mode : spec.steps.length ? "recording" : "task";
   const at = isoOrEmpty(r.recordedAt);
   if (at) spec.recordedAt = at;
   const w = r.where as Record<string, unknown> | undefined;
@@ -443,10 +492,69 @@ export function cleanBrowserSpec(raw: unknown): BrowserSpec {
     const fu = cleanUrlNoSecrets(l.finalUrl, 300);
     if (fu) run.finalUrl = fu;
     if (l.title) run.title = plain(l.title, 140);
-    if (l.text) run.text = plain(l.text, 700);
+    if (l.text) run.text = hideKeys(plain(l.text, 700));
+    if (l.by === "you" || l.by === "beezilla") run.by = l.by;
+    if (l.kind === "task" || l.kind === "recording") run.kind = l.kind;
+    const files = cleanRunFiles(l.files);
+    if (files.length) run.files = files;
+    if (l.needs) run.needs = tidy(l.needs, 200);
     spec.lastRun = run;
   }
   return spec;
+}
+
+/**
+ * A task in words, as the person (or BeeZilla, from what they said) wrote it: line breaks
+ * kept, control characters and secret query words out, capped. A web address in it keeps
+ * its path but never a key (?api_key=… is emptied, as everywhere on a node).
+ */
+export function cleanTask(v: unknown): string {
+  const text = block(v, TASK_MAX * 2).replace(/[\u200b\u2060-\u2064\u202a-\u202e\u2066-\u2069\ufeff]/g, "");
+  // An address in it is left as written, except a user:password@ part and the value of a secret
+  // word in its query or fragment (?api_key=…, #access_token=…), which are taken out.
+  const out = text.replace(/https?:\/\/[^\s"'<>]+/gi, (u) => {
+    let x = u.replace(/^(https?:\/\/)[^/?#@\s]*@/i, "$1");
+    const h = x.indexOf("#");
+    if (h >= 0 && x.indexOf("=", h) > 0) x = x.slice(0, h + 1) + emptySecretPairs(x.slice(h + 1)).query;
+    const q = x.indexOf("?");
+    if (q >= 0) {
+      const end = x.indexOf("#", q);
+      x = x.slice(0, q + 1) + emptySecretPairs(x.slice(q + 1, end < 0 ? undefined : end)).query + (end < 0 ? "" : x.slice(end));
+    }
+    return x;
+  });
+  return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, TASK_MAX).replace(/[\uD800-\uDBFF]$/, "");
+}
+
+/**
+ * A page's words kept on a card (where a run ended) without anything that looks like a key: a long
+ * run of letters and digits (an API key or a token a page showed) is left out.
+ */
+export function hideKeys(text: string): string {
+  return text.replace(/[A-Za-z0-9_-]{24,}/g, (w) => (/[0-9]/.test(w) && /[A-Za-z]/.test(w) ? "[hidden]" : w));
+}
+
+/** Files a run kept: only the person's own Library addresses, named and sized. */
+export function cleanRunFiles(v: unknown): RunFile[] {
+  const out: RunFile[] = [];
+  for (const f of Array.isArray(v) ? v : []) {
+    if (!f || typeof f !== "object") continue;
+    const o = f as Record<string, unknown>;
+    const url = String(o.url ?? "");
+    if (!/^\/api\/buzzy\/assets\/\d{1,12}$/.test(url)) continue;
+    const name = plain(o.name, 120) || "file";
+    const type = /^[a-z0-9.+-]{1,40}\/[a-z0-9.+-]{1,80}$/i.test(String(o.type ?? "")) ? String(o.type).toLowerCase() : "application/octet-stream";
+    out.push({ name, url, type, bytes: num(o.bytes, 0, 1e10) ?? 0 });
+    if (out.length >= MAX_RUN_FILES) break;
+  }
+  return out;
+}
+
+/** The blanks of a recording, in order: what BeeZilla fills in each time it follows it. */
+export function blanksOf(steps: BrowserStep[]): string[] {
+  const seen: string[] = [];
+  for (const st of steps) if (st.t === "type" && st.blank && !seen.includes(st.blank)) seen.push(st.blank);
+  return seen;
 }
 
 /**
@@ -475,7 +583,10 @@ export function bodyFor(kind: unknown, spec: ApiSpec | BrowserSpec): string {
     const a = spec as ApiSpec;
     return (lead + (a.url ? `${a.method || "GET"} ${a.url}` : "")).slice(0, 700);
   }
-  const steps = (spec as BrowserSpec).steps || [];
+  const b = spec as BrowserSpec;
+  // The task in words is what a "do this" node does; the steps are what a recording does.
+  if (b.mode === "task") return (lead + (b.task ? "Does: " + tidy(b.task, 400) : "")).trim().slice(0, 1200);
+  const steps = b.steps || [];
   if (!steps.length) return tidy(spec.purpose, 300);
   return (lead + steps.slice(0, 12).map((x, i) => `${i + 1}. ${tidy(x.say, 90)}`).join("\n") + (steps.length > 12 ? `\n… and ${steps.length - 12} more steps` : "")).slice(0, 1200);
 }
