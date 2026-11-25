@@ -20,7 +20,7 @@ export interface BoardStep {
   do: "board";
   /** The verb: fit, zoomIn, zoomOut, zoom100, focus, enlarge, note, step, agent, end, connect,
    *  disconnect, select, deselect, remove, rename, write, edit, duplicate, move, area,
-   *  sell, recipe, history, keys, undo, redo, find, start, orchestrate. */
+   *  sell, recipe, history, keys, undo, redo, find, start, browser, orchestrate. */
   value: string;
   /** The card(s) it works on, in the person's words ("the beach photo", "everything"). */
   target?: string;
@@ -154,6 +154,11 @@ const RULES: Rule[] = [
   {
     re: /^(?:(?:add|set|make|change|update|write)(?: a| the)? )?who it serves(?: card)?(?:(?:,|:)?\s*(?:is|to|as|:|saying|that says)\s*(.+))?$/,
     make: (m) => ({ do: "board", value: "person", text: m[1] ? clean(m[1]) : undefined, say: m[1] ? "Write who it serves" : "Add who it serves" }),
+  },
+  // ── The globe: a job BeeZilla does in its own browser ─────────────────
+  {
+    re: new RegExp(`^(?:add|make|create|put|drop|give me|open)(?: me)?(?: a| an| another| one more| the)?(?: new)? (?:globe|browser (?:node|job|card|step|use)|web browser(?: node)?)(?: (?:on|to|onto) ${BOARD})?$`),
+    make: () => ({ do: "board", value: "browser", say: "Add a browser node (the globe)" }),
   },
   // ── Drawing on the board ─────────────────────────────────────────────
   {
@@ -355,6 +360,30 @@ const RULES: Rule[] = [
     make: (m) => ({ do: "board", value: "start", query: clean(m[1]), say: m[1] ? `Put a simple starting board for ${quote(m[1])} on the board` : "Put a simple starting board on the board" }),
   },
 ];
+
+/**
+ * The globe joined to a step, in one sentence (owner, 2026-11-23): "OK, when you get to that step,
+ * go to [the site] and, you know, go to /create and then type in these instructions to create the
+ * sound and then download the sound and send it elsewhere." The whole rest of the sentence is the
+ * job, in their words — so this is matched before a message is cut into clauses (pilot.ts), and only
+ * when the job is something done on a website (a site, the browser or a website is named).
+ */
+const AT_STEP = /^(?:(?:ok(?:ay)?|so|and|alright|right|now)[,.]?\s+)*(?:when(?:ever)?|once|as soon as|after) (?:you|we|it|beezilla|bee zilla) (?:get|gets|come|comes|reach|reaches|are|is|hit|hits)(?: (?:to|at|on))? (.{2,70}?) step\b[,:;.]?\s+(?:(?:please|then|just|you|i want you to|i need you to|go ahead and)\s+)*(.{6,1200})$/;
+const AT_STEP_TOO = /^(?:at|for|in|on|during) (.{2,70}?) step\b[,:;]?\s+(?:(?:please|then|just|you)\s+)*(?:use (?:your|the|beezilla'?s) (?:own )?browser (?:to|and)\s+)?(.{6,1200})$/;
+const WEBBY = /(?:https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|ai|io|net|org|app|co|dev|me|so|xyz|fm|tv|studio|music|art|us|uk|de|fr|ca|site|online|tech|gg|ly|to|sh)\b|\bbrowser\b|\bwebsite\b|\bweb ?site\b|\bweb page\b|\blog ?in\b|\bsign ?in\b)/;
+// The job says to DO something there: not "for this step we need a website", not a question.
+const DOING = /^(?:(?:please|then|just|and|you)\s+)*(?:go|head|navigate|open|visit|log ?in|sign ?in|use (?:your|the|beezilla'?s) (?:own )?browser|type|fill|click|press|download|upload|search|make|create|generate|post|send|record|browse|find)\b/;
+export function browserAtStep(body: string): BoardStep | null {
+  const m = AT_STEP.exec(body) ?? AT_STEP_TOO.exec(body);
+  if (!m) return null;
+  const task = clean(m[2]).replace(/^(?:to|and)\s+/, "");
+  if (!task || !WEBBY.test(task) || !DOING.test(task) || /\?\s*$/.test(task)) return null;
+  let which = clean(m[1]).replace(/^(?:the|my|your|our)\s+/, "");
+  // "that step", "this step", "the next step": the one they mean on the board (the selection).
+  const target = /^(?:that|this|it|the one|that one|this one)$/.test(which) || !which ? "that" : `the ${which} step`;
+  which = which || "that";
+  return { do: "board", value: "browser", target, text: task, say: target === "that" ? "Join a browser job to that step" : `Join a browser job to ${quote(target)}` };
+}
 
 /** A whole message that is one fixed board phrase ("zoom out and show me the whole board"). */
 export function closedBoardStep(body: string): BoardStep | null {

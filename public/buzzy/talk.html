@@ -5850,13 +5850,29 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      *   done  → the same ChatResponse the text lane returns
      *   error → surfaces the failure instead of hanging on a dead stream
      */
+    // A turn's clock: aborts after `ms`; `stretch()` (BeeZilla's browser is working) turns it into
+    // a limit on silence instead, refreshed by every event that arrives, never past 15 minutes.
+    function longTurnClock(ms) {
+      var ctl = new AbortController(), started = Date.now(), long = false, timer = 0;
+      function arm(wait) { clearTimeout(timer); timer = setTimeout(function () { try { ctl.abort(new DOMException("The turn took too long.", "TimeoutError")); } catch (_) { ctl.abort(); } }, wait); }
+      arm(ms);
+      return {
+        signal: ctl.signal,
+        stretch: function () { long = true; arm(Math.min(150000, 15 * 60000 - (Date.now() - started))); },
+        heard: function () { if (long) arm(Math.min(150000, 15 * 60000 - (Date.now() - started))); },
+        done: function () { clearTimeout(timer); }
+      };
+    }
     function streamVoiceTurn(sendBody, metrics, sendStarted, myTurn) {
+      // Two minutes, as before — unless BeeZilla's browser is at work, when it is how long the
+      // turn may go quiet (the browser's steps arrive every few seconds), up to 15 minutes.
+      var turnClock = longTurnClock(120000);
       var liveBubble = null;
       var liveText = "";
       return fetch(CHAT_BASE, {
         method: "POST",
         credentials: "same-origin",
-        signal: AbortSignal.timeout(120000),
+        signal: turnClock.signal,
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(Object.assign({}, sendBody, { voice: true })),
       }).then(function (res) {
@@ -5872,6 +5888,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         function handleFrame(frame) {
           var ev = "message";
           var dataLines = [];
+          // Anything from the server (a keep-alive too) means the turn is still alive.
+          turnClock.heard();
           frame.split("\n").forEach(function (line) {
             if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
             else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
@@ -5879,6 +5897,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (!dataLines.length) return;
           var payload;
           try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
+          // BeeZilla's browser is doing a job: that takes minutes, not seconds.
+          if ((ev === "tool" && payload && payload.name === "use_browser") || (ev === "flow" && payload && /^browser:/.test(String(payload.id || "")))) turnClock.stretch();
           if (ev === "stage") {
             if (window.__bzStage) window.__bzStage(payload);
           } else if (ev === "text") {
@@ -5929,6 +5949,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         function pump() {
           return reader.read().then(function (r) {
             if (r.done) {
+              turnClock.done();
               if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
               if (!finalData) throw new Error("The voice turn ended without a reply.");
               return finalData;
@@ -5951,12 +5972,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // reply paints nothing until the whole answer exists. Same SSE contract,
     // no audio.
     function streamTextTurn(sendBody, metrics, sendStarted) {
+      // Two minutes, as before — unless BeeZilla's browser is at work, when it is how long the
+      // turn may go quiet (the browser's steps arrive every few seconds), up to 15 minutes.
+      var turnClock = longTurnClock(120000);
       var liveBubble = null;
       var liveText = "";
       return fetch(CHAT_BASE, {
         method: "POST",
         credentials: "same-origin",
-        signal: AbortSignal.timeout(120000),
+        signal: turnClock.signal,
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(Object.assign({}, sendBody, { stream: true })),
       }).then(function (res) {
@@ -5976,6 +6000,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         function handleFrame(frame) {
           var ev = "message";
           var dataLines = [];
+          // Anything from the server (a keep-alive too) means the turn is still alive.
+          turnClock.heard();
           frame.split("\n").forEach(function (line) {
             if (line.indexOf("event:") === 0) ev = line.slice(6).trim();
             else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
@@ -5983,6 +6009,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (!dataLines.length) return;
           var payload;
           try { payload = JSON.parse(dataLines.join("\n")); } catch (_) { return; }
+          // BeeZilla's browser is doing a job: that takes minutes, not seconds.
+          if ((ev === "tool" && payload && payload.name === "use_browser") || (ev === "flow" && payload && /^browser:/.test(String(payload.id || "")))) turnClock.stretch();
           if (ev === "stage") {
             // The server names the work and how long it should take ("Composing
             // 15s of audio"). This frame was silently dropped on the typed lane,
@@ -6016,6 +6044,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         function pump() {
           return reader.read().then(function (r) {
             if (r.done) {
+              turnClock.done();
               if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble);
               if (!finalData) throw new Error("The turn ended without a reply.");
               return finalData;
@@ -7164,6 +7193,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
           // The person's own edits to the process on the whiteboard (or a recipe they ran).
           boardInstructions: (window.bzBoardInstructions && window.bzBoardInstructions()) || undefined,
+          // The board's browser nodes (globes): what BeeZilla runs in its own browser at their step.
+          boardNodes: (function () { try { var n = window.bzBoardNodes && window.bzBoardNodes(); return n && n.length ? n : undefined; } catch (_) { return undefined; } })(),
           // What they were looking at on the Idea Board as this turn started (above).
           boardView: boardView,
         };

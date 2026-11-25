@@ -19,7 +19,7 @@
  * The Idea Board's own steps (zoom, add a note, connect two cards, make an area…)
  * are listed in boardPilot.ts and run by the board itself (whiteboard.js `act`).
  */
-import { acceptedOffer, boardStep, closedBoardStep, orchestrateStep, type BoardStep } from "./boardPilot";
+import { acceptedOffer, boardStep, browserAtStep, closedBoardStep, orchestrateStep, type BoardStep } from "./boardPilot";
 
 export type PrivacyMode = "advocate" | "lockdown" | "open";
 
@@ -227,6 +227,13 @@ export function planAppActions(message: string, current?: PrivacyMode | null, ct
 function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
   const m = normal(message);
   if (!m) return null;
+  // "When you get to the song step, go to … and download the song": a job for BeeZilla's own
+  // browser, joined to that step. The whole sentence is the job, however long, so it comes first.
+  // (It starts "when/once/at … step", which no orchestration request below does.)
+  if (m.length <= 1300) {
+    const atStep = browserAtStep(m.replace(LEAD, "").replace(TAIL, ""));
+    if (atStep) return [atStep];
+  }
   // Building or changing an orchestration on the board (boardPilot.ts orchestrateStep):
   // the whole message is the request, however long, so it is never split into clauses.
   if (m.length <= ORCH_MAX_LENGTH) {
