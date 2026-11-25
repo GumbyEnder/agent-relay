@@ -1711,6 +1711,10 @@
       '<div class="bzs-h" role="heading" aria-level="3">Honey Drops</div>',
       '<div class="bzs-row"><span class="bzs-honey"></span><a class="bzs-link" href="/buzzy/wallet">Open wallet</a></div>',
       "</div>",
+      // Every option and setting on one page, with a search, for when one isn't where you looked.
+      '<div class="bzs-sec" data-bzs="all">',
+      '<div class="bzs-row"><span class="bzs-muted">Can’t find a setting?</span><a class="bzs-link" href="/buzzy/options">All options</a></div>',
+      "</div>",
     ].join("");
     dock.appendChild(panel);
     document.body.appendChild(dock);
@@ -1777,7 +1781,10 @@
       if (e.target && e.target.closest && e.target.closest("a[href]")) close(false);
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && isOpen()) close(true);
+      // Focus goes back to the gear only from inside the panel (or from nowhere): a box on the
+      // page you were typing in keeps it, so its own Esc still works there.
+      var at = document.activeElement;
+      if (e.key === "Escape" && isOpen()) close(!at || at === document.body || panel.contains(at));
     });
     // The panel closes with its X, Esc, or the gear: a click on the page around it does
     // nothing (owner, 2026-11-21: "no click-outside-to-close").
@@ -1789,6 +1796,7 @@
       sec("account").hidden = !on;
       sec("plan").hidden = !on;
       sec("honey").hidden = !on;
+      sec("all").hidden = !on;
     }
     function paintAccount(name, email) {
       q(".bzs-name").textContent = name || "";
