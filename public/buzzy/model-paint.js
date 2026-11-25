@@ -42,7 +42,7 @@
 import * as THREE from "./vendor/three/three.module.min.js";
 import { GLTFLoader } from "./vendor/three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "./vendor/three/addons/controls/OrbitControls.js";
-import { GlbPatch, copyOf, readGlb, readModel as readModelFile } from "./glb-patch.js";
+import { GlbPatch, copyOf, readGlb, readModel as readModelFile, writeGlb } from "./glb-patch.js";
 
 export const REGIONS = [
   { id: 1, key: "red", name: "Red", css: "#ff4d4d", rgb: [255, 60, 60] },
@@ -534,9 +534,12 @@ export async function open(opts) {
     const bytes = new Uint8Array(await res.arrayBuffer());
     const glb = readModelFile(bytes);   // a .glb, or a .gltf with its data inside it (the result is saved as a .glb either way)
     new GlbPatch(glb);                  // says now if the file keeps its data outside itself
-    const g = await parseGltf(bytes);
+    // What the loader opens is rebuilt from the parts that were just checked (one description, one binary part, the chunks it does
+    // not know): nothing the check did not see can reach it, whichever way the file was laid out. A saved copy starts from these bytes.
+    const checked = writeGlb(glb.json, glb.bin, glb.extra);
+    const g = await parseGltf(checked);
     if (!g || !g.scene) throw new Error("that file has no model in it");
-    return { bytes, glb, gltf: g };
+    return { bytes: checked, glb, gltf: g };
   }
   function unsupported(g) {
     let bad = "";

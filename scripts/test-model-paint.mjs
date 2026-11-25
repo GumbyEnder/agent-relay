@@ -241,6 +241,30 @@ console.log("\nNothing is fetched from outside, and nothing in the file is dropp
   const ca = colours.json.accessors[acc];
   ok("per-vertex floats are a vertex accessor of their own (four to a vertex)", ca.type === "VEC4" && ca.componentType === 5126 && ca.count === 2 && colours.json.bufferViews[ca.bufferView].target === 34962);
 }
+console.log("\nOne description, one binary part");
+{
+  // A .glb built by hand, so it can hold what writeGlb never writes: two descriptions, two binary parts.
+  const pad = (u8, fill = 0) => { const out = new Uint8Array(Math.ceil(u8.length / 4) * 4).fill(fill); out.set(u8); return out; };
+  const jsonChunk = (j) => ({ type: 0x4e4f534a, bytes: pad(new TextEncoder().encode(JSON.stringify(j)), 0x20) });
+  const binChunk = (b) => ({ type: 0x004e4942, bytes: pad(b) });
+  const glbOf = (chunks) => {
+    let len = 12; chunks.forEach((c) => { len += 8 + c.bytes.length; });
+    const out = new Uint8Array(len); const dv = new DataView(out.buffer);
+    dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, len, true);
+    let at = 12; for (const c of chunks) { dv.setUint32(at, c.bytes.length, true); dv.setUint32(at + 4, c.type, true); out.set(c.bytes, at + 8); at += 8 + c.bytes.length; }
+    return out;
+  };
+  const ambiguous = (fn) => { try { fn(); return false; } catch (e) { return e instanceof GlbError && /more than one description or binary part/.test(e.message); } };
+  const evil = copyOf(base.json); evil.images = [{ uri: "https://example.com/never-asked.png", mimeType: "image/png" }];
+  ok("a plain hand-built .glb (one description, one binary part) reads", readModel(glbOf([jsonChunk(base.json), binChunk(base.bin)])).json.nodes.length === base.json.nodes.length);
+  ok("a .glb with two descriptions is refused: a viewer takes the last one, this checked the first", ambiguous(() => readModel(glbOf([jsonChunk(base.json), binChunk(base.bin), jsonChunk(evil)]))) && ambiguous(() => readGlb(glbOf([jsonChunk(base.json), jsonChunk(evil), binChunk(base.bin)]))));
+  ok("…and one with two binary parts is refused too", ambiguous(() => readModel(glbOf([jsonChunk(base.json), binChunk(base.bin), binChunk(new Uint8Array(8))]))));
+  ok("…while any number of chunks it does not know are kept, not refused", readGlb(glbOf([jsonChunk(base.json), binChunk(base.bin), { type: 0x31585859, bytes: new Uint8Array(8) }, { type: 0x32585859, bytes: new Uint8Array(4) }])).extra.length === 2);
+  // What the painter hands the loader is rebuilt from what was checked, so the two cannot differ.
+  const rebuilt = writeGlb(readModel(glbOf([jsonChunk(base.json), binChunk(base.bin)])).json, base.bin, []);
+  const again = readGlb(rebuilt);
+  ok("rebuilt from the checked parts, a file reads back as the same description and binary part, and nothing else", same(again.json, base.json) && same(Array.from(again.bin), Array.from(base.bin)) && again.extra.length === 0);
+}
 {
   // The Library's limit for one file is the server's, kept in step here (a change to one without the other would let a paid
   // repaint through for a file that cannot be saved).

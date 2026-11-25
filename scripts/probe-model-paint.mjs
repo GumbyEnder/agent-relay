@@ -229,7 +229,22 @@ await page.evaluate(async () => {
     const v = emb.bufferViews[emb.images[0].bufferView];
     emb.images[0] = { uri: "data:image/png;base64," + b64(g.bin.slice(v.byteOffset, v.byteOffset + v.byteLength)), mimeType: "image/png" };
     window.__bytes.datauri = writeGlb(emb, g.bin);
-    for (const k of ["spyimage", "spybuffer", "datauri"]) window.__glbs[k] = URL.createObjectURL(new Blob([window.__bytes[k]], { type: "model/gltf-binary" }));
+    // …a .glb with TWO descriptions: the first is clean, the second (the one a loader takes) points a picture at the spy address.
+    const padTo4 = (u8, fill) => { const o = new Uint8Array(Math.ceil(u8.length / 4) * 4).fill(fill); o.set(u8); return o; };
+    const chunk = (type, bytes) => ({ type, bytes });
+    const jsonOf = (j) => chunk(0x4e4f534a, padTo4(new TextEncoder().encode(JSON.stringify(j)), 0x20));
+    const glbOf = (chunks) => {
+      let len = 12; chunks.forEach((c) => { len += 8 + c.bytes.length; });
+      const out = new Uint8Array(len); const dv = new DataView(out.buffer);
+      dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, len, true);
+      let at = 12; for (const c of chunks) { dv.setUint32(at, c.bytes.length, true); dv.setUint32(at + 4, c.type, true); out.set(c.bytes, at + 8); at += 8 + c.bytes.length; }
+      return out;
+    };
+    window.__bytes.twodesc = glbOf([jsonOf(g.json), chunk(0x004e4942, padTo4(g.bin, 0)), jsonOf(img)]);
+    // …and a .glb with bytes after its declared end (a loader ignores them; the painter's copy must not carry them).
+    const tail = new Uint8Array(window.__bytes.panel.length + 64); tail.set(window.__bytes.panel); tail.fill(7, window.__bytes.panel.length);
+    window.__bytes.trailing = tail;
+    for (const k of ["spyimage", "spybuffer", "datauri", "twodesc", "trailing"]) window.__glbs[k] = URL.createObjectURL(new Blob([window.__bytes[k]], { type: "model/gltf-binary" }));
   }
   // A grille with holes (alphaMode MASK: left half solid red, right half cut away) in front of a wall.
   {
@@ -979,6 +994,38 @@ await section("Q1.", async () => {
   const d = await desc();
   check("Q. a picture inside the file as a data: address is the file's own: it opens, paints, and comes out inside the binary part with no address left", st.loaded && !st.failed && d.meshes[0].length === 2 && d.uris === 0 && (await hits()) === 0, J(st) + J(d.meshes));
   await close();
+
+  // A file with two descriptions: a viewer takes the LAST one, a check that read the first saw a clean model.
+  await page.evaluate(() => fetch("/spyreset", { method: "POST" }));
+  await page.evaluate(async () => { try { await new Promise((res, rej) => new window.__GLTFLoader().parse(window.__bytes.twodesc.slice().buffer, "", res, rej)); } catch { /* it asked; that is all this wants */ } });
+  await sleep(500);
+  const control2 = await hits();
+  check("Q. (control: a loader given a .glb with two descriptions opens the LAST one and asks the address it names, though the first is clean)", control2 >= 1, String(control2));
+  await page.evaluate(() => fetch("/spyreset", { method: "POST" }));
+  const two = await open("twodesc");
+  await sleep(600);
+  const n2 = await hits();
+  check("Q. a .glb with two descriptions is refused before anything opens it, in words, and the address in the second one is never asked", !!two.failed && /more than one description or binary part/.test(await page.textContent(".mp-hint")) && n2 === 0, `${J(two)} hits ${n2} ${await page.textContent(".mp-hint")}`);
+  await page.keyboard.press("Escape");
+  await sleep(100);
+  await gone();
+
+  // What the loader is handed is what was checked: rebuilt from the checked description and binary part, byte for byte.
+  await page.evaluate(() => { const P = window.__GLTFLoader.prototype; if (!P.__real) { P.__real = P.parse; P.parse = function (data, path, onLoad, onError) { window.__loaderInput = new Uint8Array(data.slice(0)); return P.__real.call(this, data, path, onLoad, onError); }; } });
+  for (const [key, what] of [["trailing", "a .glb with bytes after its declared end"], ["gltf", "a .gltf (text) with its data inside it"]]) {
+    await page.evaluate(() => { window.__loaderInput = null; });
+    const o = await open(key);
+    const got = await page.evaluate(async (k) => {
+      const { readModel, writeGlb } = await import("/buzzy/glb-patch.js");
+      const g = readModel(window.__bytes[k]);
+      const want = writeGlb(g.json, g.bin, g.extra);
+      const have = window.__loaderInput;
+      const same = !!have && have.length === want.length && have.every((v, i) => v === want[i]);
+      return { same, haveLen: have && have.length, wantLen: want.length, sourceLen: window.__bytes[k].length, magic: have ? Array.from(have.slice(0, 4)) : null };
+    }, key);
+    check(`Q. the loader is handed what was checked, not the file as it came (${what}): the same bytes the checked parts are written as`, !!o.loaded && got.same && got.haveLen !== got.sourceLen, J(got));
+    await close();
+  }
 });
 // Q2. Alpha cutouts: the brush sees what the drawing shows.
 await section("Q2.", async () => {

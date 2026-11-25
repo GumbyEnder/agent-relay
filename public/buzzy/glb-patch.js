@@ -48,6 +48,11 @@ export function isGlb(input) {
   return b.length >= 12 && new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true) === MAGIC;
 }
 
+// A viewer takes the LAST description and binary part when a file has several; this reads the first. A file with more than one of
+// either could show the check one model and the loader another (and the loader could then fetch what was never checked).
+const AMBIGUOUS = "That .glb has more than one description or binary part in it, so it is not clear which one a viewer would open. " +
+  "Save it again as one clean .glb.";
+
 /** A .glb as { json, bin, extra }: extra holds any chunk that is neither the description nor the binary part. */
 export function readGlb(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -61,11 +66,14 @@ export function readGlb(input) {
     const len = dv.getUint32(at, true), type = dv.getUint32(at + 4, true);
     const start = at + 8;
     if (start + len > total) throw new GlbError("That .glb is cut short.");
-    if (type === CHUNK_JSON && !json) {
+    if (type === CHUNK_JSON) {
+      if (json) throw new GlbError(AMBIGUOUS);
       try { json = JSON.parse(new TextDecoder().decode(bytes.subarray(start, start + len))); }
       catch { throw new GlbError("That .glb's description could not be read."); }
-    } else if (type === CHUNK_BIN && !bin) bin = bytes.slice(start, start + len);
-    else extra.push({ type, bytes: bytes.slice(start, start + len) });
+    } else if (type === CHUNK_BIN) {
+      if (bin) throw new GlbError(AMBIGUOUS);
+      bin = bytes.slice(start, start + len);
+    } else extra.push({ type, bytes: bytes.slice(start, start + len) });
     at = start + len;
   }
   if (!json || typeof json !== "object") throw new GlbError("That .glb has no description in it.");
