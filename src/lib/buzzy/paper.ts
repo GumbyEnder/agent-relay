@@ -64,6 +64,14 @@ export interface PaperPayload {
   facts: PaperFactPayload[];
   /** Confirmed lines only. Proposed and unknown are not in here. */
   accepted: Array<{ key: string; label: string; value: string }>;
+  /**
+   * Is the job this paper was dropped on still the work in hand? A paper is only
+   * put on a blank landing while its job is open (CR-14). False also when the job
+   * row is gone: a paper whose job was deleted is history, not a landing page.
+   */
+  jobOpen: boolean;
+  /** The job's title, so a paper shown on a fresh page says which job it came from. */
+  jobTitle: string;
 }
 
 const INSTRUCTION =
@@ -441,11 +449,58 @@ type PaperRow = {
   body: string;
 };
 
+/**
+ * "Open" for the job a paper belongs to. Two signals, the same two the Library
+ * uses (jobComplete() in library.html): a stored status that names the end, and the
+ * board — all four steps in Done. Nothing here is a finishing word the rest of the
+ * product does not already write ("Done", "Deliverable ready", a cancelled job).
+ */
+export const JOB_DONE_STATUSES = [
+  "done",
+  "completed",
+  "complete",
+  "delivered",
+  "deliverable ready",
+  "cancelled",
+  "canceled",
+  "archived",
+  "closed",
+];
+
+/**
+ * The same rule as JOB_OPEN_SQL below, for a job row already in hand. Both exist on
+ * purpose: the SQL picks the newest OPEN paper in one round trip, and this says
+ * whether the paper it picked is still open. scripts/test-paper-open.ts asserts the
+ * two agree on the same table of rows.
+ */
+export function jobIsOpen(status: string | null | undefined, data: unknown): boolean {
+  if (status != null && JOB_DONE_STATUSES.includes(String(status).trim().toLowerCase())) return false;
+  const board = data && typeof data === "object" ? (data as Record<string, unknown>).board : null;
+  const done = board && typeof board === "object" ? (board as Record<string, unknown>).Done : null;
+  return !(Array.isArray(done) && done.length >= 4);
+}
+
+/**
+ * SQL for "that job is still open", with the job aliased `j`. Keep in step with
+ * jobIsOpen(): a job row that is missing is NOT open (the paper's job was deleted),
+ * which is why the test starts with `j.id IS NOT NULL`.
+ */
+const JOB_OPEN_SQL = `(j.id IS NOT NULL
+  AND COALESCE(lower(btrim(j.status)), '') NOT IN (${JOB_DONE_STATUSES.map((s) => `'${s}'`).join(", ")})
+  AND (CASE WHEN jsonb_typeof(j.data->'board'->'Done') = 'array'
+            THEN jsonb_array_length(j.data->'board'->'Done') ELSE 0 END) < 4)`;
+
+
 function isCompanyId(id: string): boolean {
   return /^co_[a-z0-9]{8,32}$/.test(id);
 }
 
-function payloadFrom(row: PaperRow, facts: FactRow[], read: { sentence: string; question: string | null; gaps: string[]; reply: string }): PaperPayload {
+function payloadFrom(
+  row: PaperRow,
+  facts: FactRow[],
+  read: { sentence: string; question: string | null; gaps: string[]; reply: string },
+  job: { open: boolean; title: string },
+): PaperPayload {
   const visible = facts.filter((f) => f.status !== "dropped");
   const mapped = visible.map((f) => ({
     id: f.id,
@@ -472,6 +527,8 @@ function payloadFrom(row: PaperRow, facts: FactRow[], read: { sentence: string; 
     accepted: mapped
       .filter((f) => f.status === "confirmed" && f.value.trim())
       .map((f) => ({ key: f.key, label: f.label, value: f.value })),
+    jobOpen: job.open,
+    jobTitle: job.title,
   };
 }
 
@@ -521,12 +578,20 @@ function unpackBody(body: string): { sentence: string; question: string | null; 
 }
 
 async function loadPaper(sql: Sql, userId: string, paperId: string): Promise<PaperPayload | null> {
-  const rows = await sql<PaperRow>`
-    SELECT id, company_id, job_id, filename, kind, place, body
-    FROM buzzy_papers
-    WHERE id = ${paperId} AND user_id = ${userId}
-    LIMIT 1
-  `;
+  // One query for the paper and its job: whether the job is still open decides
+  // whether a blank landing may show this paper at all (CR-14).
+  const rows = await sql.query<
+    PaperRow & { job_title: string | null; job_open: boolean | null }
+  >(
+    `SELECT p.id, p.company_id, p.job_id, p.filename, p.kind, p.place, p.body,
+            j.title AS job_title,
+            ${JOB_OPEN_SQL} AS job_open
+       FROM buzzy_papers p
+       LEFT JOIN buzzy_jobs j ON j.id = p.job_id AND j.user_id = p.user_id
+      WHERE p.id = $1 AND p.user_id = $2
+      LIMIT 1`,
+    [paperId, userId],
+  );
   if (!rows.length) return null;
   const facts = await sql<FactRow>`
     SELECT id, paper_id, fact_key, label, value, status, place, original_value
@@ -536,7 +601,10 @@ async function loadPaper(sql: Sql, userId: string, paperId: string): Promise<Pap
   `;
   const meta = unpackBody(rows[0].body || "");
   const row = { ...rows[0], body: meta.text.slice(0, 20000) };
-  return payloadFrom(row, facts, meta);
+  return payloadFrom(row, facts, meta, {
+    open: rows[0].job_open === true,
+    title: String(rows[0].job_title || ""),
+  });
 }
 
 export async function acceptedPaperFacts(
@@ -739,6 +807,7 @@ export async function latestPaper(
   jobId?: string | null,
 ): Promise<PaperPayload | null> {
   if (!isCompanyId(companyId)) return null;
+  // Named job: that job's paper, open or finished — you asked for that job.
   const rows = jobId
     ? await sql<{ id: string }>`
         SELECT id FROM buzzy_papers
@@ -746,14 +815,51 @@ export async function latestPaper(
         ORDER BY created_at DESC
         LIMIT 1
       `
-    : await sql<{ id: string }>`
-        SELECT id FROM buzzy_papers
-        WHERE user_id = ${userId} AND company_id = ${companyId}
-        ORDER BY created_at DESC
-        LIMIT 1
-      `;
+    : // No job named (a blank landing): only the newest paper whose job is still
+      // open. A finished job's paper is history; it used to reappear here forever
+      // and, worse, the page adopted its job id (CR-14: pp_0165a978ab20406d and
+      // job_283b80118dc746fb on shane@veanox.com). JOIN, not LEFT JOIN: a paper
+      // whose job row is gone is not open either.
+      await sql.query<{ id: string }>(
+        `SELECT p.id FROM buzzy_papers p
+           JOIN buzzy_jobs j ON j.id = p.job_id AND j.user_id = p.user_id
+          WHERE p.user_id = $1 AND p.company_id = $2 AND ${JOB_OPEN_SQL}
+          ORDER BY p.created_at DESC
+          LIMIT 1`,
+        [userId, companyId],
+      );
   if (!rows.length) return null;
   return loadPaper(sql, userId, rows[0].id);
+}
+
+/**
+ * Take a paper off the account — the X on the paper panel (CR-14).
+ *
+ * Lines the owner already accepted stay: they are company facts, and "the sheet is
+ * gone" must not quietly delete a line someone confirmed. Only the unconfirmed
+ * proposed lines go with the paper. Callers read accepted lines straight from
+ * buzzy_paper_facts (acceptedPaperFacts), so later turns keep using them.
+ */
+export async function deletePaper(
+  sql: Sql,
+  userId: string,
+  paperId: string,
+): Promise<{ ok: true } | { ok: false; error: string; code: string; status: number }> {
+  if (!/^pp_[a-z0-9]{8,32}$/.test(paperId)) {
+    return { ok: false, error: "That paper isn't on your account.", code: "not_found", status: 404 };
+  }
+  const rows = await sql<{ id: string }>`
+    SELECT id FROM buzzy_papers WHERE id = ${paperId} AND user_id = ${userId} LIMIT 1
+  `;
+  if (!rows.length) {
+    return { ok: false, error: "That paper isn't on your account.", code: "not_found", status: 404 };
+  }
+  await sql`
+    DELETE FROM buzzy_paper_facts
+    WHERE paper_id = ${paperId} AND user_id = ${userId} AND status <> 'confirmed'
+  `;
+  await sql`DELETE FROM buzzy_papers WHERE id = ${paperId} AND user_id = ${userId}`;
+  return { ok: true };
 }
 
 export async function updatePaperLine(
