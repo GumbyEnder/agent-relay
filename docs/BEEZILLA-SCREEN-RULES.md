@@ -46,7 +46,10 @@ Escape key or an X closes anything that opens up."
 4. A new pop-up is not finished until a test presses outside it and finds it still open.
    `scripts/test-no-outside-close.mjs` reads the source for backdrop and outside-press
    closers (it runs in `test:ci`); `scripts/probe-no-outside-close.mjs` presses outside the
-   real ones in a browser.
+   real ones in a browser, at 360/390/430/1366, and measures each exit control — settings X,
+   privacy X, the key dialog's `.ob-x`, and the two recipe dialogs' `Cancel`/`Close` — for
+   being wholly inside the viewport, actually hittable at its centre, and closing on a real
+   click. A recipe dialog legitimately has no X; `Cancel`/`Close` satisfies this rule.
 
 ## Critical: boxes and panels can be resized
 
