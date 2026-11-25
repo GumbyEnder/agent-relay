@@ -1058,14 +1058,14 @@ check(parseQuestion('{"question":"When do you need it by?","suggested":"Before t
     (serverSrc.match(/const orchestrating = asksToOrchestrate\(message, \{ boardHasFlow: flowOnBoard \}\)/g) ?? []).length === 1 &&
       (serverSrc.match(/takeBoardPictures\(/g) ?? []).length === 1 &&
       serverSrc.indexOf("const orchestrating = asksToOrchestrate(") < serverSrc.indexOf("const decided = nextStep(savedStep") &&
-      /\n\s+buildsOnBoard: orchestrating,\n/.test(serverSrc),
+      /\n\s+buildsOnBoard: orchestrating(?: \|\| browserGo)?,\n/.test(serverSrc),
     "the server tells one mode with the board's own flag, worked out once, before one mode decides",
   );
   check(
-    /const oneModeNote = orchestrating \? "" : turnNote\(/.test(serverSrc) &&
-      /assessment\.size !== "small" && !orchestrating;/.test(serverSrc) &&
+    /const oneModeNote = orchestrating(?: \|\| browserGo)? \? "" : turnNote\(/.test(serverSrc) &&
+      /assessment\.size !== "small" && !orchestrating(?: && !browserGo)?;/.test(serverSrc) &&
       /const playbookBlock = !orchestrating && \(requestedDraft \|\| hasExistingDraft\)/.test(serverSrc) &&
-      /if \(!orchestrating\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(serverSrc),
+      /if \(!orchestrating(?: && !browserGo)?\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(serverSrc),
     "and on that turn: no one-mode note, go reminder, redo or playbook, and the stored question is left alone",
   );
 }
