@@ -184,9 +184,14 @@ await page.waitForTimeout(400);
 const open = await page.evaluate(() => ({
   w: Math.round(document.querySelector("#bzAgents").getBoundingClientRect().width),
   pad: getComputedStyle(document.documentElement).paddingLeft,
+  // The agent panel (agents.css, html.bz-agent-panel) has its own column right of the strip, and
+  // the page moves over for both; pressing an agent opens it, so it is open here.
+  panel: document.documentElement.classList.contains("bz-agent-panel")
+    ? parseInt(getComputedStyle(document.documentElement).getPropertyValue("--bzap-w"), 10) || 300
+    : 0,
   roles: [...document.querySelectorAll("#bzAgents .bzag-role")].map((n) => n.textContent),
 }));
-check("opened: names and jobs show, the page moved further", open.w > 200 && open.pad === open.w + "px" && open.roles.includes("helps with to-do list"), open);
+check("opened: names and jobs show, the page moved further", open.w > 200 && open.pad === open.w + open.panel + "px" && open.roles.includes("helps with to-do list"), open);
 check("with the strip open the box you type in is still wide enough", await page.evaluate(() => Math.round(document.getElementById("chatInput").getBoundingClientRect().width)) >= 140, await page.evaluate(() => Math.round(document.getElementById("chatInput").getBoundingClientRect().width)));
 await shot("5-strip-open");
 const edge = await page.evaluate(() => { const r = document.querySelector("#bzAgents .bzag-edge").getBoundingClientRect(); return { x: r.x + r.width / 2, y: 400 }; });
@@ -256,6 +261,12 @@ const bee = await page.evaluate(() => ({ name: document.querySelector(".bz-brand
 check("pressing BeeZilla puts the yellow button and the bee back", bee.name === "BeeZilla" && bee.label === "Talk to BeeZilla" && /255, 193, 7|255, 179, 0|255, 213, 79/.test(bee.bg), bee);
 
 // 9. A phone: a drawer, closed only by its X or Esc.
+// Pressing an agent also opens its panel (agents.js, #bzAgentPanel). On a phone that panel is a
+// sheet over the whole page, the drawer's tab included, so it is closed with its X first.
+if (await page.locator("#bzAgentPanel:not([hidden]) .bzap-x").count()) {
+  await page.locator("#bzAgentPanel .bzap-x").click();
+  await page.waitForTimeout(250);
+}
 await page.setViewportSize({ width: 390, height: 800 });
 await page.waitForTimeout(400);
 const ph = await page.evaluate(() => ({
