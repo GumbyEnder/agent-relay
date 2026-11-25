@@ -14,17 +14,20 @@
 //      says "Nothing matches" in the live region (#aoCount) too, so a screen reader hears it.
 //   D. Esc clears the search; clicking outside it changes nothing (nothing here closes on an
 //      outside click). With Settings (or Feedback) open, the first Esc closes only that panel and the
-//      search keeps its words; the next Esc clears it (on the page opened directly and on the one
-//      the settings gear opened in place).
+//      search keeps its words and the focus; the next Esc, with nothing clicked in between, clears
+//      it (on the page opened directly and on the one the settings gear opened in place). Esc from
+//      inside Settings still gives the focus back to the gear.
 //   E. Every "Open" link goes to a page the server serves.
 //   F. An "Open" link is a soft move (nothing reloads); the settings gear has an All options link.
 //      Leaving the page takes its window resize listener off again (no detached page kept alive).
 //   G. At 390px wide there is no sideways scroll and nothing sticks out past the right edge.
 //   H. No script errors; a desktop and a phone screenshot are saved.
 //   I. Open, Advocate and Lockdown are drawn in the privacy button's colours (read from privacy.css).
-//   J. A card drags onto the Idea Board: it is draggable with a grab cursor, its drag carries a
-//      note (name, what it does, where it is), and dropped on the header's strip it lands on the
-//      board as that note.
+//   J. An option drags onto the Idea Board by its handle, with real mouse drags: the handle has a
+//      grab cursor (the card itself does not drag), the header's strip comes up, and dropped there
+//      it lands on the board as a note (name, what it does, where it is). The Open link still drags
+//      as a link (what lands keeps its address), and the words can be selected with the mouse; a
+//      drag of selected words carries the words, not the option's note.
 // usage: node scripts/probe-options-page.mjs [origin]
 //   BZ_PROBE_CDP=<DevTools URL>  drive that browser (`ai-screen.sh browser` prints one); unset, a
 //                                headless browser with no window is started
@@ -144,23 +147,25 @@ try {
     return page.locator("#aoList .ao-item").filter({ has: page.locator(".ao-name", { hasText: exact }) }).first();
   };
   // A panel (Settings, Feedback) stays open while you type in the search: the first Esc closes only
-  // that panel and the search keeps its words; the next Esc clears the search.
+  // that panel, and the search keeps its words and the focus, so the next Esc clears the search
+  // with nothing clicked in between.
+  const focusedId = () => page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
   const escWithPanel = async (where, panel) => {
     await search("stretch");
     await page.click(panel.opener);
     await page.waitForSelector(panel.open);
-    await page.click("#aoQ");
+    await page.click("#aoQ");                          // back to the search; the panel stays open
     await settle(150);
     const openBefore = !!(await page.$(panel.open));
     await page.keyboard.press("Escape");
     await settle(300);
     const openAfter = !!(await page.$(panel.open));
     const kept = await page.inputValue("#aoQ");
-    check(`${where}: Esc with ${panel.name} open closes only ${panel.name}; the search keeps its words`, openBefore && !openAfter && kept === "stretch" && (await names()).length > 0, `${panel.name} open before=${openBefore} after=${openAfter}; search="${kept}"`);
-    await page.click("#aoQ");
-    await page.keyboard.press("Escape");
+    const focus = await focusedId();
+    check(`${where}: Esc with ${panel.name} open closes only ${panel.name}; the search keeps its words and the focus`, openBefore && !openAfter && kept === "stretch" && focus === "aoQ" && (await names()).length > 0, `${panel.name} open before=${openBefore} after=${openAfter}; search="${kept}"; focus on "${focus}"`);
+    await page.keyboard.press("Escape");               // nothing clicked in between
     await settle(250);
-    check(`${where}: …and the next Esc clears the search`, (await page.inputValue("#aoQ")) === "" && (await names()).length === OPTIONS.length, `search="${await page.inputValue("#aoQ")}"`);
+    check(`${where}: …and the next Esc, with nothing clicked in between, clears the search`, (await page.inputValue("#aoQ")) === "" && (await names()).length === OPTIONS.length, `search="${await page.inputValue("#aoQ")}"; focus on "${await focusedId()}"`);
   };
   const SETTINGS = { name: "Settings", opener: "#bzGear", open: "#bzSettings:not([hidden])" };
   const FEEDBACK = { name: "Feedback", opener: 'button[aria-controls="bzFeedback"]', open: "#bzFeedback.open:not(.min)" };
@@ -274,6 +279,15 @@ try {
   check("the ✕ clears it too", (await page.inputValue("#aoQ")) === "", "the box still had text");
   await escWithPanel("opened directly", SETTINGS);
   await escWithPanel("opened directly", FEEDBACK);
+  // Only a box on the page keeps the focus: Esc from inside Settings gives it back to the gear.
+  await page.click("#bzGear");
+  await page.waitForSelector(SETTINGS.open);
+  await settle(150);
+  const inPanel = await page.evaluate(() => !!(document.activeElement && document.activeElement.closest("#bzSettings")));
+  await page.keyboard.press("Escape");
+  await settle(250);
+  const backToGear = await page.evaluate(() => ({ shut: document.getElementById("bzSettings").hidden, focus: (document.activeElement && document.activeElement.id) || "" }));
+  check("Esc from inside Settings closes it and gives the focus back to the gear", inPanel && backToGear.shut && backToGear.focus === "bzGear", `focus in the panel first=${inPanel}; ${JSON.stringify(backToGear)}`);
 
   // ── I. the privacy modes in the privacy button's colours ─────────────────
   await search("privacy");
@@ -338,32 +352,98 @@ try {
   check("…and the settings panel put itself away", gearShut, "the panel is still open");
   await escWithPanel("opened by the gear", SETTINGS);
 
-  // ── J. an option drags onto the Idea Board ───────────────────────────────
+  // ── J. an option drags onto the Idea Board by its handle ─────────────────
+  // Real mouse drags (Playwright drives Chromium's own drag and drop). Only the handle carries the
+  // option: the Open link drags as a link, and the words can be selected and dragged as words.
   await search("stretch");
   await page.waitForSelector(".bz-dropstrip", { state: "attached", timeout: 20000 });
   const want = OPTIONS.find((o) => o.group === "Sketch" && o.name === "Resize / skew…");
-  const grab = await cardOf("Resize / skew…").evaluate((li) => {
-    const dt = new DataTransfer();
-    li.querySelector(".ao-name").dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
-    window.__optDt = dt;
-    let card = null;
-    try { card = JSON.parse(dt.getData("application/x-beezilla-card")); } catch { card = null; }
-    const strip = document.querySelector(".bz-dropstrip");
-    return { draggable: li.draggable, cursor: getComputedStyle(li).cursor, card, strip: !!strip && !strip.hidden };
+  const optCard = cardOf("Resize / skew…");
+  const looks = await optCard.evaluate((li) => {
+    const grip = li.querySelector(".ao-grab");
+    return {
+      handle: !!grip && grip.draggable === true, handleCursor: grip ? getComputedStyle(grip).cursor : "",
+      card: li.draggable, cardPayload: li.hasAttribute("data-bz-card"), cardCursor: getComputedStyle(li).cursor,
+    };
   });
-  check("an option card is draggable and shows a grab cursor", grab.draggable === true && grab.cursor === "grab", `draggable=${grab.draggable} cursor=${grab.cursor}`);
-  check("its drag carries a note: the option's name, what it does and where it is", !!grab.card && grab.card.kind === "note" && grab.card.title === want.name && grab.card.body.includes(want.what) && grab.card.body.includes(want.where), JSON.stringify(grab.card));
-  check("…and the header's strip comes up to say where to drop it", grab.strip, "the drop strip did not show");
-  const landed = await page.evaluate(async () => {
-    const strip = document.querySelector(".bz-dropstrip");
-    strip.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: window.__optDt }));
-    await new Promise((r) => setTimeout(r, 1200));
-    const status = (strip.querySelector(".bz-ds-text") || {}).textContent || "";
-    const notes = [...document.querySelectorAll(".wb-card.wb-k-note")].map((n) => (n.innerText || n.textContent || "").replace(/\s+/g, " ").trim());
-    return { status, notes };
+  check("an option has a drag handle with a grab cursor; the card itself does not drag", looks.handle && looks.handleCursor === "grab" && looks.card === false && !looks.cardPayload && looks.cardCursor !== "grab", JSON.stringify(looks));
+  const notes = () => page.$$eval(".wb-card.wb-k-note", (els) => els.map((n) => (n.innerText || n.textContent || "").replace(/\s+/g, " ").trim()));
+  // Every card on every board, as this browser keeps them.
+  const boardCards = () => page.evaluate(() => {
+    const out = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith("bz.board.")) continue;
+      try { (JSON.parse(localStorage.getItem(k)).cards || []).forEach((c) => out.push({ kind: c.kind, title: c.title, url: c.url })); } catch { /* not a board */ }
+    }
+    return out;
   });
-  check("dropped on the strip, it lands on the Idea Board as that note", landed.notes.some((t) => t.includes(want.name) && t.includes(want.where)), JSON.stringify(landed));
+  // Press at `at`, move a little (the drag starts and the header's strip comes up), let go on the strip.
+  const dragToStrip = async (at) => {
+    if (!at) return false;                             // nothing there to press on
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x + 24, at.y + 24, { steps: 5 });
+    await settle(200);
+    const strip = await page.evaluate(() => {
+      const s = document.querySelector(".bz-dropstrip");
+      const r = s.getBoundingClientRect();
+      return { shown: !s.hidden && r.height > 0, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    if (strip.shown) await page.mouse.move(strip.x, strip.y, { steps: 10 });
+    await settle(150);
+    await page.mouse.up();
+    await settle(1300);
+    return strip.shown;
+  };
+  // A box to press in, or null when the element is not there.
+  const boxOf = async (sel) => ((await optCard.locator(sel).count()) ? optCard.locator(sel).first().boundingBox() : null);
+  await optCard.scrollIntoViewIfNeeded();
+  const hb = await boxOf(".ao-grab");
+  check("dragging the handle brings up the header's strip to say where to drop it", await dragToStrip(hb && { x: hb.x + hb.width / 2, y: hb.y + 20 }), hb ? "the drop strip did not show" : "there is no handle");
+  const landed = await notes();
+  check("dropped on the strip, it lands on the Idea Board as a note: the option's name, what it does and where it is", landed.some((t) => t.includes(want.name) && t.includes(want.what.slice(0, 40)) && t.includes(want.where)), JSON.stringify(landed));
   await page.screenshot({ path: join(SHOTS, "all-options-dropped-on-board.png"), fullPage: false });
+  // The Open link drags as a link: what lands keeps its address (the whole card used to drag, and
+  // turned the link into the option's note without it).
+  const href = await optCard.locator(".ao-open").evaluate((a) => a.href);
+  const namedNotes = async () => (await notes()).filter((t) => t.includes(want.where)).length;
+  const namedBefore = await namedNotes();
+  await optCard.scrollIntoViewIfNeeded();
+  const lb = await boxOf(".ao-open");
+  await dragToStrip(lb && { x: lb.x + lb.width / 2, y: lb.y + lb.height / 2 });
+  const linked = (await boardCards()).filter((c) => c.url === href);
+  const namedAfter = await namedNotes();
+  check("the Open link still drags as a link: it lands on the board with its address, not as the option's note", linked.length >= 1 && linked.every((c) => c.kind !== "note") && namedAfter === namedBefore, `cards with ${href}: ${JSON.stringify(linked)}; option notes ${namedBefore} → ${namedAfter}`);
+  // The words can be selected with the mouse (a card that drags as a whole starts a drag instead)…
+  await optCard.scrollIntoViewIfNeeded();
+  const wb = await boxOf(".ao-what");
+  if (wb) {
+    await page.mouse.move(wb.x + 3, wb.y + 9);
+    await page.mouse.down();
+    await page.mouse.move(wb.x + Math.min(wb.width - 8, 260), wb.y + 9, { steps: 8 });
+    await page.mouse.up();
+  }
+  const picked = (await page.evaluate(() => String(window.getSelection()))).trim();
+  check("the words on an option can be selected with the mouse", picked.length >= 12 && want.what.includes(picked), `selected “${picked}”`);
+  // …and a drag of selected words carries the words, not the option's note. A windowless browser
+  // does not start a drag from a press on a selection, so the dragstart is sent as the browser sends
+  // it (from the selected text, with its words) and dropped on the strip.
+  const wordsDrag = await page.evaluate(() => {
+    const sel = window.getSelection();
+    const node = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+    if (!node) return { node: 0, carried: null };
+    const dt = new DataTransfer();
+    dt.setData("text/plain", String(sel));
+    node.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const carried = Array.from(dt.types).includes("application/x-beezilla-card");
+    document.querySelector(".bz-dropstrip").dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return { node: node.nodeType, carried };
+  });
+  await settle(1300);
+  const wordNotes = (await notes()).filter((t) => t.includes(picked) && !t.includes(want.where));
+  check("…and a drag of selected words carries the words (not the option's note): they land as a note of their own", wordsDrag.node === 3 && wordsDrag.carried === false && wordNotes.length >= 1, JSON.stringify({ ...wordsDrag, wordNotes }));
+  await page.evaluate(() => window.getSelection().removeAllRanges());
   await page.evaluate(() => window.BeeZillaShell.go("/buzzy/sketch"));
   await page.waitForFunction(() => window.BeeZillaShell.currentKey === "/buzzy/sketch" && !window.BeeZillaShell.busy, null, { timeout: 20000 });
   rz = await resizeLeft();

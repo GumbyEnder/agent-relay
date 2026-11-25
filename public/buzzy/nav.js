@@ -1694,7 +1694,10 @@
       if (e.target && e.target.closest && e.target.closest("a[href]")) close(false);
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && isOpen()) close(true);
+      // Focus goes back to the gear only from inside the panel (or from nowhere): a box on the
+      // page you were typing in keeps it, so its own Esc still works there.
+      var at = document.activeElement;
+      if (e.key === "Escape" && isOpen()) close(!at || at === document.body || panel.contains(at));
     });
     // The panel closes with its X, Esc, or the gear: a click on the page around it does
     // nothing (owner, 2026-11-21: "no click-outside-to-close").

@@ -162,15 +162,24 @@
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
     }
     .ao-item {
+      position: relative;
       background: var(--bz-panel);
       border: 1px solid #2A2A2A;
       border-radius: 6px;
-      padding: 0.85rem 1rem 0.9rem;
+      padding: 0.85rem 1rem 0.9rem 2.1rem;   /* the left edge is the handle */
       min-width: 0;
       display: flex; flex-direction: column; gap: 0.4rem;
-      cursor: grab;                          /* every card drags onto the Idea Board */
     }
-    .ao-item:active { cursor: grabbing; }
+    /* The handle down the left edge drags the option onto the Idea Board. Only the handle:
+       the Open link still drags as a link, and the words can be selected and dragged as words. */
+    .ao-grab {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 1.6rem;
+      display: flex; justify-content: center; padding-top: 1.05rem;
+      color: #5c5c5c; cursor: grab; border-radius: 6px 0 0 6px;
+    }
+    .ao-grab:hover { color: var(--bz-yellow); background: #1c1c1c; }
+    .ao-grab:active { cursor: grabbing; }
+    .ao-grab svg { width: 10px; height: 16px; fill: currentColor; }
     .ao-top { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
     .ao-name { margin: 0; font-size: 1rem; font-weight: 700; color: var(--bz-yellow); min-width: 0; overflow-wrap: anywhere; }
     .ao-item[data-mode="open"] .ao-name { color: var(--bz-mode-open); }
@@ -258,7 +267,7 @@
   </script>
   <main>
     <h1>All options</h1>
-    <p class="ao-lede">Every option, setting and tool BeeZilla has, in one place and grouped by where you use it. Can&rsquo;t find something where you expected it? Type what you&rsquo;re looking for. Drag any option onto the Idea Board to keep it there as a note.</p>
+    <p class="ao-lede">Every option, setting and tool BeeZilla has, in one place and grouped by where you use it. Can&rsquo;t find something where you expected it? Type what you&rsquo;re looking for. Drag an option by the dots on its left onto the Idea Board to keep it there as a note.</p>
     <div class="ao-bar" role="search">
       <label class="ao-sr" for="aoQ">Search all options</label>
       <div class="ao-field">
@@ -291,6 +300,9 @@
         "/buzzy/recipes": "Recipes", "/buzzy/sketch": "Sketch", "/buzzy/orchestrate": "Orchestrate", "/buzzy/studio": "Music studio",
         "/buzzy/capabilities": "What BeeZilla can do", "/buzzy/download": "Download", "/buzzy/wallet": "Honey Drops",
         "/buzzy/upload": "Publish", "/buzzy/profile": "About your business", "/buzzy/options": "All options" };
+      // The handle's six dots.
+      var GRIP = '<svg viewBox="0 0 10 16" aria-hidden="true"><circle cx="2.5" cy="2.5" r="1.5"/><circle cx="7.5" cy="2.5" r="1.5"/>' +
+        '<circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13.5" r="1.5"/><circle cx="7.5" cy="13.5" r="1.5"/></svg>';
       // Small words and the verbs people put in front of what they want ("how do I change the resolution").
       var STOP = {};
       ("a an the to of in on at for and or my me i how do does can is it where what which with you your there any " +
@@ -371,12 +383,23 @@
 
       function card(o) {
         var li = h("li", "ao-item");
+        if (o.mode) li.setAttribute("data-mode", o.mode);   // Open, Advocate, Lockdown: drawn in their colours
         // Everything on the site drags onto the Idea Board. The website's header (voice-stage.js) reads
         // data-bz-card as the drag starts, the way it does for every other card on the site: the option
-        // lands as a note with its name, what it does and where it is.
-        li.draggable = true;
-        li.setAttribute("data-bz-card", JSON.stringify({ kind: "note", title: o.name, body: o.what + "\n\nWhere: " + o.where }));
-        if (o.mode) li.setAttribute("data-mode", o.mode);   // Open, Advocate, Lockdown: drawn in their colours
+        // lands as a note with its name, what it does and where it is. The payload is on the handle
+        // alone, so a drag that starts on the Open link carries the link and selected words carry
+        // the words (a whole draggable card would take both over and stop the words being selected).
+        var grab = h("span", "ao-grab");
+        grab.draggable = true;
+        grab.title = "Drag onto the Idea Board";
+        grab.setAttribute("aria-hidden", "true");
+        grab.setAttribute("data-bz-card", JSON.stringify({ kind: "note", title: o.name, body: o.what + "\n\nWhere: " + o.where }));
+        grab.innerHTML = GRIP;
+        // What you hold while dragging is the whole option, not the thin handle.
+        grab.addEventListener("dragstart", function (e) {
+          if (e.dataTransfer && e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(li, 14, 14);
+        });
+        li.appendChild(grab);
         var top = h("div", "ao-top");
         top.appendChild(h("h3", "ao-name", o.name));
         var open = h("a", "ao-open", "Open " + (PAGE[o.href] || "page") + " →");
@@ -439,7 +462,8 @@
       clear.addEventListener("click", function () { q.value = ""; render(); q.focus(); });
       // Esc clears the search (nothing here closes on a click outside it: only Esc or the ✕), but not
       // while a panel is open over the page: Settings and Feedback stay open while you type here, and
-      // their own Esc (nav.js) closes the top one first. The search is cleared by the next Esc.
+      // their own Esc (nav.js) closes the top one first, leaving the focus in the search, so the
+      // next Esc clears it.
       function panelOpen() {
         var settings = document.getElementById("bzSettings");
         var feedback = document.getElementById("bzFeedback");
