@@ -65,6 +65,47 @@ jobs:
       - name: Tests (hermetic subset)
         run: npm run test:ci
 
+      # The probes that boot the built server are NOT in test:ci: they need Chromium
+      # and a listening port, and test:ci must stay hermetic and fast. They run here,
+      # after Build, on the same .output — a probe that is a file in scripts/ and
+      # wired to nothing never fails anything, which is how the ?job= regression
+      # (#416, CR-14b residual) reached live QA twice.
+      - name: Install Chromium for the built-server probes
+        run: npx playwright install --with-deps chromium
+
+      - name: Probe — the address names the job it is in (CR-14c)
+        env:
+          # The server leg must be production: dev mode turns off Better Auth rate
+          # limiting and emits the dev JSX runtime (see the Build note above).
+          NODE_ENV: production
+        run: |
+          set -euo pipefail
+          # PGLite ships its engine beside the bundle, and `npm run build` recreates
+          # .output/. Without these the server boots, serves HTML, then 500s on the
+          # first DB touch (ENOENT ... _libs/pglite.data) — which reads like a broken
+          # sign-in, not a missing file.
+          cp node_modules/@electric-sql/pglite/dist/pglite.data \
+             node_modules/@electric-sql/pglite/dist/pglite.wasm \
+             node_modules/@electric-sql/pglite/dist/initdb.wasm \
+             .output/server/_libs/
+          PORT=8244 AGENT_RELAY_DEV_MAIL=1 \
+            BETTER_AUTH_URL=http://127.0.0.1:8244 \
+            BETTER_AUTH_TRUSTED_ORIGINS=http://127.0.0.1:8244 \
+            BETTER_AUTH_SECRET=ci-job-url-probe-secret \
+            node .output/server/index.mjs > /tmp/job-url-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill $server_pid 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8244/buzzy/talk; then break; fi
+            sleep 2
+          done
+          set +e
+          npm run test:job-url -- http://127.0.0.1:8244
+          probe_rc=$?
+          set -e
+          if [ "$probe_rc" -ne 0 ]; then tail -40 /tmp/job-url-server.log; fi
+          exit "$probe_rc"
+
       - name: Upload build output on failure
         if: failure()
         uses: actions/upload-artifact@v7

@@ -55,6 +55,7 @@
     "test:library-finished": "node scripts/test-library-finished.mjs",
     "test:board-nodes": "npx tsx scripts/test-board-nodes.ts",
     "test:browser-globe": "npx tsx scripts/test-browser-globe.ts",
+    "test:job-url": "node scripts/probe-cr14c-job-url.mjs",
     "posttest:ci": "npm run test:board-nodes && npm run test:page-share",
     "smoke": "npm run test:engine && npm run test:api",
     "start": "node scripts/migrate.mjs && node scripts/retention.mjs && HOST=0.0.0.0 NITRO_HOST=0.0.0.0 node .output/server/index.mjs",
