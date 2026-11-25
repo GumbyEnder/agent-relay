@@ -19,6 +19,8 @@ export default tseslint.config(
       // Lint them at the source, not here: fixes made in this tree are overwritten.
       "src/lib/private/**",
       "scripts/private/**",
+      // three.js, copied as published (MIT, see its LICENSE): linted upstream, not here.
+      "public/buzzy/vendor/**",
     ],
   },
   js.configs.recommended,

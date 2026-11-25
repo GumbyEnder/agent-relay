@@ -2667,6 +2667,15 @@
           dl.href = c.url; dl.download = c.title || "model.glb";
           dl.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
           m.appendChild(dl);
+          // Paint the parts to change on the model itself; only those change (model-paint.js).
+          if (/^\/api\/buzzy\/assets\/\d+/.test(c.url) || /\.glb(?:$|\?)/i.test(c.url)) {
+            var pb = el("button", "wb-open wb-paint3d", "Paint changes");
+            pb.type = "button";
+            pb.title = "Open the model, paint the parts you want changed (red, blue) and say how — only those parts change";
+            pb.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+            pb.addEventListener("click", function (e) { e.stopPropagation(); openPainter(c); });
+            m.appendChild(pb);
+          }
         }
         n.appendChild(m);
       } else if (k === "video") {
@@ -2828,6 +2837,45 @@
       var r = canvas.getBoundingClientRect();
       return toWorld(r.left + Math.max(140, r.width * 0.35), r.top + Math.max(80, r.height * 0.3));
     }
+    // ── Paint changes on a 3D model (testers, 2026-11-24) ─────────────────────
+    // The painter is loaded the first time it is needed. What it makes goes back on the
+    // board: the changed model beside the original (kept), a line from one to the other,
+    // a note per painted colour with what was asked, and a picture of the painted areas.
+    function openPainter(c) {
+      say("Opening the model…");
+      import("/buzzy/model-paint.js").then(function (mod) {
+        return mod.open({
+          url: c.url,
+          title: c.title || "3D model",
+          place: function (res) { placePainted(c, res); },
+        });
+      }).catch(function (e) { say("The model could not be opened: " + (e && e.message ? e.message : e)); });
+    }
+    function placePainted(from, res) {
+      var src = cardById(from.id) || from;
+      snapshot();
+      var col = src.x + 300, row = src.y;
+      var made = addCard({ kind: "model", title: String(from.title || "3D model").replace(/\s*\(changed\)$/i, "") + " (changed)", url: res.saved.url, contentType: "model/gltf-binary" },
+        { x: col + 300, y: row, exact: true }, true);
+      var pic = null;
+      if (res.pictureUrl) {
+        pic = addCard({ kind: "image", title: "The areas you painted", url: res.pictureUrl, contentType: "image/png" }, { x: src.x, y: row + 260, exact: true }, true);
+        if (pic) link(src.id, pic.id, null, null, false, "painted");
+      }
+      (res.done || []).forEach(function (d, i) {
+        var note = addCard({ kind: "note", title: d.region.name + " area", body: d.words, user: true }, { x: col, y: row + i * 170, exact: true }, true);
+        if (!note) return;
+        link(src.id, note.id);
+        if (made) link(note.id, made.id);
+      });
+      if (made && !(res.done || []).length) link(src.id, made.id, null, null, false, "changed");
+      [made, pic].forEach(function (k) { if (k) { fillCard(nodes[k.id], k); } });
+      drawLinks();
+      persist();
+      if (made) reveal(made);
+      say("The changed model is on the board, next to the original.");
+    }
+
     function addCard(card, at, noUndo) {
       if (state.cards.length >= MAX_CARDS) { say("The board is full — remove a few cards first."); return null; }
       if (!noUndo) snapshot();

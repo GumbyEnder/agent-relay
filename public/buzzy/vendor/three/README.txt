@@ -1,0 +1,1 @@
+three.js r170 (npm three@0.170.0), MIT — see LICENSE. Only the files BeeZilla's 3D painter needs: the core module and four add-ons (GLTFLoader, OrbitControls, GLTFExporter, BufferGeometryUtils). The add-ons' bare 'three' imports were changed to the relative core path, so no import map is needed.

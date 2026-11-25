@@ -183,6 +183,27 @@ export default defineEventHandler(async (event) => {
     body.refs = [base, mask];
   }
 
+  // Repainting the painted part of a 3D model's texture (public/buzzy/model-paint.js;
+  // testers, 2026-11-24: fixing the windshield "completely messed up all the treads").
+  // The page sends the piece of the texture the paint covers and its mask; the answer is
+  // the repainted piece, NOT kept in the Library (it is a working piece of a texture),
+  // and the page puts back only the painted pixels, so nothing outside the paint changes.
+  const repaint3d = action === "repaint3d";
+  if (repaint3d) {
+    const crop = typeof body.crop === "string" && /^data:image\/png;base64,/.test(body.crop) ? body.crop : "";
+    const mask = typeof body.mask === "string" && /^data:image\/png;base64,/.test(body.mask) ? body.mask : "";
+    const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 600) : "";
+    if (!crop || !mask) return json(400, { error: "Send the piece of the texture and its mask (PNG).", code: "bad_request" });
+    if (crop.length > 12_000_000 || mask.length > 12_000_000) return json(413, { error: "That piece of the texture is too big.", code: "too_big" });
+    if (!instruction) return json(400, { error: "Say how the painted area should change.", code: "bad_request" });
+    body.prompt =
+      `${instruction}\n\nThe FIRST attached image is part of a 3D model's texture map (flattened surface colours, not a photo). ` +
+      "The SECOND is a mask: white marks the ONLY area you may change. Repaint that area as instructed, matching the " +
+      "texture's style, scale, lighting and detail, and keep every pixel outside the white area exactly as it is. " +
+      "Return an image of exactly the same size and framing as the first.";
+    body.refs = [crop, mask];
+  }
+
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 4000) : "";
   if (!prompt) return json(400, { error: "Describe what to create.", code: "bad_request" });
   if (!artConfigured()) return json(503, { error: "Art is not configured on this deployment.", code: "not_configured" });
@@ -202,7 +223,8 @@ export default defineEventHandler(async (event) => {
   // The reference image the render was conditioned on is an INPUT of this project.
   // Storing it is what makes "source in, output out" auditable instead of folklore.
   let referenceSource: { kind: string; label: string; url: string; bytes: number } | null = null;
-  if (refs.length) {
+  // A texture piece sent for repainting is a working piece, not a picture of theirs: not kept.
+  if (refs.length && !repaint3d) {
     try {
       const m = /^data:([^;,]+);base64,(.*)$/s.exec(refs[0]);
       if (m) {
@@ -228,6 +250,9 @@ export default defineEventHandler(async (event) => {
   if (!made.ok || !made.bytes) {
     const status = made.code === "provider_plan_required" ? 402 : 502;
     return json(status, { error: made.error ?? "the provider did not return an image", code: made.code ?? "image_failed" });
+  }
+  if (repaint3d) {
+    return json(200, { ok: true, image: `data:${made.contentType || "image/png"};base64,${made.bytes.toString("base64")}` });
   }
 
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
