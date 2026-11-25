@@ -234,6 +234,21 @@ here deliberately; the no-credentials rule is what keeps that acceptable.
 
 ---
 
+## 11. The globe: B3 done the owner's way (2026-11-23, later)
+
+Owner, 2026-11-23: "make it so that browser use absolutely works for Bzilla. So it's able to use its
+own browser to automate and complete tasks on your behalf as per your commands to it… go to [the
+site]… type in these instructions to create the sound and then download the sound and send it
+elsewhere." That is the owner deciding B3: BeeZilla may click, type and press the buttons a job needs
+(Create, Download, Post) in its own browser, on the owner's command or at a board step the owner joined
+a globe to. What still never happens, enforced in code and not in a prompt (`remoteBrowser.ts` act and
+play): a password, card or code typed by BeeZilla; a button that pays, buys, subscribes, upgrades,
+starts a trial or changes the account pressed by BeeZilla (the job stops and says it is the owner's to
+press); a private address opened. B4 comes with it the way the owner set it out: the owner signs in
+themselves, once, in the window; the provider keeps the cookies in a profile of their own (no
+credential stored here), revocable with "Forget sign-ins"; every run is logged (`browser_run` tool
+calls). Details: `docs/beezilla/MORE-NODES.md`.
+
 ## 10. Nodes on the Idea Board (2026-11-23)
 
 B3's "a person shows a job, the AI does it" has a first half that needs none of B3's approval

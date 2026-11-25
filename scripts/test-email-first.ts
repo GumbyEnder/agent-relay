@@ -11,6 +11,21 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { auth, handleAuthRequest } from "../src/lib/auth/server";
 import { emailFirst, RECENT_SIGN_IN_SECONDS } from "../src/lib/auth/email-first";
 
+// This file asserts the DEV transport, so the box's own mail config must not leak
+// in: with RESEND_API_KEY (or SMTP_*) exported, isDevMailInboxEnabled() is false,
+// the mail goes out for real and the dev-inbox assertions below fail. Same scrub
+// as scripts/test-mail-log.ts.
+for (const key of [
+  "RESEND_API_KEY",
+  "SMTP_URL",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "SMTP_PASSWORD",
+  "AGENT_RELAY_DEV_MAIL",
+]) delete process.env[key];
+
 assert.equal(isDevMailInboxEnabled(), true);
 
 const ORIGIN = "http://127.0.0.1:8090";
