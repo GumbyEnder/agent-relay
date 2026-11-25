@@ -26,6 +26,10 @@
   button.on { background:var(--bz-yellow); color:#111; border-color:var(--bz-yellow); font-weight:600; }
   button.primary { background:var(--bz-yellow); color:#111; font-weight:600; border-color:var(--bz-yellow); }
   button:disabled { opacity:0.5; cursor:default; }
+  /* Looks disabled but still answers a click (with a hint in the status line), so a
+     button with nothing to act on explains itself instead of doing nothing. */
+  button.is-off { opacity:0.5; cursor:default; }
+  button.is-off:hover { border-color:var(--bz-line); }
   #stage { position:relative; flex:1 1 auto; min-height:0; min-width:0; overflow:hidden; background:#141414;
            touch-action:none; overscroll-behavior:contain; }
   /* nav.js moves body's children into #bzPage on the first soft hop, so #stage stops
@@ -63,6 +67,14 @@
   .img-wrap .handle { position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--bz-yellow);
                       border-radius:2px; cursor:nwse-resize; pointer-events:none; }
   .img-wrap.selected .handle { pointer-events:auto; }
+  /* The × on a selected picture's corner. Positioned from syncImages(), which keeps it
+     inside the stage so a picture dragged half off-screen can still be deleted. */
+  .img-wrap .img-del { position:absolute; left:0; top:0; width:22px; height:22px; padding:0; border-radius:50%;
+                       display:none; pointer-events:auto; cursor:pointer; z-index:2;
+                       background:#1b1b1b; color:var(--bz-yellow); border:1px solid var(--bz-yellow);
+                       font-size:16px; line-height:1; font-weight:600; }
+  .img-wrap .img-del:hover { background:var(--bz-yellow); color:#111; border-color:var(--bz-yellow); }
+  .img-wrap.selected .img-del { display:block; }
   /* The right padding keeps the bar's last words clear of the settings gear, which
      nav.js pins to the bottom-right corner of every page (44px, 22px in). */
   footer { border-top:1px solid var(--bz-line); padding:0.5rem 80px 0.5rem 1rem; display:flex; gap:0.6rem; align-items:center; }
@@ -100,6 +112,18 @@
              padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
   #textbar.on { visibility:visible; }
   #textbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  /* The text bar and the polygon bar are both "options for the tool in your hand" and
+     are never shown together, so they share one row: stacked in one grid cell, each
+     hidden with visibility (not display) so the row never changes height. A bar that
+     appeared and disappeared would move the board under the cursor mid-click. */
+  #toolopts { display:grid; }
+  #toolopts > * { grid-area:1 / 1; min-width:0; }
+  #polybar { display:flex; visibility:hidden; align-items:center; gap:0.5rem;
+             padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
+  #polybar.on { visibility:visible; }
+  #polybar .lbl { color:var(--bz-muted); font-size:0.76rem; flex:none; }
+  #polybar .hint { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #polybar button { flex:none; }
   #fontSize { width:64px; background:#101010; border:1px solid var(--bz-line); color:var(--bz-text);
               border-radius:8px; padding:0.25rem; font-size:0.8rem; }
   .text-edit { position:absolute; z-index:6; outline:1px dashed var(--bz-yellow); outline-offset:2px;
@@ -128,6 +152,8 @@
   #canvasPanel label { color:var(--bz-muted); font-size:0.78rem; width:88px; display:inline-block; }
   #canvasPanel input[type="number"] { width:74px; background:#101010; border:1px solid var(--bz-line);
                                       color:var(--bz-text); border-radius:6px; padding:0.2rem 0.3rem; font-size:0.78rem; }
+  #canvasPanel label.chk { width:auto; display:inline-flex; align-items:center; gap:0.35rem; cursor:pointer; }
+  #canvasPanel .note { color:var(--bz-muted); font-size:0.74rem; margin:-0.1rem 0 0.4rem; }
   #transformPanel { position:absolute; z-index:8; right:12px; top:12px; width:230px; display:none;
                     background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
                     padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
@@ -158,11 +184,12 @@
     <span class="title" id="pTitle">Untitled board</span>
     <button id="undo" title="Undo (Ctrl/Cmd+Z)">Undo</button>
     <button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
-    <button id="del" title="Delete the selected mark (Delete)">Delete mark</button>
+    <button id="del" class="is-off" aria-disabled="true" title="Delete — click a picture or a mark first, then press Delete or Backspace">Delete</button>
     <button id="clear" title="Clear the canvas">Clear canvas</button>
     <button id="save">Save</button>
     <span id="savedFlag" style="font-size:.76rem;align-self:center"></span>
-    <button id="shot" title="Download a PNG of the board">Export PNG</button>
+    <button id="shot" title="Download a PNG of the board, paper colour included. Tick Canvas… › None (see-through) for a PNG with no background">Export PNG</button>
+    <button id="shotAlpha" title="Download a PNG with no background at all: the paper colour is left out, so every empty area is see-through">Export see-through PNG</button>
     <button id="svg" title="Download the drawing as vector SVG (images are not included)">Export SVG</button>
   </div>
 </header>
@@ -174,7 +201,7 @@
   <button class="tool" data-tool="pencil" title="Pencil — hard edge (P)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-pencil"/></svg></span></button>
   <button class="tool" data-tool="brush" title="Brush (B)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-brush"/></svg></span></button>
   <button class="tool" data-tool="eraser" title="Eraser — erases pixels (E)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-eraser"/></svg></span></button>
-  <button class="tool" data-tool="fill" title="Fill with colour (F)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-fill"/></svg></span></button>
+  <button class="tool" data-tool="fill" title="Fill with colour (F) — Alt/Option+click makes the area see-through instead"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-fill"/></svg></span></button>
   <button class="tool" data-tool="picker" title="Pick a colour from the board (I)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-picker"/></svg></span></button>
   <button class="tool" data-tool="airbrush" title="Airbrush (A)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-airbrush"/></svg></span></button>
   <span class="sep"></span>
@@ -184,7 +211,7 @@
   <button class="tool" data-tool="rrect" title="Rounded rectangle (Shift+R)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-rrect"/></svg></span></button>
   <button class="tool" data-tool="ellipse" title="Ellipse (O)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-ellipse"/></svg></span></button>
   <button class="tool" data-tool="triangle" title="Triangle (V)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-triangle"/></svg></span></button>
-  <button class="tool" data-tool="polygon" title="Polygon — click each corner, double-click to close (Y)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-polygon"/></svg></span></button>
+  <button class="tool" data-tool="polygon" title="Polygon (Y) — click each corner. Finish by clicking the first corner, double-clicking or pressing Enter. Esc keeps the shape, Backspace removes the last corner"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-polygon"/></svg></span></button>
   <button class="tool" data-tool="star" title="Star (5)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-star"/></svg></span></button>
   <button class="tool" data-tool="arrow" title="Arrow (9)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-arrow"/></svg></span></button>
   <button class="tool" data-tool="bubble" title="Speech bubble (6)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-bubble"/></svg></span></button>
@@ -194,6 +221,7 @@
   <span class="sep"></span>
   <div id="sizeWrap"><span>Size</span><input id="size" type="range" min="1" max="50" value="6" /><span id="sizeVal">6</span></div>
   <div id="tolWrap"><span>Fill tol.</span><input id="tol" type="range" min="0" max="120" value="24" /><span id="tolVal">24</span></div>
+  <button id="rmBg" title="Make the colour that touches the edges see-through. Works on the selected picture, or on the pixel layer when no picture is selected. Uses the Fill tol. slider.">Remove background</button>
   <span class="sep"></span>
   <div class="colors" title="Primary (left click) / secondary (right click)">
     <input id="colorP" type="color" value="#ffd40d" />
@@ -220,6 +248,7 @@
   </select>
 </div>
 
+<div id="toolopts">
 <div id="textbar">
   <span class="lbl">Text</span>
   <select id="fontFamily" title="Font">
@@ -241,6 +270,16 @@
   </label>
   <input id="tBgColor" type="color" value="#000000" title="Text background" />
   <span class="hint">Click the board to type. Double-click text to edit it; Esc finishes.</span>
+</div>
+<!-- Shown while the polygon tool is in hand. A polygon used to close only on a
+     double-click, and Esc threw the whole draft away, so people could not tell how to
+     get out of it. The hint names every way out; the button is the way out for a
+     touch screen, which has no Enter, Esc or Backspace. -->
+<div id="polybar">
+  <span class="lbl">Polygon</span>
+  <span class="hint" id="polyHint">Click the first corner, double-click or press Enter to finish · Esc keeps the shape · Backspace removes the last corner</span>
+  <button id="polyFinish" class="primary is-off" aria-disabled="true" title="Finish the shape (Enter). It needs at least 3 corners.">Finish shape</button>
+</div>
 </div>
 
 <div id="selbar">
@@ -281,11 +320,14 @@
       <div class="row"><label>Width</label><input id="cvW" type="number" min="1" max="8000" value="1000" /> px</div>
       <div class="row"><label>Height</label><input id="cvH" type="number" min="1" max="8000" value="700" /> px</div>
       <div class="row"><label>Background</label><input id="cvBg" type="color" value="#141414" /></div>
+      <div class="row"><label class="chk" for="cvBgNone"><input id="cvBgNone" type="checkbox" /> None (see-through)</label></div>
+      <div class="note">Shown as a checkerboard. Export PNG then has no background.</div>
       <div class="row"><button id="cvApply" class="primary">Apply size</button></div>
       <div class="row" style="gap:0.4rem;display:flex;flex-wrap:wrap;margin-top:0.5rem">
         <button id="cvOpen" title="Open an image from disk and edit it here">Open image…</button>
         <button id="cvLibrary" title="File the board as a picture in this project's Library">Save to Library</button>
-        <button id="cvJpg" title="Download a JPG of the board">Export JPG</button>
+        <button id="cvPng" title="Download a PNG with no background at all: the paper colour is left out, so every empty area is see-through">Export see-through PNG</button>
+        <button id="cvJpg" title="Download a JPG of the board. A JPG cannot be see-through, so its background is always white. Use Export see-through PNG for that.">Export JPG</button>
       </div>
       <input id="cvFile" type="file" accept="image/*" style="display:none" />
       <div class="hint" id="cvStatus" style="margin-top:0.4rem"></div>
@@ -359,6 +401,11 @@
     var selectedStroke = null;
     var draft = null;
     var rasterCv = null;          // pixel layer, doc-sized
+    // The paper is a colour, or "none": see-through. A see-through paper is drawn as a
+    // checkerboard on screen and is simply left out of a PNG export. `paperColor`
+    // remembers the last real colour so un-ticking "none" has somewhere to go back to.
+    var paperColor = "#141414";
+    function paperNone() { return doc.bg === "none"; }
 
     // Undo is a stack of board snapshots, not a pile of per-tool inverses: pixels,
     // strokes, text and image positions are one document, so one snapshot restores all.
@@ -368,6 +415,20 @@
 
     function newId() { return "s_" + Math.random().toString(36).slice(2, 9); }
     function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+    // What is selected, looked up by id each time: a selected id can outlive the thing it
+    // named (an undo removes the picture, an empty text box is dropped), so a bare id is
+    // not proof that there is something to act on.
+    function imageById(id) {
+      for (var i = 0; i < doc.images.length; i++) if (doc.images[i].id === id) return doc.images[i];
+      return null;
+    }
+    function selectedImage() { return selected ? imageById(selected) : null; }
+    function selectedMark() {
+      if (!selectedStroke) return null;
+      for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) return doc.strokes[i];
+      return null;
+    }
 
     // ── stacking order (#296) ─────────────────────────────────────────
     // One list describes what is above what, bottom first, for the two things that
@@ -717,10 +778,61 @@
       }
       if (floating) box(floating.x, floating.y, floating.w, floating.h);
       if (polySelPath && polySelPath.length > 1) { poly(polySelPath); g.stroke(); }
+      // The corners of a polygon being drawn. The first one is the exit: it grows and
+      // fills when the pointer is on it, which is the cue that a click there closes it.
+      if (polyDraft && polyDraft.points.length) {
+        g.setLineDash([]);
+        g.lineWidth = 1;
+        polyDraft.points.forEach(function (c, i) {
+          g.beginPath();
+          g.arc(c.x * z + px, c.y * z + py, i === 0 ? (polyHot ? 9 : 6) : 3.5, 0, Math.PI * 2);
+          g.fillStyle = i === 0 ? (polyHot ? "rgba(255,212,13,1)" : "rgba(255,212,13,0.4)") : "rgba(255,212,13,0.95)";
+          g.fill();
+          g.strokeStyle = "rgba(0,0,0,0.7)";
+          g.stroke();
+        });
+      }
       g.restore();
     }
 
+    // The see-through paper, drawn the way every editor draws one: a checkerboard. It is
+    // laid in device pixels and anchored to the paper's corner, so the squares stay the
+    // same size on screen at every zoom (a checker that zoomed with the board would be a
+    // blur at 25% and blocks at 800%) and stay sharp on a high-density screen.
+    var checkerPat = null, checkerDpr = 0;
+    function checkerFill(g, dpr) {
+      if (!checkerPat || checkerDpr !== dpr) {
+        var n = Math.max(1, Math.round(8 * dpr));
+        var c = document.createElement("canvas");
+        c.width = n * 2; c.height = n * 2;
+        var k = c.getContext("2d");
+        k.fillStyle = "#f4f4f4"; k.fillRect(0, 0, n * 2, n * 2);
+        k.fillStyle = "#cdcdcd"; k.fillRect(0, 0, n, n); k.fillRect(n, n, n, n);
+        checkerPat = g.createPattern(c, "repeat");
+        checkerDpr = dpr;
+      }
+      return checkerPat;
+    }
+    function paintChecker(g, dpr) {
+      var w = doc.w * view.zoom * dpr, h = doc.h * view.zoom * dpr;
+      g.save();
+      g.setTransform(1, 0, 0, 1, Math.round(dpr * view.panX), Math.round(dpr * view.panY));
+      g.beginPath(); g.rect(0, 0, w, h); g.clip();
+      g.fillStyle = checkerFill(g, dpr);
+      g.fillRect(0, 0, w, h);
+      g.restore();
+    }
+
+    // One paint per frame, however many pointermoves arrive. A picture drag used to move
+    // only the DOM frame and never repainted the canvas that actually draws the picture.
+    var paintFrame = 0;
+    function schedulePaint() {
+      if (paintFrame) return;
+      paintFrame = requestAnimationFrame(function () { paintFrame = 0; paint(); });
+    }
+
     function paint() {
+      refreshDeleteBtn();
       var dpr = window.devicePixelRatio || 1;
       var r = canvas.getBoundingClientRect();
       // A hidden or minimised stage measures 0×0, and sizing the backing store from that
@@ -744,8 +856,9 @@
       // paper
       g.save();
       g.shadowColor = "rgba(0,0,0,0.55)"; g.shadowBlur = 12 / view.zoom;
-      g.fillStyle = doc.bg; g.fillRect(0, 0, doc.w, doc.h);
+      g.fillStyle = paperNone() ? "#e6e6e6" : doc.bg; g.fillRect(0, 0, doc.w, doc.h);
       g.restore();
+      if (paperNone()) paintChecker(g, dpr);
       g.save();
       g.beginPath(); g.rect(0, 0, doc.w, doc.h); g.clip();
       if (rasterCv) g.drawImage(rasterCv, 0, 0, doc.w, doc.h);
@@ -871,6 +984,9 @@
     function snapshot() {
       undoStack.push(JSON.stringify({
         strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
+        // The stacking order is document state too: without it, undoing a delete brought
+        // the picture back on top of everything instead of where it was.
+        order: doc.order,
       }));
       redoStack.length = 0;
       // The first mark is the moment this board becomes a project; a page you
@@ -881,14 +997,16 @@
       var d = JSON.parse(json);
       doc.strokes = d.strokes || [];
       doc.images = d.images || [];
-      if (d.bg) doc.bg = d.bg;
+      doc.order = Array.isArray(d.order) ? d.order : [];
+      if (d.bg) { doc.bg = d.bg; if (d.bg !== "none") paperColor = d.bg; }
       if (d.w && d.h) { doc.w = d.w; doc.h = d.h; rasterCv = null; ensureRaster(); }
       selectedStroke = null;
+      if (selected && !selectedImage()) selected = null;   // the restored board may not have it
       loadRaster(d.raster || null);
       renderImages();
       paint();
     }
-    function current() { return JSON.stringify({ strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData() }); }
+    function current() { return JSON.stringify({ strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(), order: doc.order }); }
     function undo() {
       if (!undoStack.length) { setStatus("Nothing to undo."); return; }
       redoStack.push(current());
@@ -933,6 +1051,18 @@
       var el = document.getElementById("savedFlag");
       if (el) { clearTimeout(el._t); el.textContent = "Not saved — server refused"; el.style.color = "#ff6b6b"; }
     }
+    // A re-encode for size must not turn see-through pixels black: JPEG has no alpha. A
+    // picture that really has some goes out as PNG; everything else keeps the smaller
+    // JPEG it always got.
+    function hasAlpha(c) {
+      var d;
+      try { d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; } catch (e) { return false; }
+      for (var i = 3; i < d.length; i += 4) if (d[i] < 255) return true;
+      return false;
+    }
+    function encodeSmall(c, jpegQuality) {
+      return hasAlpha(c) ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", jpegQuality);
+    }
     // Second shrink pass, for boards that accumulated images: the import path already
     // caps a single image at 2560 px, this re-encodes the largest one smaller.
     function shrinkLargestImage() {
@@ -948,7 +1078,7 @@
           c.height = Math.max(1, Math.round((probe.naturalHeight || 1) * s));
           c.getContext("2d").drawImage(probe, 0, 0, c.width, c.height);
           var next = "";
-          try { next = c.toDataURL("image/jpeg", 0.82); } catch (e) { next = ""; }
+          try { next = encodeSmall(c, 0.82); } catch (e) { next = ""; }
           // Only accept a real win, or the retry loops on the same bytes forever.
           if (!next || next.length >= target.url.length) { resolve(false); return; }
           target.url = next;               // the placed rectangle keeps its w/h
@@ -1065,17 +1195,20 @@
       g.restore();
       paint();
     }
+    // `hex` null erases instead of painting: the flooded area becomes see-through
+    // (Alt/Option+click). Returns whether any pixel changed.
     function floodFill(p, hex) {
       rasterize();
       var w = rasterCv.width, h = rasterCv.height;
       var x0 = Math.floor(p.x), y0 = Math.floor(p.y);
-      if (x0 < 0 || y0 < 0 || x0 >= w || y0 >= h) return;
+      if (x0 < 0 || y0 < 0 || x0 >= w || y0 >= h) return false;
       var g = rasterCv.getContext("2d");
       var img = g.getImageData(0, 0, w, h);
       var d = img.data;
       var si = (y0 * w + x0) * 4;
       var sr = d[si], sg = d[si + 1], sb = d[si + 2], sa = d[si + 3];
-      var rgb = hexToRgb(hex);
+      var erase = hex === null;
+      var rgb = erase ? { r: 0, g: 0, b: 0 } : hexToRgb(hex);
       var tol = tolerance;
       // Squared-distance tolerance on RGBA, so a 0 tolerance is exact-match and a
       // high one still stops at the stroke that encloses the area.
@@ -1083,7 +1216,7 @@
         var dr = d[i] - sr, dg = d[i + 1] - sg, db = d[i + 2] - sb, da = d[i + 3] - sa;
         return dr * dr + dg * dg + db * db + da * da <= tol * tol * 4;
       }
-      if (sa === 255 && sr === rgb.r && sg === rgb.g && sb === rgb.b) return;
+      if (erase ? sa === 0 : (sa === 255 && sr === rgb.r && sg === rgb.g && sb === rgb.b)) return false;
       var stack = [[x0, y0]];
       var seen = new Uint8Array(w * h);
       while (stack.length) {
@@ -1095,11 +1228,129 @@
         seen[idx] = 1;
         var i4 = idx * 4;
         if (!match(i4)) continue;
-        d[i4] = rgb.r; d[i4 + 1] = rgb.g; d[i4 + 2] = rgb.b; d[i4 + 3] = 255;
+        d[i4] = rgb.r; d[i4 + 1] = rgb.g; d[i4 + 2] = rgb.b; d[i4 + 3] = erase ? 0 : 255;
         stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
       }
       g.putImageData(img, 0, 0);
       paint();
+      return true;
+    }
+
+    // ── remove background ─────────────────────────────────────────────
+    // "The colour that touches the edges" is the background of a flat picture (a
+    // generated one, a logo, a product shot). Find it, then flood inward from every edge
+    // pixel that matches it, with the same RGBA distance the Fill tool uses, so the
+    // Fill tol. slider means the same thing here. Only what the flood reaches goes
+    // see-through: a patch of the same colour sealed inside the subject (the hole in a
+    // ring, the white of an eye) does not touch the edge and stays.
+    function edgeColor(d, w, h) {
+      // Count the opaque edge pixels in coarse buckets, so a little noise (JPEG, grain)
+      // does not split one background into hundreds of colours, then average the winning
+      // bucket for an exact key.
+      var cnt = new Uint32Array(4096), sr = new Float64Array(4096), sg = new Float64Array(4096), sb = new Float64Array(4096);
+      var any = false;
+      function add(x, y) {
+        var i = (y * w + x) * 4;
+        if (d[i + 3] < 128) return;
+        var k = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
+        cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2]; any = true;
+      }
+      var x, y;
+      for (x = 0; x < w; x++) { add(x, 0); add(x, h - 1); }
+      for (y = 1; y < h - 1; y++) { add(0, y); add(w - 1, y); }
+      if (!any) return null;
+      var best = 0;
+      for (var k = 1; k < 4096; k++) if (cnt[k] > cnt[best]) best = k;
+      return { r: sr[best] / cnt[best], g: sg[best] / cnt[best], b: sb[best] / cnt[best] };
+    }
+    // Works in place on an RGBA array; returns how many pixels it made see-through.
+    function clearEdgeColor(d, w, h, tol) {
+      var key = edgeColor(d, w, h);
+      if (!key) return 0;
+      var lim = tol * tol * 4;
+      var seen = new Uint8Array(w * h);
+      var stack = new Int32Array(w * h);      // every pixel is pushed at most once
+      var top = 0, cleared = 0;
+      function seed(x, y) {
+        var idx = y * w + x;
+        if (seen[idx]) return;
+        seen[idx] = 1;
+        var i = idx * 4;
+        var dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b, da = d[i + 3] - 255;
+        if (dr * dr + dg * dg + db * db + da * da <= lim) stack[top++] = idx;
+      }
+      var x, y;
+      for (x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+      for (y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
+      while (top) {
+        var at = stack[--top];
+        var i4 = at * 4;
+        d[i4] = 0; d[i4 + 1] = 0; d[i4 + 2] = 0; d[i4 + 3] = 0;
+        cleared++;
+        var cx = at % w, cy = (at - cx) / w;
+        if (cx > 0) seed(cx - 1, cy);
+        if (cx < w - 1) seed(cx + 1, cy);
+        if (cy > 0) seed(cx, cy - 1);
+        if (cy < h - 1) seed(cx, cy + 1);
+      }
+      return cleared;
+    }
+    function removedMessage() {
+      return "Background removed. Export see-through PNG keeps it see-through · Undo brings it back." +
+        (paperNone() ? "" : " The paper colour still shows behind it here; tick Canvas… › None (see-through) to see the checkerboard.");
+    }
+    var NOTHING_TO_REMOVE = "Nothing to remove here. To clear a picture's background, click the picture first, then Remove background.";
+    // The pixel layer: what Open image… and the Fill tool work on.
+    function removeRasterBackground() {
+      ensureRaster();
+      var w = rasterCv.width, h = rasterCv.height;
+      var g = rasterCv.getContext("2d");
+      var img = g.getImageData(0, 0, w, h);
+      var n = clearEdgeColor(img.data, w, h, tolerance);
+      if (!n) { setStatus(NOTHING_TO_REMOVE); return; }
+      // The change is computed on a copy, so the snapshot still sees the pixels as they
+      // were and Undo gives them back.
+      snapshot();
+      g.putImageData(img, 0, 0);
+      paint(); autoSave();
+      setStatus(removedMessage());
+    }
+    // A picture placed on the board (dropped, pasted, or a finished render): its data URL
+    // is rewritten as a PNG with the background cleared.
+    function removeImageBackground(im) {
+      var id = im.id, src = im.url;
+      setStatus("Removing the background…");
+      var probe = new Image();
+      probe.onload = function () {
+        var w = probe.naturalWidth, h = probe.naturalHeight;
+        if (!w || !h) { setStatus("That picture could not be read."); return; }
+        var c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        var g = c.getContext("2d");
+        g.drawImage(probe, 0, 0);
+        var data;
+        try { data = g.getImageData(0, 0, w, h); }
+        catch (err) { setStatus("That picture comes from another site, so its pixels cannot be changed."); return; }
+        var n = clearEdgeColor(data.data, w, h, tolerance);
+        if (!n) { setStatus("No background colour touches this picture's edges. Try a higher Fill tol."); return; }
+        g.putImageData(data, 0, 0);
+        var url = c.toDataURL("image/png");
+        var cur = imageById(id);
+        // It decoded asynchronously: if the picture was swapped or deleted meanwhile,
+        // writing the result would resurrect or overwrite the wrong thing.
+        if (!cur || cur.url !== src) { setStatus("That picture changed while its background was being removed. Try again."); return; }
+        snapshot();                 // before the write: Undo restores the old pixels
+        cur.url = url;
+        renderImages(); paint(); autoSave();
+        setStatus(removedMessage());
+      };
+      probe.onerror = function () { setStatus("That picture could not be read."); };
+      probe.src = src;
+    }
+    function removeBackground() {
+      var im = selectedImage();
+      if (im) removeImageBackground(im);
+      else removeRasterBackground();
     }
     function hexToRgb(h) {
       h = String(h || "#000000").replace("#", "");
@@ -1170,7 +1421,8 @@
     function syncTextBar() {
       var sel = null;
       for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) sel = doc.strokes[i];
-      var show = tool === "text" || (sel && sel.tool === "text");
+      // The polygon bar owns that row while the polygon tool is in hand.
+      var show = tool === "text" || (sel && sel.tool === "text" && tool !== "polygon");
       document.getElementById("textbar").classList.toggle("on", !!show);
       if (sel && sel.tool === "text") adoptTextStyle(sel);
       else if (tool === "text") {
@@ -1370,9 +1622,14 @@
       if (!el) {
         el = new Image();
         el.onload = function () { paint(); };
+        el._bzSrc = url;
         el.src = url;
         imgCache[id] = el;
-      } else if (url && el.getAttribute("src") !== url) {
+      } else if (url && el._bzSrc !== url) {
+        // Compared against what we last set, not el.getAttribute("src"): this runs for
+        // every picture on every paint, and reading a multi-megabyte data URL back out of
+        // the DOM each time is work a drag does not need.
+        el._bzSrc = url;
         // The URL can change under a stable id: shrinkLargestImage() rewrites im.url
         // in place to the smaller re-encode. A cache keyed only by id kept painting
         // the old, larger bitmap (the save carried the new URL, so the board looked
@@ -1429,9 +1686,10 @@
       var g = c.getContext("2d");
       g.save();
       if (path) { pathFor(g, path, rect.x, rect.y); g.clip(); }
-      // Paint's default selection is opaque: it carries the paper with it.
-      g.fillStyle = doc.bg;
-      g.fillRect(0, 0, w, h);
+      // Paint's default selection is opaque: it carries the paper with it. A see-through
+      // paper has nothing to carry ("none" is not a colour fillStyle would accept, and
+      // the selection would have come out black).
+      if (!paperNone()) { g.fillStyle = doc.bg; g.fillRect(0, 0, w, h); }
       g.drawImage(rasterCv, rect.x, rect.y, rect.w, rect.h, 0, 0, w, h);
       g.restore();
       return c;
@@ -1652,6 +1910,16 @@
     var rightBtn = false;
     var curvePending = null;
     var polyDraft = null;
+    // How a polygon is finished. It used to close only on a double-click, and Esc threw
+    // the whole draft away, so people could not tell how to get out of it ("I can push
+    // escape but then it deletes all my work"). Now every natural gesture finishes it:
+    // a click on (or near) the first corner, a double-click, Enter, Esc (which keeps the
+    // shape once it has 3 corners), the Finish shape button, or picking another tool.
+    // Backspace takes back the last corner.
+    var POLY_CLOSE_PX = 10;     // a click this close to the first corner closes the shape (screen px)
+    var POLY_DUP_PX = 6;        // a corner this close to the last one is a double-click's second press
+    var polyHot = false;        // the pointer is on the first corner: the next click closes
+    var polyShut = null;        // {t}: when the last shape was closed by a click on its first corner
 
     canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
@@ -1741,7 +2009,7 @@
           canvas.setPointerCapture(e.pointerId);
         } else if (selected) {
           var im = pick.item;
-          drag = { id: im.id, mode: "move", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h };
+          drag = { id: im.id, mode: "move", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h, moved: false };
           canvas.setPointerCapture(e.pointerId);
         }
         renderImages();
@@ -1752,9 +2020,13 @@
       if (tool === "picker") { pickColor(e, e.button === 2); return; }
       if (tool === "fill") {
         if (!inDoc(p)) return;
+        // Alt/Option+click erases to see-through instead of painting a colour.
+        var erase = e.altKey;
         snapshot();
-        floodFill(p, e.button === 2 ? colorS : colorP);
-        setStatus("Filled.");
+        var filled = floodFill(p, erase ? null : (e.button === 2 ? colorS : colorP));
+        setStatus(!erase ? "Filled."
+          : filled ? "Made the area see-through. Undo brings it back."
+          : "That area is already see-through.");
         autoSave();
         return;
       }
@@ -1776,6 +2048,14 @@
         return;
       }
 
+      if (tool === "polygon") {
+        // Corners are clicks, not drags, so there is no pointer capture to take, and no
+        // undo step until the shape is finished (it used to snapshot on every corner).
+        e.preventDefault();
+        polyClick(p, e);
+        return;
+      }
+
       canvas.setPointerCapture(e.pointerId);
       snapshot();
       if (tool === "eraser") {
@@ -1793,18 +2073,6 @@
         clearInterval(sprayTimer);
         sprayTimer = setInterval(function () { spray(lastPoint, hex); }, 60);
         lastPoint = p;
-        return;
-      }
-      if (tool === "polygon") {
-        if (!polyDraft) {
-          polyDraft = { id: newId(), tool: "polygon", color: e.button === 2 ? colorS : colorP,
-                        width: size, op: op, fillColor: e.button === 2 ? colorP : colorS,
-                        points: [p], closed: false };
-        } else {
-          polyDraft.points.push(p);
-        }
-        draft = polyDraft;
-        paint();
         return;
       }
       if (tool === "curve" && curvePending) {
@@ -1862,10 +2130,11 @@
         return;
       }
       if (polyDraft && !mode) {
-        // live rubber band from the last corner
-        draft = { tool: "polygon", color: polyDraft.color, width: polyDraft.width, op: polyDraft.op,
-                  fillColor: polyDraft.fillColor, closed: false,
-                  points: polyDraft.points.concat([p]) };
+        // live rubber band from the last corner; the first corner lights up when a click
+        // there would close the shape
+        var hot = polyDraft.points.length >= 3 && screenDist(p, polyDraft.points[0]) <= POLY_CLOSE_PX;
+        if (hot !== polyHot) { polyHot = hot; canvas.style.cursor = hot ? "pointer" : "crosshair"; }
+        polyPreview();
         paint(); return;
       }
       if (mode === "pan") {
@@ -1951,19 +2220,121 @@
       mode = null; draft = null; clearInterval(sprayTimer); sprayTimer = null; paint();
     });
 
-    // A polygon stays open until a double-click or Enter closes it.
     canvas.addEventListener("dblclick", function (e) {
-      if (polyDraft) { closePolygon(); return; }
+      if (polyDraft) {
+        // A double-click on the first corner closed the shape with its first press; its
+        // second press then began a stray one-corner shape right there. The browser
+        // decides what counts as a double-click, so this is where to put that one away.
+        if (polyShut && polyDraft.points.length === 1 && Date.now() - polyShut.t < 1500) {
+          polyDraft = null; draft = null; polyHot = false; polyShut = null;
+          syncPolyBar(); paint();
+          setStatus("Polygon finished. " + doc.strokes.length + " marks on the board");
+          return;
+        }
+        closePolygon();
+        return;
+      }
       var hit = hitTest(pt(e));
       if (hit && hit.tool === "text") editTextMark(hit);
     });
+    function screenDist(a, b) {
+      var dx = (a.x - b.x) * view.zoom, dy = (a.y - b.y) * view.zoom;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    // The rubber band: the shape so far plus a segment out to the pointer.
+    function polyPreview() {
+      draft = { tool: "polygon", color: polyDraft.color, width: polyDraft.width, op: polyDraft.op,
+                fillColor: polyDraft.fillColor, closed: false,
+                points: polyDraft.points.concat([lastPoint]) };
+    }
+    function polyStatus() {
+      var n = polyDraft ? polyDraft.points.length : 0;
+      return n < 3
+        ? "Polygon: " + n + " corner" + (n === 1 ? "" : "s") + ". Add at least 3, then click the first corner, double-click or press Enter to finish."
+        : "Polygon: " + n + " corners. Click the first corner, double-click, press Enter or Esc to finish; Backspace removes the last corner.";
+    }
+    function syncPolyBar() {
+      var bar = document.getElementById("polybar");
+      if (bar) bar.classList.toggle("on", tool === "polygon");
+      var btn = document.getElementById("polyFinish");
+      if (btn) {
+        var ready = !!polyDraft && polyDraft.points.length >= 3;
+        btn.classList.toggle("is-off", !ready);
+        btn.setAttribute("aria-disabled", ready ? "false" : "true");
+      }
+      syncTextBar();      // the two bars share one row, so only one of them may show
+    }
+    // One click of the polygon tool: a new corner, or the click that finishes the shape.
+    function polyClick(p, e) {
+      if (!polyDraft) {
+        polyDraft = { id: newId(), tool: "polygon", color: e.button === 2 ? colorS : colorP,
+                      width: size, op: op, fillColor: e.button === 2 ? colorP : colorS,
+                      points: [p], closed: false };
+      } else {
+        var pts = polyDraft.points;
+        if (screenDist(p, pts[0]) <= POLY_CLOSE_PX) {
+          if (pts.length >= 3) { closePolygon(); polyShut = { t: Date.now() }; return; }
+          setStatus(polyStatus());      // a corner on top of the first one would be no corner at all
+          return;
+        }
+        // The second press of a double-click lands where the first one did: not a corner.
+        if (screenDist(p, pts[pts.length - 1]) <= POLY_DUP_PX) return;
+        pts.push(p);
+      }
+      lastPoint = p;
+      polyPreview();
+      syncPolyBar();
+      setStatus(polyStatus());
+      paint();
+    }
+    // Corners that landed on top of each other (a shaky double-click) are one corner, and
+    // a last corner sitting on the first one is the first one: the shape closes itself.
+    function tidyCorners(pts) {
+      var out = [];
+      pts.forEach(function (c) {
+        if (out.length && screenDist(c, out[out.length - 1]) < POLY_DUP_PX) return;
+        out.push(c);
+      });
+      if (out.length > 1 && screenDist(out[0], out[out.length - 1]) < POLY_DUP_PX) out.pop();
+      return out;
+    }
+    // Backspace / Delete while drawing: take back the last corner.
+    function polyBack() {
+      if (!polyDraft) return;
+      polyDraft.points.pop();
+      polyHot = false;
+      if (!polyDraft.points.length) {
+        polyDraft = null; draft = null;
+        syncPolyBar(); paint();
+        setStatus("Polygon cancelled: no corners left.");
+        return;
+      }
+      polyPreview();
+      syncPolyBar(); paint();
+      setStatus(polyStatus());
+    }
+    // Finish the shape. With 3 or more corners it is kept; with fewer there is no shape
+    // to keep, so it is just dropped. Nothing else on the board is touched either way.
     function closePolygon() {
       if (!polyDraft) return;
-      polyDraft.closed = true;
-      if (polyDraft.points.length > 2) { polyDraft.id = newId(); doc.strokes.push(polyDraft); }
-      polyDraft = null; draft = null;
-      paint(); autoSave(); setStatus(doc.strokes.length + " marks on the board");
+      var shape = polyDraft;
+      polyDraft = null; draft = null; polyHot = false;
+      if (tool === "polygon") canvas.style.cursor = "crosshair";
+      var pts = tidyCorners(shape.points);
+      if (pts.length >= 3) {
+        snapshot();                   // one undo step for the whole shape, not one per corner
+        shape.points = pts; shape.closed = true; shape.id = newId();
+        doc.strokes.push(shape);
+        setStatus("Polygon finished. " + doc.strokes.length + " marks on the board");
+      } else {
+        setStatus("Polygon cancelled: a polygon needs at least 3 corners.");
+      }
+      syncPolyBar(); paint(); autoSave();
     }
+    document.getElementById("polyFinish").addEventListener("click", function () {
+      if (!polyDraft || polyDraft.points.length < 3) { setStatus("A polygon needs at least 3 corners. Add more, then Finish shape."); return; }
+      closePolygon();
+    });
 
     // ── images: drop, paste, move, resize ─────────────────────────────
     function addImage(url, at, file) {
@@ -2000,7 +2371,7 @@
             c.width = Math.max(1, Math.round((probe.naturalWidth || 1) * s));
             c.height = Math.max(1, Math.round((probe.naturalHeight || 1) * s));
             c.getContext("2d").drawImage(probe, 0, 0, c.width, c.height);
-            try { resolve(c.toDataURL("image/jpeg", 0.9)); } catch (err) { resolve(raw); }
+            try { resolve(encodeSmall(c, 0.9)); } catch (err) { resolve(raw); }
           };
           probe.onerror = function () { resolve(raw); };
           probe.src = raw;
@@ -2017,63 +2388,130 @@
       autoSave();
     }
     function syncImages() {
+      var sw = stage.clientWidth, sh = stage.clientHeight;
       Array.prototype.forEach.call(layers.children, function (wrap) {
         var id = wrap.getAttribute("data-id");
-        var im = doc.images.find(function (x) { return x.id === id; });
+        var im = imageById(id);
         if (!im) return;
-        wrap.style.left = (im.x * view.zoom + view.panX) + "px";
-        wrap.style.top = (im.y * view.zoom + view.panY) + "px";
-        wrap.style.width = (im.w * view.zoom) + "px";
-        wrap.style.height = (im.h * view.zoom) + "px";
+        var left = im.x * view.zoom + view.panX, top = im.y * view.zoom + view.panY;
+        var w = im.w * view.zoom, h = im.h * view.zoom;
+        wrap.style.left = left + "px";
+        wrap.style.top = top + "px";
+        wrap.style.width = w + "px";
+        wrap.style.height = h + "px";
+        // Seat the × on the picture's top-right corner, but never outside the stage: a
+        // picture dragged half off the edge must still be deletable with it.
+        if (wrap._del && selected === id) {
+          var half = 11;
+          var cx = clamp(left + w, half + 2, Math.max(half + 2, sw - half - 2));
+          var cy = clamp(top, half + 2, Math.max(half + 2, sh - half - 2));
+          wrap._del.style.left = (cx - left - half) + "px";
+          wrap._del.style.top = (cy - top - half) + "px";
+        }
       });
     }
+    function buildWrap(id) {
+      var wrap = document.createElement("div");
+      wrap.className = "img-wrap";
+      wrap.setAttribute("data-id", id);
+      var img = document.createElement("img");
+      img.alt = "";
+      var handle = document.createElement("div");
+      handle.className = "handle";
+      var del = document.createElement("button");
+      del.type = "button";
+      del.className = "img-del";
+      del.textContent = "×";
+      del.title = "Delete this picture (Undo brings it back)";
+      del.setAttribute("aria-label", "Delete this picture");
+      wrap.appendChild(img);
+      wrap.appendChild(handle);
+      wrap.appendChild(del);
+      wrap._img = img; wrap._del = del;
+      wrap.addEventListener("pointerdown", function (e) {
+        // Only the resize handle is clickable on a wrap now; everything else goes to
+        // the board's front-to-back hit test (#296). The handle exists only on the
+        // selected image, so a click here is unambiguous. The wrap outlives undo and
+        // redo (see renderImages), so it looks its picture up by id instead of holding it.
+        if (tool !== "select" || e.target !== handle) return;
+        var im = imageById(id);
+        if (!im) return;
+        e.stopPropagation();
+        selected = id;
+        drag = { id: id, mode: "resize", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h, moved: false };
+      });
+      // The × is a control of its own: pressing it must not start a drag, and a click on
+      // it deletes this picture.
+      del.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      del.addEventListener("click", function (e) { e.stopPropagation(); deleteImage(id); });
+      return wrap;
+    }
+    // Reconcile, not rebuild. This used to throw every wrap away and make new ones on each
+    // call, and it is called on every click on the board: each rebuild gave every picture
+    // a fresh <img> to decode again from its data URL, which is part of the "slight delay"
+    // when picking a picture up. Wraps now stay, keyed by id, and are only re-pointed,
+    // re-ordered or removed when something really changed.
     function renderImages() {
-      layers.innerHTML = "";
       orderSync();
+      var have = {};
+      Array.prototype.forEach.call(layers.children, function (w) { have[w.getAttribute("data-id")] = w; });
       // DOM order decides who wins a click, so it follows the stacking order too.
       var ordered = doc.images.slice().sort(function (a, b) {
         return orderIndexOf("image", a.id) - orderIndexOf("image", b.id);
       });
-      ordered.forEach(function (im) {
-        var wrap = document.createElement("div");
-        wrap.className = "img-wrap" + (selected === im.id ? " selected" : "");
-        wrap.setAttribute("data-id", im.id);
-        var img = document.createElement("img");
-        img.src = im.url;
-        img.alt = "";
-        var handle = document.createElement("div");
-        handle.className = "handle";
-        wrap.appendChild(img);
-        wrap.appendChild(handle);
-        wrap.addEventListener("pointerdown", function (e) {
-          // Only the resize handle is clickable on a wrap now; everything else goes to
-          // the board's front-to-back hit test (#296). The handle exists only on the
-          // selected image, so a click here is unambiguous.
-          if (tool !== "select" || e.target !== handle) return;
-          e.stopPropagation();
-          selected = im.id;
-          drag = { id: im.id, mode: "resize", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h };
-        });
-        layers.appendChild(wrap);
+      ordered.forEach(function (im, at) {
+        var wrap = have[im.id];
+        if (wrap) delete have[im.id]; else wrap = buildWrap(im.id);
+        if (wrap._src !== im.url) { wrap._src = im.url; wrap._img.src = im.url; }
+        wrap.classList.toggle("selected", selected === im.id);
+        if (layers.children[at] !== wrap) layers.insertBefore(wrap, layers.children[at] || null);
       });
+      Object.keys(have).forEach(function (id) { layers.removeChild(have[id]); });
       syncImages();
       markImagePainted();
+      refreshDeleteBtn();
+    }
+    // Delete a picture. Undo brings it back: the snapshot is taken first, and it carries
+    // the picture, its place in the stacking order, and everything else on the board.
+    function deleteImage(id) {
+      if (!imageById(id)) { if (selected === id) selected = null; renderImages(); paint(); return; }
+      snapshot();
+      doc.images = doc.images.filter(function (x) { return x.id !== id; });
+      if (selected === id) selected = null;
+      if (drag && drag.id === id) drag = null;
+      orderSync();                    // drops its place in the stacking order
+      renderImages(); paint(); autoSave();
+      setStatus("Picture deleted. Undo brings it back.");
     }
     var drag = null;
     window.addEventListener("pointermove", function (e) {
       if (!drag) return;
-      var im = doc.images.find(function (x) { return x.id === drag.id; });
-      if (!im) return;
+      var im = imageById(drag.id);
+      if (!im) { drag = null; return; }
+      // A click that jitters by a pixel is a click, not a move: nothing shifts, and
+      // nothing is saved afterwards.
+      if (!drag.moved) {
+        if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) < 3) return;
+        drag.moved = true;
+      }
       var dx = (e.clientX - drag.sx) / view.zoom, dy = (e.clientY - drag.sy) / view.zoom;
       if (drag.mode === "move") { im.x = drag.ox + dx; im.y = drag.oy + dy; }
       else { im.w = Math.max(40, drag.ow + dx); im.h = Math.max(40, drag.oh + dy); }
+      // The frame around the picture follows at once; the picture itself is drawn by the
+      // canvas, once per frame. Only the frame used to move: nothing repainted the canvas
+      // during or after the drag, so the picture stayed where it was until some later
+      // click happened to redraw the board.
       syncImages();
+      schedulePaint();
     });
-    window.addEventListener("pointerup", function () {
+    function endDrag() {
       if (!drag) return;
+      var moved = drag.moved;
       drag = null;
-      autoSave();
-    });
+      if (moved) { paint(); autoSave(); }
+    }
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
 
     stage.addEventListener("dragover", function (e) { e.preventDefault(); stage.classList.add("drop"); });
     stage.addEventListener("dragleave", function () { stage.classList.remove("drop"); });
@@ -2109,22 +2547,22 @@
       canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy"
         : t === "text" ? "text" : t === "pan" ? "grab" : t === "zoom" ? "zoom-in" : "crosshair";
       if (t !== "text" && editEl) closeTextEditor();
-      syncTextBar();
+      syncPolyBar();          // also settles the text bar, which shares its row
       syncSelBar();
       setStatus(toolHint(t));
       paint();
     }
     function toolHint(t) {
       var hints = {
-        select: "Click a mark to select it; Delete removes it. Drag images to move them.",
+        select: "Click a picture or a mark to select it; Delete removes it. Drag a picture to move it.",
         pencil: "Pencil: drag to draw a hard edge.", brush: "Brush: drag to paint.",
         eraser: "Eraser: drag over pixels to erase them.",
-        fill: "Fill: click an area to flood it with colour.", picker: "Pick: click to take a colour.",
+        fill: "Fill: click an area to flood it with colour. Alt/Option+click makes it see-through.", picker: "Pick: click to take a colour.",
         airbrush: "Airbrush: hold and drag to spray.",
         line: "Line: drag.", curve: "Curve: drag, then move to bend and click to fix.",
         rect: "Rectangle: drag.", rrect: "Rounded rectangle: drag.",
         ellipse: "Ellipse: drag.", triangle: "Triangle: drag.",
-        polygon: "Polygon: click each corner, double-click to close.",
+        polygon: "Polygon: click each corner. Finish with a click on the first corner, a double-click or Enter.",
         star: "Star: drag.", arrow: "Arrow: drag.", bubble: "Speech bubble: drag.",
         text: "Text: click to type.",
       };
@@ -2138,6 +2576,7 @@
     sizeEl.addEventListener("input", function () { size = Number(sizeEl.value); sizeVal.textContent = size; });
     var tolEl = document.getElementById("tol"), tolVal = document.getElementById("tolVal");
     tolEl.addEventListener("input", function () { tolerance = Number(tolEl.value); tolVal.textContent = tolerance; });
+    document.getElementById("rmBg").addEventListener("click", removeBackground);
     document.getElementById("opMode").addEventListener("change", function (e) { op = e.target.value; });
 
     document.getElementById("colorP").addEventListener("input", function (e) { colorP = e.target.value; });
@@ -2164,21 +2603,61 @@
     document.getElementById("undo").addEventListener("click", undo);
     document.getElementById("redo").addEventListener("click", redo);
     document.getElementById("del").addEventListener("click", deleteSelected);
+    // One Delete for everything that can be selected, however it is asked for: the key,
+    // the header button, the Selection bar's Delete, the × on a picture. It used to know
+    // only about vector marks, so a selected picture answered "Select a mark first".
+    var delBtn = null, delWhat = "";
+    // The header button looks disabled while there is nothing to delete, and says what it
+    // would delete when there is. It stays clickable so that it can explain itself.
+    function refreshDeleteBtn() {
+      if (!delBtn) delBtn = document.getElementById("del");
+      if (!delBtn) return;
+      var what = floating ? "lifted area" : sel ? "selected area" : selectedImage() ? "picture" : selectedMark() ? "mark" : "";
+      if (what === delWhat) return;
+      delWhat = what;
+      delBtn.classList.toggle("is-off", !what);
+      delBtn.setAttribute("aria-disabled", what ? "false" : "true");
+      delBtn.title = what ? "Delete the selected " + what + " (Delete key; Undo brings it back)"
+                          : "Delete — click a picture or a mark first, then press Delete or Backspace";
+    }
     function deleteSelected() {
-      if (!selectedStroke) { setStatus("Select a mark first (Select tool), then Delete."); return; }
-      snapshot();
-      doc.strokes = doc.strokes.filter(function (x) { return x.id !== selectedStroke; });
-      // Notes anchored to a deleted mark keep their fallback position, so the
-      // comment survives the mark it described.
-      doc.strokes.forEach(function (x) { if (x.anchor === selectedStroke) x.anchor = null; });
-      selectedStroke = null;
-      paint(); setStatus("Deleted."); autoSave();
+      if (floating) {
+        // Lifted pixels live only in the floating buffer, and the snapshot taken when
+        // they were lifted still has them where they were: dropping the buffer is the
+        // delete, and Undo gives them back.
+        floating = null;
+        paint(); autoSave(); syncSelBar();
+        setStatus("Deleted the lifted area. Undo brings it back.");
+        return;
+      }
+      if (sel) { deleteSel(); return; }
+      var im = selectedImage();
+      if (im) { deleteImage(im.id); return; }
+      var mark = selectedMark();
+      if (mark) {
+        snapshot();
+        doc.strokes = doc.strokes.filter(function (x) { return x.id !== mark.id; });
+        // Notes anchored to a deleted mark keep their fallback position, so the
+        // comment survives the mark it described.
+        doc.strokes.forEach(function (x) { if (x.anchor === mark.id) x.anchor = null; });
+        selectedStroke = null;
+        paint(); setStatus("Deleted. Undo brings it back."); autoSave();
+        return;
+      }
+      setStatus("Nothing is selected. Click a picture or a mark with the Select tool, then Delete.");
     }
 
     window.addEventListener("keydown", function (e) {
       var tag = (e.target && e.target.tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (sel || floating) deleteSel(); else deleteSelected(); return; }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        // Mid-polygon these keys belong to the shape being drawn (Backspace takes back the
+        // last corner) and must never reach whatever else happens to be selected.
+        if (polyDraft) { polyBack(); return; }
+        deleteSelected();
+        return;
+      }
       var meta = e.metaKey || e.ctrlKey;
       if (meta) {
         if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
@@ -2203,9 +2682,11 @@
         return;
       }
       if (e.key === "Escape") {
+        // The polygon being drawn comes first: it is the gesture in progress. Esc finishes
+        // it (it keeps the shape once it has 3 corners) instead of throwing the work away.
+        if (polyDraft) { e.preventDefault(); closePolygon(); return; }
         if (floating) { dropFloating(); return; }
         if (sel) { sel = null; paint(); syncSelBar(); return; }
-        if (polyDraft) { polyDraft = null; draft = null; paint(); return; }
         if (curvePending) { curvePending = null; draft = null; paint(); return; }
       }
       var keys = { s: "select", m: "selrect", n: "selfree", p: "pencil", z: "zoom", h: "pan", b: "brush", e: "eraser", f: "fill", i: "picker", a: "airbrush",
@@ -2263,7 +2744,8 @@
     function openCanvasPanel() {
       document.getElementById("cvW").value = Math.round(doc.w);
       document.getElementById("cvH").value = Math.round(doc.h);
-      document.getElementById("cvBg").value = doc.bg;
+      document.getElementById("cvBg").value = paperNone() ? paperColor : doc.bg;
+      document.getElementById("cvBgNone").checked = paperNone();
       cvPanel.classList.toggle("on");
     }
 
@@ -2285,8 +2767,18 @@
       document.getElementById("cvStatus").textContent = "Canvas " + w + "×" + h;
     });
     document.getElementById("cvBg").addEventListener("input", function (e) {
-      doc.bg = e.target.value;
+      doc.bg = paperColor = e.target.value;
+      document.getElementById("cvBgNone").checked = false;      // choosing a colour puts a paper back
       paint(); autoSave();
+    });
+    // Background: none. The paper becomes see-through: a checkerboard here, and no paper
+    // at all in a PNG export. Un-ticking brings the last colour back.
+    document.getElementById("cvBgNone").addEventListener("change", function (e) {
+      doc.bg = e.target.checked ? "none" : paperColor;
+      paint(); autoSave();
+      setStatus(e.target.checked
+        ? "Background: none. It shows as a checkerboard and is left out of a PNG export."
+        : "Background colour is back.");
     });
     document.getElementById("cvFile").addEventListener("change", function (e) {
       var f = e.target.files && e.target.files[0];
@@ -2344,15 +2836,24 @@
     // ── flatten for the model, and for PNG/JPG export ─────────────────
     // Board layering on screen is: paper → pixels → vector marks → images (DOM wraps).
     // Export in exactly that order at 1:1, so the PNG is the board, not a re-drawing.
-    function renderBoard(scale, type) {
+    // `paper` says what goes under the art:
+    //   (left out)  the board as it looks: the paper colour, or nothing when the paper is none
+    //   "clear"     nothing at all, whatever the paper is (Export see-through PNG)
+    //   "solid"     the paper colour, or white when the paper is none (what the model is
+    //               sent: a reference with holes in it is not read the same by every provider)
+    // A JPG has no alpha, so it always goes out on white.
+    function renderBoard(scale, type, paper) {
       var s = scale === undefined ? 1 : scale;
       var out = document.createElement("canvas");
       out.width = Math.max(1, Math.round(doc.w * s));
       out.height = Math.max(1, Math.round(doc.h * s));
       var c = out.getContext("2d");
       c.setTransform(s, 0, 0, s, 0, 0);
-      c.fillStyle = type === "image/jpeg" ? "#ffffff" : doc.bg;
-      c.fillRect(0, 0, doc.w, doc.h);
+      var under = type === "image/jpeg" ? "#ffffff"
+        : paper === "clear" ? null
+        : paperNone() ? (paper === "solid" ? "#ffffff" : null)
+        : doc.bg;
+      if (under) { c.fillStyle = under; c.fillRect(0, 0, doc.w, doc.h); }
       if (rasterCv) c.drawImage(rasterCv, 0, 0, doc.w, doc.h);
       // Images are decoded first and then painted in `doc.order` interleaved with the
       // vector marks, so the PNG is the board and not a re-drawing of it.
@@ -2385,7 +2886,7 @@
     function flatten() {
       // The model gets a sane size, not a 4K plate.
       var s = Math.min(1, 1280 / Math.max(doc.w, 1));
-      return renderBoard(s, "image/png");
+      return renderBoard(s, "image/png", "solid");
     }
 
     // The provider only accepts inline images, so an existing render has to be read
@@ -2471,7 +2972,7 @@
       return '<svg xmlns="http://www.w3.org/2000/svg" width="' + Math.round(doc.w) +
         '" height="' + Math.round(doc.h) + '" viewBox="0 0 ' + Math.round(doc.w) +
         " " + Math.round(doc.h) + '">' +
-        '<rect width="100%" height="100%" fill="' + doc.bg + '"/>' + parts.join("") + "</svg>";
+        (paperNone() ? "" : '<rect width="100%" height="100%" fill="' + doc.bg + '"/>') + parts.join("") + "</svg>";
     }
 
     document.getElementById("svg").addEventListener("click", function () {
@@ -2489,8 +2990,21 @@
       renderBoard(1, "image/png").then(function (url) {
         var a = document.createElement("a");
         a.href = url; a.download = "sketch-" + Date.now() + ".png"; a.click();
+        setStatus(paperNone()
+          ? "Exported a PNG with no background (the paper is None)."
+          : "Exported a PNG with the paper colour. For one with no background, use Export see-through PNG.");
       });
     });
+    // One click, whatever the paper colour is: the art on nothing at all.
+    function exportSeeThrough() {
+      renderBoard(1, "image/png", "clear").then(function (url) {
+        var a = document.createElement("a");
+        a.href = url; a.download = "sketch-see-through-" + Date.now() + ".png"; a.click();
+        setStatus("Exported a PNG with no background: every empty area is see-through.");
+      });
+    }
+    document.getElementById("shotAlpha").addEventListener("click", exportSeeThrough);
+    document.getElementById("cvPng").addEventListener("click", exportSeeThrough);
 
     document.getElementById("create").addEventListener("click", function () {
       var prompt = (promptEl.value || "").trim();
@@ -2665,7 +3179,10 @@
         .then(function (d) {
           if (d && d.board) {
             if (d.board.w && d.board.h) { doc.w = d.board.w; doc.h = d.board.h; }
-            if (d.board.bg) doc.bg = d.board.bg;
+            if (d.board.bg) {
+              doc.bg = d.board.bg === "transparent" ? "none" : d.board.bg;
+              if (doc.bg !== "none") paperColor = doc.bg;
+            }
             doc.strokes = d.board.strokes || [];
             // An image with no url was a blob: pointer that could not be saved; it must
             // not come back as an empty wrap the user can drag but never see.
@@ -2743,7 +3260,9 @@
         return { jobId: jobId, saving: saving, saveAgain: saveAgain, w: doc.w, h: doc.h,
                  zoom: view.zoom, panX: view.panX, panY: view.panY, bg: doc.bg,
                  strokes: doc.strokes.length, images: doc.images.length,
-                 sel: sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null, floating: !!floating };
+                 sel: sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null, floating: !!floating,
+                 poly: polyDraft ? polyDraft.points.length : 0,
+                 selectedImage: selected, selectedMark: selectedStroke };
       },
     };
     if (!jobId) titleEl.textContent = "New board";
