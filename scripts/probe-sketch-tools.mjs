@@ -56,6 +56,10 @@
  *   E54-E55  a neighbouring colour bucket counts only if the flood could clear it from the key
  *   E56-E57  the "still over the limit" note is taken back when the save makes the board fit
  *
+ * Fourth review (of the third-review fixes):
+ *   B39-B40  an Undo that brings back a lifted area is applied only once its pixels have
+ *            decoded, so an Esc in the same moment cannot lay an empty buffer into the layer
+ *
  * It needs no server and no account: it serves public/ from this checkout on an ephemeral
  * port, answers the few /api/buzzy calls the page makes with stubs, and drives the page
  * with Playwright. The pass/fail is on what the page really does (pixels on the canvas,
@@ -856,6 +860,36 @@ async function checksDeleteMore(ctx) {
   const aShown = await screenPx(page, at(g, 150, 140).x, at(g, 150, 140).y);
   check("B38 Undo while dragging a pasted area brings back A, lifted, where it was: the rest of the drag does not move it",
     st.floating === true && aShown[0] > 200 && aShown[2] < 80, { floating: st.floating, shown: aShown });
+  await page.close();
+
+  // 6. (fourth review) an Esc in the same moment as an Undo that brings back a lifted area: the
+  //    step used to be applied before the area's PNG had decoded, and that Esc laid the still
+  //    empty buffer into the layer, so the area was lost
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="fill"]');
+  await click(page, g, 50, 50);
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 100, 100, 200, 180);                         // area A
+  await page.click("#flipH");                                      // A is lifted
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 400, 300, 480, 360);                         // a mark while it floats: this step has A lifted
+  await page.click("#del");                                        // A is deleted
+  await page.click("#undo");                                       // A is back, laid in (the delete's own step)
+  await sleep(300);
+  await page.evaluate(() => {                                      // the next Undo, and an Esc in the same task
+    document.getElementById("undo").click();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await sleep(400);
+  st = await state(page);
+  const shown39 = await screenPx(page, at(g, 150, 140).x, at(g, 150, 140).y);
+  check("B39 an Esc in the same moment as an Undo that brings back a lifted area does not throw the area away: it floats, and shows",
+    st.floating === true && st.strokes === 0 && shown39[0] > 200 && shown39[2] < 80, { floating: st.floating, strokes: st.strokes, shown: shown39 });
+  await page.keyboard.press("Escape");
+  await sleep(150);
+  const laid39 = await rasterPx(page, [[150, 140]]);
+  check("B40 ...and Esc then lays its pixels into the layer (not an empty buffer)", laid39[0][3] === 255 && laid39[0][0] > 200 && laid39[0][2] < 80, laid39[0]);
   await page.close();
 }
 

@@ -1048,16 +1048,33 @@
                                png: floatPng(floating.buf), bw: floating.buf.width, bh: floating.buf.height } : null,
       };
     }
-    // A lifted area from a step: a buffer of its size that its PNG is drawn into once that has
-    // decoded (a data URL decodes in a moment, as the pixel layer's does in loadRaster).
-    function floatFromStep(f) {
+    // Undo and Redo apply a step only once its lifted area (kept as a PNG) has been decoded
+    // into a buffer, so whatever acts on the restored area next (Esc dropping it, Delete, a
+    // save, an export) has its pixels. A step applied at once and filled in when the PNG had
+    // decoded let an Esc in between lay an empty buffer into the layer, and the area was lost.
+    // A step with nothing lifted (nearly every one) is applied at once, as before; an Undo or
+    // Redo asked for while a decode is under way waits its turn, so the order holds.
+    var historyBusy = false, historyWaiting = [];
+    function whenStepReady(step, apply) {
+      var f = step.floating;
+      if (!f || f.buf) { apply(); return; }
+      historyBusy = true;
       var buf = document.createElement("canvas");
       buf.width = f.bw; buf.height = f.bh;
       buf._bzPng = f.png;
       var im = new Image();
-      im.onload = function () { buf.getContext("2d").drawImage(im, 0, 0); paint(); };
+      im.onload = im.onerror = function () {
+        if (im.naturalWidth) buf.getContext("2d").drawImage(im, 0, 0);
+        f.buf = buf;          // the step has been taken off its stack: this buffer is not kept in it
+        apply();
+        historyBusy = false;
+        while (!historyBusy && historyWaiting.length) historyWaiting.shift()();
+      };
       im.src = f.png;
-      return { x: f.x, y: f.y, w: f.w, h: f.h, path: f.path, buf: buf };
+    }
+    // The lifted area of a step that whenStepReady has made ready.
+    function floatFromStep(f) {
+      return { x: f.x, y: f.y, w: f.w, h: f.h, path: f.path, buf: f.buf };
     }
     function snapshot() {
       undoStack.push(historyStep());
@@ -1106,23 +1123,31 @@
       // so undoing from the stack would undo the edit BEFORE the polygon and leave the open
       // shape on a board that changed under it. Nothing is snapshotted here, so the board's
       // Redo keeps whatever it had for when the shape is done.
+      if (historyBusy) { historyWaiting.push(undo); return; }
       if (polyDraft) { polyBack(); return; }
       if (!undoStack.length) { setStatus("Nothing to undo."); return; }
-      redoStack.push(current());
-      applySnapshot(undoStack.pop());
-      setStatus("Undone.");
-      autoSave();
+      var step = undoStack.pop();
+      whenStepReady(step, function () {
+        redoStack.push(current());
+        applySnapshot(step);
+        setStatus("Undone.");
+        autoSave();
+      });
     }
     function redo() {
       // While a polygon is open, Redo is the polygon's too: it puts back the corner Undo (or
       // Backspace) took. It used to reach past the open shape to the board's Redo and bring
       // back (and save) an unrelated earlier edit under it.
+      if (historyBusy) { historyWaiting.push(redo); return; }
       if (polyDraft) { polyForward(); return; }
       if (!redoStack.length) { setStatus("Nothing to redo."); return; }
-      undoStack.push(current());
-      applySnapshot(redoStack.pop());
-      setStatus("Redone.");
-      autoSave();
+      var step = redoStack.pop();
+      whenStepReady(step, function () {
+        undoStack.push(current());
+        applySnapshot(step);
+        setStatus("Redone.");
+        autoSave();
+      });
     }
 
     // ── autosave ──────────────────────────────────────────────────────
