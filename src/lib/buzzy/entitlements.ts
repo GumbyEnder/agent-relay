@@ -29,6 +29,17 @@ export interface PlanRules {
   musicMaxSeconds: number;
   /** images rendered per day; 0 = the plan does not include art */
   imagesPerDay: number;
+  /**
+   * Seconds a "Browser use" node may keep a server browser open in a rolling 24 h (the
+   * browser costs money while it is open, so it is counted by the second). 0 = none.
+   */
+  browserSecondsPerDay: number;
+  /**
+   * Calls an "API use" node may make from this server's address in a rolling 24 h. A
+   * node's Try it runs on the server, so on the free plan it would otherwise be a
+   * shared egress proxy with no daily ceiling. 0 = the plan includes none.
+   */
+  apiCallsPerDay: number;
   /** models this plan may name; null = the deployment's own default set */
   models: string[] | null;
 }
@@ -46,9 +57,9 @@ export const FREE_MODELS = (process.env.BZ_FREE_MODELS ?? "google/gemini-3.1-fla
 export const PLANS: Record<PlanName, PlanRules> = {
   // Music is the most expensive unit we buy, so it is a paid perk: a free account
   // gets chat on the cheap lane, not audio generation.
-  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, models: FREE_MODELS },
-  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 60, models: null },
-  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 400, models: null },
+  free: { inferencePerDay: 100, musicSecondsPerDay: 0, musicMaxSeconds: 60, imagesPerDay: 0, browserSecondsPerDay: 600, apiCallsPerDay: 20, models: FREE_MODELS },
+  starter: { inferencePerDay: 1000, musicSecondsPerDay: 900, musicMaxSeconds: 180, imagesPerDay: 60, browserSecondsPerDay: 3600, apiCallsPerDay: 300, models: null },
+  pro: { inferencePerDay: 10000, musicSecondsPerDay: 3600, musicMaxSeconds: 600, imagesPerDay: 400, browserSecondsPerDay: 14400, apiCallsPerDay: 1000, models: null },
 };
 
 export const DEFAULT_PLAN: PlanName = ((): PlanName => {
@@ -101,11 +112,29 @@ export async function getEntitlement(userId: string): Promise<Entitlement> {
   }
 }
 
-/** Units spent in the rolling window, for one scope. */
+/** Thrown when the usage ledger cannot be read. */
+export class UsageUnreadable extends Error {
+  readonly scope: string;
+  constructor(scope: string) {
+    super(`usage ledger unreadable for scope ${scope}`);
+    this.name = "UsageUnreadable";
+    this.scope = scope;
+  }
+}
+
+/**
+ * Units spent in the rolling window, for one scope.
+ *
+ * Throws when the ledger cannot be read. It used to return 0, which made every
+ * "is there quota left" answer a yes during a database hiccup — the browser and
+ * the API node then spent with no ceiling at all. Callers decide: the gate
+ * (checkQuota) fails closed, the display path (browserInfo) says it does not know.
+ */
 export async function unitsInWindow(userId: string, scope: string, hours = 24): Promise<number> {
+  let rows: Array<{ used: string | number | null }>;
   try {
     const sql = await getSql();
-    const rows = await sql<{ used: string | number | null }>`
+    rows = await sql<{ used: string | number | null }>`
       SELECT COALESCE(SUM(units), 0) AS used
       FROM bz_usage
       WHERE user_id = ${userId}
@@ -113,16 +142,17 @@ export async function unitsInWindow(userId: string, scope: string, hours = 24): 
         AND status = 'ok'
         AND created_at > now() - (${hours}::text || ' hours')::interval
     `;
-    const used = Number(rows[0]?.used ?? 0);
-    return Number.isFinite(used) ? used : 0;
   } catch {
-    return 0;
+    throw new UsageUnreadable(scope);
   }
+  const used = Number(rows[0]?.used ?? 0);
+  if (!Number.isFinite(used)) throw new UsageUnreadable(scope);
+  return used;
 }
 
 export interface QuotaVerdict {
   ok: boolean;
-  code?: "plan_required" | "quota_exhausted" | "model_not_allowed";
+  code?: "plan_required" | "quota_exhausted" | "model_not_allowed" | "usage_unknown";
   error?: string;
   plan: PlanName;
   used?: number;
@@ -135,13 +165,29 @@ export interface QuotaVerdict {
  */
 export async function checkQuota(opts: {
   userId: string;
-  scope: "inference" | "music" | "image";
-  /** music: requested seconds. inference: 1 */
+  scope: "inference" | "music" | "image" | "browser" | "api";
+  /** music: requested seconds. inference: 1. browser: the seconds about to be used (default 1). api: calls about to be made (default 1) */
   units?: number;
   model?: string;
 }): Promise<QuotaVerdict> {
   const ent = await getEntitlement(opts.userId);
   const rules = PLANS[ent.plan] ?? PLANS.free;
+
+  // A ledger we cannot read is not a ledger that says "nothing used yet". Every
+  // scope below refuses rather than passing with used = 0.
+  const usage = async (scope: string): Promise<number | null> => {
+    try {
+      return await unitsInWindow(opts.userId, scope);
+    } catch {
+      return null;
+    }
+  };
+  const unreadable = (scope: string): QuotaVerdict => ({
+    ok: false,
+    code: "usage_unknown",
+    plan: ent.plan,
+    error: `BeeZilla can't read how much ${scope} is left today, so it won't start more until it can — try again in a moment`,
+  });
 
   if (opts.scope === "music") {
     const want = Math.max(1, Math.round(opts.units ?? 0));
@@ -162,7 +208,8 @@ export async function checkQuota(opts: {
         error: `one track is capped at ${rules.musicMaxSeconds}s on the ${ent.plan} plan`,
       };
     }
-    const used = await unitsInWindow(opts.userId, "music");
+    const used = await usage("music");
+    if (used === null) return unreadable("music");
     if (used + want > rules.musicSecondsPerDay) {
       return {
         ok: false,
@@ -176,6 +223,26 @@ export async function checkQuota(opts: {
     return { ok: true, plan: ent.plan, used, limit: rules.musicSecondsPerDay };
   }
 
+  if (opts.scope === "browser") {
+    const want = Math.max(1, Math.round(opts.units ?? 1));
+    const used = await usage("browser");
+    if (used === null) return unreadable("browser");
+    if (rules.browserSecondsPerDay <= 0 || used + want > rules.browserSecondsPerDay) {
+      const left = Math.max(0, Math.floor(rules.browserSecondsPerDay - used));
+      return {
+        ok: false,
+        code: rules.browserSecondsPerDay <= 0 ? "plan_required" : "quota_exhausted",
+        plan: ent.plan,
+        used,
+        limit: rules.browserSecondsPerDay,
+        error: rules.browserSecondsPerDay <= 0
+          ? `the ${ent.plan} plan does not include the server browser`
+          : `the ${ent.plan} plan includes ${Math.round(rules.browserSecondsPerDay / 60)} minutes of server browser a day, and ${left <= 0 ? "today's are used up" : `${Math.ceil(left / 60)} minute${left > 60 ? "s are" : " is"} left`}. It comes back on a rolling 24 hours`,
+      };
+    }
+    return { ok: true, plan: ent.plan, used, limit: rules.browserSecondsPerDay };
+  }
+
   if (opts.scope === "image") {
     const want = Math.max(1, Math.round(opts.units ?? 1));
     if (rules.imagesPerDay <= 0) {
@@ -186,7 +253,8 @@ export async function checkQuota(opts: {
         error: `the ${ent.plan} plan does not include BeeZilla art — images are part of the paid plans`,
       };
     }
-    const used = await unitsInWindow(opts.userId, "image");
+    const used = await usage("image");
+    if (used === null) return unreadable("image");
     if (used + want > rules.imagesPerDay) {
       return {
         ok: false,
@@ -200,6 +268,35 @@ export async function checkQuota(opts: {
     return { ok: true, plan: ent.plan, used, limit: rules.imagesPerDay };
   }
 
+  // API use: a node's "Try it" calls a website from this server's address, so it is a
+  // shared egress proxy — it belongs to a plan and it is counted, not just rate-limited.
+  // The in-process limiter in boardNodes.nitro (30 tries / 10 min) stays as the flood
+  // guard; this is the daily ceiling that the free plan was missing entirely.
+  if (opts.scope === "api") {
+    const want = Math.max(1, Math.round(opts.units ?? 1));
+    if (rules.apiCallsPerDay <= 0) {
+      return {
+        ok: false,
+        code: "plan_required",
+        plan: ent.plan,
+        error: `the ${ent.plan} plan does not include API use — it needs calls made from BeeZilla's own address, which is part of the paid plans`,
+      };
+    }
+    const used = await usage("api");
+    if (used === null) return unreadable("API use");
+    if (used + want > rules.apiCallsPerDay) {
+      return {
+        ok: false,
+        code: "quota_exhausted",
+        plan: ent.plan,
+        used,
+        limit: rules.apiCallsPerDay,
+        error: `API use on the ${ent.plan} plan is ${rules.apiCallsPerDay} calls per day — ${Math.max(0, rules.apiCallsPerDay - used)} left, back on a rolling 24 hours`,
+      };
+    }
+    return { ok: true, plan: ent.plan, used, limit: rules.apiCallsPerDay };
+  }
+
   // Inference: count requests, and hold the caller to the plan's model list when the
   // deployment publishes one.
   const model = (opts.model ?? "").trim();
@@ -211,7 +308,8 @@ export async function checkQuota(opts: {
       error: `the ${ent.plan} plan does not include ${model}`,
     };
   }
-  const used = await unitsInWindow(opts.userId, "inference");
+  const used = await usage("inference");
+  if (used === null) return unreadable("chat");
   if (used + 1 > rules.inferencePerDay) {
     return {
       ok: false,
@@ -287,10 +385,10 @@ export async function setPlan(userId: string, plan: PlanName, planUntil?: Date |
 export async function describeEntitlement(userId: string) {
   const ent = await getEntitlement(userId);
   const rules = PLANS[ent.plan];
-  const [inferenceUsed, musicUsed] = await Promise.all([
-    unitsInWindow(userId, "inference"),
-    unitsInWindow(userId, "music"),
-  ]);
+  // Read-only display: an unreadable ledger says "unknown", it does not take the page
+  // down. The gate is checkQuota, and there an unreadable ledger refuses.
+  const read = (scope: string) => unitsInWindow(userId, scope).catch(() => null);
+  const [inferenceUsed, musicUsed] = await Promise.all([read("inference"), read("music")]);
   return {
     plan: ent.plan,
     planUntil: ent.planUntil?.toISOString() ?? null,
@@ -302,8 +400,8 @@ export async function describeEntitlement(userId: string) {
     },
     used: { inference: inferenceUsed, musicSeconds: musicUsed },
     remaining: {
-      inference: Math.max(0, rules.inferencePerDay - inferenceUsed),
-      musicSeconds: Math.max(0, rules.musicSecondsPerDay - musicUsed),
+      inference: inferenceUsed === null ? null : Math.max(0, rules.inferencePerDay - inferenceUsed),
+      musicSeconds: musicUsed === null ? null : Math.max(0, rules.musicSecondsPerDay - musicUsed),
     },
   };
 }

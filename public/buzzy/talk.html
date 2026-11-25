@@ -173,7 +173,6 @@
       order: 1;
     }
     .composer-card:focus-within { border-color: #3A3A3A; }
-    .composer-card .mode-tabs { margin: 0 0 0.55rem; }
     .composer-card .chat-input-row {
       border-top: none;
       margin-top: 0;
@@ -297,8 +296,6 @@
       gap: 0.6rem;
       margin: 0.55rem 0.4rem 0;
     }
-    .talk-sub .mode-tabs { margin: 0; }
-    .talk-sub .mode-tab { padding: 0.24rem 0.8rem; font-size: 0.76rem; }
     .talk-attach { margin: 0; font-size: 0.78rem; padding: 0.24rem 0.7rem; }
     .talk-sub-right { display: inline-flex; align-items: center; gap: 0.45rem; }
     .file-card .file-share { min-height: 0; padding: 0.2rem 0.65rem; border-radius: 999px; border: 1px solid #6B5A1E; background: transparent; color: #FFC107; font: inherit; font-size: 0.8rem; cursor: pointer; }
@@ -1121,11 +1118,17 @@
       border-left: 1px solid #2A2A2A;
       z-index: 61;
       box-shadow: -6px 0 24px rgba(0,0,0,0.5);
-      display: flex;
       flex-direction: column;
       transform: translateX(100%);
       transition: transform 0.18s ease;
+      /* Closed = absent from layout. A panel parked just off the right edge is
+         still a 359px box hanging outside the viewport: at 390px every probe
+         (and the desktop shell's width check) reads that as overflow even
+         though Chromium shows no scrollbar, and it stays in the a11y tree.
+         `.mounted` exists only while the drawer is opening, open, or closing. */
+      display: none;
     }
+    #sessionsDrawer.mounted { display: flex; }
     #sessionsDrawer.open { transform: translateX(0); }
     .drawer-header {
       display: flex;
@@ -1488,49 +1491,31 @@
   color: var(--bz-yellow);
 }
 
-/* ── Chat / Work modes ─────────────────────────────────────────────── */
-.mode-tabs {
+/* ── One mode: the quick choice and a question's suggested answer ────
+   Buttons under BeeZilla's newest reply (oneMode.ts): "Ask me a few questions" /
+   "Just go for it", or the suggested answer (one tap) and "Just go for it". */
+.bz-choice {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin: 0.15rem 0 0.85rem;
   flex-wrap: wrap;
-}
-.mode-tab {
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
-  padding: 0.36rem 1rem;
-  border-radius: 999px;
-  border: 1px solid #2E2E2E;
-  background: transparent;
-  color: #9A9A9A;
-  cursor: pointer;
-  min-height: 0;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.mode-tab:hover { color: var(--bz-yellow); border-color: var(--bz-yellow); }
-.mode-tab.active {
-  background: var(--bz-yellow);
-  border-color: var(--bz-yellow);
-  color: var(--bz-black);
-}
-
-/* Work definition panel — replaces the composer in work mode */
-.work-offer {
-  border: 1px solid var(--bz-yellow);
-  border-radius: 8px;
-  background: #171717;
-  padding: 0.75rem 0.9rem;
-  margin: 0.5rem 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.45rem;
+  margin: -0.3rem 0 0.9rem 0.35rem;
   max-width: 640px;
 }
-.work-offer p { margin: 0; font-size: 0.86rem; color: #DADADA; }
-.work-offer .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.work-offer button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.85rem; }
+.bz-choice-note {
+  flex-basis: 100%;
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  color: var(--bz-muted, #8d8d8d);
+}
+.bz-choice button {
+  min-height: 0;
+  font-size: 0.82rem;
+  padding: 0.42rem 0.9rem;
+  border-radius: 999px;
+  white-space: normal;
+  text-align: left;
+  max-width: 100%;
+}
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
   <link rel="stylesheet" href="/buzzy/browse.css" />
@@ -1538,9 +1523,11 @@
   <link rel="stylesheet" href="/buzzy/inspiration.css" />
   <link rel="stylesheet" href="/buzzy/voice-stage.css" />
   <link rel="stylesheet" href="/buzzy/whiteboard.css" />
+  <link rel="stylesheet" href="/buzzy/board-nodes.css" />
   <link rel="stylesheet" href="/buzzy/calm.css" />
   <link rel="stylesheet" href="/buzzy/oneboard.css" />
   <link rel="stylesheet" href="/buzzy/share.css" />
+  <link rel="stylesheet" href="/buzzy/page-share.css" />
 </head>
 <body>
   <header>
@@ -1558,6 +1545,7 @@
       <a href="/buzzy/experts" data-nav="experts">Experts</a>
       <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
       <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+      <a href="/buzzy/orchestrate" data-nav="orchestrate">Orchestrate</a>
       <a href="/buzzy/studio" data-nav="studio">Music studio</a>
       <a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>
       <!-- The raw file is what /buzzy/talk.html serves; the rendered /buzzy/talk gets
@@ -1575,20 +1563,17 @@
        TALK. Active state is computed here from the path, not hard-coded per page. */
     (function () {
       var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
-      // index.html serves ONLY /buzzy/library; every other /buzzy route
-      // redirects to the chat, so bare /buzzy counts as Talk here.
-      var section = "library";
+      // One rule: the page's segment names its nav anchor. The hard-coded list that
+      // used to live here defaulted to "library" for every route it did not name, so
+      // /buzzy/orchestrate (and sketch, studio, capabilities, project) lit Library.
+      var seg = (path.match(/^\/buzzy\/([a-z-]+)$/) || [])[1] || "";
+      var section = "";
       if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
-      else if (/^\/buzzy\/library$/.test(path)) section = "library";
-      else if (/^\/buzzy\/(memory|remember)$/.test(path)) section = "memory";
-      else if (/^\/buzzy\/experts$/.test(path)) section = "experts";
-      else if (/^\/buzzy\/recipes$/.test(path)) section = "recipes";
-      else if (/^\/buzzy\/download$/.test(path)) section = "download";
-      else if (/^\/buzzy\/wallet$/.test(path)) section = "wallet";
-      else if (/^\/buzzy\/upload$/.test(path)) section = "publish";
-      // These screens are not in the nav, so nothing lights up — claiming
-      // "Library" was active on the business profile was simply wrong.
-      else if (/^\/buzzy\/(profile|landing)?$/.test(path)) section = "";
+      else if (seg === "remember") section = "memory";
+      else if (seg === "upload") section = "publish";
+      else if (seg) section = seg;
+      // Only light a link that exists; screens that are not in the nav light nothing.
+      if (section && !document.querySelector('#bzNav a[data-nav="' + section + '"]')) section = "";
       var links = document.querySelectorAll("#bzNav a[data-nav]");
       for (var i = 0; i < links.length; i++) {
         var on = links[i].getAttribute("data-nav") === section;
@@ -1694,7 +1679,7 @@
          The agent's work is drawn on it live: agent.md, a line to each skill, the
          output. The conversation sits inside it on the right. -->
     <div id="obBoard" class="ob-board hidden" aria-label="Idea Board"></div>
-    <!-- Where the conversation and the old mode switch wait while the board is folded. -->
+    <!-- Where the conversation waits while the board is folded. -->
     <div id="obParking" hidden>
       <div class="talk-ws-thread" id="talkWsThread">
         <div class="chat-messages" id="chatMessages"></div>
@@ -1706,12 +1691,6 @@
       <button type="button" id="boardToggle" class="paper-toggle talk-attach" aria-pressed="false" title="Open or fold the Idea Board">Idea Board</button>
       <button type="button" id="aiKeyBtn" class="talk-attach" title="Use your own AI account">Your AI key</button>
       <button id="sessionsToggle" class="secondary sessions-toggle" type="button">Conversations</button>
-            <div class="tm-row tm-mode"><span class="tm-label">Mode</span>
-              <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="Chat or define work">
-                <button type="button" class="mode-tab active" data-mode="chat" role="tab" aria-selected="true">Chat</button>
-                <button type="button" class="mode-tab" data-mode="work" role="tab" aria-selected="false">Work</button>
-              </div>
-            </div>
     </div>
 
     <!-- The brief is one line above the conversation, expandable in place.
@@ -1775,23 +1754,22 @@
     <section class="bz-browse" id="bzBrowse" aria-label="Find and browse">
       <div class="bz-search" role="search">
         <svg class="bz-search-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
-        <input id="bzSearch" type="search" placeholder="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
+        <input id="bzSearch" type="search" placeholder="Search" data-placeholder-full="Search everything — your work and Inspiration — or enter a web address" autocomplete="off" spellcheck="false"
                aria-label="Search your pictures, music, 3D, documents, skills and recipes, or enter a web address" />
         <span class="bz-search-tools">
-          <!-- The page's address as a QR code, for a phone (owner's reference zMWSgG0:
-               "Search or enter a URL" with the QR code and the copy button). -->
-          <button type="button" id="bzQr" class="bz-share-btn" aria-haspopup="dialog" aria-expanded="false"
-                  aria-label="Show a QR code for this page"
-                  title="Shows this page's address as a QR code to open it on your phone. Nothing is shared or sent.">
+          <!-- The QR code and the copy button of the owner's reference zMWSgG0 ("Search or
+               enter a URL"). Both SHARE the page, so both open a window that says what
+               becomes public and to whom, with the small "Block searches" tick, and nothing
+               is shared until its "Yes, share this page" (owner, 2026-11-21; page-share.js). -->
+          <button type="button" id="bzQr" class="bz-share-btn" aria-haspopup="dialog"
+                  aria-label="Share this page with a QR code. You are asked first."
+                  title="Share this page as a QR code. You are asked first, and nothing is shared until you say yes.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2zM16 16h2v2h-2z"/></svg>
             <span>QR code</span>
           </button>
-          <!-- A share control that only copies a URL has to SAY so. The
-               icon alone read as "share this" and left the owner guessing
-               what left the page (nothing did). -->
-          <button type="button" id="bzCopy" class="bz-share-btn"
-                  aria-label="Copy a link to this page — nothing is shared or sent"
-                  title="Copies this page's address to your clipboard. Nothing is shared or sent.">
+          <button type="button" id="bzCopy" class="bz-share-btn" aria-haspopup="dialog"
+                  aria-label="Copy a link that shares this page. You are asked first."
+                  title="Copy a link to this page. You are asked first, and nothing is shared until you say yes.">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
             <span>Copy page link</span>
           </button>
@@ -1836,6 +1814,7 @@
         </div>
         <nav class="bz-places" aria-label="More places">
           <a href="/buzzy/sketch" data-place="sketch">Sketch</a>
+          <a href="/buzzy/orchestrate" data-place="orchestrate">Orchestrate</a>
           <a href="/buzzy/studio" data-place="studio">Music studio</a>
           <a href="/buzzy/capabilities" data-place="capabilities">What BeeZilla can do</a>
           <!-- #350's landing-order note: the installer is a place too, and it sits
@@ -2479,8 +2458,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       userId: null,
       model: null,
       boundCompanyId: null,
-      mode: "chat",
-      workOfferDismissed: false,
     };
 
     // ── Zilla agents: who is on the other end of this conversation ──────────
@@ -2920,6 +2897,45 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }, 8000);
     }
 
+    // ── One mode: the buttons under BeeZilla's reply ─────────────────
+    // Either the one quick choice ("Ask me a few questions" / "Just go for it"),
+    // a question's suggested answer, so one tap accepts it, or three amounts for how
+    // much to spend. Pressing one sends its words as the person's message, with the
+    // choice, through the ordinary send.
+    function renderChoice(choice) {
+      var opts = (choice && choice.options) || [];
+      if (!opts.length) return "";
+      var esc = function (v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); };
+      // The main button is BeeZilla's suggestion: the first, or the one marked (the
+      // middle of the three budget amounts).
+      var marked = opts.some(function (o) { return o.suggested; });
+      return '<div class="bz-choice" role="group" aria-label="' + (choice.kind === "offer" ? "Questions first, or just go" : "Answer") + '">' +
+        opts.map(function (o, i) {
+          var main = marked ? !!o.suggested : i === 0;
+          return '<button type="button" class="' + (main ? "" : "secondary") + '" data-choice="' + esc(o.value) + '" data-send="' + esc(o.send) + '">' +
+            esc(o.label) + "</button>";
+        }).join("") +
+        // What keeps going while this waits (a pending answer never stalls other work).
+        (choice.note ? '<p class="bz-choice-note">' + esc(choice.note) + "</p>" : "") +
+        "</div>";
+    }
+    var pendingChoice = null;
+    // Wired per render (renderChatMessages), not delegated once: the site shell runs
+    // this script again on a page switch, and a listener from an earlier run would
+    // send through that run's state.
+    function pressChoice(b) {
+      if (!b || b.disabled) return;
+      var box = document.getElementById("chatInput");
+      if (!box || box.disabled) return;
+      b.parentNode.querySelectorAll("button").forEach(function (x) { x.disabled = true; });
+      var value = b.getAttribute("data-choice");
+      pendingChoice = value;
+      // "Just go for it" is the Do it button by another name.
+      if (value === "go") pendingExecute = true;
+      box.value = b.getAttribute("data-send") || b.textContent || "";
+      sendFromBox();
+    }
+
     // ── What happened ────────────────────────────────────────────────
     // The product judges itself on numbers; the person paying should be able to
     // see them without asking. One muted line per reply: model, wall clock, what
@@ -3011,7 +3027,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       })(chatState.messages);
       const html = ordered.map((m) => {
         const cls = m.role === "user" ? "bubble me" : "bubble";
-        const escaped = String(m.content).replace(/</g, "&lt;").replace(/\n/g, "<br>");
+        // A question's suggested answer is its button (renderChoice); the "Suggested:"
+        // line stays in the stored text for voice and the other chat surfaces.
+        const shown = m.choice && m.choice.kind === "question" ? String(m.content).replace(/\nSuggested: [\s\S]*$/, "") : String(m.content);
+        const escaped = shown.replace(/</g, "&lt;").replace(/\n/g, "<br>");
         var bubble = '<div class="' + cls + '">' + escaped + "</div>";
         if (m.document && m.document.downloadUrl) {
           bubble += renderFileCard(m.document);
@@ -3040,9 +3059,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             '>' + String(m.progress).replace(/</g, "&lt;") + "</div>";
         }
         if (m.timings) bubble += renderWhatHappened(m);
+        // One mode (oneMode.ts): the quick choice, or a question's suggested answer.
+        // Only under the newest reply: once they answer, the buttons have done their job.
+        if (m.choice && m === chatState.messages[chatState.messages.length - 1]) bubble += renderChoice(m.choice);
         return bubble;
       }).join("");
       container.innerHTML = html;
+      container.querySelectorAll(".bz-choice button").forEach(function (b) {
+        b.addEventListener("click", function () { pressChoice(b); });
+      });
       // Music always shows its sound: each track's player becomes the waveform player.
       if (window.BeeZillaWave) {
         container.querySelectorAll("audio.media-audio").forEach(function (a) {
@@ -3082,43 +3107,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         card.appendChild(switchBtn);
         card.appendChild(dismiss);
         container.appendChild(card);
-      }
-      // Is this a project? Once two decisions are on the table, offer the
-      // structured path instead of letting the chat drift. The agent also
-      // asks in its own words; this is the actionable button for that ask.
-      if (shouldOfferWork() && container.querySelectorAll(".work-offer").length === 0) {
-        var offer = document.createElement("div");
-        offer.className = "work-offer";
-        var txt = document.createElement("p");
-        txt.textContent = "This is shaping up like a project. Want to define the work so it gets done the same way every time?";
-        var row = document.createElement("div");
-        row.className = "row";
-        var yes = document.createElement("button");
-        yes.type = "button";
-        yes.textContent = "Define the work";
-        yes.addEventListener("click", function () {
-          chatState.workOfferDismissed = true;
-          setMode("work");
-          chatState.messages.push({
-            role: "assistant",
-            content: "Work it is. What are we going to accomplish together?",
-          });
-          renderChatMessages();
-        });
-        var no = document.createElement("button");
-        no.type = "button";
-        no.className = "secondary";
-        no.textContent = "Just chatting";
-        no.addEventListener("click", function () {
-          chatState.workOfferDismissed = true;
-          renderChatMessages();
-        });
-        row.appendChild(yes);
-        row.appendChild(no);
-        offer.appendChild(txt);
-        offer.appendChild(row);
-        // Newest-first transcript: the offer belongs with the latest turn.
-        container.insertBefore(offer, container.firstChild);
       }
       container.scrollTop = 0;
       if (typeof updateChrome === "function") updateChrome();
@@ -3541,18 +3529,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }).catch(function () {}).finally(function () {
         document.getElementById("chatInput").disabled = false;
         document.getElementById("chatSend").disabled = false;
-      });
-    }
-
-    // ── Chat / Work mode ────────────────────────────────────────────
-    // Chat is the default. Work mode makes the harness delineate the task
-    // before a single turn is sent: required fields, one composed message,
-    // then the normal draft-then-approve path. Nothing here bypasses the
-    // server's slot extraction or the draft gate.
-    function filledDecisions() {
-      return Object.keys(SLOT_LABELS).filter(function (id) {
-        var v = chatState.slots[id];
-        return v && v !== "skipped";
       });
     }
 
@@ -3999,6 +3975,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           var heard = e.results[e.resultIndex || 0];
           if (heard && heard[0] && String(heard[0].transcript || "").trim()) {
             voice.firstInterimAt = performance.now();
+            bzSpeechHeard();
           }
         }
         var finalText = "";
@@ -5025,7 +5002,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { speechSeen = true; quietSince = 0; }
+            if (rms > 0.02) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
             // Live words: the clip so far, shown while the person is still talking.
@@ -5169,7 +5146,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var q = 0; q < copy.length; q++) sum += copy[q] * copy[q];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { capState.speechSeen = true; capState.quietSince = 0; }
+            if (rms > 0.02) { if (!capState.speechSeen) bzSpeechHeard(); capState.speechSeen = true; capState.quietSince = 0; }
             else if (capState.speechSeen && !capState.quietSince) capState.quietSince = Date.now();
             if (voice.bargeClip && capState.speechSeen && capState.quietSince &&
                 Date.now() - capState.quietSince > 1200) sendTurnClip();
@@ -5332,6 +5309,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
     }
 
+    // ── What the owner is looking at on the Idea Board, for this turn ─────────
+    // Owner, 2026-11-21: "it could hover over something or grab something and say, what
+    // do I do with this?… And it knows what this or that is." The board's view is taken
+    // the instant speech is heard (the words come later, and the mouse may have moved by
+    // then), kept once that speech's words reach the box (a cough keeps nothing), and
+    // sent with the turn; a typed turn sends the view as it is sent (whiteboard.js).
+    function bzBoard() { return window.BeeZillaWhiteboard || null; }
+    function bzSpeechHeard() {
+      var W = bzBoard();
+      if (W && W.markSpeech) setTimeout(function () { try { W.markSpeech(); } catch (_) { /* the board's view is a help, never a gate */ } }, 0);
+    }
+    function bzFreezeView() {
+      var W = bzBoard();
+      if (W && W.freezeView) { try { W.freezeView("speaking"); } catch (_) { /* as above */ } }
+    }
+    function bzTakeView() {
+      var W = bzBoard();
+      try { return W && W.takeView ? W.takeView() : undefined; } catch (_) { return undefined; }
+    }
+
     // ── Dictation: what you say collects in the box until you send it ─────
     // Owner, 2026-11-19: "When you click on it the first time, it should switch to
     // a pause button. You can click on that pause anytime, think as much as you
@@ -5384,6 +5381,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var t = String(text || "").trim();
       var seg = dictSeg(id, !!t);
       if (!seg || seg.done) return;
+      if (t) bzFreezeView();
       seg.text = t;
       dictRender();
     }
@@ -5395,6 +5393,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     // The words that count for a stretch ("" when nothing was said).
     function dictFinal(id, text) {
+      if (String(text || "").trim()) bzFreezeView();
       var seg = dictSeg(id, !!text);
       if (seg) { seg.text = String(text || "").trim(); seg.done = true; }
       dictSettle();
@@ -5843,7 +5842,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var body = {
         jobId: chatState.jobId || null,
         sessionId: chatState.sessionId || null,
-        mode: chatState.mode || "chat",
+        mode: m.mode || null,
         model: m.model || null,
         lane: m.lane || null,
         speechMs: m.userSpeechMs || null,
@@ -6095,38 +6094,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         }
         return pump();
       });
-    }
-
-    // Both modes are the same free-form chat box. The mode changes the
-    // prompt and the steering the server applies — not the interface.
-    function setMode(mode, opts) {
-      mode = mode === "work" ? "work" : "chat";
-      chatState.mode = mode;
-      var main = document.querySelector(".chat-main");
-      if (main) main.classList.toggle("mode-work", mode === "work");
-      document.querySelectorAll("#modeTabs .mode-tab").forEach(function (b) {
-        var on = b.getAttribute("data-mode") === mode;
-        b.classList.toggle("active", on);
-        b.setAttribute("aria-selected", on ? "true" : "false");
-      });
-      var input = document.getElementById("chatInput");
-      if (input) {
-        // One bar, one question (owner: "We don't need to have a difference between chat
-        // and work"). The mode only changes how BeeZilla steers, never what you see.
-        input.placeholder = "What would you like to make?";
-      }
-      var briefH = document.querySelector("#briefPanel h3");
-      if (briefH) briefH.textContent = "Brief";
-      if (typeof updateChrome === "function") updateChrome();
-      if (input && !input.disabled && !(opts && opts.noFocus)) input.focus();
-    }
-
-    function shouldOfferWork() {
-      if (chatState.mode === "work") return false;
-      if (chatState.jobId) return false;
-      if (chatState.workOfferDismissed) return false;
-      if (chatState.draftText) return false;
-      return filledDecisions().length >= 2;
     }
 
     function draftBodyEl() {
@@ -6633,8 +6600,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var inConversation = !!(chatState.messages.length || chatState.sessionId || chatState.jobId);
       if (main) main.classList.toggle("is-conversation", inConversation);
       var bar = document.getElementById("briefBar");
-      // The brief is a work-mode instrument; ordinary chat stays clean.
-      var showBrief = inConversation && chatState.mode === "work";
+      // One mode (oneMode.ts): the brief is captured quietly, never a form on screen.
+      // What BeeZilla assumed is in its reply, on the board and on the Memory page.
+      var showBrief = false;
       if (bar) bar.classList.toggle("hidden", !showBrief);
       if (!showBrief) setBrief(false);
       renderBriefStatus();
@@ -6817,15 +6785,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // ── Work search across all of the user's companies ─────────────────
     var rwSearchQuery = "";
 
+    function workSearchPlaceholder() {
+      // The long sentence needs 300px+; a phone gives the field about 160, so it
+      // used to clip to "Search all work across your co" (CR-13). Short wording on
+      // a narrow field, the full sentence when there is room.
+      return window.matchMedia && window.matchMedia("(max-width: 700px)").matches
+        ? "Search your work…"
+        : "Search all work across your companies…";
+    }
+
     function workSearchBoxHtml() {
       return '<div class="rw-search"><input id="rwSearch" type="search" ' +
-        'placeholder="Search all work across your companies…" autocomplete="off" ' +
+        'placeholder="' + workSearchPlaceholder() + '" autocomplete="off" ' +
         'aria-label="Search all work across your companies" value="' + esc(rwSearchQuery) + '"></div>';
     }
 
     function bindWorkSearchBox(container) {
       var el = container.querySelector("#rwSearch");
       if (!el) return;
+      var fit = function () { if (!el.value) el.placeholder = workSearchPlaceholder(); };
+      window.addEventListener("resize", fit);
       var t = null;
       el.addEventListener("input", function () {
         var q = el.value.trim();
@@ -7165,6 +7144,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const input = document.getElementById("chatInput");
       const text = input.value.trim();
       if (!text) return;
+      // What they are looking at on the Idea Board: taken first, before sending changes
+      // the board (the conversation card appears, a new conversation's board takes over):
+      // as they started speaking, or now as they send (whiteboard.js takeView).
+      const boardView = bzTakeView();
       var pastedPaper = readThisBody(text);
       if (pastedPaper !== null) {
         input.value = "";
@@ -7193,6 +7176,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       input.value = "";
       const sentExecute = pendingExecute === true;
       pendingExecute = false;
+      const sentChoice = pendingChoice;
+      pendingChoice = null;
       setChatMascot("08-thinking");
 
       // Add user message
@@ -7255,7 +7240,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // Say what is likely happening rather than a bare number.
         var staged = document.getElementById("bzStageLabel");
         if (staged && staged.textContent) { el.textContent = secs + "s"; return; }
-        el.textContent = secs < 3 ? "" : secs + "s" + (secs > 8 && (chatState.mode || "chat") === "work" ? " · working" : "");
+        el.textContent = secs < 3 ? "" : secs + "s";
       }, 500);
       // Cleared wherever the indicator is removed; a leaked interval would tick
       // against a dead node forever.
@@ -7285,13 +7270,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           message: text,
           model: selectedModel(),
           jobContext: chatState.jobContext || undefined,
-          mode: chatState.mode || "chat",
-          execute: pendingExecute === true,
+          // Read before the reset above: this used to send pendingExecute after it was
+          // cleared, so Do it always arrived as false.
+          execute: sentExecute,
+          // The button pressed under BeeZilla's last reply (oneMode.ts), if any.
+          choice: sentChoice || undefined,
           attemptId: attemptId,
           // The Talk bar's privacy slider: Lockdown turns off web lookups and outside makers.
           privacy: window.bzPrivacy ? window.bzPrivacy() : undefined,
           // The person's own edits to the process on the whiteboard (or a recipe they ran).
           boardInstructions: (window.bzBoardInstructions && window.bzBoardInstructions()) || undefined,
+          // What they were looking at on the Idea Board as this turn started (above).
+          boardView: boardView,
         };
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
@@ -7315,7 +7305,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         const sendStarted = performance.now();
         const metrics = {
           at: new Date().toLocaleTimeString(),
-          mode: chatState.mode || "chat",
+          // What one mode did this turn (go, offer, ask, ticket); filled from the reply.
+          mode: null,
           surface: useVoiceLane ? "voice" : "text",
           asrMs: voice.lastSpeechEnd ? Math.round(sendStarted - voice.lastSpeechEnd) : null,
           ttftMs: null,
@@ -7391,8 +7382,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           artifacts: data.artifacts || null,
           timings: data.timings || null,
           tools: data.tools || null,
+          // Buttons under this reply: the one quick choice, or a suggested answer.
+          choice: data.choice || null,
         };
         chatState.messages.push(replyMsg);
+        if (data.oneMode && data.oneMode.step) metrics.mode = data.oneMode.step;
 
         // Update slots if present
         if (data.slots) {
@@ -7494,6 +7488,160 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
     }
 
+    // ── Plan handed over from Orchestrate ──────────────────────────
+    // orchestrate.html saves the canonical spec under bz_orch_handoff and then
+    // hops to Talk?fromOrchestration=1. Nothing read either one, so a plan
+    // built on the canvas arrived as a blank composer and the query hint meant
+    // nothing. One-shot by design: the key is removed the moment it is read, so
+    // a reload cannot re-plant a stale plan. It FILLS the box and never sends —
+    // the person still owns the turn and the draft gate is untouched.
+    var ORCH_KINDS = {
+      start: "Start", end: "End", agent: "Agent", tool: "Tool", decision: "Decision",
+      parallel: "Parallel", loop: "Loop", approval: "Approval", trigger: "Trigger",
+      subflow: "Subflow", note: "Note",
+    };
+    function orchHandoffText(spec) {
+      var nodes = (spec && spec.nodes) || [];
+      var steps = [];
+      var skipped = 0;
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i] || {};
+        if (n.type === "note") { skipped++; continue; }
+        var kind = ORCH_KINDS[n.type] || n.type || "node";
+        var label = n.name || kind;
+        var cfg = n.config || {};
+        var detail = cfg.prompt || cfg.tool || cfg.text || n.notes || cfg.expression || "";
+        detail = String(detail).replace(/\s+/g, " ").trim();
+        if (detail.length > 140) detail = detail.slice(0, 137) + "…";
+        steps.push((steps.length + 1) + ". " + kind + " \u201c" + label + "\u201d" + (detail ? " \u2014 " + detail : ""));
+        if (steps.length >= 12) break;
+      }
+      var total = 0;
+      for (var j = 0; j < nodes.length; j++) if (nodes[j] && nodes[j].type !== "note") total++;
+      var head = "Here is the plan I built in Orchestrate" + (spec.name ? " \u2014 \u201c" + spec.name + "\u201d" : "") + ".";
+      var desc = String(spec.description || "").replace(/\s+/g, " ").trim();
+      if (desc) head += " " + (desc.length > 240 ? desc.slice(0, 237) + "…" : desc);
+      var body = steps.length ? "\n\nSteps:\n" + steps.join("\n") : "";
+      if (total > steps.length) body += "\n(+" + (total - steps.length) + " more)";
+      return head + body + "\n\nPlease turn it into a draft.";
+    }
+    function applyOrchHandoff() {
+      if (chatState._orchHandoffRead) return;
+      var raw = null;
+      try { raw = window.localStorage.getItem("bz_orch_handoff"); } catch (e) { return; }
+      if (!raw) return;
+      // No composer means "not yet", never "delivered". A late session callback
+      // from an earlier Talk document can land here after its composer is gone;
+      // consuming the key there threw the plan away with no door left to retry.
+      var input = document.getElementById("chatInput");
+      if (!input) return;
+      if (chatState._orchHandoffRaw !== raw) {
+        var spec = null;
+        try { spec = JSON.parse(raw); } catch (e) {}
+        var text = spec && spec.nodes ? orchHandoffText(spec) : String(raw).slice(0, 4000);
+        // Never throw away something the person already typed: a kept-alive Talk can
+        // come back with a draft in the box, and the plan goes under it, not over it.
+        var typed = String(input.value || "").replace(/\s+$/, "");
+        var fill = typed ? typed + "\n\n" + text : text;
+        try { input.value = fill; } catch (e) { return; }
+        // A refused write (readOnly, a detached box) is not a delivery.
+        if (input.value !== fill) return;
+        chatState._orchHandoffRaw = raw;
+        try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+        if (!input.disabled) input.focus();
+      }
+      armOrchHandoffConsume(raw);
+    }
+    // Consuming the key is a claim that the plan reached the person. A fill in a
+    // document that is already on its way out is not delivery: the first Talk of a
+    // just-started server can finish its get-session call after the plan was
+    // planted but while the browser is navigating, fill a box that is about to be
+    // discarded, and take the key with it — the Talk the person lands on never sees
+    // the plan. So the fill happens now; the key is dropped only once this document
+    // has stayed put for a beat, and a cross-document navigation cancels the drop.
+    function armOrchHandoffConsume(raw) {
+      clearTimeout(chatState._orchHandoffTimer);
+      chatState._orchHandoffTimer = setTimeout(function () {
+        if (chatState._orchHandoffRead || chatState._orchHandoffLeaving) return;
+        if (chatState._orchHandoffRaw !== raw) return;
+        var box = document.getElementById("chatInput");
+        if (!box) return;
+        chatState._orchHandoffRead = true;
+        try { window.localStorage.removeItem("bz_orch_handoff"); } catch (e) {}
+        // The query hint is not state: drop it so a reload is an ordinary Talk load.
+        try {
+          if (window.history && window.history.replaceState) {
+            var u = new URL(window.location.href);
+            if (u.searchParams.has("fromOrchestration")) {
+              u.searchParams.delete("fromOrchestration");
+              window.history.replaceState({}, "", u.pathname + (u.search ? u.search : "") + (u.hash || ""));
+            }
+          }
+        } catch (e) {}
+      }, 350);
+    }
+    function orchHandoffLeaving() {
+      chatState._orchHandoffLeaving = true;
+      clearTimeout(chatState._orchHandoffTimer);
+    }
+    try {
+      if (window.navigation && window.navigation.addEventListener) {
+        window.navigation.addEventListener("navigate", function (e) {
+          // A same-document hop is the shell keeping this Talk alive, not a door
+          // closing on it: only a cross-document navigation cancels the drop.
+          if (e && e.destination && e.destination.sameDocument) return;
+          orchHandoffLeaving();
+        });
+      }
+    } catch (e) {}
+    window.addEventListener("pagehide", orchHandoffLeaving);
+
+    // ── A flow put on the Idea Board from Orchestrate ("Put on the Idea Board") ──
+    // orchestrate.html saves the board's cards and lines (orchestration.ts specToBoard)
+    // under bz_orch_to_board and hops here. The board opens and puts the flow up card
+    // by card, the same way BeeZilla builds one, once the board has finished settling
+    // (a visit starts on an emptied board, and that clear must not land on top of it).
+    function applyOrchToBoard() {
+      if (chatState._orchToBoardBusy) return;
+      var raw = null;
+      try { raw = window.localStorage.getItem("bz_orch_to_board"); } catch (e) { return; }
+      if (!raw || !window.BeeZillaWhiteboard) return;
+      var payload = null;
+      try { payload = JSON.parse(raw); } catch (e) { payload = null; }
+      if (!payload || !Array.isArray(payload.cards)) {
+        try { window.localStorage.removeItem("bz_orch_to_board"); } catch (e) {}
+        return;
+      }
+      chatState._orchToBoardBusy = true;
+      var W = window.BeeZillaWhiteboard;
+      if (!W.current()) {
+        var toggle = document.getElementById("boardToggle");
+        if (toggle) toggle.click();
+      }
+      var tries = 0;
+      (function whenOpen() {
+        var b = W.current();
+        if (!b) {
+          if (++tries > 50) { chatState._orchToBoardBusy = false; return; }
+          return setTimeout(whenOpen, 100);
+        }
+        Promise.resolve(b.settled ? b.settled() : null).then(function () {
+          // Delivered now: a reload must not put it up a second time.
+          try { window.localStorage.removeItem("bz_orch_to_board"); } catch (e) {}
+          return b.addOrchestration(payload);
+        }).then(function () { chatState._orchToBoardBusy = false; }, function () { chatState._orchToBoardBusy = false; });
+      })();
+    }
+    // Orchestrate -> Talk is a SOFT navigation (nav.js BeeZillaShell.go). When Talk is
+    // already the kept-alive page, the shell only restores it and no script of ours
+    // runs again — so the handoff needs a second door: the shell announces every page
+    // it finishes with bz:page, and a restore of Talk is one of those.
+    window.addEventListener("bz:page", function (e) {
+      var key = e && e.detail && e.detail.key ? String(e.detail.key).split("?")[0] : "";
+      if (key === "/buzzy/talk") { applyOrchHandoff(); applyOrchToBoard(); }
+    });
+    setTimeout(applyOrchToBoard, 600);
+
     function checkAuthAndEnableInput() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
         // An outage is not a logout here either: a 500 used to disable the composer
@@ -7513,6 +7661,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             chatState._signedOut = false;
             document.getElementById("chatInput").disabled = false;
             document.getElementById("chatSend").disabled = false;
+            applyOrchHandoff();
           }
         })
         .catch(function () {
@@ -7525,6 +7674,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             chatState._signedOut = false;
             document.getElementById("chatInput").disabled = false;
             document.getElementById("chatSend").disabled = false;
+            applyOrchHandoff();
           }
         });
     }
@@ -7546,16 +7696,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     });
     sendObserver.observe(document.getElementById("chatSend"), { attributes: true, attributeFilter: ["disabled"] });
 
-    // ── Chat / Work mode wiring ─────────────────────────────────────
-    (function initModes() {
-      var tabs = document.getElementById("modeTabs");
-      if (tabs) {
-        tabs.addEventListener("click", function (e) {
-          var b = e.target.closest ? e.target.closest(".mode-tab") : null;
-          if (!b) return;
-          setMode(b.getAttribute("data-mode"));
-        });
-      }
+    // ── Talk chrome wiring ──────────────────────────────────────────
+    // (There was a Chat / Work switch here. One mode now: oneMode.ts decides per
+    // request whether to ask first or just go.)
+    (function initTalkChrome() {
       // ── Inline brief strip ─────────────────────────────────────
       var barToggle = document.getElementById("briefBarToggle");
       if (barToggle) {
@@ -7575,9 +7719,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (inp && !inp.disabled) inp.focus();
       });
 
-      // Deep link: /buzzy/talk?mode=work opens the chat already in work mode.
-      var m = new URLSearchParams(window.location.search).get("mode");
-      if (m === "work") setMode("work", { noFocus: true });
     })();
 
     document.getElementById("paperRead").onclick = function () {
@@ -7688,6 +7829,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         toggle.setAttribute("aria-expanded", "false");
       }
     };
+    // The person cleared the box: the board view kept for what they had said goes too.
+    document.getElementById("chatInput").addEventListener("input", function (e) {
+      var W = bzBoard();
+      if (W && W.dropView && !String(e.target.value || "").trim()) W.dropView();
+    });
     document.getElementById("chatInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -7707,10 +7853,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     };
     document.getElementById("downloadPdf").onclick = onDownloadPdf;
     // ── Sessions drawer ───────────────────────────────────────
+    // The close timer owns two things: dropping `mounted` and hiding the overlay.
+    // A close followed by an open inside its 180ms window would otherwise fire
+    // after the new open and unmount the drawer that was just opened, so the
+    // handle is kept here and every open cancels any pending close.
+    var sessionsCloseTimer = null;
     function openSessionsDrawer() {
       const drawer = document.getElementById("sessionsDrawer");
       const overlay = document.getElementById("sessionsOverlay");
+      if (sessionsCloseTimer !== null) {
+        clearTimeout(sessionsCloseTimer);
+        sessionsCloseTimer = null;
+      }
       overlay.classList.remove("hidden");
+      drawer.classList.add("mounted");
+      // Resolve the off-canvas start position before `open`, or the panel is
+      // painted straight into place instead of sliding in.
+      void drawer.offsetWidth;
       drawer.classList.add("open");
       drawer.setAttribute("aria-hidden", "false");
       var pill = document.getElementById("sessionsPill");
@@ -7722,7 +7881,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       const overlay = document.getElementById("sessionsOverlay");
       drawer.classList.remove("open");
       drawer.setAttribute("aria-hidden", "true");
-      setTimeout(function () { overlay.classList.add("hidden"); }, 180);
+      if (sessionsCloseTimer !== null) clearTimeout(sessionsCloseTimer);
+      sessionsCloseTimer = setTimeout(function () {
+        // Take the panel back out of layout once the slide-out has finished,
+        // so the closed page is exactly the viewport wide again.
+        sessionsCloseTimer = null;
+        drawer.classList.remove("mounted");
+        overlay.classList.add("hidden");
+      }, 180);
     }
     // Handle auth/errors with plain-language notes; 401 → sign in.
     function sessionsError(msg) {
@@ -8058,8 +8224,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/inspiration.js"></script>
 <script src="/buzzy/qr.js"></script>
 <script src="/buzzy/share.js"></script>
+<script src="/buzzy/page-share.js"></script>
 <script src="/buzzy/waveform.js"></script>
+<script src="/buzzy/orchestration.js"></script>
 <script src="/buzzy/whiteboard.js"></script>
+<script src="/buzzy/board-nodes.js"></script>
 <script src="/buzzy/voice-stage.js"></script>
 <script src="/buzzy/browse.js"></script>
 <script src="/buzzy/pilot.js"></script>

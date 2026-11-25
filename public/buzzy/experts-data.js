@@ -17,11 +17,16 @@
     { id: "landlord", name: "Landlord & Tenant", blurb: "Leases, deposits, repairs, eviction questions, notices.", skills: ["Lease and room-rental agreements", "Security-deposit returns and letters", "Repair request notices", "Eviction and notice guidance", "Move-in/move-out checklists", "Tenant rights explainers"] },
     { id: "travel", name: "Travel", blurb: "Refunds, cancellations, disputes with airlines and hotels.", skills: ["Refund and cancellation requests", "Airline and hotel dispute letters", "Chargeback documentation", "Itinerary-change planning", "Rights explainers for travelers", "Escalation templates"] }
   ];
-  var ICONS = {
-    legal: "⚖️", medical: "🩺", software: "💻", technology: "🖥️",
-    accounting: "📊", home: "🏠", career: "💼", insurance: "🛡️",
-    government: "📋", education: "🎓", landlord: "🏘️", travel: "✈️"
-  };
+  // Each icon is a ready-made <svg> from the shared sprite (icons/bz-icons.svg). It is 1em square, so it
+  // follows the font-size and colour of whatever it sits in. `other` is for an area with no icon of its own.
+  function ico(id) {
+    return '<svg class="bz-line-ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+      '<use href="/buzzy/icons/bz-icons.svg#expert-' + id + '"/></svg>';
+  }
+  var ICONS = { other: ico("other") };
+  ["legal", "medical", "software", "technology", "accounting", "home", "career", "insurance",
+    "government", "education", "landlord", "travel"].forEach(function (id) { ICONS[id] = ico(id); });
   window.BZ_EXPERTS = EXPERTS;
   window.BZ_EXPERT_ICONS = ICONS;
 })();

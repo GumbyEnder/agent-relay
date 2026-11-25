@@ -42,10 +42,12 @@
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
 import { chatLoop, type FlowStep } from "./server";
+import { cleanBoardView } from "./boardView";
 import { withLlmOverride } from "./llm";
 import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
 import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
 import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
+import { boardBuildResponse, readBuildRequest } from "./boardOrchestrator";
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import { agentsRoute, agentForSession, ownsAgent, AGENT_BODY_MAX_BYTES, type AgentTurn } from "./agents";
 import type { VoiceHandlers } from "./voice";
@@ -54,7 +56,8 @@ import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
-import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
+import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
+import { parseGraphDetailPath } from "./orchestration";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import {
@@ -1539,6 +1542,32 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── /api/buzzy/graphs/:id/revisions — the history the counter never kept ──
+  if (method === "GET" && /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+\/revisions(\/[0-9]+)?$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    // Parsed by helper, not by index: the index version tested the literal
+    // "revisions" segment and made the list branch unreachable (400 on every call).
+    const route = parseGraphDetailPath(path)!;
+    const graphId = route.graphId;
+    if (route.bad) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Bad revision.", code: "bad_revision" };
+    }
+    if (route.revision !== null) {
+      const found = await loadGraphRevision(user.id, graphId, route.revision);
+      if (!found) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such revision on this account.", code: "not_found" };
+      }
+      return { ok: true, ...found };
+    }
+    return { ok: true, revisions: await listGraphRevisions(user.id, graphId) };
+  }
+
   // ── /api/buzzy/graphs — author, list and read orchestration graphs ────
   // 6d's whiteboard writes through here; a run (6e) freezes what it reads.
   if (path === "/api/buzzy/graphs" || /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+$/.test(path)) {
@@ -1571,6 +1600,19 @@ export default defineEventHandler(async (event) => {
       } catch {
         setResponseStatus(event, 400);
         return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+      const b = body as Record<string, unknown>;
+      // CR-3: the orchestration editor posts one `spec`. It is validated here with
+      // the same function the page runs, and saved with its revision in one statement.
+      if (b && typeof b === "object" && b.spec && typeof b.spec === "object") {
+        try {
+          const saved = await saveOrchestrationGraph(user.id, b.spec);
+          return { ok: true, id: saved.id, version: saved.version, spec: saved.spec };
+        } catch (e) {
+          setResponseStatus(event, 400);
+          const err = e as Error & { code?: string; issues?: unknown };
+          return { ok: false, error: err.message, code: err.code || "invalid_spec", issues: err.issues ?? [] };
+        }
       }
       const checked = validateGraph(body);
       if (!checked.ok) {
@@ -1612,17 +1654,22 @@ export default defineEventHandler(async (event) => {
       ? body.attemptId.trim().slice(0, 80)
       : null;
     const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
-    // UI mode: "work" steers toward a work effort, "chat" is ordinary
-    // conversation. Unknown values fall back to chat inside chatLoop.
-    const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The button pressed under BeeZilla's last reply (oneMode.ts): a few questions,
+    // just go, the suggested answer, or a tapped budget amount. There is one mode, so an
+    // old page's `mode: "work"` means nothing any more and is ignored.
+    const choice: "ask" | "go" | "accept" | "amount" | null =
+      body.choice === "ask" || body.choice === "go" || body.choice === "accept" || body.choice === "amount" ? body.choice : null;
     // The person's own process from the whiteboard (edited agent.md, skills, output,
     // or a recipe they ran). Their instructions; chatLoop caps and appends them.
     const boardInstructions = typeof body.boardInstructions === "string"
       ? body.boardInstructions.slice(0, 8200)    // the summary (up to 7,800) and its pictures line
       : null;
+    // What the owner is looking at on the Idea Board as this turn started (whiteboard.js
+    // viewOf): read for this turn only, never stored with the conversation (boardView.ts).
+    const boardView = cleanBoardView(body.boardView);
     // The Talk bar's privacy control. Unknown values mean the default (no change).
     let privacy: "advocate" | "lockdown" | "open" | undefined =
       body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
@@ -1782,8 +1829,8 @@ export default defineEventHandler(async (event) => {
         model,
         attemptId,
         jobContext,
-        mode,
         execute,
+        choice,
         privacy,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
@@ -1801,6 +1848,7 @@ export default defineEventHandler(async (event) => {
         onStage: (st) => { turnStages.push({ ...st, atMs: Date.now() - turnStarted }); opts?.onStage?.(st); },
         onFlow: opts?.onFlow,
         boardInstructions,
+        boardView,
       })).then(async (result) => {
         try {
           await sql`
@@ -1854,7 +1902,9 @@ export default defineEventHandler(async (event) => {
                 jobId,
                 sessionId,
                 source: "server",
-                mode,
+                // What one mode did this turn (go, offer, ask, ticket): how often
+                // BeeZilla stops to ask is the friction it costs people.
+                mode: result.oneMode?.step ?? null,
                 model: result.timings.model,
                 ttftMs: result.timings.ttftMs,
                 ttfaMs: result.timings.ttfaMs,
@@ -1945,7 +1995,7 @@ export default defineEventHandler(async (event) => {
           jobId,
           sessionId,
           source: "server",
-          mode,
+          mode: result.oneMode?.step ?? null,
           lane: "text",
           model: result.timings.model,
           ttftMs: result.timings.ttftMs,
@@ -2643,7 +2693,9 @@ export default defineEventHandler(async (event) => {
     `;
     return {
       honchoAvailable: honchoAvailable(),
-      facts: facts.map((r) => ({
+      // Keys starting "_" are conversation bookkeeping (where one mode's questions
+      // are up to), not something remembered about the person.
+      facts: facts.filter((r) => !String(r.key ?? "").startsWith("_")).map((r) => ({
         jobId: r.job_id,
         key: r.key,
         value: r.value,
@@ -3230,6 +3282,38 @@ export default defineEventHandler(async (event) => {
     }
     setResponseStatus(event, 405);
     return { ok: false, error: "Use GET, PUT or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── POST /api/buzzy/board-orchestrate — BeeZilla builds a flow on the Idea Board ──
+  // Owner, 2026-11-24: "you should just be able to talk to Beezilla, and that should be
+  // all you need to do to make an orchestration." The board sends what the person said
+  // and itself in words; the answer streams back as cards and lines the board puts up
+  // one by one (boardOrchestrator.ts). Metered like a chat turn: one model call.
+  if (method === "POST" && path === "/api/buzzy/board-orchestrate") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event)).catch(() => null);
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let raw: unknown = null;
+    try { raw = await event.req.json(); } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON: { request, map, known }.", code: "bad_json" };
+    }
+    const input = readBuildRequest(raw);
+    if (!input.ok) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: input.error, code: "bad_request" };
+    }
+    const quota = await checkQuota({ userId: user.id, scope: "inference", units: 1 });
+    if (!quota.ok) {
+      await recordUsage({ userId: user.id, scope: "inference", units: 0, ms: 0, status: "refused", code: quota.code ?? "quota", model: null });
+      setResponseStatus(event, quota.code === "plan_required" ? 402 : 429);
+      return { ok: false, error: quota.error, code: quota.code, plan: quota.plan, limit: quota.limit, used: quota.used };
+    }
+    await recordUsage({ userId: user.id, scope: "inference", units: 1, ms: 0, status: "ok", model: null });
+    const ownKey = await overrideFor(await getSql(), user.id);
+    return boardBuildResponse(input, (fn) => withLlmOverride(ownKey, fn));
   }
 
   // ── /api/buzzy/board-recipes — recipes made from a whiteboard selection ──
