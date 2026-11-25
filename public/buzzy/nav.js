@@ -235,6 +235,73 @@
   }
   window.addEventListener("resize", applyBleed);
 
+  // ── The pinned bar's own arithmetic (CR-14) ──────────────────────────────
+  // Two sticky siblings: the chrome head at top:0 and #bzHead directly under it.
+  // #bzHead's `top` is the chrome head's MEASURED height, published as
+  // --bz-chrome-h. Measured, never guessed: the company select, the plan line and a
+  // long account name all change it, and a guess leaves a strip of page showing
+  // through between the two bars (or hides the top of the Talk row under the name).
+  // Math.ceil, so a fractional height overlaps by a hair instead of gapping.
+  function chromeHeadEl() {
+    var beat = document.querySelector("header.bz-chrome-head");
+    if (beat) return beat;
+    var c = document.getElementById("bzChrome");
+    return c && c.closest ? c.closest("header") : null;
+  }
+  function measureChromeHead() {
+    var h = chromeHeadEl();
+    if (!h) return;
+    h.classList.add("bz-chrome-head");
+    var px = Math.ceil(h.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--bz-chrome-h", Math.max(0, px) + "px");
+  }
+  window.bzMeasureChromeHead = measureChromeHead;
+  var headRO = null;
+  function watchChromeHead() {
+    measureChromeHead();
+    var h = chromeHeadEl();
+    if (!h) return;
+    if (typeof ResizeObserver !== "function") { window.addEventListener("resize", measureChromeHead); return; }
+    if (headRO) headRO.disconnect();
+    headRO = new ResizeObserver(measureChromeHead);
+    headRO.observe(h);
+    // The keyboard class changes this header's height to 0 and back; a ResizeObserver
+    // catches that too, but one explicit pass keeps the offset right in the same frame.
+    window.addEventListener("resize", measureChromeHead);
+  }
+
+  // ── A phone with the keyboard open ──────────────────────────────────────
+  // The pinned bar is the whole website's chrome; with the keyboard up it would eat
+  // most of the screen, and the composer — the point of the page — would be squeezed.
+  // So on a phone the bar collapses to the Talk row (html.bz-kb): the name row, the
+  // search and the places give way until the keyboard goes. Detected two ways, because
+  // phones disagree: the visual viewport shrinking under the layout viewport
+  // (iOS/Android), and a window that is simply too short to be a phone without a
+  // keyboard. Both only on a phone width — a desktop window dragged short is not a
+  // keyboard.
+  function watchKeyboard() {
+    var root = document.documentElement;
+    var apply = function () {
+      if (window.innerWidth > 760) { root.classList.remove("bz-kb"); measureChromeHead(); return; }
+      var vv = window.visualViewport;
+      var covered = vv ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop)) : 0;
+      var open = covered > 120 || window.innerHeight <= 520;
+      if (root.classList.contains("bz-kb") !== open) {
+        root.classList.toggle("bz-kb", open);
+        measureChromeHead();
+      }
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", apply);
+      window.visualViewport.addEventListener("scroll", apply);
+    }
+  }
+  watchKeyboard();
+  window.addEventListener("bz:page", function () { watchChromeHead(); });
+
+
   function style() {
     if (document.getElementById("bz-chrome-css")) return;
     var s = document.createElement("style");
@@ -422,12 +489,23 @@
       ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
       // ── Pages with the website's header (#bzHead) ─────────────────────────────
       // The places live in the header's row under the search, on every page (owner,
-      // 2026-11-20), so the old link row up here hides; the bar is the same quiet bar
-      // with the real face on every page, and it scrolls away with the page rather
-      // than pinning over it. Talk to BeeZilla is the voice switch on every page, so
-      // the Listening pill by the gear stays out of the way.
+      // 2026-11-20), so the old link row up here hides. The bar is the same quiet bar
+      // with the real face on every page.
+      //
+      // PINNED (CR-14, owner via buzzygrok 2026-11-25): "a slim pinned bar: face/name +
+      // Talk to BeeZilla + search + places row, position:sticky; top:0". The chrome head
+      // and #bzHead are two sticky siblings, so the bar that holds still is exactly the
+      // stack you see: face and name at y=0, everything else under it. #bzHead's own
+      // `top` is the measured height of this header (--bz-chrome-h in nav.js), never a
+      // guess: the company select and a long account name both change that height.
+      // It has to be OPAQUE — a transparent pinned bar shows the page scrolling through
+      // the face row.
       "html.bz-has-head #bzNav,html.bz-has-head .bz-navbar{display:none!important}",
-      "html.bz-has-head header:has(#bzChrome){position:relative!important;top:auto!important;border-bottom:0!important;background:transparent!important}",
+      // (cited by the self-knowledge answer sk-036 — keep this sentence: Talk to BeeZilla is the voice switch on every page, so the Listening pill by the gear stays out of the way.)
+      "html.bz-has-head header:has(#bzChrome){position:sticky!important;top:0!important;z-index:41;background:var(--bz-panel,#0A0A0A)!important}",
+      // A phone with the keyboard up: the pinned bar must not eat the screen. Only the
+      // Talk row stays; the name row goes so the composer sits at the top.
+      "html.bz-kb .bz-chrome-head{display:none!important}",
       "html.bz-has-head .bz-brandrow .bz-brand img{width:44px;height:44px;border-radius:10px;object-fit:contain}",
       "html.bz-has-head .bz-brandrow .bz-brand strong{font-size:1.1rem;font-weight:800;letter-spacing:.01em}",
       "html.bz-has-head #bzMicLive{display:none!important}",
@@ -1294,6 +1372,8 @@
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();
+      // The bar that stayed is the bar the next page pins under (CR-14).
+      watchChromeHead();
       // The chrome survived this hop, so its Feedback button survives, and so must the
       // panel that button opens. The stale-panel sweep used to run above this return:
       // it deleted the live panel on every hop that kept the chrome, and the yellow pill
@@ -1324,6 +1404,11 @@
       else document.body.appendChild(header);
     }
     chromeBleedHeader = header;
+    // A name for the pinned header's own box (CR-14). #bzHead pins itself exactly
+    // under it, and the keyboard rule hides this row. A class, so an id a page
+    // already put on its header survives.
+    header.classList.add("bz-chrome-head");
+    if (!header.id) header.id = "bzChromeHead";
 
     var brand = findBrand(header);
     var account = document.getElementById("accountLink");
@@ -1364,7 +1449,7 @@
     header.style.boxSizing = "border-box";
     header.style.margin = "0";
     applyBleed();
-    header.style.padding = "12px 24px 8px";
+    header.style.padding = "6px 24px 4px";
     header.innerHTML = "";
 
     var brandRow = document.createElement("div");
@@ -1400,6 +1485,8 @@
     accountControl(chrome);
     menuPlanLine();
     feedbackControl(chrome);
+    // The built header is the one #bzHead pins under (CR-14).
+    watchChromeHead();
   }
 
   /**

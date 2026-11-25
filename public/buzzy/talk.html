@@ -399,8 +399,10 @@
     .brief-body .slot-checklist { border: none; background: none; padding: 0; }
 
     .chat-messages { order: 3; }
-    #paperPanel, #paperDrop { order: 4; }
-    #draftBanner { order: 5; }
+    /* Anything waiting on you sits FIRST in the page, under the pinned bar (CR-14).
+       These ids used to live in #bzHead, where an open paper stretched the header. */
+    #paperPanel, #paperDrop { order: 1; }
+    #draftBanner { order: 2; }
     #chatError { order: 7; }
     .chat-main > p.muted:last-of-type { order: 9; }
 
@@ -845,6 +847,31 @@
       text-align: left;
     }
     #paperPanel.hidden { display: none; }
+    /* The X on the paper (CR-14): a paper you dropped can be taken off the page.
+       It hides at once and the account is told; if the server refuses, the paper
+       comes back with a note rather than a lie on screen. */
+    .paper-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+    .paper-head h3 { margin: 0 0 0.2rem; }
+    .paper-where { margin: 0 0 0.35rem; color: #9A9A9A; font-size: 0.82rem; }
+    .paper-x {
+      flex: 0 0 auto;
+      box-sizing: border-box;
+      width: 2rem;
+      height: 2rem;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid #2C2C2C;
+      background: #1A1A1A;
+      color: #CFCFCF;
+      font: inherit;
+      font-size: 0.9rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .paper-x:hover, .paper-x:focus-visible { color: var(--bz-yellow); border-color: #4A3B0A; }
+    .paper-x:focus-visible { outline: 2px solid var(--bz-yellow); outline-offset: 2px; }
     #paperBrief { margin-top: 0.8rem; }
     #paperBrief.hidden { display: none; }
     .paper-doc {
@@ -1734,43 +1761,6 @@
       </div>
     </div>
 
-    <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
-    <div id="paperDrop" class="paper-drop hidden">
-      <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
-      <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz" />
-      <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
-      <div class="row">
-        <button type="button" id="paperRead">Read it</button>
-      </div>
-      <p id="paperNote" class="muted" role="status"></p>
-    </div>
-    <div id="draftBanner" class="draft-ready-banner hidden">
-      <p>A draft is ready for you to review.</p>
-      <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
-      <p id="draftWarning" class="draft-warning hidden" role="alert"></p>
-      <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
-      <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
-      <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
-      <p class="muted" id="draftMeta">Version 1 · not approved</p>
-      <div class="row">
-        <button type="button" id="approveDraft">Approve this version</button>
-        <button type="button" id="draftSend">Send</button>
-      </div>
-      <div class="row row-tools">
-        <button type="button" id="downloadDraft" class="secondary">Download .md</button>
-        <button type="button" id="downloadWord" class="secondary">Word</button>
-        <button type="button" id="downloadPdf" class="secondary">PDF</button>
-        <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
-        <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
-        <button type="button" id="newChatBtn" class="secondary new-chat-btn">New conversation</button>
-      </div>
-      <p id="draftSendNote" class="muted" role="status"></p>
-      <div id="outwardConfirm" class="outward-confirm">
-        <p>Sending, filing, paying, or publishing is a separate step.</p>
-        <button type="button" id="confirmOutward" disabled>Confirm send</button>
-        <p id="outwardNote" class="muted"></p>
-      </div>
-    </div>
     <div id="chatError" class="chat-error hidden"></div>
     <!-- Browse half (owner's references zMWSgG0 / qVxl1TJ): building happens
          above, finding and inspiration below. browse.js wires it; a search
@@ -1855,6 +1845,48 @@
     <div id="chatScreen">
       <div class="chat-layout">
         <div class="chat-main">
+          <!-- Anything waiting on you lives HERE, in the page under the pinned top bar,
+               not in #bzHead. Inside the header an open paper added ~267px and pushed
+               the row of places to y=748 on a 390px phone (CR-14), because the header is
+               the website's bar and has to stay one bar. These scroll: the bar holds
+               still, the paper and the draft pass under it. -->
+          <div id="paperPanel" class="paper-panel hidden" aria-live="polite"></div>
+          <div id="paperDrop" class="paper-drop hidden">
+            <p>Drop an invoice, quote, letter, or photo. Or paste it here.</p>
+            <input id="paperFile" type="file" accept=".pdf,.txt,.md,.csv,image/*,audio/*,.glb,.gltf,.obj,.usdz" />
+            <textarea id="paperPaste" rows="2" placeholder="Paste the letter or invoice"></textarea>
+            <div class="row">
+              <button type="button" id="paperRead">Read it</button>
+            </div>
+            <p id="paperNote" class="muted" role="status"></p>
+          </div>
+          <div id="draftBanner" class="draft-ready-banner hidden">
+            <p>A draft is ready for you to review.</p>
+            <p class="muted">Nothing leaves the company until you approve this exact version. Download stays on this page.</p>
+            <p id="draftWarning" class="draft-warning hidden" role="alert"></p>
+            <textarea id="draftBody" rows="8" aria-label="Draft"></textarea>
+            <div id="moneyCheck" class="money-check hidden" aria-label="Before you approve"></div>
+            <div id="promiseCheck" class="promise-check hidden" aria-label="Words that would commit the company"></div>
+            <p class="muted" id="draftMeta">Version 1 · not approved</p>
+            <div class="row">
+              <button type="button" id="approveDraft">Approve this version</button>
+              <button type="button" id="draftSend">Send</button>
+            </div>
+            <div class="row row-tools">
+              <button type="button" id="downloadDraft" class="secondary">Download .md</button>
+              <button type="button" id="downloadWord" class="secondary">Word</button>
+              <button type="button" id="downloadPdf" class="secondary">PDF</button>
+              <button type="button" id="downloadCsvBtn" class="secondary hidden">CSV</button>
+              <button type="button" id="restorePrevious" class="secondary hidden">↺ Restore previous</button>
+              <button type="button" id="newChatBtn" class="secondary new-chat-btn">New conversation</button>
+            </div>
+            <p id="draftSendNote" class="muted" role="status"></p>
+            <div id="outwardConfirm" class="outward-confirm">
+              <p>Sending, filing, paying, or publishing is a separate step.</p>
+              <button type="button" id="confirmOutward" disabled>Confirm send</button>
+              <p id="outwardNote" class="muted"></p>
+            </div>
+          </div>
           <div class="chat-header-row">
             <div class="chat-header-left">
               <div class="chat-mascot">
@@ -2518,6 +2550,42 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return /^\/buzzy(\/talk)?$/.test(key.replace(/[?#].*$/, "").replace(/\/+$/, "") || "/buzzy");
     })();
 
+    // ── The address names the job the page is in ──────────────────────
+    // A ?job= link is the only way back to a job's sheet. The boot path used to
+    // read the param, put the job in chatState, then replaceState to a bare
+    // /buzzy/talk: the sheet stayed on screen beside an address that no longer
+    // named it, so the next refresh was a blank landing and the job was
+    // unreachable by link (CR-14b residual, found live on #415). One writer keeps
+    // the two honest — job in state → ?job= in the address, no job → no ?job=,
+    // the same way submitPaper already did it. Only New conversation and
+    // back-to-recent clear the job, so only they clear it here.
+    // bzOwnPage guards it: a header-donor run (nav.js fetching this page for its
+    // chrome) must never rewrite the address of the page the reader is on.
+    function bzJobUrl() {
+      if (!bzOwnPage) return;
+      var want = chatState.jobId ? String(chatState.jobId) : null;
+      var have;
+      try { have = new URLSearchParams(window.location.search).get("job"); } catch (_) { return; }
+      if (have === want) return;
+      try {
+        var u = new URL(window.location.href);
+        if (want) u.searchParams.set("job", want); else u.searchParams.delete("job");
+        window.history.replaceState({}, "", u.pathname + (u.search || "") + (u.hash || ""));
+      } catch (_) {}
+    }
+
+    // Drop one consumed parameter and keep the rest: ?expert= must not take a
+    // ?job= with it (they arrive together from the experts pages).
+    function bzDropParam(name) {
+      if (!bzOwnPage) return;
+      try {
+        var u = new URL(window.location.href);
+        if (!u.searchParams.has(name)) return;
+        u.searchParams.delete(name);
+        window.history.replaceState({}, "", u.pathname + (u.search || "") + (u.hash || ""));
+      } catch (_) {}
+    }
+
     // The board follows bz_session_id (voice-stage.js): a fresh visit has none, so it
     // opens on the empty board in front of a new conversation. Only a real visit — a
     // header-donor run must not clear the id of the conversation the reader is in.
@@ -2527,7 +2595,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var expertFromUrl = bzOwnPage ? new URLSearchParams(window.location.search).get("expert") : null;
     if (expertFromUrl) {
       chatState.expert = expertFromUrl;
-      window.history.replaceState({}, "", "/buzzy/talk");
+      bzDropParam("expert");
     }
 
     // ── Job context from the Jobs card "Chat" button ───────────────────
@@ -2542,7 +2610,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           chatState.jobContext = jobCtx;
         }
       } catch (_) {}
-      window.history.replaceState({}, "", "/buzzy/talk");
+      // Keep the param. It stays until New conversation or back-to-recent clears
+      // the job: dropping it here left the sheet on screen under an address that
+      // no longer named its job, so a refresh was a blank landing (CR-14b).
+      bzJobUrl();
     }
 
     // ── Form tab ───────────────────────────────────────────────────────
@@ -3191,14 +3262,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         : '<p class="muted">No words could be read on this.</p>';
       if (panel) {
         panel.classList.remove("hidden");
+        // Which job this sheet came from, when it is not the conversation's own. The
+        // panel needs a job now, so this should never fire — but if a paper ever
+        // reaches the page from another job it says so instead of pretending.
+        var where = paper.jobTitle && paper.jobId !== chatState.jobId
+          ? '<p class="paper-where">On "' + esc(paper.jobTitle) + '"</p>'
+          : "";
         panel.innerHTML =
-          "<h3>The paper</h3>" +
-          "<p>" + esc(paper.filename || "Pasted letter") + "</p>" +
+          '<div class="paper-head">' +
+            "<div><h3>The paper</h3>" +
+            "<p>" + esc(paper.filename || "Pasted letter") + "</p>" +
+            where + "</div>" +
+            '<button type="button" id="paperDismiss" class="paper-x" aria-label="Hide this paper" title="Hide this paper">&#10005;</button>' +
+          "</div>" +
           doc +
           '<p class="muted">Nothing is sent, filed, or paid from this.</p>' +
           '<div class="row"><button type="button" id="paperDownload">Download the paper</button></div>';
         var dl = document.getElementById("paperDownload");
         if (dl) dl.addEventListener("click", downloadPaper);
+        var x = document.getElementById("paperDismiss");
+        if (x) x.addEventListener("click", dismissPaper);
       }
       if (brief) {
         brief.classList.remove("hidden");
@@ -3281,18 +3364,55 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function loadCompanyPaper(companyId) {
       var token = ++paperLoad;
       if (!companyId) { renderPaper(null); return; }
-      var q = "/api/buzzy/papers?companyId=" + encodeURIComponent(companyId);
-      if (chatState.jobId) q += "&jobId=" + encodeURIComponent(chatState.jobId);
+      // The job THIS conversation is in. No job → no sheet: a blank landing must not
+      // show another job's paper, which is exactly what Shane reported (a tax letter
+      // from a six-week-old demand letter sat on a fresh Talk page). The server says
+      // the same thing (paperForConversation); this is the page's half of the rule.
+      var jobId = chatState.jobId;
+      if (!jobId) { renderPaper(null); return; }
+      var q = "/api/buzzy/papers?companyId=" + encodeURIComponent(companyId) +
+              "&jobId=" + encodeURIComponent(jobId);
       fetch(q, { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (token !== paperLoad) return;
           if (!d || !d.paper) { renderPaper(null); return; }
           if (d.paper.companyId && d.paper.companyId !== companyId) { renderPaper(null); return; }
-          if (d.paper.jobId && !chatState.jobId) chatState.jobId = d.paper.jobId;
+          // The response may arrive after the chat moved on: only the job it was
+          // asked for may paint. Dropping a paper into the chat still sets the job —
+          // that is an explicit act, in submitPaper, not a guess from a page load.
+          if (d.paper.jobId && d.paper.jobId !== jobId) { renderPaper(null); return; }
           renderPaper(d.paper);
         })
         .catch(function () { if (token === paperLoad) renderPaper(null); });
+    }
+
+    // The X on the paper: off the page now, off the account too. Nothing about the
+    // owner's confirmed lines is touched (the server keeps those), so a mis-tap costs
+    // the sheet, not a fact someone had already said was right.
+    function dismissPaper() {
+      var paper = chatState.paper;
+      if (!paper) { renderPaper(null); return; }
+      var id = paper.id;
+      var putBack = paper;
+      paperLoad++;          // a load already in flight must not undo this
+      renderPaper(null);
+      fetch("/api/buzzy/papers/" + encodeURIComponent(id), {
+        method: "DELETE",
+        credentials: "same-origin",
+      }).then(function (r) {
+        if (r.status === 401) { window.location.href = "/buzzy/landing"; return null; }
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+      }).then(function (res) {
+        if (!res || res.ok) return;
+        renderPaper(putBack);
+        var note = document.getElementById("paperNote");
+        if (note) note.textContent = (res.d && res.d.error) || "Couldn't hide that paper.";
+      }).catch(function () {
+        renderPaper(putBack);
+        var note = document.getElementById("paperNote");
+        if (note) note.textContent = "Couldn't hide that paper.";
+      });
     }
 
     function bytesToBase64(bytes) {
@@ -3376,6 +3496,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return;
         }
         if (res.d.paper.jobId) chatState.jobId = res.d.paper.jobId;
+        // The conversation now belongs to that job, so put it in the address. The page
+        // shows a paper only for the job it is in, and a reload starts with no job —
+        // without this, a dropped letter's panel vanished on refresh (CR-14).
+        bzJobUrl();
         chatState.boundCompanyId = co;
         paperLoad++;
         renderPaper(res.d.paper);
@@ -5762,7 +5886,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           chatState.paper = null;
           resetDraftGate();
           setBackVisible(true);
-          try { history.replaceState(null, "", "/buzzy/talk"); } catch (_) {}
+          // The row is a link to this job now: a refresh reopens it instead of
+          // landing blank with the conversation gone (CR-14b). submitPaper and
+          // the boot path write the same param the same way.
+          bzJobUrl();
           updateChrome();
           restoreTranscript();
           showRecentWork();
@@ -6717,9 +6844,13 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.jobContext = null;
       chatState.slots = {};
       chatState.messages = [];
-      chatState.paper = null;
+      // The panel is the LAST job's sheet: back to recent means no sheet, and an
+      // in-flight load must not repaint it (CR-14; this is how a stale paper stayed
+      // on a page with no job in it).
+      paperLoad++;
+      renderPaper(null);
       resetDraftGate();
-      try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      try { bzJobUrl(); } catch (_) {}
       updateChrome();
       showRecentWork();
     }
@@ -6739,6 +6870,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { localStorage.removeItem("bz_session_id"); } catch (_) {}
       chatState.jobId = null;
       chatState.jobContext = null;
+      // A new conversation has no job, so it must not carry the old job in the
+      // address: a reload would walk straight back into it (CR-14).
+      try { bzJobUrl(); } catch (_) {}
+      // ...and no sheet. New conversation used to leave the last job's paper panel
+      // on screen with no job behind it — the original "stale paper on a blank
+      // landing" report, from the other end.
+      paperLoad++;
+      renderPaper(null);
       chatState.slots = {};
       chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
       setBackVisible(true);
@@ -7459,7 +7598,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           setChatMascot("12-content");
           openDraftReview(data.reply || "");
           setDraftWarning(data.warning);
-          if (data.jobId) chatState.jobId = data.jobId;
+          if (data.jobId) { chatState.jobId = data.jobId; bzJobUrl(); }
           if (data.previousDraft) {
             chatState.previousDraft = data.previousDraft;
             var rpBtn = document.getElementById("restorePrevious");
@@ -8051,12 +8190,28 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         });
         chatState.sessionId = s.id;
         syncAgentFor(typeof data.agentId === "string" ? data.agentId : null);
+        // A conversation that was started in a job is a page in that job. Without
+        // this, opening it from recent work restored the chat but dropped the job
+        // — no sheet, and (after CR-14c) no ?job= in the address either, so the
+        // row behaved like a dead end. Same defect as the boot path, other door.
+        if (s.jobId) {
+          if (chatState.jobId !== s.jobId) chatState.jobContext = null;
+          chatState.jobId = s.jobId;
+        } else {
+          chatState.jobId = null;
+          chatState.jobContext = null;
+        }
+        bzJobUrl();
         // The board follows the conversation in front of you (voice-stage.js reads
         // bz_session_id): without this the chat showed the conversation while the
         // Idea Board stayed on the blank board of a new one, and the conversation's
         // own cards (still in the account) read as 0.
         try { localStorage.setItem("bz_session_id", s.id); } catch (_) {}
         chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
+        // The address names the job, so the page shows that job's sheet — the same
+        // thing a ?job= load and a paste do. Without it, opening the row named a
+        // job in the address with no sheet under it.
+        if (chatState.jobId) loadCompanyPaper(chatState.boundCompanyId || activeCompanyId());
         chatState.messages = msgs;
         // BZ-F004: restore structured Decisions from the server instead of
         // blanking the box until the next turn.
@@ -8120,7 +8275,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          jobId: chatState.jobId || undefined,
+          // A new conversation has NO job. This used to post the old jobId, so the
+          // fresh session was created already bound to the last job — which is how
+          // QA turns landed on shane@veanox.com's job_283b80118dc746fb (CR-14).
           companyId: coId || undefined,
           // A truly new one: without `fresh` the server handed back the last conversation
           // touched in the past 12 hours.
@@ -8134,7 +8291,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // The board follows the conversation (voice-stage.js reads bz_session_id).
         try { if (s && s.id) localStorage.setItem("bz_session_id", s.id); else localStorage.removeItem("bz_session_id"); } catch (_) {}
         chatState = {
-          jobId: chatState.jobId, // keep job-scoped behavior when a job is present
+          jobId: null,
           sessionId: s ? s.id : null,
           slots: {},
           messages: [],
@@ -8147,10 +8304,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paper: null,
           userId: chatState.userId,
           _signedOut: chatState._signedOut,
-          jobContext: chatState.jobContext,
+          jobContext: null,
           boundCompanyId: (s && s.companyId) || coId || null,
           expert: chatState.expert,
         };
+        // No job means no sheet and no ?job= in the address, or a reload walks back
+        // into the conversation the owner just left (CR-14).
+        paperLoad++;
+        renderPaper(null);
+        try { bzJobUrl(); } catch (_) {}
         document.getElementById("chatError").classList.add("hidden");
         closeSessionsDrawer();
         showChatScreen();
@@ -8241,6 +8403,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.sessionId = null;
         chatState.jobId = null;
         chatState.jobContext = null;
+        // A different company cannot keep the old company's job in the address.
+        bzJobUrl();
         chatState.slots = {};
         chatState.messages = [{
           role: "assistant",

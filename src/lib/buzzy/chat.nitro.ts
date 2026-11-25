@@ -22,6 +22,8 @@
  *   POST /api/buzzy/sessions/:id/summary — generate AI summary
  *   POST /api/buzzy/papers          — read a dropped or pasted paper into proposed lines
  *   GET  /api/buzzy/papers          — latest paper on the active company (?companyId, ?jobId)
+ *                                     with no jobId: only a paper whose job is still open
+ *   DELETE /api/buzzy/papers/:id    — take the paper off the landing (accepted lines stay)
  *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
  *   POST /api/buzzy/money-check — compare a draft to the paper and the brief
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
@@ -97,7 +99,7 @@ import {
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
-import { cleanFilename, latestPaper, savePaper, updatePaperLine } from "./paper";
+import { cleanFilename, deletePaper, latestPaper, paperForConversation, savePaper, updatePaperLine } from "./paper";
 import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 import { buildExportBundle, deleteAccountData } from "./portability";
@@ -5635,7 +5637,10 @@ export default defineEventHandler(async (event) => {
     return { summary, note: summary ? undefined : "No messages to summarize yet." };
   }
 
-  // ── GET /api/buzzy/papers — latest paper on this company, not another ──
+  // ── GET /api/buzzy/papers — the paper THIS conversation is working from ──
+  // A paper belongs to a job; a landing with no job has no sheet. See
+  // paperForConversation() — this used to answer "the newest open paper on the
+  // company", which put a six-week-old tax letter on a blank Talk page (CR-14).
   if (method === "GET" && path === "/api/buzzy/papers") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
@@ -5656,7 +5661,7 @@ export default defineEventHandler(async (event) => {
       return { error: "Company not found", code: "not_found" };
     }
     const jobId = queryValue(fullPath, "jobId");
-    const paper = await latestPaper(sql, user.id, companyId, jobId);
+    const paper = await paperForConversation(sql, user.id, companyId, jobId);
     return { paper };
   }
 
@@ -5729,6 +5734,25 @@ export default defineEventHandler(async (event) => {
       return { error: saved.error, code: saved.code };
     }
     return { ok: true, paper: saved.paper, reply: saved.paper.reply };
+  }
+
+  // ── DELETE /api/buzzy/papers/:id — take the paper off the landing ──────
+  // The X on the paper panel (CR-14). Confirmed lines stay: they are company
+  // facts, and closing the sheet must not delete a line the owner accepted.
+  const paperDelete = path.match(/^\/api\/buzzy\/papers\/(pp_[a-z0-9]{8,32})$/);
+  if (method === "DELETE" && paperDelete) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const gone = await deletePaper(sql, user.id, paperDelete[1]);
+    if (!gone.ok) {
+      setResponseStatus(event, gone.status);
+      return { error: gone.error, code: gone.code };
+    }
+    return { ok: true };
   }
 
   // ── POST /api/buzzy/papers/:id/lines — confirm or correct one line ──
