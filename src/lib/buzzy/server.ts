@@ -2095,6 +2095,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       asksInsteadOfDoing(reply.content)
     ) {
       console.warn("[buzzy/one-mode] a go turn asked instead of doing — asking for the work once");
+      // One retry, deliberately without tools: the first completion already ran with
+      // this turn's tool surface and chose to talk instead. Re-arming it would loop a
+      // second maker lane on the same request, so this retry is text only (no tools, no
+      // streaming). Consequence, accepted: a recovered go turn can come back as prose
+      // with no rendered document. It is a better outcome than the questionnaire it
+      // replaces, and the turn is never silent about it.
       reply = await chatCompletionFull(
         [...messages, { role: "assistant", content: reply.content }, { role: "user", content: DO_IT_NOW }],
         { model: routedModel, maxTokens: 4096 },

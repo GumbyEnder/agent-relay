@@ -38,6 +38,14 @@ export interface Assessment {
    *  deploying, signing. (Those steps still wait for the person's OK elsewhere; this
    *  only says a misreading would be expensive.) */
   irreversible: boolean;
+  /**
+   * The request performs the door itself ("send it to all our customers"), rather
+   * than mentioning it inside work that makes something ("write a tweet announcing
+   * our sale") or asking about it ("how do I publish this?" — already not
+   * irreversible). The equation can price a mention as a small readable mistake, but
+   * a performed door leaves the account, so `askFirst` never lets it go silently.
+   */
+  performsDoor?: boolean;
   /** They seem to be in a hurry ("quick", "asap", "right now"). */
   hurried: boolean;
   /** P(BeeZilla misreads what they want), 0..1. */
@@ -127,7 +135,7 @@ const MULTI_PART = /\b(and then|after that|as well as|on top of that|step \d)\b|
 
 /** A mistake would be devastating: money, health, legal, security, people's data, production. */
 const CRITICAL: Array<[string, RegExp]> = [
-  ["money", /\b(checkout|payments?|billing|charg(e|es|ed|ing) (customers?|cards?|users?|people)|refunds?|payroll|tax(es)?|tax return|irs|hmrc|loans?|mortgages?|invest(ing|ment|ments)?|portfolio|stocks?|crypto|bitcoin|wire (transfer|money)|bank accounts?|routing number|credit cards?|chargebacks?|pay (my|our|the) (staff|employees|team|vendors|bills?|invoices?)|financial (statements?|reports?)|move (the )?money)\b/i],
+  ["money", /\b(checkout|payments?|billing|charg(e|es|ed|ing) (customers?|cards?|users?|people)|refunds?|payroll|tax(es)?|tax return|irs|hmrc|loans?|mortgages?|invest(ing|ment|ments)?|portfolio|stocks?|crypto|bitcoin|wire (transfer|money)|bank accounts?|routing number|credit cards?|chargebacks?|pay (my|our|the) (staff|employees|team|vendors?|contractors?|suppliers?|bills?|invoices?)|financial (statements?|reports?)|move (the )?money|(pay|paid|wire|transfer|send)\b[^.!?\n]{0,40}(\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:dollars?|usd|eur|gbp)\b))\b/i],
   ["health", /\b(medical|medicine|medications?|meds|doses?|dosage|prescriptions?|diagnos(is|e|ed)|symptoms?|allerg(y|ies|ic)|pregnan(t|cy)|surgery|treatment plan|mental health|suicid\w*|overdose|vaccines?|insulin|blood pressure|chemo\w*|patients?|clinical|hospital)\b/i],
   ["legal", /\b(legal|lawyers?|attorneys?|lawsuits?|sue|suing|court|judge|contracts?|terms of (service|use)|privacy policy|compliance|gdpr|hipaa|liabilit(y|ies)|(write|draft|update|make) (a|my|our) will|will and testament|living will|estate plan|custody|divorce|immigration|visas?|evict(ion)?|cease and desist|demand letter|settlement|nda|non-disclosure|trademark|patent)\b/i],
   ["security", /\b(passwords?|credentials|api keys?|secret keys?|private keys?|encrypt(ion)?|security|vulnerabilit(y|ies)|exploits?|breach(es)?|hack(ed|ing)?|two-factor|2fa|permissions|access control|firewall)\b/i],
@@ -146,6 +154,20 @@ const IRREVERSIBLE = /\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|th
 
 /** They seem to be in a hurry. "Just do it" is stronger than this: see isGoReply. */
 const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|immediately|hurry|in a rush|rushed|no time|real quick|need (it|this) (now|today|tonight)|by tonight|by end of (the )?day|eod|in \d+ ?(min|mins|minutes))\b|!!/i;
+
+/**
+ * The leading verb of a request that *performs* a one-way door: the act itself
+ * leaves the account, so a misreading cannot be read and corrected afterwards.
+ *
+ * Only the first verb counts, after the usual politeness and auxiliary words.
+ * "Send it to all our customers" performs a send; "write a tweet announcing our
+ * sale" mentions one inside a maker lane (nothing leaves, so it must stay a go);
+ * "how do I publish this?" is a question, and `irreversible` is already false
+ * there. Buying and ordering are deliberately absent: they cost money but nothing
+ * leaves the account, and pulling them in would add a tap to ordinary requests.
+ */
+const DOOR_VERB =
+  /^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\s]+)*(send|email|e-?mail|mail|announce|publish|post|tweet|mass e-?mail|email blast|pay|wire|transfer|delete|remove|wipe|drop|deploy|launch|cancel|refund|terminate|fire|evict|submit|migrate|overwrite)\b/i;
 
 /** Words that leave the result open. */
 const VAGUE = /\b(something|anything|some kind of|some sort of|stuff|whatever|ideas?|not sure|maybe|i don'?t know|dunno|cool|nice|fun|better|awesome|amazing|help me( with)?|figure out|kind of|sort of)\b/gi;
@@ -258,6 +280,13 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
 
   const irreversible = IRREVERSIBLE.test(m) && !QUESTION.test(m);
   if (irreversible) why.push("cannot be taken back: " + m.match(IRREVERSIBLE)?.[0]);
+  // A door described inside work that makes something ("write a tweet announcing
+  // our sale", "draft the email") is not performed here: the deliverable is a draft
+  // the person reads, and the maker lanes already stop short of sending. Likewise a
+  // change to a draft on file.
+  const performsDoor =
+    irreversible && !ctx.makerLane && !ctx.hasDraft && !QUESTION.test(m) && DOOR_VERB.test(m);
+  if (performsDoor) why.push("the door itself: " + m.match(DOOR_VERB)?.[1]);
   const hurried = HURRIED.test(m);
   if (hurried) why.push("in a hurry: " + m.match(HURRIED)?.[0]);
 
@@ -284,7 +313,7 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
   if (ctx.hasDraft) p *= 0.5;
   const pMisread = Math.round(Math.min(0.9, Math.max(0.03, p)) * 1000) / 1000;
 
-  return { size, stakes, irreversible, hurried, pMisread, why };
+  return { size, stakes, irreversible, performsDoor, hurried, pMisread, why };
 }
 
 // ── The rule ─────────────────────────────────────────────────────────
@@ -303,8 +332,10 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
  *   - personal projects ask only when they are big AND open ("make me a game");
  *   - work for other people asks when it is big and still open ("build a website for
  *     my bakery");
- *   - critical work, and anything feeding a one-way door, asks even when it is fairly
- *     clear, and even in a hurry.
+ *   - critical work asks even when it is fairly clear, and even in a hurry;
+ *   - whatever the equation says, a request that *performs* a one-way door (send,
+ *     publish, announce, pay, delete, deploy) is never silent: `askFirst` offers the
+ *     one choice whatever its size, and only a remembered "just go" for play skips it.
  */
 export const ASK_OR_GO = {
   /** What a wrong guess costs the person: reading it, saying what is wrong, waiting
@@ -360,13 +391,25 @@ export type AskFirst = "go" | "offer" | "questions";
  * The rule, then their remembered answer for this stakes tier. A request the rule
  * would stop for is offered the choice only the first time: after that, their own
  * answer decides, so the long-run effect is fewer questions, not more.
+ *
+ * One thing the equation must not be allowed to swallow: a request that *performs*
+ * a one-way door. `CANT_UNDO_WEIGHT` alone cannot lift a small, clear, product-stakes
+ * send over the 3-minute threshold (0.1 × 0.5 × 3 × 10 = 1.5), so "send it to all our
+ * customers" used to go ahead unannounced. A performed door is never silent: it is at
+ * least offered, whatever the size, at every tier but play, where their remembered
+ * "just go" still stands (it is their own data and their own call).
  */
 export function askFirst(
   verdict: AskOrGo,
   remembered: AskPreference | null | undefined,
-  a?: Pick<Assessment, "stakes" | "irreversible">,
+  a?: Pick<Assessment, "stakes" | "irreversible" | "performsDoor">,
 ): AskFirst {
-  if (!verdict.ask) return "go";
+  if (!verdict.ask) {
+    if (!(a?.irreversible && a.performsDoor)) return "go";
+    if (remembered === "ask") return "questions";
+    if (remembered === "go" && a.stakes === "play") return "go";
+    return "offer";
+  }
   if (remembered === "ask") return "questions";
   // The one exception to "asked once": a one-way door with critical stakes (paying,
   // deleting real data, publishing a legal text) is offered the choice every time.

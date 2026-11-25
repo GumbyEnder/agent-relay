@@ -187,6 +187,59 @@ check(assessRequest("rotate the passwords on our live server", { minStakes: "pro
 check(assessRequest("draft an NDA", { minStakes: "play" }).stakes === "critical", "and never lower it");
 check(assessRequest("Send it to all our customers").irreversible === true, "sending is irreversible");
 check(assessRequest("What happens if I send it?").irreversible === false, "a question about sending is not a send");
+
+// A performed one-way door is never silent, whatever the equation says. The weight
+// alone cannot lift a small, clear, product-stakes send (1.5 ≤ 3), so askFirst holds
+// the floor: at least the one choice, at every tier but play with a remembered "go".
+const door = (m: string, ctx = {}) => {
+  const a = assessRequest(m, ctx);
+  return { a, verdict: askOrGo(a), asked: askFirst(askOrGo(a), "go", a) };
+};
+for (const message of [
+  "Send it to all our customers",
+  "email all our customers the new price list",
+  "announce the price increase to everyone",
+  "publish the new pricing page",
+]) {
+  const { a, verdict, asked } = door(message);
+  check(
+    verdict.ask === false && a.performsDoor === true && asked !== "go",
+    `"${message}" performs a door, so it is offered even when the equation says go (got ${asked}, ${a.size}/${a.stakes})`,
+  );
+}
+// Money with an amount is critical now, so the equation stops it on its own; what
+// matters is that the door is recognised and never goes silently.
+for (const message of ["pay our contractor $2,000", "wire $5,000 to the new supplier"]) {
+  const { a, asked } = door(message);
+  check(a.performsDoor === true && asked !== "go", `"${message}" is a performed money door (got ${asked}, ${a.size}/${a.stakes})`);
+}
+// The same door inside work that makes something, or in play with a remembered "go",
+// is not performed here: "write a tweet announcing our sale" leaves nothing.
+for (const message of ["write a tweet announcing our sale", "draft the email to our customers", "write a post announcing the price rise"]) {
+  const { a, verdict } = door(message);
+  check(verdict.ask === false && a.performsDoor === false, `"${message}" mentions a door, it does not perform one`);
+}
+check(assessRequest("Send it later, maybe", { makerLane: true }).performsDoor === false, "a maker lane mentions doors, it does not perform them");
+{
+  const a = assessRequest("delete my old screenshots");
+  check(a.performsDoor === true, "deleting your own screenshots is still a door");
+  check(askFirst(askOrGo(a), "go", a) === "go", "play + a remembered 'just go': their own call, no tap");
+  check(askFirst(askOrGo(a), null, a) === "offer", "play and no answer yet: offered once");
+}
+
+// Money is critical when an amount rides with the verb, whatever noun follows it:
+// "pay our contractor $2,000" read as play before this test existed (0.32 → go).
+for (const message of [
+  "pay our contractor $2,000",
+  "wire $5,000 to the new supplier",
+  "transfer $500 to the landlord",
+  "send 2000 dollars to the vendor",
+]) {
+  check(tier(message) === "critical", `money with an amount is critical: "${message}" (got ${tier(message)})`);
+}
+for (const message of ["pay attention to the layout", "order a $5 coffee", "the pay page needs a tidier header"]) {
+  check(tier(message) !== "critical", `no money signal here: "${message}" (got ${tier(message)})`);
+}
 check(assessRequest("I need this ASAP").hurried === true, "ASAP is a hurry");
 check(assessRequest("write a short story").hurried === false, "no hurry words, no hurry");
 check(assessRequest("Make me a game").size === "large", "a game is a project");
