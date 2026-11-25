@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit",
     "parity": "node scripts/parity-check.mjs",
     "test:protocol-doc": "node scripts/check-protocol-doc.mjs",
+    "posttest:protocol-doc": "node scripts/test-options-data.mjs",
     "gate:hard-nav": "node scripts/gate-hard-nav.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
