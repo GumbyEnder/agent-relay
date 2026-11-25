@@ -25,12 +25,21 @@ import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
 import { GENERATE_VIDEO_TOOL } from "./video";
 import { START_CODE_PROJECT_TOOL } from "./codeMonkey";
+import { USE_BROWSER_TOOL } from "./browserRun";
 
-/** `code` tools appear only on turns that ask for software to be made or changed. */
-export type ToolGate = "always" | "draft" | "code";
+/**
+ * always: every tool turn. draft: once the brief is complete or the owner asked for the file.
+ * browser: a turn whose board has a browser node (the globe), or whose message asks BeeZilla to
+ * do something on a website — never an ordinary chat turn (a tool list turns streaming off).
+ * code: a turn that asks for software to be made or changed (Code Monkey's workshop).
+ */
+export type ToolGate = "always" | "draft" | "browser" | "code";
 export type ToolCost = "free" | "metered";
-/** `starts-work` hands a job to agents (Code Monkey's board); it can be stopped, so it is a two-way door. */
-export type ToolSideEffect = "read-only" | "render-to-memory" | "starts-work";
+/**
+ * acts-on-websites: clicks and types on a website for the owner, who asked for it (and watches it).
+ * starts-work: hands a job to agents (Code Monkey's board); it can be stopped, so it is a two-way door.
+ */
+export type ToolSideEffect = "read-only" | "render-to-memory" | "acts-on-websites" | "starts-work";
 
 export interface ToolPolicy {
   name: string;
@@ -165,6 +174,26 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     cost: "metered",
     sideEffects: "render-to-memory",
   },
+  // ── BeeZilla's own browser (the globe on the Idea Board) ─────────────
+  // Owner, 2026-11-23: "make it so that browser use absolutely works for Bzilla. So it's able to
+  // use its own browser to automate and complete tasks on your behalf as per your commands to
+  // it." The owner's command (or the step they joined a globe to) is the go-ahead; the rules
+  // that never bend are in code (remoteBrowser.ts act): no password, card or code typed, no
+  // pay/buy/subscribe/account button pressed, no private address. browserRun.ts runs it.
+  {
+    name: "use_browser",
+    egress: true,
+    schema: USE_BROWSER_TOOL,
+    gate: "browser",
+    offered: true,
+    // The turn waits for the job up to four minutes (browserRun.ts useBrowserTool), then says it
+    // is still going: a connection held open much longer is cut on the way.
+    timeoutMs: 285_000,
+    maxResultBytes: 6_000,
+    cost: "metered",
+    sideEffects: "acts-on-websites",
+    withheldReason: "it is offered when the board has a browser node or the owner asks for something to be done on a website.",
+  },
   {
     name: "render_document",
     schema: RENDER_DOCUMENT_TOOL,
@@ -230,11 +259,14 @@ export interface ToolContext {
    * the person asks for them, and the harness starts them itself.
    */
   documentsOnly?: boolean;
+  /** The board has a browser node, or the owner asked for something to be done on a website. */
+  browser?: boolean;
 }
 
 function gateOpen(p: ToolPolicy, ctx: ToolContext): boolean {
   if (p.gate === "always") return true;
   if (p.gate === "code") return ctx.codeRequest === true;
+  if (p.gate === "browser") return !!ctx.browser;
   return ctx.draftGateOpen;
 }
 
@@ -278,6 +310,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
+  }
+  if (policy.gate === "browser" && !ctx.browser) {
+    return `${name} is not offered in this turn — ${policy.withheldReason ?? "there is no browser job."}`;
   }
   if (ctx.documentsOnly && policy.gate === "draft" && policy.egress) {
     return `${name} runs when the owner asks for it — this turn only writes documents.`;

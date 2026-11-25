@@ -623,18 +623,26 @@
   {
     "id": "sk-030",
     "q": "Can BeeZilla log in to websites or fill in forms for me?",
-    "a": "Not yet. It reads public pages only: no clicking, no logging in and no sending forms.",
+    "a": "Yes, in its own browser. Put a globe on the Idea Board (or just ask) and BeeZilla goes to the site, clicks, types, presses Create and downloads what it made into your Library. It never types your passwords and never pays: sign in once yourself in its browser and it stays signed in.",
     "sources": [
       {
         "file": "docs/BEEZILLA-CAPABILITIES.md",
-        "symbol": "Interaction, structure extraction and authenticated sessions are still absent"
+        "symbol": "Interaction and signed-in sites came with the globe"
+      },
+      {
+        "file": "src/lib/buzzy/remoteBrowser.ts",
+        "symbol": "BeeZilla never types those"
+      },
+      {
+        "file": "src/lib/buzzy/remoteBrowser.ts",
+        "symbol": "paying, buying and subscribing are yours to press"
       }
     ],
     "surfaces": [
       "website",
       "desktop"
     ],
-    "limits": "Acting on websites for you is planned, with your permission for each site."
+    "limits": "Buttons that pay, buy, subscribe or change your account are always yours to press; boxes inside embedded frames (like a payment box) aren't seen yet."
   },
   {
     "id": "sk-031",

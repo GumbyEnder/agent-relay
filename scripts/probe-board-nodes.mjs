@@ -218,6 +218,8 @@ if (browserOn) {
   check("before anything starts it says the browser is on a server, not this computer", /on a server, not on this computer/.test(intro), intro);
   const win0 = await page.locator(".wb-nwin-browser").boundingBox();
   check("the window is big enough to use a page in (picture at least 600 px wide)", win0.width >= 760, String(win0.width));
+  // A new browser node starts on "Do this" (the globe, 2026-11-23); recording is the other tab.
+  await page.locator(".wb-nw-tab", { hasText: "Follow a recording" }).click();
   await page.locator(".wb-nw-rec").click();
   await page.waitForFunction(() => { const c = document.querySelector(".wb-nw-canvas"); return c && getComputedStyle(c).visibility === "visible"; }, null, { timeout: 40000 });
   const whereText = await page.locator(".wb-nw-where").innerText();
@@ -236,7 +238,7 @@ if (browserOn) {
   await page.keyboard.type("hunter22", { delay: 30 });
   await page.mouse.click(...at(100, 350));                            // Say hello
   await page.waitForTimeout(1500);
-  const steps = await page.locator(".wb-nw-step").allInnerTexts();
+  const steps = await page.locator(".wb-nw-steps:not(.wb-nw-acts) .wb-nw-step").allInnerTexts();
   const flat = steps.map((t) => t.replace(/\s+/g, " ")).join(" | ");
   check("every move is a step in words", steps.length === 4 && /Go to 127\.0\.0\.1/.test(flat) && /Type into “Your name” “Ada”/.test(flat) && /Click the button “Say hello”/.test(flat), flat);
   check("a password is a step, passed on, never written down", /Type your own password or code into “Password” \(not recorded\)/.test(flat) && !flat.includes("hunter22"), flat);
@@ -244,11 +246,11 @@ if (browserOn) {
   await page.waitForTimeout(700);
   const bCard = await page.locator(".wb-card.wb-k-browser").innerText();
   check("the card shows what was recorded", /4 steps recorded/.test(bCard), bCard);
-  await page.locator(".wb-nw-play").click();
+  await page.locator(".wb-nw-runbtn").click();                        // Run the recording
   await page.waitForSelector(".wb-nw-runok, .wb-nw-runbad", { timeout: 45000 });
   const run = await page.locator(".wb-nw-run").innerText();
   check("Watch it run plays the steps and lands where it did, with the typed name", /It worked/.test(run) && /Hello Ada/.test(run), run);
-  check("…and says a password was left for the person", /left for you|enter this yourself/.test(run + (await page.locator(".wb-nw-steps").innerText())), run);
+  check("…and says a password was left for the person", /left for you|enter this yourself/.test(run + (await page.locator(".wb-nw-steps:not(.wb-nw-acts)").innerText())), run);
   const win1 = await page.locator(".wb-nwin-browser").boundingBox();
   // Resize by the left edge.
   const edge = await page.locator(".wb-nwin-browser .wb-rs-l").boundingBox();
@@ -265,17 +267,17 @@ if (browserOn) {
   check("the seconds it was open are counted against the plan", after.secondsLeft < info.secondsLeft, `${info.secondsLeft} → ${after.secondsLeft}`);
   await connect(".wb-card.wb-k-browser", '.wb-card[aria-label^="Skill"]');
   const told2 = await instructions();
-  check("joined to a step, BeeZilla is told the steps, in words", /Browser job the owner recorded/.test(told2) && /Type “Ada” into “Your name”/.test(told2) && /Click the button “Say hello”/.test(told2), told2);
+  check("joined to a step, BeeZilla is told the steps, in words", /Browser node \(the globe\)/.test(told2) && /It follows their recording exactly/.test(told2) && /Type “Ada” into “Your name”/.test(told2) && /Click the button “Say hello”/.test(told2), told2);
   check("…with the password step as the person's own", /Type your own password or code into “Password”/.test(told2) && !told2.includes("hunter22"));
-  check("…and how the last play went", /Last played .*it worked/.test(told2), told2);
+  check("…and how the last run went", /Last run .*it worked/.test(told2), told2);
   await page.waitForTimeout(2200);
   const saved2 = await (await fetch(`${ORIGIN}/api/buzzy/whiteboards/talk`, { headers: authHeaders })).text();
   check("the recording is saved to the account, without the password", /"kind":"browser"/.test(saved2) && /Ada/.test(saved2) && !saved2.includes("hunter22"));
   // Opened again: the saved recording shows at once, and Watch it run opens a browser by itself.
   await page.locator(".wb-card.wb-k-browser .wb-nd-btn").click();
   await page.waitForSelector(".wb-nwin-browser");
-  check("opened again, the recording is still there", (await page.locator(".wb-nw-step").count()) === 4);
-  await page.locator(".wb-nw-play").click();
+  check("opened again, the recording is still there", (await page.locator(".wb-nw-steps:not(.wb-nw-acts) .wb-nw-step").count()) === 4);
+  await page.locator(".wb-nw-runbtn").click();
   await page.waitForSelector(".wb-nw-runok, .wb-nw-runbad", { timeout: 60000 });
   check("Watch it run works from a closed browser too", /It worked/.test(await page.locator(".wb-nw-run").innerText()));
   await page.keyboard.press("Escape");                                // focus is in the window, not the page

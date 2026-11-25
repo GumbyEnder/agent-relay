@@ -67,7 +67,7 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
 /* ── Talk to BeeZilla, on top while the board is folded ──────────────── */
 .ob-start { order: 1; margin-top: 4px; }
 .ob-start:empty { display: none; }
-.ob-start .talk-bar { padding: 0.6rem; }
+.ob-start .talk-bar { --tb-min: 3.4rem; padding: 0.6rem; }
 .ob-start .talk-btn { min-height: 3.4rem; font-size: 1.15rem; }
 
 /* ── The board's place on the page (its own look is in whiteboard.css) ── */
@@ -187,7 +187,9 @@ a.ob-item { text-decoration: none; }
 #voiceToggle, #sessionsToggle { display: none !important; }
 
 /* ── Beside the box: the paper clip and the privacy control ─────────── */
-.talk-extras { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }
+/* The paper clip and privacy keep the height of one line of the box and stay at the top
+   when the box grows (talk.html, --tb-h); their buttons are centred in that line. */
+.talk-extras { flex: 0 0 auto; align-self: flex-start; height: var(--tb-h); display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }
 .talk-extras .talk-privacy { align-self: center; }
 .talk-extras .privacy-btn { margin-top: 0; height: 2.5rem; padding: 0 0.75rem; }
 .talk-icon {
@@ -326,7 +328,7 @@ a.ob-item { text-decoration: none; }
 @media (max-width: 520px) {
   .ob-start .talk-bar { flex-wrap: wrap; row-gap: 6px; }
   .ob-start .talk-bar .talk-field { flex: 1 1 calc(100% - 4.4rem); }
-  .ob-start .talk-bar .talk-extras { flex: 1 0 100%; justify-content: flex-end; }
+  .ob-start .talk-bar .talk-extras { flex: 1 0 100%; justify-content: flex-end; height: auto; }
   .bz-search-tools .bz-share-btn > span { display: none; }
   .bz-search-tools .bz-share-btn { padding: 0.2rem 0.5rem; }
   .ob-item { flex-direction: column; }
