@@ -30,6 +30,23 @@
  *   G1-G2    the new controls fit at phone width
  *   F2       a DPRS with no device pixel ratio in it makes this probe exit non-zero
  *
+ * Second review (an independent review of the review fixes found these; each has checks):
+ *   A34-A38  Redo while a polygon is open puts back the corner Undo took, never an earlier
+ *            board edit under the open shape; a new corner ends that Redo
+ *   B30-B34  a lifted area is part of the history: Undo past a mark drawn while it floated
+ *            brings it back floating, and Undo of a flip leaves no flipped copy behind
+ *   D20d-D20e the remembered paper colour follows Redo back to "none"
+ *   D23-D25  a real mouse wheel scrolls the Canvas panel over a zoomed board (which does not
+ *            pan), and its Close button stays in sight however far it is scrolled
+ *   D26-D27  a width typed in the panel and not applied survives an Undo that keeps the size
+ *   E40-E40b the near-limit board is really saved: the stub, which refuses what the route
+ *            refuses (over 8 MB), accepted it with both pictures, and a reload has both
+ *   E44-E49  Remove background: a background split across a bucket edge (alpha 191/192, grey
+ *            127/128) still wins over a subject on the edge; a see-through gap stops the flood
+ *   E50-E51  a board that is still over the limit after a clear says so
+ *   E52-E53  Space presses the Fill switch when the keyboard reached it, and still pans after
+ *            a click on it
+ *
  * It needs no server and no account: it serves public/ from this checkout on an ephemeral
  * port, answers the few /api/buzzy calls the page makes with stubs, and drives the page
  * with Playwright. The pass/fail is on what the page really does (pixels on the canvas,
@@ -80,8 +97,12 @@ try {
 }
 
 // ── a stub of the few endpoints the page calls ──────────────────────────────
-const boards = {};            // jobId -> the last board the page saved
-const saves = [];             // every save the page posted, in order
+const boards = {};            // jobId -> the last board the page saved (and the stub accepted)
+const saves = [];             // every save the page posted, in order, with the status it got
+// The route's own backstop (src/lib/buzzy/art.nitro.ts): a board over 8 MB as JSON is refused
+// with a 413 and not stored. The stub refuses it too, so a save it records as accepted (200)
+// is one the real server would have kept.
+const ROUTE_MAX_BOARD = 8 * 1024 * 1024;
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png" };
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, "http://probe");
@@ -96,7 +117,14 @@ const server = http.createServer((req, res) => {
       try { b = body ? JSON.parse(body) : {}; } catch { /* not json */ }
       if (u.pathname === "/api/buzzy/jobs") return json({ ok: true });
       if (u.pathname === "/api/buzzy/art" && req.method === "POST") {
-        if (b.action === "save") { boards[b.jobId] = b.board; saves.push({ jobId: b.jobId, board: b.board }); }
+        if (b.action === "save") {
+          const size = JSON.stringify(b.board === undefined ? null : b.board).length;
+          if (size > ROUTE_MAX_BOARD) {
+            saves.push({ jobId: b.jobId, board: null, status: 413 });
+            return json({ error: "Board is too large to save", code: "payload_too_large", bytes: size }, 413);
+          }
+          boards[b.jobId] = b.board; saves.push({ jobId: b.jobId, board: b.board, status: 200 });
+        }
         return json({ ok: true, saved: true });
       }
       if (u.pathname === "/api/buzzy/art") return json({ board: boards[u.searchParams.get("job")] || null, images: [] });
@@ -127,6 +155,10 @@ async function waitFor(fn, ms, what) {
   const until = Date.now() + ms;
   while (Date.now() < until) { if (await fn()) return; await sleep(50); }
   throw new Error("timed out waiting for " + what);
+}
+// waitFor for a check: whether it came true in time, instead of stopping the scenario.
+async function cameTrue(fn, ms) {
+  try { await waitFor(fn, ms, "a condition"); return true; } catch { return false; }
 }
 
 // ── page helpers ────────────────────────────────────────────────────────────
@@ -208,6 +240,8 @@ async function dropMade(page, spec, x, y) {
       const [bx, by, bw, bh] = spec.block, im = g.createImageData(bw, bh);
       let s = 99; for (let i = 0; i < im.data.length; i += 4) { s = (s * 1664525 + 1013904223) >>> 0; im.data[i] = s >>> 24; im.data[i + 1] = (s >>> 16) & 255; im.data[i + 2] = (s >>> 8) & 255; im.data[i + 3] = 255; }
       g.putImageData(im, bx, by);
+      // spec.clear: a see-through patch [x, y, w, h], so the importer keeps the picture a PNG
+      if (spec.clear) g.clearRect(spec.clear[0], spec.clear[1], spec.clear[2], spec.clear[3]);
       blob = await new Promise((r) => c.toBlob(r, spec.type, spec.q));
     } else {
       const bytes = new Uint8Array(spec.n); let s = 5;
@@ -493,6 +527,39 @@ async function checksPolygonMore(ctx) {
   st = await state(page);
   check("A33 Backspace takes back a corner even though a menu had the focus", st.poly === 2, st);
   await page.close();
+
+  // 5. (second review) Redo while a polygon is open belongs to the polygon: it puts back the
+  //    corner Undo took, and an earlier board edit waiting on the Redo stack is not redone (and
+  //    saved) under the open shape
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 100, 100, 200, 160);                        // mark A
+  await drag(page, g, 300, 100, 400, 160);                        // mark B
+  await page.click("#undo");                                      // B is undone: the board's Redo has it
+  await page.click('[data-tool="polygon"]');
+  await draw([[500, 300], [650, 300], [650, 420]]);
+  await page.click("#undo");                                      // takes back the third corner
+  st = await state(page);
+  check("A34 setup: a polygon is open, Undo took back its third corner, and mark B waits on the board's Redo", st.poly === 2 && st.strokes === 1, st);
+  await page.click("#redo");
+  st = await state(page);
+  check("A35 Redo puts the corner back (it used to redo mark B under the open shape instead)", st.poly === 3 && st.strokes === 1, st);
+  await page.click("#redo");
+  st = await state(page);
+  const said = await status(page);
+  check("A36 with no corner left to put back, Redo says so and still leaves the board alone", st.poly === 3 && st.strokes === 1 && /Nothing to redo in the polygon/.test(said), { st, said });
+  await page.click("#undo");                                      // the third corner is taken back again...
+  await click(page, g, 560, 420);                                 // ...and a different one is placed instead
+  await page.click("#redo");
+  st = await state(page);
+  check("A37 a new corner is a new edit: the corner taken back before it is not redone on top of it", st.poly === 3 && st.strokes === 1, st);
+  await page.keyboard.press("Enter");
+  const shape = await newest();
+  const corners = shape && shape.points ? shape.points.map((p) => [Math.round(p.x), Math.round(p.y)].join(",")).join(" ") : "";
+  check("A38 Enter finishes the shape with the corners on screen: the new third corner, not the one taken back",
+    (await state(page)).strokes === 2 && shape.tool === "polygon" && corners === "500,300 650,300 560,420", corners);
+  await page.close();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -668,6 +735,33 @@ async function checksDeleteMore(ctx) {
   await page.click("#undo");
   await sleep(300);
   check("B29 the next Undo takes the mark away, as it would have anyway", (await state(page)).strokes === 0, await state(page));
+  // (second review) ...and that Undo must not take the lifted area with it: the step from when
+  // the mark was drawn had the area floating, and it used to come back as only the hole
+  st = await state(page);
+  const mid30 = at(g, 150, 140), shown30 = await screenPx(page, mid30.x, mid30.y);
+  check("B30 ...and the lifted area is still there: it floats where it was when the mark was drawn",
+    st.floating === true && shown30[0] > 200 && shown30[1] > 150 && shown30[2] < 80, { floating: st.floating, shown: shown30 });
+  await page.keyboard.press("Escape");                             // drop it
+  await sleep(150);
+  const laid = await rasterPx(page, [[150, 140]]);
+  check("B31 Esc lays it into the pixel layer: nothing was lost", laid[0][3] === 255 && laid[0][0] > 200 && laid[0][2] < 80, laid[0]);
+
+  // Undo of a flip puts the area back as it was: no flipped copy is left floating over it
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 90, 90, 210, 190);                           // a new area, around the old one
+  await page.click("#flipH");                                      // flipped: lifted, floating over its hole
+  check("B32 setup: the flipped area floats over its hole", (await state(page)).floating === true && (await rasterPx(page, [[150, 140]]))[0][3] === 0, await state(page));
+  await page.click("#undo");
+  await sleep(300);
+  st = await state(page);
+  const unflipped = await rasterPx(page, [[150, 140]]);
+  check("B33 Undo of the flip puts the area back in the pixel layer, with no flipped copy left floating over it (it used to stay)",
+    st.floating === false && unflipped[0][3] === 255, { floating: st.floating, px: unflipped[0] });
+  await page.click("#redo");
+  await sleep(300);
+  st = await state(page);
+  const hole = await rasterPx(page, [[150, 140]]), over = await screenPx(page, mid30.x, mid30.y);
+  check("B34 Redo flips it again: the area floats over its hole, and shows", st.floating === true && hole[0][3] === 0 && over[0] > 200 && over[2] < 80, { floating: st.floating, hole: hole[0], over });
   await page.close();
 }
 
@@ -847,6 +941,14 @@ async function checksCanvasPanel(ctx, shots) {
   await sleep(300);
   st = await state(page);
   check("D20 after Redo restores 'none', the None box is ticked again", st.bg === "none" && await page.isChecked("#cvBgNone"), { bg: st.bg, none: await page.isChecked("#cvBgNone") });
+  // (second review) the colour remembered beside "none" comes back with the Redo too: it used
+  // to stay the grey the Undo had restored, and that grey was what the board then saved
+  const shownColour = await page.inputValue("#cvBg"), savedPaper = (await board(page)).paper;
+  check("D20d ...and the remembered colour comes back with it: the colour box shows the blue chosen before None, and the board saves that blue",
+    shownColour === "#3366cc" && savedPaper === "#3366cc", { shownColour, savedPaper });
+  await page.uncheck("#cvBgNone");
+  await blur(page);
+  check("D20e ...so un-ticking None gives that blue back, not the grey from before it", (await state(page)).bg === "#3366cc", (await state(page)).bg);
   await page.close();
 
   // ...and Undo restores 'none' while the panel shows a colour
@@ -870,6 +972,9 @@ async function checksCanvasPanel(ctx, shots) {
   page = await fresh(ctx);
   await page.setViewportSize({ width: 1440, height: 560 });
   await sleep(300);
+  // The board is zoomed in: a wheel over the board then pans it, and the wheel over the panel
+  // used to be taken for that too (setting scrollTop from a script could not show it).
+  await page.selectOption("#zoomSel", "2");
   await page.click("#canvasBtn");
   const m = await page.evaluate(() => {
     const p = document.getElementById("canvasPanel"), s = document.getElementById("stage").getBoundingClientRect(), r = p.getBoundingClientRect();
@@ -877,13 +982,59 @@ async function checksCanvasPanel(ctx, shots) {
   });
   check("D21 on a short stage the Canvas panel stays inside it", m.stageH < 330 && m.inside, m);
   check("D22 ...and scrolls, so nothing in it is out of reach", /auto|scroll/.test(m.overflowY) && m.taller, m);
+  const v0 = await state(page);
+  const pc = await page.evaluate(() => { const r = document.getElementById("canvasPanel").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.move(pc.x, pc.y);
+  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 240); await sleep(60); }     // a real wheel, over the panel
+  await cameTrue(() => page.evaluate(() => { const p = document.getElementById("canvasPanel"); return p.scrollTop + p.clientHeight >= p.scrollHeight - 1; }), 3000);
   const last = await page.evaluate(() => {
-    const p = document.getElementById("canvasPanel"); p.scrollTop = p.scrollHeight;
-    const s = document.getElementById("stage").getBoundingClientRect(), b = document.getElementById("cvJpg").getBoundingClientRect();
-    return { top: b.top >= s.top - 0.5, bottom: b.bottom <= s.bottom + 0.5 };
+    const p = document.getElementById("canvasPanel"), s = document.getElementById("stage").getBoundingClientRect(),
+          r = p.getBoundingClientRect(), b = document.getElementById("cvJpg").getBoundingClientRect();
+    return { scrollTop: Math.round(p.scrollTop), inStage: b.top >= s.top - 0.5 && b.bottom <= s.bottom + 0.5, inPanel: b.top >= r.top - 0.5 && b.bottom <= r.bottom + 0.5 };
   });
-  check("D23 scrolled to the end, the last button (Export JPG) is reachable inside the stage", last.top && last.bottom, last);
+  check("D23 a real mouse wheel over the panel scrolls it to its end with the board zoomed in, so the last button (Export JPG) comes into reach", last.scrollTop > 0 && last.inStage && last.inPanel, last);
+  const v1 = await state(page);
+  check("D24 ...and the wheel stayed with the panel: the board behind it did not pan or zoom",
+    v1.panX === v0.panX && v1.panY === v0.panY && v1.zoom === v0.zoom, { before: [v0.zoom, v0.panX, v0.panY], after: [v1.zoom, v1.panX, v1.panY] });
   if (shots) await shot(page, "5-canvas-panel-on-a-short-screen.png");
+  // the way out stays in sight however far the panel is scrolled
+  await page.evaluate(() => { const p = document.getElementById("canvasPanel"); p.scrollTop = p.scrollHeight; });
+  const exit = await page.evaluate(() => {
+    const p = document.getElementById("canvasPanel"), b = document.getElementById("canvasClose"), head = b.parentElement;
+    const r = p.getBoundingClientRect(), c = b.getBoundingClientRect(), x = c.left + c.width / 2, y = c.top + c.height / 2;
+    const top = r.top + p.clientTop;                               // the panel's inside top edge
+    return { scrolled: p.scrollTop > 0, inPanel: c.top >= r.top - 0.5 && c.bottom <= r.bottom + 0.5, onTop: document.elementFromPoint(x, y) === b,
+             // nothing that scrolled shows above the title row: the panel's top strip is the row
+             headAtTop: Math.abs(head.getBoundingClientRect().top - top) < 1 && head.contains(document.elementFromPoint(r.left + 40, top + 3)), x, y };
+  });
+  await page.mouse.click(exit.x, exit.y);
+  const shut = await page.evaluate(() => !document.getElementById("canvasPanel").classList.contains("on"));
+  check("D25 scrolled to the end, the panel's Close button is still in sight at its top (nothing scrolled shows above or over it), and a click on it closes the panel",
+    exit.scrolled && exit.inPanel && exit.onTop && exit.headAtTop && shut, { exit, shut });
+  await page.close();
+
+  // a width typed into the panel but not applied yet is the person's: an Undo of a mark keeps it
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 100, 200, 300, 300);                         // a mark, away from the panel
+  await page.click("#canvasBtn");
+  const w0 = (await state(page)).w, h0 = (await state(page)).h;
+  await page.fill("#cvW", "1234");                                 // typed, not applied
+  await page.click("#undo");
+  await sleep(300);
+  st = await state(page);
+  const typed = await page.inputValue("#cvW");
+  check("D26 a width typed into the panel and not applied survives an Undo that does not change the canvas size (the mark goes, the 1234 stays)",
+    st.strokes === 0 && st.w === w0 && typed === "1234", { strokes: st.strokes, w: st.w, box: typed });
+  await page.fill("#cvW", "800"); await page.fill("#cvH", "600");
+  await page.click("#cvApply");
+  await page.waitForFunction(() => window.__bzSketch.state().w === 800);
+  await page.click("#undo");
+  await sleep(300);
+  const boxes = { w: await page.inputValue("#cvW"), h: await page.inputValue("#cvH"), doc: [(await state(page)).w, (await state(page)).h] };
+  check("D27 an Undo that does change the size still puts the restored size in the boxes",
+    boxes.doc[0] === w0 && boxes.doc[1] === h0 && boxes.w === String(Math.round(w0)) && boxes.h === String(Math.round(h0)), { boxes, w0, h0 });
   await page.close();
 }
 
@@ -1116,6 +1267,30 @@ async function checksFill(ctx, shots) {
   b = await bars();
   check("E31 with a text mark selected, Fill still owns the options row (the text bar does not show over it)", b.fill === "visible" && b.text === "hidden", b);
   await page.close();
+
+  // 4. (second review) Space presses the switch when the keyboard reached it (Tab), as Enter
+  //    does; and after a click on it, Space is still the hold-to-pan key
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="fill"]');
+  await page.focus("#opMode");                                     // the control just before the Fill bar
+  await page.keyboard.press("Tab");
+  const focused = await page.evaluate(() => document.activeElement && document.activeElement.id);
+  await page.keyboard.press(" ");
+  b = await bars();
+  check("E52 with the keyboard on the Fill switch (reached with Tab), Space presses it: it turns on and reads as pressed", focused === "fillClear" && b.pressed === "true" && b.on, { focused, b });
+  await page.click("#fillClear");                                  // a click on the switch, which leaves the focus on it
+  const clicked = (await bars()).pressed;
+  const pan0 = (await state(page)).panX;
+  await page.keyboard.down(" ");
+  await drag(page, g, 500, 300, 560, 330);                         // Space held: a drag pans the board
+  await page.keyboard.up(" ");
+  const pan1 = (await state(page)).panX;
+  b = await bars();
+  const layer = (await board(page)).raster;
+  check("E53 after a click on the switch, Space is still the hold-to-pan key: the board pans, nothing is filled, and the switch is not pressed again",
+    Math.abs(pan1 - pan0 - 60) < 2 && layer === null && b.pressed === clicked, { pan0, pan1, clicked, b, filled: layer !== null });
+  await page.close();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1181,8 +1356,22 @@ async function checksRemoveBudgets(ctx) {
   const filler = LIMIT - Math.round((O + N) / 2) - 700;             // as a data URL: halfway between the two sizes
   await dropMade(page, { kind: "bytes", n: Math.floor((filler - 22) / 4) * 3 }, 700, 100);
   const before = await pictureAt(page, 0);
-  await sleep(2300);                                                // the board saves: it fits
-  check("E40 setup: a board just under the 8 MB limit that still saves", (await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length)) < LIMIT && !/over the 8 MB/.test(await status(page)), await status(page));
+  // It must really be saved, not just be small enough in memory: a save of this board, with
+  // both pictures, that the stub (which refuses what the route refuses) accepted...
+  await page.waitForFunction(() => !!window.__bzSketch.state().jobId);
+  const job = (await state(page)).jobId;
+  const lens = await page.evaluate(() => window.__bzSketch.board().images.map((i) => i.url.length).sort((a, b) => a - b).join(","));
+  const accepted = await cameTrue(() => saves.some((s) => s.jobId === job && s.status === 200 && s.board &&
+    s.board.images.map((i) => i.url.length).sort((a, b) => a - b).join(",") === lens), 20000);
+  const sizeNow = await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length);
+  check("E40 setup: a board just under the 8 MB limit is saved: the server accepted a save of it with both pictures",
+    accepted && sizeNow < LIMIT && sizeNow > LIMIT - 2 * 1024 * 1024, { accepted, sizeNow, saves: saves.filter((s) => s.jobId === job).map((s) => s.status + ":" + (s.board ? s.board.images.length : "-")) });
+  // ...and a reload of it brings both pictures back, byte for byte
+  const again = await fresh(ctx, origin + "/buzzy/sketch?job=" + encodeURIComponent(job));
+  const both = await cameTrue(() => again.evaluate(() => window.__bzSketch.state().images === 2), 20000);
+  const lensAgain = await again.evaluate(() => window.__bzSketch.board().images.map((i) => i.url.length).sort((a, b) => a - b).join(","));
+  check("E40b ...and a reload of it brings both pictures back, byte for byte", both && lensAgain === lens, { both, lens, lensAgain });
+  await again.close();
   await selectBoardPicture(page, before);
   await page.click("#rmBg");
   await sleep(1500);
@@ -1196,6 +1385,83 @@ async function checksRemoveBudgets(ctx) {
   await page.click("#rmBg");
   await page.waitForFunction(() => /^data:image\/png/.test(window.__bzSketch.board().images[0].url), null, { timeout: 30000 });
   check("E43 once there is room, the same click works", /Background removed/.test(await status(page)), await status(page));
+  await page.close();
+
+  // 4. (second review) a board that is over the limit already: a clear that makes it smaller is
+  //    allowed (it is progress), but it must not then say the board is small enough to save
+  page = await fresh(ctx);
+  // a big picture with see-through pixels (so the importer keeps it a PNG): its cleared PNG is
+  // made smaller to fit the 2 MB a picture is allowed, so the board shrinks...
+  await dropMade(page, { kind: "noise", w: 1600, h: 1200, block: [100, 100, 1000, 700], bg: [40, 120, 220], clear: [0, 0, 24, 24], type: "image/png" }, 100, 50);
+  const big = await pictureAt(page, 0);
+  // ...and a filler that keeps the board over 8 MB even with the picture at 2 MB
+  const FILL = Math.round(7.6 * 1024 * 1024);
+  await dropMade(page, { kind: "bytes", n: Math.floor((FILL - 22) / 4) * 3 }, 700, 100);
+  const sizeBefore = await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length);
+  await selectBoardPicture(page, big);
+  await page.click("#rmBg");
+  const done50 = await cameTrue(() => page.evaluate(() => /Background removed/.test(document.getElementById("status").textContent)), 60000);
+  const said50 = await status(page);
+  const after = await page.evaluate(() => { const b = window.__bzSketch.board(); return { size: JSON.stringify(b).length, head: b.images[0].url.slice(0, 22), len: b.images[0].url.length }; });
+  check("E50 a board over the limit that is still over it after a clear says so, and does not claim it is small enough to save",
+    done50 && /still/.test(said50) && /over the 8 MB save limit/.test(said50) && !/small enough to save/.test(said50), { sizeBefore, after: after.size, said50 });
+  check("E51 ...the clear itself is kept (it made the board smaller): the picture is the cleared, smaller PNG",
+    big.len > after.len && /image\/png/.test(after.head) && sizeBefore > LIMIT && after.size > LIMIT && after.size < sizeBefore, { big: big.len, now: after.len, sizeBefore, sizeAfter: after.size });
+  await page.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// (second review) Remove background: which colour is the background, and where the flood stops.
+// A 200x100 test picture, made in the page:
+//   "alphaSplit"  a red subject on the left that touches three edges (232 of the 596 edge
+//                 pixels, 39%), and a blue background over the rest (61%) whose alpha is 191
+//                 and 192 in turn: two coarse buckets, each fuller than none of them alone
+//   "greySplit"   the same, with a grey background of 127 and 128 in turn (a colour bucket edge)
+//   "gap"         a black band at alpha 128 along every edge, a see-through gap inside it, and a
+//                 blob of the same black in the middle that touches no edge
+const makeEdgeCase = (page, kind) => page.evaluate((kind) => {
+  const w = 200, h = 100, c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"), im = g.createImageData(w, h), d = im.data;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let p;
+    if (kind === "gap") {
+      const band = x < 10 || y < 10 || x >= w - 10 || y >= h - 10, blob = x >= 80 && x < 120 && y >= 35 && y < 65;
+      p = band || blob ? [0, 0, 0, 128] : [0, 0, 0, 0];
+    } else if (x < 67) p = [220, 30, 30, 255];
+    else if (kind === "alphaSplit") p = [40, 120, 220, (x + y) % 2 ? 191 : 192];
+    else p = (x + y) % 2 ? [127, 127, 127, 255] : [128, 128, 128, 255];
+    d.set(p, (y * w + x) * 4);
+  }
+  g.putImageData(im, 0, 0);
+  return c.toDataURL("image/png");
+}, kind);
+async function checksEdgeKey(ctx) {
+  const opaqueRed = (p) => p[3] === 255 && p[0] > 200 && p[1] < 60 && p[2] < 60;
+  // the edge pixels of the 200x100 picture that are not the red subject's
+  const BG_EDGE = (() => { const a = []; for (let x = 67; x < 200; x += 3) a.push([x, 0], [x, 99]); for (let y = 1; y < 99; y += 3) a.push([199, y]); return a; })();
+  for (const [kind, label, tol, n] of [["alphaSplit", "split between alpha 191 and 192", 34, 44], ["greySplit", "a grey split between 127 and 128", 24, 46]]) {
+    const page = await fresh(ctx);
+    await openPic(page, await makeEdgeCase(page, kind), 200);
+    await setTol(page, tol);
+    await page.click("#rmBg");
+    await sleep(200);
+    const px = await rasterPx(page, [[30, 50], [0, 0], [66, 99], [0, 50], ...BG_EDGE]);
+    const left = px.slice(4).filter((p) => p[3] !== 0).length;
+    check("E" + n + " a background " + label + " still wins over a subject that touches more edge than either half: the red subject stays (Fill tol. " + tol + ")",
+      px.slice(0, 4).every(opaqueRed), px.slice(0, 4));
+    check("E" + (n + 1) + " ...and the background is what is cleared, both halves of it, all along the edge", left === 0, { left, of: BG_EDGE.length, status: await status(page) });
+    await page.close();
+  }
+  // a see-through gap stops the flood: the blob beyond it never touched an edge
+  const page = await fresh(ctx);
+  await openPic(page, await makeEdgeCase(page, "gap"), 200);
+  await setTol(page, 64);
+  await page.click("#rmBg");
+  await sleep(200);
+  const px = await rasterPx(page, [[0, 0], [5, 50], [195, 95], [100, 5], [100, 50], [85, 40], [115, 60]]);
+  check("E48 a translucent black band along the edges is cleared (Fill tol. 64)", px.slice(0, 4).every((p) => p[3] === 0), px.slice(0, 4));
+  check("E49 ...but the blob of the same black inside, beyond a see-through gap, stays: an empty pixel does not carry the flood",
+    px.slice(4).every((p) => p[3] > 100 && p[3] < 160), px.slice(4));
   await page.close();
 }
 
@@ -1251,6 +1517,7 @@ try {
       await scenario("E remove background", () => checksRemoveBackground(ctx, first));
       await scenario("E fill (review fixes)", () => checksFill(ctx, first));
       await scenario("E remove background budgets (review fixes)", () => checksRemoveBudgets(ctx));
+      await scenario("E remove background key and flood (second review)", () => checksEdgeKey(ctx));
       await scenario("G phone width", () => checksPhone(ctx));
     } finally {
       await ctx.close();

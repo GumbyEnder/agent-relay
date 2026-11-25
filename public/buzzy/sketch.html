@@ -158,9 +158,14 @@
   #canvasPanel { position:absolute; z-index:8; right:12px; top:12px; width:250px; display:none;
                  max-height:calc(100% - 24px); overflow-y:auto; overscroll-behavior:contain;
                  background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
-                 padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
+                 padding:0 0.7rem 0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
   #canvasPanel.on { display:block; }
   #canvasPanel .row { margin-bottom:0.4rem; }
+  /* The panel's title row, with its Close button, stays at the top while the rest scrolls
+     under it: scrolled down to Export JPG on a short stage, the way out had scrolled away.
+     The panel's top padding is the row's own, so the row starts at the panel's top edge and
+     nothing that scrolls can show above it. */
+  #canvasPanel .panel-head { position:sticky; top:0; z-index:1; background:var(--bz-card); padding-top:0.7rem; }
   #canvasPanel label { color:var(--bz-muted); font-size:0.78rem; width:88px; display:inline-block; }
   #canvasPanel input[type="number"] { width:74px; background:#101010; border:1px solid var(--bz-line);
                                       color:var(--bz-text); border-radius:6px; padding:0.2rem 0.3rem; font-size:0.78rem; }
@@ -336,7 +341,7 @@
     <canvas id="board" tabindex="-1"></canvas>
     <div id="layers"></div>
     <div id="canvasPanel">
-      <div class="row" style="display:flex;justify-content:space-between;align-items:center"><b>Canvas</b><button id="canvasClose">Close</button></div>
+      <div class="row panel-head" style="display:flex;justify-content:space-between;align-items:center"><b>Canvas</b><button id="canvasClose">Close</button></div>
       <div class="row"><label>Width</label><input id="cvW" type="number" min="1" max="8000" value="1000" /> px</div>
       <div class="row"><label>Height</label><input id="cvH" type="number" min="1" max="8000" value="700" /> px</div>
       <div class="row"><label>Background</label><input id="cvBg" type="color" value="#141414" /></div>
@@ -1003,41 +1008,69 @@
     }
 
     // ── undo ──────────────────────────────────────────────────────────
+    // One step of the history: the board as JSON, and the lifted pixel area if one floats.
+    // Lifted pixels live only in their own buffer while they float (the pixel layer has a
+    // hole where they came from), so a step that kept only the board lost them: flip an
+    // area, draw a mark while it floats, and undoing the mark brought back the hole without
+    // the area. The buffer is kept by reference (nothing draws into it once it is made), so
+    // a step costs no more than it did.
+    function historyStep() {
+      return {
+        board: JSON.stringify({
+          strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
+          // The last real paper colour, beside a paper of "none": Redo back to "none" has to
+          // bring it too, or the colour un-ticking None returns to (and saves) is a stale one.
+          paper: paperColor,
+          // The stacking order is document state too: without it, undoing a delete brought
+          // the picture back on top of everything instead of where it was.
+          order: doc.order,
+        }),
+        floating: floating ? { x: floating.x, y: floating.y, w: floating.w, h: floating.h, path: floating.path, buf: floating.buf } : null,
+      };
+    }
     function snapshot() {
-      undoStack.push(JSON.stringify({
-        strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
-        // The stacking order is document state too: without it, undoing a delete brought
-        // the picture back on top of everything instead of where it was.
-        order: doc.order,
-      }));
+      undoStack.push(historyStep());
       redoStack.length = 0;
       // The first mark is the moment this board becomes a project; a page you
       // merely looked at is not one.
       ensureJob().then(autoSave, function () { /* a scratch board that cannot be saved is not an error toast */ });
     }
-    function applySnapshot(json) {
-      var d = JSON.parse(json);
+    function applySnapshot(step) {
+      var d = JSON.parse(step.board);
+      var resized = !!(d.w && d.h) && (d.w !== doc.w || d.h !== doc.h);
       doc.strokes = d.strokes || [];
       doc.images = d.images || [];
       doc.order = Array.isArray(d.order) ? d.order : [];
-      if (d.bg) { doc.bg = d.bg; if (d.bg !== "none") paperColor = d.bg; }
+      if (d.bg) {
+        doc.bg = d.bg;
+        if (d.bg !== "none") paperColor = d.bg;
+        else if (d.paper) paperColor = d.paper;
+      }
       if (d.w && d.h) { doc.w = d.w; doc.h = d.h; rasterCv = null; ensureRaster(); }
       selectedStroke = null;
       if (selected && !selectedImage()) selected = null;   // the restored board may not have it
+      // The lifted area is as it was at that step: floating where it floated, or not at all
+      // (a step from before it was lifted has those pixels in the layer already, so keeping
+      // the float as well would show them twice).
+      var f = step.floating;
+      floating = f ? { x: f.x, y: f.y, w: f.w, h: f.h, path: f.path, buf: f.buf } : null;
       loadRaster(d.raster || null);
       renderImages();
       paint();
+      syncSelBar();
       // The Canvas panel mirrors the board's size and paper; a restored board can change
-      // both, and an open panel kept showing the state from before the Undo.
-      syncCanvasPanel();
+      // both, and an open panel kept showing the state from before the Undo. The size boxes
+      // are only rewritten when the size really changed: a width typed there and not yet
+      // applied is the person's, and an Undo of a mark is no reason to throw it away.
+      syncCanvasPanel(resized);
     }
-    function current() { return JSON.stringify({ strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(), order: doc.order }); }
+    function current() { return historyStep(); }
     function undo() {
       // While a polygon is open, Undo takes back its last corner, as Backspace does. The
       // corners are not on the undo stack (the shape becomes one step when it is finished),
       // so undoing from the stack would undo the edit BEFORE the polygon and leave the open
-      // shape on a board that changed under it. Nothing is snapshotted here, so Redo keeps
-      // whatever it had.
+      // shape on a board that changed under it. Nothing is snapshotted here, so the board's
+      // Redo keeps whatever it had for when the shape is done.
       if (polyDraft) { polyBack(); return; }
       if (!undoStack.length) { setStatus("Nothing to undo."); return; }
       redoStack.push(current());
@@ -1046,6 +1079,10 @@
       autoSave();
     }
     function redo() {
+      // While a polygon is open, Redo is the polygon's too: it puts back the corner Undo (or
+      // Backspace) took. It used to reach past the open shape to the board's Redo and bring
+      // back (and save) an unrelated earlier edit under it.
+      if (polyDraft) { polyForward(); return; }
       if (!redoStack.length) { setStatus("Nothing to redo."); return; }
       undoStack.push(current());
       applySnapshot(redoStack.pop());
@@ -1309,12 +1346,18 @@
     // The colour that touches the edges, as one real pixel of the picture. Edge pixels that
     // are not see-through already are sorted into coarse buckets (4 bits a colour channel, 2
     // of alpha), so a little noise (JPEG, grain) does not split one background into hundreds
-    // of colours, and the fullest bucket is the background. The key is the edge pixel in that
-    // bucket that is nearest the bucket's mean, with its own RGBA:
+    // of colours. The key is the edge pixel in the winning bucket that is nearest the
+    // bucket's mean, with its own RGBA:
     //   - not the mean itself: an average is a colour that no pixel has, so at tolerance 0 it
     //     matched nothing, and a background that was one exact colour with a few stray shades
     //     in it would not clear at all;
     //   - not an alpha forced to 255: a background that is itself translucent has to match.
+    // Which bucket wins: a bucket's own pixels plus those of its neighbours (one step either
+    // way on every channel). A bucket edge cuts across values, not colours: a background of
+    // alpha 191 and 192, or a grey of 127 and 128, lands in two (or more) buckets, and counted
+    // apart each half could lose to a subject that touches the edge, which was then cleared
+    // instead of the background. Only a bucket at least as full as each of its neighbours may
+    // win, so a thin bucket sitting between two big ones is never taken for either of them.
     function edgeColor(d, w, h) {
       var BUCKETS = 16384;
       var cnt = new Uint32Array(BUCKETS), sr = new Float64Array(BUCKETS), sg = new Float64Array(BUCKETS),
@@ -1325,15 +1368,27 @@
         for (x = 0; x < w; x++) { fn(x * 4); fn(((h - 1) * w + x) * 4); }
         for (y = 1; y < h - 1; y++) { fn(y * w * 4); fn((y * w + w - 1) * 4); }
       }
-      var any = false;
+      var used = [];
       eachEdge(function (i) {
         if (d[i + 3] < 128) return;           // already see-through: not a colour to take out
         var k = bucketOf(i);
-        cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2]; sa[k] += d[i + 3]; any = true;
+        if (!cnt[k]) used.push(k);
+        cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2]; sa[k] += d[i + 3];
       });
-      if (!any) return null;
-      var best = 0;
-      for (var k = 1; k < BUCKETS; k++) if (cnt[k] > cnt[best]) best = k;
+      if (!used.length) return null;
+      var best = -1, bestScore = -1;
+      used.forEach(function (k) {
+        var r = k >> 10, g = (k >> 6) & 15, b = (k >> 2) & 15, a = k & 3, score = 0, peak = true;
+        for (var dr = -1; dr <= 1; dr++) for (var dg = -1; dg <= 1; dg++) for (var db = -1; db <= 1; db++) for (var da = -1; da <= 1; da++) {
+          var R = r + dr, G = g + dg, B = b + db, A = a + da;
+          if (R < 0 || R > 15 || G < 0 || G > 15 || B < 0 || B > 15 || A < 0 || A > 3) continue;
+          var n = cnt[(R << 10) | (G << 6) | (B << 2) | A];
+          score += n;
+          if (n > cnt[k]) peak = false;
+        }
+        // The fullest bucket of all is always a peak, so there is always a winner.
+        if (peak && (score > bestScore || (score === bestScore && cnt[k] > cnt[best]))) { best = k; bestScore = score; }
+      });
       var mr = sr[best] / cnt[best], mg = sg[best] / cnt[best], mb = sb[best] / cnt[best], ma = sa[best] / cnt[best];
       var at = -1, nearest = Infinity;
       eachEdge(function (i) {
@@ -1357,6 +1412,11 @@
         if (seen[idx]) return;
         seen[idx] = 1;
         var i = idx * 4;
+        // A pixel that is see-through already has nothing to clear, and it must not carry the
+        // flood across either: against a translucent key (black at alpha 128, say) an empty
+        // pixel is within a wide tolerance, so a see-through gap joined the background to
+        // artwork that never touched an edge, and that artwork was cleared too.
+        if (!d[i + 3]) return;
         var dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b, da = d[i + 3] - key.a;
         if (dr * dr + dg * dg + db * db + da * da <= lim) stack[top++] = idx;
       }
@@ -1464,17 +1524,24 @@
           return;
         }
         var total = boardBytesWith(id, out.url);
+        var mb = (total / (1024 * 1024)).toFixed(1);
         if (total > MAX_BOARD_BYTES && out.url.length > src.length) {
           setStatus("Not done: with its background cleared this picture would make the board " +
-            (total / (1024 * 1024)).toFixed(1) + " MB, over the 8 MB save limit. Delete or shrink another picture first. Nothing was changed.");
+            mb + " MB, over the 8 MB save limit. Delete or shrink another picture first. Nothing was changed.");
           return;
         }
         snapshot();                 // before the write: Undo restores the old pixels
         cur.url = out.url;
         renderImages(); paint(); autoSave();
+        // A board that was over the limit already may still be over it: the edit made it
+        // smaller, which is why it was allowed, but it does not fit yet, and saying it does
+        // would be false.
+        var over = total > MAX_BOARD_BYTES;
         setStatus(removedMessage() + (out.w < nw
-          ? " The picture was made smaller (" + out.w + "×" + out.h + ", it was " + nw + "×" + nh + ") so that the board stays small enough to save."
-          : ""));
+          ? " The picture was made smaller (" + out.w + "×" + out.h + ", it was " + nw + "×" + nh + ")" +
+            (over ? "." : " so that the board stays small enough to save.")
+          : "") +
+          (over ? " The board is still " + mb + " MB, over the 8 MB save limit, so it cannot be saved yet: delete or shrink another picture." : ""));
       };
       probe.onerror = function () { setStatus("That picture could not be read."); };
       probe.src = src;
@@ -2062,26 +2129,42 @@
     var POLY_DUP_PX = 6;        // a corner this close to the last one is a double-click's second press
     var polyHot = false;        // the pointer is on the first corner: the next click closes
     var polyShut = null;        // {t}: when the last shape was closed by a click on its first corner
+    var polyRedo = [];          // corners of the open shape taken back (Undo, Backspace), for Redo
 
     canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
     // Trackpad pinch arrives as a ctrl+wheel, so it zooms; a plain wheel pans a zoomed
     // board instead of scrolling the page away from the drawing.
+    function wheelZoom(e) {
+      e.preventDefault();
+      setZoom(view.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), { x: e.clientX, y: e.clientY });
+      syncSelBar();
+    }
     stage.addEventListener("wheel", function (e) {
-      if (e.ctrlKey || e.metaKey || tool === "zoom") {
-        e.preventDefault();
-        setZoom(view.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), { x: e.clientX, y: e.clientY });
-        syncSelBar();
-        return;
-      }
+      if (e.ctrlKey || e.metaKey) { wheelZoom(e); return; }
+      // The Canvas panel sits on the stage, is capped to it and scrolls: a wheel over it is
+      // the panel's. Taken here to pan a zoomed board (or zoom, with the Zoom tool), it never
+      // scrolled, and the panel's lower buttons were out of reach of a wheel or a trackpad.
+      if (e.target && e.target.closest && e.target.closest("#canvasPanel")) return;
+      if (tool === "zoom") { wheelZoom(e); return; }
       if (view.zoom > 1 || view.panX || view.panY) {
         e.preventDefault();
         view.panX -= e.deltaX; view.panY -= e.deltaY;
         paint(); syncSelBar();
       }
     }, { passive: false });
+    // Space is the hold-to-pan key, except on a button the keyboard reached (Tab): there
+    // Space presses the button, as it does everywhere else (the Fill makes see-through switch
+    // could be turned on with Enter but not with Space). A button that was clicked keeps the
+    // keyboard focus as well, so a click does not count: after clicking a tool, or the Grid
+    // button, Space still pans and does not press that button again.
+    var focusByKeyboard = false;
+    window.addEventListener("pointerdown", function () { focusByKeyboard = false; }, true);
     window.addEventListener("keydown", function (e) {
-      if (e.key === " " && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "")) {
+      if (e.key === "Tab") { focusByKeyboard = true; return; }
+      var tag = (e.target && e.target.tagName) || "";
+      if (e.key === " " && !/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) {
+        if (tag === "BUTTON" && focusByKeyboard) return;
         if (!spaceDown) { spaceDown = true; canvas.style.cursor = "grab"; }
         e.preventDefault();
       }
@@ -2300,6 +2383,7 @@
         return;
       }
       if (mode === "selmove") {
+        if (!floating) { mode = null; selMoveFrom = null; return; }   // an Undo mid-drag took the lifted area back
         floating.x = selMoveFrom.ox + (p.x - selMoveFrom.x);
         floating.y = selMoveFrom.oy + (p.y - selMoveFrom.y);
         paint();
@@ -2426,6 +2510,7 @@
         polyDraft = { id: newId(), tool: "polygon", color: e.button === 2 ? colorS : colorP,
                       width: size, op: op, fillColor: e.button === 2 ? colorP : colorS,
                       points: [p], closed: false };
+        polyRedo = [];
       } else {
         var pts = polyDraft.points;
         if (screenDist(p, pts[0]) <= POLY_CLOSE_PX) {
@@ -2436,6 +2521,7 @@
         // The second press of a double-click lands where the first one did: not a corner.
         if (screenDist(p, pts[pts.length - 1]) <= POLY_DUP_PX) return;
         pts.push(p);
+        polyRedo = [];                  // a new corner is a new edit: the corners taken back are gone
       }
       lastPoint = p;
       polyPreview();
@@ -2459,10 +2545,11 @@
       if (out.length > 1 && first.x === end.x && first.y === end.y) out.pop();
       return out;
     }
-    // Backspace / Delete while drawing: take back the last corner.
+    // Backspace / Delete (or Undo) while drawing: take back the last corner. It is kept, so
+    // that Redo, while the shape is still open, can put it back.
     function polyBack() {
       if (!polyDraft) return;
-      polyDraft.points.pop();
+      polyRedo.push(polyDraft.points.pop());
       polyHot = false;
       if (!polyDraft.points.length) {
         polyDraft = null; draft = null;
@@ -2470,6 +2557,18 @@
         setStatus("Polygon cancelled: no corners left.");
         return;
       }
+      polyPreview();
+      syncPolyBar(); paint();
+      setStatus(polyStatus());
+    }
+    // Redo while drawing: put back the last corner that was taken back. With none to put back
+    // it says so and leaves the board alone: the board's own Redo waits until the shape is
+    // finished (or cancelled), so an earlier, unrelated edit cannot be redone under it.
+    function polyForward() {
+      if (!polyDraft) return;
+      if (!polyRedo.length) { setStatus("Nothing to redo in the polygon being drawn. " + polyStatus()); return; }
+      polyDraft.points.push(polyRedo.pop());
+      polyHot = false;
       polyPreview();
       syncPolyBar(); paint();
       setStatus(polyStatus());
@@ -2798,22 +2897,22 @@
       delBtn.title = what ? "Delete the selected " + what + " (Delete key; Undo brings it back)"
                           : "Delete — click a picture or a mark first, then press Delete or Backspace";
     }
-    // Lifted pixels live only in the floating buffer; no snapshot holds them. The snapshot
-    // from when they were lifted has them where they used to be, so dropping the buffer used
-    // to make Undo reach back to THAT step: after any edit made while the area floated, Undo
-    // undid that edit instead, and the area did not come back. To make the delete a step of
-    // its own, the snapshot is taken with the area laid into a copy of the pixel layer (the
-    // real layer is not touched), and then the area is simply let go.
+    // Deleting a lifted area is a step of its own, and Undo gives the area back laid into the
+    // pixel layer where it floated (so the board saved after that Undo has it): the step is
+    // taken with the area laid into a copy of the layer (the real layer is not touched), and
+    // with nothing floating, or the area would come back twice. Then the area is let go.
+    // Steps taken while it floated keep it floating (historyStep), so undoing further back,
+    // past a mark drawn meanwhile, does not lose it either.
     function deleteFloating() {
-      var real = ensureRaster();
+      var f = floating, real = ensureRaster();
       var withIt = document.createElement("canvas");
       withIt.width = real.width; withIt.height = real.height;
       var wg = withIt.getContext("2d");
       wg.drawImage(real, 0, 0);
-      wg.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
+      wg.drawImage(f.buf, f.x, f.y, f.w, f.h);
+      floating = null;
       rasterCv = withIt;
       try { snapshot(); } finally { rasterCv = real; }
-      floating = null;
       paint(); autoSave(); syncSelBar();
       setStatus("Deleted the lifted area. Undo brings it back.");
     }
@@ -2936,9 +3035,13 @@
     var cvPanel = document.getElementById("canvasPanel");
     // The panel's fields show the board's size and paper. Opening it fills them in, and so
     // does every Undo and Redo (applySnapshot), which can change both while it stays open.
-    function syncCanvasPanel() {
-      document.getElementById("cvW").value = Math.round(doc.w);
-      document.getElementById("cvH").value = Math.round(doc.h);
+    // `withSize` false leaves the Width and Height boxes as they are: they hold what was typed
+    // until Apply size is clicked, and only a real change of size may overwrite that.
+    function syncCanvasPanel(withSize) {
+      if (withSize !== false) {
+        document.getElementById("cvW").value = Math.round(doc.w);
+        document.getElementById("cvH").value = Math.round(doc.h);
+      }
       document.getElementById("cvBg").value = paperNone() ? paperColor : doc.bg;
       document.getElementById("cvBgNone").checked = paperNone();
     }
