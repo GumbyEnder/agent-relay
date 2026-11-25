@@ -521,9 +521,34 @@ export default defineConfig(({ command }) => ({
                 handler: "./src/lib/buzzy/chat.nitro.ts",
               },
               {
+                // The Idea Board's "More" nodes: trying an API, and the server browser a
+                // person records a job in. Streams, so it has its own handler.
+                route: "/api/buzzy/nodes",
+                handler: "./src/lib/buzzy/boardNodes.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/nodes/**",
+                handler: "./src/lib/buzzy/boardNodes.nitro.ts",
+              },
+              {
                 // Before the wildcard: the canvas needs its own handler.
                 route: "/api/buzzy/art",
                 handler: "./src/lib/buzzy/art.nitro.ts",
+              },
+              {
+                // Sharing a page, only after the person says yes: their own side (preview,
+                // share, turn off) and the one public address, /buzzy/p/<token>. Before
+                // the wildcards below, so the page handler never serves it.
+                route: "/api/buzzy/page-shares",
+                handler: "./src/lib/buzzy/pageShare.nitro.ts",
+              },
+              {
+                route: "/api/buzzy/page-shares/**",
+                handler: "./src/lib/buzzy/pageShare.nitro.ts",
+              },
+              {
+                route: "/buzzy/p/**",
+                handler: "./src/lib/buzzy/pageShare.nitro.ts",
               },
               {
                 route: "/api/buzzy/**",

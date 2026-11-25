@@ -1,0 +1,131 @@
+/* The window that asks before a page is shared (page-share.js).
+ * Dark card on a dimmed page, like the AI-key dialog. Nothing closes on a click outside it;
+ * Esc or the X closes it, and a side or a corner resizes it. Every rule is class-based so it
+ * works the same on every page under the header (the root also carries .bz-talk-own). */
+.pshare-back {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.6);
+}
+.pshare-box {
+  position: fixed;
+  box-sizing: border-box;
+  min-width: 300px;
+  max-width: calc(100vw - 8px);
+  max-height: calc(100vh - 8px);
+  overflow: auto;
+  padding: 18px 20px 16px;
+  border-radius: 16px;
+  background: #151515;
+  border: 1px solid #2c2c2c;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+  color: #f2f2f2;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  outline: none;
+}
+.pshare-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; }
+.pshare-title { margin: 0; font-size: 1.15rem; line-height: 1.3; color: #f2f2f2; font-weight: 700; }
+.pshare-x {
+  flex: 0 0 auto;
+  min-height: 0;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #333;
+  background: transparent;
+  color: #ddd;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.pshare-x:hover { background: #222; }
+.pshare-x:disabled { opacity: 0.4; cursor: default; }
+.pshare-x:focus-visible, .pshare-btn:focus-visible, .pshare-link:focus-visible, .pshare-tick:focus-visible {
+  outline: 2px solid #ffc107;
+  outline-offset: 2px;
+}
+.pshare-body { display: flex; flex-direction: column; gap: 10px; }
+.pshare-lead { margin: 0; color: #f2f2f2; font-size: 0.98rem; line-height: 1.5; }
+.pshare-sub { margin: 4px 0 0; color: #bdbdbd; font-size: 0.88rem; font-weight: 600; }
+.pshare-list { margin: 0; padding: 0 0 0 1.1rem; color: #e6e6e6; font-size: 0.92rem; }
+.pshare-list li { margin: 2px 0; }
+.pshare-list strong { font-weight: 700; color: #ffffff; }
+.pshare-left { margin: 0; color: #a8a8a8; font-size: 0.86rem; line-height: 1.45; }
+.pshare-small { margin: 0; color: #a8a8a8; font-size: 0.82rem; line-height: 1.45; }
+.pshare-status { margin: 8px 0 0; min-height: 1.2em; font-size: 0.86rem; color: #ffd54f; }
+
+/* The small tickable option: quiet, but plain. */
+.pshare-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #101010;
+  border: 1px solid #262626;
+  cursor: pointer;
+}
+.pshare-tick { flex: 0 0 auto; width: 15px; height: 15px; margin: 3px 0 0; accent-color: #ffc107; cursor: pointer; }
+.pshare-block-words { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pshare-block-name { font-size: 0.84rem; font-weight: 600; color: #e6e6e6; }
+.pshare-block-desc { font-size: 0.76rem; line-height: 1.4; color: #9a9a9a; }
+
+.pshare-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 6px 0 0; }
+.pshare-btn {
+  min-height: 0;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: transparent;
+  color: #e6e6e6;
+  font: inherit;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pshare-btn:hover { background: #1f1f1f; }
+.pshare-btn:disabled { opacity: 0.45; cursor: default; }
+.pshare-primary { background: #ffc107; border-color: #ffc107; color: #141414; font-weight: 700; }
+.pshare-primary:hover { background: #ffd54f; }
+.pshare-danger { color: #ff8a80; border-color: #6b2a2d; }
+.pshare-danger:hover { background: #2a1214; }
+
+.pshare-linkrow { display: flex; gap: 8px; align-items: stretch; }
+.pshare-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid #333;
+  background: #0d0d0d;
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.pshare-qr { text-align: center; }
+.pshare-qr[hidden] { display: none; }
+.pshare-qr svg { display: block; margin: 0 auto 6px; border-radius: 10px; max-width: 100%; height: auto; }
+
+/* Grab a side or a corner to resize. */
+.pshare-grip { position: absolute; z-index: 2; touch-action: none; }
+.pshare-grip-n, .pshare-grip-s { left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
+.pshare-grip-e, .pshare-grip-w { top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+.pshare-grip-n { top: 0; }
+.pshare-grip-s { bottom: 0; }
+.pshare-grip-e { right: 0; }
+.pshare-grip-w { left: 0; }
+.pshare-grip-ne, .pshare-grip-nw, .pshare-grip-se, .pshare-grip-sw { width: 16px; height: 16px; }
+.pshare-grip-ne { top: 0; right: 0; cursor: nesw-resize; }
+.pshare-grip-nw { top: 0; left: 0; cursor: nwse-resize; }
+.pshare-grip-se { bottom: 0; right: 0; cursor: nwse-resize; }
+.pshare-grip-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+@media (max-width: 520px) {
+  .pshare-box { padding: 16px 16px 14px; }
+  .pshare-actions { justify-content: stretch; }
+  .pshare-actions .pshare-btn { flex: 1 1 auto; }
+}

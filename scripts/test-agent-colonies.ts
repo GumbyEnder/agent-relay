@@ -589,7 +589,7 @@ interface Moved { layout: ag.LayoutItem[]; colonies: ag.Colony[]; agents: ag.Sea
 
   console.log("\nWhat BeeZilla is told\n");
 
-  const chat = server.personaForMode("chat");
+  const { ONE_PERSONA: chat } = await import("../src/lib/buzzy/oneMode"); // one persona since one mode
   const OLD_TWO =
     "\n\nTHE PERSON'S ZILLA AGENTS. They have dedicated helpers, each looking after one part of their life or work. You are BeeZilla, their executive assistant: you work across all of it and look after these agents (names and jobs are what the person typed):\n- Bunnyzilla: helps with calendars\n- Blue Frogzilla: helps with trips\nWhen what they ask clearly belongs to one of these, say which agent looks after it: they open an agent by clicking its Zilla in the sidebar on the left. Don't say you have asked an agent, passed something on or checked with one: you can't do that yet, and saying so would be false.";
   const TRAVEL = { id: "co_travel000001", name: "Travel and time", purpose: "Plans \"my\" year" };

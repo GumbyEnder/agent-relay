@@ -453,15 +453,18 @@ const model = http.createServer((req, res) => {
 
   console.log("\nWhat an agent says, and what it is told\n");
 
-  const chat = server.personaForMode("chat");
-  const work = server.personaForMode("work");
+  // One persona since one mode (oneMode.ts). The old Work persona opened with a comma
+  // ("You are BeeZilla, a …"); personaFor still handles that opening, so a stand-in keeps it checked.
+  const { ONE_PERSONA } = await import("../src/lib/buzzy/oneMode");
+  const chat = ONE_PERSONA;
+  const work = "You are BeeZilla, a no-nonsense project manager who turns a client's problem into a clear, actionable scope of work.";
   const bunny: ag.AgentTurn = { id: "ag_x", name: "Bunnyzilla", role: "to-do list", instructions: "You're in charge of my \"to-do\" list", face: "✅" };
   await ok("the persona is the agent's: the name replaces BeeZilla's and every rule after it stays", () => {
     eq(ag.personaFor(null, chat), chat, "no agent: unchanged");
     eq(ag.personaFor(undefined, work), work);
     const c = ag.personaFor(bunny, chat);
-    truthy(c.startsWith("You are Bunnyzilla, one of the person's Zilla agents (a dedicated helper from the BeeZilla family). There is no difference here"), c.slice(0, 160));
-    eq(c.slice(c.indexOf("There is no difference")), chat.slice(chat.indexOf("There is no difference")), "the rest is the same");
+    truthy(c.startsWith("You are Bunnyzilla, one of the person's Zilla agents (a dedicated helper from the BeeZilla family). There is one way of working here"), c.slice(0, 160));
+    eq(c.slice(c.indexOf("There is one way of working")), chat.slice(chat.indexOf("There is one way of working")), "the rest is the same");
     const w = ag.personaFor(bunny, work);
     truthy(w.startsWith("You are Bunnyzilla, one of the person's Zilla agents (a dedicated helper from the BeeZilla family) and a no-nonsense project manager"), w.slice(0, 200));
     truthy(!/^You are BeeZilla/.test(c) && !/^You are BeeZilla/.test(w));

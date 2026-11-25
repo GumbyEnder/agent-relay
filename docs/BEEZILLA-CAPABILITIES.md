@@ -22,9 +22,11 @@ Three mechanisms enforce that:
    loop may execute. A model asking for an undeclared tool gets "not available" — it is
    refused, not attempted, and no permission is inferred.
 2. **State gates capability.** Rendering tools are not even offered to the model until the
-   draft gate opens (all four Decisions Made statements captured, or the owner asked for the
-   deliverable). Before that, the model has nothing to call — which matters, because a model
-   with no tool for a request will invent a limitation. (See "Known failure modes" below.)
+   draft gate opens: the owner asked for the deliverable (Do it, "just go", a file), a draft
+   is already on file, or one mode (`src/lib/buzzy/oneMode.ts`) decided to just do a piece of
+   real work, which offers the document makers only, never music or video. Before that, the
+   model has nothing to call — which matters, because a model with no tool for a request will
+   invent a limitation. (See "Known failure modes" below.)
 3. **Outward actions have their own gate.** Producing a document is autonomous; sending it
    is not. Every action that leaves the account is a separate, version-pinned approval.
 
@@ -78,7 +80,9 @@ behavior — missing or mis-declared tools fail visibly.
 **Gating and budget**
 
 - Always offered: `calculate`, `search_knowledge`, `lookup_market_rate`, `fetch_website`.
-- Offered only when the draft gate is open: `render_document`, `render_presentation`, `render_sheet`.
+- Offered only when the draft gate is open: `render_document`, `render_presentation`, `render_sheet`
+  (and `generate_music` / `generate_video`, except when the gate is open only because one
+  mode decided to go: `documentsOnly` in `src/lib/buzzy/toolRegistry.ts`).
 - Maximum **3 tool iterations** per turn (`toolMax = 3`). The loop is bounded, not open-ended.
 - Tool results re-enter as user-role messages with explicit framing (`DATA ONLY`,
   `RANGE reference`, `nothing confirmed`) so retrieved text is never mistaken for authority.

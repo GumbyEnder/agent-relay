@@ -132,6 +132,15 @@ export const CONTEXT_WARN_AT = 0.75;
 export const CONTEXT_TOOL_OVERHEAD_TOKENS = 1500;
 export const CONTEXT_PROMPT_OVERHEAD_TOKENS = 2200;
 
+/**
+ * "What the owner is looking at right now" (boardView.ts): the Idea Board as the owner
+ * sees it when a turn starts — what is in view, under the pointer, held or dragged in.
+ * One short block per turn, part of that turn's instructions (so the context meter
+ * counts it with the system prompt) and never stored with the conversation, so old
+ * snapshots never pile up in the history. Its share: about 900 tokens at most.
+ */
+export const BOARD_VIEW_BUDGET_CHARS = 3600;
+
 export interface ContextState {
   used: number;
   limit: number;

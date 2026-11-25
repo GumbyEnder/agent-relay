@@ -97,6 +97,12 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
   box-sizing: border-box;
   width: 100%;
   padding: 0 var(--ob-gutter) 6px;
+  /* The header is the same dark island on every page. Orchestrate's editor is a
+     light "paper" page, and the shared places row (grey #B5B5B5 labels) was nearly
+     invisible on it (CR-13). The chrome paints its own surface; page themes stop
+     below it. */
+  background: var(--bz-panel, #0A0A0A);
+  border-bottom: 1px solid #1E1E1E;
   /* Its own type, the same on every page: pages set 14px or 15px on their body. */
   font-family: var(--bz-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 16px;
@@ -122,10 +128,10 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
 /* ── Under the board: one search, then the places ───────────────────── */
 .bz-browse { margin-top: 18px; }
 .bz-tabrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 36px; margin: 1.1rem 0.6rem 0.4rem; border-bottom: 1px solid #1e1e1e; }
-/* The settings gear (#326) owns the bottom-right corner of every page. The search
-   and the places keep its column clear (44px gear, its 22px inset, a gap), so the
-   gear never sits on a control there. */
-.bz-head .bz-browse { padding-right: 80px; }
+/* The settings gear (#326) is fixed to the bottom-right corner of the viewport,
+   nowhere near the search, so the old 80px reservation only stole width: at 390px
+   it left a 290px bar with a 106px input (CR-13). The search takes the row. */
+.bz-head .bz-browse { padding-right: 0; }
 /* On Talk, Talk to BeeZilla is the one voice switch (owner, 2026-11-18: "There
    shouldn't be 2"). The live-mic pill beside the gear shows a running session on
    the other pages. */
@@ -153,13 +159,14 @@ a.ob-item { text-decoration: none; }
   border: 0;
   overflow: visible;
 }
-.bz-tabs > [role="tab"], .bz-places > a { white-space: nowrap; }
+.bz-tabrow .bz-tabs > *, .bz-tabrow .bz-places > a { flex: 0 0 auto; }
 .bz-places > a {
   position: relative;
   padding: 0.55rem 0.1rem 0.75rem;
   color: #b5b5b5;
   font-size: 1.02rem;
   text-decoration: none;
+  white-space: nowrap;
 }
 .bz-places > a:hover { color: #f2f2f2; }
 .bz-places > a:focus-visible { outline: 2px solid #ffc107; outline-offset: 2px; border-radius: 4px; }
@@ -177,7 +184,7 @@ a.ob-item { text-decoration: none; }
   border-radius: 3px;
   background: #ffc107;
 }
-#voiceToggle, #sessionsToggle, .tm-mode { display: none !important; }
+#voiceToggle, #sessionsToggle { display: none !important; }
 
 /* ── Beside the box: the paper clip and the privacy control ─────────── */
 .talk-extras { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }
@@ -294,8 +301,21 @@ a.ob-item { text-decoration: none; }
   :root { --ob-gutter: 16px; }
   .ob-board { height: auto; min-height: 80vh; }
   .ob-board .wb-panel { min-height: 80vh; }
-  .bz-tabrow, .bz-tabrow .bz-tabs, .bz-tabrow .bz-places { gap: 2px 22px; }
-  .bz-head .bz-browse { padding-right: 68px; } /* the gear sits 16px from the corner on a phone */
+  .bz-tabrow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; }
+  /* The settings gear (nav.js #bzDock) is fixed in the bottom-right corner: 44px wide,
+     16px in. A tall header (the paper block open, a draft waiting) can put the last
+     line of the places row into that corner, and the gear then covers a label — Memory
+     at 360, the end of Orchestrate at 390, the end of Download at 430 (signed-in QA,
+     24 Nov 2026). Reserve the gear's column on the row itself so no label can ever sit
+     under it, at any header height or scroll position. 50px clears the 44px gear with a
+     gap, and the divider line still spans the row (padding sits inside the border box). */
+  .bz-tabrow { padding-right: 50px; }
+  /* The six tabs and the seven links are one menu, so they wrap as one flow:
+     two flex containers gave two independent wrap groups of 2 + 3 rows (5 rows
+     of places on a 360px phone). display:contents joins them into one row that
+     wraps to four lines at 360–430px, with no scroll and no overlap. */
+  .bz-tabrow .bz-tabs, .bz-tabrow .bz-places { display: contents; }
+  .bz-head .bz-browse { padding-right: 0; }
   .talk-extras { gap: 4px; padding-right: 0; }
   .talk-icon, .talk-extras .privacy-btn { height: 2.3rem; }
   .talk-icon { width: 2.3rem; }

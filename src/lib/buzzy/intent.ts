@@ -38,7 +38,7 @@ export function isFileRequest(message: string): boolean {
  * look right?".
  *
  * This is deliberately its own signal rather than more regex in isDraftRequest:
- * it must ALSO suppress the interview question and the plan-first step, not just
+ * it must ALSO end any questions (oneMode.ts goes straight to the work), not just
  * open the draft gate. Refusing to act on it is never the safer choice — a
  * half-brief with the unknowns marked beats a brief that never ships.
  */
@@ -182,15 +182,16 @@ export function isRevisionRequest(message: string): boolean {
  *
  * Every case below is a turn that actually produced the deliverable:
  *   - the render tool ran  → the owner has a file, the card is how he gets it;
- *   - the owner asked for it now ("save it in the file", "write it up");
- *   - Work mode with the gate open → the brief IS the product, each turn revises;
+ *   - the owner asked for it now ("save it in the file", "write it up", Do it,
+ *     "just go", or the last of the questions they chose to answer);
  *   - an edit to the draft on file ("make the second paragraph shorter").
  * Nothing else. A conversational answer is answerable in chat and is not a file.
+ * (Work mode, where every turn with the gate open revised the brief, is gone: there
+ * is one mode now, see oneMode.ts.)
  */
 export function producesDeliverable(input: {
   renderedDocText: string | null;
   requestedDraft: boolean;
-  mode: "chat" | "work";
   draftGateOpen: boolean;
   hasExistingDraft: boolean;
   message: string;
@@ -198,7 +199,6 @@ export function producesDeliverable(input: {
   return (
     !!input.renderedDocText ||
     input.requestedDraft ||
-    (input.mode === "work" && input.draftGateOpen) ||
     (input.hasExistingDraft && isRevisionRequest(input.message))
   );
 }

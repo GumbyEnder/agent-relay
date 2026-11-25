@@ -188,6 +188,7 @@
     { id: "experts", href: "/buzzy/experts", label: "Experts" },
     { id: "recipes", href: "/buzzy/recipes", label: "Recipes" },
     { id: "sketch", href: "/buzzy/sketch", label: "Sketch", more: true },
+    { id: "orchestrate", href: "/buzzy/orchestrate", label: "Orchestrate", more: true },
     { id: "studio", href: "/buzzy/studio", label: "Music studio", more: true },
     { id: "capabilities", href: "/buzzy/capabilities", label: "What BeeZilla can do", more: true },
     // The installer is a place in the product, not a README footnote: a person
@@ -322,7 +323,7 @@
       "#bzFeedback.min .bz-panel-body{display:none}",
       "#bzFeedback .bz-fb-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:.55rem;padding:0 .1rem .2rem}",
       "#bzFeedback .bz-fb-label{font-size:.8rem;color:#c9c9c9}",
-      "#bzFeedback .bz-fb-text{width:100%;box-sizing:border-box;background:#0b0b0b;color:#f2f2f2;border:1px solid #333;border-radius:10px;padding:.6rem .7rem;font:inherit;font-size:.9rem;resize:vertical;min-height:96px}",
+      "#bzFeedback .bz-fb-text{width:100%;box-sizing:border-box;background:#0b0b0b;color:#f2f2f2;border:1px solid #333;border-radius:10px;padding:.6rem .7rem;font:inherit;font-size:.9rem;resize:vertical;min-height:96px;flex:1 1 auto}",
       "#bzFeedback .bz-fb-text:focus{outline:2px solid #ffd40d;outline-offset:1px}",
       "#bzFeedback .bz-fb-row{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}",
       "#bzFeedback .bz-fb-mic{background:#1b1b1b;color:#f2f2f2;border:1px solid #3a3a3a;border-radius:999px;padding:.32rem .75rem;font:inherit;font-size:.82rem;cursor:pointer}",
@@ -395,18 +396,28 @@
       // (the desktop bar is one unbroken strip) — the inline value cannot be
       // outranked by a stylesheet any other way.
       "@media (max-width:640px){",
-      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.4rem;padding:.35rem 0}",
-      ".bz-brandrow .bz-cluster{margin-left:0;width:100%;flex-wrap:wrap;row-gap:.4rem;gap:.5rem}",
-      // The link row keeps its place under the brand on a phone, but it is the
-      // SAME row as the brand (no second bar a page can style away).
-      ".bz-brandrow #bzNav{order:3;flex:1 1 100%;width:100%;flex-wrap:wrap!important;justify-content:flex-start;gap:.3rem .85rem;overflow-x:visible}",
-      "#bzChrome{flex-wrap:wrap;row-gap:.35rem}",
-      "#bzChrome .bz-co-wrap{flex:1 1 8rem;min-width:0}",
-      "#bzChrome select.bz-co-select{max-width:100%;width:100%}",
+      ".bz-brandrow{height:auto;min-height:0;flex-wrap:wrap;row-gap:.35rem;padding:.35rem 0}",
+      ".bz-brandrow .bz-brand img{width:32px;height:32px}",
+      // CR-13: the identity cluster was one non-wrapping line inside a 390px bar, so
+      // the company select was squeezed to 87px (\"No co…\") beside a fixed 5.5rem
+      // account link and an 84px Feedback pill. Two rows instead: the company owns a
+      // row of its own and the select takes the full width; account and Feedback
+      // share the row under it, each whole.
+      ".bz-brandrow .bz-cluster{margin-left:0;width:100%;gap:.4rem}",
+      "#bzChrome{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem .5rem;width:100%;flex-wrap:nowrap}",
+      "#bzChrome .bz-co-wrap{grid-column:1 / -1;display:flex;align-items:center;gap:.45rem;min-width:0;width:100%}",
+      "#bzChrome .bz-co-label{flex:0 0 auto}",
+      "#bzChrome select.bz-co-select{flex:1 1 auto;min-width:0;max-width:100%;width:100%}",
+      "#bzChrome .bz-account{min-width:0!important;justify-self:start;font-size:.9rem;padding:.2rem 0}",
+      "#bzChrome button.bz-ask{justify-self:end;font-size:.78rem;padding:.28rem .6rem}",
+      ".bz-brandrow #bzNav{order:3;flex:1 1 100%;width:100%;flex-wrap:wrap!important;justify-content:flex-start;gap:.3rem .7rem;overflow-x:visible}",
+      ".bz-brandrow #bzNav a{font-size:.8rem}",
       ".bz-navbar{display:none}",
       ".bz-navbar::-webkit-scrollbar{display:none}",
-      "#bzNav{flex-wrap:wrap!important;gap:.3rem .85rem}",
       "}",
+      // CR-13: where the places row exists it is the menu; the top link row does not
+      // repeat it on a phone, so there can never be a second nav (or a More) below it.
+      "@media (max-width:760px){html.bz-has-places #bzNav{display:none!important}}",
       // Honey Drops, plan and company: inside the menu under your name, never in the bar.
       ".bz-account[href='/buzzy/profile']::after{content:' \\25BE';font-size:1em;opacity:.85}",
       // ── Pages with the website's header (#bzHead) ─────────────────────────────
@@ -514,7 +525,12 @@
         // it: pin the menu to the viewport under the button instead.
         var r = moreBtn.getBoundingClientRect();
         var w = moreMenu.offsetWidth || 180;
-        moreMenu.style.top = Math.round(r.bottom + 6) + "px";
+        var h = moreMenu.offsetHeight || 240;
+        var top = r.bottom + 6;
+        // A menu opened near the bottom of a phone must open upwards, or its last
+        // entries land off-screen (CR-13: every menu stays fully on-screen).
+        if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+        moreMenu.style.top = Math.round(top) + "px";
         moreMenu.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + "px";
       };
       window.addEventListener("resize", function () { setOpen(false); });
@@ -1220,6 +1236,17 @@
     document.head.appendChild(s);
   }
 
+  // Boxes and panels you can drag bigger or smaller (owner, 2026-11-22): resize.js finds
+  // them on every page and puts the grab strips on, so no page has to ask for it.
+  function loadResize() {
+    if (window.BeeZillaResize) return;
+    if (document.querySelector('script[src="/buzzy/resize.js"]')) return;
+    var s = document.createElement("script");
+    s.src = "/buzzy/resize.js";
+    s.defer = true;
+    document.head.appendChild(s);
+  }
+
   /**
    * The brand for row one — ALWAYS the canonical one.
    *
@@ -1235,6 +1262,12 @@
     var a = document.createElement("a");
     a.className = "bz-brand";
     a.href = "/buzzy/talk";
+    // The bee is home (the page shell below handles the click): the top page, with the
+    // board folded away, from any page, even when Talk is the one showing. Middle-click
+    // and the like still open Talk in a new tab, as for any link.
+    a.setAttribute("data-bz-home", "");
+    a.setAttribute("aria-label", "BeeZilla home");
+    a.title = "Home: back to the top, with the board folded away";
     // The real brand face, content by default (owner, 2026-11-18: "he has an apathetic
     // face as his default face… it should be in the repo, the proper faces"). On Talk,
     // voice-stage.js switches it to the face for what BeeZilla is doing.
@@ -1255,6 +1288,9 @@
     // The website's header (#bzHead: Talk to BeeZilla, the search, the row of places)
     // is on every page that has it, so the old link row up here hides there too.
     document.documentElement.classList.toggle("bz-has-head", !!document.getElementById("bzHead"));
+    // The places row is the one menu on a phone (CR-13): where it exists, the top
+    // link row must not repeat it, and no "More" may hang off either of them.
+    document.documentElement.classList.toggle("bz-has-places", !!document.getElementById("bzPlaces"));
     if (document.getElementById("bzChrome")) {
       // Re-derive the body-padding bleed for the page that is active NOW.
       applyBleed();
@@ -1271,7 +1307,22 @@
     Array.prototype.forEach.call(document.querySelectorAll("#bzFeedback"), function (n) {
       n.remove();
     });
-    var header = nav.closest("header") || document.querySelector("header") || document.body;
+    // Which element is the site header? Only a header that already carries the site's
+    // nav or brand. A page with its own <header> that is really a page toolbar
+    // (Orchestrate's editor bar) used to be adopted, rebuilt into the chrome and
+    // dragged out of its app: the BeeZilla/company/Feedback bar then painted
+    // mid-page, under the places row (CR-13). Otherwise the chrome gets its own
+    // header at the top of <body> and the page keeps its toolbar untouched.
+    var header = nav.closest("header");
+    if (!header) {
+      var candidate = document.querySelector("header");
+      if (candidate && (candidate.contains(nav) || candidate.querySelector(".brand-link, .brand, .bz-brand, .header-inner"))) header = candidate;
+    }
+    if (!header) {
+      header = document.createElement("header");
+      if (document.body.firstChild) document.body.insertBefore(header, document.body.firstChild);
+      else document.body.appendChild(header);
+    }
     chromeBleedHeader = header;
 
     var brand = findBrand(header);
@@ -1344,6 +1395,7 @@
     }
 
     loadCompanies();
+    loadResize();
     companyControl(chrome);
     accountControl(chrome);
     menuPlanLine();
@@ -1621,14 +1673,16 @@
       e.stopPropagation();
       close(false);
       if (window.bzOpenKeyDialog) { window.bzOpenKeyDialog(); return; }
+      // nav.js is what defines the shell (the BeeZillaShell export at the bottom of
+      // this file), so the old `else location.href = "/buzzy/talk"` could only fire
+      // if this very file had not run — and then there would be no panel to click.
+      // A hard load was never the reachable branch; it was just a way to lose the
+      // mic in the one place that is all about keeping it. No fallback.
       var shell = window.BeeZillaShell;
-      if (shell && shell.go) {
-        Promise.resolve(shell.go("/buzzy/talk")).then(function () {
-          if (window.bzOpenKeyDialog) window.bzOpenKeyDialog();
-        });
-      } else {
-        location.href = "/buzzy/talk";
-      }
+      if (!shell || !shell.go) return;
+      Promise.resolve(shell.go("/buzzy/talk")).then(function () {
+        if (window.bzOpenKeyDialog) window.bzOpenKeyDialog();
+      });
     });
     // Its links go somewhere (the shell soft-navigates /buzzy/ links), so the panel
     // has done its job and closes instead of hanging over the next page.
@@ -1638,9 +1692,8 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && isOpen()) close(true);
     });
-    document.addEventListener("click", function (e) {
-      if (isOpen() && !dock.contains(e.target)) close(false);
-    });
+    // The panel closes with its X, Esc, or the gear: a click on the page around it does
+    // nothing (owner, 2026-11-21: "no click-outside-to-close").
     window.addEventListener("popstate", function () { close(false); });
 
     // ── What the panel shows ───────────────────────────────────────────
@@ -2487,6 +2540,21 @@
       });
   }
 
+  // The bee (the logo, top left) is home: the top page, which is Talk, scrolled to the
+  // top with the Idea Board folded away and Inspiration under the row. Owner, 2026-11-21:
+  // "when you click the bee itself, like the Beezilla logo, it should bring you back to
+  // the top page with the thing folded away." Going to Talk is not enough: from Talk
+  // itself the link went nowhere, and from another page it brought Talk back exactly as
+  // it was left (the board still open). Talk lends the two hooks, so the sign-in pages
+  // (no header, no board) just follow the link.
+  function goHome() {
+    return Promise.resolve(go(TALK)).then(function () {
+      try { if (window.bzFoldBoard) window.bzFoldBoard(); } catch (e) { /* best effort */ }
+      try { if (window.bzBrowseHome) window.bzBrowseHome(); } catch (e) { /* best effort */ }
+      try { window.scrollTo(0, 0); } catch (e) { /* best effort */ }
+    });
+  }
+
   document.addEventListener(
     "click",
     function (e) {
@@ -2497,6 +2565,11 @@
       // soft-navigate on it before the chrome's own click handler could toggle the
       // menu, so clicking your name took you to /buzzy/profile and no menu ever showed.
       if (a.id === "accountLink") return;
+      if (a.hasAttribute("data-bz-home") && document.getElementById("bzHead")) {
+        e.preventDefault();
+        goHome();
+        return;
+      }
       if (a.target && a.target !== "_self") return;
       if (a.hasAttribute("download")) return;
       var href = a.getAttribute("href");

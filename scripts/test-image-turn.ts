@@ -13,7 +13,7 @@
  * Run: npx tsx scripts/test-image-turn.ts
  */
 import { readFileSync } from "node:fs";
-import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse, IMAGE_TURN_SENTENCE } from "../src/lib/buzzy/artReply";
+import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse, IMAGE_TURN_SENTENCE, claimsImage, withoutImageClaims } from "../src/lib/buzzy/artReply";
 import { pickImageUrl, describePayload, normalizeImageUrl, fetchImageUrl } from "../src/lib/buzzy/art";
 import { isImageRequest } from "../src/lib/buzzy/intent";
 
@@ -203,6 +203,22 @@ expect(
   /for \(const deliverable of \[renderedAudio, renderedImage\]\.filter\(Boolean\)/.test(server),
   true,
 );
+
+console.log("a claimed picture with nothing behind it:");
+expect("'Here's your logo' with no picture is a claim", claimsImage("Here's your logo, ready to use."), true);
+expect("'I couldn't make the banner' is not a claim", claimsImage("I couldn't make the banner this time."), false);
+expect("a plain sentence is not a claim", claimsImage("Your bakery opens at 7."), false);
+{
+  // A document turn: the content mentions a banner and a logo; the work's summary
+  // and the list of what BeeZilla assumed must survive the check.
+  const doc =
+    "Here is your site plan as a document.\nI've made a banner with your logo at the top.\n\nWhat I assumed for you:\n- Four pages\n- Warm colours";
+  const kept = withoutImageClaims(doc);
+  expect("only the claiming sentence goes", !/banner with your logo/.test(kept), true);
+  expect("the summary stays", kept.startsWith("Here is your site plan as a document."), true);
+  expect("the assumptions list keeps its lines", /What I assumed for you:\n- Four pages\n- Warm colours/.test(kept), true);
+  expect("the server keeps the rest of a document turn", /renderedDocText && !artRefusal \? withoutImageClaims\(finalReply\)/.test(server), true);
+}
 
 console.log("");
 if (failures) {

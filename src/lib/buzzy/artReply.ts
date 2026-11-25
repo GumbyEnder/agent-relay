@@ -79,3 +79,35 @@ export function deliveryClaimIsFalse(turn: {
 }): boolean {
   return !turn.document && !turn.audio && !turn.image;
 }
+
+/**
+ * "I have created an image and attached it below" with no image in the envelope.
+ * Image nouns are stricter than audio ones because "art" and "picture" appear in
+ * ordinary sentences; a sentence that says "can't" or "failed" is not a claim.
+ */
+const IMAGE_NOUN = /\b(image|picture|illustration|drawing|poster|logo|artwork|thumbnail|banner|mockup)\b/i;
+const IMAGE_CLAIM = /\b(created|made|generated|drew|drawn|attached|rendered|here is|here's|ready|saved)\b/i;
+const SENTENCE = /[^.!?\n]*[.!?]?/g;
+
+/** True when some sentence of the reply claims a picture was made. */
+export function claimsImage(text: string): boolean {
+  return (String(text || "").match(SENTENCE) ?? []).some(
+    (sentence) => IMAGE_NOUN.test(sentence) && IMAGE_CLAIM.test(sentence) && !/\b(can'?t|cannot|unable|failed|didn'?t)\b/i.test(sentence),
+  );
+}
+
+/**
+ * The reply without its picture claims, every other line kept as it was.
+ *
+ * For a turn that delivered a document: "I've created your site plan with a banner
+ * and your logo up top" is the document's content, not a picture claim, and replacing
+ * the whole reply threw away the work's summary and the list of what BeeZilla assumed
+ * (seen 2026-11-23 on a one-mode "just go" turn). Only the claiming sentences go.
+ */
+export function withoutImageClaims(text: string): string {
+  return String(text || "")
+    .replace(SENTENCE, (sentence) => (claimsImage(sentence) ? "" : sentence))
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
