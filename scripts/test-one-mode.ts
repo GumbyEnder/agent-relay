@@ -240,6 +240,52 @@ for (const message of [
 for (const message of ["pay attention to the layout", "order a $5 coffee", "the pay page needs a tidier header"]) {
   check(tier(message) !== "critical", `no money signal here: "${message}" (got ${tier(message)})`);
 }
+// The recipient is a door on its own, not only the amount. "owe the landlord" read
+// critical through MONEY_RECIPIENT but was neither irreversible nor a door, so a
+// remembered "just go" walked it through as a payment.
+for (const message of ["owe the landlord", "owe the landlord $500", "we owe the landlord $500"]) {
+  check(tier(message) === "critical", `owing a bill is critical: "${message}" (got ${tier(message)})`);
+}
+{
+  const a = assessRequest("owe the landlord");
+  check(a.irreversible === true && a.performsDoor === true, "owe with a payment recipient is irreversible and performs the door");
+  check(
+    askFirst(askOrGo(a), "go", a) === "offer",
+    `critical + irreversible is offered even after a remembered "just go" (got ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+// ... and only then: owing a favour is not owing money.
+for (const message of ["owe you one", "owe my team an apology", "owe it to myself to rest"]) {
+  const a = assessRequest(message);
+  check(
+    a.irreversible !== true && a.performsDoor !== true,
+    `not a payment: "${message}" (irreversible=${a.irreversible}, door=${a.performsDoor})`,
+  );
+}
+// An adverb of degree rides between the verb and the recipient. The bare `more|less`
+// guard that kept "pay more attention" out also swallowed "pay more to our suppliers",
+// a real payment that then read as play and went on a remembered "just go".
+for (const message of ["pay more to our suppliers", "pay less to our suppliers", "pay more to our landlord"]) {
+  const a = assessRequest(message);
+  const asked = askFirst(askOrGo(a), "go", a);
+  check(
+    a.stakes === "critical" && a.performsDoor === true && asked === "offer",
+    `a degree adverb still pays: "${message}" (${a.stakes}, door=${a.performsDoor}, ${asked})`,
+  );
+}
+for (const message of [
+  "pay more attention to our vendors",
+  "pay less attention to the bills",
+  "pay more heed to the warnings",
+  "pay closer attention to the invoice",
+  "pay more attention to the team's feedback",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.irreversible === false && a.performsDoor === false && a.stakes !== "critical",
+    `paying attention is not paying: "${message}" (${a.stakes}, irreversible=${a.irreversible}, door=${a.performsDoor})`,
+  );
+}
 // The legal arm knew "terms of service" but not the acronym, so "publish ToS" read as
 // product stakes and went ahead (1.2 ≤ 3). An acronym the owner types is still a door.
 for (const message of ["publish ToS", "update our T&Cs", "publish the terms of service", "publish the terms and conditions"]) {

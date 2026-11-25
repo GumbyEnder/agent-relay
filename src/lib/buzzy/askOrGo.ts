@@ -156,9 +156,31 @@ const MONEY_AMOUNT =
  * "pay closer attention to our vendors" are instructions, not payments, and the
  * 25-character window that first shipped here turned both into critical doors a
  * remembered "just go" could not suppress.
+ *
+ * An adverb of degree rides between the verb and the recipient — "pay more to our
+ * suppliers", "owe less to the bank" — but only when it is followed by the payment
+ * path. "pay more attention to our vendors" stays an instruction, because the next
+ * word is the attention noun, never `to`/`for` or a recipient.
  */
-const MONEY_RECIPIENT =
-  /\b(?:pay|paid|paying|owe|owing)\b\s+(?:(?:off|back|up|for)\s+)?(?:(?:the|a|an|my|our|your|their|his|her|its|all|this|that|these|those)\s+)?(?:staff|employees?|team|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?|fines?|fees?|rent|deposits?|tuition|salar(?:y|ies)|wages?)\b/i;
+const DETERMINER = "(?:(?:the|a|an|my|our|your|their|his|her|its|all|this|that|these|those)\\s+)?";
+/** Who a payment can go to. */
+const RECIPIENT_NOUNS =
+  "staff|employees?|team|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?|fines?|fees?|rent|deposits?|tuition|salar(?:y|ies)|wages?";
+/**
+ * The same list for `owe`, minus "team": a team is paid through payroll ("pay the
+ * team"), but "owe my team an apology" is gratitude, and reading it as a payment
+ * made it critical and irreversible for nothing.
+ */
+const OWE_NOUNS =
+  "staff|employees?|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?|fines?|fees?|rent|deposits?|tuition|salar(?:y|ies)|wages?";
+
+const MONEY_RECIPIENT = new RegExp(
+  "\\b(?:(?:pay|paid|paying)\\b\\s+(?:(?:off|back|up)\\s+)?(?:(?:more|less)\\s+)?(?:(?:to|for)\\s+)?" +
+    DETERMINER + "(?:" + RECIPIENT_NOUNS + ")" +
+    "|(?:owe|owed|owing)\\b\\s+(?:(?:off|back|up)\\s+)?(?:(?:more|less)\\s+)?(?:(?:to|for)\\s+)?" +
+    DETERMINER + "(?:" + OWE_NOUNS + "))\\b",
+  "i",
+);
 
 /** A mistake would be devastating: money, health, legal, security, people's data, production. */
 const CRITICAL: Array<[string, RegExp]> = [
@@ -193,7 +215,7 @@ const PLAY = /\b(for fun|just for fun|my kids?|my children|my son|my daughter|my
  *  made every one of them irreversible. */
 const IRREVERSIBLE = new RegExp(
   "\\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that|the|a|an)|publish|tweet (it|this)|upload|share(?!\\s+my\\s+screen)|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\\b|" +
-    MONEY_AMOUNT.source,
+    MONEY_AMOUNT.source + "|" + MONEY_RECIPIENT.source,
   "i",
 );
 
@@ -236,8 +258,49 @@ const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|
  * there. Buying and ordering are deliberately absent: they cost money but nothing
  * leaves the account, and pulling them in would add a tap to ordinary requests.
  */
-const DOOR_VERB =
-  /^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\s]+)*(send(?!\s+(?:me|myself)\b)|email(?!\s+(?:me|myself)\b)|e-?mail(?!\s+(?:me|myself)\b)|mail(?!\s+(?:me|myself)\b)|announce|publish|post|tweet|upload|share(?!\s+my\s+screen)|mass e-?mail|email blast|pay(?!\s+(?:attention|heed|mind|regard|respects?|tribute|homage|closer|close|more|less|dearly|lip\s+service))|wire|transfer|delete|remove|wipe|drop|deploy|launch|cancel|refund|terminate|fire|evict|submit|migrate|overwrite)\b/i;
+const DOOR_VERB = new RegExp(
+  "^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\\s]+)*(" +
+    [
+      "send(?!\\s+(?:me|myself)\\b)",
+      "email(?!\\s+(?:me|myself)\\b)",
+      "e-?mail(?!\\s+(?:me|myself)\\b)",
+      "mail(?!\\s+(?:me|myself)\\b)",
+      "announce",
+      "publish",
+      "post",
+      "tweet",
+      "upload",
+      "share(?!\\s+my\\s+screen)",
+      "mass e-?mail",
+      "email blast",
+      // `more`/`less` are only attention words when the attention noun follows. A bare
+      // guard on them also ate "pay more to our suppliers", a real payment that then
+      // read as play and went on a remembered "just go".
+      "pay(?!\\s+(?:attention|heed|mind|regard|respects?|tribute|homage|closer|close|dearly|lip\\s+service)\\b)(?!\\s+(?:more|less)\\s+(?:attention|heed|mind|regard|respect|care|thought|time|closer)\\b)",
+      // `owe` is a door only when a payment recipient is the direct object: "owe the
+      // landlord" leaves a bill unpaid; "owe you one" and "owe my team an apology"
+      // do not.
+      "owe(?:d|ing)?(?=\\s+(?:(?:off|back|up)\\s+)?(?:(?:to|for)\\s+)?" + DETERMINER + "(?:" + OWE_NOUNS + ")\\b)",
+      "wire",
+      "transfer",
+      "delete",
+      "remove",
+      "wipe",
+      "drop",
+      "deploy",
+      "launch",
+      "cancel",
+      "refund",
+      "terminate",
+      "fire",
+      "evict",
+      "submit",
+      "migrate",
+      "overwrite",
+    ].join("|") +
+    ")\\b",
+  "i",
+);
 
 /** Words that leave the result open. */
 const VAGUE = /\b(something|anything|some kind of|some sort of|stuff|whatever|ideas?|not sure|maybe|i don'?t know|dunno|cool|nice|fun|better|awesome|amazing|help me( with)?|figure out|kind of|sort of)\b/gi;
