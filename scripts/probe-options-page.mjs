@@ -4,15 +4,27 @@
 //   A. The page lists every option in public/buzzy/options-data.js, grouped, with its heading.
 //   B. Search finds the right options by the words people use:
 //        "stretch" → Sketch's Resize / skew…      "resolution" → Canvas size and Resize / skew…
-//        "transparent" → Export PNG and Background, which say plainly they are not see-through
+//        "transparent" → Export PNG and Background (which says a JPG export is always on white)
 //        "undo", "colour" and "color", "voice", "privacy", "key", "delete"
-//   C. A search with no match says "Nothing matches — ask BeeZilla in Talk", linking to Talk.
+//      A chosen group is searched before "all words" or "closest" is decided: Sketch + "stretch
+//      conversation" shows Sketch's closest options although Talk has a full match; a group with
+//      nothing says which others have it; both hand-offs between Orchestrate and the Idea Board
+//      are found.
+//   C. A search with no match says "Nothing matches — ask BeeZilla in Talk", linking to Talk, and
+//      says "Nothing matches" in the live region (#aoCount) too, so a screen reader hears it.
 //   D. Esc clears the search; clicking outside it changes nothing (nothing here closes on an
-//      outside click).
+//      outside click). With Settings (or Feedback) open, the first Esc closes only that panel and the
+//      search keeps its words; the next Esc clears it (on the page opened directly and on the one
+//      the settings gear opened in place).
 //   E. Every "Open" link goes to a page the server serves.
 //   F. An "Open" link is a soft move (nothing reloads); the settings gear has an All options link.
+//      Leaving the page takes its window resize listener off again (no detached page kept alive).
 //   G. At 390px wide there is no sideways scroll and nothing sticks out past the right edge.
 //   H. No script errors; a desktop and a phone screenshot are saved.
+//   I. Open, Advocate and Lockdown are drawn in the privacy button's colours (read from privacy.css).
+//   J. A card drags onto the Idea Board: it is draggable with a grab cursor, its drag carries a
+//      note (name, what it does, where it is), and dropped on the header's strip it lands on the
+//      board as that note.
 // usage: node scripts/probe-options-page.mjs [origin]
 //   BZ_PROBE_CDP=<DevTools URL>  drive that browser (`ai-screen.sh browser` prints one); unset, a
 //                                headless browser with no window is started
@@ -69,6 +81,13 @@ vm.createContext(sandbox);
 vm.runInContext(readFileSync(join("public", "buzzy", "options-data.js"), "utf8"), sandbox);
 const OPTIONS = sandbox.window.BZ_OPTIONS || [];
 const GROUPS = [...new Set(OPTIONS.map((o) => o.group))];
+// The privacy button's own colours (privacy.css): Open green, Advocate yellow, Lockdown red.
+const privacyCss = readFileSync(join("public", "buzzy", "privacy.css"), "utf8");
+const rgbOf = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; };
+const MODE_RGB = Object.fromEntries(["open", "advocate", "lockdown"].map((m) => {
+  const hex = new RegExp(`\\.privacy-btn\\[data-mode="${m}"\\]\\s*\\{\\s*color:\\s*(#[0-9a-f]{6})`, "i").exec(privacyCss)?.[1];
+  return [m, hex ? rgbOf(hex) : "?"];
+}));
 
 let browser;
 let exitCode = 2;
@@ -86,6 +105,15 @@ try {
   }]);
   const page = await context.newPage();
   await page.route(/openpanel\.dev/, (r) => r.abort()); // a probe is not a visit
+  // Which window "resize" listeners the page (its fitHint) adds and takes off again.
+  await page.addInitScript(() => {
+    const spy = { added: [], removed: [] };
+    window.__optResize = spy;
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    window.addEventListener = (type, fn, ...rest) => { if (type === "resize" && fn && fn.name === "fitHint") spy.added.push(fn); return add(type, fn, ...rest); };
+    window.removeEventListener = (type, fn, ...rest) => { if (type === "resize" && fn && fn.name === "fitHint") spy.removed.push(fn); return remove(type, fn, ...rest); };
+  });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
   mkdirSync(SHOTS, { recursive: true });
@@ -110,6 +138,32 @@ try {
     window.scrollTo(0, Math.max(0, h.getBoundingClientRect().top + window.scrollY - (window.innerWidth < 700 ? 135 : 90)));
   });
   const has = (list, name, group) => list.some((x) => x.name === name && (!group || x.group === group));
+  // The card whose NAME is exactly this (another card's text may mention it: Canvas size says "use Resize / skew…").
+  const cardOf = (name) => {
+    const exact = new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "$");
+    return page.locator("#aoList .ao-item").filter({ has: page.locator(".ao-name", { hasText: exact }) }).first();
+  };
+  // A panel (Settings, Feedback) stays open while you type in the search: the first Esc closes only
+  // that panel and the search keeps its words; the next Esc clears the search.
+  const escWithPanel = async (where, panel) => {
+    await search("stretch");
+    await page.click(panel.opener);
+    await page.waitForSelector(panel.open);
+    await page.click("#aoQ");
+    await settle(150);
+    const openBefore = !!(await page.$(panel.open));
+    await page.keyboard.press("Escape");
+    await settle(300);
+    const openAfter = !!(await page.$(panel.open));
+    const kept = await page.inputValue("#aoQ");
+    check(`${where}: Esc with ${panel.name} open closes only ${panel.name}; the search keeps its words`, openBefore && !openAfter && kept === "stretch" && (await names()).length > 0, `${panel.name} open before=${openBefore} after=${openAfter}; search="${kept}"`);
+    await page.click("#aoQ");
+    await page.keyboard.press("Escape");
+    await settle(250);
+    check(`${where}: …and the next Esc clears the search`, (await page.inputValue("#aoQ")) === "" && (await names()).length === OPTIONS.length, `search="${await page.inputValue("#aoQ")}"`);
+  };
+  const SETTINGS = { name: "Settings", opener: "#bzGear", open: "#bzSettings:not([hidden])" };
+  const FEEDBACK = { name: "Feedback", opener: 'button[aria-controls="bzFeedback"]', open: "#bzFeedback.open:not(.min)" };
 
   // ── A. the whole list ────────────────────────────────────────────────────
   await page.goto(`${ORIGIN}/buzzy/options`, { waitUntil: "load" });
@@ -137,7 +191,8 @@ try {
   r = await names();
   const png = r.find((x) => x.name === "Export PNG");
   check("“transparent” finds Export PNG and Background", !!png && has(r, "Background", "Sketch"), r.map((x) => x.name).join(" | "));
-  check("…and Export PNG says it is not see-through", !!png && /not see-through/.test(png.what), png ? png.what : "no Export PNG");
+  const bg = r.find((x) => x.name === "Background" && x.group === "Sketch");
+  check("…and Background says a JPG export is always on white", !!bg && /JPG export always has a white background/.test(bg.what), bg ? bg.what : "no Background");
   await search("see-through");
   r = await names();
   check("“see-through” finds them too", has(r, "Export PNG") && has(r, "Background"), r.map((x) => x.name).join(" | "));
@@ -160,7 +215,7 @@ try {
   check("“key” finds Your AI key", has(r, "Your AI key", "Your AI key"), r.map((x) => x.name).join(" | "));
   await search("delete");
   r = await names();
-  check("“delete” finds Sketch's Delete mark and the board's Remove", has(r, "Delete mark", "Sketch") && has(r, "Remove", "Idea Board"), r.map((x) => x.name).join(" | "));
+  check("“delete” finds Sketch's Delete and the board's Remove", has(r, "Delete", "Sketch") && has(r, "Remove", "Idea Board"), r.map((x) => `${x.group}: ${x.name}`).join(" | "));
   await search("how do I change the resolution");
   r = await names();
   check("a whole question works (small words are ignored)", has(r, "Canvas size", "Sketch") && has(r, "Resize / skew…", "Sketch"), r.map((x) => x.name).join(" | "));
@@ -168,7 +223,29 @@ try {
   await search("undo");
   r = await names();
   check("the group menu narrows a search to one group", r.length > 0 && r.every((x) => x.group === "Sketch"), r.map((x) => `${x.group}: ${x.name}`).join(" | "));
+  // The group is searched BEFORE "all the words" or "the closest" is decided. Over all groups,
+  // "stretch conversation" has one full match (Talk's Make a box bigger or smaller, the only option
+  // with both words); with Sketch chosen that match must not hide Sketch's own closest options.
+  // (The first example, "stretch the board", no longer shows it: Sketch's Resize / skew… now says
+  // "click the board", so Sketch has a full match of its own.)
   await page.selectOption("#aoGroup", "");
+  await search("stretch conversation");
+  r = await names();
+  check("“stretch conversation” has a full match over all groups (Talk's Make a box bigger or smaller)", r.length === 1 && has(r, "Make a box bigger or smaller", "Talk"), r.map((x) => `${x.group}: ${x.name}`).join(" | "));
+  await page.selectOption("#aoGroup", "Sketch");
+  await search("stretch conversation");
+  r = await names();
+  const sketchLine = await page.textContent("#aoCount");
+  check("…with Sketch chosen, Sketch's closest options show instead of nothing", r.length > 0 && r.every((x) => x.group === "Sketch") && has(r, "Resize / skew…", "Sketch") && has(r, "Canvas size", "Sketch"), r.map((x) => `${x.group}: ${x.name}`).join(" | ") || "nothing shown");
+  check("…and the line says no option in Sketch has all of those words", /^No option in Sketch has all of those words\. The closest \d+:$/.test(sketchLine), sketchLine);
+  await page.selectOption("#aoGroup", "Honey Drops");
+  await search("stretch");
+  const otherLine = await page.textContent("#aoCount");
+  check("a group with nothing says other groups have it", (await names()).length === 0 && /^Nothing in Honey Drops matches, but \d+ other options? (do|does): choose All groups\.$/.test(otherLine), otherLine);
+  await page.selectOption("#aoGroup", "");
+  await search("orchestrate");
+  r = await names();
+  check("both hand-offs are listed: Put on the Idea Board (Orchestrate) and Open in Orchestrate (Idea Board)", has(r, "Put on the Idea Board", "Orchestrate") && has(r, "Open in Orchestrate", "Idea Board"), r.map((x) => `${x.group}: ${x.name}`).join(" | "));
 
   // ── C. nothing matches ───────────────────────────────────────────────────
   await search("zzzqxv");
@@ -178,6 +255,8 @@ try {
   check("no match says Nothing matches — ask BeeZilla in Talk", emptyShown && emptyText === "Nothing matches — ask BeeZilla in Talk", `shown=${emptyShown} text="${emptyText}"`);
   check("…and links to Talk", emptyHref === "/buzzy/talk", `href=${emptyHref}`);
   check("…with no options listed", (await names()).length === 0, "options were still listed");
+  const liveNo = await page.$eval("#aoCount", (e) => ({ text: e.textContent, role: e.getAttribute("role"), live: e.getAttribute("aria-live") }));
+  check("…and the live region (#aoCount) says Nothing matches, so a screen reader hears it", /^Nothing matches “zzzqxv”\.$/.test(liveNo.text) && liveNo.role === "status" && liveNo.live === "polite", JSON.stringify(liveNo));
 
   // ── D. Esc clears; an outside click changes nothing ──────────────────────
   await search("stretch");
@@ -193,6 +272,32 @@ try {
   await page.click("#aoClear");
   await settle(200);
   check("the ✕ clears it too", (await page.inputValue("#aoQ")) === "", "the box still had text");
+  await escWithPanel("opened directly", SETTINGS);
+  await escWithPanel("opened directly", FEEDBACK);
+
+  // ── I. the privacy modes in the privacy button's colours ─────────────────
+  await search("privacy");
+  const modeRows = await page.$$eval("#aoList .ao-item", (els) => els.map((e) => ({
+    name: e.querySelector(".ao-name").textContent,
+    group: e.closest(".ao-group").querySelector(".ao-gh").firstChild.textContent,
+    colour: getComputedStyle(e.querySelector(".ao-name")).color,
+  })));
+  for (const m of ["Open", "Advocate", "Lockdown"]) {
+    const got = modeRows.find((x) => x.name === m && x.group === "Privacy modes");
+    check(`${m} is drawn in its mode colour (the privacy button's ${MODE_RGB[m.toLowerCase()]})`, !!got && got.colour === MODE_RGB[m.toLowerCase()], got ? got.colour : "not listed");
+  }
+  await search("open");
+  const libOpen = (await page.$$eval("#aoList .ao-item", (els) => els.map((e) => ({
+    name: e.querySelector(".ao-name").textContent,
+    group: e.closest(".ao-group").querySelector(".ao-gh").firstChild.textContent,
+    colour: getComputedStyle(e.querySelector(".ao-name")).color,
+  })))).find((x) => x.name === "Open" && x.group === "Library");
+  check("…and only those three: the Library's Open is not green", !!libOpen && libOpen.colour !== MODE_RGB.open, libOpen ? libOpen.colour : "no Library Open");
+  await search("privacy");
+  await page.locator("#aoList .ao-gh", { hasText: "Privacy modes" }).first().scrollIntoViewIfNeeded();
+  await settle(200);
+  await page.screenshot({ path: join(SHOTS, "all-options-privacy-modes.png"), fullPage: false });
+  await search("");
 
   // ── E. every Open link goes to a served page ─────────────────────────────
   const hrefs = [...new Set(OPTIONS.map((o) => o.href))];
@@ -209,11 +314,14 @@ try {
   // ── F. Open is a soft move; the gear has the link ────────────────────────
   await page.evaluate(() => { window.__optProbe = "kept"; });
   await search("stretch");
-  const first = page.locator("#aoList .ao-item", { hasText: "Resize / skew…" }).first().locator(".ao-open");
+  const first = cardOf("Resize / skew…").locator(".ao-open");
   check("an Open link says where it goes", /Open Sketch/.test((await first.textContent()) || ""), (await first.textContent()) || "no link");
   await first.click();
   await page.waitForFunction(() => window.BeeZillaShell.currentKey === "/buzzy/sketch" && !window.BeeZillaShell.busy, null, { timeout: 20000 });
   check("…and it opens that page without reloading", (await page.evaluate(() => window.__optProbe)) === "kept" && (await page.evaluate(() => location.pathname)) === "/buzzy/sketch", "the document reloaded or stayed put");
+  const resizeLeft = () => page.evaluate(() => ({ added: window.__optResize.added.length, left: window.__optResize.added.filter((fn) => window.__optResize.removed.includes(fn)).length }));
+  let rz = await resizeLeft();
+  check("leaving the page takes its window resize listener off again", rz.added === 1 && rz.left === 1, `${rz.added} added, ${rz.left} taken off`);
   await page.evaluate(() => window.BeeZillaShell.go("/buzzy/talk"));
   await page.waitForFunction(() => window.BeeZillaShell.currentKey === "/buzzy/talk" && !window.BeeZillaShell.busy);
   await settle(600);
@@ -228,6 +336,38 @@ try {
   check("…and it opens All options without reloading", (await page.evaluate(() => window.__optProbe)) === "kept" && (await page.locator("#aoList .ao-item").count()) === OPTIONS.length, "the document reloaded or the list is missing");
   const gearShut = await page.$eval("#bzSettings", (p) => p.hidden);
   check("…and the settings panel put itself away", gearShut, "the panel is still open");
+  await escWithPanel("opened by the gear", SETTINGS);
+
+  // ── J. an option drags onto the Idea Board ───────────────────────────────
+  await search("stretch");
+  await page.waitForSelector(".bz-dropstrip", { state: "attached", timeout: 20000 });
+  const want = OPTIONS.find((o) => o.group === "Sketch" && o.name === "Resize / skew…");
+  const grab = await cardOf("Resize / skew…").evaluate((li) => {
+    const dt = new DataTransfer();
+    li.querySelector(".ao-name").dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    window.__optDt = dt;
+    let card = null;
+    try { card = JSON.parse(dt.getData("application/x-beezilla-card")); } catch { card = null; }
+    const strip = document.querySelector(".bz-dropstrip");
+    return { draggable: li.draggable, cursor: getComputedStyle(li).cursor, card, strip: !!strip && !strip.hidden };
+  });
+  check("an option card is draggable and shows a grab cursor", grab.draggable === true && grab.cursor === "grab", `draggable=${grab.draggable} cursor=${grab.cursor}`);
+  check("its drag carries a note: the option's name, what it does and where it is", !!grab.card && grab.card.kind === "note" && grab.card.title === want.name && grab.card.body.includes(want.what) && grab.card.body.includes(want.where), JSON.stringify(grab.card));
+  check("…and the header's strip comes up to say where to drop it", grab.strip, "the drop strip did not show");
+  const landed = await page.evaluate(async () => {
+    const strip = document.querySelector(".bz-dropstrip");
+    strip.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: window.__optDt }));
+    await new Promise((r) => setTimeout(r, 1200));
+    const status = (strip.querySelector(".bz-ds-text") || {}).textContent || "";
+    const notes = [...document.querySelectorAll(".wb-card.wb-k-note")].map((n) => (n.innerText || n.textContent || "").replace(/\s+/g, " ").trim());
+    return { status, notes };
+  });
+  check("dropped on the strip, it lands on the Idea Board as that note", landed.notes.some((t) => t.includes(want.name) && t.includes(want.where)), JSON.stringify(landed));
+  await page.screenshot({ path: join(SHOTS, "all-options-dropped-on-board.png"), fullPage: false });
+  await page.evaluate(() => window.BeeZillaShell.go("/buzzy/sketch"));
+  await page.waitForFunction(() => window.BeeZillaShell.currentKey === "/buzzy/sketch" && !window.BeeZillaShell.busy, null, { timeout: 20000 });
+  rz = await resizeLeft();
+  check("…and the page opened by the gear takes its resize listener off when you leave it too", rz.added === 2 && rz.left === 2, `${rz.added} added, ${rz.left} taken off`);
 
   // ── G. the phone ─────────────────────────────────────────────────────────
   await page.setViewportSize({ width: 390, height: 844 });

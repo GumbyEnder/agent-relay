@@ -13,6 +13,11 @@
       --bz-yellow-dim: #B8860B;
       --bz-silver: #C9CDD2;
       --bz-charcoal: #111111;
+      /* The three privacy modes, in the colours the privacy button gives them (privacy.css):
+         Open green, Advocate yellow, Lockdown red. scripts/test-options-data.mjs keeps them the same. */
+      --bz-mode-open: #5FD38D;
+      --bz-mode-advocate: #FFC107;
+      --bz-mode-lockdown: #FF8A80;
       --bz-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
     }
     * { box-sizing: border-box; }
@@ -163,9 +168,14 @@
       padding: 0.85rem 1rem 0.9rem;
       min-width: 0;
       display: flex; flex-direction: column; gap: 0.4rem;
+      cursor: grab;                          /* every card drags onto the Idea Board */
     }
+    .ao-item:active { cursor: grabbing; }
     .ao-top { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
     .ao-name { margin: 0; font-size: 1rem; font-weight: 700; color: var(--bz-yellow); min-width: 0; overflow-wrap: anywhere; }
+    .ao-item[data-mode="open"] .ao-name { color: var(--bz-mode-open); }
+    .ao-item[data-mode="advocate"] .ao-name { color: var(--bz-mode-advocate); }
+    .ao-item[data-mode="lockdown"] .ao-name { color: var(--bz-mode-lockdown); }
     .ao-open { flex: 0 0 auto; font-size: 0.82rem; font-weight: 600; color: var(--bz-silver); text-decoration: none; white-space: nowrap; }
     .ao-open:hover { color: var(--bz-yellow); text-decoration: underline; }
     .ao-what { margin: 0; font-size: 0.9rem; color: #D2D2D2; overflow-wrap: anywhere; }
@@ -248,7 +258,7 @@
   </script>
   <main>
     <h1>All options</h1>
-    <p class="ao-lede">Every option, setting and tool BeeZilla has, in one place and grouped by where you use it. Can&rsquo;t find something where you expected it? Type what you&rsquo;re looking for.</p>
+    <p class="ao-lede">Every option, setting and tool BeeZilla has, in one place and grouped by where you use it. Can&rsquo;t find something where you expected it? Type what you&rsquo;re looking for. Drag any option onto the Idea Board to keep it there as a note.</p>
     <div class="ao-bar" role="search">
       <label class="ao-sr" for="aoQ">Search all options</label>
       <div class="ao-field">
@@ -288,10 +298,18 @@
       // A phone's search box is too narrow for the long hint.
       var HINT = "Search options: try \u201cstretch\u201d, \u201cundo\u201d, \u201ccolour\u201d or \u201cvoice\u201d";
       function fitHint() {
-        if (!q.isConnected) { window.removeEventListener("resize", fitHint); return; }
         q.placeholder = window.matchMedia && window.matchMedia("(min-width: 641px)").matches ? HINT : "Search all options";
       }
+      // This page is thrown away when you leave it (nav.js takes it out of the document and says
+      // "bz:page" once the next page is in), so what it hung on the window goes with it: a detached
+      // page must not be kept alive by a resize listener.
+      function leave() {
+        if (q.isConnected) return;       // "bz:page" also says the header arrived: this page is still here
+        window.removeEventListener("resize", fitHint);
+        window.removeEventListener("bz:page", leave);
+      }
       window.addEventListener("resize", fitHint);
+      window.addEventListener("bz:page", leave);
 
       function h(tag, cls, text) {
         var n = document.createElement(tag);
@@ -322,14 +340,17 @@
       });
 
       // Every word typed has to be found (as the start of a word). When no option has them all, the
-      // closest few are offered instead, rarer words counting for more.
-      function find(text) {
+      // closest few are offered instead, rarer words counting for more. With a group chosen, only that
+      // group is searched, so "all words" and "closest" are decided inside it: a full match in another
+      // group must not hide the closest ones in this one.
+      function find(text, only) {
+        var pool = only ? items.filter(function (it) { return it.o.group === only; }) : items;
         var said = words(text);
         var terms = said.filter(function (w) { return !STOP[w]; });
         if (!terms.length) terms = said;       // only small words typed: take them as they are
         terms = terms.map(stem);
-        if (!terms.length) return { list: items, loose: false };
-        var hit = items.map(function (it) {
+        if (!terms.length) return { list: pool, loose: false };
+        var hit = pool.map(function (it) {
           return terms.map(function (t) { return it.toks.some(function (k) { return k.indexOf(t) === 0; }); });
         });
         var rare = terms.map(function (_t, j) {
@@ -337,7 +358,7 @@
           return n ? 1 / n : 0;
         });
         var scored = [];
-        items.forEach(function (it, i) {
+        pool.forEach(function (it, i) {
           var score = 0, all = true;
           hit[i].forEach(function (yes, j) { if (yes) score += rare[j]; else all = false; });
           if (score > 0) scored.push({ it: it, score: score, all: all });
@@ -350,6 +371,12 @@
 
       function card(o) {
         var li = h("li", "ao-item");
+        // Everything on the site drags onto the Idea Board. The website's header (voice-stage.js) reads
+        // data-bz-card as the drag starts, the way it does for every other card on the site: the option
+        // lands as a note with its name, what it does and where it is.
+        li.draggable = true;
+        li.setAttribute("data-bz-card", JSON.stringify({ kind: "note", title: o.name, body: o.what + "\n\nWhere: " + o.where }));
+        if (o.mode) li.setAttribute("data-mode", o.mode);   // Open, Advocate, Lockdown: drawn in their colours
         var top = h("div", "ao-top");
         top.appendChild(h("h3", "ao-name", o.name));
         var open = h("a", "ao-open", "Open " + (PAGE[o.href] || "page") + " →");
@@ -368,9 +395,9 @@
       function render() {
         var text = q.value.trim();
         clear.hidden = !text;
-        var res = find(text);
         var only = pick.value;
-        var shown = res.list.filter(function (it) { return !only || it.o.group === only; });
+        var res = find(text, only);
+        var shown = res.list;
 
         list.textContent = "";
         GROUPS.forEach(function (g) {
@@ -387,14 +414,16 @@
         });
 
         empty.hidden = shown.length > 0;
+        // The status line is the page's live region, so every outcome is said here, "nothing" included.
         if (!shown.length) {
-          count.textContent = only && res.list.length
-            ? "Nothing in " + only + " matches, but " + res.list.length + " other " + (res.list.length === 1 ? "option does" : "options do") + ": choose All groups."
-            : "";
+          var other = only ? find(text, "") : null;      // is the answer in another group?
+          count.textContent = other && other.list.length
+            ? "Nothing in " + only + " matches, but " + (other.loose ? "the closest options are in other groups" : other.list.length + " other " + (other.list.length === 1 ? "option does" : "options do")) + ": choose All groups."
+            : "Nothing matches" + (text ? " “" + text + "”" : "") + ".";
         } else if (!text) {
           count.textContent = only ? shown.length + " options in " + only : DATA.length + " options in " + GROUPS.length + " groups";
         } else if (res.loose) {
-          count.textContent = "No option has all of those words. The closest " + shown.length + ":";
+          count.textContent = "No option " + (only ? "in " + only + " " : "") + "has all of those words. The closest " + shown.length + ":";
         } else {
           count.textContent = shown.length + (shown.length === 1 ? " match" : " matches") + " for “" + text + "”";
         }
@@ -408,10 +437,18 @@
       q.addEventListener("input", render);
       pick.addEventListener("change", render);
       clear.addEventListener("click", function () { q.value = ""; render(); q.focus(); });
-      // Esc clears the search (nothing here closes on a click outside it: only Esc or the ✕).
+      // Esc clears the search (nothing here closes on a click outside it: only Esc or the ✕), but not
+      // while a panel is open over the page: Settings and Feedback stay open while you type here, and
+      // their own Esc (nav.js) closes the top one first. The search is cleared by the next Esc.
+      function panelOpen() {
+        var settings = document.getElementById("bzSettings");
+        var feedback = document.getElementById("bzFeedback");
+        return !!((settings && !settings.hidden) || (feedback && feedback.classList.contains("open") && !feedback.classList.contains("min")));
+      }
       main.addEventListener("keydown", function (e) {
         if (e.key !== "Escape" || !q.value) return;
-        e.preventDefault();
+        e.preventDefault();               // a search box clears itself on Esc in some browsers: this page decides
+        if (panelOpen()) return;
         q.value = "";
         render();
         q.focus();
