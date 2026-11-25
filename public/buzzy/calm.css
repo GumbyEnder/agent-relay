@@ -112,7 +112,6 @@
   border-top: 1px solid #222;
 }
 .tm-label { color: #9a9a9a; font-size: 0.85rem; }
-.tm-row .mode-tabs { margin: 0; }
 .tm-row .talk-privacy { position: static; }
 .talk-more-panel .privacy-pop {
   position: static;

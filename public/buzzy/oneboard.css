@@ -184,7 +184,7 @@ a.ob-item { text-decoration: none; }
   border-radius: 3px;
   background: #ffc107;
 }
-#voiceToggle, #sessionsToggle, .tm-mode { display: none !important; }
+#voiceToggle, #sessionsToggle { display: none !important; }
 
 /* ── Beside the box: the paper clip and the privacy control ─────────── */
 .talk-extras { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding-right: 4px; }

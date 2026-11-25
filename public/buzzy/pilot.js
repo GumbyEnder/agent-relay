@@ -72,9 +72,6 @@
           { sel: '.pp-slider [data-mode="' + v + '"]', name: "“" + cap(v) + "”" },
           { sel: "#privacyClose", name: "Close", optional: true },
         ];
-      case "mode":
-        // Chat and Work are one bar now; the switch stays in the page, out of sight.
-        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " setting", hiddenOk: true }];
       case "history":
         return [{ sel: '[data-tab="history"]', name: "History, under the search bar" }];
       case "newChat":
