@@ -24,10 +24,11 @@
 //   H. No script errors; a desktop and a phone screenshot are saved.
 //   I. Open, Advocate and Lockdown are drawn in the privacy button's colours (read from privacy.css).
 //   J. An option drags onto the Idea Board by its handle, with real mouse drags: the handle has a
-//      grab cursor (the card itself does not drag), the header's strip comes up, and dropped there
-//      it lands on the board as a note (name, what it does, where it is). The Open link still drags
-//      as a link (what lands keeps its address), and the words can be selected with the mouse; a
-//      drag of selected words carries the words, not the option's note.
+//      grab cursor and is seen at rest (3:1 against the card; the card itself does not drag), the
+//      header's strip comes up, and dropped there a new note lands on the board (name, what it
+//      does, where it is). The Open link still drags as a link (a new card keeps its address), and
+//      the words can be selected with the mouse; a drag of selected words carries the words, not
+//      the option's note. Every drop must add a card, so an account that already has them can't pass.
 // usage: node scripts/probe-options-page.mjs [origin]
 //   BZ_PROBE_CDP=<DevTools URL>  drive that browser (`ai-screen.sh browser` prints one); unset, a
 //                                headless browser with no window is started
@@ -363,10 +364,21 @@ try {
     const grip = li.querySelector(".ao-grab");
     return {
       handle: !!grip && grip.draggable === true, handleCursor: grip ? getComputedStyle(grip).cursor : "",
+      dots: grip ? getComputedStyle(grip).color : "", behind: getComputedStyle(li).backgroundColor,
       card: li.draggable, cardPayload: li.hasAttribute("data-bz-card"), cardCursor: getComputedStyle(li).cursor,
     };
   });
-  check("an option has a drag handle with a grab cursor; the card itself does not drag", looks.handle && looks.handleCursor === "grab" && looks.card === false && !looks.cardPayload && looks.cardCursor !== "grab", JSON.stringify(looks));
+  // The dots at rest against the card: 3:1 at least, so the handle can be found before it is hovered.
+  const lum = (rgb) => {
+    const [r, g, b] = (rgb.match(/\d+(\.\d+)?/g) || [0, 0, 0]).slice(0, 3).map((v) => {
+      const c = Number(v) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [hi, lo] = [lum(looks.dots), lum(looks.behind)].sort((a, b) => b - a);
+  const contrast = (hi + 0.05) / (lo + 0.05);
+  check("an option has a drag handle with a grab cursor, seen at rest (3:1 or more); the card itself does not drag", looks.handle && looks.handleCursor === "grab" && contrast >= 3 && looks.card === false && !looks.cardPayload && looks.cardCursor !== "grab", `${JSON.stringify(looks)}; contrast ${contrast.toFixed(2)}:1`);
   const notes = () => page.$$eval(".wb-card.wb-k-note", (els) => els.map((n) => (n.innerText || n.textContent || "").replace(/\s+/g, " ").trim()));
   // Every card on every board, as this browser keeps them.
   const boardCards = () => page.evaluate(() => {
@@ -374,10 +386,12 @@ try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k || !k.startsWith("bz.board.")) continue;
-      try { (JSON.parse(localStorage.getItem(k)).cards || []).forEach((c) => out.push({ kind: c.kind, title: c.title, url: c.url })); } catch { /* not a board */ }
+      try { (JSON.parse(localStorage.getItem(k)).cards || []).forEach((c) => out.push({ key: `${k}|${c.id}`, kind: c.kind, title: c.title, url: c.url })); } catch { /* not a board */ }
     }
     return out;
   });
+  // Each drop must add something: an account the probe signs in with may already hold these cards.
+  const optionNotes = async () => (await notes()).filter((t) => t.includes(want.name) && t.includes(want.what.slice(0, 40)) && t.includes(want.where)).length;
   // Press at `at`, move a little (the drag starts and the header's strip comes up), let go on the strip.
   const dragToStrip = async (at) => {
     if (!at) return false;                             // nothing there to press on
@@ -400,21 +414,21 @@ try {
   const boxOf = async (sel) => ((await optCard.locator(sel).count()) ? optCard.locator(sel).first().boundingBox() : null);
   await optCard.scrollIntoViewIfNeeded();
   const hb = await boxOf(".ao-grab");
+  const notesBefore = await optionNotes();
   check("dragging the handle brings up the header's strip to say where to drop it", await dragToStrip(hb && { x: hb.x + hb.width / 2, y: hb.y + 20 }), hb ? "the drop strip did not show" : "there is no handle");
-  const landed = await notes();
-  check("dropped on the strip, it lands on the Idea Board as a note: the option's name, what it does and where it is", landed.some((t) => t.includes(want.name) && t.includes(want.what.slice(0, 40)) && t.includes(want.where)), JSON.stringify(landed));
+  const notesAfter = await optionNotes();
+  check("dropped on the strip, it lands on the Idea Board as a new note: the option's name, what it does and where it is", notesAfter === notesBefore + 1, `option notes ${notesBefore} → ${notesAfter}: ${JSON.stringify(await notes())}`);
   await page.screenshot({ path: join(SHOTS, "all-options-dropped-on-board.png"), fullPage: false });
-  // The Open link drags as a link: what lands keeps its address (the whole card used to drag, and
-  // turned the link into the option's note without it).
+  // The Open link drags as a link: a new card with its address lands (the whole card used to drag,
+  // and turned the link into the option's note without it).
   const href = await optCard.locator(".ao-open").evaluate((a) => a.href);
-  const namedNotes = async () => (await notes()).filter((t) => t.includes(want.where)).length;
-  const namedBefore = await namedNotes();
+  const cardsBefore = new Set((await boardCards()).map((c) => c.key));
   await optCard.scrollIntoViewIfNeeded();
   const lb = await boxOf(".ao-open");
-  await dragToStrip(lb && { x: lb.x + lb.width / 2, y: lb.y + lb.height / 2 });
-  const linked = (await boardCards()).filter((c) => c.url === href);
-  const namedAfter = await namedNotes();
-  check("the Open link still drags as a link: it lands on the board with its address, not as the option's note", linked.length >= 1 && linked.every((c) => c.kind !== "note") && namedAfter === namedBefore, `cards with ${href}: ${JSON.stringify(linked)}; option notes ${namedBefore} → ${namedAfter}`);
+  const linkDragged = await dragToStrip(lb && { x: lb.x + lb.width / 2, y: lb.y + lb.height / 2 });
+  const linked = (await boardCards()).filter((c) => !cardsBefore.has(c.key) && c.url === href);
+  const notesAfterLink = await optionNotes();
+  check("the Open link still drags as a link: a new card with its address lands on the board, not the option's note", linkDragged && linked.length >= 1 && linked.every((c) => c.kind !== "note") && notesAfterLink === notesAfter, `drag started=${linkDragged}; new cards with ${href}: ${JSON.stringify(linked)}; option notes ${notesAfter} → ${notesAfterLink}`);
   // The words can be selected with the mouse (a card that drags as a whole starts a drag instead)…
   await optCard.scrollIntoViewIfNeeded();
   const wb = await boxOf(".ao-what");
@@ -428,21 +442,26 @@ try {
   check("the words on an option can be selected with the mouse", picked.length >= 12 && want.what.includes(picked), `selected “${picked}”`);
   // …and a drag of selected words carries the words, not the option's note. A windowless browser
   // does not start a drag from a press on a selection, so the dragstart is sent as the browser sends
-  // it (from the selected text, with its words) and dropped on the strip.
+  // it (from the selected text, with its words); only a drag nothing cancelled, with the strip up
+  // in its drag state, is dropped on the strip, as a browser would.
+  const wordNotes = async () => (await notes()).filter((t) => picked && t.includes(picked) && !t.includes(want.where)).length;
+  const wordsBefore = await wordNotes();
   const wordsDrag = await page.evaluate(() => {
     const sel = window.getSelection();
     const node = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
-    if (!node) return { node: 0, carried: null };
+    if (!node) return { node: 0 };
     const dt = new DataTransfer();
     dt.setData("text/plain", String(sel));
-    node.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const started = node.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const strip = document.querySelector(".bz-dropstrip");
+    const dragging = started && !strip.hidden && /\bbz-ds-drag\b/.test(strip.className);
     const carried = Array.from(dt.types).includes("application/x-beezilla-card");
-    document.querySelector(".bz-dropstrip").dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
-    return { node: node.nodeType, carried };
+    if (dragging) strip.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    return { node: node.nodeType, started, dragging, carried };
   });
   await settle(1300);
-  const wordNotes = (await notes()).filter((t) => t.includes(picked) && !t.includes(want.where));
-  check("…and a drag of selected words carries the words (not the option's note): they land as a note of their own", wordsDrag.node === 3 && wordsDrag.carried === false && wordNotes.length >= 1, JSON.stringify({ ...wordsDrag, wordNotes }));
+  const wordsAfter = await wordNotes();
+  check("…and a drag of selected words carries the words (not the option's note): they land as a new note of their own", wordsDrag.node === 3 && wordsDrag.started && wordsDrag.dragging && wordsDrag.carried === false && wordsAfter === wordsBefore + 1, `${JSON.stringify(wordsDrag)}; notes of the words ${wordsBefore} → ${wordsAfter}`);
   await page.evaluate(() => window.getSelection().removeAllRanges());
   await page.evaluate(() => window.BeeZillaShell.go("/buzzy/sketch"));
   await page.waitForFunction(() => window.BeeZillaShell.currentKey === "/buzzy/sketch" && !window.BeeZillaShell.busy, null, { timeout: 20000 });

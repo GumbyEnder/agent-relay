@@ -7,10 +7,11 @@
 // an attribute or a link's address: chatDoIt, aria-label="Send") it only proves the control
 // exists, not what it is called, so the test finds that control and looks for the option's name
 // (each name in a list) ON it: the words inside it, its aria-label, title, placeholder or alt, a
-// field's <label>. Words elsewhere in the file, a comment included, do not count, so a renamed
-// label cannot hide behind an id that stayed; code that names no control (a function) is refused.
-// An entry whose control has no words of its own (the swatches) says `label: false`; the test
-// refuses that on a control that has words, and checks itself on made-up samples. It also holds
+// field's <label>. Words elsewhere in the file do not count, nor a control left in a comment, so a
+// renamed label cannot hide behind an id that stayed; code that names no control (a function) is
+// refused. An entry whose control has no words of its own (the swatches) says `label: false`; the
+// test refuses that on a control that has words, and checks itself on made-up samples. An entry's
+// `also` sources (the code a board command runs) must be in the code, not in a comment. It also holds
 // the list's shape (every entry says what, where and which page), that each page it opens is one
 // the server serves (src/lib/buzzy/pages.nitro.ts), that the three privacy modes are drawn in the
 // privacy button's own colours (privacy.css), and that the page, its script and the gear link exist.
@@ -47,6 +48,21 @@ const attrsOf = (raw) => {
 };
 const textOf = (html) => html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ")
   .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+// The source with its comments blanked (<!-- -->, /* */, //; line breaks kept), so a control or a
+// line of code left in a comment does not count. Strings and regular expressions are kept whole
+// (markup in a script's strings is real; "image/*", "https://" or the backtick in /[*_`]/ is not
+// a comment or a string's start); a regular expression is a / after an operator, a bracket, a
+// comma or return. A quote not closed on its line (an apostrophe in a page's text) ends there.
+const COMMENT_OR_STRING = new RegExp([
+  /<!--[\s\S]*?(?:-->|$)/, /\/\*[\s\S]*?(?:\*\/|$)/, /\/\/[^\n]*/,
+  /(?<=(?:^|[=(,:;!&|?{}[\n]|\breturn|\btypeof)[ \t]*)\/(?![*/])(?:[^/\\\n[]|\\.|\[(?:[^\]\\\n]|\\.)*\])+\/[a-z]*/,
+  /\\[\s\S]/, /"(?:[^"\\\n]|\\[\s\S])*"?/, /'(?:[^'\\\n]|\\[\s\S])*'?/, /`(?:[^`\\]|\\[\s\S])*`?/,
+].map((r) => r.source).join("|"), "g");
+const bareMemo = new Map();
+const withoutComments = (src) => {
+  if (!bareMemo.has(src)) bareMemo.set(src, src.replace(COMMENT_OR_STRING, (t) => (/^(?:<!--|\/\*|\/\/)/.test(t) ? t.replace(/[^\n]/g, " ") : t)));
+  return bareMemo.get(src);
+};
 const literals = (code) => [...code.matchAll(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1] ?? m[2]);
 // What a code src points at: <button id="del" (a tag), aria-label="Send" (an attribute),
 // /buzzy/options (a link's address) or chatDoIt / wb-sk-btn (an id or a class). A function
@@ -71,13 +87,14 @@ function innerText(body, name, from) {
   }
   return "";
 }
-// Every control in `body` that `ref` names, each with the words a person sees on it or hears for
-// it: its text, aria-label, title, placeholder or alt (a button-like input's value; a field's
-// <label>, named by for= or right before it). whiteboard.js builds its controls with
-// el("tag", "classes", text) and may give one words on the lines after, until it is put in place.
-function controlsIn(body, ref) {
+// Every control in `src` that `ref` names, each with the words a person sees on it or hears for
+// it: its text, aria-label, title, placeholder or alt (a button-like input's value; a field's own
+// <label>). whiteboard.js builds its controls with el("tag", "classes", text) and may give one
+// words on the lines after, until it is put in place. Comments are not looked in.
+function controlsIn(source, ref) {
   const match = refMatcher(ref);
   if (!match) return [];
+  const body = withoutComments(source);
   const found = [];
   for (const t of body.matchAll(/<([a-zA-Z][\w-]*)(\s[^<>]*?)?\/?>/g)) {
     const tag = { name: t[1].toLowerCase(), raw: t[0], attrs: attrsOf(t[2] || "") };
@@ -86,11 +103,17 @@ function controlsIn(body, ref) {
     if (tag.name === "input" && /^(button|submit|reset)$/i.test(tag.attrs.type || "")) words.push(tag.attrs.value);
     if (!VOID.has(tag.name)) words.push(innerText(body, tag.name, t.index + t[0].length));
     if (FIELDS.has(tag.name)) {
+      // A field's own <label>: the one that names it (for="its id"), the one wrapped around it,
+      // or else an unbound one (no for=) right before it.
       const id = tag.attrs.id;
+      const head = body.slice(Math.max(0, t.index - 400), t.index);
       const named = id && new RegExp(`<label\\b[^<>]*\\bfor=\\\\?["']${escRe(id)}\\\\?["'][^<>]*>([\\s\\S]*?)</label>`).exec(body);
-      const before = /<label\b[^<>]*>((?:(?!<label\b)[\s\S])*?)<\/label>\s*$/.exec(body.slice(Math.max(0, t.index - 400), t.index));
-      const label = named || before;
-      if (label) words.push(textOf(label[1]));
+      const open = head.lastIndexOf("<label");
+      const around = open >= 0 && head.indexOf("</label>", open) < 0
+        ? /^<label\b[^<>]*>([\s\S]*?)<\/label>/.exec(body.slice(t.index - head.length + open)) : null;
+      const before = /<label\b([^<>]*)>((?:(?!<label\b)[\s\S])*?)<\/label>\s*$/.exec(head);
+      const label = named ? named[1] : around ? around[1] : before && !/\bfor\s*=/.test(before[1]) ? before[2] : null;
+      if (label != null) words.push(textOf(label));
     }
     found.push({ tag: tag.name, words: words.filter(Boolean) });
   }
@@ -157,6 +180,7 @@ const blocks = [];
 let sourced = 0;
 let named = 0;
 let described = 0;
+let alsoFound = 0;
 const modesSeen = [];
 OPTIONS.forEach((o, i) => {
   const id = `#${i + 1} ${o && o.group} · ${o && o.name}`;
@@ -171,6 +195,18 @@ OPTIONS.forEach((o, i) => {
     if (!MODES.includes(o.mode)) fail(id, `mode "${o.mode}" must be one of ${MODES.join(", ")}`);
     else if (o.group !== "Privacy modes" || String(o.name).toLowerCase() !== o.mode) fail(id, `mode "${o.mode}" belongs on the Privacy modes entry named ${o.mode[0].toUpperCase() + o.mode.slice(1)}`);
     else modesSeen.push(o.mode);
+  }
+  // also: more sources that must be there too, in the code itself (a comment does not count).
+  if (o.also !== undefined) {
+    if (!Array.isArray(o.also) || !o.also.length) fail(id, 'also must be a list of one or more "<file>|<words>" sources');
+    else for (const s of o.also) {
+      const at = typeof s === "string" ? s.indexOf("|") : -1;
+      const alsoBody = at > 0 ? text(s.slice(0, at)) : null;
+      if (at < 1) fail(id, `also "${s}" must be "<file>|<words in it>"`);
+      else if (alsoBody === null) fail(id, `also names ${s.slice(0, at)}, which does not exist`);
+      else if (!withoutComments(alsoBody).includes(s.slice(at + 1))) fail(id, `${s.slice(0, at)} no longer has "${s.slice(at + 1)}" in its code: what this option does may have been removed or changed. Fix this line.`);
+      else alsoFound++;
+    }
   }
   if (typeof o.what === "string" && o.what.length > 420) fail(id, `what is ${o.what.length} characters: one plain line, please`);
   if (blocks[blocks.length - 1] !== o.group) {
@@ -212,23 +248,39 @@ for (const m of MODES) {
   const n = modesSeen.filter((x) => x === m).length;
   if (n !== 1) fail(`privacy mode "${m}"`, `${n} entries carry mode: "${m}"; exactly one must (the page draws its name in the mode's colour)`);
 }
-if (!failed) ok(`${OPTIONS.length} options in ${blocks.length} groups, each with its words found in the code (${sourced} sources checked; ${named} names found on the control their code names, ${described} controls with no words of their own)`);
+if (!failed) ok(`${OPTIONS.length} options in ${blocks.length} groups, each with its words found in the code (${sourced} sources checked; ${named} names found on the control their code names, ${described} controls with no words of their own; ${alsoFound} more sources of what options do)`);
 
 // ── the name check itself, on made-up samples ────────────────────────────────
 // A label renamed behind an id that stayed is caught although a comment still says the old
-// name; label: false is refused on a control that has words; a function is no control. And it
-// still finds the names the real files carry: in a script's strings, in a field's <label>, in el().
+// name, or still holds the old control (markup, a script's string, an el() line); label: false
+// is refused on a control that has words; a function is no control; a <label> counts only for
+// the field it belongs to. And it still finds the names the real files carry: in a script's
+// strings, in a field's <label>, in el(), past an "image/*" or an address in a string.
 const SAMPLES = [
   ["a label renamed behind an id that stayed (a comment still says the old name)", { name: "Do it" }, "chatDoIt",
     '<!-- the Do it button -->\n<button id="chatDoIt" type="button" title="Stop asking">Go</button>\n<script>// Do it: stop asking</script>', false],
+  ["the old control kept in an HTML comment, the live one renamed", { name: "Do it" }, "chatDoIt",
+    '<!-- <button id="chatDoIt" type="button">Do it</button> -->\n<button id="chatDoIt" type="button">Go</button>', false],
+  ["the old control kept in a script comment, the live one renamed", { name: "Open" }, "fw-open",
+    '// h += "<button class=\\"secondary fw-open\\">Open</button>";\nh += "<button class=\\"secondary fw-open\\">View</button>";', false],
+  ["…also after a regular expression with a backtick in it", { name: "Open" }, "fw-open",
+    'function snip(md) { return md.replace(/[*_`>|]/g, "").replace(/\\s+/g, " "); }\n// h += "<button class=\\"secondary fw-open\\">Open</button>";\nh += "<button class=\\"secondary fw-open\\">View</button>";\nvar t = `two\nlines`;', false],
+  ["an old el() line kept in a block comment, the live one renamed", { name: "Draw / Done" }, "wb-sk-btn",
+    '/* var b = el("button", "wb-sk-btn", on ? "Done" : "Draw"); */\nvar b = el("button", "wb-sk-btn", on ? "Finish" : "Sketch");', false],
   ["label: false on a control that has words", { name: "Do it", label: false }, "chatDoIt", '<button id="chatDoIt">Do it</button>', false],
   ["a function, not a control", { name: "Remove" }, "removeSelected", 'function removeSelected() {}\nb.textContent = "Remove";', false],
   ["label: false on an el() control a later line gives a title", { name: "Colours", label: false }, "wb-sk-swatches",
     'var sw = el("span", "wb-sk-swatches");\nsw.title = "Ink colours";\nstrip.appendChild(sw);', false],
+  ["a <label> right before the field that belongs to another one (for=)", { name: "Background" }, "cvBg",
+    '<div class="row"><label for="cvW">Background</label><input id="cvBg" type="color" /></div>', false],
   ["the name on the control, over two lines", { name: "Do it" }, "chatDoIt", '<button id="chatDoIt" class="secondary"\n    title="Stop asking">Do it</button>', true],
   ["markup in a script's strings", { name: "Open" }, "fw-open", 'h += "<button type=\\"button\\" class=\\"secondary fw-open\\" data-key=\\"" + k + "\\">Open</button>";', true],
+  ["past an \"image/*\" and an address in strings, and a comment after", { name: "Delete" }, "<button id=\"del\"",
+    '<input type="file" accept="image/*" /><a href="https://example.com/x">x</a>\n<button id="del" title="Delete it">Delete mark</button> <!-- note -->', true],
   ["a field named by the <label> before it", { name: "Background" }, "cvBg",
     '<div class="row"><label>Width</label><input id="cvW" /></div><div class="row"><label>Background</label><input id="cvBg" type="color" value="#141414" /></div>', true],
+  ["a field inside its <label>", { name: "Background" }, "cvBg", '<div class="row"><label>Background <input id="cvBg" type="color" /></label></div>', true],
+  ["a field named by for=", { name: "Background" }, "cvBg", '<label for="cvBg">Background</label><div class="row"><input id="cvBg" type="color" /></div>', true],
   ["el() with its words", { name: "Draw / Done" }, "wb-sk-btn", 'var b = el("button", "wb-sk-btn", on ? "Done" : "Draw");', true],
   ["label: false on an el() control with no words", { name: "Colours", label: false }, "wb-sk-swatches",
     'var sw = el("span", "wb-sk-swatches");\nINK.forEach(function (c) { var b = el("button", "wb-sk-ink"); b.title = c; sw.appendChild(b); });\nstrip.appendChild(sw);', true],
