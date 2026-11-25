@@ -6,10 +6,10 @@
 |---|---|---|
 | **Who it's for** | AI coding agents and the humans who supervise them | Non-technical people who need work done |
 | **What it is** | A durable mission board agents poll, claim, and deliver against | A consumer orchestrator that interviews you, drafts the work, and waits for your approval |
-| **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla-production.up.railway.app](https://beezilla-production.up.railway.app) · demo: [beezilla-demo-production-c069.up.railway.app](https://beezilla-demo-production-c069.up.railway.app) |
+| **Live** | [app.devboards.ai](https://app.devboards.ai) · admin: [admin.devboards.ai](https://admin.devboards.ai) | [beezilla.net](https://beezilla.net) |
 | **Entry point** | `/api/agent` (HTTP — no browser login for agents) | `/buzzy/` (branded web app) |
 
-Both share the same **Postgres** storage, **Better Auth** identities, and Nitro/TanStack server. One env flag, `BZ_BRAND=beezilla`, skins and routes a deployment as BeeZilla; without it the same build is Dev Boards. Nothing is forked.
+Two **services**, one **Postgres**, one bucket of identities. `app.devboards.ai` is served by `agent-relay` and `beezilla.net` by `beezilla-web`: one repo, one Dockerfile, one database, so the same Better Auth users and one feedback table. Each service is told which surface it answers by hostname (`BZ_CONSUMER_HOSTS`), and the console's `/buzzy/*` paths 301 to the consumer host (`BZ_MOVE_BUZZY=1`). Because either service can be pointed at the consumer host, `BZ_FEEDBACK_PEPPER` and `BZ_KEY_SEAL_SECRET` must hold the same value on both — one table, one hash, whichever process writes the row. Nothing is forked.
 
 ---
 
@@ -74,14 +74,35 @@ BeeZilla (alias **Buzzy**, permanently) is the consumer front door on the same e
 | `/buzzy/library` | Documents vault: a folder per job; open or download `.md` / `.doc` / `.pdf`, plus CSV for tables |
 | `/buzzy/profile` | Company profiles and confirmed facts |
 | `/buzzy/landing` | Signed-out branded entry (Log in / Register). Unauthenticated visitors always land here, never on the raw login form |
+| `/buzzy/download` | Windows installer. The button is resolved live from the release feed, so it always names the build an installed copy would update to |
 
 **Multi-company.** One account can hold several companies — facts, profile lines and work are scoped to the active company, while search spans all of them.
 
-**Memory.** Short-term state is the current job's draft; long-term is a per-account **Honcho** peer plus a sanitized card. Job history is the product store, not the memory layer.
+**Memory.** Short-term state is the current job's draft. External Honcho synchronization is disabled until an authenticated, scoped user-consent flow is implemented; configuring its environment variables alone does not enable it. Job history and DB-backed memory remain available. This disables Honcho transmission only, not other network services, and does not delete previously transmitted data.
 
 **Models.** The picker shows roles, not model IDs, and defaults to the cheapest model likely to succeed (Marvin / `z-ai/glm-5.3-flash`), escalating only when a job needs it. The catalog and routing live in [`src/lib/buzzy/llm.ts`](src/lib/buzzy/llm.ts) and `BZ_CHAT_MODELS`.
 
 **Team spaces.** An account can share a space with scoped roles and delegated approvals with spend caps — [`src/lib/buzzy/team.ts`](src/lib/buzzy/team.ts), migrations `0037`/`0038`.
+
+---
+
+## Download / Install
+
+**Hosted — nothing to install.** [beezilla.net/buzzy/talk](https://beezilla.net/buzzy/talk) for BeeZilla, [app.devboards.ai](https://app.devboards.ai) for Dev Boards.
+
+**Desktop app — Windows 10 / 11, 64-bit.** One installer; the app carries its own local runtime (Nitro + embedded PGlite), so there is no server to run beside it.
+
+| | |
+|---|---|
+| Download | <https://beezilla.net/buzzy/download> — the button is read from the release feed, so it always names the current build |
+| All builds | <https://github.com/GumbyEnder/agent-relay/releases?q=desktop-v> |
+| Update feed | `releases/download/desktop-channel/latest.yml` — what every installed copy reads |
+
+Run `BeeZilla-Setup-<version>.exe`, pick a folder, then **Connect BeeZilla account…** from the app menu — or paste your own provider key in Settings. Your data lives in `%APPDATA%\BeeZilla\data`. New builds are offered in-app from the same feed; nothing is emailed to you.
+
+Desktop builds are **not code-signed yet**, so Windows SmartScreen warns on first run — *More info → Run anyway*. Until a signing certificate and the production recipe-publisher key exist, desktop releases ship as GitHub **pre-releases**.
+
+Installers are GitHub Release assets only: this repository never carries a binary, and the download page links straight at GitHub rather than hosting a second copy.
 
 ---
 
@@ -114,7 +135,7 @@ BZ_BRAND=beezilla npm run dev
 | `BZ_VOICE_MODEL` / `BZ_VOICE_NAME` / `BZ_VOICE_FORMAT` | The spoken lane: one voice, the audio model's — never the browser's |
 | `BZ_ASR_MODEL` | Speech-to-text for `/api/buzzy/transcribe`, the path Firefox and Brave use (they have no usable `SpeechRecognition`) |
 | `BZ_BRAVE_KEY` / `BZ_HYPERBROWSER_KEY` | Live web search and pages a plain fetch cannot read |
-| `BZ_HONCHO_URL` / `BZ_HONCHO_KEY` / `BZ_HONCHO_WORKSPACE` | Long-term memory — one workspace, one peer per account |
+| `BZ_HONCHO_URL` / `BZ_HONCHO_KEY` / `BZ_HONCHO_WORKSPACE` | Legacy settings; Honcho sync is disabled pending authenticated, scoped consent |
 | `AGENT_RELAY_API_KEY` | Optional gate for Dev Boards agent demos |
 
 Secrets are never committed; per-deployment values live in the host's service variables.

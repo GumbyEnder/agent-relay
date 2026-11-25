@@ -70,11 +70,19 @@
   {
     "id": "sk-005",
     "q": "What is the difference between Chat and Work?",
-    "a": "Chat is the normal way to talk it through. Work first collects the key details of the job in one go, then goes through the usual draft-and-approve steps.",
+    "a": "There's no difference any more: one conversation for both. BeeZilla answers, drafts and makes things straight away. When you want something bigger built, it first asks a question or two about the end result you have in mind, and points out anything that already exists so you don't build it from scratch. Say \"just do it\" or \"cut to the chase\" and it skips straight to the work.",
     "sources": [
       {
-        "file": "public/buzzy/talk.html",
-        "symbol": "Chat is the default. Work mode makes the harness delineate the task"
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "There is no difference here between chatting and getting work done"
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "DON'T REINVENT THE WHEEL"
+      },
+      {
+        "file": "src/lib/buzzy/intent.ts",
+        "symbol": "cut to the chase|just get (it|the job|this) done"
       }
     ],
     "surfaces": [
@@ -609,11 +617,19 @@
   {
     "id": "sk-032",
     "q": "What is the Inspiration wall?",
-    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters. ↗ shows similar work and ⛶ opens a piece bigger. You can drag a card onto the Idea Board. It is hidden in Lockdown.",
+    "a": "A wall of your own finished work (pictures, music, 3D and documents) with filters, plus a few ideas to start from. Every card shows the grabbing hand: drag it onto the Idea Board, or press it and click the strip that appears at the top of the window. ↗ shows similar work and ⛶ opens a piece bigger. It is hidden in Lockdown.",
     "sources": [
       {
         "file": "public/buzzy/inspiration.js",
         "symbol": "BeeZillaInspiration"
+      },
+      {
+        "file": "public/buzzy/inspiration.css",
+        "symbol": "cursor: grab;"
+      },
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "Drag it up here to put it on your Idea Board"
       },
       {
         "file": "public/buzzy/privacy.js",
@@ -627,11 +643,47 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "A board for laying out a job. Add cards for your files, connect two cards by dragging from a corner of one to the other, and use Search the board to add things from your Library.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: a line to each skill it uses, and what it makes \u2014 pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about. To point BeeZilla at something, drag the dot on a card's right edge onto one of its steps: what you connect, it uses there in full, and a connected picture is what it draws from. Make an area around a piece of the board to move, save or share it together; selling an orchestration (for Honey Drops or Honey, or open-sourcing it) is coming soon. You can draw on it too: the Draw tool (D) gives you a pen, shapes and colours, and Make it real turns your drawing into a finished picture beside it. Once you've laid out a few cards, BeeZilla drafts your agent's core identity (how it works here) from them, and a Who it serves card holds who it's working for, which stays private when you share.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
-        "symbol": "Search the board"
+        "symbol": "the moment it reads the"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Create recipe"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Also on the board:"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Connected to BeeZilla's steps"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Make an area"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Sell this orchestration"
+      },
+      {
+        "file": "src/lib/buzzy/server.ts",
+        "symbol": "onFlow?: (f: FlowStep) => void;"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "\"chat\" is the conversation itself, sitting on the board as a card"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "function makeReal(c, ask)"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "function maybeDraftIdentity()"
       }
     ],
     "surfaces": [
@@ -641,30 +693,54 @@
   {
     "id": "sk-034",
     "q": "Is my Idea Board (formerly the Whiteboard) saved to my account?",
-    "a": "Not yet. It is saved in this browser, one board per conversation, so another computer won't see it.",
+    "a": "Yes. Each conversation's Idea Board is saved to your account a moment after every change, so it follows you to any computer you sign in on. This browser keeps a copy too, so nothing is lost if the connection drops: it catches up when you're back online. History, the clock by the zoom buttons, keeps earlier versions (the last 30, for up to 90 days), and Go back to this brings one back. Recipes you make from it are saved to your account as well.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
-        "symbol": "bz.board."
+        "symbol": "var API = \"/api/buzzy/whiteboards/\";"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Go back to this"
+      },
+      {
+        "file": "src/lib/buzzy/whiteboards.ts",
+        "symbol": "export const VERSIONS_KEPT = 30;"
+      },
+      {
+        "file": "src/lib/buzzy/whiteboards.ts",
+        "symbol": "export const VERSIONS_MAX_DAYS = 90;"
+      },
+      {
+        "file": "src/lib/buzzy/chat.nitro.ts",
+        "symbol": "if (path.startsWith(\"/api/buzzy/whiteboards/\")) {"
+      },
+      {
+        "file": "src/lib/buzzy/boardRecipes.ts",
+        "symbol": "INSERT INTO buzzy_board_recipes"
       }
     ],
     "surfaces": [
       "website"
     ],
-    "limits": "Saving boards to your account is not built yet."
+    "limits": "Going back to an earlier version needs a connection. A board saved to your account is up to 1 MB."
   },
   {
     "id": "sk-035",
     "q": "How does talking to BeeZilla by voice work?",
-    "a": "Press Talk to BeeZilla. A big mic appears with a live sound level and your words as you speak, and the Idea Board opens beside it. Press the mic again, or End voice, to stop.",
+    "a": "Press Talk to BeeZilla. The Idea Board opens with the bar inside it, the face at the top left listens, and your words appear in the box as you speak, in every browser. Stopping to think doesn't send anything: the button has become Pause, so press it whenever you like, press Continue to keep talking, and press Send (or Enter) when your message is ready.",
     "sources": [
       {
-        "file": "public/buzzy/voice-stage.js",
-        "symbol": "Pressing the mic again ends voice"
+        "file": "public/buzzy/talk.html",
+        "symbol": "Dictation: what you say collects in the box until you send it"
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "End voice"
+        "symbol": "Sending is the person's own act"
+      },
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "We have a voice toggle. That does not need to be there."
       }
     ],
     "surfaces": [
@@ -675,11 +751,19 @@
   {
     "id": "sk-036",
     "q": "Can BeeZilla read its replies out loud?",
-    "a": "Yes. Turn on the voice switch in the top bar (the mic beside your name) and it listens and reads its answers aloud as one mode. Press it again to stop.",
+    "a": "Yes. Press Talk to BeeZilla: it listens, and BeeZilla reads its answers aloud. Press Pause for quiet to think (it also stops BeeZilla mid-answer) and Continue to talk again. The Talk bar is at the top of every page, so you can pause from wherever you are, and the browser tab says when it's listening.",
     "sources": [
       {
+        "file": "public/buzzy/talk.html",
+        "symbol": "toggleMic owns both halves of its state"
+      },
+      {
         "file": "public/buzzy/nav.js",
-        "symbol": "bzVoiceMic"
+        "symbol": "Talk to BeeZilla is the voice switch on every page"
+      },
+      {
+        "file": "public/buzzy/voice-stage.js",
+        "symbol": "We have a voice toggle. That does not need to be there."
       }
     ],
     "surfaces": [
@@ -690,7 +774,7 @@
   {
     "id": "sk-037",
     "q": "Can I give BeeZilla a document to read?",
-    "a": "Yes. Use Attach file, or drag the file onto the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
+    "a": "Yes. Drag the file onto the Talk bar or onto the Idea Board, or press the paper clip at the right end of the Talk bar. It takes PDFs, text, Markdown, CSV, pictures, audio and 3D files. A locked (password-protected) PDF is spotted and you're asked to unlock it first.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
@@ -698,7 +782,11 @@
       },
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Attach file"
+        "symbol": "aria-label=\"Attach a file\""
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "A file from the computer goes to the person's Library first"
       },
       {
         "file": "src/lib/buzzy/paper.ts",
@@ -712,12 +800,16 @@
   },
   {
     "id": "sk-038",
-    "q": "What is History?",
-    "a": "Your past chats. Pick one to reopen it, rename it or get a quick summary. You can also start a new chat from there.",
+    "q": "Where are my past conversations?",
+    "a": "Under History, in the row of places below the search bar. Open one to carry on where it stopped. New conversation is there too.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
-        "symbol": "Pick a past chat to reopen it, rename it, or get a quick summary."
+        "symbol": "data-tab=\"history\""
+      },
+      {
+        "file": "public/buzzy/browse.js",
+        "symbol": "Past conversations, newest first"
       }
     ],
     "surfaces": [
@@ -931,6 +1023,132 @@
     ],
     "surfaces": [
       "desktop"
+    ]
+  },
+  {
+    "id": "sk-051",
+    "q": "What can you do?",
+    "a": "I make things with you by talking: pictures, music, 3D models, short videos, documents, spreadsheets and slides, and I can look things up on the web. Everything I do appears on the Idea Board as I do it, so you can see each step and change any of it, and I can work the board for you when you ask (zoom out, add a note, connect two cards, make an area, start a drawing). Before building something from scratch I check what already exists: your Library, your recipes and simple starting boards. Tell me about one thing you're struggling to do, even if you're not sure I can help with it, and I'll see what I can do about it.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/inspirationSearch.ts",
+        "symbol": "name: \"search_inspiration\""
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function boardStep"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Connected to BeeZilla's steps"
+      },
+      {
+        "file": "src/lib/buzzy/self-knowledge/index.ts",
+        "symbol": "export const OPENER_QUESTION"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-052",
+    "q": "What makes BeeZilla unique, and different from other AI tools?",
+    "a": "Four things. I don't reinvent the wheel: before making something from scratch I look for what has already been done (your Library, your recipes and simple starting boards) and start you from there. You see the work as it happens: the Idea Board draws each step, and you can change any step, connect your own pictures and notes to it, or have me do it by voice. What works becomes yours to keep: cordon off a piece of the board as an orchestration, save it as a recipe, and soon sell it, trade it for Honey Drops or Honey, or open-source it, with what it made shown as examples. And it's one button: Talk to BeeZilla, with Pause and Continue, your own AI key if you want, and privacy modes you control.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/inspirationSearch.ts",
+        "symbol": "Don't reinvent the wheel"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Sell this orchestration"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Make an area"
+      },
+      {
+        "file": "docs/beezilla/SELLING-POINTS.md",
+        "symbol": "don't reinvent the wheel"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-053",
+    "q": "Can BeeZilla work the Idea Board for me?",
+    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; start a drawing; turn the drawing into a castle at sunset; who it serves is a bakery in Lisbon; the core identity is friendly and short; open the board; fold the board away. It builds whole orchestrations too, live, card by card: say orchestrate a weekly newsletter, or build me a workflow that answers customer emails, then change it the same way (add a spelling check before my approval, make the writing repeat until it's short enough) and say open it in Orchestrate to check, export or save it. When you're editing a card, press Speak and say what it should say. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function boardStep"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "function act("
+      },
+      {
+        "file": "public/buzzy/pilot.js",
+        "symbol": "a.do === \"board\""
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function orchestrateStep"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-054",
+    "q": "How do I use the Idea Board's controls?",
+    "a": "Down the left side are the tools: Select (V), Move the board (H), Note (N), Core identity, who BeeZilla is here (A), Who it serves (P), Skill or step (K), Output, what you want at the end (O), Draw (D) and Upload (U). In the bottom-right corner: zoom out and in, the percentage (back to 100%), Fit everything (Alt/Option+1), History, and the keyboard button (F1) that lists every shortcut. Drag on empty board to select cards; drag a card to move it; double-click a card to edit it (Speak lets you say it instead of typing); double-click a drawing to draw on it; Delete removes; Ctrl/⌘+Z undoes. To connect two cards, drag the dot on a card's right edge onto another card. With cards selected, the bar above them has Create recipe, Make an area, Sell this orchestration and Remove. At the top are the Talk bar, Sell this orchestration and Fold away. Or just tell me what you want and I'll do it.",
+    "sources": [
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "[\"agent\", \"Core identity — who BeeZilla is here\", \"A\"]"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Fit everything (Alt/Option+1)"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Keyboard shortcuts (F1)"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Make an area"
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "[\"sketch\", \"Draw — sketch on the board, then make it real\", \"D\"]"
+      }
+    ],
+    "surfaces": [
+      "website"
+    ]
+  },
+  {
+    "id": "sk-055",
+    "q": "I'm lost on the Idea Board. How do I see everything again?",
+    "a": "Say “show me the whole board” and I'll zoom out to fit everything, or press Fit everything in the bottom-right corner (Alt/Option+1). Back to 100% is the percentage between the zoom buttons (Ctrl/⌘+0). Select a card and press Alt/Option+2 to zoom to it, or ask me to zoom in on it by name. Hold Space and drag, or use the Move tool (H), to move around.",
+    "sources": [
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "Fit everything (Alt/Option+1)"
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export const LOST_OFFER"
+      }
+    ],
+    "surfaces": [
+      "website"
     ]
   }
 ]

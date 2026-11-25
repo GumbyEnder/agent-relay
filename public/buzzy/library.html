@@ -318,8 +318,10 @@
     .fw-preview audio { width: 100%; display: block; margin-top: 0.4rem; }
     .fw-tile {
       height: 150px; border-radius: 8px; background: #101010; border: 1px solid #222;
-      display: flex; align-items: center; justify-content: center; font-size: 2.2rem;
+      display: flex; align-items: center; justify-content: center; font-size: 2.2rem; color: var(--bz-yellow, #FFC107);
     }
+    .bz-line-ico { display: inline-block; flex: none; vertical-align: -0.18em; }
+    .df-name .bz-line-ico { color: var(--bz-yellow, #FFC107); margin-right: 0.25rem; }
     .kind-audio .fw-tile { height: 104px; }
     .fw-tile.fw-doc {
       display: block; overflow: hidden; text-align: left; padding: 0.7rem 0.8rem;
@@ -979,7 +981,6 @@
       catalog.jobs.unshift(state);
       catalog.currentId = state.id;
       state.screen = "pick";
-      ensureHonchoPeer();
       render();
     }
 
@@ -1444,7 +1445,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
               "<div class='docs-folders'>" +
               folders.map((f) =>
                 "<div class=\"docfolder\" data-folder=\"" + escAttr(f.id) + "\">" +
-                  "<div class='df-name'>📁 " + escHtml(f.job ? jobTitle(f.job) : f.id) + "</div>" +
+                  "<div class='df-name'>" + bzIco("kind-folder", 16) + escHtml(f.job ? jobTitle(f.job) : f.id) + "</div>" +
                   "<div class='df-meta'>" + f.docs.length + " document" + (f.docs.length === 1 ? "" : "s") +
                     (f.job && jobComplete(f.job) ? " · approved draft" : "") +
                     " · latest " + new Date(f.docs[0].updatedAt || f.docs[0].createdAt).toLocaleDateString() + "</div>" +
@@ -1471,7 +1472,16 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
      * is served at /api/buzzy/assets/<id>. */
     const FW_FIRST = 24; // cards before "Show all"
     const FW_LABEL = { doc: "Document", audio: "Audio", image: "Picture", video: "Video", model: "3D model", file: "File" };
-    const FW_ICON = { doc: "📝", audio: "🎵", image: "🖼", video: "🎬", model: "🧊", file: "📄" };
+    // Line icons from the shared sprite (icons/bz-icons.svg), drawn in the colour of the text around them.
+    function bzIco(id, px) {
+      return '<svg class="bz-line-ico" viewBox="0 0 24 24" width="' + px + '" height="' + px + '" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+        '<use href="/buzzy/icons/bz-icons.svg#' + id + '"/></svg>';
+    }
+    const FW_ICON = {
+      doc: bzIco("kind-doc", 46), audio: bzIco("kind-audio", 46), image: bzIco("kind-image", 46),
+      video: bzIco("kind-video", 46), model: bzIco("kind-model", 46), file: bzIco("kind-file", 46),
+    };
     const FW_STATUS = { draft: "Draft", ready: "Ready for you to check", accepted: "Finished" };
     let fwItems = [];       // the list last shown, for the document viewer
     let fwShowAll = false;
@@ -1693,7 +1703,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           { who: "bee", text: "Got it — I'll treat this as a " + (t ? t.name : "") + " job. When you're ready, I'll show a full draft. Nothing starts until you approve it." },
         ];
         state.screen = "chat";
-        syncHonchoChat();
         render();
       };
       document.getElementById("back").onclick = () => { state.screen = "pick"; render(); };
@@ -1712,7 +1721,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         "<p class='muted'>Approve the draft next — that's when the board appears.</p>";
       document.getElementById("draft").onclick = () => {
         buildDraft();
-        syncHonchoChat();
         state.screen = "draft";
         render();
         generateDraft();
@@ -1722,7 +1730,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (!v) {
           if (state.problem) {
             buildDraft();
-            syncHonchoChat();
             state.screen = "draft";
             render();
           }
@@ -1732,7 +1739,6 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         state.messages.push({ who: "me", text: v });
         state.problem = (state.problem ? state.problem + "\n\n" : "") + v;
         buildDraft();
-        syncHonchoChat();
         state.screen = "draft";
         render();
       };
@@ -1985,38 +1991,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       else if (state.screen === "docs") goDocs();
       saveState();
     }
-    const HONCHO_BASE = "https://honcho-api-production-5869.up.railway.app";
-
-    function ensureHonchoPeer() {
-      if (!catalog.userId) return;
-      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/peers", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: catalog.userId }),
-      }).catch(function () {});
-    }
-
-    function syncHonchoChat() {
-      if (!catalog.userId || !state.id) return;
-      ensureHonchoPeer();
-      const sid = String(state.id).slice(0, 128);
-      fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/sessions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: sid, peers: { [catalog.userId]: {}, beezilla: {} } }),
-      }).then(function () {
-        const msgs = (state.messages || []).filter(function (m) { return m.who === "me" && m.text; }).slice(-5);
-        if (!msgs.length && state.problem) msgs.push({ who: "me", text: state.problem });
-        if (!msgs.length) return;
-        return fetch(HONCHO_BASE + "/v3/workspaces/beezilla-clients/sessions/" + encodeURIComponent(sid) + "/messages", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            messages: msgs.map(function (m) { return { content: String(m.text).slice(0, 4000), peer_id: catalog.userId }; }),
-          }),
-        });
-      }).catch(function () {});
-    }
+    // External memory sync is disabled pending authenticated, scoped consent.
+    // This UI must never send owner IDs or conversations to an ambient third party.
 
     // ── Account gate. The chrome (nav.js) owns the identity chip and its menu;
     // this page only refuses a signed-out visitor. Two writers built two menus

@@ -19,6 +19,12 @@ import { artConfigured, generateImage, storeImage, imageModel } from "./art";
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+// A board is posted whole on every autosave (public/buzzy/sketch.html, 1.2s debounce),
+// so one oversized board costs the user that whole upload on each pause in drawing.
+// The page refuses over this same number first and says so out loud; this is the
+// backstop for any other caller of the route.
+const MAX_BOARD_BYTES = 8 * 1024 * 1024;
+
 // Matches chat.nitro.ts: h3 hands us node headers, and the auth helper wants a Headers.
 function headersFromEvent(event: any): Headers {
   const rawHeaders = event.node?.req?.headers ?? event.req?.headers;
@@ -81,6 +87,18 @@ export default defineEventHandler(async (event) => {
     if (!jobId) return json(400, { error: "jobId is required to save a board", code: "bad_request" });
     const board = body.board && typeof body.board === "object" ? body.board : null;
     if (!board) return json(400, { error: "board is required", code: "bad_request" });
+    // Backstop for the page's own cap. The board is re-posted whole on every
+    // autosave, so its size is a cost the user pays on each pause in drawing:
+    // measured 2026-11-23, without this check a 48 MB board was accepted and written
+    // to jsonb (50,331,971 B in, 50,332,010 B back out) with nothing refusing it.
+    const boardBytes = JSON.stringify(board).length;
+    if (boardBytes > MAX_BOARD_BYTES) {
+      return json(413, {
+        error: "Board is too large to save (" + (boardBytes / (1024 * 1024)).toFixed(1) + " MB, limit 8 MB)",
+        code: "payload_too_large",
+        bytes: boardBytes,
+      });
+    }
     const owned = await sql`SELECT id FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${user.id} LIMIT 1`;
     if (!owned.length) return json(404, { error: "No such project", code: "not_found" });
     // The board is the project's source, so it lives beside its brief and survives
@@ -106,6 +124,38 @@ export default defineEventHandler(async (event) => {
         updated_at = now()
       WHERE id = ${jobId} AND user_id = ${user.id}`;
     return json(200, { ok: true, saved: true });
+  }
+
+  // Saving the board itself as a Library file. The owner drew it, so there is no
+  // model call and no quota: it is their own artwork being filed against the project
+  // that produced it. Without the job_id the file would sit in the account with no
+  // project to show it under, which is the orphan bug the render path just fixed.
+  if (action === "file") {
+    if (!jobId) return json(400, { error: "jobId is required to file a board", code: "bad_request" });
+    const owned = await sql`SELECT id FROM buzzy_jobs WHERE id = ${jobId} AND user_id = ${user.id} LIMIT 1`;
+    if (!owned.length) return json(404, { error: "No such project", code: "not_found" });
+    const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";
+    const parsed = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+    if (!parsed) return json(400, { error: "dataUrl must be a base64 PNG or JPEG", code: "bad_request" });
+    const bytes = Buffer.from(parsed[2] as string, "base64");
+    if (bytes.byteLength === 0) return json(400, { error: "That image is empty.", code: "bad_request" });
+    if (bytes.byteLength > 16 * 1024 * 1024) return json(413, { error: "That image is over 16 MB.", code: "too_large" });
+    const ext = parsed[1] === "image/jpeg" ? "jpg" : "png";
+    const name = typeof body.name === "string" && body.name.trim()
+      ? body.name.trim().replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80)
+      : `sketch-${Date.now()}.${ext}`;
+    const stored = await storeImage(user.id, bytes, name, parsed[1] as string);
+    try {
+      await sql`UPDATE buzzy_assets SET job_id = ${jobId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
+      await sql`
+        UPDATE buzzy_jobs SET
+          data = jsonb_set(COALESCE(data, '{}'::jsonb), '{artifacts}', COALESCE(data->'artifacts', '[]'::jsonb) || ${JSON.stringify([
+            { kind: "image", id: String(stored.id), url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: parsed[1] },
+          ])}::jsonb, true),
+          updated_at = now()
+        WHERE id = ${jobId} AND user_id = ${user.id}`;
+    } catch { /* the file is stored either way */ }
+    return json(200, { ok: true, image: { id: String(stored.id), url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: parsed[1] } });
   }
 
   // Region edit. "Make the coat red" on a finished picture used to mean re-rolling

@@ -1,159 +1,882 @@
-/* The Whiteboard (whiteboard.js; reference zMWSgG0, top right). */
-.wb-panel {
+/*
+ * The Whiteboard's own look (whiteboard.js). The page around it is oneboard.css.
+ *
+ * Owner, 2026-11-18: "The whiteboard by default should be distinct from its
+ * background… a blackboard with a little bit of texture so you can see it's
+ * different from the space around it. It should be more distinct than the dotted
+ * version we have presently."
+ *
+ * A slate surface with a fine grain and a faint dot grid that scales with the zoom;
+ * cards with a coloured edge per role (agent.md yellow, skills lavender, outputs
+ * green, notes sticky-yellow); music, 3D and video as rounded bubbles; Miro's corners
+ * for the controls: tools on the left, zoom bottom-right, the conversation on the
+ * right where nothing covers it.
+ */
+:root {
+  --ob-slate: #262a30;
+  --ob-slate-edge: #3b4049;
+  --ob-card: #15171b;
+  --ob-card-edge: #2f343c;
+  --ob-text: #f2f2f2;
+  --ob-muted: #9aa0a8;
+  --ob-yellow: #ffc107;
+  --ob-skill: #9b8ec4;
+  --ob-out: #5baf6b;
+  --ob-red: #e07a7a;
+}
+.wb-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 18px;
+  background: #1b1e23;
+  border-bottom: 1px solid #30353d;
+}
+.wb-title { margin: 0; font-size: 0.95rem; font-weight: 700; color: #d9dde3; white-space: nowrap; }
+.wb-dock { flex: 1 1 0; min-width: 0; }
+.wb-dock .composer-card { margin: 0; }
+.wb-dock .talk-bar { padding: 0.35rem; box-shadow: none; background: #121418; border-color: #2f343c; }
+.wb-dock .talk-btn { min-height: 2.7rem; font-size: 1rem; padding: 0 1.2rem 0 1rem; }
+.wb-dock .composer-card .talk-field #chatInput { padding: 0.6rem 0; }
+.wb-tools { display: flex; gap: 6px; flex: 0 0 auto; }
+.wb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 2.2rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  border: 1px solid #3a3f47;
+  background: transparent;
+  color: #d9dde3;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wb-btn:hover, .wb-btn:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); background: transparent; outline: none; }
+.wb-btn .wb-ico { width: 16px; height: 16px; }
+
+.wb-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+/* A styled box ignores the hidden attribute unless told: these must really go. */
+.wb-panel [hidden] { display: none !important; }
+
+/* The surface: a slate blackboard with a fine grain, clearly not the page. */
+.wb-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  outline: none;
+  cursor: default;
+  touch-action: none;
+  background-color: var(--ob-slate);
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.13) 1.1px, transparent 1.4px),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 24px 24px, auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), inset 0 0 90px rgba(0, 0, 0, 0.28);
+}
+.wb-canvas:focus-visible { box-shadow: inset 0 0 0 2px rgba(255, 193, 7, 0.5); }
+.wb-canvas.wb-hand { cursor: grab; }
+.wb-canvas.wb-panning { cursor: grabbing; }
+.wb-canvas.wb-placing { cursor: crosshair; }
+.wb-panel.wb-target .wb-canvas { box-shadow: inset 0 0 0 2px rgba(255, 193, 7, 0.55); }
+.wb-panel.wb-over .wb-canvas { box-shadow: inset 0 0 0 3px var(--ob-yellow), inset 0 0 60px rgba(255, 193, 7, 0.18); }
+.wb-world { position: absolute; left: 0; top: 0; width: 1px; height: 1px; transform-origin: 0 0; will-change: transform; }
+.wb-world.wb-glide { transition: transform 0.38s ease; }
+@media (prefers-reduced-motion: reduce) { .wb-world.wb-glide { transition: none; } }
+.wb-links { position: absolute; left: 0; top: 0; pointer-events: none; }
+.wb-link { fill: none; stroke: var(--ob-yellow); stroke-width: 2.5; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(255, 193, 7, 0.35)); }
+.wb-link.wb-preview { stroke-dasharray: 6 6; opacity: 0.9; }
+.wb-link.wb-sel { stroke: #fff; stroke-width: 3.5; }
+.wb-link.wb-bad { stroke: var(--ob-red); filter: none; }
+.wb-link.wb-live { stroke-dasharray: 8 7; animation: wbFlow 0.9s linear infinite; }
+.wb-link.wb-draw { stroke-dasharray: 1200; stroke-dashoffset: 1200; animation: wbDraw 0.9s ease-out forwards; }
+@keyframes wbFlow { to { stroke-dashoffset: -30; } }
+@keyframes wbDraw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .wb-link.wb-live, .wb-link.wb-draw { animation: none; stroke-dashoffset: 0; } }
+.wb-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
+
+.wb-hint {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  max-width: min(460px, 70%);
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 15rem;
-  border-radius: 16px;
-  border: 1px solid #262626;
-  background: #141414;
-  overflow: hidden;
-}
-.wb-head { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 0.8rem 0.4rem 1rem; }
-.wb-title { margin: 0; font-size: 0.95rem; font-weight: 600; color: #D9D9D9; }
-.wb-tools { display: inline-flex; gap: 0.15rem; }
-.wb-btn {
-  min-height: 0; width: 1.9rem; height: 1.9rem; padding: 0;
-  border: none; border-radius: 8px; background: transparent; color: #CFCFCF;
-  font: inherit; font-size: 1rem; line-height: 1; cursor: pointer;
-}
-.wb-btn:hover { background: #222; color: #FFC107; }
-.wb-btn:focus-visible { outline: 2px solid #FFC107; }
-.wb-panel.wb-min { height: auto; min-height: 0; }
-.wb-panel.wb-min .wb-canvas, .wb-panel.wb-min .wb-foot { display: none; }
-
-.wb-canvas {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 12.5rem;
-  margin: 0 0.6rem;
-  border-radius: 12px;
-  overflow: auto;
-  background-color: #111;
-  background-image: radial-gradient(#2E2E2E 1px, transparent 1.2px);
-  background-size: 18px 18px;
-  outline: none;
-}
-.wb-panel.wb-over .wb-canvas { box-shadow: inset 0 0 0 2px #FFC107; background-color: #16130A; }
-.wb-panel.wb-target .wb-canvas { outline: 2px dashed #FFC107; outline-offset: -5px; }
-.wb-panel.wb-target .wb-canvas::before {
-  content: "Drop here to add it to the board";
-  position: absolute;
-  top: 0.6rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 3;
-  padding: 0.2rem 0.75rem;
-  border-radius: 999px;
-  background: #FFC107;
-  color: #141414;
-  font-size: 0.75rem;
-  font-weight: 600;
-  white-space: nowrap;
+  gap: 6px;
+  text-align: center;
+  color: #b9bfc8;
+  font-size: 0.95rem;
+  line-height: 1.5;
   pointer-events: none;
 }
-:root[data-theme="light"] .wb-panel.wb-target .wb-canvas { outline-color: #B8860B; }
-.wb-hint {
-  position: absolute; inset: 0; margin: 0;
-  display: flex; align-items: center; justify-content: center; text-align: center;
-  padding: 1rem; color: #6A6A6A; font-size: 0.9rem; pointer-events: none;
+.wb-hint strong { color: #eef1f4; font-size: 1.05rem; }
+/* No card in sight (zoomed or moved far off): one press brings them all back. */
+.wb-lost {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  max-width: min(440px, 80%);
+  min-height: 2.6rem;
+  padding: 0.5rem 1.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ob-yellow);
+  color: #141414;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.3;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
 }
-.wb-hint[hidden] { display: none; }
-.wb-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.wb-link {
-  fill: none; stroke: #FFC107; stroke-width: 3; stroke-linecap: round;
-  pointer-events: stroke; cursor: pointer;
+.wb-lost:hover { filter: brightness(1.06); }
+.wb-lost:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+/* A pinch anywhere on the board is the board's (whiteboard.js), never the page's:
+   fingers can still scroll the page from the board's bars, but not zoom it. */
+.wb-panel { touch-action: pan-x pan-y; }
+.wb-marquee {
+  position: absolute;
+  border: 1.5px solid var(--ob-yellow);
+  background: rgba(255, 193, 7, 0.09);
+  border-radius: 4px;
+  pointer-events: none;
 }
-.wb-link.wb-sel { stroke-width: 5; filter: drop-shadow(0 0 6px rgba(255, 193, 7, 0.8)); }
-.wb-link.wb-preview { stroke-dasharray: 6 6; pointer-events: none; }
 
+/* Tools: a slim column on the left, like Miro's creation bar. */
+.wb-toolbar {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(18, 20, 24, 0.94);
+  border: 1px solid #343a42;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+.wb-tool {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 10px;
+  border: 0;
+  background: transparent;
+  color: #d9dde3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.wb-tool:hover, .wb-tool:focus-visible { background: #262b33; color: #fff; outline: none; }
+.wb-tool.on { background: var(--ob-yellow); color: #141414; }
+.wb-tool .wb-ico { width: 20px; height: 20px; }
+.wb-key { position: absolute; right: 3px; bottom: 1px; font-size: 9px; font-weight: 700; opacity: 0.55; }
+.wb-ico { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Zoom: bottom-right, like Miro. */
+.wb-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(18, 20, 24, 0.94);
+  border: 1px solid #343a42;
+}
+/* Nothing covers anything: with the conversation open, the zoom bar and the
+   shortcut list sit left of it. */
+.wb-panel:not(.wb-side-is-closed) .wb-zoom,
+.wb-panel:not(.wb-side-is-closed) .wb-keylist,
+.wb-panel:not(.wb-side-is-closed) .wb-history { right: 364px; }
+.wb-zbtn, .wb-zlabel {
+  min-height: 0;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #d9dde3;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-zbtn { width: 32px; padding: 0; }
+.wb-zbtn .wb-ico { width: 17px; height: 17px; }
+.wb-zlabel { min-width: 52px; padding: 0 6px; font: 600 12px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.wb-zbtn:hover, .wb-zlabel:hover, .wb-zbtn:focus-visible, .wb-zlabel:focus-visible { background: #262b33; color: #fff; outline: none; }
+.wb-keylist {
+  position: absolute;
+  right: 12px;
+  bottom: 60px;
+  z-index: 7;
+  width: 300px;
+  max-height: calc(100% - 80px);
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #121418;
+  border: 1px solid #343a42;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  font-size: 0.85rem;
+  color: #d9dde3;
+}
+.wb-keyrow { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.wb-keyrow kbd { font: 600 11px/1.6 system-ui, sans-serif; padding: 0 6px; border-radius: 5px; border: 1px solid #3a3f47; background: #1c2026; white-space: nowrap; }
+.wb-keyclose { margin-top: 8px; width: 100%; min-height: 0; padding: 0.45rem; border-radius: 9px; border: 1px solid #3a3f47; background: transparent; color: #d9dde3; font: inherit; cursor: pointer; }
+
+/* History: this board's earlier versions in the account, by the zoom (bottom-right).
+   On a short window, or a phone on its side, it reaches the settings gear's corner
+   (nav.js #bzDock: fixed, z-index 45, with back-to-top at 40 above it). A panel covers
+   the gear, never the reverse, so History and what the board shows above it (the
+   selection bar, the editor, a message: 47–49) sit just over 45 and under the page's
+   own menus and drawers (50 and up). */
+.wb-history {
+  position: absolute;
+  right: 12px;
+  bottom: 60px;
+  z-index: 46;
+  width: 320px;
+  max-width: calc(100% - 24px);
+  max-height: min(460px, calc(100% - 80px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #121418;
+  border: 1px solid #343a42;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  font-size: 0.85rem;
+  color: #d9dde3;
+}
+.wb-hist-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #eef1f4; }
+.wb-hist-x { min-height: 1.9rem; padding: 0 0.7rem; font-size: 0.8rem; }
+.wb-hist-sync { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--ob-muted); }
+.wb-hist-list { list-style: none; margin: 0; padding: 0; min-height: 0; flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.wb-hist-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: #1a1d22; border: 1px solid #2a2f37; }
+.wb-hist-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; color: #eef1f4; }
+.wb-hist-count { font-weight: 500; color: var(--ob-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wb-hist-titles { font-size: 0.8rem; color: var(--ob-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-hist-now { font-size: 0.78rem; color: var(--ob-out); }
+.wb-hist-tag { font-size: 0.78rem; color: var(--ob-yellow); }
+.wb-history .wb-hist-go { align-self: flex-start; height: 30px; padding: 0 10px; border: 1px solid #3a3f47; font-size: 0.8rem; }
+.wb-history .wb-hist-go:hover, .wb-history .wb-hist-go:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); background: transparent; }
+.wb-history .wb-hist-go:disabled { opacity: 0.6; cursor: default; }
+.wb-hist-empty { padding: 6px 2px; color: var(--ob-muted); }
+.wb-hist-note { margin: 0; font-size: 0.75rem; line-height: 1.4; color: var(--ob-muted); }
+/* Not saved to the account yet: a small amber dot on the History button. */
+.wb-zbtn { position: relative; }
+.wb-zbtn.wb-unsynced::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ob-yellow);
+  box-shadow: 0 0 0 2px #121418;
+}
+
+/* Cards */
 .wb-card {
   position: absolute;
-  width: 7.5rem;
-  padding: 0.4rem 0.4rem 0.45rem;
-  border-radius: 10px;
-  border: 1px solid #2E2E2E;
-  background: #1B1B1B;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
-  color: #EDEDED;
-  cursor: grab;
-  touch-action: none;
+  width: 210px;
+  padding: 10px 12px 12px;
+  border-radius: 12px;
+  background: var(--ob-card);
+  border: 1px solid var(--ob-card-edge);
+  color: var(--ob-text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   user-select: none;
+  cursor: default;
+  outline: none;
 }
-.wb-card:focus-visible { outline: 2px solid #FFC107; outline-offset: 2px; }
-.wb-card.wb-moving { cursor: grabbing; z-index: 5; box-shadow: 0 12px 26px rgba(0, 0, 0, 0.55); }
-.wb-card.wb-flash { box-shadow: 0 0 0 3px #FFC107; }
-.wb-img { display: block; width: 100%; height: 4.6rem; object-fit: cover; border-radius: 7px; background: #222; }
-.wb-glyph {
-  display: flex; align-items: center; justify-content: center;
-  height: 4.6rem; border-radius: 7px; background: #222;
-  font-size: 2rem; font-weight: 800; color: #FFC107;
+.wb-card:focus-visible, .wb-card.wb-on { border-color: var(--ob-yellow); box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.45), 0 8px 22px rgba(0, 0, 0, 0.4); }
+.wb-card.wb-moving { opacity: 0.92; box-shadow: 0 16px 34px rgba(0, 0, 0, 0.5); }
+.wb-ctop { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--ob-muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.wb-cico { width: 14px; height: 14px; }
+.wb-ckind { flex: 1 1 auto; }
+.wb-badge { font-size: 0.66rem; padding: 1px 7px; border-radius: 999px; letter-spacing: 0.02em; }
+.wb-badge-run { background: rgba(255, 193, 7, 0.16); color: var(--ob-yellow); }
+.wb-badge-fail { background: rgba(224, 122, 122, 0.16); color: var(--ob-red); }
+.wb-name { display: block; font-weight: 700; font-size: 0.95rem; line-height: 1.3; word-break: break-word; }
+.wb-body-text {
+  margin: 6px 0 0;
+  max-height: 7.5em;
+  overflow: auto;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #c4c9d0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-.wb-g-document { background: linear-gradient(135deg, #2B7CD3, #185ABD); color: #fff; }
-.wb-g-sheet { background: linear-gradient(135deg, #21A366, #107C41); color: #fff; }
-.wb-g-slides { background: linear-gradient(135deg, #E86E44, #C43E1C); color: #fff; }
-.wb-g-pdf { background: linear-gradient(135deg, #E5484D, #B4232A); color: #fff; font-size: 1.4rem; }
-.wb-g-note { background: #FFE082; color: #3A2E00; }
-.wb-name { display: block; margin-top: 0.35rem; font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-body-text.wb-empty { color: #7f8690; font-style: italic; }
+.wb-err { margin: 6px 0 0; font-size: 0.8rem; color: var(--ob-red); }
+.wb-img { display: block; width: 100%; height: auto; max-height: 220px; object-fit: cover; margin-top: 8px; border-radius: 8px; background: #0e0f12; }
+.wb-glyph { display: inline-flex; align-items: center; justify-content: center; margin-top: 8px; width: 44px; height: 52px; border-radius: 6px; color: #fff; font-weight: 800; font-size: 1.1rem; }
+.wb-g-document { background: linear-gradient(135deg, #2b7cd3, #185abd); }
+.wb-g-sheet { background: linear-gradient(135deg, #21a366, #107c41); }
+.wb-g-slides { background: linear-gradient(135deg, #e86a3a, #c43e1c); }
+.wb-g-pdf { background: linear-gradient(135deg, #e5484d, #b4232a); font-size: 0.8rem; }
 .wb-rm {
-  position: absolute; top: 0.35rem; right: 0.35rem;
-  min-height: 0; width: 1.4rem; height: 1.4rem; padding: 0;
-  border: none; border-radius: 50%; background: rgba(0, 0, 0, 0.65); color: #eee;
-  font-size: 0.7rem; cursor: pointer; opacity: 0; transition: opacity 0.12s;
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #3a3f47;
+  background: #1c2026;
+  color: #d9dde3;
+  font-size: 15px;
+  line-height: 1;
+  display: none;
+  cursor: pointer;
 }
-.wb-card:hover .wb-rm, .wb-card:focus-within .wb-rm { opacity: 1; }
-@media (hover: none) { .wb-rm { opacity: 1; } }
+.wb-card:hover .wb-rm, .wb-card:focus-within .wb-rm, .wb-card.wb-on .wb-rm { display: inline-flex; align-items: center; justify-content: center; }
 .wb-handle {
   position: absolute;
-  width: 12px; height: 12px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: #FFC107;
+  background: var(--ob-yellow);
   box-shadow: 0 0 0 2px #141414;
+  opacity: 0;
   cursor: crosshair;
+  transition: opacity 0.12s;
 }
-.wb-nw { left: -6px; top: -6px; }
-.wb-ne { right: -6px; top: -6px; }
-.wb-sw { left: -6px; bottom: -6px; }
-.wb-se { right: -6px; bottom: -6px; }
+.wb-card:hover .wb-handle, .wb-card.wb-on .wb-handle, .wb-card:focus-within .wb-handle { opacity: 1; }
+.wb-nw { left: -6px; top: -6px; } .wb-ne { right: -6px; top: -6px; }
+.wb-sw { left: -6px; bottom: -6px; } .wb-se { right: -6px; bottom: -6px; }
 
-.wb-foot { position: relative; padding: 0.6rem; }
-.wb-search {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 0;
-  padding: 0.6rem 0.9rem 0.6rem 2.2rem;
-  border-radius: 999px;
-  border: 1px solid #2A2A2A;
-  background: #0E0E0E url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BDBDBD' stroke-width='2'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5L21 21'/%3E%3C/svg%3E") no-repeat 0.75rem 50% / 1rem;
-  color: #F2F2F2;
-  font: inherit;
-  font-size: 0.9rem;
-}
-.wb-search:focus { outline: none; border-color: #FFC107; box-shadow: none; }
-.wb-results {
+/* What each card is, at a glance: an edge colour per role. */
+.wb-r-agent { border-left: 4px solid var(--ob-yellow); width: 250px; }
+.wb-r-skill { border-left: 4px solid var(--ob-skill); }
+.wb-k-memory { border-left-color: #5b8db8; }
+.wb-r-output { border-left: 4px solid var(--ob-out); }
+.wb-k-track, .wb-k-model, .wb-k-video { width: 300px; border-radius: 18px; } /* the bubbles */
+.wb-k-image { width: 240px; }
+.wb-k-note { background: #ffe680; color: #2a2400; border-color: #e7c94c; }
+.wb-k-note .wb-ctop, .wb-k-note .wb-body-text { color: #4d4300; }
+.wb-k-note .wb-body-text.wb-empty { color: #7a6c1a; }
+.wb-s-running { border-color: rgba(255, 193, 7, 0.75); animation: wbPulse 1.4s ease-in-out infinite; }
+.wb-s-failed { border-color: var(--ob-red); }
+@keyframes wbPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.0), 0 6px 18px rgba(0, 0, 0, 0.35); } 50% { box-shadow: 0 0 0 5px rgba(255, 193, 7, 0.18), 0 6px 18px rgba(0, 0, 0, 0.35); } }
+@media (prefers-reduced-motion: reduce) { .wb-s-running { animation: none; } }
+.wb-wave { margin-top: 10px; }
+.wb-model { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.wb-cube { width: 54px; height: 54px; color: var(--ob-yellow); }
+.wb-cube.wb-spin { animation: wbSpin 2.4s linear infinite; }
+@keyframes wbSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .wb-cube.wb-spin { animation: none; } }
+.wb-progress { font-size: 0.82rem; color: #d8c36a; }
+.wb-open { color: var(--ob-yellow); font-size: 0.85rem; font-weight: 600; }
+.wb-video { width: 100%; margin-top: 8px; border-radius: 10px; background: #000; }
+
+/* The bar over a selection, and the editor beside a card. */
+.wb-selbar {
   position: absolute;
-  left: 0.6rem; right: 0.6rem; bottom: calc(100% - 0.2rem);
-  z-index: 20;
-  max-height: 14rem;
-  overflow-y: auto;
-  padding: 0.3rem;
+  z-index: 47;   /* over History (46), as before; see .wb-history */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
   border-radius: 12px;
-  border: 1px solid #2C2C2C;
-  background: #171717;
-  box-shadow: 0 -10px 26px rgba(0, 0, 0, 0.5);
+  background: #121418;
+  border: 1px solid #3a3f47;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
 }
-.wb-results[hidden] { display: none; }
-.wb-opt {
-  display: flex; flex-direction: column; align-items: flex-start; width: 100%;
-  min-height: 0; padding: 0.45rem 0.6rem; border: none; border-radius: 8px;
-  background: transparent; color: #EDEDED; font: inherit; text-align: left; cursor: pointer;
+.wb-selbar.wb-quiet { visibility: hidden; }
+.wb-selcount { padding: 0 8px; color: var(--ob-muted); font-size: 0.8rem; }
+.wb-selbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 0;
+  background: transparent;
+  color: #e6e9ed;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
 }
-.wb-opt:hover, .wb-opt:focus-visible { background: #222; outline: none; }
-.wb-opt-name { font-size: 0.88rem; }
-.wb-opt-sub { font-size: 0.74rem; color: #8D8D8D; }
-.wb-none { margin: 0.4rem 0.6rem; color: #8D8D8D; font-size: 0.85rem; }
+.wb-selbtn:hover, .wb-selbtn:focus-visible { background: #262b33; outline: none; color: #fff; }
+.wb-selbtn .wb-ico { width: 16px; height: 16px; }
+.wb-recipe-btn { color: var(--ob-yellow); }
+.wb-primary { background: var(--ob-yellow); color: #141414; }
+.wb-primary:hover, .wb-primary:focus-visible { background: #ffd54f; color: #141414; }
+.wb-namer { display: flex; align-items: center; gap: 4px; }
+.wb-namer[hidden] { display: none; }
+.wb-namer-in { width: 200px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid #3a3f47; background: #0d0f12; color: #fff; font: inherit; font-size: 0.88rem; }
+.wb-editor {
+  position: absolute;
+  z-index: 48;
+  width: 320px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #121418;
+  border: 1px solid #3a3f47;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wb-ed-head { display: flex; align-items: center; justify-content: space-between; color: #eef1f4; }
+.wb-ed-title, .wb-ed-body { width: 100%; box-sizing: border-box; border-radius: 9px; border: 1px solid #3a3f47; background: #0d0f12; color: #fff; font: inherit; padding: 8px 10px; }
+.wb-ed-body { resize: vertical; min-height: 8em; line-height: 1.45; font-size: 0.9rem; }
+.wb-ed-row { display: flex; align-items: center; gap: 10px; }
+.wb-ed-note { font-size: 0.78rem; color: var(--ob-muted); }
+.wb-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 49;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: #121418;
+  border: 1px solid #3a3f47;
+  color: #eef1f4;
+  font-size: 0.88rem;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
 
-:root[data-theme="light"] .wb-panel { background: #fff; border-color: #E2E2E2; }
-:root[data-theme="light"] .wb-canvas { background-color: #FAFAF7; background-image: radial-gradient(#DDD 1px, transparent 1.2px); }
-:root[data-theme="light"] .wb-card { background: #fff; border-color: #E2E2E2; color: #141414; }
-@media (prefers-reduced-motion: reduce) { .wb-rm { transition: none; } }
+/* The conversation, inside the board on the right. */
+.wb-side {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  bottom: 12px;
+  z-index: 6;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: rgba(14, 15, 18, 0.96);
+  border: 1px solid #343a42;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.wb-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 14px; border-bottom: 1px solid #262b33; }
+.wb-side-title { font-size: 0.85rem; font-weight: 700; color: #d9dde3; }
+.wb-side-btn { min-height: 1.9rem; padding: 0 0.7rem; font-size: 0.8rem; }
+.wb-side-slot { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.wb-side.wb-side-closed { bottom: auto; width: auto; }
+.wb-side.wb-side-closed .wb-side-slot, .wb-side.wb-side-closed .wb-side-title { display: none; }
+.wb-side.wb-side-closed .wb-side-head { border-bottom: 0; padding: 6px; }
+.wb-side-slot .talk-ws-thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border: 0; border-radius: 0; background: transparent; }
+.wb-side-slot .chat-messages { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding: 0.6rem 0.8rem; }
+.wb-side-slot .chat-messages:empty::before {
+  content: "What you say and BeeZilla's answers show up here. The work itself goes on the board.";
+  display: block;
+  padding: 0.8rem 0.2rem;
+  color: #8a9099;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.wb-side-slot .bubble { font-size: 0.9rem; }
+.wb-side-slot .bz-what { opacity: 0; transition: opacity 0.15s; }
+.wb-side-slot .bz-what:hover { opacity: 0.85; }
+
+/* Files in the conversation panel: the name, the waveform or picture, then the
+   links — stacked, because the panel is narrow. No emoji badge (they don't draw
+   everywhere, and the card already says what it is). */
+.wb-side-slot .file-card.media-card { flex-wrap: wrap; gap: 6px 10px; }
+.wb-side-slot .media-card .file-icon { display: none; }
+.wb-side-slot .media-card .file-meta { flex: 1 1 100%; }
+.wb-side-slot .media-card .file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-side-slot .media-card .media-img { max-width: 100%; }
+.wb-side-slot .media-card .bzw { margin-top: 6px; }
+
+@media (max-width: 760px) {
+  .wb-head { flex-wrap: wrap; padding: 8px 10px; }
+  .wb-dock { order: 3; flex-basis: 100%; }
+  .wb-btn-label { display: none; }
+  .wb-body { min-height: 60vh; }
+  .wb-toolbar { left: 8px; right: 8px; top: 8px; padding: 3px; flex-direction: row; justify-content: space-between; gap: 2px; }
+  .wb-tool { width: 32px; height: 32px; }
+  .wb-tool .wb-ico { width: 18px; height: 18px; }
+  .wb-key { display: none; }
+  .wb-side { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 40%; }
+  .wb-panel:not(.wb-side-is-closed) .wb-zoom { right: 8px; bottom: calc(40% + 16px); }
+  .wb-panel:not(.wb-side-is-closed) .wb-keylist,
+  .wb-panel:not(.wb-side-is-closed) .wb-history { right: 8px; bottom: calc(40% + 60px); }
+  .wb-history { right: 8px; max-height: calc(100% - 120px); }
+  .wb-panel:not(.wb-side-is-closed) .wb-history { max-height: calc(60% - 120px); }
+  /* Little room on a phone: the list gets it, not the explainer. */
+  .wb-hist-note { display: none; }
+  .wb-history { gap: 6px; padding: 10px 12px; }
+  .wb-side.wb-side-closed { left: auto; }
+  .wb-zoom { right: 8px; bottom: 8px; }
+  .wb-card { width: 180px; }
+  .wb-r-agent { width: 200px; }
+  .wb-k-track, .wb-k-model, .wb-k-video { width: 240px; }
+}
+
+/* ── The conversation, as a card on the board (owner, 2026-11-20: "on the board itself
+   as a thing that you could scroll by. It would just be sitting there.") ─────────
+   Hold it by the bar on top to move it; inside, the words scroll and can be selected. */
+.wb-card.wb-k-chat {
+  width: 360px;
+  height: 480px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #121418;
+}
+.wb-chat-bar { margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--ob-card-edge); cursor: grab; }
+.wb-chat-bar:active { cursor: grabbing; }
+.wb-chat-grip { font-weight: 600; text-transform: none; letter-spacing: 0; opacity: 0.65; }
+.wb-chat-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; user-select: text; cursor: auto; }
+.wb-chat-body .wb-side-slot { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+/* ── Connect and share (owner, 2026-11-20: "/space" connectors, within our framework) ──
+   One dot on each card's right edge starts a line; lines run left to right with an
+   arrow. Amber: part of the work (into or out of one of BeeZilla's steps). Grey and
+   dashed: two things joined that lead to no step yet. A selected step lights up what
+   feeds it. Areas cordon off a piece of the board, under everything else. */
+.wb-port {
+  right: -8px;
+  top: min(calc(50% - 8px), 48px);
+  width: 16px;
+  height: 16px;
+  box-shadow: 0 0 0 3px #141414;
+  touch-action: none;
+}
+.wb-port::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }   /* a bigger target than it looks */
+.wb-port:hover, .wb-connecting .wb-port { opacity: 1; transform: scale(1.15); }
+.wb-card.wb-target { border-color: var(--ob-yellow); box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.65), 0 10px 26px rgba(0, 0, 0, 0.45); }
+.wb-card.wb-lit:not(.wb-k-area) { border-color: rgba(255, 193, 7, 0.85); box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.35), 0 8px 22px rgba(0, 0, 0, 0.4); }
+.wb-link.wb-plain { stroke: #8a9099; stroke-dasharray: 5 6; filter: none; }
+.wb-link.wb-lit { stroke: #ffd54f; stroke-width: 3.5; }
+.wb-arrow-feed { fill: var(--ob-yellow); }
+.wb-arrow-plain { fill: #8a9099; }
+.wb-arrow-sel { fill: #fff; }
+.wb-link-x {
+  position: absolute;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid #5a2f2f;
+  background: #2a1517;
+  color: #ffb4b4;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-link-x[hidden] { display: none; }
+.wb-link-x:hover, .wb-link-x:focus-visible { background: var(--ob-red); color: #141414; outline: none; }
+
+/* Areas */
+.wb-card.wb-k-area {
+  padding: 0;
+  pointer-events: none;            /* the board under it still selects and places */
+  background: rgba(255, 193, 7, 0.035);
+  border: 2px dashed rgba(255, 193, 7, 0.5);
+  border-radius: 18px;
+  box-shadow: none;
+}
+.wb-card.wb-k-area.wb-on, .wb-card.wb-k-area:focus-visible { border-style: solid; border-color: var(--ob-yellow); box-shadow: none; }
+.wb-card.wb-k-area.wb-lit { border-color: var(--ob-yellow); background: rgba(255, 193, 7, 0.07); }
+.wb-k-area .wb-area-bar, .wb-k-area .wb-grip, .wb-k-area .wb-port, .wb-k-area .wb-rm { pointer-events: auto; }
+.wb-area-bar {
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  max-width: calc(100% - 20px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 10px;
+  background: #1b1e24;
+  border: 1px solid #3a3f47;
+  color: #eef1f4;
+  font-size: 0.84rem;
+  cursor: grab;
+  overflow: hidden;
+}
+.wb-moving .wb-area-bar { cursor: grabbing; }
+.wb-area-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wb-area-count { color: var(--ob-muted); font-size: 0.76rem; white-space: nowrap; }
+.wb-area-tag { padding: 1px 8px; border-radius: 999px; background: rgba(91, 175, 107, 0.18); color: #9fd8a9; font-size: 0.72rem; white-space: nowrap; }
+.wb-area-sell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid #4a4130;
+  background: transparent;
+  color: var(--ob-yellow);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.wb-area-sell .wb-ico { width: 14px; height: 14px; }
+.wb-area-sell:hover, .wb-area-sell:focus-visible { background: rgba(255, 193, 7, 0.12); outline: none; }
+.wb-k-area .wb-port { top: 12px; }
+.wb-grip {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 0 55%, rgba(255, 193, 7, 0.7) 55% 62%, transparent 62% 72%, rgba(255, 193, 7, 0.7) 72% 79%, transparent 79%);
+  touch-action: none;
+}
+
+/* "Coming soon" */
+.wb-soon {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 193, 7, 0.16);
+  color: var(--ob-yellow);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.wb-sell-btn { border-color: #4a4130; color: var(--ob-yellow); }
+.wb-selsell-btn { color: var(--ob-yellow); }
+.wb-selbar:has(.wb-namer:not([hidden])) .wb-area-btn,
+.wb-selbar:has(.wb-namer:not([hidden])) .wb-selsell-btn { display: none; }
+
+/* The panel: same corner and layer as History (which it replaces while open). */
+.wb-sellpanel {
+  position: absolute;
+  right: 12px;
+  bottom: 60px;
+  z-index: 46;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  max-height: min(560px, calc(100% - 80px));
+  overflow: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #121418;
+  border: 1px solid #4a4130;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  font-size: 0.88rem;
+  color: #d9dde3;
+}
+.wb-sellpanel[hidden] { display: none; }
+.wb-sell-head { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 0.98rem; }
+.wb-sell-head strong { flex: 0 1 auto; }
+.wb-sell-x { margin-left: auto; min-height: 1.9rem; padding: 0 0.7rem; font-size: 0.8rem; }
+.wb-sell-what { margin: 0; color: var(--ob-muted); font-size: 0.8rem; }
+.wb-sell-lede, .wb-sell-note { margin: 0; line-height: 1.45; }
+.wb-sell-note { color: #b9bfc7; font-size: 0.82rem; }
+.wb-sell-q { margin: 0; font-weight: 700; color: #fff; font-size: 0.95rem; }
+.wb-sell-pick { margin: 0; color: #9fd8a9; font-weight: 600; }
+.wb-sell-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #343a42;
+  background: #1a1d22;
+  color: #d9dde3;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wb-sell-opt strong { color: #fff; font-size: 0.92rem; }
+.wb-sell-opt span { color: var(--ob-muted); font-size: 0.8rem; line-height: 1.4; }
+.wb-sell-opt:hover, .wb-sell-opt:focus-visible, .wb-sell-opt.wb-picked { border-color: var(--ob-yellow); outline: none; }
+.wb-sell-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-sell-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #0e0f12; }
+.wb-sell-chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 999px; background: #1f2329; color: #d9dde3; font-size: 0.78rem; }
+.wb-sell-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-sell-back { align-self: flex-start; min-height: 0; padding: 2px 0; border: 0; background: none; color: var(--ob-muted); font: inherit; font-size: 0.8rem; text-decoration: underline; cursor: pointer; }
+.wb-sell-back:hover, .wb-sell-back:focus-visible { color: #fff; outline: none; }
+@media (max-width: 760px) {
+  .wb-sell-btn .wb-soon { display: none; }
+  .wb-sellpanel { right: 8px; left: 8px; width: auto; max-height: calc(100% - 120px); }
+  .wb-panel:not(.wb-side-is-closed) .wb-sellpanel { bottom: calc(40% + 60px); max-height: calc(60% - 120px); }
+}
+
+/* A card BeeZilla is working on for you (board.act, by voice): lit for a moment. */
+.wb-card.wb-pilot { box-shadow: 0 0 0 3px var(--ob-yellow), 0 0 24px rgba(255, 193, 7, 0.55); transition: box-shadow 0.2s; }
+.wb-card.wb-k-area.wb-pilot { border-style: solid; border-color: var(--ob-yellow); box-shadow: 0 0 24px rgba(255, 193, 7, 0.35); }
+@media (prefers-reduced-motion: reduce) { .wb-card.wb-pilot { transition: none; } }
+
+/* ── Drawing on the board (Sketch, merged in), and Who it serves ──────────── */
+.wb-card.wb-k-sketch { padding: 0 0 8px; overflow: visible; background: #fbfbf8; color: #1d1d1f; border-color: #d9d6cc; }
+.wb-k-sketch .wb-sk-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 6px; margin: 0; color: #5a5a5f; }
+.wb-k-sketch .wb-ckind { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-sk-btn {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: 26px; padding: 0 9px;
+  border-radius: 8px; border: 1px solid #d0ccbf; background: #fff; color: #1d1d1f;
+  font: inherit; font-size: 0.74rem; font-weight: 700; letter-spacing: 0; text-transform: none; cursor: pointer;
+}
+.wb-sk-btn .wb-ico { width: 14px; height: 14px; }
+.wb-sk-btn:hover, .wb-sk-btn:focus-visible { border-color: var(--ob-yellow); outline: none; }
+.wb-sk-real { background: var(--ob-yellow); border-color: var(--ob-yellow); color: #141414; }
+.wb-sk-btn:disabled { opacity: 0.55; cursor: default; }
+.wb-sk-canvas { display: block; margin: 0 0 0; border-top: 1px solid #ebe8df; border-bottom: 1px solid #ebe8df; background: #fff; touch-action: none; }
+.wb-card.wb-drawing { border-color: var(--ob-yellow); box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.55), 0 10px 26px rgba(0, 0, 0, 0.45); }
+.wb-card.wb-drawing .wb-sk-canvas { cursor: crosshair; }
+.wb-sk-what { margin: 6px 10px 0; font-size: 0.78rem; line-height: 1.35; color: #5a5a5f; }
+.wb-sketchbar {
+  position: absolute; z-index: 47; display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  max-width: min(720px, calc(100% - 90px)); padding: 6px; border-radius: 12px;
+  background: #121418; border: 1px solid #3a3f47; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+.wb-sketchbar[hidden] { display: none; }
+.wb-sk-tool, .wb-sk-size, .wb-sk-act {
+  min-height: 0; height: 30px; padding: 0 9px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: #e6e9ed; font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+}
+.wb-sk-tool:hover, .wb-sk-size:hover, .wb-sk-act:hover, .wb-sk-tool:focus-visible, .wb-sk-size:focus-visible, .wb-sk-act:focus-visible { background: #262b33; outline: none; }
+.wb-sk-tool.on, .wb-sk-size.on { border-color: var(--ob-yellow); color: var(--ob-yellow); }
+.wb-sk-swatches { display: inline-flex; gap: 3px; padding: 0 4px; }
+.wb-sk-ink { width: 22px; height: 22px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid #3a3f47; cursor: pointer; }
+.wb-sk-ink.on { border-color: var(--ob-yellow); box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.4); }
+.wb-k-person { border-left: 4px solid #6fb3d9; }
+.wb-ed-speak.on { background: var(--ob-red); color: #141414; }
+.wb-ed-speak .wb-ico { width: 15px; height: 15px; }
+@media (max-width: 760px) {
+  .wb-sketchbar { left: 8px !important; right: 8px; max-width: none; }
+}
+
+/* "See board" by the Talk bar while the board is folded (voice-stage.js paintSeeBoard). */
+.ob-see-board {
+  display: inline-flex; align-items: center; justify-content: center; margin: 8px 0 0; min-height: 2.4rem; padding: 0 1.1rem;
+  border-radius: 999px; border: 1px solid #ffc107; background: transparent; color: #ffc107;
+  font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer;
+}
+.ob-see-board:hover, .ob-see-board:focus-visible { background: rgba(255, 193, 7, 0.12); outline: none; }
+.ob-see-board[hidden] { display: none; }
+
+/* ── Orchestrations on the board (owner, 2026-11-24: "use it on the normal whiteboard
+   and tell the AI what we want to orchestrate, and it can put the pieces together live
+   in front of us"). Each orchestration card keeps the board's card look with its own
+   edge colour, the same colours the Orchestrate editor uses for each type. ───────── */
+.wb-r-flow { border-left: 4px solid var(--ob-skill); }
+.wb-k-start { border-left-color: #5baf6b; }
+.wb-k-tool { border-left-color: #5b8db8; }
+.wb-k-decision { border-left-color: #e0a93b; }
+.wb-k-parallel { border-left-color: #4fb3a9; }
+.wb-k-loop { border-left-color: #b07ad6; }
+.wb-k-approval { border-left-color: var(--ob-yellow); }
+.wb-k-trigger { border-left-color: #6fa8dc; }
+.wb-k-subflow { border-left-color: #9aa0a8; }
+.wb-k-start .wb-ctop { color: #7fcf8e; }
+.wb-k-tool .wb-ctop { color: #86b2db; }
+.wb-k-decision .wb-ctop { color: #f0c066; }
+.wb-k-parallel .wb-ctop { color: #77cfc6; }
+.wb-k-loop .wb-ctop { color: #cba0ea; }
+.wb-k-approval .wb-ctop { color: var(--ob-yellow); }
+.wb-k-trigger .wb-ctop { color: #93c1ea; }
+.wb-k-subflow .wb-ctop { color: #c4c9d0; }
+
+/* An end result that is still a description: the end of a flow, not a Word file. */
+.wb-card.wb-end .wb-glyph { display: none; }
+.wb-card.wb-end .wb-ctop { color: #7fcf8e; }
+
+/* What a line says ("yes", "approved", "again"): a small pill at its middle. */
+.wb-llabel rect { fill: #121418; stroke: rgba(255, 193, 7, 0.55); stroke-width: 1; }
+.wb-llabel text { fill: #f2f2f2; font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: 0.01em; }
+.wb-llabel.wb-sel rect { stroke: #fff; }
+
+/* A card BeeZilla just put up, and cards moving over to make room. */
+.wb-card.wb-arrive { animation: wbArrive 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes wbArrive { from { opacity: 0; transform: translateY(10px) scale(0.92); } to { opacity: 1; transform: none; } }
+.wb-card.wb-shift { transition: left 0.42s ease, top 0.42s ease; }
+@media (prefers-reduced-motion: reduce) { .wb-card.wb-arrive { animation: none; } .wb-card.wb-shift { transition: none; } }
+
+/* While BeeZilla builds: what it said it is doing, and Stop. Top centre of the board,
+   clear of the tools on the left and the zoom on the right. */
+.wb-buildbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 48;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(640px, calc(100% - 140px));
+  padding: 8px 8px 8px 14px;
+  border-radius: 14px;
+  background: rgba(18, 20, 24, 0.96);
+  border: 1px solid rgba(255, 193, 7, 0.5);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: #eef1f4;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.wb-buildbar[hidden] { display: none; }
+.wb-build-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: var(--ob-yellow); animation: wbPulse 1s ease-in-out infinite; }
+@keyframes wbPulse { 50% { opacity: 0.35; transform: scale(0.8); } }
+@media (prefers-reduced-motion: reduce) { .wb-build-dot { animation: none; } }
+.wb-build-text { flex: 1 1 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wb-build-stop {
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #3a3f47;
+  background: transparent;
+  color: #d9dde3;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wb-build-stop:hover, .wb-build-stop:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); outline: none; }
+@media (max-width: 760px) {
+  .wb-buildbar { top: auto; bottom: 64px; max-width: calc(100% - 24px); }
+  /* The selection bar is one line; on a phone this button keeps only its icon. */
+  .wb-orch-btn > span { display: none; }
+}

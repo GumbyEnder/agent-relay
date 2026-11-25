@@ -74,11 +74,12 @@ const MONEY = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b
 const DATE =
   /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},?\s+\d{4}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/i;
 
-const FROM_RE = /^(?:from|vendor|supplier|issued by|billed from|seller)\s*[:\-]\s*(.+)$/i;
-const TO_RE = /^(?:to|bill to|billed to|sold to|customer|client)\s*[:\-]\s*(.+)$/i;
-const ASK_RE = /^(?:for|description|re|subject|regarding|services|work)\s*[:\-]\s*(.+)$/i;
+const FROM_RE = /^(?:from|vendor|supplier|issued by|billed from|seller)\s*[:-]\s*(.+)$/i;
+const TO_RE = /^(?:to|bill to|billed to|sold to|customer|client)\s*[:-]\s*(.+)$/i;
+const ASK_RE = /^(?:for|description|re|subject|regarding|services|work)\s*[:-]\s*(.+)$/i;
 
 function cleanLine(raw: string): string {
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   return raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 }
 
@@ -406,6 +407,7 @@ function newId(prefix: string): string {
 export function cleanFilename(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const base = raw.replace(/\\/g, "/").split("/").pop() || "";
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   return base.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 180);
 }
 
@@ -790,6 +792,7 @@ export async function updatePaperLine(
       WHERE id = ${lineId} AND user_id = ${userId}
     `;
   } else {
+    // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
     const next = (value || "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
     if (!next) {
       return { ok: false, error: "Type the corrected line.", code: "bad_request", status: 400 };

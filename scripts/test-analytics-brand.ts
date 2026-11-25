@@ -1,9 +1,11 @@
 /**
  * The OpenPanel write client must follow the HOST, not the build or the env.
  *
- * Guard for the 2026-11-18 regression: one service answers beezilla.net and
- * app.devboards.ai with no BZ_BRAND set, so a module-level const from process.env
- * sent every BeeZilla page view into the Dev Boards project.
+ * Guard for the 2026-11-18 regression: the consumer host and the console host are
+ * answered with no BZ_BRAND set (then one service, now two — beezilla.net on
+ * beezilla-web, app.devboards.ai on agent-relay, neither with a brand var), so a
+ * module-level const from process.env sent every BeeZilla page view into the Dev
+ * Boards project.
  *
  * WHY THIS ASSERTS THE CLASSIFIER AND NOT JUST THE ID: with BZ_BRAND unset the env
  * fallback and the console id are the same string, so `openpanelClientId("junk")`

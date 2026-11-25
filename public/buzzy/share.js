@@ -210,7 +210,7 @@
     }
     function onKey(e) { if (e.key === "Escape") { e.preventDefault(); done(); } }
     closeBtn.addEventListener("click", done);
-    scrim.addEventListener("click", done);
+    // Its X or Esc closes it, never a click on the scrim ("no click-outside-to-close").
     document.addEventListener("keydown", onKey, true);
     closeBtn.focus();
   }

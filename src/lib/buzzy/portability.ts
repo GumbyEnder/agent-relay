@@ -97,6 +97,8 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_document_versions:
     "DELETE FROM buzzy_document_versions WHERE doc_id IN (SELECT id FROM buzzy_documents WHERE user_id = $1) RETURNING 1",
   buzzy_share_links: "DELETE FROM buzzy_share_links WHERE user_id = $1 RETURNING 1",
+  // Pages the person shared by link (0064): the copies go with the account.
+  buzzy_page_shares: "DELETE FROM buzzy_page_shares WHERE user_id = $1 RETURNING 1",
   buzzy_outbound_actions: "DELETE FROM buzzy_outbound_actions WHERE user_id = $1 RETURNING 1",
   buzzy_telemetry: "DELETE FROM buzzy_telemetry WHERE user_id = $1 RETURNING 1",
   buzzy_documents: "DELETE FROM buzzy_documents WHERE user_id = $1 RETURNING 1",
@@ -115,6 +117,15 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   // pass, and no "snapshot" that outlives the user — closing an account is not
   // consent to a 24-month archive. The receipt counts the rows it removed.
   buzzy_feedback: "DELETE FROM buzzy_feedback WHERE user_id = $1 RETURNING 1",
+  // The one board (0060_buzzy_one_board): the person's own AI key (sealed), the
+  // recipes they made from the Idea Board and the search words on their files.
+  buzzy_user_ai_keys: "DELETE FROM buzzy_user_ai_keys WHERE user_id = $1 RETURNING 1",
+  buzzy_board_recipes: "DELETE FROM buzzy_board_recipes WHERE user_id = $1 RETURNING 1",
+  buzzy_asset_tags: "DELETE FROM buzzy_asset_tags WHERE user_id = $1 RETURNING 1",
+  // The Talk whiteboards (0060): the history first (FK child; cascade covers it too,
+  // but the explicit pass keeps the receipt truthful), then the boards.
+  buzzy_whiteboard_versions: "DELETE FROM buzzy_whiteboard_versions WHERE user_id = $1 RETURNING 1",
+  buzzy_whiteboards: "DELETE FROM buzzy_whiteboards WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */

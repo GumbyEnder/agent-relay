@@ -103,14 +103,36 @@ const talk = readFileSync(resolve(root, "public/buzzy/talk.html"), "utf8");
 const browse = readFileSync(resolve(root, "public/buzzy/browse.js"), "utf8");
 const pilot = readFileSync(resolve(root, "public/buzzy/pilot.js"), "utf8");
 const navjs = readFileSync(resolve(root, "public/buzzy/nav.js"), "utf8");
-for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "sessionsToggle", "newSessionBtn", "micBtn"]) {
+for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newSessionBtn", "micBtn"]) {
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }
-// One voice switch: the header control built by nav.js, not a page-level pill.
-check(navjs.includes('mic.id = "bzVoiceMic"'), "nav.js builds the #bzVoiceMic voice switch");
-check(pilot.includes("#bzVoiceMic"), "pilot.js presses the one voice switch");
-for (const tab of ["inspiration", "library", "memory", "experts"]) check(talk.includes(`data-tab="${tab}"`), `talk.html has the ${tab} tab`);
+// One voice switch: Talk to BeeZilla (#micBtn, checked above), not a page-level pill
+// and, since the owner's 2026-11-18 top-bar cleanup, not a header control either.
+// nav.js keeps only the live-mic pill that shows and stops a running session.
+check(!navjs.includes('"bzVoiceMic"'), "nav.js builds no header voice switch");
+check(navjs.includes('live.id = "bzMicLive"'), "nav.js builds the live-mic pill");
+check(!pilot.includes("#bzVoiceMic"), "pilot.js presses no header voice switch");
+// Live words in every browser (owner, 2026-11-19: "the text is literally showing up as
+// I'm speaking"). Chrome's recogniser streams its guesses; the recorder lane (Brave,
+// Firefox, the desktop app) asks the transcriber about the clip so far while the person
+// talks, and the route keeps those guesses out of the time-to-transcript numbers.
+const chatRoutes = readFileSync(resolve(root, "src/lib/buzzy/chat.nitro.ts"), "utf8");
+const voiceStage = readFileSync(resolve(root, "public/buzzy/voice-stage.js"), "utf8");
+check(talk.includes("if (speechSeen) liveWords(recState);") && talk.includes('"partial=1"'), "the recorder lane shows live words while the person talks");
+check(/const partial = queryValue\(fullPath, "partial"\) === "1";[\s\S]{0,600}if \(!partial\) \{\s*const sql = await getSql\(\);\s*await recordVoiceMetrics/.test(chatRoutes), "live guesses are not counted as time to transcript");
+// Talk → Pause → Continue (owner, 2026-11-19: "You can click on that pause anytime, think
+// as much as you want, and then continue clicking on it and dictate it"). What is said
+// collects in the box; only the person's own send reaches BeeZilla.
+check(talk.includes('var word = voice.mic ? "Pause" : voice.paused ? "Continue" : "Talk to BeeZilla";'), "the button reads Talk to BeeZilla, then Pause, then Continue");
+check((talk.match(/(?<!function )sendChatMessage\(\)/g) || []).length === 1 && talk.includes("Promise.resolve(sendChatMessage()).then(after, after);"), "only the person's own send reaches BeeZilla (no voice path sends by itself)");
+check(talk.includes('document.getElementById("chatSend").onclick = sendFromBox;'), "the Send arrow finishes the words still coming, then sends");
+check(talk.includes("function pauseVoice()") && /function pauseVoice\(\) \{\s*dictFinishWindow\(\);/.test(talk), "Pause keeps the words already said");
+check(voiceStage.includes("!!state().paused"), "a paused session keeps its Idea Board open");
+// History is a place in the row under the search bar now (owner, 2026-11-18), not a
+// button up top: "show my history" presses that tab.
+check(pilot.includes(`'[data-tab="history"]'`), "pilot.js presses the History place");
+for (const tab of ["inspiration", "history", "library", "memory", "experts", "recipes"]) check(talk.includes(`data-tab="${tab}"`), `talk.html has the ${tab} tab`);
 for (const mode of ["advocate", "lockdown", "open"]) check(talk.includes(`data-mode="${mode}"`), `talk.html has the ${mode} privacy choice`);
 for (const kind of ["all", "photo", "audio", "3d", "document"]) check(browse.includes(`"${kind}"`), `browse.js offers the ${kind} kind`);
 check(browse.includes("bz-insp-kinds"), "browse.js draws the kind choices pilot.js presses");

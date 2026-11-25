@@ -71,5 +71,41 @@
     </div>
   </main>
   <footer>BeeZilla helps you get the work done — this is not legal or financial advice.</footer>
+  <script>
+    // Signed in already? This page is not for you. The server sends a signed-in
+    // visitor straight to Talk; this covers a copy shown without asking it (Back
+    // or a restored tab, from the page cache). It asks the server the very question
+    // a page load asks — this address again, without following the answer — so
+    // the two can never disagree (a disabled account is "signed out" to both).
+    // A redirect is a yes; anything else, or no answer, leaves the page alone.
+    (function () {
+      var here = function () { return /^\/buzzy\/landing(\.html)?\/?$/.test(location.pathname); };
+      function check() {
+        if (!here()) return;
+        fetch(location.pathname + location.search, {
+          method: "HEAD", credentials: "same-origin", cache: "no-store", redirect: "manual",
+        })
+          .then(function (r) {
+            var moved = r.type === "opaqueredirect" || (r.status >= 300 && r.status < 400);
+            if (!moved || !here()) return;
+            // Back inside an app that already runs the shell (a restored tab): let the
+            // shell take us, so the document that is listening stays alive.
+            var shell = window.BeeZillaShell;
+            if (shell && shell.go) { shell.go("/buzzy/talk"); return; }
+            // A cold landing is the welcome page: the shell is not up yet and this page
+            // has no header and no recogniser, so there is nothing to keep alive and a
+            // hard load is the only way in. That one load is named in
+            // scripts/gate-hard-nav.mjs (HARD_NAV_ALLOW) rather than hidden.
+            window.location.replace("/buzzy/talk");
+          })
+          .catch(function () {});
+      }
+      check();
+      if (!window.__bzLandingShow) {
+        window.__bzLandingShow = true;
+        window.addEventListener("pageshow", function (e) { if (e.persisted) check(); });
+      }
+    })();
+  </script>
 </body>
 </html>

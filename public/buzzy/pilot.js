@@ -10,6 +10,10 @@
  *   - a step whose control is not on the page stops the run and says which;
  *   - a step marked `ask` (less privacy, the microphone) waits for Allow or Skip.
  * It only presses this page's own buttons, the way the owner would.
+ * Steps on the Idea Board itself ("zoom out", "connect the beach photo to the poster
+ * step", "add a note saying…") are the board's own (whiteboard.js `act`): the board
+ * opens first if it's folded, then glides to and lights what it changes, and its own
+ * words ("Joined “beach.jpg” to “Draw the poster”.") go under the step.
  * Plain IIFE, no dependencies.
  */
 (function () {
@@ -59,7 +63,9 @@
       case "tab":
         return [{ sel: '[data-tab="' + v + '"]', name: "the " + cap(v) + " tab" }];
       case "whiteboard":
-        return [{ sel: "#boardToggle", name: "the Idea Board button", already: function (el) { return pressed(el) === (v === "open"); } }];
+        // No button for it on the page any more (it opens when you talk, and folds with
+        // its own Fold away): the switch stays in the page, out of sight.
+        return [{ sel: "#boardToggle", name: "the Idea Board", hiddenOk: true, already: function (el) { return pressed(el) === (v === "open"); } }];
       case "privacy":
         return [
           { sel: "#privacyBtn", name: "the Privacy button", already: function () { var p = document.getElementById("privacyPop"); return !!p && !p.classList.contains("hidden"); } },
@@ -67,16 +73,18 @@
           { sel: "#privacyClose", name: "Close", optional: true },
         ];
       case "mode":
-        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " tab" }];
+        // Chat and Work are one bar now; the switch stays in the page, out of sight.
+        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " setting", hiddenOk: true }];
       case "history":
-        return [{ sel: "#sessionsToggle, #sessionsPill", name: "History" }];
+        return [{ sel: '[data-tab="history"]', name: "History, under the search bar" }];
       case "newChat":
-        // The chat header's New button; the draft banner and History drawer have their own.
-        return [{ sel: "#newSessionBtn, #newChatBtn, #drawerNewChat", name: "the New chat button" }];
+        // The board's New conversation button, History's, or the one kept out of sight.
+        return [{ sel: ".wb-new, .bz-pane-head [data-new], #newSessionBtn", name: "New conversation", hiddenOk: true }];
       case "speak":
-        // One voice switch now (header #bzVoiceMic): it starts listening and
-        // speaks replies together, so "speak on" is that switch pressed.
-        return [{ sel: "#bzVoiceMic", name: "the Voice switch", already: function (el) { return pressed(el) === (v === "on"); } }];
+        // One voice switch: Talk to BeeZilla (#micBtn) starts listening and speaks
+        // replies together, and turns both off (toggleMic), so "speak on" is that
+        // button pressed. The header's voice switch is gone (owner, 2026-11-18).
+        return [{ sel: "#micBtn", name: "the Talk to BeeZilla button", already: function (el) { return pressed(el) === (v === "on"); } }];
       case "voice":
         return [{ sel: "#micBtn", name: "the microphone button", already: pressed }];
       case "go":
@@ -128,6 +136,7 @@
   var MARK = { waiting: "○", doing: "…", done: "✓", failed: "✕", stopped: "–", skipped: "–", asking: "?" };
 
   function Run(actions) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     this.actions = actions;
     this.stopped = false;
@@ -197,6 +206,12 @@
   Run.prototype.stop = function () {
     if (this.stopped || this.finished) return;
     this.stopped = true;
+    // This run's own board build stops too (what is already on the board stays).
+    if (this.building) {
+      var W = window.BeeZillaWhiteboard;
+      var wb = W && W.current ? W.current() : null;
+      if (wb && wb.stopBuild) wb.stopBuild();
+    }
     if (this.resolveAsk) this.resolveAsk(false);
     for (var i = 0; i < this.rows.length; i++) {
       var s = this.rows[i].li.getAttribute("data-state");
@@ -207,8 +222,15 @@
 
   Run.prototype.end = function (text) {
     this.finished = true;
+    // Fold the More menu away again if this run opened it.
+    var panel = document.getElementById("talkMorePanel");
+    if (this.openedMore && panel && !panel.classList.contains("hidden")) {
+      var more = document.getElementById("talkMoreBtn");
+      if (more) more.click();
+    }
     this.status.textContent = text;
     this.stopBtn.textContent = "Close";
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     this.stopBtn.onclick = function () { self.remove(); };
     if (this.lit) { this.lit.classList.remove("bz-pilot-target"); this.lit = null; }
@@ -222,6 +244,7 @@
 
   // Allow / Skip under a step that waits for the owner.
   Run.prototype.ask = function (i) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     var r = this.rows[i];
     this.set(i, "asking", "Waiting for you");
@@ -239,14 +262,44 @@
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(yes);
       };
-      allow.addEventListener("click", function () { self.resolveAsk && self.resolveAsk(true); });
-      skip.addEventListener("click", function () { self.resolveAsk && self.resolveAsk(false); });
+      allow.addEventListener("click", function () { if (self.resolveAsk) self.resolveAsk(true); });
+      skip.addEventListener("click", function () { if (self.resolveAsk) self.resolveAsk(false); });
     });
   };
 
+  // Controls that aren't talking live behind the Talk bar's More button: open it
+  // first, lit like any other press, so the owner sees where the control is.
+  Run.prototype.reveal = async function (sel) {
+    var panel = document.getElementById("talkMorePanel");
+    var more = document.getElementById("talkMoreBtn");
+    if (!panel || !more || !panel.classList.contains("hidden")) return;
+    var inside = panel.querySelector(sel);
+    if (!inside) return;
+    more.classList.add("bz-pilot-target");
+    this.lit = more;
+    await wait(LIT_MS);
+    more.classList.remove("bz-pilot-target");
+    this.lit = null;
+    if (this.stopped) return;
+    more.click();
+    this.openedMore = true;
+    await wait(200);
+  };
+
   Run.prototype.press = async function (p) {
-    var target = await find(p.sel, p.optional ? 600 : 2500);
+    if (!p.hiddenOk) await this.reveal(p.sel);
     if (this.stopped) return "stopped";
+    var target = await find(p.sel, p.optional || p.hiddenOk ? 600 : 2500);
+    if (this.stopped) return "stopped";
+    if (!target && p.hiddenOk) {
+      // A setting with no button on screen: change it directly, nothing to light up.
+      var quiet = document.querySelector(p.sel);
+      if (quiet) {
+        if (!(p.already && p.already(quiet))) quiet.click();
+        await wait(150);
+        return "ok";
+      }
+    }
     if (!target) {
       if (p.optional) return "ok";
       if (p.go) { location.assign(p.go); return "ok"; }
@@ -265,12 +318,32 @@
     return "ok";
   };
 
+  // A step on the Idea Board: open it if it's folded, then the board does the step.
+  Run.prototype.board = async function (a) {
+    var W = window.BeeZillaWhiteboard;
+    var b = W && W.current ? W.current() : null;
+    if (!b) {
+      var res = await this.press({ sel: "#boardToggle", name: "the Idea Board button", already: function (el) { return pressed(el); } });
+      if (res === "stopped") return { stopped: true };
+      for (var t = 0; t < 30 && !(b = W && W.current ? W.current() : null); t++) await wait(100);
+      if (!b) return { ok: false, note: "Couldn't open the Idea Board." };
+      await wait(300);
+    }
+    if (this.stopped) return { stopped: true };
+    try {
+      var out = await b.act(a);
+      return out && typeof out === "object" ? out : { ok: true, note: "" };
+    } catch (e) {
+      return { ok: false, note: "That didn't work on the board." };
+    }
+  };
+
   Run.prototype.play = async function () {
     var n = this.actions.length;
     for (var i = 0; i < n; i++) {
       if (this.stopped) return;
       var a = this.actions[i];
-      var list = presses(a);
+      var list = a.do === "board" ? [] : presses(a);
       if (!list) { this.set(i, "failed", "BeeZilla doesn't know how to do this here."); return this.end("Couldn't finish."); }
       if (a.ask) {
         var yes = await this.ask(i);
@@ -279,6 +352,24 @@
       }
       this.set(i, "doing", "");
       this.status.textContent = "Step " + (i + 1) + " of " + n + "…";
+      if (a.do === "board") {
+        // A long board step (BeeZilla building an orchestration) says how it's going.
+        if (a.value === "orchestrate") {
+          a.progress = (function (run, row) {
+            return function (text) { if (!run.stopped) run.set(row, "doing", String(text || "").slice(0, 200)); };
+          })(this, i);
+        }
+        this.building = a.value === "orchestrate";
+        var did = await this.board(a);
+        this.building = false;
+        if (did.stopped || this.stopped) return;
+        this.set(i, did.ok ? "done" : "failed", did.note || "");
+        if (!did.ok) {
+          for (var q = i + 1; q < n; q++) this.set(q, "stopped", "Not done");
+          return this.end("Couldn't finish.");
+        }
+        continue;
+      }
       for (var j = 0; j < list.length; j++) {
         var result = await this.press(list[j]);
         if (result === "stopped") return;
@@ -291,6 +382,7 @@
       this.set(i, "done", "");
     }
     this.end("Done.");
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     setTimeout(function () { if (self.finished && !self.stopped && !self.card.matches(":hover, :focus-within")) self.remove(); }, 6000);
   };
@@ -298,7 +390,9 @@
   window.BeeZillaPilot = {
     run: function (actions) {
       if (!Array.isArray(actions) || !actions.length) return null;
-      if (current) { current.stop(); current.remove(); }
+      // A build still going on the board keeps going when a new command comes in ("zoom
+      // out" while it builds); only its card makes way. Any other run stops as before.
+      if (current) { if (!current.building) current.stop(); current.remove(); }
       current = new Run(actions.slice(0, 4));
       current.play();
       return current;

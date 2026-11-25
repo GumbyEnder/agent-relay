@@ -124,6 +124,13 @@
   }
 
   function makeAudio(url, cls) {
+    // Music always shows its sound (owner, 2026-11-18): the shared waveform player
+    // when it is on the page, the browser's own player otherwise.
+    if (global.BeeZillaWave && global.BeeZillaWave.player) {
+      var wave = global.BeeZillaWave.player(url, {});
+      wave.className += ' ' + cls;
+      return wave;
+    }
     var audio = document.createElement('audio');
     audio.className = cls;
     audio.controls = true;
@@ -577,7 +584,7 @@
 
   function appendControls(card) {
     card.appendChild(makeButton('insp-btn insp-btn--similar', 'Show similar work', '↗'));
-    card.appendChild(makeButton('insp-btn insp-btn--expand', 'Expand', '⛶'));
+    card.appendChild(makeButton('insp-btn insp-btn--expand', 'Open it big', '⛶'));
   }
 
   function buildDocumentCard(item) {
@@ -595,15 +602,19 @@
     return card;
   }
 
+  // An idea moves to the board like everything else (it was a button, and a button
+  // can't be dragged in every browser). "Ask BeeZilla" puts it in the Talk box.
   function buildIdeaCard(item) {
     var style = styleFor(item.title);
-    var card = h('button', 'insp-card insp-card--idea insp-type ' + style.cls + ' ' + lengthClass(item.title));
-    card.type = 'button';
+    var card = h('article', 'insp-card insp-card--idea insp-type ' + style.cls + ' ' + lengthClass(item.title));
+    card.tabIndex = 0;
+    card.draggable = true;
     card.setAttribute('data-kind', 'idea');
     card.setAttribute('data-key', item.key);
     card.setAttribute('aria-label', 'Idea: ' + item.title);
     card.appendChild(h('span', 'insp-tag', 'Idea'));
     card.appendChild(h('span', 'insp-type-text', item.title));
+    card.appendChild(makeButton('insp-btn insp-btn--ask', 'Ask BeeZilla to do this', '→'));
     return card;
   }
 
@@ -671,8 +682,14 @@
     if (!card) return;
     var item = itemByKey(state, card.getAttribute('data-key'));
     if (!item) return;
-    if (item.kind === 'idea') {
+    if (el.closest('.insp-btn--ask')) {
       if (state.onPrompt) state.onPrompt(item.title);
+      return;
+    }
+    if (item.kind === 'idea') {
+      // The idea itself goes to the board (the strip is already up); without the
+      // board on this page, it goes to the Talk box as before.
+      if (!global.bzDirectToBoard && state.onPrompt) state.onPrompt(item.title);
       return;
     }
     if (el.closest('.insp-btn--similar')) {
@@ -685,7 +702,10 @@
       return;
     }
     // Native controls inside a card (the audio player, links) keep their own clicks.
-    if (el.closest('audio, video, a, input, select, textarea, button, label')) return;
+    if (el.closest('audio, video, a, input, select, textarea, button, label, .bzw')) return;
+    // A click on the card itself points at the Idea Board (the strip came up on press).
+    // Without the board on this page it opens as it always did.
+    if (global.bzDirectToBoard) return;
     if (item.kind === 'document') {
       goTo(item.libraryUrl, e);
       return;
@@ -698,30 +718,49 @@
     var card = cardFromEvent(state, e);
     if (!card || elementOf(e.target) !== card) return;
     var item = itemByKey(state, card.getAttribute('data-key'));
-    if (!item || item.kind === 'idea') return;
+    if (!item) return;
     e.preventDefault();
+    if (item.kind === 'idea') {
+      if (state.onPrompt) state.onPrompt(item.title);
+      return;
+    }
     openViewer(state, item, card);
+  }
+
+  function boardCard(item) {
+    if (item.kind === 'idea') return { kind: 'note', title: 'Idea', body: item.title };
+    return { kind: item.kind, id: item.id, title: item.title, url: item.url, contentType: item.contentType };
   }
 
   function onRootDragStart(state, e) {
     var card = cardFromEvent(state, e);
     if (!card || !e.dataTransfer) return;
     var item = itemByKey(state, card.getAttribute('data-key'));
-    if (!item || item.kind === 'idea') return;
+    if (!item) return;
     try {
       e.dataTransfer.effectAllowed = 'copy';
-      e.dataTransfer.setData('application/x-beezilla-card', JSON.stringify({
-        kind: item.kind,
-        id: item.id,
-        title: item.title,
-        url: item.url,
-        contentType: item.contentType
-      }));
+      e.dataTransfer.setData('application/x-beezilla-card', JSON.stringify(boardCard(item)));
       e.dataTransfer.setData('text/plain', item.title);
     } catch (err) {
       // Some browsers refuse a custom type; the drag then carries whatever they accept.
     }
     card.classList.add('insp-dragging');
+  }
+
+  // Owner, 2026-11-20: "the default when you hover over something in Inspiration should
+  // be the drag [hand], not the click one… It should direct you to move it to the
+  // whiteboard the moment you click on it." Pressing a card shows where it goes (the
+  // drop strip, voice-stage.js); letting go without dragging leaves the strip up a
+  // moment, and clicking the strip puts the card there. The corner buttons still open
+  // it big or show similar work; Enter opens it from the keyboard.
+  function onRootPointerDown(state, e) {
+    if (e.button !== 0 || !global.bzDirectToBoard) return;
+    var el = elementOf(e.target);
+    if (!el || !el.closest || el.closest('audio, video, a, input, select, textarea, button, label, .bzw')) return;
+    var card = cardFromEvent(state, e);
+    if (!card) return;
+    var item = itemByKey(state, card.getAttribute('data-key'));
+    if (item) global.bzDirectToBoard(boardCard(item), { from: card });
   }
 
   function onRootDragEnd(state) {
@@ -977,6 +1016,9 @@
     });
     root.addEventListener('keydown', function (e) {
       onRootKeydown(state, e);
+    });
+    root.addEventListener('pointerdown', function (e) {
+      onRootPointerDown(state, e);
     });
     root.addEventListener('dragstart', function (e) {
       onRootDragStart(state, e);

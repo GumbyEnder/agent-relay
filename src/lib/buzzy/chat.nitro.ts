@@ -25,17 +25,29 @@
  *   POST /api/buzzy/papers/:id/lines — confirm, correct, or drop one line
  *   POST /api/buzzy/money-check — compare a draft to the paper and the brief
  *   POST /api/buzzy/promise-check — mark a committing sentence; do not approve or send
+ *   GET  /api/buzzy/whiteboards/:id — the Talk whiteboard kept in the account (null if none)
+ *   PUT  /api/buzzy/whiteboards/:id — save it ({ state, baseRev }; 409 + the account's copy on a clash)
+ *   GET  /api/buzzy/whiteboards/:id/versions — its history, newest first
+ *   POST /api/buzzy/whiteboards/:id/versions/:vid/restore — go back to an earlier version
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
-import { chatLoop } from "./server";
+import { chatLoop, type FlowStep } from "./server";
+import { cleanBoardView } from "./boardView";
+import { withLlmOverride } from "./llm";
+import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
+import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
+import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
+import { boardBuildResponse, readBuildRequest } from "./boardOrchestrator";
+import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
-import { validateGraph, saveGraph, listGraphs, loadGraph } from "./graphs";
+import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
+import { parseGraphDetailPath } from "./orchestration";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
 import {
@@ -108,6 +120,11 @@ import {
   pathOnly,
   sanitizeDiag,
   wavDurationSeconds,
+  checkScreenshot,
+  listFeedback,
+  feedbackScreenshot,
+  userIdForEmail,
+  isAdminEmail,
 } from "./feedback";
 
 /**
@@ -269,6 +286,7 @@ function companyPayload(row: CompanyRow, facts: FactRow[] = []) {
 
 function factValue(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   const v = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
   return v || null;
 }
@@ -339,6 +357,92 @@ function opsAuthorized(event: any): boolean {
   if (!want) return false;
   const got = (headersFromEvent(event).get("x-bz-ops-key") || "").trim();
   return got.length > 0 && got === want;
+}
+
+/**
+ * Who may read other people's reports and change their plan.
+ *
+ * Two doors, deliberately: the ops key (scripts, the console), and a signed-in
+ * account whose email is in BZ_ADMIN_EMAILS (a human on /buzzy/testers, who
+ * cannot carry an ops key in a browser). Revoking an admin is a variable change.
+ */
+async function adminAuthorized(event: any): Promise<boolean> {
+  if (opsAuthorized(event)) return true;
+  const user = await getSessionUserFromHeaders(headersFromEvent(event)).catch(() => null);
+  if (!user) return false;
+  return isAdminEmail((user as { email?: string | null }).email ?? null);
+}
+
+/**
+ * The Windows installer's address, read from the same feed installed copies
+ * read — never hard-coded, never mirrored.
+ *
+ * Two traps this closes:
+ *  1. Asset filenames carry the version (`BeeZilla-Setup-<ver>.exe`), so any
+ *     URL typed into a page rots on the next release. The feed names the
+ *     current file, so the page asks the feed instead of guessing.
+ *  2. `releases/latest` is not the desktop's feed. electron-updater was once
+ *     pointed at it (BZ-D1) and asked for releases/download/v0.3.0/latest.yml
+ *     forever. The desktop reads the `desktop-channel` release; a Download
+ *     page that advertised the Latest slot instead would show a version the
+ *     updater will never offer.
+ */
+const DESKTOP_FEED_URL = (
+  process.env.BZ_DESKTOP_FEED_URL ||
+  "https://github.com/GumbyEnder/agent-relay/releases/download/desktop-channel"
+).replace(/\/+$/, "");
+const DESKTOP_RELEASES_URL = "https://github.com/GumbyEnder/agent-relay/releases";
+const DESKTOP_CACHE_MS = 5 * 60 * 1000;
+
+type DesktopRelease = {
+  version: string;
+  fileName: string;
+  url: string;
+  size: number | null;
+  sha512: string | null;
+  feedUrl: string;
+  releaseUrl: string;
+  releasesUrl: string;
+  fetchedAt: string;
+};
+
+let desktopCache: { at: number; body: DesktopRelease } | null = null;
+
+/** latest.yml is a fixed, tiny shape written by desktop/release.mjs — no need
+ *  to pull a YAML parser in for six keys, but do not assume ordering. */
+function parseLatestYml(text: string): { version?: string; file?: string; size?: number | null; sha512?: string | null } {
+  const version = /^version:\s*(\S+)\s*$/m.exec(text)?.[1];
+  const path = /^path:\s*(\S+)\s*$/m.exec(text)?.[1];
+  const fileUrl = /^\s*-\s*url:\s*(\S+)\s*$/m.exec(text)?.[1];
+  const size = /^\s*size:\s*(\d+)\s*$/m.exec(text)?.[1];
+  const sha512 = /^sha512:\s*(\S+)\s*$/m.exec(text)?.[1] || /^\s*sha512:\s*(\S+)\s*$/m.exec(text)?.[1];
+  return { version, file: path || fileUrl, size: size ? Number(size) : null, sha512: sha512 ?? null };
+}
+
+async function readDesktopRelease(): Promise<DesktopRelease> {
+  const now = Date.now();
+  if (desktopCache && now - desktopCache.at < DESKTOP_CACHE_MS) return desktopCache.body;
+  const res = await fetch(`${DESKTOP_FEED_URL}/latest.yml`, {
+    redirect: "follow",
+    headers: { "user-agent": "beezilla-site" },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`feed answered ${res.status}`);
+  const parsed = parseLatestYml(await res.text());
+  if (!parsed.version || !parsed.file) throw new Error("feed has no version/path");
+  const body: DesktopRelease = {
+    version: parsed.version,
+    fileName: parsed.file.split("/").pop() as string,
+    url: /^https?:\/\//.test(parsed.file) ? parsed.file : `${DESKTOP_FEED_URL}/${parsed.file}`,
+    size: parsed.size ?? null,
+    sha512: parsed.sha512 ?? null,
+    feedUrl: `${DESKTOP_FEED_URL}/latest.yml`,
+    releaseUrl: `${DESKTOP_RELEASES_URL}/tag/desktop-v${parsed.version}`,
+    releasesUrl: DESKTOP_RELEASES_URL,
+    fetchedAt: new Date().toISOString(),
+  };
+  desktopCache = { at: now, body };
+  return body;
 }
 
 export default defineEventHandler(async (event) => {
@@ -428,6 +532,13 @@ export default defineEventHandler(async (event) => {
       return { ok: false, error: "The diagnostic is too large to accept.", code: "diag_too_large" };
     }
     const clean = sanitizeDiag(raw?.diag ?? null);
+    // The picture (0062). Validated before any limit is counted, so a rejected
+    // upload never burns the person's hourly allowance.
+    const shot = checkScreenshot(raw?.screenshot ?? null);
+    if (!shot.ok) {
+      setResponseStatus(event, 400);
+      return shot;
+    }
     const sql = await getSql();
     const userId = user?.id ?? null;
 
@@ -493,9 +604,9 @@ export default defineEventHandler(async (event) => {
       try {
         const inserted = (await sql`
           INSERT INTO buzzy_feedback
-            (id, ref, user_id, body, page_url, route, app_sha, diag, diag_redactions, ip_hash, ua)
+            (id, ref, user_id, body, page_url, route, app_sha, diag, diag_redactions, ip_hash, ua, screenshot)
           VALUES (${id}, ${ref}, ${userId}, ${body}, ${pageUrl}, ${route}, ${appSha()},
-                  ${diag ? JSON.stringify(diag) : null}::jsonb, ${clean.redactions}, ${hashed}, ${ua})
+                  ${diag ? JSON.stringify(diag) : null}::jsonb, ${clean.redactions}, ${hashed}, ${ua}, ${shot.value})
           RETURNING ref, created_at
         `) as Array<{ ref: string; created_at: string }>;
         if (inserted[0]) {
@@ -610,6 +721,32 @@ export default defineEventHandler(async (event) => {
   // instruction alone mints nothing beyond it.
   if (method === "GET" && path === "/api/buzzy/tools") {
     return { tools: TOOL_REGISTRY };
+  }
+
+  // ── GET /api/buzzy/desktop-release — what /buzzy/download links to ──────
+  // Public on purpose: the installer is a public GitHub release asset, and the
+  // page that offers it is a front door, not a signed-in surface. No file is
+  // copied or proxied here — the page links straight at GitHub, so the bytes
+  // have exactly one home.
+  if (method === "GET" && path === "/api/buzzy/desktop-release") {
+    try {
+      const release = await readDesktopRelease();
+      setResponseHeader(event, "cache-control", "public, max-age=300");
+      return release;
+    } catch (err: any) {
+      // A feed hiccup must not turn a download page into a lie: serve the last
+      // good answer if we have one, otherwise say so and point at Releases.
+      if (desktopCache) {
+        setResponseHeader(event, "cache-control", "no-store");
+        return { ...desktopCache.body, stale: true, error: String(err?.message ?? err) };
+      }
+      setResponseStatus(event, 503);
+      return {
+        error: "Could not read the release feed just now.",
+        releasesUrl: DESKTOP_RELEASES_URL,
+        feedUrl: `${DESKTOP_FEED_URL}/latest.yml`,
+      };
+    }
   }
 
   // ── GET /api/buzzy/models — open catalog (labels only; raw ids stay server-side) ──
@@ -803,19 +940,25 @@ export default defineEventHandler(async (event) => {
     }
     // The product's own coinages, which no owner can be expected to have typed.
     addVocab(["Honey Drops"]);
+    // partial=1: a live guess at the words while the person is still talking (the
+    // recorder lane shows it in the field, talk.html liveWords). Only a turn's final
+    // clip is a time-to-transcript number, so guesses are not recorded.
+    const partial = queryValue(fullPath, "partial") === "1";
     try {
       const r = await transcribeAudio(audio, format, vocab);
       // Time to transcript is a product number, not a log line. Recorded with
       // lane "asr" so ops can tell the browser recognizer apart from this path.
-      const sql = await getSql();
-      await recordVoiceMetrics(sql, {
-        userId: user.id,
-        source: "server",
-        mode: "voice",
-        model: r.model,
-        asrMs: r.ms,
-        lane: "asr",
-      });
+      if (!partial) {
+        const sql = await getSql();
+        await recordVoiceMetrics(sql, {
+          userId: user.id,
+          source: "server",
+          mode: "voice",
+          model: r.model,
+          asrMs: r.ms,
+          lane: "asr",
+        });
+      }
       return { ok: true, text: r.text, ms: r.ms, model: r.model };
     } catch (e) {
       setResponseStatus(event, 502);
@@ -963,6 +1106,17 @@ export default defineEventHandler(async (event) => {
       if (!stored) {
         setResponseStatus(event, 502);
         return { ok: false, error: "Meshy finished but the file could not be fetched.", code: "download_failed" };
+      }
+      if (!stored.duplicate) {
+        // Tag the model from the words that asked for it (kept since the turn started it).
+        const asked = recallPrompt("3d:" + taskId, user.id);
+        const sqlTags = await getSql();
+        if (asked?.sessionId) {
+          try {
+            await sqlTags`UPDATE buzzy_assets SET session_id = ${asked.sessionId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
+          } catch { /* older schema: the link is a bonus */ }
+        }
+        void enrichLater(sqlTags, user.id, stored.id, { prompt: asked?.prompt || "", filename: name, contentType: "model/gltf-binary" });
       }
       return {
         ok: true,
@@ -1118,6 +1272,14 @@ export default defineEventHandler(async (event) => {
         sha256,
       };
     }
+    // Search words for the upload, from its name, its folder and any note the page
+    // sent about it (x-bz-note: what the person said the file is).
+    const note = Array.from(getHeader(event, "x-bz-note") || "", (ch) => (ch.charCodeAt(0) < 32 ? " " : ch)).join("").trim().slice(0, 600);
+    void enrichLater(sql, user.id, inserted[0]!.id, {
+      prompt: [note, relPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
+      filename,
+      contentType,
+    });
     return {
       ok: true,
       duplicate: false,
@@ -1358,6 +1520,32 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── /api/buzzy/graphs/:id/revisions — the history the counter never kept ──
+  if (method === "GET" && /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+\/revisions(\/[0-9]+)?$/.test(path)) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    // Parsed by helper, not by index: the index version tested the literal
+    // "revisions" segment and made the list branch unreachable (400 on every call).
+    const route = parseGraphDetailPath(path)!;
+    const graphId = route.graphId;
+    if (route.bad) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Bad revision.", code: "bad_revision" };
+    }
+    if (route.revision !== null) {
+      const found = await loadGraphRevision(user.id, graphId, route.revision);
+      if (!found) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such revision on this account.", code: "not_found" };
+      }
+      return { ok: true, ...found };
+    }
+    return { ok: true, revisions: await listGraphRevisions(user.id, graphId) };
+  }
+
   // ── /api/buzzy/graphs — author, list and read orchestration graphs ────
   // 6d's whiteboard writes through here; a run (6e) freezes what it reads.
   if (path === "/api/buzzy/graphs" || /^\/api\/buzzy\/graphs\/[A-Za-z0-9_-]+$/.test(path)) {
@@ -1390,6 +1578,19 @@ export default defineEventHandler(async (event) => {
       } catch {
         setResponseStatus(event, 400);
         return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+      const b = body as Record<string, unknown>;
+      // CR-3: the orchestration editor posts one `spec`. It is validated here with
+      // the same function the page runs, and saved with its revision in one statement.
+      if (b && typeof b === "object" && b.spec && typeof b.spec === "object") {
+        try {
+          const saved = await saveOrchestrationGraph(user.id, b.spec);
+          return { ok: true, id: saved.id, version: saved.version, spec: saved.spec };
+        } catch (e) {
+          setResponseStatus(event, 400);
+          const err = e as Error & { code?: string; issues?: unknown };
+          return { ok: false, error: err.message, code: err.code || "invalid_spec", issues: err.issues ?? [] };
+        }
       }
       const checked = validateGraph(body);
       if (!checked.ok) {
@@ -1437,6 +1638,14 @@ export default defineEventHandler(async (event) => {
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The person's own process from the whiteboard (edited agent.md, skills, output,
+    // or a recipe they ran). Their instructions; chatLoop caps and appends them.
+    const boardInstructions = typeof body.boardInstructions === "string"
+      ? body.boardInstructions.slice(0, 8200)    // the summary (up to 7,800) and its pictures line
+      : null;
+    // What the owner is looking at on the Idea Board as this turn started (whiteboard.js
+    // viewOf): read for this turn only, never stored with the conversation (boardView.ts).
+    const boardView = cleanBoardView(body.boardView);
     // The Talk bar's privacy control. Unknown values mean the default (no change).
     let privacy: "advocate" | "lockdown" | "open" | undefined =
       body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
@@ -1569,13 +1778,17 @@ export default defineEventHandler(async (event) => {
 
     const turnStages: Array<{ phase: string; label: string; etaMs?: number; atMs: number }> = [];
     const turnTools: Array<{ name: string; state: string; ms?: number }> = [];
+    // Their own AI key, when they saved one: every completion in this turn goes to
+    // their provider instead of the deployment's (owner, 2026-11-18).
+    const ownKey = await overrideFor(sql, userId);
     const runTurn = (opts?: {
       speech?: VoiceHandlers;
       onText?: (t: string) => void;
       onTool?: (e: { name: string; state: "running" | "done" | "failed"; ms?: number }) => void;
       onStage?: (s: { phase: string; label: string; etaMs?: number }) => void;
+      onFlow?: (f: FlowStep) => void;
     }) =>
-      chatLoop({
+      withLlmOverride(ownKey, () => chatLoop({
         userId,
         jobId,
         sessionId,
@@ -1599,7 +1812,10 @@ export default defineEventHandler(async (event) => {
         // only a stream of events the page throws away.
         onTool: (e) => { turnTools.push(e); opts?.onTool?.(e); },
         onStage: (st) => { turnStages.push({ ...st, atMs: Date.now() - turnStarted }); opts?.onStage?.(st); },
-      }).then(async (result) => {
+        onFlow: opts?.onFlow,
+        boardInstructions,
+        boardView,
+      })).then(async (result) => {
         try {
           await sql`
             INSERT INTO buzzy_turn_log (user_id, session_id, job_id, surface, model, latency_ms, stages, tools, artifacts)
@@ -1642,6 +1858,8 @@ export default defineEventHandler(async (event) => {
               onTool: (e) => send("tool", e),
               // stage {phase,label,etaMs} — what the turn is doing, and how long it should take.
               onStage: (st) => send("stage", st),
+              // flow {kind,id,title,parent,state,url} — the live whiteboard.
+              onFlow: (f) => send("flow", f),
             });
             send("done", result);
             if (result.timings) {
@@ -1708,6 +1926,7 @@ export default defineEventHandler(async (event) => {
               onText: (t) => send("text", { t }),
               onTool: (e) => send("tool", e),
               onStage: (st) => send("stage", st),
+              onFlow: (f) => send("flow", f),
             });
             send("done", result);
           } catch (err) {
@@ -1816,23 +2035,49 @@ export default defineEventHandler(async (event) => {
     return { ok: true, ...(await describeEntitlement(user.id)) };
   }
 
-  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops only) ─────────
+  // ── GET /api/buzzy/admin/feedback — what testers reported (admins) ───────────
+  // ?id=<report> returns that report's screenshot; otherwise the newest 200.
+  // id is TEXT in 0059, so it is passed straight through — no Number() anywhere,
+  // or a non-numeric id would become NaN and silently read nothing.
+  if (method === "GET" && path === "/api/buzzy/admin/feedback") {
+    if (!(await adminAuthorized(event))) {
+      setResponseStatus(event, 403);
+      return { ok: false, error: "Only BeeZilla admins can read feedback.", code: "forbidden" };
+    }
+    const sql = await getSql();
+    const one = queryValue(fullPath, "id");
+    if (one) return { ok: true, id: one, screenshot: await feedbackScreenshot(sql, one) };
+    return { ok: true, feedback: await listFeedback(sql) };
+  }
+
+  // ── POST /api/buzzy/admin/plan — put an account on a plan (ops or admin) ────
   // The billing hook writes here. Stripe (or a manual grant) maps to one call, so
   // entitlement logic has exactly one writer and cannot drift from the invoice.
+  // An admin may grant by email: a tester is named by the address they signed up
+  // with, not by an internal id nobody can see.
   if (method === "POST" && path === "/api/buzzy/admin/plan") {
-    if (!opsAuthorized(event)) {
+    if (!(await adminAuthorized(event))) {
       setResponseStatus(event, 403);
-      return { ok: false, error: "Ops key required.", code: "forbidden" };
+      return { ok: false, error: "Ops key or admin account required.", code: "forbidden" };
     }
     const body = (await event.req.json().catch(() => ({}))) as {
       user?: string;
       userId?: string;
+      email?: string;
       plan?: string;
       planUntil?: string;
       note?: string;
     };
-    const userId = String(body.user ?? body.userId ?? "").trim();
+    let userId = String(body.user ?? body.userId ?? "").trim();
     const plan = String(body.plan ?? "").trim().toLowerCase();
+    if (!userId && body.email) {
+      const found = await userIdForEmail(await getSql(), String(body.email));
+      if (!found) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No account has that email.", code: "no_account" };
+      }
+      userId = found;
+    }
     if (!userId) {
       setResponseStatus(event, 400);
       return { ok: false, error: "which account? pass user=<id>", code: "no_user" };
@@ -2824,6 +3069,7 @@ export default defineEventHandler(async (event) => {
     }
     const cleanOneLiner =
       hasOneLiner && typeof body.one_liner === "string"
+        // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
         ? body.one_liner.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
         : null;
     const sql = await getSql();
@@ -2947,6 +3193,157 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // ── /api/buzzy/ai-key — the person's own AI key ─────────────────────
+  // Owner, 2026-11-18: "Even on the cloud mode, I need to be able to put in my own
+  // API key." GET shows what is saved (never the key: provider, model, last four),
+  // PUT saves or replaces it (optionally testing it first), DELETE forgets it.
+  if (path === "/api/buzzy/ai-key") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const providers = Object.entries(KEY_PROVIDERS).map(([id, p]) => ({ id, label: p.label }));
+    if (method === "GET") return { ok: true, key: await keySummary(sql, user.id), providers };
+    if (method === "PUT" || method === "POST") {
+      let body: Record<string, unknown> = {};
+      try { body = (await event.req.json()) as Record<string, unknown>; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { provider, apiKey, model, baseUrl }.", code: "bad_json" };
+      }
+      const saved = await saveKey(sql, user.id, body);
+      if (!saved.ok) {
+        setResponseStatus(event, 400);
+        return saved;
+      }
+      // "Does it work?" answered now, with one tiny call on their key, so a typo shows
+      // up here and not as a failed reply later.
+      let works: boolean | null = null;
+      let problem: string | null = null;
+      if (body.test === true) {
+        const o = await overrideFor(sql, user.id);
+        try {
+          await withLlmOverride(o, () => chatCompletion([{ role: "user", content: "Reply with the word ok." }], { maxTokens: 8, temperature: 0 }));
+          works = true;
+        } catch (err) {
+          works = false;
+          const m = err instanceof Error ? err.message : String(err);
+          const code = /\((\d{3})\)/.exec(m)?.[1];
+          problem = code === "401" || code === "403" ? "The provider refused that key."
+            : code === "404" ? "The provider doesn't know that model name."
+            : code === "429" ? "The provider says the key is out of credit or rate-limited."
+            : "The provider didn't answer.";
+        }
+      }
+      return { ok: true, key: saved.summary, works, problem };
+    }
+    if (method === "DELETE") {
+      await deleteKey(sql, user.id);
+      return { ok: true, key: { saved: false } };
+    }
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET, PUT or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── POST /api/buzzy/board-orchestrate — BeeZilla builds a flow on the Idea Board ──
+  // Owner, 2026-11-24: "you should just be able to talk to Beezilla, and that should be
+  // all you need to do to make an orchestration." The board sends what the person said
+  // and itself in words; the answer streams back as cards and lines the board puts up
+  // one by one (boardOrchestrator.ts). Metered like a chat turn: one model call.
+  if (method === "POST" && path === "/api/buzzy/board-orchestrate") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event)).catch(() => null);
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let raw: unknown = null;
+    try { raw = await event.req.json(); } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON: { request, map, known }.", code: "bad_json" };
+    }
+    const input = readBuildRequest(raw);
+    if (!input.ok) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: input.error, code: "bad_request" };
+    }
+    const quota = await checkQuota({ userId: user.id, scope: "inference", units: 1 });
+    if (!quota.ok) {
+      await recordUsage({ userId: user.id, scope: "inference", units: 0, ms: 0, status: "refused", code: quota.code ?? "quota", model: null });
+      setResponseStatus(event, quota.code === "plan_required" ? 402 : 429);
+      return { ok: false, error: quota.error, code: quota.code, plan: quota.plan, limit: quota.limit, used: quota.used };
+    }
+    await recordUsage({ userId: user.id, scope: "inference", units: 1, ms: 0, status: "ok", model: null });
+    const ownKey = await overrideFor(await getSql(), user.id);
+    return boardBuildResponse(input, (fn) => withLlmOverride(ownKey, fn));
+  }
+
+  // ── /api/buzzy/board-recipes — recipes made from a whiteboard selection ──
+  if (path === "/api/buzzy/board-recipes" || path.startsWith("/api/buzzy/board-recipes/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    const sql = await getSql();
+    const id = path.startsWith("/api/buzzy/board-recipes/") ? decodeURIComponent(path.split("/").pop() || "") : "";
+    if (method === "GET" && !id) return { ok: true, recipes: await listBoardRecipes(sql, user.id) };
+    if (method === "POST" && !id) {
+      let body: Record<string, unknown> = {};
+      try { body = (await event.req.json()) as Record<string, unknown>; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { name, graph }.", code: "bad_json" };
+      }
+      const saved = await saveBoardRecipe(sql, user.id, body);
+      if (!saved.ok) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: saved.error, code: "bad_recipe" };
+      }
+      return { ok: true, recipe: saved.recipe };
+    }
+    if (method === "DELETE" && id) {
+      const gone = await deleteBoardRecipe(sql, user.id, id);
+      if (!gone) setResponseStatus(event, 404);
+      return { ok: gone };
+    }
+    setResponseStatus(event, 405);
+    return { ok: false, error: "Use GET, POST or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── /api/buzzy/whiteboards/:id — the Talk page's whiteboard, kept in the account ──
+  // Asked 2026-11-18: the board follows the person to any computer, with a simple
+  // history to go back to. The person's own boards only; whiteboards.ts has the rules
+  // (GET/PUT the board, GET its versions, POST versions/:vid/restore).
+  if (path.startsWith("/api/buzzy/whiteboards/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let body: unknown = undefined;
+    if (method === "PUT" || method === "POST") {
+      const tooBig = () => {
+        setResponseStatus(event, 413);
+        return { ok: false, error: `A board saved to your account is up to ${WHITEBOARD_MAX_BYTES / 1048576} MB. Remove a few cards, then it saves again.`, code: "too_big" };
+      };
+      if (Number(getHeader(event, "content-length") || 0) > WHITEBOARD_MAX_REQUEST_BYTES) return tooBig();
+      let raw = "";
+      try { raw = await event.req.text(); } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "The board could not be read.", code: "bad_body" };
+      }
+      if (new TextEncoder().encode(raw).length > WHITEBOARD_MAX_REQUEST_BYTES) return tooBig();
+      try { body = raw ? JSON.parse(raw) : {}; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON: { state, baseRev }.", code: "bad_json" };
+      }
+    }
+    const sql = await getSql();
+    const out = await whiteboardRoute(sql, user.id, method, path.slice("/api/buzzy/whiteboards/".length), body);
+    setResponseStatus(event, out.status);
+    return out.body;
+  }
+
   // ── GET /api/buzzy/search — work search across ALL of the user's companies
   // Matches job titles, captured problem text, and chat message content, so a
   // user can find work by what was said in it, not just its title. Archived
@@ -2965,7 +3362,7 @@ export default defineEventHandler(async (event) => {
       return { error: "Type at least 2 characters to search.", code: "bad_query" };
     }
     if (raw.length === 0) {
-      return { ok: true, query: "", jobs: [], documents: [], sessions: [], totals: { jobs: 0, documents: 0, sessions: 0 } };
+      return { ok: true, query: "", jobs: [], documents: [], sessions: [], assets: [], totals: { jobs: 0, documents: 0, sessions: 0, assets: 0 } };
     }
     const statusFilter = queryValue(fullPath, "status");
     const typeFilter = queryValue(fullPath, "type"); // "jobs" | "documents" | null
@@ -3024,7 +3421,13 @@ export default defineEventHandler(async (event) => {
       ORDER BY d.updated_at DESC LIMIT 25
     `;
     const ql = raw.toLowerCase();
+    // Saved pictures, music, 3D and files, found by their search words (tags.ts):
+    // "house" finds the house picture, not only a file named house.png. Older files
+    // without words get them a few at a time as people search.
+    const assetHits = typeFilter === "jobs" ? [] : await searchTagged(sql, user.id, raw, 24);
+    void backfillTags(sql, user.id, 4).catch(() => {});
     return {
+      assets: assetHits,
       ok: true,
       query: raw,
       jobs: typeFilter === "documents" ? [] : jobRows.map((r) => ({
@@ -3058,7 +3461,7 @@ export default defineEventHandler(async (event) => {
           ...(snippet ? { snippet } : {}),
         };
       }),
-      totals: { jobs: typeFilter === "documents" ? 0 : jobRows.length, documents: docRows.length, sessions: sessionRows.length },
+      totals: { jobs: typeFilter === "documents" ? 0 : jobRows.length, documents: docRows.length, sessions: sessionRows.length, assets: assetHits.length },
     };
   }
 

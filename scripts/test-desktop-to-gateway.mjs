@@ -80,7 +80,7 @@ for (let i = 0; i < 60 && !gwUp; i++) {
   try {
     const res = await fetch(`${gwBase}/`, { signal: AbortSignal.timeout(1200) });
     gwUp = res.status < 500;
-  } catch {}
+  } catch { /* nothing to do */ }
   if (!gwUp) await sleep(500);
 }
 check("the gateway boots", gwUp, gwBase);
@@ -111,7 +111,7 @@ for (let i = 0; i < 120 && !rt; i++) {
   try {
     const parsed = JSON.parse(readFileSync(join(dataDir, "runtime.json"), "utf8"));
     if (parsed?.port) rt = parsed;
-  } catch {}
+  } catch { /* nothing to do */ }
   if (!rt) await sleep(500);
 }
 check("the local runtime boots", Boolean(rt), rt ? `port ${rt.port}` : "no runtime.json");

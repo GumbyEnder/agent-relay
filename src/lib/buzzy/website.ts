@@ -63,13 +63,59 @@ export function normalizeWebsiteUrl(raw: unknown): string | null {
   return u.toString();
 }
 
-function isPrivateIp(ip: string): boolean {
-  const v = ip.toLowerCase().replace(/^::ffff:/, "");
+/** The eight 16-bit groups of an IPv6 address, or null when it isn't one. */
+function ipv6Groups(s: string): number[] | null {
+  let v = s.toLowerCase().replace(/^\[|\]$/g, "").split("%")[0]!;
+  const dotted = /^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(v);
+  if (dotted) {
+    const q = [dotted[2], dotted[3], dotted[4], dotted[5]].map(Number);
+    if (q.some((n) => n > 255)) return null;
+    v = dotted[1]! + (((q[0]! << 8) | q[1]!).toString(16)) + ":" + (((q[2]! << 8) | q[3]!).toString(16));
+  }
+  const halves = v.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null;
+  const groups = [...head, ...Array<string>(fill).fill("0"), ...tail];
+  if (groups.length !== 8) return null;
+  const nums = groups.map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN));
+  return nums.some((n) => Number.isNaN(n)) ? null : nums;
+}
+
+/**
+ * The IPv4 address an IPv6 one carries inside it: "::ffff:7f00:1" is 127.0.0.1 written the
+ * way a URL parser writes it (the dotted form never survives it), and the older ways to
+ * carry one (compatible, NAT64, 6to4) reach it just the same. Null when it carries none.
+ */
+function embeddedIpv4(v6: string): string | null {
+  const g = ipv6Groups(v6);
+  if (!g) return null;
+  const v4 = (x: number, y: number) => `${x >> 8}.${x & 255}.${y >> 8}.${y & 255}`;
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && (g[5] === 0xffff || g[5] === 0)) return v4(g[6]!, g[7]!); // ::ffff:a.b.c.d, ::a.b.c.d
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0) return v4(g[6]!, g[7]!);             // 64:ff9b::a.b.c.d (NAT64)
+  if (g[0] === 0x2002) return v4(g[1]!, g[2]!);                                                                                       // 2002:a.b:c.d:: (6to4)
+  return null;
+}
+
+export function isPrivateIp(ip: string): boolean {
+  const whole = ip.toLowerCase();
+  if (isIP(whole) === 6) {
+    // An address that carries a private IPv4 address inside it is that address. (Looked at
+    // before the "::ffff:" is cut off below, because a URL parser writes 127.0.0.1 inside
+    // IPv6 as ::ffff:7f00:1, which that cut would leave unreadable.)
+    const inner = embeddedIpv4(whole);
+    if (inner && isPrivateIp(inner)) return true;
+    if (/^2001:0*:/.test(whole)) return true; // Teredo 2001::/32 tunnels to anywhere
+  }
+  const v = whole.replace(/^::ffff:/, "");
   if (isIP(v) === 4) {
     const [a, b, c] = v.split(".").map((n) => Number(n));
     if (a === 0 || a === 10 || a === 127) return true;
     if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
     if (a === 169 && b === 254) return true; // link-local / cloud metadata 169.254.0.0/16
+    if (a === 168 && b === 63 && c === 129 && Number(v.split(".")[3]) === 16) return true; // Azure's own service address
     if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
     if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0.0/24 + 192.0.2.0/24 (TEST-NET-1)
     if (a === 192 && b === 168) return true; // 192.168.0.0/16
@@ -82,6 +128,7 @@ function isPrivateIp(ip: string): boolean {
   if (v === "::1" || v === "::") return true; // loopback + unspecified
   if (/^f[cd]/.test(v)) return true; // ULA fc00::/7
   if (/^fe[89ab]/.test(v)) return true; // link-local fe80::/10 (fe80–febf)
+  if (/^fe[c-f]/.test(v)) return true; // site-local fec0::/10 (retired, still routed on some networks)
   if (/^ff/.test(v)) return true; // multicast ff00::/8
   return false;
 }
@@ -107,6 +154,7 @@ export async function hostBlocked(host: string): Promise<"blocked" | "missing" |
 }
 
 function clean(s: string, max: number): string {
+  // eslint-disable-next-line no-control-regex -- deliberate: matches control bytes so they can be stripped
   const t = s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   const cut = t.slice(0, max);

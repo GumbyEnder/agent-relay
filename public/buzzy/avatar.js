@@ -119,6 +119,7 @@
   Avatar.prototype.start = function () {
     if (this.running) return;
     this.running = true;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     var last = performance.now();
     function frame(now) {
@@ -157,6 +158,7 @@
   };
 
   Avatar.prototype.draw = function () {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- ES5 self-alias kept on purpose: callbacks below need the instance, and rewriting the flow to arrows is not a lint change
     var self = this;
     loadShell(function (img) { self.paint(img); });
   };

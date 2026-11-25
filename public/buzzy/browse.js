@@ -32,15 +32,63 @@
       .catch(function () { return null; });
   }
   function store(key, val) {
-    try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (_) {}
+    try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (_) { /* nothing to do */ }
     return null;
   }
 
   var input = $("bzSearch");
+  // ── The placeholder has to FIT ──────────────────────────────────────────
+  // The markup carries a SHORT wording and the full sentence in
+  // data-placeholder-full. It used to carry the sentence itself: at 390px that
+  // needs 551px in a 120px content box, so every moment before this script runs
+  // (a slow phone, a blocked/errored bundle) painted "Search eve…" — a cut-off
+  // sentence that reads as a broken field. A JS-only fix cannot cover that
+  // first paint; the markup must be honest on its own. JS then lengthens the
+  // wording to the longest that fits and re-picks on resize.
+  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search your work or a link", "Search your work", "Search"];
+  (function () {
+    if (!input) return;
+    var long = input.getAttribute("data-placeholder-full") || input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
+    var all = [long].concat(PLACEHOLDER_SHRINKS.filter(function (s) { return s !== long; }));
+    var canvas = null;
+    var tries = 0;
+    function pick() {
+      var room = input.clientWidth - (parseFloat(window.getComputedStyle(input).paddingLeft) || 0) - (parseFloat(window.getComputedStyle(input).paddingRight) || 0);
+      // Not laid out yet. The old code returned here and NEVER re-picked on its own,
+      // so Safari's first paint (before the input had width) kept the 551px sentence
+      // in a phone-sized field — "Search everything — your wor…" (CR-13). Wait for
+      // the box to exist, then measure; the ResizeObserver below covers later moves.
+      if (!(room > 0)) {
+        if (tries++ < 60) requestAnimationFrame(pick);
+        return;
+      }
+      var cs = window.getComputedStyle(input);
+      canvas = canvas || document.createElement("canvas");
+      var ctx = canvas.getContext && canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.font = cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+      var chosen = all[all.length - 1];
+      for (var i = 0; i < all.length; i++) {
+        if (ctx.measureText(all[i]).width <= room) { chosen = all[i]; break; }
+      }
+      if (input.placeholder !== chosen) input.placeholder = chosen;
+      input.style.textOverflow = "ellipsis";
+    }
+    var t = null;
+    function soon() { clearTimeout(t); t = setTimeout(pick, 60); }
+    window.addEventListener("resize", soon);
+    if (window.ResizeObserver) new window.ResizeObserver(soon).observe(input);
+    // A webfont that lands after first paint measures wider than it renders, so
+    // re-pick once the fonts are ready rather than keeping the too-short word.
+    if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(soon);
+    pick();
+  })();
   var results = $("bzResults");
   var grid = $("bzResultsGrid");
   var note = $("bzSearchNote");
   var tabs = $("bzTabs");
+  // The places and More share one row; a search or the reader hides the whole row.
+  var tabRow = (tabs && tabs.closest && tabs.closest(".bz-tabrow")) || tabs;
   var pane = $("bzPane");
   var recent = $("recentBelow");
 
@@ -97,28 +145,16 @@
     if (msg) say.t = setTimeout(function () { note.textContent = ""; }, 6000);
   }
 
-  // ── Copy this page's link, and say truthfully whether it worked ────────
-  function copyLink() {
-    var href = window.location.href;
-    // Say what was copied and what did NOT happen. "Link copied." next to a
-    // share-looking icon was ambiguous: the owner could not tell whether the
-    // page had just been shared with someone.
-    var done = "Copied this page's address. Nothing was shared or sent.";
-    function fallback() {
-      var ta = document.createElement("textarea");
-      ta.value = href;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed"; ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      var ok = false;
-      try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
-      document.body.removeChild(ta);
-      say(ok ? done : "Couldn't copy here — the address is " + href);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(href).then(function () { say(done); }, fallback);
-    } else fallback();
+  // ── The QR code and Copy page link share the page, so both ask first ───
+  // Owner, 2026-11-21: "When you use a QR code or copy a page link, you have to be given a
+  // prompt… everything on this page… becomes available… a little pop-up to say yes and
+  // confirm before they do that." They used to hand out the page's own address, which opens
+  // nothing for anyone else. Now nothing is copied, drawn or made until the window
+  // (page-share.js) gets its "Yes, share this page"; it lists what becomes public, to whom,
+  // and carries the small "Block searches" tick.
+  function askToShare(kind) {
+    if (window.BeeZillaPageShare) { window.BeeZillaPageShare.open(kind); return; }
+    say("Sharing isn't ready on this page. Reload it and try again.");
   }
 
   // ── Sources (cached per page view; search queries the server each time) ─
@@ -139,6 +175,17 @@
       return cache.files;
     });
   }
+  function boardRecipes(force) {
+    if (cache.boardRecipes && !force) return Promise.resolve(cache.boardRecipes);
+    return getJSON("/api/buzzy/board-recipes").then(function (j) {
+      cache.boardRecipes = (j && Array.isArray(j.recipes)) ? j.recipes : [];
+      return cache.boardRecipes;
+    });
+  }
+  window.addEventListener("bz:recipes", function () {
+    cache.boardRecipes = null;
+    if (current === "recipes") select("recipes");
+  });
   function skills() {
     var out = [];
     (window.BZ_EXPERTS || []).forEach(function (e) {
@@ -164,6 +211,7 @@
       getJSON("/api/buzzy/search?q=" + encodeURIComponent(q)),
       files(),
       recipes(),
+      boardRecipes(),
     ]).then(function (r) {
       if (my !== seq) return; // a newer keystroke won
       var s = r[0] || {};
@@ -173,10 +221,23 @@
         list.push({ group: "documents", icon: k.icon, title: d.title || "Untitled document", type: k.label,
           sub: d.snippet || "", href: "/buzzy/library?job=" + encodeURIComponent(d.job_id || d.jobId || d.id) });
       });
-      (r[1] || []).filter(function (f) { return contains(f.filename || f.rel_path, ql); }).slice(0, 12).forEach(function (f) {
+      // Saved pictures, music, 3D and files, found by their search words (45+ per file,
+      // written when the file was saved), so "house" finds the house picture.
+      var seenAsset = {};
+      (s.assets || []).forEach(function (a) {
+        seenAsset[a.id] = 1;
+        var media = a.kind === "picture" ? "pictures" : a.kind === "music" ? "music" : a.kind === "3d" ? "models" : "documents";
+        var k = fileKind(a.filename, a.contentType);
+        list.push({ group: media, media: a.kind, icon: k.icon, title: a.description || a.filename || "File", type: k.label,
+          sub: a.description ? a.filename : "", href: a.url, url: a.url, contentType: a.contentType, name: a.filename, external: true });
+      });
+      (r[1] || []).filter(function (f) { return !seenAsset[f.id] && contains(f.filename || f.rel_path, ql); }).slice(0, 12).forEach(function (f) {
         var k = fileKind(f.filename || f.rel_path, f.content_type);
-        list.push({ group: "documents", icon: k.icon, title: f.filename || f.rel_path || "File", type: k.label,
-          sub: f.job_title ? "In " + f.job_title : "", href: "/api/buzzy/assets/" + encodeURIComponent(f.id), external: true });
+        var media = /^image\//.test(f.content_type || "") ? "pictures" : /^audio\//.test(f.content_type || "") ? "music" : /gltf|glb/.test(f.content_type || "") ? "models" : "documents";
+        list.push({ group: media, media: media === "pictures" ? "picture" : media === "music" ? "music" : media === "models" ? "3d" : "", icon: k.icon,
+          title: f.filename || f.rel_path || "File", type: k.label, sub: f.job_title ? "In " + f.job_title : "",
+          href: "/api/buzzy/assets/" + encodeURIComponent(f.id), url: "/api/buzzy/assets/" + encodeURIComponent(f.id),
+          contentType: f.content_type, name: f.filename, external: true });
       });
       (s.jobs || []).forEach(function (j) {
         list.push({ group: "documents", icon: "work", title: j.title || "Untitled work", type: "Work",
@@ -190,6 +251,9 @@
         list.push({ group: "skills", icon: "skill", title: x.skill, type: "Skill · " + x.expert.name,
           prompt: "I need help with " + x.skill.charAt(0).toLowerCase() + x.skill.slice(1) });
       });
+      (r[3] || []).filter(function (rc) { return contains(rc.name, ql) || contains(rc.instructions, ql); }).slice(0, 12).forEach(function (rc) {
+        list.push({ group: "recipes", icon: "recipe", title: rc.name, type: "Your recipe", sub: "From your Idea Board", boardRecipe: rc });
+      });
       (r[2] || []).filter(function (rc) { return contains(rc.name, ql) || contains(rc.outcome, ql); }).slice(0, 12).forEach(function (rc) {
         list.push({ group: "recipes", icon: "recipe", title: rc.name || rc.id, type: "Recipe",
           sub: rc.outcome || "", href: "/buzzy/recipes#" + encodeURIComponent(rc.id) });
@@ -201,31 +265,73 @@
   function show(list, q) {
     items = list;
     results.classList.remove("hidden");
-    tabs.classList.add("hidden");
+    tabRow.classList.add("hidden");
     pane.classList.add("hidden");
     paintChips();
     var visible = list.filter(function (it) { return filter === "all" || it.group === filter || it.group === "all"; });
     if (!visible.length) {
       grid.innerHTML = '<p class="bz-results-empty">' + (q.length < 2
         ? "Keep typing — two letters or more."
-        : "Nothing of yours matches “" + esc(q) + "”" + (filter === "all" ? "." : " in " + filter + ".")) + "</p>";
+        : "Nothing of yours matches “" + esc(q) + "”" + (filter === "all" ? "." : " in " + ({ pictures: "pictures", music: "music", models: "3D", documents: "documents", skills: "skills", recipes: "recipes" }[filter] || filter) + ".")) + "</p>";
       return;
     }
-    grid.innerHTML = visible.map(function (it) {
+    var pics = visible.filter(function (it) { return it.media === "picture"; });
+    var tracks = visible.filter(function (it) { return it.media === "music"; });
+    var rest = visible.filter(function (it) { return it.media !== "picture" && it.media !== "music"; });
+    var html = "";
+    if (pics.length) {
+      html += '<div class="bz-media-row">' + pics.map(function (it) {
+        var i = list.indexOf(it);
+        return '<a class="bz-hit-img" draggable="true" data-i="' + i + '" href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(it.title) + '">' +
+          '<img src="' + esc(it.url) + '" alt="' + esc(it.title) + '" loading="lazy" draggable="false" />' +
+          '<span class="bz-hit-cap">' + esc(it.title) + "</span>" +
+          '<span class="bz-hit-tools"><button type="button" data-board="' + i + '">Add to board</button></span></a>';
+      }).join("") + "</div>";
+    }
+    tracks.forEach(function (it) {
+      var i = list.indexOf(it);
+      html += '<div class="bz-hit-track" draggable="true" data-i="' + i + '"><span class="bz-hit-title">' + esc(it.title) + "</span>" +
+        '<span class="bz-hit-wave" data-wave="' + i + '"></span>' +
+        '<span class="bz-hit-tools"><button type="button" data-board="' + i + '">Add to board</button>' +
+        '<a href="' + esc(it.url) + '" download>Download</a></span></div>';
+    });
+    html += rest.map(function (it) {
       var i = list.indexOf(it);
       var tag = it.href ? "a" : "button";
       var attrs = it.href
         ? ' href="' + esc(it.href) + '"' + (it.external ? ' target="_blank" rel="noopener noreferrer"' : "")
         : ' type="button"';
-      return "<" + tag + ' class="bz-result" data-i="' + i + '"' + attrs + ">" +
+      return "<" + tag + ' class="bz-result" draggable="true" data-i="' + i + '"' + attrs + ">" +
         (ICON[it.icon] || ICON.file) +
         '<span class="bz-result-text"><span class="bz-result-title">' + esc(it.title) + "</span>" +
         '<span class="bz-result-type">' + esc(it.type) + (it.sub ? " · " + esc(it.sub) : "") + "</span></span></" + tag + ">";
     }).join("");
+    grid.innerHTML = html;
+    // Music always shows its sound.
+    grid.querySelectorAll("[data-wave]").forEach(function (slot) {
+      var it = list[Number(slot.getAttribute("data-wave"))];
+      if (it && window.BeeZillaWave) slot.appendChild(window.BeeZillaWave.player(it.url, { title: it.title }));
+    });
   }
 
+  // A result as a whiteboard card (drag it onto the board, or press Add to board).
+  function asCard(it) {
+    var kind = it.media === "picture" ? "image" : it.media === "music" ? "track" : it.media === "3d" ? "model" :
+      it.group === "skills" ? "skill" : it.icon === "word" ? "document" : it.icon === "sheet" ? "sheet" : it.icon === "pdf" ? "pdf" : "file";
+    return { kind: kind, title: it.name || it.title, url: it.url || (it.href && !/^\/buzzy\//.test(it.href) ? it.href : "") || it.href || "",
+      contentType: it.contentType || "", body: it.group === "skills" ? (it.prompt || "") : "" };
+  }
+  grid.addEventListener("dragstart", function (e) {
+    var el = e.target.closest ? e.target.closest("[data-i]") : null;
+    if (!el || !e.dataTransfer) return;
+    var it = items[Number(el.getAttribute("data-i"))];
+    if (!it) return;
+    e.dataTransfer.setData("application/x-beezilla-card", JSON.stringify(asCard(it)));
+    e.dataTransfer.effectAllowed = "copy";
+  });
+
   function paintChips() {
-    var counts = { all: items.length, documents: 0, skills: 0, recipes: 0 };
+    var counts = { all: items.length, pictures: 0, music: 0, models: 0, documents: 0, skills: 0, recipes: 0 };
     items.forEach(function (it) { if (counts[it.group] != null && it.group !== "all") counts[it.group]++; });
     results.querySelectorAll(".bz-chips [data-f]").forEach(function (b) {
       var f = b.getAttribute("data-f");
@@ -243,7 +349,7 @@
     results.classList.add("hidden");
     var rd = document.getElementById("bzReader");
     if (rd) { rd.classList.add("hidden"); }
-    tabs.classList.remove("hidden");
+    tabRow.classList.remove("hidden");
     pane.classList.remove("hidden");
     say("");
   }
@@ -271,6 +377,14 @@
     });
   });
   grid.addEventListener("click", function (e) {
+    var add = e.target.closest ? e.target.closest("[data-board]") : null;
+    if (add) {
+      e.preventDefault();
+      e.stopPropagation();
+      var hit = items[Number(add.getAttribute("data-board"))];
+      if (hit && window.bzAddToBoard) { window.bzAddToBoard(asCard(hit)); add.textContent = "On the board"; }
+      return;
+    }
     var el = e.target.closest ? e.target.closest(".bz-result") : null;
     if (!el) return;
     var it = items[Number(el.getAttribute("data-i"))];
@@ -278,12 +392,13 @@
     if (it.reader) { e.preventDefault(); openReader(it.reader); return; }
     if (it.session && window.bzOpenSession) { e.preventDefault(); closeSearch(); window.bzOpenSession(it.session); return; }
     if (it.prompt && window.bzPrompt) { e.preventDefault(); closeSearch(); window.bzPrompt(it.prompt); return; }
+    if (it.boardRecipe && window.bzPutRecipeOnBoard) { e.preventDefault(); closeSearch(); window.bzPutRecipeOnBoard(it.boardRecipe); return; }
     if (it.href && window.BeeZillaShell && !it.external && /^\/buzzy\//.test(it.href)) {
       e.preventDefault(); window.BeeZillaShell.go(it.href);
     }
   });
   var copyBtn = $("bzCopy");
-  if (copyBtn) copyBtn.addEventListener("click", copyLink);
+  if (copyBtn) copyBtn.addEventListener("click", function () { askToShare("copy"); });
 
   // ── Reader: the built-in browser for a typed web address ──────────────
   // Home · Back · breadcrumbs · the page as text with its links. Fetched by the
@@ -302,7 +417,7 @@
       '<a class="bz-reader-out" target="_blank" rel="noopener noreferrer">Open the real page &#8599;</a>' +
     "</div>" +
     '<div class="bz-reader-body" aria-live="polite"></div>';
-  root.insertBefore(reader, tabs);
+  root.insertBefore(reader, tabRow);
   var trail = [];   // pages opened, oldest first
   var at = -1;      // index in trail being shown
   var readSeq = 0;
@@ -310,7 +425,7 @@
   function showReader(on) {
     reader.classList.toggle("hidden", !on);
     results.classList.add("hidden");
-    tabs.classList.toggle("hidden", on);
+    tabRow.classList.toggle("hidden", on);
     pane.classList.toggle("hidden", on);
   }
   function crumbs() {
@@ -404,9 +519,11 @@
   var mounted = null;
 
   function parkRecent() {
-    // Recent work belongs to Library; elsewhere it waits, hidden, so talk.html's
-    // own code (which repaints it) keeps working.
-    if (recent && recent.parentNode !== root) { root.appendChild(recent); }
+    // Recent work belongs to Library; elsewhere it waits, hidden, in Talk's own page
+    // (not the header, which every page shows), so talk.html's own code (which
+    // repaints it) keeps working.
+    var home = (pane && pane.parentNode) || root;
+    if (recent && recent.parentNode !== home) { home.appendChild(recent); }
     if (recent) recent.classList.add("bz-parked");
   }
 
@@ -453,6 +570,82 @@
       // Without the wall, finished work still has a home: show recent work.
       if (recent) { recent.classList.remove("bz-parked"); pane.appendChild(recent); }
     },
+    history: function () {
+      // Past conversations, newest first (owner: "History can move down to where
+      // library, memory, and experts is"). Open one to carry on where it stopped.
+      pane.innerHTML = '<div class="bz-pane-head"><h2>History</h2>' +
+        '<button type="button" class="ob-new" data-new="1">New conversation</button></div><div class="ob-list" aria-live="polite"><p class="ob-empty">Loading…</p></div>';
+      var listEl = pane.querySelector(".ob-list");
+      pane.querySelector("[data-new]").addEventListener("click", function () {
+        var b = document.getElementById("newSessionBtn");
+        if (b) b.click();
+        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { /* best effort */ }
+      });
+      getJSON("/api/buzzy/sessions").then(function (j) {
+        var sessions = (j && Array.isArray(j.sessions)) ? j.sessions : [];
+        if (!sessions.length) { listEl.innerHTML = '<p class="ob-empty">Nothing yet. Talk to BeeZilla and your conversations collect here.</p>'; return; }
+        listEl.innerHTML = sessions.slice(0, 60).map(function (c, i) {
+          var n = c.messageCount != null ? c.messageCount + " message" + (c.messageCount === 1 ? "" : "s") : "";
+          // Drag a conversation onto the Idea Board: it lands as a note with its gist.
+          var card = { kind: "note", title: String(c.title || "Conversation").slice(0, 120), body: String(c.summary || n || "").slice(0, 600) };
+          return '<div class="ob-item ob-drag" draggable="true" data-bz-card="' + esc(JSON.stringify(card)) + '"><div class="ob-item-main"><p class="ob-item-title">' + esc(c.title || "Untitled conversation") + "</p>" +
+            '<p class="ob-item-sub">' + esc(c.summary || n) + "</p></div>" +
+            '<div class="ob-item-tools"><button type="button" class="ob-go" data-open="' + i + '">Open</button></div></div>';
+        }).join("");
+        listEl.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest("[data-open]") : null;
+          if (!b) return;
+          var c = sessions[Number(b.getAttribute("data-open"))];
+          if (c && window.bzOpenSession) {
+            window.bzOpenSession(c);
+            try { localStorage.setItem("bz_session_id", c.id); } catch (_) { /* best effort */ }
+            try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { /* best effort */ }
+          }
+        });
+      });
+    },
+    recipes: function () {
+      // Recipes you made from the whiteboard (select an area → Create recipe), then
+      // the ready-made ones. Run one, or put it back on the board to change it.
+      pane.innerHTML = '<div class="bz-pane-head"><h2>Recipes</h2>' + link("/buzzy/recipes", "Ready-made recipes") + "</div>" +
+        '<p class="ob-section">Yours</p><div class="ob-list ob-mine"><p class="ob-empty">Loading…</p></div>' +
+        '<p class="ob-section">Ready-made</p><div class="ob-list ob-ready"></div>';
+      var mine = pane.querySelector(".ob-mine"), ready = pane.querySelector(".ob-ready");
+      boardRecipes(true).then(function (list) {
+        if (!list.length) {
+          mine.innerHTML = '<p class="ob-empty">None yet. On the Idea Board, drag a box around your agent.md, skills and output, then choose Create recipe.</p>';
+          return;
+        }
+        mine.innerHTML = list.map(function (rc, i) {
+          var steps = (rc.graph && rc.graph.nodes || []).filter(function (n) { return n.kind === "skill"; }).length;
+          var card = { kind: "note", title: String(rc.name || "Recipe").slice(0, 120), body: "Recipe: " + steps + " step" + (steps === 1 ? "" : "s") + ". Recipes → Put on board brings back every step." };
+          return '<div class="ob-item ob-drag" draggable="true" data-bz-card="' + esc(JSON.stringify(card)) + '"><div class="ob-item-main"><p class="ob-item-title">' + esc(rc.name) + "</p>" +
+            '<p class="ob-item-sub">' + steps + " step" + (steps === 1 ? "" : "s") + " · made on your Idea Board</p></div>" +
+            '<div class="ob-item-tools"><button type="button" class="ob-go" data-run="' + i + '">Run</button>' +
+            '<button type="button" data-put="' + i + '">Put on board</button><button type="button" data-del="' + i + '">Delete</button></div></div>';
+        }).join("");
+        mine.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest("button") : null;
+          if (!b) return;
+          var idx = Number(b.getAttribute("data-run") || b.getAttribute("data-put") || b.getAttribute("data-del"));
+          var rc = list[idx];
+          if (!rc) return;
+          if (b.hasAttribute("data-run") && window.bzRunRecipe) window.bzRunRecipe(rc);
+          else if (b.hasAttribute("data-put") && window.bzPutRecipeOnBoard) window.bzPutRecipeOnBoard(rc);
+          else if (b.hasAttribute("data-del")) {
+            if (b.getAttribute("data-sure") !== "1") { b.setAttribute("data-sure", "1"); b.textContent = "Delete for good?"; return; }
+            fetch("/api/buzzy/board-recipes/" + encodeURIComponent(rc.id), { method: "DELETE", credentials: "same-origin" })
+              .then(function () { cache.boardRecipes = null; select("recipes"); });
+          }
+        });
+      });
+      recipes().then(function (list) {
+        ready.innerHTML = list.slice(0, 12).map(function (rc) {
+          return '<a class="ob-item" href="/buzzy/recipes#' + esc(rc.id) + '"><span class="ob-item-main"><span class="ob-item-title">' + esc(rc.name || rc.id) + "</span>" +
+            '<span class="ob-item-sub" style="display:block">' + esc(rc.outcome || "") + "</span></span></a>";
+        }).join("") || '<p class="ob-empty">No ready-made recipes on this server.</p>';
+      });
+    },
     library: function () {
       pane.innerHTML = '<div class="bz-pane-head"><h2>Library</h2>' + link("/buzzy/library", "Open the full Library") + "</div>";
       if (recent) { recent.classList.remove("bz-parked"); pane.appendChild(recent); }
@@ -467,55 +660,130 @@
       pane.innerHTML = '<div class="bz-pane-head"><h2>Experts</h2>' + link("/buzzy/experts", "All experts") + "</div>" +
         '<div class="bz-experts">' + ex.map(function (e) {
           return '<a class="bz-expert" href="/buzzy/experts#' + esc(e.id) + '">' +
-            '<span class="bz-expert-ico" aria-hidden="true">' + esc(icons[e.id] || "★") + "</span>" +
+            '<span class="bz-expert-ico" aria-hidden="true">' + (icons[e.id] || icons.other || "") + "</span>" +
             '<span class="bz-expert-name">' + esc(e.name) + "</span>" +
             '<span class="bz-expert-blurb">' + esc(e.blurb || "") + "</span></a>";
         }).join("") + "</div>";
     },
   };
 
+  // ── Which page is under the header ─────────────────────────────────────
+  // The header (search, places) is on every page; the first six places open in
+  // Talk's own page, under the row. From any other page they go to Talk first.
+  function pathNow() {
+    var key = window.BeeZillaShell && window.BeeZillaShell.currentKey;
+    return String(key || location.pathname).replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, "");
+  }
+  function onTalk() { return /^\/buzzy(\/talk)?$/.test(pathNow()); }
+  // A full page that belongs to one of the places lights that place up.
+  var PAGE_PLACE = {
+    library: "library", memory: "memory", remember: "memory", experts: "experts", recipes: "recipes",
+    sketch: "sketch", studio: "studio", capabilities: "capabilities", wallet: "wallet", upload: "publish",
+    // Orchestrate joined the row with CR-3 but not this map, so the row went dark on it.
+    orchestrate: "orchestrate",
+  };
+  var places = document.querySelector("#bzPlaces .bz-places");
+  function paintPlaces() {
+    var talk = onTalk();
+    var here = talk ? "" : (PAGE_PLACE[pathNow().split("/")[2] || ""] || "");
+    var first = null;
+    tabs.querySelectorAll("[data-tab]").forEach(function (b) {
+      var name = b.getAttribute("data-tab");
+      var on = talk && name === current;
+      b.classList.toggle("on", on);
+      b.classList.toggle("here", !talk && name === here);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      if (!talk && name === here) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+      b.tabIndex = on || (!talk && name === here) ? 0 : -1;
+      if (!first) first = b;
+    });
+    // Away from Talk with no place of its own lit, the row still takes Tab once.
+    if (!talk && first && !tabs.querySelector('[data-tab][tabindex="0"]')) first.tabIndex = 0;
+    if (places) {
+      places.querySelectorAll("a[data-place]").forEach(function (a) {
+        var on = a.getAttribute("data-place") === here;
+        a.classList.toggle("on", on);
+        if (on) a.setAttribute("aria-current", "page");
+        else a.removeAttribute("aria-current");
+      });
+    }
+  }
+  window.addEventListener("bz:page", paintPlaces);
+  window.addEventListener("popstate", function () { setTimeout(paintPlaces, 0); });
+
   function select(name) {
     if (!TABS[name]) name = "inspiration";
-    if (mounted && mounted.destroy) { try { mounted.destroy(); } catch (_) {} }
+    if (mounted && mounted.destroy) { try { mounted.destroy(); } catch (_) { /* nothing to do */ } }
     mounted = null;
     parkRecent();
     pane.innerHTML = "";
     current = name;
     store("bz.browse.tab", name);
-    tabs.querySelectorAll("[data-tab]").forEach(function (b) {
-      var on = b.getAttribute("data-tab") === name;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-selected", on ? "true" : "false");
-      b.tabIndex = on ? 0 : -1;
-    });
+    paintPlaces();
     TABS[name]();
+  }
+  // A place chosen from another page: go to Talk (its page is kept), then open it.
+  function choose(name) {
+    if (!onTalk() && window.BeeZillaShell && window.BeeZillaShell.go) {
+      Promise.resolve(window.BeeZillaShell.go("/buzzy/talk")).then(function () {
+        select(name);
+        paintPlaces();
+      });
+      return;
+    }
+    select(name);
   }
 
   tabs.addEventListener("click", function (e) {
     var b = e.target.closest ? e.target.closest("[data-tab]") : null;
-    if (b) select(b.getAttribute("data-tab"));
+    if (b) choose(b.getAttribute("data-tab"));
   });
   tabs.addEventListener("keydown", function (e) {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     var all = Array.prototype.slice.call(tabs.querySelectorAll("[data-tab]"));
-    var at = all.findIndex(function (b) { return b.getAttribute("data-tab") === current; });
+    var at = all.findIndex(function (b) { return b === document.activeElement; });
+    if (at < 0) at = all.findIndex(function (b) { return b.getAttribute("data-tab") === current; });
     var next = all[(at + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length];
-    if (next) { select(next.getAttribute("data-tab")); next.focus(); }
+    if (!next) return;
+    if (onTalk()) select(next.getAttribute("data-tab"));
+    next.focus();
   });
+
+  window.bzBrowseSelect = function (name) { choose(name); };
+
+  // The bee in the corner (nav.js) brings you to the top page: a search or a web page
+  // you were reading is put away, the QR code closes, and Inspiration is under the row
+  // again, as on a fresh visit. Only called once Talk is the page showing.
+  window.bzBrowseHome = function () {
+    // The share window stands in for the old QR popover: going home closes it.
+    if (window.BeeZillaPageShare) window.BeeZillaPageShare.close();
+    readSeq++;            // a page still being fetched must not open itself afterwards
+    closeSearch();        // also hides the reader and brings the row and its pane back
+    // Already on a mounted Inspiration wall: leave it, rather than rebuild it for nothing.
+    if (current === "inspiration" && mounted) paintPlaces();
+    else select("inspiration");
+  };
 
   // A privacy change can hide or show the wall.
   window.addEventListener("bz:privacy", function () { if (current === "inspiration") select("inspiration"); });
 
-  // The wall script may arrive after this one.
-  select(store("bz.browse.tab") || "inspiration");
+  // Every visit opens on Inspiration (owner, 2026-11-20: "The tab in question should
+  // be Inspiration by default"). The last place you chose is no longer reopened.
+  select("inspiration");
   window.addEventListener("load", function () {
     if (current === "inspiration" && !mounted && window.BeeZillaInspiration) select("inspiration");
   });
 
+  // ── QR code: asks first, then draws the shared page's code in the window ──
+  var qrBtn = $("bzQr");
+  if (qrBtn) qrBtn.addEventListener("click", function (e) { e.stopPropagation(); askToShare("qr"); });
+
   // ── Back to top ────────────────────────────────────────────────────────
   var top = document.createElement("button");
   top.type = "button";
-  top.className = "bz-totop";
+  // Talk's own, styled from the header's copy of Talk's sheets on every page (bz-talk-own).
+  top.className = "bz-totop bz-talk-own";
   top.setAttribute("aria-label", "Back to top");
   top.title = "Back to top";
   top.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7.6l-7.1 7.1 1.4 1.4L12 10.4l5.7 5.7 1.4-1.4z"/></svg>';

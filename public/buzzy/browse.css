@@ -16,6 +16,7 @@
   border: 1px solid #2A2A2A;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+.bz-search { position: relative; }
 .bz-search:focus-within {
   border-color: #FFC107;
   box-shadow: 0 0 0 1px #FFC107, 0 0 22px rgba(255, 193, 7, 0.35);
@@ -172,9 +173,14 @@
 .bz-ico-recipe i:nth-child(3) { width: 1.2rem; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────── */
-.bz-tabs { display: flex; gap: 2rem; margin: 1.1rem 0.6rem 1rem; border-bottom: 1px solid #1E1E1E; overflow-x: auto; }
+/* The places row wraps; it never scrolls. `.bz-tabs` used to be its own
+   `overflow-x: auto` strip with shrinkable nowrap labels, which painted tab text
+   over its neighbour at 360–430px (CR-13: "Memo" was Memory clipped).
+   oneboard.css owns the row's wrap; this side must not fight it. */
+.bz-tabs { display: flex; flex-wrap: wrap; gap: 2rem; margin: 1.1rem 0.6rem 1rem; border-bottom: 1px solid #1E1E1E; }
 .bz-tabs button {
   position: relative;
+  flex: 0 0 auto;
   min-height: 0;
   padding: 0.55rem 0.1rem 0.75rem;
   border: none;
@@ -220,15 +226,19 @@
   text-decoration: none;
 }
 .bz-expert:hover, .bz-expert:focus-visible { border-color: #FFC107; outline: none; }
-.bz-expert-ico { grid-row: span 2; font-size: 1.6rem; line-height: 1; align-self: center; }
+.bz-expert-ico { grid-row: span 2; font-size: 1.6rem; line-height: 1; align-self: center; color: #FFC107; }
+.bz-expert-ico .bz-line-ico { display: block; }
 .bz-expert-name { color: #F2F2F2; font-weight: 700; }
 .bz-expert-blurb { color: #9A9A9A; font-size: 0.85rem; }
 
 /* ── Back to top ────────────────────────────────────────────────────── */
+/* The bottom-right corner belongs to the settings gear (nav.js: 44px, 22px in from
+   the right and bottom; 16px on a phone). This sits directly above it, centred on
+   the same line, so the two never overlap. */
 .bz-totop {
   position: fixed;
-  right: 1.4rem;
-  bottom: 1.4rem;
+  right: calc(44px - 1.65rem);
+  bottom: 78px;
   z-index: 40;
   display: inline-flex;
   align-items: center;
@@ -257,7 +267,8 @@
   .bz-search input { height: 3rem; font-size: 16px; }
   .bz-results { padding: 1rem; }
   .bz-results-grid { grid-template-columns: 1fr; }
-  .bz-tabs { gap: 1.3rem; }
+  .bz-tabs { gap: 0.6rem 1.1rem; }
+  .bz-totop { right: calc(38px - 1.65rem); bottom: 72px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bz-totop, .bz-search { transition: none; }

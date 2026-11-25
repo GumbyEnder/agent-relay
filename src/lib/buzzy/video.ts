@@ -51,8 +51,8 @@ export const VIDEO_BRAND = env("BZ_VIDEO_BRAND") === "1";
  * The kit enforces the same flat number (`DAILY_LIMIT_PER_USER` on serve.py)
  * because it has no idea what a BeeZilla plan is; its 429 is the backstop, never
  * the product rule. `BZ_VIDEO_DAILY_LIMIT` is the only override, for ops. Never
- * reintroduce a plan argument: the signature takes one only so existing callers
- * cannot silently disagree with the kit.
+ * reintroduce a plan argument: this signature takes none, so no caller can pass
+ * a plan and silently disagree with the kit.
  */
 export const DAILY_LIMIT_PER_USER = 5;
 
@@ -129,11 +129,15 @@ const TOPIC_FIELD: VideoAskField = {
 };
 
 /**
- * The five recipes in Shane's Thursday scope. `asks` mirrors the kit's cards:
- * four of them take one topic; the chart race takes a question, a table and a
- * source, which is why it cannot be started from a sentence alone.
+ * Every recipe the kit has. `asks` mirrors the kit's cards: four of them take one
+ * topic; the chart race takes a question, a table and a source, which is why it
+ * cannot be started from a sentence alone.
+ *
+ * This list is the *catalogue*, not what BeeZilla offers. What BeeZilla offers is
+ * `VIDEO_RECIPES` below (the catalogue minus `HELD_BACK_RECIPES`); the wire
+ * contract and the labels on old job rows still need the whole thing.
  */
-export const VIDEO_RECIPES: VideoRecipe[] = [
+export const ALL_VIDEO_RECIPES: VideoRecipe[] = [
   {
     id: "explain-on-a-chalkboard",
     kind: "tips",
@@ -217,8 +221,33 @@ export const VIDEO_RECIPES: VideoRecipe[] = [
   },
 ];
 
+/**
+ * Recipes the kit has but BeeZilla is NOT offering yet, held back on purpose.
+ *
+ * Shane, 2026-11-19 (CR-1): "ships today with 4 of 5 recipes, picture-reel
+ * later". The reason is the kit's own behaviour, not taste: with no seeded
+ * picture library it refuses the job with `pictures_unavailable` rather than
+ * half-rendering (verified 2026-11-19 against a 13 MB JPEG-only library), so
+ * offering it would only turn a person's request into a failure.
+ *
+ * To switch it on, delete its id from this list — nothing else to change: the
+ * recipe card, the tool enum and the chat pre-pass all read VIDEO_RECIPES.
+ */
+export const HELD_BACK_RECIPES: readonly VideoRecipeId[] = ["picture-reel"];
+
+/** What the Recipes page, the chat pre-pass and `generate_video` offer. */
+export const VIDEO_RECIPES: VideoRecipe[] = ALL_VIDEO_RECIPES.filter(
+  (r) => !HELD_BACK_RECIPES.includes(r.id),
+);
+
+export function videoRecipeHeldBack(id: string): boolean {
+  return (HELD_BACK_RECIPES as readonly string[]).includes(id);
+}
+
+/** The catalogue lookup: labels on old job rows and the kit's wire body need
+ *  every recipe, including one that is held back from new jobs. */
 export function recipeById(id: string): VideoRecipe | undefined {
-  return VIDEO_RECIPES.find((r) => r.id === id);
+  return ALL_VIDEO_RECIPES.find((r) => r.id === id);
 }
 
 export function videoConfigured(): boolean {
@@ -349,7 +378,7 @@ export function kitJobBody(
   input: VideoJobInput,
 ): { ok: true; body: Record<string, unknown> } | KitFailure {
   const recipe = recipeById(input.recipe);
-  if (!recipe) return { ok: false, code: "bad_recipe", error: "That is not one of the five recipes." };
+  if (!recipe) return { ok: false, code: "bad_recipe", error: "That is not a recipe the kit has." };
   const user = (collapse(input.userId) || "anonymous").slice(0, 80);
 
   if (recipe.kind === "chart") {
@@ -529,6 +558,17 @@ export async function startKitJob(
 export async function createVideoJob(
   input: VideoJobInput,
 ): Promise<{ ok: true; jobId: string; state: string; etaMinutes: number } | KitFailure> {
+  // The product gate. Every path that starts a job for a person (chat pre-pass,
+  // generate_video, the Recipes card's API) comes through here; a held-back
+  // recipe is refused in the person's own words rather than sent to a kit that
+  // will fail it. startKitJob stays a raw kit client so its contract can be tested.
+  if (videoRecipeHeldBack(input.recipe)) {
+    return {
+      ok: false,
+      code: "recipe_unavailable",
+      error: "The picture reel is not switched on yet — the other four recipes are ready today.",
+    };
+  }
   const started = await startKitJob(input);
   if (!started.ok) return started;
   await recordVideoJob(input.userId, started.jobId, input.recipe, inputSeed(input));
@@ -640,7 +680,8 @@ function guessType(name: string): string {
 /**
  * The tool the model calls to make a video.
  *
- * `recipe` is an enum of the five, and `topic` is the thing to explain — not the
+ * `recipe` is an enum of what BeeZilla offers today (four of the catalogue; the
+ * picture reel is held back), and `topic` is the thing to explain — not the
  * request. The harness starts the render either way (intent.ts decides before the
  * model is asked), but the model needs the tool so that a follow-up like "now one
  * about volcanoes, paper-cut style" is a job rather than a paragraph.
@@ -665,7 +706,7 @@ export const GENERATE_VIDEO_TOOL = {
             "Which recipe to run. explain-on-a-chalkboard is the hand-drawn explainer; " +
             "ai-creator-tips-paper-cut is cut-out creator tips; chart-race-from-your-numbers is a " +
             "racing bar chart and needs the person's own table, so ask for the numbers first; " +
-            "picture-reel is pictures cut to the beat; narrated-explainer is a plain narrated explainer.",
+            "narrated-explainer is a plain narrated explainer.",
         },
         topic: {
           type: "string",

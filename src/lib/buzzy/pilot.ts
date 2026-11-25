@@ -15,11 +15,16 @@
  *
  * Plans come only from this closed list, matched against the owner's own words.
  * The model never writes one, and no action reaches outside BeeZilla's pages.
+ *
+ * The Idea Board's own steps (zoom, add a note, connect two cards, make an area…)
+ * are listed in boardPilot.ts and run by the board itself (whiteboard.js `act`).
  */
+import { acceptedOffer, boardStep, closedBoardStep, orchestrateStep, type BoardStep } from "./boardPilot";
 
 export type PrivacyMode = "advocate" | "lockdown" | "open";
 
-export interface AppAction {
+export type AppAction = PageAction | BoardStep;
+export interface PageAction {
   do: "go" | "tab" | "inspiration" | "whiteboard" | "privacy" | "mode" | "history" | "newChat" | "speak" | "voice";
   /** The place, tab, kind or mode, or "open"/"close", "on"/"off". */
   value?: string;
@@ -31,6 +36,8 @@ export interface AppAction {
 
 const MAX_STEPS = 4;
 const MAX_LENGTH = 160;
+/** An orchestration can take a few sentences to describe ("…then I approve it, then…"). */
+const ORCH_MAX_LENGTH = 1500;
 
 function normal(message: string): string {
   return String(message || "")
@@ -40,8 +47,8 @@ function normal(message: string): string {
     .trim();
 }
 
-// "Hey BeeZilla, could you please …", "… for me now please!"
-const LEAD = /^(?:(?:hey|hi|ok|okay)\s+)?(?:(?:bee ?zilla|buzzy)\s*[,:!]?\s+)?(?:please\s+|pls\s+|kindly\s+)?(?:(?:can|could|would|will) you\s+(?:please\s+)?)?/;
+// "Hey BeeZilla, could you please …", "Um, okay, so can you …", "… for me now please!"
+const LEAD = /^(?:(?:hey|hi|ok|okay|um+|uh+|so|alright|all right|right|now|and)\s*[,.]?\s+)*(?:(?:bee ?zilla|buzzy|debzilla|gzilla)\s*[,:!]?\s+)?(?:please\s+|pls\s+|kindly\s+)?(?:(?:can|could|would|will) you\s+(?:please\s+)?|i want you to\s+|i'd like you to\s+|i need you to\s+)?/;
 const TAIL = /(?:\s+(?:please|pls|for me|now|right now|thanks|thank you))*\s*[.!?]*$/;
 
 const PLACES: Record<string, string> = {
@@ -106,6 +113,14 @@ const RULES: Rule[] = [
     re: /^(?:close|hide|shut|put away|dismiss)(?: the| my)? ?white ?board$/,
     make: () => ({ do: "whiteboard", value: "close", say: "Close the Idea Board" }),
   },
+  {
+    re: /^(?:open|show|bring up|pull up|unfold)(?: up)?(?: me)?(?: the| my)? idea board$|^(?:open|see|show|bring up|pull up|unfold|bring back)(?: up)?(?: me)?(?: the| my)? board(?: back)?(?: up)?$|^(?:open|bring) (?:it|the board) back(?: up)?$/,
+    make: () => ({ do: "whiteboard", value: "open", say: "Open the Idea Board" }),
+  },
+  {
+    re: /^(?:close|hide|fold|put away|tuck away|minimi[sz]e)(?: the| my)? (?:idea board|board)(?: away)?$|^fold (?:it|the idea board|the board) away$/,
+    make: () => ({ do: "whiteboard", value: "close", say: "Fold the Idea Board away" }),
+  },
   // ── The tabs under the Talk bar ──────────────────────────────────────
   {
     re: /^(?:show|see|view)(?: me)?(?: my| the)? (inspiration(?: wall)?|library|memory|experts)(?: tab)?$|^open(?: up)?(?: the| my)? (inspiration(?: wall)?|inspiration tab|library tab|memory tab|experts tab)$/,
@@ -151,7 +166,7 @@ const RULES: Rule[] = [
   },
   // ── A new chat ───────────────────────────────────────────────────────
   {
-    re: /^(?:(?:start|open|begin|make|create)(?: me)? (?:a )?(?:new|fresh|blank) (?:chat|conversation|talk)|new chat)$/,
+    re: /^(?:(?:start|open|begin|make|create|put in|add)(?: me)? (?:a )?(?:new|fresh|blank) (?:chat|conversation|talk)(?: icon| button| card| window| tab)?|new (?:chat|conversation))$/,
     make: () => ({ do: "newChat", say: "Start a new chat" }),
   },
   // ── Speak replies ────────────────────────────────────────────────────
@@ -170,30 +185,114 @@ const RULES: Rule[] = [
   },
 ];
 
+export interface PlanContext {
+  /** BeeZilla's previous reply: "yes" to its own offer ("…zoom out and show you the whole board?"). */
+  lastReply?: string | null;
+  /** The starting boards BeeZilla can offer (starterBoards.ts), by title. */
+  startingBoards?: string[];
+  /** The board this turn was sent with has a flow on it: "add a check before…" changes it. */
+  boardHasFlow?: boolean;
+}
+
+/** Does the board text a turn carries (whiteboard.js compile) hold a flow to change? */
+export function boardHasFlow(boardText: string | null | undefined): boolean {
+  return /^The orchestration on the board\b|^Step \d+ — /m.test(String(boardText || ""));
+}
+
+function clauseStep(clause: string, current?: PrivacyMode | null): AppAction | null {
+  for (const rule of RULES) {
+    const hit = clause.match(rule.re);
+    if (hit) return rule.make(hit, current ?? undefined);
+  }
+  return boardStep(clause);
+}
+
+// Commands are matched in lower case; the words they carry onto the board keep the
+// person's own capitals ("add a note saying Call Maria at 5").
+function keepCase(message: string, piece: string | undefined, capital = false): string | undefined {
+  if (!piece) return piece;
+  const orig = String(message || "").replace(/[’']/g, "'").replace(/\s+/g, " ").trim();
+  const i = orig.toLowerCase().indexOf(piece.toLowerCase());
+  const got = i >= 0 ? orig.slice(i, i + piece.length) : piece;
+  return capital ? got.charAt(0).toUpperCase() + got.slice(1) : got;
+}
+function withCase(message: string, plan: AppAction[] | null): AppAction[] | null {
+  if (!plan) return plan;
+  return plan.map((s) => (s.do === "board" ? { ...s, text: keepCase(message, s.text), title: keepCase(message, s.title, true) } : s));
+}
+
 /** The actions a command asks for, or null when the message is not one. */
-export function planAppActions(message: string, current?: PrivacyMode | null): AppAction[] | null {
+export function planAppActions(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
+  const plan = withCase(message, planInLowerCase(message, current, ctx));
+  // "Orchestrate…": BeeZilla is handed the person's own words, capitals and all.
+  return plan && plan.length === 1 && plan[0]!.do === "board" && plan[0]!.value === "orchestrate"
+    ? [{ ...plan[0]!, query: String(message || "").replace(/\s+/g, " ").trim().slice(0, ORCH_MAX_LENGTH) }]
+    : plan;
+}
+function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
   const m = normal(message);
-  if (!m || m.length > MAX_LENGTH) return null;
+  if (!m) return null;
+  // Building or changing an orchestration on the board (boardPilot.ts orchestrateStep):
+  // the whole message is the request, however long, so it is never split into clauses.
+  if (m.length <= ORCH_MAX_LENGTH) {
+    const orch = orchestrateStep(m.replace(LEAD, "").replace(TAIL, ""), { boardHasFlow: ctx?.boardHasFlow });
+    if (orch) return [orch];
+  }
+  // A note can carry a sentence or two; any other command is short.
+  if (m.length > (/\bnote\b/.test(m) ? 400 : MAX_LENGTH)) return null;
+  const yes = acceptedOffer(m, ctx?.lastReply, ctx?.startingBoards ?? []);
+  if (yes) return [yes];
   const body = m.replace(LEAD, "").replace(TAIL, "");
   if (!body) return null;
+  const fixed = closedBoardStep(body);
+  if (fixed) return [fixed];
   const clauses = body.split(/\s*,?\s*(?:\band then\b|\bthen\b|\band\b)\s*|\s*,\s*/).filter(Boolean);
-  if (!clauses.length || clauses.length > MAX_STEPS) return null;
-  const plan: AppAction[] = [];
-  for (const clause of clauses) {
-    let step: AppAction | null = null;
-    for (const rule of RULES) {
-      const hit = clause.match(rule.re);
-      if (hit) { step = rule.make(hit, current ?? undefined); break; }
+  let plan: AppAction[] | null = null;
+  if (clauses.length && clauses.length <= MAX_STEPS) {
+    plan = [];
+    for (const clause of clauses) {
+      const step = clauseStep(clause, current);
+      // One clause the list doesn't cover: never half-do what was asked.
+      if (!step) { plan = null; break; }
+      plan.push(step);
     }
-    // One clause the list doesn't cover and the whole message is ordinary chat:
-    // never half-do what was asked.
-    if (!step) return null;
-    plan.push(step);
+  }
+  // "connect the note and the picture", "add a note saying eggs and milk": one board
+  // step whose words hold an "and".
+  if (!plan) {
+    const whole = boardStep(body);
+    return whole ? [whole] : null;
   }
   // Going to another page ends this one, so it can only be the last step.
   if (plan.slice(0, -1).some((s) => s.do === "go")) return null;
   return plan;
 }
+
+/**
+ * The person asked BeeZilla to build or change an orchestration on the Idea Board, or
+ * to open the one there in the Orchestrate editor: a turn whose work is on the board.
+ */
+export function asksToOrchestrate(message: string, ctx?: PlanContext): boolean {
+  const m = normal(message);
+  if (!m || m.length > ORCH_MAX_LENGTH) return false;
+  if (orchestrateStep(m.replace(LEAD, "").replace(TAIL, ""), { boardHasFlow: ctx?.boardHasFlow })) return true;
+  const plan = planAppActions(message, null, ctx);
+  return !!plan && plan.some((s) => s.do === "board" && s.value === "openOrchestrate");
+}
+
+/**
+ * On a turn where BeeZilla builds on the board, the board does the work, so the reply
+ * only says so. Measured 2026-11-24 with a local model: told only in the leading system
+ * note, it answered "I can't set up the recurring send" while the board was building
+ * it. It goes on the end of the model's copy of the person's message, in their voice:
+ * a note in the leading system message is ignored (server.ts afterNotes), and a system
+ * message after theirs is refused outright by some models ("system message must be at
+ * the beginning", local Qwen) — the person's own AI key can be any of them.
+ */
+export const ORCHESTRATE_USER_LINE =
+  "(You're building this on my Idea Board right now, card by card, and I can watch it happen there. " +
+  "Just tell me in one short sentence that you're building it on the board. Don't say you can't build workflows, " +
+  "automations, schedules or orchestrations, don't ask me anything first, and don't list the steps.)";
 
 /** The system note that tells the model what the page is doing. */
 export function appActionsNote(plan: AppAction[]): string {

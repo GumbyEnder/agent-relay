@@ -48,6 +48,10 @@ export const CONSUMER_PREFIXES = [
   "/api/auth",
   "/api/buzzy",
   "/api/inference",
+  // Exact path, not a segment under /api/inference: the desktop's mint is
+  // POST /api/inference-token, and without this the consumer host answered it
+  // with the catch-all 302 to /buzzy/talk ("the window returned something unreadable").
+  "/api/inference-token",
   "/api/music-token",
   "/api/search-token",
   "/api/search",

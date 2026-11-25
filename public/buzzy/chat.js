@@ -66,7 +66,7 @@
   }
   function setSession(id) {
     if (!id) return;
-    try { localStorage.setItem("bz_session_id", id); } catch (_) {}
+    try { localStorage.setItem("bz_session_id", id); } catch (_) { /* nothing to do */ }
   }
 
   function mount(host, opts) {
@@ -170,7 +170,7 @@
       try {
         var pv = localStorage.getItem("bz.privacy");
         if (pv === "advocate" || pv === "lockdown" || pv === "open") body.privacy = pv;
-      } catch (_) {}
+      } catch (_) { /* nothing to do */ }
       if (opts.jobId) body.jobId = opts.jobId;
       var sid = getSession();
       if (sid) body.sessionId = sid;
