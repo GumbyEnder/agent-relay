@@ -311,7 +311,7 @@ section("One mode lets a browser job go");
       /const oneModeNote = orchestrating \|\| browserGo \? "" : turnNote\(/.test(src) &&
       /if \(!orchestrating && !browserGo\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(src));
   ok("the browser gate and one mode's documents-only gate are both on the turn",
-    /const toolCtx = \{\n\s+draftGateOpen,\n\s+lockdown,\n\s+browser: browserTurn,\n\s+documentsOnly: /.test(src) &&
+    /const toolCtx = \{[^}]*\n\s+browser: browserTurn,\n/.test(src) && /const toolCtx = \{[^}]*\n\s+documentsOnly: goMakesSomething/.test(src) &&
       /const toolTurnNeeded = explicitDocumentRequest \|\| browserTurn;/.test(src));
   ok("documents-only never holds a browser job back", offeredToolNames({ draftGateOpen: true, browser: true, documentsOnly: true }).includes("use_browser") && refusalFor("use_browser", { draftGateOpen: true, browser: true, documentsOnly: true }) === null);
 }
