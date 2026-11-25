@@ -99,6 +99,16 @@ function remember(mail: OutboundEmail): void {
   const box = inbox();
   box.unshift(mail);
   if (box.length > 50) box.length = 50;
+  // The file is a local-testing affordance, never a production record.
+  //
+  // This used to append every mail — SMTP and Resend deliveries included — to
+  // .data/outbound-mail.jsonl with the full body and a live `actionUrl`. On
+  // Railway that put unexpired magic links and password-reset links in cleartext
+  // in /app/.data, one shell into the service away from signing in as a
+  // customer. The inbox endpoint that reads this file is served only when the dev
+  // inbox is on, so the file follows the same switch: with SMTP configured it is
+  // not written at all, and the link exists only in the mail we sent.
+  if (!isDevMailInboxEnabled()) return;
   try {
     const dir = env("AGENT_RELAY_MAIL_LOG_DIR") || join(process.cwd(), ".data");
     mkdirSync(dir, { recursive: true });
@@ -242,11 +252,19 @@ export async function sendMail(input: {
     console.error("[mail] delivery failed, falling back to dev inbox:", err);
   }
 
-  // Dev fallback
+  // Dev fallback. The body and the link are printed only when the dev inbox is
+  // on: with SMTP configured, Railway's log stream is as readable as the data
+  // directory, so a link that failed to send must not appear there either.
   remember(base);
-  console.info(
-    `[mail:dev] To: ${input.to}\nSubject: ${input.subject}\n${input.actionUrl ? `Link: ${input.actionUrl}\n` : ""}${input.text}\n---`,
-  );
+  if (isDevMailInboxEnabled()) {
+    console.info(
+      `[mail:dev] To: ${input.to}\nSubject: ${input.subject}\n${input.actionUrl ? `Link: ${input.actionUrl}\n` : ""}${input.text}\n---`,
+    );
+  } else {
+    console.error(
+      `[mail] undelivered → ${input.to} · ${input.subject} · no link in logs`,
+    );
+  }
   return base;
 }
 

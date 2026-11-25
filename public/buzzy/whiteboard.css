@@ -35,10 +35,24 @@
 .wb-title { margin: 0; font-size: 0.95rem; font-weight: 700; color: #d9dde3; white-space: nowrap; }
 .wb-dock { flex: 1 1 0; min-width: 0; }
 .wb-dock .composer-card { margin: 0; }
-.wb-dock .talk-bar { padding: 0.35rem; box-shadow: none; background: #121418; border-color: #2f343c; }
+/* In the board's top edge the box grows too (a long paste), a little less far than on the
+   page: the board below needs its room. The padding is a variable so the button, the
+   paper clip and the box agree on one line's height (talk.html, --tb-h). */
+.wb-dock .talk-bar { --tf-padt: 0.6rem; --tf-padb: 0.6rem; --tb-min: 2.7rem; --tf-max: clamp(7rem, 30vh, 14rem); padding: 0.35rem; box-shadow: none; background: #121418; border-color: #2f343c; }
 .wb-dock .talk-btn { min-height: 2.7rem; font-size: 1rem; padding: 0 1.2rem 0 1rem; }
-.wb-dock .composer-card .talk-field #chatInput { padding: 0.6rem 0; }
 .wb-tools { display: flex; gap: 6px; flex: 0 0 auto; }
+/* While the box above is one line the title and the buttons are centred on it; once it
+   grows they stay level with its first line instead of drifting down the tall header.
+   3.75rem is the bar as one line: its button, its padding and its border. */
+@media (min-width: 761px) {
+  .wb-head:has(.talk-bar.is-grown) { align-items: flex-start; }
+  .wb-head:has(.talk-bar.is-grown) .wb-title,
+  .wb-head:has(.talk-bar.is-grown) .wb-tools { display: flex; align-items: center; min-height: 3.75rem; }
+}
+@media (min-width: 641px) {
+  .wb-dock .talk-bar.is-grown { border-radius: 1.9rem; }
+  .wb-dock .talk-bar.is-grown .talk-field { border-radius: 1.5rem; }
+}
 .wb-btn {
   display: inline-flex;
   align-items: center;

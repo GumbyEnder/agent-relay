@@ -34,12 +34,15 @@
  * The sessions live in this process. Run more than one server copy and a person's calls
  * must reach the same copy (a sticky route), or the second copy answers "no such browser".
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { promises as dnsPromises } from "node:dns";
+import { readFile, unlink } from "node:fs/promises";
+import { join as joinPath } from "node:path";
 import { isIP } from "node:net";
 import { CdpConnection } from "./cdp";
 import { isPrivateIp } from "./website";
-import { MAX_STEPS, cleanSteps, cleanUrl, isRecordedKey, plain, stripSecretQuery, tidy, type BrowserStep, type ElementHint } from "./boardNodes";
+import { MAX_STEPS, cleanSteps, cleanUrl, isRecordedKey, plain, stripSecretQuery, tidy, type BrowserMode, type BrowserStep, type ElementHint, type RunFile } from "./boardNodes";
+import { MAX_DOWNLOAD_BYTES, decodeDataUrl, readZipEntry, safeContentType, safeFileName } from "./browserFiles";
 
 export const VIEW_W = 1280;
 export const VIEW_H = 800;
@@ -53,7 +56,7 @@ export const idleSeconds = () => seconds("BZ_BROWSER_IDLE_SECONDS", 240);
 export const sessionSeconds = () => seconds("BZ_BROWSER_SESSION_SECONDS", 1200);
 
 export class BrowserError extends Error {
-  constructor(readonly code: "not_configured" | "start_failed" | "gone" | "busy" | "bad_request", message: string) {
+  constructor(readonly code: "not_configured" | "start_failed" | "gone" | "busy" | "bad_request" | "quota" | "unavailable", message: string) {
     super(message);
   }
 }
@@ -66,6 +69,12 @@ export interface ProviderHandle {
   label: string;
   wsUrl: string;
   close(): Promise<void>;
+  /** Where the browser itself saves a download ("" = it doesn't: the bytes are read here instead). */
+  downloadDir?: string;
+  /** A download the browser saved itself, read back by the name it was saved under (its guid). */
+  savedDownload?(guid: string): Promise<Buffer | null>;
+  /** The sign-ins this browser starts with and keeps (Hyperbrowser: a profile of the person's own). */
+  keepsSignIns?: boolean;
 }
 
 export function providerKind(): ProviderKind | null {
@@ -80,14 +89,128 @@ export const browserConfigured = () => providerKind() !== null;
 
 const hbBase = () => (env("BZ_HYPERBROWSER_BASE") || "https://api.hyperbrowser.ai/api").replace(/\/+$/, "");
 
-async function openHyperbrowser(): Promise<ProviderHandle> {
-  const key = env("BZ_HYPERBROWSER_KEY");
-  const headers = { "content-type": "application/json", "x-api-key": key };
+const hbHeaders = () => ({ "content-type": "application/json", "x-api-key": env("BZ_HYPERBROWSER_KEY") });
+/** Keep what the person signs in to between browsers (BZ_BROWSER_KEEP_SIGNINS=0 turns it off for the deployment). */
+const keepSignIns = () => env("BZ_BROWSER_KEEP_SIGNINS") !== "0";
+/** Block ads and their pop-ups in BeeZilla's browser (BZ_BROWSER_ADBLOCK=0 turns that off). */
+const blockAds = () => env("BZ_BROWSER_ADBLOCK") !== "0";
+/** The ad networks whose pop-ups cover a page's own buttons, for a browser of your own. */
+export const AD_HOSTS = [
+  "*doubleclick.net*", "*googlesyndication.com*", "*googleadservices.com*", "*adservice.google.*", "*googletagservices.com*",
+  "*google-analytics.com/*collect*", "*amazon-adsystem.com*", "*adnxs.com*", "*taboola.com*", "*outbrain.com*", "*criteo.*",
+  "*pubmatic.com*", "*rubiconproject.com*", "*openx.net*", "*casalemedia.com*", "*smartadserver.com*", "*adform.net*",
+  "*moatads.com*", "*quantserve.com*", "*scorecardresearch.com*", "*zedo.com*", "*media.net/*", "*yieldmo.com*",
+  "*sharethrough.com*", "*teads.tv*", "*3lift.com*", "*adsrvr.org*", "*bidswitch.net*", "*indexww.com*", "*fundingchoicesmessages.google.com*",
+];
+/** Where the cloud browser saves a download, inside its own machine (its documentation's folder). */
+const hbDownloads = () => env("BZ_HYPERBROWSER_DOWNLOAD_DIR") || "/tmp/downloads";
+
+// ── Staying signed in ──────────────────────────────────────────────────────
+//
+// Owner, 2026-11-23: a site "which can only be used via browser use like [a music]
+// subscription" has to work "seamlessly" in a workflow — so BeeZilla's browser must still be
+// signed in the next time it goes there. The person signs in once, themselves, in the browser
+// window (BeeZilla never types a password); the browser keeps the cookies:
+//   - hyperbrowser: a profile of the person's own on the provider (saved when a session stops,
+//     docs.hyperbrowser.ai/sessions/profiles). Nothing about it is stored here: it is found
+//     again by a name made from a hash of the account id.
+//   - cdp: the cookies of the person's browser context, kept in this process's memory for
+//     JAR_HOURS (a browser of your own has no profiles); a restart forgets them.
+// "Forget sign-ins" (the window) deletes the profile or the cookies at once.
+
+const profileIds = new Map<string, string>();
+const profileName = (userId: string) => "beezilla-" + createHash("sha256").update("bz-browser-profile:" + userId).digest("hex").slice(0, 32);
+
+async function findProfile(userId: string): Promise<string | null> {
+  const cached = profileIds.get(userId);
+  if (cached) return cached;
+  const name = profileName(userId);
+  const r = await fetch(`${hbBase()}/profiles?name=${encodeURIComponent(name)}`, { headers: hbHeaders(), signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) throw new Error(`profiles ${r.status}`);
+  const j = (await r.json()) as Record<string, unknown> | unknown[];
+  const list = (Array.isArray(j) ? j : ((j as Record<string, unknown>).profiles ?? (j as Record<string, unknown>).data ?? (j as Record<string, unknown>).items ?? [])) as Array<Record<string, unknown>>;
+  const hit = Array.isArray(list) ? list.find((p) => p && p.name === name && p.id) : undefined;
+  if (!hit) return null;
+  profileIds.set(userId, String(hit.id));
+  return String(hit.id);
+}
+async function hyperbrowserProfile(userId: string): Promise<string | null> {
+  const found = await findProfile(userId);
+  if (found) return found;
+  const r = await fetch(`${hbBase()}/profile`, { method: "POST", headers: hbHeaders(), body: JSON.stringify({ name: profileName(userId) }), signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) throw new Error(`profile ${r.status}`);
+  const id = String(((await r.json()) as Record<string, unknown>).id ?? "");
+  if (!id) throw new Error("profile without an id");
+  profileIds.set(userId, id);
+  return id;
+}
+
+const JAR_HOURS = 12;
+const cookieJar = new Map<string, { cookies: unknown[]; at: number }>();
+function jarFor(userId: string): unknown[] | null {
+  const j = cookieJar.get(userId);
+  if (!j) return null;
+  if (Date.now() - j.at > JAR_HOURS * 3600_000) { cookieJar.delete(userId); return null; }
+  return j.cookies;
+}
+
+/** Does BeeZilla's browser keep sign-ins for this person (a profile, or cookies in memory)? */
+export async function signInsKept(userId: string): Promise<boolean> {
+  if (!keepSignIns()) return false;
+  if (providerKind() === "hyperbrowser") {
+    try { return !!(await findProfile(userId)); } catch { return false; }
+  }
+  return !!jarFor(userId)?.length;
+}
+
+/** Forget every site the person signed in to in BeeZilla's browser. */
+export async function forgetSignIns(userId: string): Promise<boolean> {
+  cookieJar.delete(userId);
+  // A browser open now forgets at once (and keeps nothing when it closes).
+  const open = currentBrowserSession(userId);
+  if (open) await open.forgetNow();
+  if (providerKind() !== "hyperbrowser") return true;
+  let id: string | null = null;
+  try { id = await findProfile(userId); } catch { return false; }
+  profileIds.delete(userId);
+  if (!id) return true;
+  try {
+    const r = await fetch(`${hbBase()}/profile/${encodeURIComponent(id)}`, { method: "DELETE", headers: hbHeaders(), signal: AbortSignal.timeout(10_000) });
+    return r.ok || r.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+async function openHyperbrowser(userId: string): Promise<ProviderHandle> {
+  const headers = hbHeaders();
+  let profile: string | null = null;
+  if (keepSignIns()) {
+    try { profile = await hyperbrowserProfile(userId); } catch (e) { console.warn("[buzzy/browser] no profile:", (e as Error).message); }
+  }
+  // A fixed address of the deployment's own (a Hyperbrowser static IP): every recording and every
+  // run of every node goes out from the same one. Without it: no proxy, the provider's data-centre
+  // address, the same as the page reader the AI already uses (browser.ts). That is the point of this browser.
+  const staticIp = env("BZ_HYPERBROWSER_STATIC_IP_ID");
+  const make = (withProfile: boolean) => ({
+    useProxy: !!staticIp,
+    ...(staticIp ? { staticIpId: staticIp } : {}),
+    // Ads and pop-ups in front of a page's own buttons stop a job (seen on a real text-to-speech
+    // site, 2026-11-23: a full-height ad over its Download button): the provider blocks them.
+    ...(blockAds() ? { adblock: true, annoyances: true } : {}),
+    saveDownloads: true,
+    timeoutMinutes: Math.min(720, Math.ceil(sessionSeconds() / 60) + 2),
+    ...(withProfile && profile ? { profile: { id: profile, persistChanges: true } } : {}),
+  });
   let res: Response;
   try {
-    // No proxy: the session goes out from the provider's data-centre address, the same as
-    // the page reader the AI already uses (browser.ts). That is the point of this browser.
-    res = await fetch(`${hbBase()}/session`, { method: "POST", headers, body: JSON.stringify({ useProxy: false }), signal: AbortSignal.timeout(30_000) });
+    res = await fetch(`${hbBase()}/session`, { method: "POST", headers, body: JSON.stringify(make(true)), signal: AbortSignal.timeout(30_000) });
+    // A profile the provider won't take (gone, or not in this plan) must not stop the browser opening.
+    if (!res.ok && profile && res.status >= 400 && res.status < 500) {
+      console.warn("[buzzy/browser] session with a profile refused:", res.status);
+      profile = null;
+      res = await fetch(`${hbBase()}/session`, { method: "POST", headers, body: JSON.stringify(make(false)), signal: AbortSignal.timeout(30_000) });
+    }
   } catch {
     throw new BrowserError("start_failed", "BeeZilla couldn't reach the browser service. Try again in a moment.");
   }
@@ -97,10 +220,32 @@ async function openHyperbrowser(): Promise<ProviderHandle> {
   const id = String(j.id ?? j.sessionId ?? "");
   const ws = String(j.wsEndpoint ?? j.ws_endpoint ?? j.websocketUrl ?? "");
   if (!id || !/^wss?:\/\//i.test(ws)) throw new BrowserError("start_failed", "The browser service answered in a way BeeZilla didn't expect.");
+  let zip: { at: number; bytes: Buffer } | null = null;
   return {
     kind: "hyperbrowser",
     label: "A cloud browser on a server",
     wsUrl: ws,
+    downloadDir: hbDownloads(),
+    keepsSignIns: !!profile,
+    // The session's downloads, zipped by the provider as they arrive (docs: "synced in real-time").
+    savedDownload: async (guid: string) => {
+      for (let i = 0; i < 12; i++) {
+        if (!zip || Date.now() - zip.at > 3000) {
+          const r = await fetch(`${hbBase()}/session/${encodeURIComponent(id)}/downloads-url`, { headers, signal: AbortSignal.timeout(10_000) });
+          const d = r.ok ? ((await r.json()) as { status?: string; downloadsUrl?: string | null }) : {};
+          // The provider's own storage link (https; a stand-in on this machine in tests).
+          if (d.status === "completed" && d.downloadsUrl && (/^https:\/\//i.test(d.downloadsUrl) || (allowPrivate() && /^http:\/\/127\.0\.0\.1[:/]/.test(d.downloadsUrl)))) {
+            const z = await fetch(d.downloadsUrl, { signal: AbortSignal.timeout(30_000) });
+            const len = Number(z.headers.get("content-length") || 0);
+            if (z.ok && len <= MAX_DOWNLOAD_BYTES * 4) zip = { at: Date.now(), bytes: Buffer.from(await z.arrayBuffer()) };
+          } else if (d.status === "failed" || d.status === "not_enabled") return null;
+        }
+        const got = zip ? readZipEntry(zip.bytes, guid) : null;
+        if (got) return got;
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      return null;
+    },
     close: async () => {
       try { await fetch(`${hbBase()}/session/${encodeURIComponent(id)}/stop`, { method: "PUT", headers, signal: AbortSignal.timeout(10_000) }); } catch { /* it times out on its own */ }
     },
@@ -131,12 +276,24 @@ async function openCdpBrowser(): Promise<ProviderHandle> {
   if (!/^wss?:\/\//i.test(ws)) throw new BrowserError("not_configured", "BZ_BROWSER_CDP_URL has to be a DevTools address.");
   // One page's address would put every person in the same page: it has to be the browser's.
   if (/\/devtools\/page\//.test(ws)) throw new BrowserError("not_configured", "BZ_BROWSER_CDP_URL has to be a browser's address, not one page's.");
-  return { kind: "cdp", label: "A browser on a server", wsUrl: ws, close: async () => {} };
+  // A browser on this machine (or one sharing a folder with it) can save downloads where this
+  // server reads them back; any other is told to save nothing, and the bytes are read through it.
+  const dir = env("BZ_BROWSER_DOWNLOAD_DIR");
+  return {
+    kind: "cdp", label: "A browser on a server", wsUrl: ws, close: async () => {},
+    downloadDir: dir,
+    keepsSignIns: keepSignIns(),
+    savedDownload: dir ? async (guid: string) => {
+      if (!/^[0-9a-f-]{8,64}$/i.test(guid)) return null;
+      const path = joinPath(dir, guid);
+      try { const b = await readFile(path); void unlink(path).catch(() => {}); return b.length <= MAX_DOWNLOAD_BYTES ? b : null; } catch { return null; }
+    } : undefined,
+  };
 }
 
-async function openProvider(): Promise<ProviderHandle> {
+async function openProvider(userId: string): Promise<ProviderHandle> {
   const kind = providerKind();
-  if (kind === "hyperbrowser") return openHyperbrowser();
+  if (kind === "hyperbrowser") return openHyperbrowser(userId);
   if (kind === "cdp") return openCdpBrowser();
   throw new BrowserError("not_configured", "The server browser isn't set up on this BeeZilla yet.");
 }
@@ -249,7 +406,9 @@ async function mustRefuse(url: string): Promise<boolean> {
 // written as one string (no template literals inside) so a bundler cannot rewrite them.
 
 const PAGE_LIB = String.raw`(function () {
-  var SECRET = /pass(word|code|wort)?|pwd|contrase|mot.?de.?passe|senha|secret|token|otp|totp|one.?time|2fa|mfa|verification|security.?code|\bpin\b|cvv|cvc|card.?(number|no|num)|cc.?(num|csc|exp)|ssn|social.?sec/i;
+  // A box for a secret: a password, a code sent to the person, a card or bank number. ("Zip code",
+  // "promo code" and the like are not secrets.)
+  var SECRET = /pass(word|code|wort)?|pwd|contrase|mot.?de.?passe|senha|secret|token|otp|totp|one.?time|2fa|mfa|verification|security.?code|\bpin\b|cvv|cvc|card.?(number|no|num)|cc.?(num|csc|exp)|ssn|social.?sec|iban|account.?(no|num)|routing|(?<!zip |postal |post |promo |coupon |discount |referral |area |country |gift |voucher |product |item |colou?r |style |source |dress |embed |qr )\bcode\b|\bcard\b/i;
   var watch = { el: null, moved: false };
   document.addEventListener("focusin", function (e) { if (watch.el && e.target !== watch.el) watch.moved = true; }, true);
   var CAND = "a,button,input,select,textarea,summary,label,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=radio],[role=switch],[role=option],[role=combobox],[onclick],[tabindex]";
@@ -284,6 +443,13 @@ const PAGE_LIB = String.raw`(function () {
     if (t === "img") return txt(e.alt, 90);
     var inner = txt(e.innerText || e.textContent, 90);
     if (inner) return inner;
+    // A button that is only a picture or an icon: the picture's own words ("Buy", "Download").
+    var sub = e.querySelector ? e.querySelector("img[alt],svg title,[aria-label],[title]") : null;
+    if (sub) {
+      var st = sub.tagName.toLowerCase();
+      var sn = st === "img" ? sub.alt : st === "title" ? sub.textContent : (sub.getAttribute("aria-label") || sub.getAttribute("title"));
+      if (txt(sn, 90)) return txt(sn, 90);
+    }
     return txt(e.getAttribute("title") || e.getAttribute("placeholder") || e.getAttribute("alt") || e.getAttribute("name") || "", 90);
   }
   function esc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&"); }
@@ -395,7 +561,9 @@ const PAGE_LIB = String.raw`(function () {
     if (!el) return null;
     try { el.scrollIntoView({ block: "center", inline: "center" }); } catch (_) {}
     var r = el.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), how: how, name: nameOf(el), editable: describe(el).editable };
+    var cx = Math.round(r.left + r.width / 2), cy = Math.round(r.top + r.height / 2);
+    return { x: cx, y: cy, how: how, name: nameOf(el), editable: describe(el).editable, at: atPoint(cx, cy),
+      disabled: !!(el.disabled || (el.getAttribute && el.getAttribute("aria-disabled") === "true")) };
   }
   function pick(x, y, idx) {
     var el = document.elementFromPoint(x, y);
@@ -425,8 +593,215 @@ const PAGE_LIB = String.raw`(function () {
   function nav() { var n = window.navigation; return { api: !!n, back: !!(n && n.canGoBack), fwd: !!(n && n.canGoForward) }; }
   function go(n) { history.go(n); return true; }
   function readText() { return txt(document.body ? document.body.innerText : "", 700); }
-  return { describeAt: describeAt, arm: arm, value: value, options: options, find: find, pick: pick, setSelect: setSelect, selectActive: selectActive, look: look, readText: readText, ready: ready, nav: nav, go: go };
+
+  // ── For BeeZilla doing a job itself: the page as a numbered list of things to act on ──
+  var marks = [];
+  var CONTROL = "a,button,summary,select,[role=button],[role=link],[role=menuitem],[role=tab],[role=option],[role=checkbox],[role=radio],[role=switch]";
+  function deep(root, out, depth) {
+    var list;
+    try { list = root.querySelectorAll(CAND + ",[role=textbox],[role=searchbox],[role=slider],[role=spinbutton],[contenteditable=''],[contenteditable=true]"); } catch (_) { return; }
+    for (var i = 0; i < list.length && out.length < 4000; i++) out.push(list[i]);
+    // A page built from parts that are clicked without saying so (a box with a pointer cursor).
+    var loose = root.querySelectorAll("div,span,li,img,svg,i,p,td");
+    for (var j = 0, n = 0; j < loose.length && j < 15000 && n < 4000; j++) {
+      var e = loose[j];
+      if (e.closest && e.closest(CONTROL)) continue;
+      var cs;
+      try { cs = getComputedStyle(e); } catch (_) { continue; }
+      if (cs.cursor !== "pointer") continue;
+      var p = e.parentElement;
+      try { if (p && getComputedStyle(p).cursor === "pointer") continue; } catch (_) {}
+      out.push(e); n++;
+    }
+    if (depth > 2) return;
+    var all = root.querySelectorAll("*");
+    for (var k = 0; k < all.length && k < 20000; k++) if (all[k].shadowRoot) deep(all[k].shadowRoot, out, depth + 1);
+  }
+  function snapshot(max) {
+    max = max || 90;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var found = [];
+    deep(document, found, 0);
+    var seen = new Set(), items = [];
+    for (var i = 0; i < found.length; i++) {
+      var e = found[i];
+      if (seen.has(e)) continue;
+      seen.add(e);
+      var tag = e.tagName.toLowerCase();
+      if (tag === "label" || tag === "option") continue;
+      var field = /^(input|textarea|select)$/.test(tag) || e.isContentEditable;
+      // The words or picture inside a button are the button.
+      if (!field && e.parentElement && e.parentElement.closest && e.parentElement.closest(CONTROL)) continue;
+      if (tag === "input" && String(e.type).toLowerCase() === "hidden") continue;
+      if (!vis(e) && !(tag === "input" && String(e.type).toLowerCase() === "file")) continue;
+      if (!field && !interactive(e)) continue;
+      var r = e.getBoundingClientRect();
+      items.push({ e: e, top: r.top + window.scrollY, left: r.left + window.scrollX, inView: r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw });
+    }
+    items.sort(function (a, b) { return (a.inView === b.inView ? 0 : a.inView ? -1 : 1) || (a.top - b.top) || (a.left - b.left); });
+    items = items.slice(0, max);
+    items.sort(function (a, b) { return (a.top - b.top) || (a.left - b.left); });
+    marks = [];
+    var els = [];
+    for (var k = 0; k < items.length; k++) {
+      var el = items[k].e;
+      marks.push(el);
+      var d = describe(el);
+      var o = { i: k, tag: d.tag, role: d.role, name: d.name, type: d.type, ph: d.placeholder, inView: items[k].inView };
+      if (d.secret) o.secret = true;
+      if (d.editable) {
+        o.editable = true;
+        if (!d.secret) { var v = "value" in el ? String(el.value == null ? "" : el.value) : el.isContentEditable ? String(el.innerText || "") : ""; if (v) o.value = txt(v, 80); }
+      }
+      if (d.tag === "a" && d.href) o.href = txt(d.href, 100);
+      if (el.disabled || el.getAttribute("aria-disabled") === "true") o.disabled = true;
+      var role = el.getAttribute("role");
+      if (d.type === "checkbox" || d.type === "radio" || role === "checkbox" || role === "switch" || role === "radio") o.checked = !!(el.checked || el.getAttribute("aria-checked") === "true");
+      if (d.tag === "select") {
+        o.options = [];
+        for (var q = 0; q < el.options.length && q < 15; q++) o.options.push(txt(el.options[q].text, 40));
+        o.value = el.selectedIndex >= 0 && el.options[el.selectedIndex] ? txt(el.options[el.selectedIndex].text, 40) : "";
+      }
+      if (d.tag === "input" && d.type === "file") o.file = true;
+      if (el.getAttribute("aria-expanded")) o.expanded = el.getAttribute("aria-expanded") === "true";
+      els.push(o);
+    }
+    var main = document.querySelector("main,[role=main]");
+    var words = main && main.innerText && main.innerText.length > 200 ? main.innerText : (document.body ? document.body.innerText : "");
+    var se = document.scrollingElement || document.documentElement;
+    return { els: els, text: txt(words, 3000), below: Math.max(0, Math.round(se.scrollHeight - window.scrollY - vh)), above: Math.round(window.scrollY), total: found.length };
+  }
+  function markAt(i) {
+    var e = marks[i];
+    if (!e || !e.isConnected) return null;
+    try { e.scrollIntoView({ block: "center", inline: "center" }); } catch (_) {}
+    var d = describe(e);
+    var r = e.getBoundingClientRect();
+    var x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+    var hit = document.elementFromPoint(x, y);
+    d.covered = !!(hit && hit !== e && !e.contains(hit) && !hit.contains(e));
+    if (d.covered) {
+      // A pop-up in front (a dialog, a banner) is the person's or the job's to deal with first; a
+      // layer the page lays over its own button (no name, not a dialog) is clicked through.
+      var box = hit.closest ? hit.closest("[role=dialog],[role=alertdialog],[aria-modal=true],dialog,[id*=cookie i],[class*=cookie i],[id*=consent i],[class*=consent i],[class*=modal i],[class*=popup i],[class*=banner i]") : null;
+      d.coveredBy = box ? txt(nameOf(box) || box.getAttribute("aria-label") || "", 60) || "a pop-up" : "";
+      d.overlay = !box;
+      // What a click at that point would really press.
+      d.hitName = atPoint(x, y);
+    }
+    d.x = x; d.y = y;
+    d.disabled = !!(e.disabled || e.getAttribute("aria-disabled") === "true");
+    d.file = e.tagName === "INPUT" && String(e.type).toLowerCase() === "file";
+    d.hidden = r.width < 2 || r.height < 2;
+    return d;
+  }
+  /** The name of the thing a click at (x, y) would press (the nearest clickable thing there). */
+  function atPoint(x, y) {
+    var t = document.elementFromPoint(x, y), k = 0;
+    while (t && k < 7 && !interactive(t)) { t = t.parentElement; k++; }
+    return t && interactive(t) ? nameOf(t) : "";
+  }
+  /** What Enter or Space would press now: the thing with the cursor, and a form's own send button. */
+  function wouldPress() {
+    var a = document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return [];
+    var out = [nameOf(a)];
+    var f = a.form || (a.closest ? a.closest("form") : null);
+    if (f) {
+      var b = f.querySelector("button:not([type=button]):not([type=reset]),input[type=submit],input[type=image]");
+      if (b) out.push(nameOf(b));
+      out.push(txt(f.getAttribute("aria-label") || f.getAttribute("name") || "", 60));
+    }
+    return out.filter(function (x) { return !!x; });
+  }
+  /** Is the cursor in thing i (and what kind of box is it)? A page can move it somewhere else. */
+  function focusIs(i) {
+    var e = marks[i], a = document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    if (!e || !a || a === document.body) return { ok: false };
+    var d = describe(a);
+    return { ok: a === e || e.contains(a) || a.contains(e), secret: !!d.secret, editable: !!d.editable, name: d.name };
+  }
+  function activeSecret() {
+    var a = document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    return !!(a && a !== document.body && a !== document.documentElement && describe(a).secret);
+  }
+  function focusMark(i) { var e = marks[i]; if (!e || !e.isConnected) return false; try { e.focus(); } catch (_) { return false; } return true; }
+  function pressAt(i) {
+    var e = marks[i];
+    if (!e || !e.isConnected) return false;
+    try { if (e.focus) e.focus(); } catch (_) {}
+    e.click();
+    return true;
+  }
+  function chooseAt(i, text) {
+    var e = marks[i];
+    if (!e || e.tagName !== "SELECT") return null;
+    var want = norm(text), best = -1;
+    for (var k = 0; k < e.options.length; k++) {
+      var n = norm(e.options[k].text);
+      if (n === want) { best = k; break; }
+      if (best < 0 && want && n.indexOf(want) >= 0) best = k;
+    }
+    if (best < 0) return null;
+    e.selectedIndex = best;
+    e.dispatchEvent(new Event("input", { bubbles: true }));
+    e.dispatchEvent(new Event("change", { bubbles: true }));
+    return { text: txt(e.options[best].text, 80), name: nameOf(e), sel: sel(e) };
+  }
+  // A file handed to the page, put in a file box (or dropped on a drop zone) the way a person's
+  // own file would be. It comes in parts: a whole song is bigger than one message.
+  var parts = {};
+  function filePart(id, chunk, first) { if (first || !parts[id]) parts[id] = []; parts[id].push(chunk); return parts[id].length; }
+  function giveFile(i, id, name, type) {
+    var e = marks[i];
+    var b64 = (parts[id] || []).join("");
+    delete parts[id];
+    if (!e || !e.isConnected || !b64) return { ok: false };
+    var bin = atob(b64), u = new Uint8Array(bin.length);
+    for (var k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+    var file = new File([u], name, { type: type || "application/octet-stream" });
+    var dt = new DataTransfer();
+    dt.items.add(file);
+    var form = e.closest ? e.closest("form") : null;
+    var input = e.tagName === "INPUT" && String(e.type).toLowerCase() === "file" ? e : (e.querySelector && e.querySelector("input[type=file]")) || (form && form.querySelector("input[type=file]"));
+    if (input) {
+      input.files = dt.files;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: true, how: "box" };
+    }
+    ["dragenter", "dragover", "drop"].forEach(function (t) {
+      try { e.dispatchEvent(new DragEvent(t, { bubbles: true, cancelable: true, dataTransfer: dt })); } catch (_) {}
+    });
+    return { ok: true, how: "drop" };
+  }
+  // A download the page made itself (a blob: address): read in parts for the same reason.
+  var blobs = {};
+  function grabBlob(id, url) {
+    return fetch(url).then(function (r) { return r.blob(); }).then(function (b) {
+      return new Promise(function (res) {
+        var fr = new FileReader();
+        fr.onload = function () { var s = String(fr.result || ""); blobs[id] = s.slice(s.indexOf(",") + 1); res({ ok: true, type: b.type || "", size: b.size, len: blobs[id].length }); };
+        fr.onerror = function () { res({ ok: false }); };
+        fr.readAsDataURL(b);
+      });
+    }).catch(function () { return { ok: false }; });
+  }
+  function blobPart(id, start, len) { var s = blobs[id] || ""; var out = s.slice(start, start + len); if (start + len >= s.length) delete blobs[id]; return out; }
+  function still() { return String(document.readyState) === "complete"; }
+  return { describeAt: describeAt, arm: arm, value: value, options: options, find: find, pick: pick, setSelect: setSelect, selectActive: selectActive, look: look, readText: readText, ready: ready, nav: nav, go: go,
+    snapshot: snapshot, markAt: markAt, pressAt: pressAt, chooseAt: chooseAt, wouldPress: wouldPress, focusIs: focusIs, focusMark: focusMark, atPoint: atPoint, activeSecret: activeSecret, filePart: filePart, giveFile: giveFile, grabBlob: grabBlob, blobPart: blobPart, still: still };
 })()`;
+
+/**
+ * In the page's own world, before its scripts run: a download the page builds itself (a blob:
+ * address) is let go a couple of minutes later than the page asks, so it can still be read
+ * after the page has handed it over. Nothing else about the page changes.
+ */
+const KEEP_BLOBS = "(function(){try{var r=URL.revokeObjectURL;if(!r||r.__bz)return;var k=function(u){setTimeout(function(){try{r.call(URL,u)}catch(e){}},150000)};k.__bz=1;URL.revokeObjectURL=k;}catch(e){}})()";
 
 /** A call into the helpers, as the text to run. They live in a world of their own (see page()). */
 const call = (fn: string, ...args: unknown[]) => `globalThis.__bz.${fn}(${args.map((a) => (a === undefined ? "undefined" : JSON.stringify(a))).join(",")})`;
@@ -466,10 +841,78 @@ const hostPath = (u: string): string => {
 };
 export const wordsForGoto = (u: string) => `Go to ${tidy(hostPath(u), 90)}`;
 
+/** A blank's words, by its name however it was written ("song idea" fills "Song idea"). */
+export function fillFor(fill: Record<string, string>, blank: string | undefined): string | undefined {
+  if (!blank) return undefined;
+  if (typeof fill[blank] === "string") return fill[blank];
+  const key = (x: string) => x.toLowerCase().replace(/[^a-z0-9\u00c0-\uffff]+/g, " ").trim();
+  const want = key(blank);
+  for (const [k, v] of Object.entries(fill)) if (key(k) === want) return v;
+  return undefined;
+}
+
+/**
+ * Is this address on one of these sites? A site is its host without "www." and, for a deeper name,
+ * the last two parts (three when the second-to-last is short, as in example.co.uk).
+ */
+export function siteOf(u: string): string {
+  let host = "";
+  try { host = new URL(u).hostname.toLowerCase().replace(/\.+$/, ""); } catch { return ""; }
+  if (!host || isIP(host.replace(/^\[|\]$/g, ""))) return host;
+  const parts = host.split(".");
+  if (parts.length <= 2) return host;
+  const keep = parts[parts.length - 2]!.length <= 3 && parts.length >= 3 ? 3 : 2;
+  return parts.slice(-keep).join(".");
+}
+export function siteAllowed(url: string, allowed: string[]): boolean {
+  const want = siteOf(url);
+  if (!want) return false;
+  return allowed.some((a) => {
+    const s = siteOf(/^[a-z][a-z0-9+.-]*:/i.test(a) ? a : "https://" + a);
+    return !!s && s === want;
+  });
+}
+/** The sites a job's own words name ("go to mureka.ai/create…"), as addresses. */
+export function sitesIn(...texts: Array<string | undefined>): string[] {
+  const out = new Set<string>();
+  for (const t of texts) {
+    for (const m of String(t ?? "").matchAll(/(?:https?:\/\/[^\s"'<>]+|\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\b)/gi)) {
+      const raw = m[0].replace(/[.,;:!?)]+$/, "");
+      const s = siteOf(/^https?:/i.test(raw) ? raw : "https://" + raw);
+      if (s && s.includes(".")) out.add(s);
+    }
+  }
+  return [...out];
+}
+
+/** The words for a recording's blanks: names to text, capped. */
+export function cleanFill(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 20)) {
+    const name = plain(k, 40);
+    if (name && (typeof x === "string" || typeof x === "number")) out[name] = String(x).slice(0, 4000);
+  }
+  return out;
+}
+/**
+ * A box BeeZilla typed the words of the moment into (the song idea it was handed) becomes a
+ * blank when the job is kept as a recording: next time it is filled with that day's words.
+ */
+function blankFor(text: string, details: string | undefined, d: Seen): string | undefined {
+  const t = text.trim();
+  const g = String(details ?? "").trim();
+  if (t.length < 8 || g.length < 8) return undefined;
+  const norm = (x: string) => x.toLowerCase().replace(/\s+/g, " ");
+  if (!norm(g).includes(norm(t).slice(0, 200)) && !norm(t).includes(norm(g).slice(0, 200))) return undefined;
+  return plain(d.name || d.placeholder || "The words", 40) || "The words";
+}
+
 // ── A session ──────────────────────────────────────────────────────────────
 
 export type SessionEvent =
-  | { type: "hello"; id: string; view: { w: number; h: number }; recording: boolean; steps: BrowserStep[]; url: string; title: string; where: Where | null; replaying: boolean; canBack: boolean; canForward: boolean; maxSeconds: number; idleSeconds: number; label: string }
+  | { type: "hello"; id: string; view: { w: number; h: number }; recording: boolean; steps: BrowserStep[]; url: string; title: string; where: Where | null; replaying: boolean; canBack: boolean; canForward: boolean; maxSeconds: number; idleSeconds: number; label: string;
+      run: { kind: BrowserMode; by: RunBy; task?: string; nodeId?: string; acts: { i: number; say: string; state: string; note?: string }[] } | null; files: RunFile[]; signIns: boolean }
   | { type: "frame"; seq: number; w: number; h: number; b64: string }
   | { type: "nav"; url: string; title: string; canBack: boolean; canForward: boolean }
   | { type: "step"; i: number; step: BrowserStep }
@@ -480,7 +923,100 @@ export type SessionEvent =
   | { type: "replay"; i: number; state: "running" | "ok" | "skipped" | "failed"; note?: string }
   | { type: "replay-done"; ok: boolean; failedAt?: number; note: string; steps: number; finalUrl: string; title: string; text: string }
   | { type: "notice"; text: string }
-  | { type: "ended"; reason: string };
+  | { type: "ended"; reason: string }
+  | { type: "run"; state: "start"; kind: BrowserMode; by: RunBy; task?: string; nodeId?: string }
+  | { type: "run"; state: "end"; result: RunResult }
+  | { type: "act"; i: number; say: string; state: "running" | "ok" | "failed"; note?: string }
+  | { type: "file"; state: "started" | "saved" | "failed"; name: string; url?: string; bytes?: number; fileType?: string; note?: string };
+
+export type RunBy = "you" | "beezilla";
+/** How a run of a node ended: what BeeZilla is told, and what the card keeps. */
+export interface RunResult {
+  ok: boolean;
+  kind: BrowserMode;
+  by: RunBy;
+  /** One plain sentence. */
+  note: string;
+  /** It stopped because the person has to do something: what, in words. */
+  needs?: string;
+  /** The person pressed Stop. */
+  stopped?: boolean;
+  /** A recording: the step it could not do. */
+  failedAt?: number;
+  /** How many steps were done. */
+  ran: number;
+  files: RunFile[];
+  finalUrl: string;
+  title: string;
+  /** The page's own words at the end: data, never instructions. */
+  text: string;
+  /** A task: what BeeZilla did, as steps that can be kept as the node's recording. */
+  steps?: BrowserStep[];
+  seconds: number;
+  /** The node it was (a window showing another node leaves this result alone). */
+  nodeId?: string;
+}
+
+/** One thing BeeZilla does on a page while doing a job itself (browserAgent.ts decides which). */
+export type AgentAction =
+  | { do: "click"; el: number }
+  | { do: "type"; el: number; text: string; enter?: boolean }
+  | { do: "press"; key: string }
+  | { do: "select"; el: number; option: string }
+  | { do: "scroll"; dir: "down" | "up" }
+  | { do: "goto"; url: string }
+  | { do: "back" }
+  | { do: "wait"; seconds: number }
+  | { do: "upload"; el: number; file: string };
+export interface ActOutcome {
+  ok: boolean;
+  /** What happened, in a few plain words (for the model and the window). */
+  note: string;
+  /** The person must do this one: what, in words. The job stops. */
+  needs?: string;
+  step?: BrowserStep;
+}
+/** The page as BeeZilla sees it while doing a job: numbered things to act on, and its words. */
+export interface PageView {
+  url: string;
+  title: string;
+  els: Array<{
+    i: number; tag: string; role?: string; name?: string; type?: string; ph?: string; value?: string; href?: string;
+    inView?: boolean; secret?: boolean; editable?: boolean; disabled?: boolean; checked?: boolean; options?: string[]; file?: boolean; expanded?: boolean;
+  }>;
+  text: string;
+  below: number;
+  above: number;
+  files: RunFile[];
+  downloading: number;
+}
+
+/**
+ * Buttons BeeZilla never presses on its own, in a recording or a job: money and the account
+ * itself. Paying, buying, subscribing, a trial that turns into a charge, deleting or closing an
+ * account are the person's to press (docs/TOOL-AND-BROWSER-PLAN.md D4). The job stops there and
+ * says so; the person can press it themselves in the window.
+ */
+export const MONEY_WORDS = /\b(?:pay|payment|paying|buy|buying|purchase|checkout|check out|place (?:my |your |the )?order|order now|subscribe|subscription|upgrade|start (?:my |your |a |the )?(?:free )?trial|add (?:a )?(?:card|payment(?: method)?)|billing|donate|top ?up|add funds|confirm (?:and pay|purchase|payment)|complete (?:purchase|payment|order)|book now|reserve now|go premium|get (?:pro|premium|plus))\b/i;
+export const ACCOUNT_WORDS = /\b(?:delete (?:my |your |the )?account|close (?:my |your |the )?account|deactivate|cancel (?:my |your |the )?(?:subscription|plan|membership))\b/i;
+/**
+ * The other doors: a press that puts the person's words out in the world where they cannot be
+ * taken back — a post, a publish, a send, a submit. Same rule as money and the account: the
+ * person presses it (docs/TOOL-AND-BROWSER-PLAN.md D4). This is one line on purpose: if the
+ * owner decides his own "post it" is the approval, this arm is what he lifts.
+ */
+export const DOOR_WORDS = /\b(?:post|publish|send|submit)\b/i;
+export function personOnly(name: string | undefined): string | null {
+  const n = plain(name ?? "", 60);
+  if (!n) return null;
+  if (MONEY_WORDS.test(n)) return `BeeZilla stopped before pressing “${n}”: paying, buying and subscribing are yours to press. Press it yourself in BeeZilla's browser if you mean to.`;
+  if (ACCOUNT_WORDS.test(n)) return `BeeZilla stopped before pressing “${n}”: that changes your account, so it is yours to press.`;
+  if (DOOR_WORDS.test(n)) return `BeeZilla stopped before pressing “${n}”: posting, publishing and sending put your words out where they can't be taken back, so that press is yours. Press it yourself in BeeZilla's browser if you mean to.`;
+  return null;
+}
+/** Keys a job or a played step may press. */
+const JOB_KEYS = new Set(["Enter", "Tab", "Escape", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", "Backspace", " "]);
+export const isJobKey = (k: string) => JOB_KEYS.has(k);
 
 export type InputEvent =
   | { type: "mouse"; action: "down" | "up" | "move"; x: number; y: number; button?: "left" | "middle" | "right"; buttons?: number; clickCount?: number; mods?: number }
@@ -548,6 +1084,17 @@ export class BrowserSession {
   private popups = 0;
   private billedAt = Date.now();
   private stopHandlers: (() => void)[] = [];
+  /** A job or a played recording going on now (one at a time). */
+  run: { kind: BrowserMode; by: RunBy; task?: string; nodeId?: string; stop: boolean; started: number; firstFile: number; acts: { i: number; say: string; state: string; note?: string }[] } | null = null;
+  /** The person asked to forget their sign-ins while this browser was open: it keeps none when it closes. */
+  forgetOnClose = false;
+  /** Every file this browser downloaded, as saved to the Library. */
+  files: RunFile[] = [];
+  /** Set by whoever opened it: saves a download to the person's Library. */
+  onFile?: (f: { name: string; type: string; bytes: Buffer }) => Promise<RunFile | null>;
+  private frames = new Set<string>();
+  private dls = new Map<string, { url: string; name: string; frameId: string; done: boolean; at?: number; early?: Promise<{ bytes: Buffer; type: string } | null> }>();
+  private dlWork = new Set<Promise<unknown>>();
 
   constructor(
     readonly userId: string,
@@ -584,20 +1131,40 @@ export class BrowserSession {
       }
       if (!targetId) targetId = (await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" })).targetId;
       this.targetId = targetId;
+      this.frames.add(targetId);          // a page's main frame has the page's own id
+      // The sites the person signed in to last time (a browser of your own keeps them here, for a while).
+      const jar = this.contextId && this.provider.keepsSignIns ? jarFor(this.userId) : null;
+      if (jar?.length) {
+        try { await cdp.send("Storage.setCookies", { cookies: jar, browserContextId: this.contextId }); } catch { /* a fresh start */ }
+      }
       this.sid = (await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true })).sessionId;
       // A link that opens a new window opens in this one: the person sees one page.
       try {
         await cdp.send("Target.setDiscoverTargets", { discover: true });
         this.stopHandlers.push(cdp.on("Target.targetCreated", (p) => void this.onNewTarget(p?.targetInfo)));
       } catch { /* optional */ }
-      try { await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", ...(this.contextId ? { browserContextId: this.contextId } : {}) }); } catch { /* optional */ }
+      // Downloads (owner, 2026-11-23: "download the sound and send it elsewhere"): the browser says
+      // when one starts and ends; the bytes are read through the browser itself (its address, its
+      // sign-ins) and saved to the person's Library. A browser that can't save where this server
+      // reads saves nothing at all.
+      const dir = this.provider.downloadDir || "";
+      try {
+        await cdp.send("Browser.setDownloadBehavior", {
+          behavior: dir ? "allowAndName" : "deny", ...(dir ? { downloadPath: dir } : {}), eventsEnabled: true,
+          ...(this.contextId ? { browserContextId: this.contextId } : {}),
+        });
+        this.stopHandlers.push(
+          cdp.on("Browser.downloadWillBegin", (p, sid) => { if (!sid) this.downloadBegins(p); }),
+          cdp.on("Browser.downloadProgress", (p, sid) => { if (!sid && (p?.state === "completed" || p?.state === "canceled")) this.downloadEnds(String(p.guid ?? "")); }),
+        );
+      } catch { /* a browser without it: downloads just don't arrive */ }
     }
     const s = this.sid;
     await cdp.send("Page.enable", {}, s);
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: VIEW_W, height: VIEW_H, deviceScaleFactor: 1, mobile: false }, s);
     try {
       await cdp.send("Network.enable", {}, s);
-      await cdp.send("Network.setBlockedURLs", { urls: ["file://*", "ftp://*", "chrome://*", "chrome-extension://*", "view-source:*"] }, s);
+      await cdp.send("Network.setBlockedURLs", { urls: ["file://*", "ftp://*", "chrome://*", "chrome-extension://*", "view-source:*", ...(blockAds() && this.provider.kind === "cdp" ? AD_HOSTS : [])] }, s);
     } catch { /* optional */ }
     this.stopHandlers.push(
       cdp.on("Page.screencastFrame", (p, sid) => {
@@ -606,7 +1173,24 @@ export class BrowserSession {
         this.takeFrame(String(p.data || ""), Number(p.metadata?.deviceWidth) || VIEW_W, Number(p.metadata?.deviceHeight) || VIEW_H);
       }),
       // A new page is a new world for the helpers (below).
-      cdp.on("Page.frameNavigated", (p, sid) => { if (sid === this.sid && !p?.frame?.parentId) { this.world = null; this.lookSoon(); } }),
+      cdp.on("Page.frameNavigated", (p, sid) => {
+        if (sid !== this.sid) return;
+        if (p?.frame?.id && this.frames.size < 500) this.frames.add(String(p.frame.id));
+        if (!p?.frame?.parentId) { this.world = null; this.lookSoon(); }
+      }),
+      cdp.on("Page.frameAttached", (p, sid) => { if (sid === this.sid && p?.frameId && this.frames.size < 500) this.frames.add(String(p.frameId)); }),
+      // A "Download" that opens the file itself as the page (a song, a video, a PDF in a new tab,
+      // followed here): the browser shows it instead of saving it, so it is kept like a download.
+      cdp.on("Network.responseReceived", (p, sid) => {
+        if (sid !== this.sid || p?.type !== "Document" || p?.frameId !== this.targetId) return;
+        const mime = String(p?.response?.mimeType ?? "").toLowerCase();
+        if (!/^(audio|video)\/|^application\/(pdf|zip|octet-stream)$/.test(mime)) return;
+        // "attachment": the browser downloads it (and says so); only a file shown as the page is ours to keep.
+        const headers = (p?.response?.headers ?? {}) as Record<string, string>;
+        const cd = Object.entries(headers).find(([k]) => k.toLowerCase() === "content-disposition")?.[1] ?? "";
+        if (/attachment/i.test(String(cd))) return;
+        this.fileAsPage(String(p?.response?.url ?? ""), mime);
+      }),
       cdp.on("Page.loadEventFired", (_p, sid) => { if (sid === this.sid) this.lookSoon(); }),
       cdp.on("Page.javascriptDialogOpening", (p, sid) => {
         if (sid !== this.sid) return;
@@ -630,6 +1214,7 @@ export class BrowserSession {
         this.stopHandlers.push(cdp.on("Fetch.requestPaused", (p, sid) => { if (sid === this.sid) void this.vet(p).catch(() => {}); }));
       } catch { /* a browser without it: every address is still checked before the browser is sent there */ }
     }
+    try { await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: KEEP_BLOBS, runImmediately: true }, s); } catch { /* downloads a page builds itself may be missed */ }
     await cdp.send("Page.startScreencast", { format: "jpeg", quality: 55, maxWidth: VIEW_W, maxHeight: VIEW_H, everyNthFrame: 1 }, s);
     // Where does this browser go out from? Asked of the browser itself, from a blank page,
     // so the answer is the one a website would see. It has to be asked before the first
@@ -803,6 +1388,9 @@ export class BrowserSession {
       type: "hello", id: this.id, view: { w: VIEW_W, h: VIEW_H }, recording: this.recording, steps: this.steps, url: this.url, title: this.title,
       where: this.where, replaying: this.replaying, canBack: this.canBack, canForward: this.canForward,
       maxSeconds: Math.round(this.maxMs / 1000), idleSeconds: idleSeconds(), label: this.provider.label,
+      run: this.run ? { kind: this.run.kind, by: this.run.by, task: this.run.task, nodeId: this.run.nodeId, acts: this.run.acts.slice(-60) } : null,
+      files: this.files.slice(-12),
+      signIns: !!this.provider.keepsSignIns,
     };
   }
 
@@ -943,7 +1531,8 @@ export class BrowserSession {
   // ---- input ----
 
   async input(events: InputEvent[]): Promise<void> {
-    if (this.closed || this.replaying) return;
+    // While BeeZilla does a job the browser is its: Stop hands it back.
+    if (this.closed || this.replaying || this.run) return;
     this.lastInput = Date.now();
     // All of a batch goes into the line at once, so a second batch that arrives while this
     // one is still being passed on can never get in between its events.
@@ -1111,24 +1700,296 @@ export class BrowserSession {
     await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
   }
 
+  private async pressKey(key: string, modifiers = 0) {
+    const text = key === "Enter" ? "\r" : key === " " ? " " : undefined;
+    await this.send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", key, code: key === " " ? "Space" : undefined, windowsVirtualKeyCode: keyCodeFor(key), modifiers, text, unmodifiedText: text });
+    await this.send("Input.dispatchKeyEvent", { type: "keyUp", key, windowsVirtualKeyCode: keyCodeFor(key), modifiers });
+  }
+  /** Everything in the box that has the cursor, selected, so what is typed next replaces it. */
+  private async selectAll() {
+    await this.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2, commands: ["selectAll"] });
+    await this.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+  }
+  /** Run a helper that answers later (a download being read). */
+  private async pageWait(fn: string, timeoutMs: number, ...args: unknown[]): Promise<unknown> {
+    const contextId = await this.ensureWorld();
+    const r = await this.send<{ result?: { value?: unknown }; exceptionDetails?: unknown }>("Runtime.evaluate", { expression: call(fn, ...args), contextId, returnByValue: true, awaitPromise: true, timeout: timeoutMs }, timeoutMs + 3000);
+    return r.exceptionDetails ? undefined : r.result?.value;
+  }
+
+  // ---- jobs: a recording played, or a task BeeZilla does itself ----
+
+  /** Sign out of every site in this browser now, and keep nothing when it closes. */
+  async forgetNow(): Promise<void> {
+    this.forgetOnClose = true;
+    try { await this.cdp.send("Storage.clearCookies", this.contextId ? { browserContextId: this.contextId } : {}, undefined, 5000); } catch { /* it closes soon enough */ }
+  }
+  /** Is a job or a played recording going on? */
+  busy(): boolean { return this.replaying || !!this.run; }
+  /** Stop the job going on (the person pressed Stop, or the page is closing). */
+  stopRun(): boolean {
+    if (!this.run) return false;
+    this.run.stop = true;
+    return true;
+  }
+  /** Asked between steps: should the job stop now? */
+  stopRequested(): boolean { return this.closed || !!this.run?.stop; }
+  isClosed(): boolean { return this.closed; }
+  /** Mark the start of a job. Throws when one is already going on. */
+  beginRun(kind: BrowserMode, by: RunBy, task?: string, nodeId?: string): number {
+    if (this.closed) throw new BrowserError("gone", "That browser has closed.");
+    if (this.run) throw new BrowserError("busy", "BeeZilla's browser is already doing a job. Wait for it, or press Stop.");
+    const node = nodeId && /^[A-Za-z0-9_:-]{1,80}$/.test(nodeId) ? nodeId : undefined;
+    this.run = { kind, by, task: task ? tidy(task, 400) : undefined, nodeId: node, stop: false, started: Date.now(), firstFile: this.files.length, acts: [] };
+    this.lastInput = Date.now();
+    this.emit({ type: "run", state: "start", kind, by, task: this.run.task, nodeId: node });
+    return this.files.length;
+  }
+  /** One thing a job did, for the window (a list that fills in as it works). */
+  noteAct(i: number, say: string, state: "running" | "ok" | "failed", note?: string) {
+    if (!this.run) return;
+    const acts = this.run.acts;
+    const at = acts.findIndex((x) => x.i === i);
+    const row = { i, say: tidy(say, 160), state, note: note ? tidy(note, 200) : undefined };
+    if (at >= 0) acts[at] = row; else acts.push(row);
+    if (acts.length > 80) acts.shift();
+    this.lastInput = Date.now();
+    this.emit({ type: "act", ...row });
+  }
+  /** End a job: wait for its downloads, read where it ended, tell everyone watching. */
+  async endRun(base: Omit<RunResult, "files" | "finalUrl" | "title" | "text" | "seconds">, firstFile: number): Promise<RunResult> {
+    await this.downloadsSettled(45_000);
+    let text = "";
+    try {
+      await this.look();
+      text = plain(await this.page("readText"), 700);
+    } catch { /* the page is gone: say what we know */ }
+    const started = this.run?.started ?? Date.now();
+    const result: RunResult = {
+      ...base,
+      nodeId: this.run?.nodeId,
+      files: this.files.slice(firstFile),
+      // Where it ended up is the one address never cleaned on the way here (a job can finish on
+      // ?token=…): the value is taken out at the source, for the card and BeeZilla alike (review 4).
+      finalUrl: stripSecretQuery(this.url).url, title: plain(this.title, 140), text,
+      seconds: Math.max(0, Math.round((Date.now() - started) / 1000)),
+    };
+    this.run = null;
+    this.lastInput = Date.now();
+    this.emit({ type: "run", state: "end", result });
+    this.lookSoon();
+    return result;
+  }
+
+  /** The page as BeeZilla sees it while doing a job: numbered things to act on, and its words. */
+  async observe(): Promise<PageView | null> {
+    if (this.closed) return null;
+    await this.look();
+    const raw = (await this.page("snapshot", 90)) as { els?: unknown[]; text?: string; below?: number; above?: number } | undefined;
+    if (!raw) return null;
+    const els: PageView["els"] = [];
+    for (const x of Array.isArray(raw.els) ? raw.els.slice(0, 90) : []) {
+      const e = (x ?? {}) as Record<string, unknown>;
+      const row: PageView["els"][number] = { i: Math.max(0, Math.floor(Number(e.i) || 0)), tag: tidy(e.tag, 12).toLowerCase() };
+      if (e.role) row.role = tidy(e.role, 20);
+      if (e.name) row.name = plain(e.name, 80);
+      if (e.type) row.type = tidy(e.type, 16);
+      if (e.ph) row.ph = plain(e.ph, 60);
+      if (e.value && e.secret !== true) row.value = plain(e.value, 80);
+      if (e.href) row.href = plain(e.href, 100);
+      if (e.inView === true) row.inView = true;
+      if (e.secret === true) row.secret = true;
+      if (e.editable === true) row.editable = true;
+      if (e.disabled === true) row.disabled = true;
+      if (typeof e.checked === "boolean") row.checked = e.checked;
+      if (Array.isArray(e.options)) row.options = e.options.slice(0, 15).map((o) => plain(o, 40));
+      if (e.file === true) row.file = true;
+      if (typeof e.expanded === "boolean") row.expanded = e.expanded;
+      els.push(row);
+    }
+    const downloading = [...this.dls.values()].filter((d) => !d.done).length + this.dlWork.size;
+    return {
+      url: this.url, title: plain(this.title, 140), els, text: plain(raw.text, 3000),
+      below: Math.max(0, Math.floor(Number(raw.below) || 0)), above: Math.max(0, Math.floor(Number(raw.above) || 0)),
+      // Only what this job downloaded: a file from an earlier job is not this one's result.
+      files: this.files.slice(this.run ? this.run.firstFile : this.files.length).slice(-8), downloading,
+    };
+  }
+  /** Would Enter or Space press something that is the person's to press (a form's Pay button)? */
+  private async enterIsPersons(): Promise<string | null> {
+    const names = (await this.page("wouldPress")) as string[] | undefined;
+    for (const n of Array.isArray(names) ? names : []) {
+      const stop = personOnly(String(n));
+      if (stop) return stop;
+    }
+    return null;
+  }
+  private async mark(i: number): Promise<(Seen & { x: number; y: number; covered?: boolean; coveredBy?: string; overlay?: boolean; hitName?: string; disabled?: boolean; file?: boolean; hidden?: boolean }) | null> {
+    if (!Number.isInteger(i) || i < 0 || i > 500) return null;
+    const d = (await this.page("markAt", i)) as (Seen & { x: number; y: number }) | null | undefined;
+    return d && typeof d.x === "number" ? d : null;
+  }
+
+  /**
+   * Do one thing on the page for a job. The rules that keep the person safe are here, in code,
+   * whatever the model asked for: no password, card or code is ever typed by BeeZilla, no
+   * button that pays, buys, subscribes or changes the account is pressed, no private address
+   * is opened. Each thing done comes back as steps, so a job can be kept as a recording.
+   */
+  async act(a: AgentAction, opts: { details?: string; loadFile?: (name: string) => Promise<{ name: string; type: string; bytes: Buffer } | null>; sites?: string[] } = {}): Promise<ActOutcome & { steps?: BrowserStep[] }> {
+    if (this.closed) return { ok: false, note: "The browser has closed." };
+    this.lastInput = Date.now();
+    try {
+      if (a.do === "goto") {
+        let u = String(a.url ?? "").trim();
+        if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = "https://" + u;
+        const url = cleanUrl(u, 2000);
+        if (!url) return { ok: false, note: "That isn't a web address." };
+        if (await mustRefuse(url)) return { ok: false, note: "BeeZilla's browser doesn't open private or internal addresses." };
+        // A job opens only the sites its own words name (and the site it is on): a page's words can't
+        // send it somewhere else with what it has seen. Links on the page are still followed by clicking.
+        if (opts.sites && !siteAllowed(url, [...opts.sites, this.url])) {
+          return { ok: false, note: "BeeZilla only opens the sites the job names. To go elsewhere, follow a link on this page." };
+        }
+        await this.navigateRaw(url);
+        await this.settle(15_000);
+        await this.look();
+        return { ok: true, note: `Opened ${tidy(hostPath(this.url || url), 90)}`, steps: [{ t: "goto", say: wordsForGoto(url), url }] };
+      }
+      if (a.do === "back") {
+        await this.page("go", -1);
+        await this.settle(8000);
+        return { ok: true, note: "Went back a page", steps: [{ t: "back", say: "Go back one page" }] };
+      }
+      if (a.do === "scroll") {
+        const dy = a.dir === "up" ? -600 : 600;
+        await this.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: VIEW_W / 2, y: VIEW_H / 2, deltaX: 0, deltaY: dy });
+        await new Promise((r) => setTimeout(r, 500));
+        return { ok: true, note: dy > 0 ? "Scrolled down" : "Scrolled up", steps: [{ t: "scroll", say: dy > 0 ? "Scroll down" : "Scroll up", dy }] };
+      }
+      if (a.do === "wait") {
+        const n = Math.max(1, Math.min(60, Math.round(Number(a.seconds) || 5)));
+        for (let k = 0; k < n * 2 && !this.stopRequested(); k++) {
+          await new Promise((r) => setTimeout(r, 500));
+          this.lastInput = Date.now();
+        }
+        return { ok: true, note: `Waited ${n} seconds`, steps: [{ t: "wait", say: `Wait ${n} seconds for the page`, wait: n }] };
+      }
+      if (a.do === "press") {
+        const key = String(a.key ?? "").trim().replace(/^space(bar)?$/i, " ").replace(/^(esc)$/i, "Escape").replace(/^return$/i, "Enter");
+        const named = key === " " ? " " : key.charAt(0).toUpperCase() + key.slice(1);
+        if (!isJobKey(named)) return { ok: false, note: `BeeZilla can't press ${tidy(a.key, 20)} on a page.` };
+        if (named === "Enter" || named === " ") {
+          const stop = await this.enterIsPersons();
+          if (stop) return { ok: false, note: stop, needs: stop };
+        }
+        await this.pressKey(named);
+        await this.settle(6000);
+        return { ok: true, note: `Pressed ${named === " " ? "Space" : named}`, steps: [{ t: "key", say: `Press ${named === " " ? "Space" : named}`, key: named }] };
+      }
+      const d = await this.mark(a.el);
+      if (!d) return { ok: false, note: `Thing [${a.el}] isn't on the page any more. Look at the page again.` };
+      const label = called(d) || "that";
+      if (a.do === "upload") {
+        if (!opts.loadFile) return { ok: false, note: "There is no file to hand over in this job." };
+        const f = await opts.loadFile(String(a.file ?? ""));
+        if (!f) return { ok: false, note: `There's no file called “${plain(a.file, 60)}” to hand over. Use one of the files listed.` };
+        if (f.bytes.length > MAX_DOWNLOAD_BYTES) return { ok: false, note: "That file is too big to hand to a page." };
+        const id = randomBytes(6).toString("hex");
+        const b64 = f.bytes.toString("base64");
+        for (let at = 0, first = true; at < b64.length; at += 3_000_000, first = false) {
+          await this.page("filePart", id, b64.slice(at, at + 3_000_000), first);
+        }
+        const r = (await this.page("giveFile", a.el, id, f.name, f.type)) as { ok?: boolean; how?: string } | undefined;
+        if (!r?.ok) return { ok: false, note: `The page didn't take the file at ${label}.` };
+        await this.settle(8000);
+        return { ok: true, note: `Gave the page “${plain(f.name, 60)}”${r.how === "drop" ? " (dropped on it)" : ""}` };
+      }
+      if (d.file) return { ok: false, note: `${label} is for choosing a file: use upload with the file's name instead.` };
+      if (a.do === "click") {
+        // The thing's own name, and what a click there would really press if something covers it.
+        const stop = personOnly(d.name || d.placeholder) ?? (d.covered ? personOnly(d.hitName) : null);
+        if (stop) return { ok: false, note: stop, needs: stop };
+        if (d.disabled) return { ok: false, note: `${label} is greyed out right now: the page isn't ready for it (wait, or do what it needs first).` };
+        if (d.covered && !d.overlay && d.type !== "checkbox" && d.type !== "radio") {
+          return { ok: false, note: `A pop-up${d.coveredBy && d.coveredBy !== "a pop-up" ? ` (“${plain(d.coveredBy, 50)}”)` : ""} is in front of ${label}: close it or answer it first.` };
+        }
+        // A see-through layer over the button: the button itself is pressed.
+        if (d.covered && d.overlay) await this.page("pressAt", a.el);
+        else await this.clickAt(d.x, d.y);
+        await this.popupsDone();
+        await this.settle(8000);
+        return { ok: true, note: `Clicked ${label}`, steps: [{ t: "click", say: wordsForClick(d), on: hintOf(d), x: d.x, y: d.y }] };
+      }
+      if (a.do === "type") {
+        if (d.secret) {
+          const why = `${label === "that" ? "That box" : label} is for a password, a card or a code. BeeZilla never types those: sign in yourself, once, in BeeZilla's browser (open the globe on the board and type it in the picture). It stays signed in after that.`;
+          return { ok: false, note: why, needs: why };
+        }
+        if (!d.editable) return { ok: false, note: `${label} isn't a box to type in.` };
+        if (d.covered && !d.overlay) return { ok: false, note: `A pop-up is in front of ${label}: close it or answer it first.` };
+        const text = String(a.text ?? "").slice(0, 4000);
+        if (!d.covered) await this.clickAt(d.x, d.y);
+        await new Promise((r) => setTimeout(r, 150));
+        // The words go only where the cursor really is, and only if that is this box and not a secret
+        // one: a page can lay a password box over a plain one, or move the cursor away.
+        let f = (await this.page("focusIs", a.el)) as { ok?: boolean; secret?: boolean } | undefined;
+        if (!f?.ok) { await this.page("focusMark", a.el); f = (await this.page("focusIs", a.el)) as typeof f; }
+        if (f?.secret) {
+          const why = "The cursor is in a box for a password, a card or a code. BeeZilla never types those: sign in yourself, once, in BeeZilla's browser.";
+          return { ok: false, note: why, needs: why };
+        }
+        if (!f?.ok) return { ok: false, note: `The cursor didn't go into ${label}. Look at the page again.` };
+        await this.selectAll();
+        if (text) await this.send("Input.insertText", { text });
+        else await this.pressKey("Backspace");
+        const steps: BrowserStep[] = [];
+        const blank = blankFor(text, opts.details, d);
+        steps.push({ t: "type", say: wordsForType(d), on: hintOf(d), v: text, x: d.x, y: d.y, ...(blank ? { blank } : {}) });
+        if (a.enter) {
+          const stop = await this.enterIsPersons();
+          if (stop) return { ok: false, note: `Typed into ${label}, then stopped: ${stop}`, needs: stop, steps };
+          await this.pressKey("Enter");
+          await this.settle(8000);
+          steps.push({ t: "key", say: "Press Enter", key: "Enter" });
+        } else await new Promise((r) => setTimeout(r, 300));
+        return { ok: true, note: `Typed into ${label}${a.enter ? " and pressed Enter" : ""}`, steps };
+      }
+      if (a.do === "select") {
+        const r = (await this.page("chooseAt", a.el, String(a.option ?? ""))) as { text: string; name: string } | null | undefined;
+        if (!r) return { ok: false, note: `${label} has no choice “${plain(a.option, 40)}”.` };
+        await this.settle(4000);
+        return { ok: true, note: `Chose “${plain(r.text, 40)}” in ${label}`, steps: [{ t: "select", say: r.name ? `Choose from the list “${plain(r.name, 50)}”` : "Choose from a list", on: hintOf(d), v: tidy(r.text, 80), x: d.x, y: d.y }] };
+      }
+      return { ok: false, note: "BeeZilla can't do that on a page." };
+    } catch (e) {
+      return { ok: false, note: e instanceof BrowserError ? e.message : "The browser stopped answering." };
+    }
+  }
+
   /** Play steps in this browser, the way a person would, and say how far it got. */
-  async replay(raw: unknown): Promise<void> {
-    if (this.closed || this.replaying) return;
+  async replay(raw: unknown, opts: { fill?: Record<string, string>; by?: RunBy; nodeId?: string } = {}): Promise<RunResult> {
+    const by = opts.by ?? "you";
     const steps = cleanSteps(raw);
-    if (!steps.length) { this.emit({ type: "notice", text: "There's nothing recorded to play yet." }); return; }
+    const none = (note: string): RunResult => ({ ok: false, kind: "recording", by, note, ran: 0, files: [], finalUrl: this.url, title: plain(this.title, 140), text: "", seconds: 0 });
+    if (this.closed) return none("The browser has closed.");
+    if (this.replaying || this.run) return none("BeeZilla's browser is already doing a job. Wait for it, or press Stop.");
+    if (!steps.length) { this.emit({ type: "notice", text: "There's nothing recorded to play yet." }); return none("There's nothing recorded to play yet."); }
     // Marked at once, before anything waits: a second request can't start a second play.
     this.replaying = true;
-    this.lastInput = Date.now();
+    const firstFile = this.beginRun("recording", by, undefined, opts.nodeId);
+    const fill = cleanFill(opts.fill);
     await this.queue(() => this.flushAll());
     await this.setRecording(false);
-    const done = (ok: boolean, note: string, failedAt?: number, ran = 0) => {
-      this.replaying = false;
-      return this.finishReplay(ok, note, failedAt, ran);
-    };
+    let skipped = 0, ran = 0, failedAt: number | undefined, note = "", needs: string | undefined, stopped = false;
     try {
-      let skipped = 0;
       for (let i = 0; i < steps.length; i++) {
-        if (this.closed) return;
+        if (this.stopRequested()) {
+          // (Read through a method: the checks above can't see a Stop that arrives while this runs.)
+          if (this.isClosed()) note = "The browser closed."; else { stopped = true; note = "You stopped it."; }
+          failedAt = i;
+          break;
+        }
         const st = steps[i]!;
         this.lastInput = Date.now();
         this.emit({ type: "replay", i, state: "running" });
@@ -1137,86 +1998,225 @@ export class BrowserSession {
           this.emit({ type: "replay", i, state: "skipped", note: "You enter this yourself — it was never recorded." });
           continue;
         }
-        const failed = await this.play(st);
-        if (failed) {
-          this.emit({ type: "replay", i, state: "failed", note: failed });
-          await done(false, failed, i, i);
-          return;
+        const r = await this.play(st, fill);
+        if (r.needs || r.failed) {
+          failedAt = i;
+          note = (r.needs || r.failed)!;
+          needs = r.needs;
+          this.emit({ type: "replay", i, state: "failed", note });
+          break;
         }
+        ran = i + 1;
         this.emit({ type: "replay", i, state: "ok" });
       }
-      await done(true, skipped ? `Played every step. ${skipped} ${skipped === 1 ? "step was" : "steps were"} left for you (passwords and codes are never recorded).` : "Played every step.", undefined, steps.length);
-    } catch (e) {
-      await done(false, "The browser stopped answering.", undefined, 0);
-      void e;
+    } catch {
+      note = "The browser stopped answering.";
+      failedAt = failedAt ?? ran;
     }
-  }
-  private async finishReplay(ok: boolean, note: string, failedAt: number | undefined, ran: number) {
-    let text = "";
-    try {
-      await this.look();
-      text = plain(await this.page("readText"), 700);
-    } catch { /* the page is gone: say what we know */ }
-    // Where it ended up is the one address that was never cleaned on the way here: the
-    // browser goes where the page sends it, so a job can finish on ?token=… . The card
-    // and the sentence BeeZilla is told both come from this event, so the value is taken
-    // out at the source, not at one of the two readers.
-    this.emit({ type: "replay-done", ok, failedAt, note, steps: ran, finalUrl: stripSecretQuery(this.url).url, title: plain(this.title, 140), text });
-    this.lookSoon();
+    const ok = failedAt === undefined && !stopped;
+    if (ok) note = skipped ? `Played every step. ${skipped} ${skipped === 1 ? "step was" : "steps were"} left for you (passwords and codes are never recorded).` : "Played every step.";
+    this.replaying = false;
+    const result = await this.endRun({ ok, kind: "recording", by, note, needs, stopped: stopped || undefined, failedAt, ran }, firstFile);
+    this.emit({ type: "replay-done", ok, failedAt, note, steps: ran, finalUrl: result.finalUrl, title: result.title, text: result.text });
+    return result;
   }
 
-  /** One step. Returns why it could not be done, or "" when it was. */
-  private async play(st: BrowserStep): Promise<string> {
+  /**
+   * One step. A thing to click or type into is waited for — a page that is still making the
+   * song shows its Download button later — for about twice as long as the person waited when
+   * they recorded it (8 seconds to 3 minutes), and a greyed-out one is waited for too.
+   */
+  private async play(st: BrowserStep, fill: Record<string, string>): Promise<{ failed?: string; needs?: string }> {
     try {
       if (st.t === "goto" && st.url) {
         await this.navigateRaw(st.url);
-        await this.settle(9000);
-        return "";
+        await this.settle(12_000);
+        return {};
       }
       if (st.t === "back") {
-        await this.history("back");
-        await this.settle(6000);
-        return "";
+        await this.page("go", -1);
+        await this.settle(8000);
+        return {};
+      }
+      if (st.t === "wait") {
+        const n = Math.max(1, Math.min(300, st.wait ?? 5));
+        for (let k = 0; k < n * 2 && !this.stopRequested(); k++) { await new Promise((r) => setTimeout(r, 500)); this.lastInput = Date.now(); }
+        return {};
       }
       if (st.t === "key" && st.key) {
         const parts = st.key.split("+");
         const key = parts[parts.length - 1]!;
-        if (!isRecordedKey(key)) return `I can't press ${tidy(st.key, 20)}.`;
-        const modifiers = (parts.includes("Shift") ? 8 : 0) | (parts.includes("Alt") ? 1 : 0);
-        await this.send("Input.dispatchKeyEvent", { type: key === "Enter" ? "keyDown" : "rawKeyDown", key, windowsVirtualKeyCode: keyCodeFor(key), modifiers, text: key === "Enter" ? "\r" : undefined });
-        await this.send("Input.dispatchKeyEvent", { type: "keyUp", key, windowsVirtualKeyCode: keyCodeFor(key), modifiers });
+        if (!isRecordedKey(key) && !isJobKey(key)) return { failed: `I can't press ${tidy(st.key, 20)}.` };
+        if (key === "Enter" || key === " ") {
+          const stop = await this.enterIsPersons();
+          if (stop) return { needs: stop };
+        }
+        await this.pressKey(key, (parts.includes("Shift") ? 8 : 0) | (parts.includes("Alt") ? 1 : 0));
         await this.settle(6000);
-        return "";
+        return {};
       }
       if (st.t === "scroll") {
         await this.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: VIEW_W / 2, y: VIEW_H / 2, deltaX: 0, deltaY: st.dy ?? 400 });
         await new Promise((r) => setTimeout(r, 400));
-        return "";
+        return {};
       }
-      const where = (await this.page("find", st.on ?? null, st.x, st.y)) as { x: number; y: number; how: string; editable?: boolean } | null;
       const label = st.on?.name ? `“${plain(st.on.name, 50)}”` : "that";
-      if (!where) return `I couldn't find ${label} on this page.`;
+      const named = !!(st.on?.sel || st.on?.name);
+      const until = Date.now() + Math.max(8000, Math.min(180_000, 2 * (st.ms ?? 0) + 8000));
+      type Found = { x: number; y: number; how: string; editable?: boolean; disabled?: boolean; name?: string; at?: string };
+      let where: Found | null = null;
+      for (;;) {
+        where = (await this.page("find", st.on ?? null, named ? undefined : st.x, named ? undefined : st.y)) as Found | null;
+        if (where && !where.disabled) break;
+        if (Date.now() > until || this.stopRequested()) break;
+        this.lastInput = Date.now();
+        await new Promise((r) => setTimeout(r, 600));
+      }
+      // Waited long enough: the place it was is the last way to find it.
+      if (!where && named && typeof st.x === "number") where = (await this.page("find", null, st.x, st.y)) as Found | null;
+      if (this.stopRequested()) return { failed: "You stopped it." };
+      if (!where) return { failed: `I couldn't find ${label} on this page.` };
+      if (where.disabled) return { failed: `${label} stayed greyed out, so the page wasn't ready for it.` };
+      if (st.t === "click") {
+        const stop = personOnly(where.name || st.on?.name) ?? personOnly(where.at);
+        if (stop) return { needs: stop };
+      }
       // Typing goes only into a box that takes typing: never into whatever happens to be selected.
-      if (st.t === "type" && where.editable === false) return `I found ${label}, but it isn't a box to type in.`;
+      if (st.t === "type" && where.editable === false) return { failed: `I found ${label}, but it isn't a box to type in.` };
       if (st.t === "select" && st.v) {
         const ok = await this.page("setSelect", st.on ?? null, st.v);
-        if (!ok) return `I couldn't choose “${tidy(st.v, 40)}” in ${label}.`;
+        if (!ok) return { failed: `I couldn't choose “${tidy(st.v, 40)}” in ${label}.` };
         await this.settle(4000);
-        return "";
+        return {};
       }
       await this.clickAt(where.x, where.y);
       await this.popupsDone();
       if (st.t === "type") {
-        await this.page("selectActive");
-        if (st.v) await this.send("Input.insertText", { text: st.v });
+        const v = fillFor(fill, st.blank) ?? (st.v ?? "");
+        await new Promise((r) => setTimeout(r, 120));
+        // Never into a box that has become a secret one (the page changed since it was recorded).
+        const sec = (await this.page("activeSecret")) as boolean | undefined;
+        if (sec) return { needs: "The box this step types into is now one for a password, a card or a code. You type it yourself." };
+        await this.selectAll();
+        if (v) await this.send("Input.insertText", { text: v });
         await new Promise((r) => setTimeout(r, 250));
-        return "";
+        return {};
       }
       await this.settle(6000);
-      return "";
+      return {};
     } catch (e) {
-      return e instanceof BrowserError ? e.message : "The browser stopped answering.";
+      return { failed: e instanceof BrowserError ? e.message : "The browser stopped answering." };
     }
+  }
+
+  // ---- downloads ----
+
+  /** The browser says a download is starting. Only this person's page counts. */
+  private downloadBegins(p: { guid?: string; frameId?: string; url?: string; suggestedFilename?: string } | undefined) {
+    const guid = String(p?.guid ?? "");
+    const frameId = String(p?.frameId ?? "");
+    // Downloads that are long done are let go of; a page can't fill the list for good.
+    if (this.dls.size >= 40) for (const [g, x] of this.dls) if (x.done && Date.now() - (x.at ?? 0) > 120_000) this.dls.delete(g);
+    if (!guid || this.closed || !this.frames.has(frameId) || this.dls.has(guid) || this.dls.size >= 40) return;
+    const url = String(p?.url ?? "");
+    const name = safeFileName(p?.suggestedFilename, url);
+    const d: { url: string; name: string; frameId: string; done: boolean; at?: number; early?: Promise<{ bytes: Buffer; type: string } | null> } = { url, name, frameId, done: false, at: Date.now() };
+    // A file the page built itself is read at once, while the page still has it.
+    if (/^blob:/i.test(url)) d.early = this.readBlob(url).catch(() => null);
+    else if (/^data:/i.test(url)) { const x = decodeDataUrl(url); d.early = Promise.resolve(x); }
+    this.dls.set(guid, d);
+    this.lastInput = Date.now();
+    this.emit({ type: "file", state: "started", name });
+  }
+  private downloadEnds(guid: string) {
+    const d = this.dls.get(guid);
+    if (!d || d.done) return;
+    d.done = true;
+    const work: Promise<void> = this.saveDownload(guid, d).catch(() => {}).finally(() => { this.dlWork.delete(work); });
+    this.dlWork.add(work);
+  }
+  private fileAsPage(url: string, mime: string) {
+    if (!/^https?:/i.test(url) || this.closed) return;
+    const key = "page:" + url;
+    if (this.dls.has(key)) return;
+    let name = "";
+    try { name = decodeURIComponent(new URL(url).pathname.split("/").pop() || ""); } catch { /* none */ }
+    const ext = /^audio\/(mpeg|mp3)/.test(mime) ? ".mp3" : /^audio\/(wav|x-wav)/.test(mime) ? ".wav" : /pdf/.test(mime) ? ".pdf" : /^video\/mp4/.test(mime) ? ".mp4" : "";
+    if (ext && !/\.[a-z0-9]{2,5}$/i.test(name)) name = (name || "download") + ext;
+    const d = { url, name: safeFileName(name, url), frameId: this.targetId, done: false, at: Date.now() };
+    this.dls.set(key, d);
+    // Read once the page has it (it was checked on the way in, like every page) — unless the browser
+    // turned out to download it after all (then that download is the file).
+    setTimeout(() => {
+      if ([...this.dls.entries()].some(([g, x]) => g !== key && x.url === url)) { this.dls.delete(key); return; }
+      this.emit({ type: "file", state: "started", name: d.name });
+      this.downloadEnds(key);
+    }, 1200);
+  }
+  /** Wait for downloads that started to be saved (a click on Download: the browser says so a moment later). */
+  async downloadsSettled(maxMs: number): Promise<void> {
+    const until = Date.now() + maxMs;
+    await new Promise((r) => setTimeout(r, 700));
+    while (Date.now() < until) {
+      if (![...this.dls.values()].some((d) => !d.done) && this.dlWork.size === 0) return;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+  private async readBlob(url: string): Promise<{ bytes: Buffer; type: string } | null> {
+    const id = randomBytes(6).toString("hex");
+    const got = (await this.pageWait("grabBlob", 30_000, id, url)) as { ok?: boolean; type?: string; size?: number; len?: number } | undefined;
+    if (!got?.ok || !got.len || (got.size ?? 0) > MAX_DOWNLOAD_BYTES) return null;
+    let b64 = "";
+    for (let at = 0; at < got.len; at += 4_000_000) b64 += String((await this.page("blobPart", id, at, 4_000_000)) ?? "");
+    return b64 ? { bytes: Buffer.from(b64, "base64"), type: String(got.type ?? "") } : null;
+  }
+  /** Fetch an address through the browser itself: its address on the internet, its sign-ins. */
+  private async loadResource(frameId: string, url: string): Promise<{ bytes: Buffer; type: string } | null> {
+    const r = await this.send<{ resource?: { success?: boolean; httpStatusCode?: number; stream?: string; headers?: Record<string, string> } }>(
+      "Network.loadNetworkResource", { frameId, url, options: { disableCache: false, includeCredentials: true } }, 60_000);
+    const res = r.resource;
+    if (!res?.stream) return null;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    try {
+      if (!res.success || (res.httpStatusCode && res.httpStatusCode >= 400)) return null;
+      for (;;) {
+        const c = await this.send<{ data: string; base64Encoded?: boolean; eof?: boolean }>("IO.read", { handle: res.stream, size: 1 << 20 }, 30_000);
+        const b = c.base64Encoded ? Buffer.from(c.data || "", "base64") : Buffer.from(c.data || "", "utf8");
+        total += b.length;
+        if (total > MAX_DOWNLOAD_BYTES) return null;
+        chunks.push(b);
+        if (c.eof) break;
+      }
+    } finally {
+      try { await this.send("IO.close", { handle: res.stream }); } catch { /* gone */ }
+    }
+    const type = Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+    return { bytes: Buffer.concat(chunks), type: String(type) };
+  }
+  private async saveDownload(guid: string, d: { url: string; name: string; frameId: string; early?: Promise<{ bytes: Buffer; type: string } | null> }) {
+    let got: { bytes: Buffer; type: string } | null = null;
+    if (/^https?:/i.test(d.url) && (await mustRefuse(d.url).catch(() => true))) {
+      // From a private or internal address: not read, not even from the browser's own copy.
+      this.emit({ type: "file", state: "failed", name: d.name, note: "It came from a private or internal address, so BeeZilla didn't keep it." });
+      return;
+    }
+    if (d.early) got = await d.early;
+    else if (/^https?:/i.test(d.url)) got = await this.loadResource(d.frameId, d.url).catch(() => null);
+    if (!got && this.provider.savedDownload && !guid.startsWith("page:")) {
+      const b = await this.provider.savedDownload(guid).catch(() => null);
+      if (b) got = { bytes: b, type: "" };
+    }
+    if (!got || !got.bytes.length) { this.emit({ type: "file", state: "failed", name: d.name, note: "BeeZilla couldn't read that download." }); return; }
+    if (got.bytes.length > MAX_DOWNLOAD_BYTES) { this.emit({ type: "file", state: "failed", name: d.name, note: `It's bigger than ${MAX_DOWNLOAD_BYTES / 1048576} MB, the most the Library keeps.` }); return; }
+    const type = safeContentType(got.type, d.name, got.bytes);
+    let saved: RunFile | null = null;
+    try { saved = this.onFile ? await this.onFile({ name: d.name, type, bytes: got.bytes }) : null; } catch { saved = null; }
+    if (!saved) { this.emit({ type: "file", state: "failed", name: d.name, note: "It couldn't be saved to your Library." }); return; }
+    this.files.push(saved);
+    if (this.files.length > 40) this.files.shift();
+    this.lastInput = Date.now();
+    this.emit({ type: "file", state: "saved", name: saved.name, url: saved.url, bytes: saved.bytes, fileType: saved.type });
   }
 
   // ---- ending ----
@@ -1230,7 +2230,20 @@ export class BrowserSession {
     this.stopHandlers = [];
     this.emit({ type: "ended", reason });
     this.listeners.clear();
+    if (this.run) this.run.stop = true;
     try { await this.cdp.send("Page.stopScreencast", {}, this.sid, 3000); } catch { /* going away */ }
+    // A browser of your own forgets everything with its context: the sign-ins are kept here, for a while.
+    if (this.contextId && this.provider.keepsSignIns && this.provider.kind === "cdp" && !this.forgetOnClose) {
+      try {
+        const got = await this.cdp.send<{ cookies: unknown[] }>("Storage.getCookies", { browserContextId: this.contextId }, undefined, 3000);
+        if (Array.isArray(got.cookies) && got.cookies.length) {
+          // Old sign-ins are let go of, and the jar never grows past a couple of thousand people.
+          for (const [u, j] of cookieJar) if (Date.now() - j.at > JAR_HOURS * 3600_000) cookieJar.delete(u);
+          if (cookieJar.size >= 2000) cookieJar.delete(cookieJar.keys().next().value as string);
+          cookieJar.set(this.userId, { cookies: got.cookies.slice(0, 400), at: Date.now() });
+        }
+      } catch { /* nothing kept */ }
+    }
     if (this.targetId) { try { await this.cdp.send("Target.closeTarget", { targetId: this.targetId }, undefined, 3000); } catch { /* going away */ } }
     if (this.contextId) { try { await this.cdp.send("Target.disposeBrowserContext", { browserContextId: this.contextId }, undefined, 3000); } catch { /* it goes with the connection */ } }
     this.cdp.close();
@@ -1252,7 +2265,8 @@ function startReaper() {
     const now = Date.now();
     for (const s of [...sessions.values()]) {
       if (now - s.startedAt > s.maxMs) void dropSession(s, "time").catch(() => {});
-      else if (now - s.lastInput > idleSeconds() * 1000) void dropSession(s, "idle").catch(() => {});
+      // A job going on is not idle, however long the model takes to think (it has its own limits).
+      else if (now - s.lastInput > idleSeconds() * 1000 && !s.busy()) void dropSession(s, "idle").catch(() => {});
       else s.bill();
     }
     if (!sessions.size && reaper) { clearInterval(reaper); reaper = null; }
@@ -1286,7 +2300,7 @@ export async function openBrowserSession(
     const before = byUser.get(userId);
     if (before) { const old = sessions.get(before); if (old) await dropSession(old, "replaced"); }
     if (sessions.size >= maxSessions()) throw new BrowserError("busy", "BeeZilla's browsers are all in use right now. Try again in a minute.");
-    const provider = await openProvider();
+    const provider = await openProvider(userId);
     let cdp: CdpConnection;
     try {
       cdp = await CdpConnection.connect(provider.wsUrl);

@@ -73,7 +73,12 @@ check("web, page reading and music are marked as leaving BeeZilla", ["web_search
 check("lockdown offers none of them", outside.every((n) => !locked.includes(n)), locked.join(","));
 check("lockdown keeps the local tools", ["calculate", "render_document", "render_sheet"].every((n) => locked.includes(n)), locked.join(","));
 check("a withheld outside tool explains Lockdown", /Lockdown/.test(refusalFor("web_search", { draftGateOpen: true, lockdown: true }) ?? ""));
-check("without lockdown nothing changes", outside.filter((n) => policyFor(n)?.offered).every((n) => offeredToolNames({ draftGateOpen: true }).includes(n)));
+check("without lockdown nothing changes", outside.filter((n) => policyFor(n)?.offered).every((n) => offeredToolNames({ draftGateOpen: true, browser: true }).includes(n)));
+
+console.log("BeeZilla's browser (the globe):");
+check("offered only on a browser turn", !offeredToolNames({ draftGateOpen: true }).includes("use_browser") && offeredToolNames({ draftGateOpen: false, browser: true }).includes("use_browser"));
+check("a browser turn keeps the read-only tools", ["web_search", "read_web_page"].every((n) => offeredToolNames({ draftGateOpen: false, browser: true }).includes(n)));
+check("withheld, it says why", /browser node/.test(refusalFor("use_browser", { draftGateOpen: true }) ?? ""));
 
 console.log("the Hive's tools (agents asking each other, hive.ts):");
 const names = (tools: unknown[]) => (tools as Array<{ function?: { name?: string } }>).map((t) => String(t.function?.name));

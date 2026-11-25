@@ -327,6 +327,58 @@ textarea.wb-nf-input { height: auto; padding: 8px 10px; resize: vertical; line-h
 .wb-nw-foot { margin: 0; flex: 0 0 auto; }
 .wb-nw-foot[hidden] { display: none; }
 
+/* ── The globe: a job in words, or a recording followed exactly ─────────── */
+.wb-nw-tabs { display: flex; gap: 4px; flex: 0 0 auto; padding: 3px; border-radius: 11px; background: #0d0f12; border: 1px solid #2a2f37; align-self: flex-start; }
+.wb-nw-tab { min-height: 0; height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: transparent; color: #c4c9d0; font: inherit; font-size: 0.86rem; font-weight: 700; cursor: pointer; }
+.wb-nw-tab.on { background: var(--ob-yellow); color: #141414; }
+.wb-nw-tab:hover:not(.on):not(:disabled), .wb-nw-tab:focus-visible { color: var(--ob-yellow); outline: none; }
+.wb-nw-tab:disabled:not(.on) { opacity: 0.5; cursor: default; }
+.wb-nw-task { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.wb-nw-task[hidden] { display: none; }
+.wb-nw-task p { margin: 0; }
+textarea.wb-nf-input.wb-nw-taskin { font-family: inherit; font-size: 0.9rem; min-height: 64px; max-height: 180px; }
+.wb-nw-startrow .wb-nf-input { height: 32px; font-size: 0.82rem; }
+.wb-nw-ctl .wb-primary { border-color: var(--ob-yellow); }
+.wb-nw-runbtn .wb-ico, .wb-nw-stop .wb-ico { width: 14px; height: 14px; }
+.wb-nw-stop { background: #3a1517; color: #ffb4b4; }
+/* BeeZilla is working: the picture is its, and the strip says so. */
+.wb-nw-busy { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 6px 12px; border-radius: 999px; background: rgba(18, 20, 24, 0.92); border: 1px solid var(--ob-yellow); color: #f1dca0; font-size: 0.8rem; font-weight: 600; text-align: center; pointer-events: none; }
+.wb-nw-busy[hidden] { display: none; }
+.wb-nw-acts .wb-nw-step { background: #15181d; }
+.wb-nw-fill { flex: 0 0 auto; min-height: 0; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid #3a3f47; background: transparent; color: var(--ob-muted); font: inherit; font-size: 0.72rem; font-weight: 600; cursor: pointer; }
+.wb-nw-fill.on { border-color: var(--ob-yellow); color: var(--ob-yellow); }
+.wb-nw-fill:hover:not(:disabled), .wb-nw-fill:focus-visible { border-color: var(--ob-yellow); outline: none; }
+.wb-nw-fill:disabled { opacity: 0.5; cursor: default; }
+.wb-nw-keep { margin-top: 8px; border: 1px solid var(--ob-yellow); }
+.wb-nw-blanks { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: #1a1d22; border: 1px solid #3a3f47; }
+.wb-nw-blanks[hidden] { display: none; }
+.wb-nw-blanks p { margin: 0; }
+.wb-nw-blank { display: flex; flex-direction: column; gap: 3px; font-size: 0.8rem; color: #c4c9d0; }
+.wb-nw-blank .wb-nf-input { height: 32px; font-size: 0.84rem; }
+.wb-nw-files { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: #13221a; border: 1px solid rgba(91, 175, 107, 0.45); font-size: 0.82rem; }
+.wb-nw-files[hidden] { display: none; }
+.wb-nw-files ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.wb-nw-files li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.wb-nw-files a { color: #cfe9d4; font-weight: 700; word-break: break-word; }
+.wb-nw-files audio { width: 100%; height: 32px; }
+.wb-nw-signins { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.wb-nw-forget { min-height: 0; height: 28px; padding: 0 10px; font-size: 0.76rem; }
+
+/* The globe in the tools: it drags onto the board. */
+.wb-tool-globe { cursor: grab; }
+.wb-tool-globe:active { cursor: grabbing; }
+
+/* A browser node's card: what it does, and how it is doing. */
+.wb-nd-mode { background: rgba(236, 139, 91, 0.16) !important; color: #f3b493 !important; }
+.wb-nd-task { margin: 6px 0 0; font-size: 0.8rem; line-height: 1.4; color: #d9dde3; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.wb-nd-live { animation: wbNdLive 1.6s ease-in-out infinite; }
+@keyframes wbNdLive { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) { .wb-nd-live { animation: none; } }
+.wb-nd-files { margin: 6px 0 0; padding: 0; list-style: none; font-size: 0.78rem; }
+.wb-nd-files li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-nd-files li::before { content: "↓ "; color: #9fd8a9; }
+.wb-nd-files a { color: #cfe9d4; }
+
 @media (max-width: 760px) {
   .wb-more { width: auto; }
   /* The tools are a row across the top on a phone, and ten of them are wider than the

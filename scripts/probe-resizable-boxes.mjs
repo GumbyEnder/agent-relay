@@ -305,6 +305,10 @@ const board2 = await page.evaluate(() => document.getElementById("obBoard").offs
 check("…and it stops at its smallest height (360)", near(board2, 360), String(board2));
 await drag("#obBoard > .bz-rs-s", 0, 120);
 const board3 = await page.evaluate(() => document.getElementById("obBoard").offsetHeight);
+// The conversation card's size is part of the board's data, not this browser's, so a reload
+// must draw the card at the size it was left at. Grown here, read again below.
+await drag(H("se"), 80, 40);
+const keptCard = await card();
 await page.reload({ waitUntil: "load" });
 await page.waitForSelector("#chatInput:not([disabled])", { timeout: 30000 });
 await page.focus("#chatInput");
@@ -314,6 +318,12 @@ await page.waitForSelector("#obBoard:not(.hidden) .wb-panel", { timeout: 20000 }
 await page.waitForTimeout(800);
 const board4 = await page.evaluate(() => document.getElementById("obBoard").offsetHeight);
 check("the board is the height you left it at, on the next visit", near(board4, board3), `${board3} vs ${board4}`);
+const cardBack = await card();
+check("the conversation card comes back at the size you left it, after a reload", cardBack && near(cardBack.w, keptCard.w) && near(cardBack.h, keptCard.h), `${JSON.stringify(keptCard)} -> ${JSON.stringify(cardBack)}`);
+await page.dblclick(H("se"));
+await page.waitForTimeout(150);
+const cardReset = await card();
+check("…and a double-click after the reload puts it back at 360 x 480", near(cardReset.w, 360) && near(cardReset.h, 480), JSON.stringify(cardReset));
 await page.dblclick("#obBoard > .bz-rs-s");
 await page.waitForTimeout(150);
 check("a double-click on its bottom edge puts it back", await page.evaluate(() => !document.getElementById("obBoard").style.height));

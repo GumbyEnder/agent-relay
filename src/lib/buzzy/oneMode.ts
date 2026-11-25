@@ -167,7 +167,7 @@ export interface StepInput {
   fresh: AskOrGo;
   /** This message's assessment (its stakes tier, a one-way door; size and hurry for
    *  the budget's numbers). */
-  assessment?: Pick<Assessment, "stakes" | "irreversible"> & Partial<Pick<Assessment, "size" | "hurried">>;
+  assessment?: Pick<Assessment, "stakes" | "irreversible" | "performsDoor"> & Partial<Pick<Assessment, "size" | "hurried">>;
   /** This message hands work to agents (askOrGo.handsToAgents; never a maker lane). */
   agentWork?: boolean;
   /** An amount they set earlier in this conversation, in dollars. */
@@ -181,6 +181,11 @@ export interface StepInput {
    *  taken back with ⌘Z, and the reply is one sentence ("don't ask me anything first").
    *  Nothing is asked, no budget, and a question still waiting stays as it was. */
   buildsOnBoard?: boolean;
+  /** A job for BeeZilla's own browser this turn (server.ts: browserCommand or a step's
+   *  globe). It is a build of a kind — nothing is asked — except that the browser really
+   *  presses buttons, so a door (post, send, publish, submit; or critical and can't-undo)
+   *  is asked about first: laying a flow out runs nothing, pressing Post does. */
+  browserGo?: boolean;
   /** The conversation has an id, so the next turn can find this one's state. */
   canFollowUp: boolean;
 }
@@ -328,7 +333,13 @@ export function goOnRequest(s: OneModeState, how: GoHow, ctx: BudgetContext, rem
 export function nextStep(state: OneModeState | null, input: StepInput): StepResult {
   // Built on the board this turn: the reply carries the page's actions, and a quick
   // choice would come back without them, so the board would never build.
-  if (input.buildsOnBoard) return { step: { kind: "go", how: "fresh" }, state };
+  // A browser job is a build of a kind, but it presses real buttons: when the words are a
+  // door (post, send, publish, submit) or critical and can't-undo, it must not pre-empt the
+  // question the ladder would have asked. Laying a flow out runs nothing; pressing Post does.
+  const doorInWords = input.assessment?.performsDoor === true ||
+    (input.assessment?.stakes === "critical" && input.assessment?.irreversible === true);
+  if (input.buildsOnBoard && !(input.browserGo === true && doorInWords))
+    return { step: { kind: "go", how: "fresh" }, state };
   // Their own explicit "go": the button, Do it, or the words. "You decide" also means
   // go this time, but it hands the choice over, so it is never remembered.
   const goExplicit = input.execute === true || input.choice === "go" || isGoReply(input.message);

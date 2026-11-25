@@ -1101,6 +1101,16 @@ const model = http.createServer((req, res) => {
     eq(bobsBunny === aliceBunny, false);
   });
 
+  console.log("\nNext to the other tools\n");
+
+  await ok("the retry without tools is only for a turn whose only tools were the Hive's: a document or browser turn keeps its own", () => {
+    // Since the globe (browserRun.ts) a browser turn carries tools too. If the model refused the list,
+    // answering it without use_browser would leave it only able to claim the job, never do it.
+    const src = readFileSync(join(process.cwd(), "src", "lib", "buzzy", "server.ts"), "utf8");
+    const line = src.split("\n").find((l) => /const onlyHive = /.test(l)) ?? "";
+    truthy(/draftGateOpen/.test(line) && /explicitDocumentRequest/.test(line) && /browserTurn/.test(line), line.trim());
+  });
+
   console.log("\nThe rollback\n");
 
   await ok("rolling 0067 back (twice is fine) drops the table and its index, and touches nothing else", async () => {
