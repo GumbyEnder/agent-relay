@@ -278,6 +278,66 @@ for (const message of [
     `a channel verb leaves the account, so it is offered: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
   );
 }
+// The object is not the signal; the verb is. The first version of this table gated
+// the door on IRREVERSIBLE's object arms, and only `send` accepted "our …", so
+// "email our customers the new price list" went at 0.15 while the same request with
+// `send` offered. These rows are the ones that went silently (#403's residual).
+for (const message of [
+  "email our customers the new price list",
+  "mail our customers the new price list",
+  "tweet our sale to our followers",
+  "post our price increase on facebook",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.performsDoor === true && a.stakes === "product" && askFirst(askOrGo(a), "go", a) === "offer",
+    `the leading channel verb is the door, whatever its object: "${message}" (door=${a.performsDoor}, ${a.stakes}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+// Two guards that must survive the widening.
+for (const message of ["share my screen", "share my screen with the team"]) {
+  const a = assessRequest(message);
+  check(
+    a.performsDoor !== true && a.irreversible === false && askFirst(askOrGo(a), null, a) === "go",
+    `sharing your screen leaves nothing: "${message}" (irr=${a.irreversible}, door=${a.performsDoor}, ${askFirst(askOrGo(a), null, a)})`,
+  );
+}
+// "send me …" leaves nothing either: the recipient is the person asking.
+for (const message of ["send me the notes", "email me the summary"]) {
+  const a = assessRequest(message);
+  check(
+    a.performsDoor !== true && askFirst(askOrGo(a), null, a) === "go",
+    `sending to yourself is not a channel door: "${message}" (irr=${a.irreversible}, door=${a.performsDoor}, ${askFirst(askOrGo(a), null, a)})`,
+  );
+}
+// Paying attention is not paying. The recipient arm reads a direct object now, so
+// "pay" + attention/closer/more never reaches the critical tier and never becomes a
+// door — otherwise the widened #404 arm charged a tap for ordinary instructions that
+// a remembered "just go" could not suppress.
+for (const message of [
+  "pay attention to the team's feedback",
+  "pay closer attention to our vendors' emails",
+  "pay attention to our staff survey",
+  "pay more attention to our suppliers",
+  "pay heed to the team's advice",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.stakes !== "critical" && a.performsDoor !== true &&
+      askFirst(askOrGo(a), "go", a) === "go" && askFirst(askOrGo(a), null, a) === "go",
+    `paying attention is not paying: "${message}" (${a.stakes}, irr=${a.irreversible}, door=${a.performsDoor}, go=${askFirst(askOrGo(a), "go", a)}, fresh=${askFirst(askOrGo(a), null, a)})`,
+  );
+}
+// The same arm must still catch a real payment whose recipient is the direct object.
+for (const message of [
+  "pay our contractor $2,000",
+  "pay the invoice",
+  "pay suppliers",
+  "pay for the invoice",
+  "owe the landlord last month's rent",
+]) {
+  check(tier(message) === "critical", `a payment's direct object is critical: "${message}" (got ${tier(message)})`);
+}
 
 // ── The money arms cannot drift apart ────────────────────────────────────────
 // One table carries both numbers the two arms read: the amount the sentence names

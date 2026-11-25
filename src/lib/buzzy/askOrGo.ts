@@ -147,12 +147,18 @@ const MONEY_AMOUNT =
   /\b(?:pay|paid|paying|wire|wiring|transfer|transferring|send|sending|sent)\b[^.!?\n]{0,40}(?:\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:dollars?|usd|eur|gbp)\b)/i;
 
 /**
- * The person or the bill on the other side of a payment: "pay our contractor",
- * "pay the invoice", "pay suppliers". No amount needed, because the recipient is
- * the signal — this is the half #404 was missing (a contractor read as play, 0.32).
+ * The person or the bill on the other side of a payment, read as a *direct object*:
+ * "pay our contractor", "pay the invoice", "pay suppliers", "owe the landlord".
+ *
+ * No amount needed, because the recipient is the signal — this is the half #404 was
+ * missing (a contractor read as play, 0.32). It must be the direct object and not a
+ * noun somewhere within N characters: "pay attention to the team's feedback" and
+ * "pay closer attention to our vendors" are instructions, not payments, and the
+ * 25-character window that first shipped here turned both into critical doors a
+ * remembered "just go" could not suppress.
  */
 const MONEY_RECIPIENT =
-  /\b(?:pay|paid|paying|owe|owing)\b[^.!?\n]{0,25}\b(?:staff|employees?|team|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?)\b/i;
+  /\b(?:pay|paid|paying|owe|owing)\b\s+(?:(?:off|back|up|for)\s+)?(?:(?:the|a|an|my|our|your|their|his|her|its|all|this|that|these|those)\s+)?(?:staff|employees?|team|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?|fines?|fees?|rent|deposits?|tuition|salar(?:y|ies)|wages?)\b/i;
 
 /** A mistake would be devastating: money, health, legal, security, people's data, production. */
 const CRITICAL: Array<[string, RegExp]> = [
@@ -171,12 +177,22 @@ const CRITICAL: Array<[string, RegExp]> = [
 /** For other people: a business, customers, the public. */
 const PRODUCT = /\b(customers?|clients?|users|audience|public(ly)?|publish(ing|ed)?|launch(ing|ed)?|sell(ing)?|sales|marketing|brand(ing)?|business(es)?|company|startup|store|shop|bakery|restaurant|caf[eé]|salon|studio|gym|agency|firm|nonprofit|charity|organi[sz]ation|club|our school|my school|investors?|pitch|my team|our team|employees|staff|students|my class|everyone|everywhere|the world|thousands|millions|subscribers|followers|invoices?|quotes?|estimates?|proposals?|resumes?|cvs?|cover letters?|job applications?|app store|play store)\b/i;
 
+/** A public platform. Posting there is for other people even when the words name no
+ *  audience, so "post our price increase on facebook" is product stakes, not play —
+ *  at play a remembered "just go" would skip the door the post itself opens. */
+const SOCIAL = /\b(?:facebook|instagram|tiktok|youtube|linkedin|twitter|threads|reddit|pinterest|substack|patreon|mastodon|bluesky)\b|\b(?:on|to) x\b/i;
+
 /** Personal, for fun. Only explains a call: "play" is also the default. */
 const PLAY = /\b(for fun|just for fun|my kids?|my children|my son|my daughter|my family|bedtime|birthday|hobby|for myself|game night|my friends|weekend|date night|practice|homework|my pet)\b/i;
 
-/** Feeds a step that cannot be taken back. */
+/** Feeds a step that cannot be taken back.
+ *
+ *  `pay` is deliberately not a bare arm any more: the guarded leading `pay` in
+ *  DOOR_VERB and the two money regexes below carry real payments, while "pay
+ *  attention", "pay heed" and "pay tribute" are not payments at all. A bare `pay`
+ *  made every one of them irreversible. */
 const IRREVERSIBLE = new RegExp(
-  "\\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that|the|a|an)|publish|tweet (it|this)|upload|share (?!my screen)|pay|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\\b|" +
+  "\\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that|the|a|an)|publish|tweet (it|this)|upload|share(?!\\s+my\\s+screen)|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\\b|" +
     MONEY_AMOUNT.source,
   "i",
 );
@@ -206,6 +222,10 @@ const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|
  * bug. What stays a go is announce *mentioned* after a maker verb, which the
  * leading-verb rule already handles.
  *
+ * Two guards live in the verb list, not in the object arms:
+ *   "share my screen"      sharing a screen leaves nothing — not a door;
+ *   "pay attention/heed…"  paying attention is not paying — not a door.
+ *
  * The leading verb of a request that *performs* a one-way door: the act itself
  * leaves the account, so a misreading cannot be read and corrected afterwards.
  *
@@ -217,7 +237,7 @@ const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|
  * leaves the account, and pulling them in would add a tap to ordinary requests.
  */
 const DOOR_VERB =
-  /^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\s]+)*(send|email|e-?mail|mail|announce|publish|post|tweet|upload|share|mass e-?mail|email blast|pay|wire|transfer|delete|remove|wipe|drop|deploy|launch|cancel|refund|terminate|fire|evict|submit|migrate|overwrite)\b/i;
+  /^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\s]+)*(send(?!\s+(?:me|myself)\b)|email(?!\s+(?:me|myself)\b)|e-?mail(?!\s+(?:me|myself)\b)|mail(?!\s+(?:me|myself)\b)|announce|publish|post|tweet|upload|share(?!\s+my\s+screen)|mass e-?mail|email blast|pay(?!\s+(?:attention|heed|mind|regard|respects?|tribute|homage|closer|close|more|less|dearly|lip\s+service))|wire|transfer|delete|remove|wipe|drop|deploy|launch|cancel|refund|terminate|fire|evict|submit|migrate|overwrite)\b/i;
 
 /** Words that leave the result open. */
 const VAGUE = /\b(something|anything|some kind of|some sort of|stuff|whatever|ideas?|not sure|maybe|i don'?t know|dunno|cool|nice|fun|better|awesome|amazing|help me( with)?|figure out|kind of|sort of)\b/gi;
@@ -316,9 +336,9 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
   if (critical) {
     stakes = "critical";
     why.push(`critical (${critical[0]}): ${m.match(critical[1])?.[0]}`);
-  } else if (PRODUCT.test(m)) {
+  } else if (PRODUCT.test(m) || SOCIAL.test(m)) {
     stakes = "product";
-    why.push("for other people: " + m.match(PRODUCT)?.[0]);
+    why.push("for other people: " + (m.match(PRODUCT)?.[0] ?? m.match(SOCIAL)?.[0]));
   } else {
     why.push(PLAY.test(m) ? "personal: " + m.match(PLAY)?.[0] : "personal (no sign it is for others)");
   }
@@ -328,15 +348,21 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
     why.push(`at least ${ctx.minStakes} (the caller's reading)`);
   }
 
-  const irreversible = IRREVERSIBLE.test(m) && !QUESTION.test(m);
-  if (irreversible) why.push("cannot be taken back: " + m.match(IRREVERSIBLE)?.[0]);
+  // The leading channel verb is itself the door, whatever object follows: "email our
+  // customers the new price list" leaves the account even though "our …" is not one of
+  // IRREVERSIBLE's object arms. That miss was #403's residual — `send` accepted "our",
+  // `email`/`post`/`tweet` did not, so the same request offered with one verb and went
+  // silently with another. The object is not the signal; the verb is.
+  const question = QUESTION.test(m);
+  const doorVerb = question ? null : (m.match(DOOR_VERB)?.[1] ?? null);
+  const irreversible = !question && (IRREVERSIBLE.test(m) || doorVerb !== null);
+  if (irreversible) why.push("cannot be taken back: " + (doorVerb ?? m.match(IRREVERSIBLE)?.[0]));
   // A door described inside work that makes something ("write a tweet announcing
   // our sale", "draft the email") is not performed here: the deliverable is a draft
   // the person reads, and the maker lanes already stop short of sending. Likewise a
   // change to a draft on file.
-  const performsDoor =
-    irreversible && !ctx.makerLane && !ctx.hasDraft && !QUESTION.test(m) && DOOR_VERB.test(m);
-  if (performsDoor) why.push("the door itself: " + m.match(DOOR_VERB)?.[1]);
+  const performsDoor = irreversible && !ctx.makerLane && !ctx.hasDraft && doorVerb !== null;
+  if (performsDoor) why.push("the door itself: " + doorVerb);
   const hurried = HURRIED.test(m);
   if (hurried) why.push("in a hurry: " + m.match(HURRIED)?.[0]);
 
