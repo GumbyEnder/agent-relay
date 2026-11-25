@@ -100,8 +100,10 @@ npm run test:ci` takes about 15 minutes after a build; zsh doesn't word-split `$
 `test:ci` is one long line that almost every open PR edits, so add tests through an npm
 lifecycle hook on a script already in the chain (`"posttest:<script>": "…"`). Never reuse a hook
 another open PR uses — two PRs adding the same key merge into JSON with a duplicate key and one
-test silently disappears. Taken as of 2026-11-23: `pretest:ci` (#357), `posttest:ci` (#358,
-#366), `posttest:buzzy-art` (#362), `posttest:wallet` (#363), `posttest:buzzy-jobs` (#372).
+test silently disappears. Taken as of 2026-11-24: `pretest:ci` and `posttest:ci` are on `main`
+(#357, #358; #395 took #366's place on `posttest:ci`), `posttest:wallet` is claimed by stamped
+#397 as well as #363, and `posttest:buzzy-art` (#362) and `posttest:buzzy-jobs` (#372) are still
+open. A key on `main` or in an open PR is taken.
 
 ## 9. Pushing to the fork
 
