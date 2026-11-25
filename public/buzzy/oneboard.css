@@ -302,6 +302,14 @@ a.ob-item { text-decoration: none; }
   .ob-board { height: auto; min-height: 80vh; }
   .ob-board .wb-panel { min-height: 80vh; }
   .bz-tabrow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; }
+  /* The settings gear (nav.js #bzDock) is fixed in the bottom-right corner: 44px wide,
+     16px in. A tall header (the paper block open, a draft waiting) can put the last
+     line of the places row into that corner, and the gear then covers a label — Memory
+     at 360, the end of Orchestrate at 390, the end of Download at 430 (signed-in QA,
+     24 Nov 2026). Reserve the gear's column on the row itself so no label can ever sit
+     under it, at any header height or scroll position. 50px clears the 44px gear with a
+     gap, and the divider line still spans the row (padding sits inside the border box). */
+  .bz-tabrow { padding-right: 50px; }
   /* The six tabs and the seven links are one menu, so they wrap as one flow:
      two flex containers gave two independent wrap groups of 2 + 3 rows (5 rows
      of places on a 360px phone). display:contents joins them into one row that
