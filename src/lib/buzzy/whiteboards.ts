@@ -438,8 +438,10 @@ export function whoOf(userId: string): string {
  * session and reads the body; `rest` is the path after /api/buzzy/whiteboards/).
  *
  *   GET  <id>                          the board, or null when the account has none
- *   PUT  <id>                          { state, baseRev } → { rev } (409 + the account's
- *                                      copy when another computer saved since baseRev)
+ *   PUT  <id>                          { state, baseRev, owner? } → { rev } (409 + the
+ *                                      account's copy when another computer saved since
+ *                                      baseRev; 403 other_account when `owner` names
+ *                                      another account)
  *   GET  <id>/versions                 the history, newest first
  *   POST <id>/versions/<vid>/restore   go back to that entry → { board }
  *
@@ -474,6 +476,12 @@ async function answer(
     if (method !== "PUT") return reply(405, { ok: false, error: "Use GET or PUT.", code: "method_not_allowed" });
     if (!(await ownsBoard(sql, userId, boardId))) return notYours();
     const b = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+    // A save can name the account it is for (`owner`, a whoOf code): a copy kept on a
+    // shared computer is then never saved into, or judged for, whoever is signed in now.
+    // Checked first, so no other answer (too big, say) is taken as being about that copy.
+    if (typeof b.owner === "string" && b.owner && b.owner !== whoOf(userId)) {
+      return reply(403, { ok: false, error: "This copy belongs to another account.", code: "other_account" });
+    }
     const checked = cleanWhiteboard(b.state);
     if (!checked.ok) return reply(checked.status, { ok: false, error: checked.error, code: checked.code });
     const baseRev = b.baseRev === undefined || b.baseRev === null ? null : Number(b.baseRev);
