@@ -783,6 +783,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     makerLane,
   });
   const verdict = askOrGo(assessment);
+  // A browser job that presses a door does not step aside like a build: what it would
+  // press (post, send, publish, submit; or critical and can't-undo) is the question the
+  // ladder asks. Laying a flow out runs nothing; the browser presses for real (oneMode.ts).
+  const browserDoor = browserGo && (assessment.performsDoor === true ||
+    (assessment.stakes === "critical" && assessment.irreversible === true));
   // What they answered to "questions first, or just go?" before, per stakes tier:
   // asked once, then their answer stands (oneMode.ts).
   let remembered: Awaited<ReturnType<typeof loadAskPreferences>> = {};
@@ -798,6 +803,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     agentWork,
     knownBudget,
     buildsOnBoard: orchestrating || browserGo,
+    browserGo,
     canFollowUp: Boolean(conversationKey),
   });
   if (decided.remember) {
@@ -805,7 +811,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
   const oneModeWhy =
     (orchestrating ? "building on the Idea Board, nothing asked · " : "") +
-    (browserGo ? "a job for its own browser, nothing asked · " : "") +
+    (browserGo ? (browserDoor
+      ? "a job for its own browser, but it presses a door · "
+      : "a job for its own browser, nothing asked · ") : "") +
     verdict.why +
     (remembered[assessment.stakes] ? ` · remembered for ${assessment.stakes} work: ${remembered[assessment.stakes]}` : "") +
     (decided.step.kind === "budget" || (decided.step.kind === "go" && decided.step.agentWork)
@@ -861,8 +869,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       carry = ticket.carry === true;
     }
   }
-  // A turn built on the board (or a browser job) leaves a waiting question exactly as it was stored.
-  if (!orchestrating && !browserGo) {
+  // A turn built on the board (or a browser job that goes) leaves a waiting question exactly
+  // as it was stored. A browser job stopped at a door is not a go: its offer is the turn's state.
+  if (!orchestrating && !(browserGo && !browserDoor)) {
     if (oneState) await memory.remember(STATE_KEY, encodeState(oneState));
     else if (savedStep) await memory.remember(STATE_KEY, "");
   }
