@@ -203,6 +203,7 @@ OPTIONS.forEach((o, i) => {
       const at = typeof s === "string" ? s.indexOf("|") : -1;
       const alsoBody = at > 0 ? text(s.slice(0, at)) : null;
       if (at < 1) fail(id, `also "${s}" must be "<file>|<words in it>"`);
+      else if (!s.slice(at + 1).trim()) fail(id, `also "${s}" names no words to find (an empty source proves nothing)`);
       else if (alsoBody === null) fail(id, `also names ${s.slice(0, at)}, which does not exist`);
       else if (!withoutComments(alsoBody).includes(s.slice(at + 1))) fail(id, `${s.slice(0, at)} no longer has "${s.slice(at + 1)}" in its code: what this option does may have been removed or changed. Fix this line.`);
       else alsoFound++;
