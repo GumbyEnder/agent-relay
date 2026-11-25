@@ -431,6 +431,46 @@
       "html.bz-has-head .bz-brandrow .bz-brand img{width:44px;height:44px;border-radius:10px;object-fit:contain}",
       "html.bz-has-head .bz-brandrow .bz-brand strong{font-size:1.1rem;font-weight:800;letter-spacing:.01em}",
       "html.bz-has-head #bzMicLive{display:none!important}",
+      // ── A light page's chrome ────────────────────────────────────────────────
+      // Talk is dark, and the header is Talk's on every page, so the chrome used to
+      // stay a dark island wherever it landed. Orchestrate's editor is cream paper:
+      // the near-white wordmark vanished into it and the page read as two products
+      // (signed-in QA, 24 Nov 2026). A page that is light declares itself with
+      // <html class="bz-light-page">; the shell carries that across soft navigations
+      // (paintPageTheme) and these rules paint the chrome in the page's own
+      // ink-and-paper palette. Dark pages are untouched: no class, no rules.
+      "html.bz-light-page{color-scheme:light}",
+      "html.bz-light-page header:has(#bzChrome){background:transparent!important;border-bottom-color:transparent!important}",
+      "html.bz-light-page .bz-brandrow .bz-brand,html.bz-light-page .bz-brandrow .bz-brand strong{color:#1d1b16}",
+      "html.bz-light-page .bz-brandrow #bzNav a{color:#5b564b}",
+      "html.bz-light-page .bz-brandrow #bzNav a:hover,html.bz-light-page .bz-brandrow #bzNav a.active{color:#b07a12}",
+      "html.bz-light-page .bz-brandrow #bzNav .account-link{color:#1d1b16;border-color:#d9d3c6}",
+      "html.bz-light-page .bz-brandrow .bz-more-btn{color:#5b564b}",
+      "html.bz-light-page #bzChrome .bz-co-label{color:#6b6558}",
+      "html.bz-light-page #bzChrome select.bz-co-select{background-color:#fff;color:#1d1b16;border-color:#d9d3c6}",
+      "html.bz-light-page .bz-head{background:#f4f1ea;border-bottom-color:#e2dbcb;color:#1d1b16}",
+      "html.bz-light-page .bz-head .talk-bar{background:#fff;border-color:#d9d3c6;box-shadow:0 2px 10px rgba(29,27,22,.06)}",
+      "html.bz-light-page .bz-head .talk-bar:focus-within{border-color:#b07a12}",
+      "html.bz-light-page .bz-head .talk-field{background:#f7f4ee;border-color:#e2dbcb}",
+      "html.bz-light-page .bz-head .talk-field #chatInput{color:#1d1b16}",
+      "html.bz-light-page .bz-head .talk-field #chatInput::placeholder{color:#6b6558}",
+      "html.bz-light-page .bz-head .bz-search{background:#fff;border-color:#d9d3c6}",
+      "html.bz-light-page .bz-head .bz-search:focus-within{border-color:#b07a12;box-shadow:0 0 0 1px #b07a12}",
+      "html.bz-light-page .bz-head .bz-search input{color:#1d1b16}",
+      "html.bz-light-page .bz-head .bz-search input::placeholder{color:#6b6558}",
+      "html.bz-light-page .bz-head .bz-search-ico{stroke:#6b6558}",
+      "html.bz-light-page .bz-head .bz-search-tools{border-left-color:#e2dbcb}",
+      "html.bz-light-page .bz-head .bz-icon-btn,html.bz-light-page .bz-head .bz-share-btn{color:#4a463d}",
+      "html.bz-light-page .bz-head .bz-icon-btn:hover,html.bz-light-page .bz-head .bz-share-btn:hover{color:#b07a12;background:#f7f4ee}",
+      "html.bz-light-page .bz-head .bz-search-note{color:#8a6a12}",
+      "html.bz-light-page .bz-head .bz-tabrow{border-bottom-color:#e2dbcb}",
+      "html.bz-light-page .bz-head .bz-tabs button{color:#6b6558}",
+      "html.bz-light-page .bz-head .bz-tabs button:hover{color:#1d1b16}",
+      "html.bz-light-page .bz-head .bz-tabs button.on,html.bz-light-page .bz-head .bz-tabs button.here{color:#b07a12}",
+      "html.bz-light-page .bz-head .bz-places>a{color:#6b6558}",
+      "html.bz-light-page .bz-head .bz-places>a:hover{color:#1d1b16}",
+      "html.bz-light-page .bz-head .bz-places>a.on{color:#b07a12}",
+      "html.bz-light-page .bz-head .bz-places>a.on::after,html.bz-light-page .bz-head .bz-tabs button.on::after,html.bz-light-page .bz-head .bz-tabs button.here::after{background:#b07a12}",
       // Tooltips you can read, beside the thing, never under the pointer (bzTips below).
       "#bzTip{position:fixed;left:0;top:0;z-index:2147483600;box-sizing:border-box;max-width:min(340px,calc(100vw - 24px));padding:9px 13px;border-radius:10px;border:1px solid #3a3a3a;background:#1b1b1b;color:#f4f4f4;font:500 15px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:none}",
       "#bzTip[hidden]{display:none}",
@@ -2159,10 +2199,28 @@
     return headCssReady;
   }
   var cache = Object.create(null); // key -> { el, title, styles }
+  // ── Which theme the visible page asks for ────────────────────────────────
+  // A page declares its theme once in its own markup: <html class="bz-light-page">
+  // (Orchestrate's cream paper editor). The <html> element belongs to the shell, not
+  // to the page that gets swapped in, so a soft navigation has to carry the decision
+  // across or the next page wears the last one's chrome. Recorded per key from the
+  // fetched document's root — never guessed from pixels, so there is no flash of the
+  // wrong theme while a stylesheet lands.
+  var THEMES = Object.create(null);
+  function pageThemeOf(doc) {
+    var root = doc && doc.documentElement;
+    return root && root.classList && root.classList.contains("bz-light-page") ? "light" : "dark";
+  }
+  function paintPageTheme(key) {
+    var theme = THEMES[key];
+    if (!theme) return; // a hard load: the page's own <html> already says it
+    document.documentElement.classList.toggle("bz-light-page", theme === "light");
+  }
   var busy = false;
   // popstate fires AFTER location has changed, so "which page am I stashing?" must
   // come from our own record, never from location.href.
   var currentKey = keyOf(location.href);
+  THEMES[currentKey] = document.documentElement.classList.contains("bz-light-page") ? "light" : "dark";
 
   // A hard load ships the page's own <style> tags with NO data-bz-style, so the
   // "only the active page's CSS is enabled" switch never saw them: after soft
@@ -2385,6 +2443,7 @@
 
   function finish(key, title, scrollY) {
     currentKey = key;
+    paintPageTheme(key);
     adoptStyles(null, key);
     setTitle(title);
     if (window.BeeZillaChrome) window.BeeZillaChrome.boot();
@@ -2503,6 +2562,7 @@
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
         var page = buildFromDoc(doc, key);
+        THEMES[key] = pageThemeOf(doc);
         var head = page.querySelector("#bzHead");
         if (head) {
           var have = document.getElementById("bzHead");
@@ -2603,6 +2663,7 @@
       })
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
+        THEMES[TALK] = pageThemeOf(doc);
         var talk = buildFromDoc(doc, TALK);
         var head = talk.querySelector("#bzHead");
         if (!head) throw new Error("no header in Talk");
