@@ -51,7 +51,10 @@ node .output/server/index.mjs
 ## 4. Sign in
 
 Fastest: `POST /api/auth/sign-in/magic-link` with an `origin` header; the dev mailer writes the
-link to `.data/outbound-mail.jsonl` in the server's folder. Open it with the host swapped for
+link to `.data/outbound-mail.jsonl` in the server's folder. **That file is written only while the
+dev inbox is on** — with SMTP configured it is skipped entirely, so a production sign-in link never
+lands on disk. Boot locally with `AGENT_RELAY_DEV_MAIL=1` (and no `SMTP_*`) to get it. Open it with
+the host swapped for
 yours and keep the `session_token` cookie. (Email sign-up also works: the verification link is
 printed in the server log as `[mail:dev] … Link: …`.) `scripts/probe-*.mjs` do this already
 (`BZ_MAIL_LOG=<server folder>/.data/outbound-mail.jsonl`).

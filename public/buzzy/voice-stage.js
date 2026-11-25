@@ -389,6 +389,12 @@
     if (board) return board.instructions();
     return window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.instructionsFor ? window.BeeZillaWhiteboard.instructionsFor(boardId()) : "";
   };
+  // The board's browser nodes (globes), with their details: BeeZilla runs one when the work
+  // reaches the step it is joined to (talk.html sends them with the message).
+  window.bzBoardNodes = function () {
+    if (board && board.browserNodes) return board.browserNodes();
+    return window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.nodesFor ? window.BeeZillaWhiteboard.nodesFor(boardId()) : [];
+  };
   // Run a saved recipe: its steps ride the next message as board instructions.
   window.bzRunRecipe = function (recipe) {
     if (!recipe || !input) return;
