@@ -2530,6 +2530,42 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       return /^\/buzzy(\/talk)?$/.test(key.replace(/[?#].*$/, "").replace(/\/+$/, "") || "/buzzy");
     })();
 
+    // ── The address names the job the page is in ──────────────────────
+    // A ?job= link is the only way back to a job's sheet. The boot path used to
+    // read the param, put the job in chatState, then replaceState to a bare
+    // /buzzy/talk: the sheet stayed on screen beside an address that no longer
+    // named it, so the next refresh was a blank landing and the job was
+    // unreachable by link (CR-14b residual, found live on #415). One writer keeps
+    // the two honest — job in state → ?job= in the address, no job → no ?job=,
+    // the same way submitPaper already did it. Only New conversation and
+    // back-to-recent clear the job, so only they clear it here.
+    // bzOwnPage guards it: a header-donor run (nav.js fetching this page for its
+    // chrome) must never rewrite the address of the page the reader is on.
+    function bzJobUrl() {
+      if (!bzOwnPage) return;
+      var want = chatState.jobId ? String(chatState.jobId) : null;
+      var have;
+      try { have = new URLSearchParams(window.location.search).get("job"); } catch (_) { return; }
+      if (have === want) return;
+      try {
+        var u = new URL(window.location.href);
+        if (want) u.searchParams.set("job", want); else u.searchParams.delete("job");
+        window.history.replaceState({}, "", u.pathname + (u.search || "") + (u.hash || ""));
+      } catch (_) {}
+    }
+
+    // Drop one consumed parameter and keep the rest: ?expert= must not take a
+    // ?job= with it (they arrive together from the experts pages).
+    function bzDropParam(name) {
+      if (!bzOwnPage) return;
+      try {
+        var u = new URL(window.location.href);
+        if (!u.searchParams.has(name)) return;
+        u.searchParams.delete(name);
+        window.history.replaceState({}, "", u.pathname + (u.search || "") + (u.hash || ""));
+      } catch (_) {}
+    }
+
     // The board follows bz_session_id (voice-stage.js): a fresh visit has none, so it
     // opens on the empty board in front of a new conversation. Only a real visit — a
     // header-donor run must not clear the id of the conversation the reader is in.
@@ -2539,7 +2575,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     var expertFromUrl = bzOwnPage ? new URLSearchParams(window.location.search).get("expert") : null;
     if (expertFromUrl) {
       chatState.expert = expertFromUrl;
-      window.history.replaceState({}, "", "/buzzy/talk");
+      bzDropParam("expert");
     }
 
     // ── Job context from the Jobs card "Chat" button ───────────────────
@@ -2554,7 +2590,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           chatState.jobContext = jobCtx;
         }
       } catch (_) {}
-      window.history.replaceState({}, "", "/buzzy/talk");
+      // Keep the param. It stays until New conversation or back-to-recent clears
+      // the job: dropping it here left the sheet on screen under an address that
+      // no longer named its job, so a refresh was a blank landing (CR-14b).
+      bzJobUrl();
     }
 
     // ── Form tab ───────────────────────────────────────────────────────
@@ -3440,11 +3479,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // The conversation now belongs to that job, so put it in the address. The page
         // shows a paper only for the job it is in, and a reload starts with no job —
         // without this, a dropped letter's panel vanished on refresh (CR-14).
-        if (res.d.paper.jobId) {
-          try {
-            history.replaceState(null, "", "/buzzy/talk?job=" + encodeURIComponent(res.d.paper.jobId));
-          } catch (_) {}
-        }
+        bzJobUrl();
         chatState.boundCompanyId = co;
         paperLoad++;
         renderPaper(res.d.paper);
@@ -5831,7 +5866,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           chatState.paper = null;
           resetDraftGate();
           setBackVisible(true);
-          try { history.replaceState(null, "", "/buzzy/talk"); } catch (_) {}
+          // The row is a link to this job now: a refresh reopens it instead of
+          // landing blank with the conversation gone (CR-14b). submitPaper and
+          // the boot path write the same param the same way.
+          bzJobUrl();
           updateChrome();
           restoreTranscript();
           showRecentWork();
@@ -6750,7 +6788,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       paperLoad++;
       renderPaper(null);
       resetDraftGate();
-      try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      try { bzJobUrl(); } catch (_) {}
       updateChrome();
       showRecentWork();
     }
@@ -6769,7 +6807,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.jobContext = null;
       // A new conversation has no job, so it must not carry the old job in the
       // address: a reload would walk straight back into it (CR-14).
-      try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      try { bzJobUrl(); } catch (_) {}
       // ...and no sheet. New conversation used to leave the last job's paper panel
       // on screen with no job behind it — the original "stale paper on a blank
       // landing" report, from the other end.
@@ -7444,7 +7482,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           setChatMascot("12-content");
           openDraftReview(data.reply || "");
           setDraftWarning(data.warning);
-          if (data.jobId) chatState.jobId = data.jobId;
+          if (data.jobId) { chatState.jobId = data.jobId; bzJobUrl(); }
           if (data.previousDraft) {
             chatState.previousDraft = data.previousDraft;
             var rpBtn = document.getElementById("restorePrevious");
@@ -8035,12 +8073,28 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return { role: m.role, content: m.content };
         });
         chatState.sessionId = s.id;
+        // A conversation that was started in a job is a page in that job. Without
+        // this, opening it from recent work restored the chat but dropped the job
+        // — no sheet, and (after CR-14c) no ?job= in the address either, so the
+        // row behaved like a dead end. Same defect as the boot path, other door.
+        if (s.jobId) {
+          if (chatState.jobId !== s.jobId) chatState.jobContext = null;
+          chatState.jobId = s.jobId;
+        } else {
+          chatState.jobId = null;
+          chatState.jobContext = null;
+        }
+        bzJobUrl();
         // The board follows the conversation in front of you (voice-stage.js reads
         // bz_session_id): without this the chat showed the conversation while the
         // Idea Board stayed on the blank board of a new one, and the conversation's
         // own cards (still in the account) read as 0.
         try { localStorage.setItem("bz_session_id", s.id); } catch (_) {}
         chatState.boundCompanyId = s.companyId || chatState.boundCompanyId;
+        // The address names the job, so the page shows that job's sheet — the same
+        // thing a ?job= load and a paste do. Without it, opening the row named a
+        // job in the address with no sheet under it.
+        if (chatState.jobId) loadCompanyPaper(chatState.boundCompanyId || activeCompanyId());
         chatState.messages = msgs;
         // BZ-F004: restore structured Decisions from the server instead of
         // blanking the box until the next turn.
@@ -8141,7 +8195,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // into the conversation the owner just left (CR-14).
         paperLoad++;
         renderPaper(null);
-        try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+        try { bzJobUrl(); } catch (_) {}
         document.getElementById("chatError").classList.add("hidden");
         closeSessionsDrawer();
         showChatScreen();
@@ -8232,6 +8286,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.sessionId = null;
         chatState.jobId = null;
         chatState.jobContext = null;
+        // A different company cannot keep the old company's job in the address.
+        bzJobUrl();
         chatState.slots = {};
         chatState.messages = [{
           role: "assistant",
