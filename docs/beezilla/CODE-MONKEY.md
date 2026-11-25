@@ -107,9 +107,12 @@ A Talk turn that asks for software to be made or changed (`isCodeRequest` in
 `src/lib/buzzy/codeMonkey.ts`) is offered one extra tool, `start_code_project`
 (`gate: "code"` in `toolRegistry.ts`; withheld in Lockdown because the agents that build
 it talk to model providers). A turn that builds a flow on the Idea Board is never Code
-Monkey's, even when it names a website or a tracker ("build me a workflow that checks my
-website every morning"): the board builds it card by card (`asksToOrchestrate` in
-`pilot.ts`, `isCodeTurn` here). The model fills a **result card** and **slices**; code then:
+Monkey's, even when it names a website, a tracker or an app ("build me a workflow that
+checks my website every morning"): the board decides first, with its own rules, and
+builds it card by card (the final plan's `orchestrate` step from `planAppActions` in
+`pilot.ts`; `isCodeTurn` here). So the two never both act on one turn. Opening the
+Orchestrate editor builds nothing and doesn't count. The model fills a **result card**
+and **slices**; code then:
 
 - **Settles the stakes** — `play` (you and people close to you), `product` (other people
   use it), `critical` (money, health, sign-in, other people's data, harm if wrong). The
@@ -237,3 +240,20 @@ Both new scripts run in CI through the `posttest:buzzy-jobs` hook.
   projects can join once BeeZilla has a way to share a project openly (and its license).
 - The budget answers are tap buttons once one mode (PR #371) lands; until then the model
   asks in words and the owner types an amount.
+- Telling a flow from software is done with words, and the board decides first. An ask
+  worded as a flow builds a flow even when it names software ("build me a workflow
+  management web app"); asking for the software itself ("build me a web app for
+  managing workflows") reaches Code Monkey. Three rounds of sharper word rules in review
+  (2026-11-25) each moved other asks to the wrong side, so the board's own rules stay as
+  they are; a better split needs the model to judge it, not more patterns.
+- A turn BeeZilla answers out loud through the audio model (voice streaming, or Speak
+  Replies on a typed turn) gets no tools, so a coding ask or a budget answer on that turn
+  doesn't reach the workshop yet; turns answered through the text model do (a spoken Work
+  turn with an open draft gate is one). Found in review on 2026-11-25; it was so from the
+  start.
+- Code Monkey's guide reaches the model as a note after the person's message (server.ts
+  `afterNotes`, the place production models obey, measured 2026-11-17). A model that
+  refuses a system message there (local Qwen: "system message must be at the beginning";
+  some people's own AI keys) fails the whole turn, as with BeeZilla's other notes there.
+  Folding those notes into the person's message for such models (as ORCHESTRATE_USER_LINE
+  does) would fix all of them at once.

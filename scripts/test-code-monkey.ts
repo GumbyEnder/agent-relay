@@ -29,13 +29,15 @@ import {
   reviewIsIndependent,
   codeRequestThread,
   isCodeTurn,
+  isCodeRequest,
   lookFirstNote,
   codeMonkeyGuide,
   codeProjectNeedsBudgetMessage,
   argsToProject,
   START_CODE_PROJECT_TOOL,
 } from "../src/lib/buzzy/codeMonkey";
-import { asksToOrchestrate } from "../src/lib/buzzy/pilot";
+import { readFileSync } from "node:fs";
+import { planAppActions } from "../src/lib/buzzy/pilot";
 import {
   BUDGET_QUESTION,
   amountsIn,
@@ -278,24 +280,73 @@ check("no software asked for: no thread", codeRequestThread(["write a poem", "$5
 console.log("Talk: a flow built on the Idea Board is the board's, not Code Monkey's:");
 // Owner, 2026-11-24: "you should just be able to talk to Beezilla … to make an
 // orchestration." These name a website, a tracker or a dashboard, so isCodeRequest
-// matches them, but main's own detector (pilot.ts) says the board builds them.
-const turnOf = (message: string, budgetAsked = false, earlier: string[] = []) =>
+// matches them, but the board builds them. As in server.ts, "the board builds this turn"
+// is the final plan's own build step (pilot.ts planAppActions, the board's rules,
+// unchanged), with or without a flow already on the board.
+const boardBuilds = (message: string, boardHasFlow = false) =>
+  !!planAppActions(message, null, { boardHasFlow })?.some((s) => s.do === "board" && s.value === "orchestrate");
+const turnOf = (message: string, o: { budgetAsked?: boolean; earlier?: string[]; boardHasFlow?: boolean } = {}) =>
   isCodeTurn(message, {
-    budgetAsked,
-    codeThread: codeRequestThread([...earlier, message]),
-    buildsOnBoard: asksToOrchestrate(message),
+    budgetAsked: !!o.budgetAsked,
+    codeThread: codeRequestThread([...(o.earlier ?? []), message]),
+    buildsOnBoard: boardBuilds(message, !!o.boardHasFlow),
   });
-for (const flow of [
+const flows = [
   "build me a workflow that checks my website every morning and tells me if it's down",
   "set up an automation that updates my tracker from new emails",
   "build me a pipeline that scrapes prices and puts them on a dashboard",
   "build me an agent team that writes the landing page copy",
-]) {
-  check(`a flow stays on the board: "${flow.slice(0, 48)}…"`, asksToOrchestrate(flow) && !turnOf(flow));
+  "build me an automation for my website",
+];
+for (const flow of flows) {
+  check(`a flow stays on the board: "${flow.slice(0, 48)}…"`, isCodeRequest(flow) && boardBuilds(flow) && !turnOf(flow));
 }
+const change = "add a check before the website update";
+check("a change to the flow on the board is the board's; with no flow there it is software", !turnOf(change, { boardHasFlow: true }) && turnOf(change));
 check("software still goes to Code Monkey", turnOf("build me an app that tracks my kids' chores") && turnOf("fix the bug in my website's contact form"));
-check("the budget answer still finishes a coding request", turnOf("$5", true, ["build me a tip calculator app"]));
-check("…but not a flow's (a flow never asks the budget question)", !isCodeTurn("$5", { budgetAsked: true, codeThread: null, buildsOnBoard: false }));
+check("asking for the software itself reaches Code Monkey ('a web app for managing workflows')", turnOf("build me a web app for managing workflows"));
+check("the budget answer still finishes a coding request", turnOf("$5", { budgetAsked: true, earlier: ["build me a tip calculator app"] }));
+// Found in review (OpenAI Codex, 2026-11-25): opening the Orchestrate editor builds
+// nothing, so it never hides a budget answer.
+const editorAnswer = "Open it in Orchestrate and add a note saying $50 is my budget";
+check(
+  "a budget answer that also opens the Orchestrate editor still reaches Code Monkey",
+  !!planAppActions(editorAnswer)?.some((s) => s.value === "openOrchestrate") &&
+    !boardBuilds(editorAnswer) &&
+    turnOf(editorAnswer, { budgetAsked: true, earlier: ["build me a tip calculator app"] }),
+);
+// The server uses this same signal (a source guard: the tests above use a helper, so
+// they would stay green if chatLoop went back to asksToOrchestrate; found in review).
+{
+  const server = readFileSync(new URL("../src/lib/buzzy/server.ts", import.meta.url), "utf8");
+  const builds = /const buildsOnBoard = !!appPlan && appPlan\.some\(\(s\) => s\.do === "board" && s\.value === "orchestrate"\);/.test(server);
+  const gate = /const codeRequest = isCodeTurn\(message, \{ budgetAsked, codeThread, buildsOnBoard \}\);/.test(server);
+  const once = (server.match(/const codeRequest\b/g) ?? []).length === 1;
+  const sameTest = /if \(buildsOnBoard\) \{\s*const own = messages\[messages\.length - 1\];/.test(server);
+  check("server.ts: Code Monkey steps aside on the plan's own build step, the one that asks for one sentence", builds && gate && once && sameTest);
+}
+// A flow turn never asks the budget question, so a later "$5" finishes nothing, even
+// though the flow's words left a coding thread behind.
+check(
+  "after a flow, a bare amount is not a coding turn",
+  codeRequestThread([flows[0]!, "$5"]) !== null && !turnOf("$5", { earlier: [flows[0]!] }),
+);
+// The two never both act on one turn, whatever the words (the reviewers' examples).
+for (const ask of [
+  ...flows,
+  "build me a workflow management web app",
+  "make me an automation dashboard",
+  "build an automation dashboard I can share with my team",
+  "build automation scripts for my invoices",
+  "make the automation dashboard step run in parallel",
+  "build an in-house workflow dashboard",
+  "write two scripts for my podcast",
+  "build me an app that tracks my kids' chores",
+]) {
+  for (const boardHasFlow of [false, true]) {
+    check(`never both${boardHasFlow ? " (flow on the board)" : ""}: "${ask.slice(0, 44)}"`, !(boardBuilds(ask, boardHasFlow) && turnOf(ask, { boardHasFlow })));
+  }
+}
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

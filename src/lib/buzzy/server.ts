@@ -813,9 +813,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // there (boardOrchestrator.ts), and a "Your board" card would land in the middle of it.
   const flowOnBoard = boardHasFlow(boardText);
   const orchestrating = asksToOrchestrate(message, { boardHasFlow: flowOnBoard });
-  // A flow built on the board is the board's work, not a coding project, even when the
-  // request names a website or a tracker: no workshop tool and no budget question.
-  const codeRequest = isCodeTurn(message, { budgetAsked, codeThread, buildsOnBoard: orchestrating });
   req.onFlow?.({
     kind: "agent",
     id: "agent",
@@ -1349,10 +1346,17 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // lane is not already speaking the wrong sentence before any text can repair it.
   const afterNotes: string[] = [];
   // Building on the board this turn (pilot.ts ORCHESTRATE_USER_LINE says why it goes here).
-  if (appPlan && appPlan.some((s) => s.do === "board" && s.value === "orchestrate")) {
+  const buildsOnBoard = !!appPlan && appPlan.some((s) => s.do === "board" && s.value === "orchestrate");
+  if (buildsOnBoard) {
     const own = messages[messages.length - 1];
     if (own && own.role === "user") own.content = String(own.content) + "\n\n" + ORCHESTRATE_USER_LINE;
   }
+  // A flow the board builds this turn is the board's work, not a coding project, even when
+  // the request names a website or an app: no workshop tool and no budget question
+  // (codeMonkey.ts isCodeTurn). The board decides first, with its own rules (boardPilot.ts),
+  // and this is the same test that adds ORCHESTRATE_USER_LINE above, so the two can't both
+  // act. Opening the Orchestrate editor builds nothing, so it doesn't count.
+  const codeRequest = isCodeTurn(message, { budgetAsked, codeThread, buildsOnBoard });
   if (renderedImage) {
     afterNotes.push(
       "A picture was already made for this request and is attached to this reply. " +
