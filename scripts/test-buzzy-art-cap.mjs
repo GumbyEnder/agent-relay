@@ -18,6 +18,8 @@
  *   CAP-4  a board over the limit (9 MB) is refused: 413 payload_too_large + bytes
  *   CAP-5  the refusal writes nothing: the stored board is still the 7 MB one
  *   CAP-6  an unauthenticated save is 401 before any size logic runs
+ *   REPAINT-1…8  the 3D painter's texture repaint is refused in Lockdown (from the account's saved
+ *          mode), and only there
  *
  * The mutant to run against this: delete the MAX_BOARD_BYTES block in
  * src/lib/buzzy/art.nitro.ts — CAP-4 goes red while CAP-1..3 stay green, which is
@@ -311,6 +313,51 @@ async function main() {
     srcRepoint && wrapPassive && !wrapTakesPress && orderedHit && selectUsesOrdered,
     `srcRepoint=${srcRepoint} wrapPassive=${wrapPassive} wrapAuto=${wrapTakesPress} orderedHit=${orderedHit} select=${selectUsesOrdered}`,
   );
+
+  // REPAINT: the 3D painter's repaint (public/buzzy/model-paint.js) sends a model's texture to the
+  // image provider, so Lockdown ("nothing leaves BeeZilla") must refuse it, from the ACCOUNT's saved
+  // mode (not from anything the page says). Local edits never reach this route. This build has no
+  // image provider, so a request that gets past the privacy gate stops at "not configured": that is
+  // what tells "refused for Lockdown" from "refused for nothing in particular".
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const repaint = async (ck) => {
+    const res = await fetch(`${BASE}/api/buzzy/art`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, ...(ck ? { cookie: ck } : {}) },
+      body: JSON.stringify({ action: "repaint3d", crop: PNG, mask: PNG, instruction: "add rust" }),
+    });
+    const text = await res.text();
+    let j = null;
+    try { j = JSON.parse(text); } catch { /* not json */ }
+    return { status: res.status, json: j, text };
+  };
+  const setMode = (mode) => fetch(`${BASE}/api/buzzy/privacy`, { method: "PUT", headers: { "content-type": "application/json", origin: BASE, cookie }, body: JSON.stringify({ mode }) });
+
+  const anon3d = await repaint("");
+  check("REPAINT-1  a repaint without a session is 401", anon3d.status === 401, `HTTP ${anon3d.status}`);
+
+  const openMode = await repaint(cookie);
+  check(
+    "REPAINT-2  with no privacy mode saved, the request gets past the gate (and stops at the missing provider)",
+    openMode.status === 503 && openMode.json?.code === "not_configured",
+    `HTTP ${openMode.status} ${openMode.text.slice(0, 140)}`,
+  );
+
+  check("REPAINT-3  Lockdown can be saved", (await setMode("lockdown")).ok);
+  const locked = await repaint(cookie);
+  check(
+    "REPAINT-4  in Lockdown the repaint is refused: 403, code lockdown, and the message says how to switch it off",
+    locked.status === 403 && locked.json?.code === "lockdown" && /Lockdown/.test(locked.json?.error || "") && /Talk bar/.test(locked.json?.error || ""),
+    `HTTP ${locked.status} ${locked.text.slice(0, 200)}`,
+  );
+
+  check("REPAINT-5  Advocate can be saved", (await setMode("advocate")).ok);
+  const advocate = await repaint(cookie);
+  check("REPAINT-6  Advocate is not Lockdown: the repaint is not refused for privacy", advocate.json?.code !== "lockdown" && advocate.status === 503, `HTTP ${advocate.status} ${advocate.text.slice(0, 140)}`);
+
+  check("REPAINT-7  Lockdown can be switched off again", (await setMode("open")).ok);
+  const reopened = await repaint(cookie);
+  check("REPAINT-8  …and the repaint is no longer refused for privacy", reopened.json?.code !== "lockdown" && reopened.status === 503, `HTTP ${reopened.status} ${reopened.text.slice(0, 140)}`);
 
   await stop();
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

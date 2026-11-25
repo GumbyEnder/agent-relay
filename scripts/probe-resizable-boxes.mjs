@@ -24,6 +24,8 @@
 //      pill again, with no strips and none of the size, and unfolded it has its size back.
 //  12. A phone: the Idea Board has no strip and keeps none of its height; back on a wide window
 //      it has it again.
+//  13. The 3D painter's window: Esc while dragging its corner takes the drag back and closes nothing;
+//      it has a usable minimum size.
 //
 // usage: node scripts/probe-resizable-boxes.mjs [origin]      (BZ_PROBE_CDP=<DevTools URL> to reuse a browser)
 //   Needs a session: BZ_PROBE_COOKIE="name=value", or leave it unset against a local server
@@ -407,6 +409,26 @@ check("on a phone the Idea Board has no strip and none of that height", phone.in
 await page.setViewportSize({ width: 1500, height: 1400 });
 await page.waitForTimeout(400);
 check("back on a wide window it has its height again", await page.evaluate((t) => document.getElementById("obBoard").style.height === t, tall));
+
+// 12. the 3D painter's window (model-paint.js): Esc, while dragging its corner, takes the drag back and does not
+// close it; it never gets smaller than the canvas, tools and button need. (A model that cannot be read still
+// opens the window, with its message: that is all this needs.)
+await page.evaluate(() => window.BeeZillaWhiteboard.current().addCard({ kind: "model", title: "Resize test model.glb", url: "/api/buzzy/assets/987654", contentType: "model/gltf-binary", user: true }));
+await page.waitForTimeout(500);
+await page.locator(".wb-card.wb-k-model .wb-paint3d").evaluate((b) => b.click());
+await page.waitForSelector(".mp-box > .bz-rs-se", { timeout: 15000 });
+const pw = () => page.evaluate(() => { const b = document.querySelector(".mp-box"); return { w: b.offsetWidth, h: b.offsetHeight }; });
+const p0 = await pw();
+await drag(".mp-box > .bz-rs-se", -160, -120, { esc: true });
+await page.waitForTimeout(150);
+const p1 = await pw();
+check("Esc, while dragging the 3D painter's corner, takes the drag back and does not close the window", p1.w === p0.w && p1.h === p0.h && !!(await page.$(".mp-dialog")), JSON.stringify([p0, p1]));
+await drag(".mp-box > .bz-rs-se", -2000, -2000);
+const p2 = await pw();
+check("…and pulled as small as it goes it is still big enough to use (480 × 480)", p2.w >= 480 && p2.h >= 480, JSON.stringify(p2));
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+check("Esc, with no drag, closes it", !(await page.$(".mp-dialog")));
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await context.close();

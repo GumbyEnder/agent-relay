@@ -523,6 +523,12 @@
     sizeBy: sizeBy,
     /** Make one box resizable now (the same attributes, as an object: edges, ax, ay, min, max, bound, key, name). */
     attach: function (el, cfg) { if (el && cfg) ensure(el, cfg); },
+    /** Forget a box that is going away (a dialog that closed): it is no longer tracked, so nothing here keeps it alive. */
+    detach: function (el) {
+      if (!el) return;
+      tracked = tracked.filter(function (x) { return x !== el; });
+      try { delete el._bzrs; } catch (_) { el._bzrs = null; }
+    },
     /** Put a box back at the size it opens at. */
     reset: reset,
     boxes: BOXES,

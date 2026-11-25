@@ -156,6 +156,17 @@ section("What the review found: a page's words can't close BeeZilla's quote");
   ok("hidden or reordering characters are taken out", cleanStep({ t: "click", say: "Click\u202eevil\u200b" })!.say === "Clickevil");
 }
 
+section("A note from the 3D painter keeps its brush");
+{
+  const painted = cleanWhiteboard({ v: 2, cards: [
+    { id: "n1", x: 0, y: 0, kind: "note", title: "Red area", body: "make it black", region: "red" },
+    { id: "n2", x: 0, y: 0, kind: "note", title: "Blue area", body: "remove it", region: "blue" },
+    { id: "n3", x: 0, y: 0, kind: "note", title: "Long", body: "", region: "x".repeat(50) },
+  ], links: [{ id: "l1", from: "n1", to: "n2" }] });
+  ok("the account keeps which brush a note came from, so it wears the colour after a reload", painted.ok && painted.state.cards[0]!.region === "red" && painted.state.cards[1]!.region === "blue");
+  ok("…as a short word, never more", painted.ok && String(painted.state.cards[2]!.region).length <= 8);
+}
+
 section("The account's copy of a board");
 {
   const card = (o: Record<string, unknown>) => ({ id: "c1", x: 0, y: 0, title: "t", body: "", ...o });

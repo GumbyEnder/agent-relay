@@ -2628,11 +2628,13 @@
       var keep = Array.prototype.filter.call(n.childNodes, function (x) { return x.classList && (x.classList.contains("wb-handle") || x.classList.contains("wb-rm")); });
       n.textContent = "";
       var k = kindOf(c);
-      n.className = "wb-card wb-k-" + k + " wb-r-" + roleOf(k) + (c.state ? " wb-s-" + c.state : "") + (selected[c.id] ? " wb-on" : "");
+      var reg = c.region === "red" || c.region === "blue" ? c.region : "";      // a note from a painted area (model-paint.js)
+      n.className = "wb-card wb-k-" + k + " wb-r-" + roleOf(k) + (c.state ? " wb-s-" + c.state : "") + (selected[c.id] ? " wb-on" : "") + (reg ? " wb-reg-" + reg : "");
       var top = el("div", "wb-ctop");
       top.appendChild(icon(NODE_KINDS[k] ? k : k === "track" ? "play" : k === "model" ? "cube" : k === "image" ? "image" : k === "video" ? "video" :
         k === "memory" ? "memory" : (k === "agent" || k === "skill" || k === "note" || k === "person") ? k : "doc", "wb-cico"));
       top.appendChild(el("span", "wb-ckind", KIND_LABEL[k] || "File"));
+      if (reg) { var dot = el("span", "wb-regdot"); dot.title = (reg === "red" ? "Red" : "Blue") + " brush"; dot.setAttribute("aria-hidden", "true"); top.appendChild(dot); }
       if (c.state === "running") top.appendChild(el("span", "wb-badge wb-badge-run", "Working"));
       else if (c.state === "failed") top.appendChild(el("span", "wb-badge wb-badge-fail", "Didn't work"));
       n.appendChild(top);
@@ -2668,7 +2670,9 @@
           dl.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
           m.appendChild(dl);
           // Paint the parts to change on the model itself; only those change (model-paint.js).
-          if (/^\/api\/buzzy\/assets\/\d+/.test(c.url) || /\.glb(?:$|\?)/i.test(c.url)) {
+          // Offered for a .glb or .gltf, which the card's own file details say (an asset number says
+          // nothing about the format: the Library also holds .obj and .usdz files the painter cannot open).
+          if (paintableModel(c)) {
             var pb = el("button", "wb-open wb-paint3d", "Paint changes");
             pb.type = "button";
             pb.title = "Open the model, paint the parts you want changed (red, blue) and say how — only those parts change";
@@ -2839,41 +2843,74 @@
     }
     // ── Paint changes on a 3D model (testers, 2026-11-24) ─────────────────────
     // The painter is loaded the first time it is needed. What it makes goes back on the
-    // board: the changed model beside the original (kept), a line from one to the other,
-    // a note per painted colour with what was asked, and a picture of the painted areas.
+    // board: the changed model beside the original (kept), a note per painted colour with what
+    // was asked (carrying that brush's colour), a picture of each painted area, and the lines
+    // between them: original → note → changed model, and picture → note.
+    // A model the painter can open and save: a .glb, or a .gltf (a .gltf that keeps its data in other
+    // files says so when it opens). Said by the card's own file details, never by its address.
+    function paintableModel(c) {
+      var type = String(c.contentType || "").toLowerCase();
+      var name = String(c.title || "").toLowerCase();
+      var url = String(c.url || "").split("?")[0].toLowerCase();
+      return /gltf/.test(type) || /\.(?:glb|gltf)$/.test(name) || /\.(?:glb|gltf)$/.test(url);
+    }
+    var painterOpen = false;
     function openPainter(c) {
+      if (painterOpen) return;
+      painterOpen = true;
+      var current = c;           // what the next change starts from: every change makes a new model card
+      var opener = document.activeElement;
       say("Opening the model…");
       import("/buzzy/model-paint.js").then(function (mod) {
         return mod.open({
           url: c.url,
           title: c.title || "3D model",
-          place: function (res) { placePainted(c, res); },
+          // Said before any work is done, so nothing is made that has nowhere to go.
+          canPlace: function (cards) {
+            var room = MAX_CARDS - state.cards.length;
+            return room >= cards ? "" : "The board needs room for " + cards + " more cards to put the changes on it and has " + Math.max(0, room) + ". Remove a few cards, then press the button again.";
+          },
+          place: function (res) {
+            var made = placePainted(current, res);
+            if (made) current = made;
+            return !!made;
+          },
+          onClose: function () {
+            painterOpen = false;
+            // Back to where the person was: the button they pressed, or the card it was on.
+            var back = opener && opener.isConnected ? opener : nodes[current.id] || nodes[c.id];
+            if (back && back.focus) { try { back.focus({ preventScroll: true }); } catch (_) { /* best effort */ } }
+          },
         });
-      }).catch(function (e) { say("The model could not be opened: " + (e && e.message ? e.message : e)); });
+      }).catch(function (e) { painterOpen = false; say("The model could not be opened: " + (e && e.message ? e.message : e)); });
     }
+    /** The changed model, its notes and pictures, and the lines between them; null (nothing added) when there is no room. */
     function placePainted(from, res) {
+      var alive = !!cardById(from.id);      // the original may have been taken off the board while the painter was open
       var src = cardById(from.id) || from;
+      var done = res.done || [];
+      var cards = 1 + done.length * 2;
+      if (MAX_CARDS - state.cards.length < cards) { say("The board is full — remove a few cards first."); return null; }
       snapshot();
-      var col = src.x + 300, row = src.y;
+      // A free band to the right of the original: a picture and its note per colour, the changed model after them.
+      var spot = freeSpot(src.x + 340, src.y, 860, Math.max(1, done.length) * 320);
       var made = addCard({ kind: "model", title: String(from.title || "3D model").replace(/\s*\(changed\)$/i, "") + " (changed)", url: res.saved.url, contentType: "model/gltf-binary" },
-        { x: col + 300, y: row, exact: true }, true);
-      var pic = null;
-      if (res.pictureUrl) {
-        pic = addCard({ kind: "image", title: "The areas you painted", url: res.pictureUrl, contentType: "image/png" }, { x: src.x, y: row + 260, exact: true }, true);
-        if (pic) link(src.id, pic.id, null, null, false, "painted");
-      }
-      (res.done || []).forEach(function (d, i) {
-        var note = addCard({ kind: "note", title: d.region.name + " area", body: d.words, user: true }, { x: col, y: row + i * 170, exact: true }, true);
+        { x: spot.x + 560, y: spot.y, exact: true }, true);
+      if (!made) return null;
+      done.forEach(function (d, i) {
+        var y = spot.y + i * 320;
+        var pic = d.pictureUrl ? addCard({ kind: "image", title: "The " + d.region.name.toLowerCase() + " area", url: d.pictureUrl, contentType: "image/png" }, { x: spot.x, y: y, exact: true }, true) : null;
+        var note = addCard({ kind: "note", title: d.region.name + " area", body: d.words, user: true, region: d.region.key }, { x: spot.x + 290, y: y, exact: true }, true);
         if (!note) return;
-        link(src.id, note.id);
-        if (made) link(note.id, made.id);
+        if (alive) link(src.id, note.id);
+        link(note.id, made.id);
+        if (pic) link(pic.id, note.id, null, null, false, "painted");
       });
-      if (made && !(res.done || []).length) link(src.id, made.id, null, null, false, "changed");
-      [made, pic].forEach(function (k) { if (k) { fillCard(nodes[k.id], k); } });
       drawLinks();
       persist();
-      if (made) reveal(made);
+      reveal(made);
       say("The changed model is on the board, next to the original.");
+      return made;
     }
 
     function addCard(card, at, noUndo) {
@@ -2894,6 +2931,7 @@
       if (card.flow) c.flow = String(card.flow);
       if (card.state) c.state = card.state;
       if (card.user) c.user = true;
+      if (card.region === "red" || card.region === "blue") c.region = card.region;     // the brush a note came from
       if (card.taskId) c.taskId = String(card.taskId);
       if (card.thumb) c.thumb = String(card.thumb);
       if (card.node && NODE_KINDS[c.kind]) c.node = String(card.node).slice(0, 60000);

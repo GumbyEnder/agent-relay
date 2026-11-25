@@ -5,6 +5,8 @@
  *   POST /api/buzzy/art            → { action: "save", jobId, board }
  *                                  → { action: "render", prompt, jobId, refs[] }
  *                                  → { action: "edit", jobId, imageId, mask, instruction }
+ *                                  → { action: "repaint3d", crop, mask, instruction }   (the 3D painter, public/buzzy/model-paint.js:
+ *                                    the repainted piece comes back, nothing is kept; refused in Lockdown)
  *
  * A rendered image is a deliverable of the project, exactly like a track: it lands
  * in buzzy_assets with job_id set, so the project page and the Library show the same
@@ -190,6 +192,25 @@ export default defineEventHandler(async (event) => {
   // and the page puts back only the painted pixels, so nothing outside the paint changes.
   const repaint3d = action === "repaint3d";
   if (repaint3d) {
+    // Lockdown: nothing leaves BeeZilla, and this sends the model's texture to the picture maker.
+    // The account's SAVED mode decides (a page that was never told, or a second device, must not
+    // get past it), and a mode that cannot be read is not "Open": like the other things that
+    // leave BeeZilla (boardNodes.nitro.ts), this refuses until it can be. Local edits (a colour,
+    // glass, a finish, removing a part) never come here, so they keep working in Lockdown.
+    let privacy: string | null = null;
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+      privacy = pm[0]?.mode ?? "";
+    } catch { privacy = null; }
+    if (privacy === null) {
+      return json(503, { error: "BeeZilla can't read your privacy setting right now, and nothing leaves it until it can. Try again in a moment.", code: "privacy_unknown" });
+    }
+    if (privacy === "lockdown") {
+      return json(403, {
+        error: "Lockdown is on, and nothing leaves BeeZilla in that mode, so the picture maker can't repaint this. A colour, glass, a shiny or matte finish and removing a part still work. The privacy control on the Talk bar switches Lockdown off.",
+        code: "lockdown",
+      });
+    }
     const crop = typeof body.crop === "string" && /^data:image\/png;base64,/.test(body.crop) ? body.crop : "";
     const mask = typeof body.mask === "string" && /^data:image\/png;base64,/.test(body.mask) ? body.mask : "";
     const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 600) : "";
