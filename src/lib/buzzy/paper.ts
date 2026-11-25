@@ -833,6 +833,33 @@ export async function latestPaper(
 }
 
 /**
+ * The paper panel's one question: "which sheet is THIS conversation working from?"
+ *
+ * A paper belongs to a job. A landing with no job in it has no sheet, so it gets
+ * no paper — whatever the company's newest paper happens to be. CR-14 shrank the
+ * old answer to "the newest paper whose job is still open", and that was still
+ * wrong on shane@veanox.com: job_283b80118dc746fb has said "Draft ready" since
+ * 2026-10-15 because nothing in the product ever writes a terminal status for a
+ * job that was left mid-draft, so "open" could not tell "work in hand" from
+ * "abandoned six weeks ago", and a blank Talk page kept showing a tax letter
+ * labelled On "Draft Demand Letter — Dog Attack by Neighbor (Revised)".
+ *
+ * Named job → that job's paper, open or finished (you asked for that job).
+ * No job → null, and the caller does not even query. latestPaper's no-jobId rule
+ * stays for the money check, which legitimately asks "the paper in hand on this
+ * company".
+ */
+export async function paperForConversation(
+  sql: Sql,
+  userId: string,
+  companyId: string,
+  jobId?: string | null,
+): Promise<PaperPayload | null> {
+  if (!jobId) return null;
+  return latestPaper(sql, userId, companyId, jobId);
+}
+
+/**
  * Take a paper off the account — the X on the paper panel (CR-14).
  *
  * Lines the owner already accepted stay: they are company facts, and "the sheet is

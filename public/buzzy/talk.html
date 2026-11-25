@@ -3203,9 +3203,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         : '<p class="muted">No words could be read on this.</p>';
       if (panel) {
         panel.classList.remove("hidden");
-        // Which job this sheet came from, when it is not the conversation's own: a
-        // paper shown on a fresh landing must not look like it belongs to the new chat.
-        var where = paper.jobTitle
+        // Which job this sheet came from, when it is not the conversation's own. The
+        // panel needs a job now, so this should never fire — but if a paper ever
+        // reaches the page from another job it says so instead of pretending.
+        var where = paper.jobTitle && paper.jobId !== chatState.jobId
           ? '<p class="paper-where">On "' + esc(paper.jobTitle) + '"</p>'
           : "";
         panel.innerHTML =
@@ -3304,26 +3305,24 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     function loadCompanyPaper(companyId) {
       var token = ++paperLoad;
       if (!companyId) { renderPaper(null); return; }
-      // The job THIS conversation is in — captured before the response, because the
-      // response may arrive after the chat moved on.
+      // The job THIS conversation is in. No job → no sheet: a blank landing must not
+      // show another job's paper, which is exactly what Shane reported (a tax letter
+      // from a six-week-old demand letter sat on a fresh Talk page). The server says
+      // the same thing (paperForConversation); this is the page's half of the rule.
       var jobId = chatState.jobId;
-      var q = "/api/buzzy/papers?companyId=" + encodeURIComponent(companyId);
-      if (jobId) q += "&jobId=" + encodeURIComponent(jobId);
+      if (!jobId) { renderPaper(null); return; }
+      var q = "/api/buzzy/papers?companyId=" + encodeURIComponent(companyId) +
+              "&jobId=" + encodeURIComponent(jobId);
       fetch(q, { credentials: "same-origin" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (token !== paperLoad) return;
           if (!d || !d.paper) { renderPaper(null); return; }
           if (d.paper.companyId && d.paper.companyId !== companyId) { renderPaper(null); return; }
-          // CR-14. A blank landing shows a paper only while its job is still OPEN (the
-          // server already answers only open-job papers when no job is named; this is
-          // the belt for a job that finished between the two reads). And a blank
-          // landing NEVER adopts the paper's job: that is exactly how a stale letter
-          // ("Pasted letter / need to do my taxes") silently bound job_283b80118dc746fb
-          // on shane@veanox.com. Dropping a paper into the chat still sets the job —
+          // The response may arrive after the chat moved on: only the job it was
+          // asked for may paint. Dropping a paper into the chat still sets the job —
           // that is an explicit act, in submitPaper, not a guess from a page load.
-          if (!jobId && d.paper.jobOpen === false) { renderPaper(null); return; }
-          if (jobId && d.paper.jobId && d.paper.jobId !== jobId) { renderPaper(null); return; }
+          if (d.paper.jobId && d.paper.jobId !== jobId) { renderPaper(null); return; }
           renderPaper(d.paper);
         })
         .catch(function () { if (token === paperLoad) renderPaper(null); });
@@ -3438,6 +3437,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           return;
         }
         if (res.d.paper.jobId) chatState.jobId = res.d.paper.jobId;
+        // The conversation now belongs to that job, so put it in the address. The page
+        // shows a paper only for the job it is in, and a reload starts with no job —
+        // without this, a dropped letter's panel vanished on refresh (CR-14).
+        if (res.d.paper.jobId) {
+          try {
+            history.replaceState(null, "", "/buzzy/talk?job=" + encodeURIComponent(res.d.paper.jobId));
+          } catch (_) {}
+        }
         chatState.boundCompanyId = co;
         paperLoad++;
         renderPaper(res.d.paper);
@@ -6737,7 +6744,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       chatState.jobContext = null;
       chatState.slots = {};
       chatState.messages = [];
-      chatState.paper = null;
+      // The panel is the LAST job's sheet: back to recent means no sheet, and an
+      // in-flight load must not repaint it (CR-14; this is how a stale paper stayed
+      // on a page with no job in it).
+      paperLoad++;
+      renderPaper(null);
       resetDraftGate();
       try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
       updateChrome();
@@ -6756,6 +6767,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { localStorage.removeItem("bz_session_id"); } catch (_) {}
       chatState.jobId = null;
       chatState.jobContext = null;
+      // A new conversation has no job, so it must not carry the old job in the
+      // address: a reload would walk straight back into it (CR-14).
+      try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
+      // ...and no sheet. New conversation used to leave the last job's paper panel
+      // on screen with no job behind it — the original "stale paper on a blank
+      // landing" report, from the other end.
+      paperLoad++;
+      renderPaper(null);
       chatState.slots = {};
       chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
       setBackVisible(true);
@@ -8085,7 +8104,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          jobId: chatState.jobId || undefined,
+          // A new conversation has NO job. This used to post the old jobId, so the
+          // fresh session was created already bound to the last job — which is how
+          // QA turns landed on shane@veanox.com's job_283b80118dc746fb (CR-14).
           companyId: coId || undefined,
           // A truly new one: without `fresh` the server handed back the last conversation
           // touched in the past 12 hours.
@@ -8099,7 +8120,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // The board follows the conversation (voice-stage.js reads bz_session_id).
         try { if (s && s.id) localStorage.setItem("bz_session_id", s.id); else localStorage.removeItem("bz_session_id"); } catch (_) {}
         chatState = {
-          jobId: chatState.jobId, // keep job-scoped behavior when a job is present
+          jobId: null,
           sessionId: s ? s.id : null,
           slots: {},
           messages: [],
@@ -8112,10 +8133,15 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           paper: null,
           userId: chatState.userId,
           _signedOut: chatState._signedOut,
-          jobContext: chatState.jobContext,
+          jobContext: null,
           boundCompanyId: (s && s.companyId) || coId || null,
           expert: chatState.expert,
         };
+        // No job means no sheet and no ?job= in the address, or a reload walks back
+        // into the conversation the owner just left (CR-14).
+        paperLoad++;
+        renderPaper(null);
+        try { history.replaceState(null, "", window.location.pathname); } catch (_) {}
         document.getElementById("chatError").classList.add("hidden");
         closeSessionsDrawer();
         showChatScreen();

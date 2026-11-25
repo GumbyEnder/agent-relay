@@ -6,10 +6,19 @@
  * shane@veanox.com that was pp_0165a978ab20406d ("Pasted letter / need to do my taxes")
  * silently binding job_283b80118dc746fb.
  *
- * The rule now: with NO job named, a landing shows only the newest paper whose job is
- * still OPEN. A named job still shows that job's paper, open or finished — you asked for
- * that job. "Open" is the Library's own completion signal: a stored status that names
- * the end, or all four board steps in Done.
+ * The rule now: a paper belongs to a job, so a landing with NO job has no paper —
+ * paperForConversation() answers null without querying. A named job still shows that
+ * job's paper, open or finished — you asked for that job. (latestPaper's no-jobId
+ * rule, "the newest paper whose job is still open", is still the money check's
+ * question: what paper is in hand on this company.)
+ *
+ * Why "open" alone was not enough: nothing in the product writes a terminal status
+ * for a job that is left mid-draft, so on shane@veanox.com job_283b80118dc746fb has
+ * said "Draft ready" since 2026-10-15 and "open" could not tell work in hand from
+ * work abandoned six weeks ago. A blank Talk page kept showing pp_0165a978ab20406d.
+ *
+ * "Open" is the Library's own completion signal: a stored status that names the
+ * end, or all four board steps in Done.
  *
  * This runs the REAL queries from src/lib/buzzy/paper.ts against the REAL migrations on
  * the real Postgres engine (PGlite), so the SQL and the JS rule are checked against each
@@ -18,7 +27,7 @@
  *   run: npx tsx scripts/test-paper-open.ts
  */
 import { getSql } from "@/lib/db";
-import { jobIsOpen, JOB_DONE_STATUSES, latestPaper, deletePaper } from "@/lib/buzzy/paper";
+import { jobIsOpen, JOB_DONE_STATUSES, latestPaper, paperForConversation, deletePaper } from "@/lib/buzzy/paper";
 
 let failures = 0;
 function check(name: string, cond: unknown, detail = "") {
@@ -122,6 +131,32 @@ async function main() {
     JSON.stringify(paperRows(paper)),
   );
   check("blank landing never crosses companies", paper?.companyId === CO);
+
+  // ── the panel's rule: no job, no sheet ────────────────────────────────
+  // The company DOES have an open job with a paper (checked just above), and the
+  // page still gets nothing: a conversation with no job is not working from a sheet.
+  const noJob = await paperForConversation(sql, USER, CO, null);
+  check(
+    "paperForConversation: no job in the conversation → no paper, even with an open one on the company",
+    noJob === null,
+    JSON.stringify(paperRows(noJob)),
+  );
+  const emptyJob = await paperForConversation(sql, USER, CO, "");
+  check("paperForConversation: an empty job id is no job", emptyJob === null);
+  const onItsJob = await paperForConversation(sql, USER, CO, kept);
+  check(
+    "paperForConversation: the job it is in → that job's paper",
+    onItsJob?.id === oldPaper && onItsJob?.jobId === kept,
+    JSON.stringify(paperRows(onItsJob)),
+  );
+  const onFinished = await paperForConversation(sql, USER, CO, finishedStatus);
+  check(
+    "paperForConversation: a named finished job still shows its own paper",
+    onFinished?.id === donePaper && onFinished?.jobOpen === false,
+    JSON.stringify(paperRows(onFinished)),
+  );
+  const onJobWithNoPaper = await paperForConversation(sql, USER, CO, goneJob + "x");
+  check("paperForConversation: a job with no paper answers null", onJobWithNoPaper === null);
 
   // A named job still shows its own paper, finished or not — the page asked for that job.
   paper = await latestPaper(sql, USER, CO, finishedStatus);

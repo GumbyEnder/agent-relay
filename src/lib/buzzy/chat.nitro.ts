@@ -87,7 +87,7 @@ import {
 import { fallbackCompanyName, readPublicWebsite, WEBSITE_SOURCE } from "./website";
 import { checkMoney, type MoneyBriefLine, type MoneyFact } from "./money";
 import { checkPromise } from "./promise";
-import { cleanFilename, deletePaper, latestPaper, savePaper, updatePaperLine } from "./paper";
+import { cleanFilename, deletePaper, latestPaper, paperForConversation, savePaper, updatePaperLine } from "./paper";
 import { buildWeeklyDigest } from "./digest";
 import { rebuildCustomerMemory, memoryContextBlock, extractTemplateStructure, type CustomerMemoryEntry } from "./customer";
 import { buildExportBundle, deleteAccountData } from "./portability";
@@ -5529,7 +5529,10 @@ export default defineEventHandler(async (event) => {
     return { summary, note: summary ? undefined : "No messages to summarize yet." };
   }
 
-  // ── GET /api/buzzy/papers — latest paper on this company, not another ──
+  // ── GET /api/buzzy/papers — the paper THIS conversation is working from ──
+  // A paper belongs to a job; a landing with no job has no sheet. See
+  // paperForConversation() — this used to answer "the newest open paper on the
+  // company", which put a six-week-old tax letter on a blank Talk page (CR-14).
   if (method === "GET" && path === "/api/buzzy/papers") {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
@@ -5550,7 +5553,7 @@ export default defineEventHandler(async (event) => {
       return { error: "Company not found", code: "not_found" };
     }
     const jobId = queryValue(fullPath, "jobId");
-    const paper = await latestPaper(sql, user.id, companyId, jobId);
+    const paper = await paperForConversation(sql, user.id, companyId, jobId);
     return { paper };
   }
 
