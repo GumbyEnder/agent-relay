@@ -19,7 +19,7 @@
  * The Idea Board's own steps (zoom, add a note, connect two cards, make an area…)
  * are listed in boardPilot.ts and run by the board itself (whiteboard.js `act`).
  */
-import { acceptedOffer, boardStep, closedBoardStep, orchestrateStep, type BoardStep } from "./boardPilot";
+import { acceptedOffer, boardStep, browserAtStep, closedBoardStep, orchestrateStep, type BoardStep } from "./boardPilot";
 
 export type PrivacyMode = "advocate" | "lockdown" | "open";
 
@@ -38,6 +38,9 @@ const MAX_STEPS = 4;
 const MAX_LENGTH = 160;
 /** An orchestration can take a few sentences to describe ("…then I approve it, then…"). */
 const ORCH_MAX_LENGTH = 1500;
+// "When you get to the song step, go to … and download the song" can run long: the whole
+// sentence is the browser job (boardPilot.ts browserAtStep).
+const BROWSER_AT_STEP_MAX_LENGTH = 1300;
 
 function normal(message: string): string {
   return String(message || "")
@@ -227,6 +230,13 @@ export function planAppActions(message: string, current?: PrivacyMode | null, ct
 function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
   const m = normal(message);
   if (!m) return null;
+  // "When you get to the song step, go to … and download the song": a job for BeeZilla's own
+  // browser, joined to that step. The whole sentence is the job, however long, so it comes first.
+  // (It starts "when/once/at … step", which no orchestration request below does.)
+  if (m.length <= BROWSER_AT_STEP_MAX_LENGTH) {
+    const atStep = browserAtStep(m.replace(LEAD, "").replace(TAIL, ""));
+    if (atStep) return [atStep];
+  }
   // Building or changing an orchestration on the board (boardPilot.ts orchestrateStep):
   // the whole message is the request, however long, so it is never split into clauses.
   if (m.length <= ORCH_MAX_LENGTH) {
@@ -267,6 +277,16 @@ function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: Pl
  * The person asked BeeZilla to build or change an orchestration on the Idea Board, or
  * to open the one there in the Orchestrate editor: a turn whose work is on the board.
  */
+/**
+ * The message sets a job up for BeeZilla's own browser on a step of the board ("when you
+ * get to the song step, go to mureka.ai/create … and download the song"): the page puts a
+ * globe on that step, so the turn is that action, like a build on the board (server.ts).
+ */
+export function setsUpBrowserJob(message: string): boolean {
+  const m = normal(message);
+  return !!m && m.length <= BROWSER_AT_STEP_MAX_LENGTH && !!browserAtStep(m.replace(LEAD, "").replace(TAIL, ""));
+}
+
 export function asksToOrchestrate(message: string, ctx?: PlanContext): boolean {
   const m = normal(message);
   if (!m || m.length > ORCH_MAX_LENGTH) return false;

@@ -132,7 +132,7 @@ request resolves to that account *through an active membership* — nobody share
 
 | Absent | Why |
 |---|---|
-| ~~**Headless browser**~~ | **Shipped in wave 1 (2026-10-25).** `read_web_page` fetches over HTTP first and escalates to a managed render (Hyperbrowser) when the page comes back thin, reporting which path ran. Interaction, structure extraction and authenticated sessions are still absent (B2-B4) |
+| ~~**Headless browser**~~ | **Shipped in wave 1 (2026-10-25).** `read_web_page` fetches over HTTP first and escalates to a managed render (Hyperbrowser) when the page comes back thin, reporting which path ran. Interaction and signed-in sites came with the globe (2026-11-23, `use_browser`, docs/beezilla/MORE-NODES.md); structure extraction (B2) is still absent |
 | **Email delivery** | No outbound mail channel is wired. Approvals record `not_sent` honestly rather than pretending |
 | **OAuth token exchange** | Email/calendar/drive connection *scope, consent and revoke* are implemented and stored; the token exchange is not |
 | **Outbound HTTP writes** | `fetch_website` is GET-only. No POST, no uploads, no arbitrary third-party writes |

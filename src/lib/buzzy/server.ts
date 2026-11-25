@@ -89,16 +89,18 @@ import { readWebPage } from "./webpage";
 import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
-import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, type AppAction } from "./pilot";
+import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, setsUpBrowserJob, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
 import { inspirationNote, inspirationResult, searchInspiration, wantsInspiration } from "./inspirationSearch";
 import { createModelTask, threeDConfigured } from "./models3d";
 import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday, videoRecipeHeldBack } from "./video";
 import type { VideoTopicInput } from "./video";
+import { browserCommand, cleanToolNodes, useBrowserTool, wantsBrowser } from "./browserRun";
+import { browserConfigured } from "./remoteBrowser";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
 // One persona, ONE_PERSONA in oneMode.ts. There used to be two (Chat, and a Work
@@ -326,6 +328,12 @@ export interface ChatRequest {
    */
   boardInstructions?: string | null;
   /**
+   * The browser nodes (globes) on the board, with their details (a task in words, or a recording
+   * to follow exactly): BeeZilla runs one when the work reaches the step it is joined to
+   * (use_browser). The board text names them; this carries what is needed to run them.
+   */
+  browserNodes?: unknown;
+  /**
    * What the owner is looking at on the Idea Board as this turn started (owner,
    * 2026-11-21: "a clear understanding of everything that the user is seeing… it knows
    * what this or that is"): cleaned by boardView.ts, written into this turn's
@@ -349,6 +357,12 @@ export interface FlowStep {
   /** A 3D model or video still being made: the page watches it and fills the card. */
   taskId?: string;
   videoJobId?: string;
+  /** A card already on the board this is about (a browser node at work): no new card is made. */
+  card?: string;
+  /** A browser node's run, for its card. */
+  run?: unknown;
+  /** A browser job BeeZilla started from words alone: the globe it becomes on the board (its details). */
+  node?: string;
 }
 
 /** Plain names for the tools the agent calls, as skill cards on the board. */
@@ -360,6 +374,7 @@ const TOOL_SKILL_NAMES: Record<string, string> = {
   generate_music: "Music maker",
   generate_image: "Picture maker",
   calculate: "Calculator",
+  use_browser: "BeeZilla's browser",
 };
 export function toolSkillTitle(name: string): string {
   const n = String(name || "");
@@ -737,6 +752,15 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // reply is one sentence (pilot.ts ORCHESTRATE_USER_LINE: nothing asked first).
   const flowOnBoard = boardHasFlow(boardText);
   const orchestrating = asksToOrchestrate(message, { boardHasFlow: flowOnBoard });
+  // A job for BeeZilla's own browser told in so many words ("go to mureka.ai and make…",
+  // "use your browser to…"), or set up on a step ("when you get to the song step, go
+  // to…"): the job, or the globe the page puts on that step, is the go — like a build on
+  // the board. A quick choice would come back without it, and "Just go" after one would
+  // write a document instead of doing the job. A bare "do it" with globes on the board
+  // is left to one mode (it may be the answer to its own question).
+  const browserNodes = cleanToolNodes(req.browserNodes);
+  const browserGo = !lockdown && !orchestrating &&
+    ((browserConfigured() && browserCommand(message, [])) || setsUpBrowserJob(message));
 
   // ── One mode: ask first, or just go (oneMode.ts) ─────────────────────
   // Silently weigh the cost of misreading this request against the cost of asking.
@@ -759,6 +783,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     makerLane,
   });
   const verdict = askOrGo(assessment);
+  // A browser job that presses a door does not step aside like a build: what it would
+  // press (post, send, publish, submit; or critical and can't-undo) is the question the
+  // ladder asks. Laying a flow out runs nothing; the browser presses for real (oneMode.ts).
+  const browserDoor = browserGo && (assessment.performsDoor === true ||
+    (assessment.stakes === "critical" && assessment.irreversible === true));
   // What they answered to "questions first, or just go?" before, per stakes tier:
   // asked once, then their answer stands (oneMode.ts).
   let remembered: Awaited<ReturnType<typeof loadAskPreferences>> = {};
@@ -773,7 +802,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     makerLane,
     agentWork,
     knownBudget,
-    buildsOnBoard: orchestrating,
+    buildsOnBoard: orchestrating || browserGo,
+    browserGo,
     canFollowUp: Boolean(conversationKey),
   });
   if (decided.remember) {
@@ -781,6 +811,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   }
   const oneModeWhy =
     (orchestrating ? "building on the Idea Board, nothing asked · " : "") +
+    (browserGo ? (browserDoor
+      ? "a job for its own browser, but it presses a door · "
+      : "a job for its own browser, nothing asked · ") : "") +
     verdict.why +
     (remembered[assessment.stakes] ? ` · remembered for ${assessment.stakes} work: ${remembered[assessment.stakes]}` : "") +
     (decided.step.kind === "budget" || (decided.step.kind === "go" && decided.step.agentWork)
@@ -836,8 +869,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       carry = ticket.carry === true;
     }
   }
-  // A turn built on the board leaves a waiting question exactly as it was stored.
-  if (!orchestrating) {
+  // A turn built on the board (or a browser job that goes) leaves a waiting question exactly
+  // as it was stored. A browser job stopped at a door is not a go: its offer is the turn's state.
+  if (!orchestrating && !(browserGo && !browserDoor)) {
     if (oneState) await memory.remember(STATE_KEY, encodeState(oneState));
     else if (savedStep) await memory.remember(STATE_KEY, "");
   }
@@ -902,9 +936,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // same as pressing Do it.
   const goHow = step.kind === "go" ? step.how : "fresh";
   // The rule's "go" on a request to make something real (a document, a plan, a project).
-  const goMakesSomething = step.kind === "go" && assessment.size !== "small" && !orchestrating;
+  const goMakesSomething = step.kind === "go" && assessment.size !== "small" && !orchestrating && !browserGo;
   if (goHow !== "fresh" && !wants3d && !wantsVideo) requestedDraft = true;
-  const oneModeNote = orchestrating ? "" : turnNote(goHow, {
+  const oneModeNote = orchestrating || browserGo ? "" : turnNote(goHow, {
     spoken: surface === "voice",
     interview: step.kind === "go" ? step.interview : undefined,
     budget: step.kind === "go" ? step.budget : undefined,
@@ -1606,16 +1640,23 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
+  // BeeZilla's own browser (the globe): a turn where the owner asks for something to be done on a
+  // website, or tells it to get going while the board has a browser node (browserRun.ts).
+  // Not when the message set a browser job up on the board ("when you get to that step, go to…"):
+  // the page does that (appPlan), and the job runs when the work gets there.
+  const browserTurn = !lockdown && browserConfigured() && !appPlan &&
+    (wantsBrowser(message, browserNodes) || (browserNodes.length > 0 && (req.execute === true || isExecuteCommand(message))));
   const toolCtx = {
     draftGateOpen,
     lockdown,
     documentsOnly: goMakesSomething && !(wereAllFilled || requestedDraft || hasExistingDraft),
+    browser: browserTurn,
   };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
   // non-empty tool list is what disables streaming), which is the 12s answer.
   // Web lookups are already handled by the deterministic research pre-pass.
-  const loopTools = (draftGateOpen || isExplicitDocumentRequest(message))
+  const loopTools = (draftGateOpen || isExplicitDocumentRequest(message) || browserTurn)
     ? (offeredTools(toolCtx) as unknown[])
     : [];
   // glm-class models treat an optional tool as optional and answer in prose.
@@ -1624,8 +1665,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const explicitDocumentRequest = isExplicitDocumentRequest(message);
   const toolChoice = draftGateOpen && explicitDocumentRequest
     ? { type: "function", function: { name: "render_document" } }
-    : undefined;
-  const toolMax = 3;
+    // Told to do the job now, in its browser: it does (a model treats an optional tool as optional).
+    : browserTurn && (req.execute === true || browserCommand(message, browserNodes))
+      ? { type: "function", function: { name: "use_browser" } }
+      : undefined;
+  // A board's work can reach more than one browser node (make the song, then post it).
+  const toolMax = browserTurn ? 6 : 3;
   let reply: Awaited<ReturnType<typeof chatCompletionFull>>;
   let renderedDocument: { filename: string; bytesB64: string; contentType: string } | null = null;
   // True when this turn's reply was spoken by the audio model. False on a
@@ -1693,10 +1738,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // Deliverable turns stay on the text lane — a draft is announced, not
     // read aloud, and only the text lane can carry the render tools.
     // When does a spoken turn actually NEED the tool-bearing text lane? Only
-    // when it must produce a file. A brief left over from earlier must not push
-    // every reply onto the slow lane — that is what made a two-second answer take
-    // 21 seconds.
-    const toolTurnNeeded = explicitDocumentRequest;
+    // when it must produce a file, or when BeeZilla is driving its own browser.
+    // A brief left over from earlier must not push every reply onto the slow lane —
+    // that is what made a two-second answer take 21 seconds. (One mode dropped the
+    // old Work-mode clause: there is no mode any more.)
+    const toolTurnNeeded = explicitDocumentRequest || browserTurn;
     const useVoiceLane =
       surface === "voice" && !!req.speech && voiceAvailable() && !toolTurnNeeded;
     if (useVoiceLane) { spokeThisTurn = true; lane = "audio"; }
@@ -1750,8 +1796,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
     // Bounded model-paced loop: execute render_document calls and feed the
     // result back until the model returns a final answer or we hit the cap.
+    // A browser turn's rounds build on each other (make the song, then post it): each round sees
+    // the earlier rounds' results. Files its jobs downloaded may be handed on by the next one.
+    let carried: Array<{ role: string; content: string }> = [];
+    const turnFiles: string[] = [];
     for (let iteration = 0; iteration < toolMax && reply.toolCalls.length > 0; iteration++) {
-      const followUpMessages: Array<{ role: string; content: string }> = [...messages];
+      const followUpMessages: Array<{ role: string; content: string }> = [...messages, ...(browserTurn ? carried : [])];
       followUpMessages.push({ role: "assistant", content: reply.content || "" });
       for (const tc of reply.toolCalls) {
         // A declared-but-withheld tool gets a REASON, never the dead phrase
@@ -1782,7 +1832,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         }
 
         req.onTool?.({ name: tc.name, state: "running" });
-        req.onFlow?.({ kind: "skill", id: "tool:" + tc.name, title: toolSkillTitle(tc.name), parent: "agent", state: "running" });
+        // BeeZilla's browser shows on the board as its globe (browserRun.ts), not as a second card.
+        if (tc.name !== "use_browser") req.onFlow?.({ kind: "skill", id: "tool:" + tc.name, title: toolSkillTitle(tc.name), parent: "agent", state: "running" });
         // Every tool runs inside its declared wall clock (toolRegistry).
         // A slow tool becomes a named failure instead of a stalled turn.
         const run = await withToolBudget(
@@ -2011,13 +2062,35 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
                 errorCode: "render_failed",
               };
             }
+            if (tc.name === "use_browser") {
+              // The job runs in the owner's server browser (their window shows it if it is open);
+              // its steps and the files it downloads appear on the board as it goes.
+              const r = await useBrowserTool({
+                userId,
+                args: content,
+                nodes: browserNodes,
+                model: routedModel,
+                // What the owner said, and their board without its browser nodes' lines (those hold a
+                // website's words): a Library file can be handed to a website only if it is named there.
+                said: message + "\n" + boardText.split("\n").filter((l) => !/^- Browser node/.test(l)).join("\n"),
+                turnFiles,
+                later: iteration > 0,
+                onFlow: (f) => req.onFlow?.(f as FlowStep),
+                waitSeconds: Number(process.env.BZ_BROWSER_TURN_WAIT_SECONDS) || 240,
+              });
+              for (const f of r.files) turnFiles.push(f.name, f.url);
+              // A song it downloaded plays in the reply, like one BeeZilla made itself.
+              const song = r.files.find((f) => /^audio\//.test(f.type));
+              if (song && !renderedAudio) renderedAudio = { url: song.url, name: song.name, bytes: song.bytes, type: song.type };
+              return { message: clampResult("use_browser", r.message), errorCode: r.errorCode, bytes: r.bytes, path: "browser" };
+            }
             return { message: `Tool ${tc.name} is not available.`, errorCode: "unknown_tool" };
           },
         );
 
         toolLog.push({ name: tc.name, ms: run.ms ?? 0, ok: run.ok, code: run.ok ? undefined : "failed" });
         req.onTool?.({ name: tc.name, state: run.ok ? "done" : "failed", ms: run.ms ?? 0 });
-        req.onFlow?.({ kind: "skill", id: "tool:" + tc.name, title: toolSkillTitle(tc.name), parent: "agent", state: run.ok ? "done" : "failed" });
+        if (tc.name !== "use_browser") req.onFlow?.({ kind: "skill", id: "tool:" + tc.name, title: toolSkillTitle(tc.name), parent: "agent", state: run.ok ? "done" : "failed" });
         if (!run.ok) {
           followUpMessages.push({
             role: "user",
@@ -2046,7 +2119,13 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
           bytes: out.bytes ?? null, path: out.path ?? null,
         });
       }
-      reply = await chatCompletionFull(followUpMessages, { model: routedModel, maxTokens: loopTools ? 4096 : undefined });
+      // A board's work can reach one browser node after another (make the song, then post it): on a
+      // browser turn BeeZilla's browser stays on hand after a result, up to toolMax rounds — and only
+      // it: a website's words are in the conversation now, so nothing that reads or searches the web
+      // is offered, and only the board's own globes can run (useBrowserTool `later`).
+      if (browserTurn) carried = followUpMessages.slice(messages.length);
+      const laterTools = browserTurn ? (loopTools as Array<{ function?: { name?: string } }>).filter((t) => t?.function?.name === "use_browser") : [];
+      reply = await chatCompletionFull(followUpMessages, { model: routedModel, tools: laterTools.length ? laterTools : undefined, maxTokens: loopTools ? 4096 : undefined });
     }
     // ── Guard: a tool name is not an answer ────────────────────────────
     // Observed live: after a search the model returned
@@ -2054,7 +2133,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // not an answer, and it would have been saved as the deliverable. Ask once
     // for the prose; if it still comes back as an echo, fail the turn honestly
     // rather than storing junk in the owner's Library.
-    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation)\s*[:(]/i;
+    const TOOL_ECHO = /^\s*(read_web_page|web_search|fetch_website|lookup_market_rate|search_knowledge|search_inspiration|calculate|render_document|render_sheet|render_presentation|use_browser)\s*[:(]/i;
     const URL_ONLY = /^\s*https?:\/\/\S+\s*$/i;
     if (reply.toolCalls.length === 0 && (TOOL_ECHO.test(reply.content) || URL_ONLY.test(reply.content))) {
       console.warn("[buzzy/chat] tool echo in reply — asking for prose once");
@@ -2095,6 +2174,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       asksInsteadOfDoing(reply.content)
     ) {
       console.warn("[buzzy/one-mode] a go turn asked instead of doing — asking for the work once");
+      // One retry, deliberately without tools: the first completion already ran with
+      // this turn's tool surface and chose to talk instead. Re-arming it would loop a
+      // second maker lane on the same request, so this retry is text only (no tools, no
+      // streaming). Consequence, accepted: a recovered go turn can come back as prose
+      // with no rendered document. It is a better outcome than the questionnaire it
+      // replaces, and the turn is never silent about it.
       reply = await chatCompletionFull(
         [...messages, { role: "assistant", content: reply.content }, { role: "user", content: DO_IT_NOW }],
         { model: routedModel, maxTokens: 4096 },

@@ -38,6 +38,14 @@ export interface Assessment {
    *  deploying, signing. (Those steps still wait for the person's OK elsewhere; this
    *  only says a misreading would be expensive.) */
   irreversible: boolean;
+  /**
+   * The request performs the door itself ("send it to all our customers"), rather
+   * than mentioning it inside work that makes something ("write a tweet announcing
+   * our sale") or asking about it ("how do I publish this?" — already not
+   * irreversible). The equation can price a mention as a small readable mistake, but
+   * a performed door leaves the account, so `askFirst` never lets it go silently.
+   */
+  performsDoor?: boolean;
   /** They seem to be in a hurry ("quick", "asap", "right now"). */
   hurried: boolean;
   /** P(BeeZilla misreads what they want), 0..1. */
@@ -125,11 +133,64 @@ function objectSize(m: string): { size: Size; noun: string } | null {
 
 const MULTI_PART = /\b(and then|after that|as well as|on top of that|step \d)\b|;\s|\balso\b[^.!?\n]{0,40}\b(need|want|make|add)\b/i;
 
+/**
+ * An amount of money riding with the verb that moves it: "pay our contractor $2,000",
+ * "wire $5,000 to the new supplier", "send 2000 dollars to the vendor".
+ *
+ * The *same* regex feeds the critical tier and `irreversible` (see IRREVERSIBLE), so
+ * the two arms cannot drift apart: an amount the tier calls critical is also a door,
+ * and a door that moves an amount is critical. Before this was shared, "send 2000
+ * dollars to the vendor" read critical but `irreversible=false`, so a remembered
+ * "just go" walked a payment through on a score of 0.4.
+ */
+const MONEY_AMOUNT =
+  /\b(?:pay|paid|paying|wire|wiring|transfer|transferring|send|sending|sent)\b[^.!?\n]{0,40}(?:\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:dollars?|usd|eur|gbp)\b)/i;
+
+/**
+ * The person or the bill on the other side of a payment, read as a *direct object*:
+ * "pay our contractor", "pay the invoice", "pay suppliers", "owe the landlord".
+ *
+ * No amount needed, because the recipient is the signal — this is the half #404 was
+ * missing (a contractor read as play, 0.32). It must be the direct object and not a
+ * noun somewhere within N characters: "pay attention to the team's feedback" and
+ * "pay closer attention to our vendors" are instructions, not payments, and the
+ * 25-character window that first shipped here turned both into critical doors a
+ * remembered "just go" could not suppress.
+ *
+ * An adverb of degree rides between the verb and the recipient — "pay more to our
+ * suppliers", "owe less to the bank" — but only when it is followed by the payment
+ * path. "pay more attention to our vendors" stays an instruction, because the next
+ * word is the attention noun, never `to`/`for` or a recipient.
+ */
+const DETERMINER = "(?:(?:the|a|an|my|our|your|their|his|her|its|all|this|that|these|those)\\s+)?";
+/** Who a payment can go to. */
+const RECIPIENT_NOUNS =
+  "staff|employees?|team|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?|fines?|fees?|rent|deposits?|tuition|salar(?:y|ies)|wages?";
+/**
+ * The same list for `owe`, minus "team": a team is paid through payroll ("pay the
+ * team"), but "owe my team an apology" is gratitude, and reading it as a payment
+ * made it critical and irreversible for nothing.
+ */
+const OWE_NOUNS =
+  "staff|employees?|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?|fines?|fees?|rent|deposits?|tuition|salar(?:y|ies)|wages?";
+
+const MONEY_RECIPIENT = new RegExp(
+  "\\b(?:(?:pay|paid|paying)\\b\\s+(?:(?:off|back|up)\\s+)?(?:(?:more|less)\\s+)?(?:(?:to|for)\\s+)?" +
+    DETERMINER + "(?:" + RECIPIENT_NOUNS + ")" +
+    "|(?:owe|owed|owing)\\b\\s+(?:(?:off|back|up)\\s+)?(?:(?:more|less)\\s+)?(?:(?:to|for)\\s+)?" +
+    DETERMINER + "(?:" + OWE_NOUNS + "))\\b",
+  "i",
+);
+
 /** A mistake would be devastating: money, health, legal, security, people's data, production. */
 const CRITICAL: Array<[string, RegExp]> = [
-  ["money", /\b(checkout|payments?|billing|charg(e|es|ed|ing) (customers?|cards?|users?|people)|refunds?|payroll|tax(es)?|tax return|irs|hmrc|loans?|mortgages?|invest(ing|ment|ments)?|portfolio|stocks?|crypto|bitcoin|wire (transfer|money)|bank accounts?|routing number|credit cards?|chargebacks?|pay (my|our|the) (staff|employees|team|vendors|bills?|invoices?)|financial (statements?|reports?)|move (the )?money)\b/i],
+  ["money", new RegExp(
+    "\\b(checkout|payments?|billing|charg(e|es|ed|ing) (customers?|cards?|users?|people)|refunds?|payroll|tax(es)?|tax return|irs|hmrc|loans?|mortgages?|invest(ing|ment|ments)?|portfolio|stocks?|crypto|bitcoin|wire (transfer|money)|bank accounts?|routing number|credit cards?|chargebacks?|financial (statements?|reports?)|move (the )?money)\\b|" +
+      MONEY_AMOUNT.source + "|" + MONEY_RECIPIENT.source,
+    "i",
+  )],
   ["health", /\b(medical|medicine|medications?|meds|doses?|dosage|prescriptions?|diagnos(is|e|ed)|symptoms?|allerg(y|ies|ic)|pregnan(t|cy)|surgery|treatment plan|mental health|suicid\w*|overdose|vaccines?|insulin|blood pressure|chemo\w*|patients?|clinical|hospital)\b/i],
-  ["legal", /\b(legal|lawyers?|attorneys?|lawsuits?|sue|suing|court|judge|contracts?|terms of (service|use)|privacy policy|compliance|gdpr|hipaa|liabilit(y|ies)|(write|draft|update|make) (a|my|our) will|will and testament|living will|estate plan|custody|divorce|immigration|visas?|evict(ion)?|cease and desist|demand letter|settlement|nda|non-disclosure|trademark|patent)\b/i],
+  ["legal", /\b(legal|lawyers?|attorneys?|lawsuits?|sue|suing|court|judge|contracts?|terms (of (service|use)|and conditions)|privacy policy|compliance|gdpr|hipaa|liabilit(y|ies)|tos|t&c'?s?|(write|draft|update|make) (a|my|our) will|will and testament|living will|estate plan|custody|divorce|immigration|visas?|evict(ion)?|cease and desist|demand letter|settlement|nda|non-disclosure|trademark|patent)\b/i],
   ["security", /\b(passwords?|credentials|api keys?|secret keys?|private keys?|encrypt(ion)?|security|vulnerabilit(y|ies)|exploits?|breach(es)?|hack(ed|ing)?|two-factor|2fa|permissions|access control|firewall)\b/i],
   ["people's data", /\b(customer (data|records|database|list|details|info)|user (data|records|accounts|database)|personal data|pii|patient records|(our|the|my) database|mailing list|everyone'?s (data|emails?|details))\b/i],
   ["production", /\b(production|prod|live (site|server|app|system)|deploy(ing|ment)?|outages?|downtime|migrat(e|ion|ing)|rollback|restore (the|our|a) (backup|database)|dns)\b/i],
@@ -138,14 +199,108 @@ const CRITICAL: Array<[string, RegExp]> = [
 /** For other people: a business, customers, the public. */
 const PRODUCT = /\b(customers?|clients?|users|audience|public(ly)?|publish(ing|ed)?|launch(ing|ed)?|sell(ing)?|sales|marketing|brand(ing)?|business(es)?|company|startup|store|shop|bakery|restaurant|caf[eé]|salon|studio|gym|agency|firm|nonprofit|charity|organi[sz]ation|club|our school|my school|investors?|pitch|my team|our team|employees|staff|students|my class|everyone|everywhere|the world|thousands|millions|subscribers|followers|invoices?|quotes?|estimates?|proposals?|resumes?|cvs?|cover letters?|job applications?|app store|play store)\b/i;
 
+/** A public platform. Posting there is for other people even when the words name no
+ *  audience, so "post our price increase on facebook" is product stakes, not play —
+ *  at play a remembered "just go" would skip the door the post itself opens. */
+const SOCIAL = /\b(?:facebook|instagram|tiktok|youtube|linkedin|twitter|threads|reddit|pinterest|substack|patreon|mastodon|bluesky)\b|\b(?:on|to) x\b/i;
+
 /** Personal, for fun. Only explains a call: "play" is also the default. */
 const PLAY = /\b(for fun|just for fun|my kids?|my children|my son|my daughter|my family|bedtime|birthday|hobby|for myself|game night|my friends|weekend|date night|practice|homework|my pet)\b/i;
 
-/** Feeds a step that cannot be taken back. */
-const IRREVERSIBLE = /\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that)|publish|tweet (it|this)|pay|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\b/i;
+/** Feeds a step that cannot be taken back.
+ *
+ *  `pay` is deliberately not a bare arm any more: the guarded leading `pay` in
+ *  DOOR_VERB and the two money regexes below carry real payments, while "pay
+ *  attention", "pay heed" and "pay tribute" are not payments at all. A bare `pay`
+ *  made every one of them irreversible. */
+const IRREVERSIBLE = new RegExp(
+  "\\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that|the|a|an)|publish|tweet (it|this)|upload|share(?!\\s+my\\s+screen)|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\\b|" +
+    MONEY_AMOUNT.source + "|" + MONEY_RECIPIENT.source,
+  "i",
+);
 
 /** They seem to be in a hurry. "Just do it" is stronger than this: see isGoReply. */
 const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|immediately|hurry|in a rush|rushed|no time|real quick|need (it|this) (now|today|tonight)|by tonight|by end of (the )?day|eod|in \d+ ?(min|mins|minutes))\b|!!/i;
+
+/**
+ * ── The discriminator: the channel verb decides, not the content verb ────────
+ *
+ *   write / draft / compose / make the thing          the artifact is made,
+ *                                                     nothing leaves        → go
+ *   post / publish / send / upload / share the thing   it leaves the account  → offer
+ *
+ * The same word can be either, so only the verb that *leads* counts:
+ *
+ *   "write a tweet announcing our sale"        write leads     → go
+ *   "draft the email to our customers"         draft leads     → go
+ *   "post the tweet"                           post leads      → offer
+ *   "publish the new pricing page"             publish leads   → offer
+ *   "send it to the vendor"                    send leads      → offer
+ *   "upload the video to youtube"              upload leads    → offer
+ *   "announce the price increase to everyone"  announce leads  → offer
+ *
+ * "Announce" is on the channel side deliberately: it is in #403's own table of
+ * misses (1.5 at 589f213), so putting it with the maker verbs would restore the
+ * bug. What stays a go is announce *mentioned* after a maker verb, which the
+ * leading-verb rule already handles.
+ *
+ * Two guards live in the verb list, not in the object arms:
+ *   "share my screen"      sharing a screen leaves nothing — not a door;
+ *   "pay attention/heed…"  paying attention is not paying — not a door.
+ *
+ * The leading verb of a request that *performs* a one-way door: the act itself
+ * leaves the account, so a misreading cannot be read and corrected afterwards.
+ *
+ * Only the first verb counts, after the usual politeness and auxiliary words.
+ * "Send it to all our customers" performs a send; "write a tweet announcing our
+ * sale" mentions one inside a maker lane (nothing leaves, so it must stay a go);
+ * "how do I publish this?" is a question, and `irreversible` is already false
+ * there. Buying and ordering are deliberately absent: they cost money but nothing
+ * leaves the account, and pulling them in would add a tap to ordinary requests.
+ */
+const DOOR_VERB = new RegExp(
+  "^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\\s]+)*(" +
+    [
+      "send(?!\\s+(?:me|myself)\\b)",
+      "email(?!\\s+(?:me|myself)\\b)",
+      "e-?mail(?!\\s+(?:me|myself)\\b)",
+      "mail(?!\\s+(?:me|myself)\\b)",
+      "announce",
+      "publish",
+      "post",
+      "tweet",
+      "upload",
+      "share(?!\\s+my\\s+screen)",
+      "mass e-?mail",
+      "email blast",
+      // `more`/`less` are only attention words when the attention noun follows. A bare
+      // guard on them also ate "pay more to our suppliers", a real payment that then
+      // read as play and went on a remembered "just go".
+      "pay(?!\\s+(?:attention|heed|mind|regard|respects?|tribute|homage|closer|close|dearly|lip\\s+service)\\b)(?!\\s+(?:more|less)\\s+(?:attention|heed|mind|regard|respect|care|thought|time|closer)\\b)",
+      // `owe` is a door only when a payment recipient is the direct object: "owe the
+      // landlord" leaves a bill unpaid; "owe you one" and "owe my team an apology"
+      // do not.
+      "owe(?:d|ing)?(?=\\s+(?:(?:off|back|up)\\s+)?(?:(?:to|for)\\s+)?" + DETERMINER + "(?:" + OWE_NOUNS + ")\\b)",
+      "wire",
+      "transfer",
+      "delete",
+      "remove",
+      "wipe",
+      "drop",
+      "deploy",
+      "launch",
+      "cancel",
+      "refund",
+      "terminate",
+      "fire",
+      "evict",
+      "submit",
+      "migrate",
+      "overwrite",
+    ].join("|") +
+    ")\\b",
+  "i",
+);
 
 /** Words that leave the result open. */
 const VAGUE = /\b(something|anything|some kind of|some sort of|stuff|whatever|ideas?|not sure|maybe|i don'?t know|dunno|cool|nice|fun|better|awesome|amazing|help me( with)?|figure out|kind of|sort of)\b/gi;
@@ -244,9 +399,9 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
   if (critical) {
     stakes = "critical";
     why.push(`critical (${critical[0]}): ${m.match(critical[1])?.[0]}`);
-  } else if (PRODUCT.test(m)) {
+  } else if (PRODUCT.test(m) || SOCIAL.test(m)) {
     stakes = "product";
-    why.push("for other people: " + m.match(PRODUCT)?.[0]);
+    why.push("for other people: " + (m.match(PRODUCT)?.[0] ?? m.match(SOCIAL)?.[0]));
   } else {
     why.push(PLAY.test(m) ? "personal: " + m.match(PLAY)?.[0] : "personal (no sign it is for others)");
   }
@@ -256,8 +411,21 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
     why.push(`at least ${ctx.minStakes} (the caller's reading)`);
   }
 
-  const irreversible = IRREVERSIBLE.test(m) && !QUESTION.test(m);
-  if (irreversible) why.push("cannot be taken back: " + m.match(IRREVERSIBLE)?.[0]);
+  // The leading channel verb is itself the door, whatever object follows: "email our
+  // customers the new price list" leaves the account even though "our …" is not one of
+  // IRREVERSIBLE's object arms. That miss was #403's residual — `send` accepted "our",
+  // `email`/`post`/`tweet` did not, so the same request offered with one verb and went
+  // silently with another. The object is not the signal; the verb is.
+  const question = QUESTION.test(m);
+  const doorVerb = question ? null : (m.match(DOOR_VERB)?.[1] ?? null);
+  const irreversible = !question && (IRREVERSIBLE.test(m) || doorVerb !== null);
+  if (irreversible) why.push("cannot be taken back: " + (doorVerb ?? m.match(IRREVERSIBLE)?.[0]));
+  // A door described inside work that makes something ("write a tweet announcing
+  // our sale", "draft the email") is not performed here: the deliverable is a draft
+  // the person reads, and the maker lanes already stop short of sending. Likewise a
+  // change to a draft on file.
+  const performsDoor = irreversible && !ctx.makerLane && !ctx.hasDraft && doorVerb !== null;
+  if (performsDoor) why.push("the door itself: " + doorVerb);
   const hurried = HURRIED.test(m);
   if (hurried) why.push("in a hurry: " + m.match(HURRIED)?.[0]);
 
@@ -284,7 +452,7 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
   if (ctx.hasDraft) p *= 0.5;
   const pMisread = Math.round(Math.min(0.9, Math.max(0.03, p)) * 1000) / 1000;
 
-  return { size, stakes, irreversible, hurried, pMisread, why };
+  return { size, stakes, irreversible, performsDoor, hurried, pMisread, why };
 }
 
 // ── The rule ─────────────────────────────────────────────────────────
@@ -303,8 +471,10 @@ export function assessRequest(message: string, ctx: AssessContext = {}): Assessm
  *   - personal projects ask only when they are big AND open ("make me a game");
  *   - work for other people asks when it is big and still open ("build a website for
  *     my bakery");
- *   - critical work, and anything feeding a one-way door, asks even when it is fairly
- *     clear, and even in a hurry.
+ *   - critical work asks even when it is fairly clear, and even in a hurry;
+ *   - whatever the equation says, a request that *performs* a one-way door (send,
+ *     publish, announce, pay, delete, deploy) is never silent: `askFirst` offers the
+ *     one choice whatever its size, and only a remembered "just go" for play skips it.
  */
 export const ASK_OR_GO = {
   /** What a wrong guess costs the person: reading it, saying what is wrong, waiting
@@ -360,13 +530,25 @@ export type AskFirst = "go" | "offer" | "questions";
  * The rule, then their remembered answer for this stakes tier. A request the rule
  * would stop for is offered the choice only the first time: after that, their own
  * answer decides, so the long-run effect is fewer questions, not more.
+ *
+ * One thing the equation must not be allowed to swallow: a request that *performs*
+ * a one-way door. `CANT_UNDO_WEIGHT` alone cannot lift a small, clear, product-stakes
+ * send over the 3-minute threshold (0.1 × 0.5 × 3 × 10 = 1.5), so "send it to all our
+ * customers" used to go ahead unannounced. A performed door is never silent: it is at
+ * least offered, whatever the size, at every tier but play, where their remembered
+ * "just go" still stands (it is their own data and their own call).
  */
 export function askFirst(
   verdict: AskOrGo,
   remembered: AskPreference | null | undefined,
-  a?: Pick<Assessment, "stakes" | "irreversible">,
+  a?: Pick<Assessment, "stakes" | "irreversible" | "performsDoor">,
 ): AskFirst {
-  if (!verdict.ask) return "go";
+  if (!verdict.ask) {
+    if (!(a?.irreversible && a.performsDoor)) return "go";
+    if (remembered === "ask") return "questions";
+    if (remembered === "go" && a.stakes === "play") return "go";
+    return "offer";
+  }
   if (remembered === "ask") return "questions";
   // The one exception to "asked once": a one-way door with critical stakes (paying,
   // deleting real data, publishing a legal text) is offered the choice every time.
