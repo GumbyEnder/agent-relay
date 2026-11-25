@@ -47,6 +47,10 @@
       ".bzc-in{flex:1;background:#101010;border:1px solid #242424;color:#f2f2f2;border-radius:9px;padding:.45rem .6rem;font:inherit}",
       ".bzc-btn{background:#ffd40d;color:#111;border:0;border-radius:9px;padding:.45rem .8rem;font-weight:600;cursor:pointer}",
       ".bzc-btn:disabled{opacity:.5;cursor:default}",
+      ".bzc-choice{display:flex;flex-wrap:wrap;gap:.4rem;align-self:flex-start;max-width:92%}",
+      ".bzc-choice .bzc-btn{text-align:left;white-space:normal;font-size:.82rem}",
+      ".bzc-alt{background:transparent;color:#ffd40d;border:1px solid #444}",
+      ".bzc-note{flex-basis:100%;color:#8d8d8d;font-size:.74rem}",
       ".bzc-card{display:flex;gap:.5rem;align-items:center;background:#0c0c0c;border:1px solid #242424;border-radius:10px;padding:.4rem .5rem}",
       ".bzc-card img{max-width:110px;border-radius:6px;display:block}",
       ".bzc-card a{color:#ffd40d;text-decoration:none;font-size:.8rem}",
@@ -153,10 +157,36 @@
       }, 4000);
     }
 
-    function send() {
-      var text = (input.value || "").trim();
+    // One mode (oneMode.ts): the buttons under a reply, either the one quick choice
+    // ("Ask me a few questions" / "Just go for it"), a question's suggested answer, or
+    // three amounts for how much to spend (the suggested one is the main button).
+    // A press sends its words as the person's message, with the choice.
+    function choices(choice) {
+      var opts = (choice && choice.options) || [];
+      if (!opts.length) return;
+      var row = el("div", "bzc-choice");
+      var marked = opts.some(function (o) { return o.suggested; });
+      opts.forEach(function (o, i) {
+        var main = marked ? !!o.suggested : i === 0;
+        var b = el("button", "bzc-btn" + (main ? "" : " bzc-alt"), o.label);
+        b.type = "button";
+        b.addEventListener("click", function () {
+          row.querySelectorAll("button").forEach(function (x) { x.disabled = true; });
+          send(o.send, o.value === "go" ? { choice: o.value, execute: true } : { choice: o.value });
+        });
+        row.appendChild(b);
+      });
+      // What keeps going while this waits (a pending answer never stalls other work).
+      if (choice.note) row.appendChild(el("div", "bzc-note", choice.note));
+      log.appendChild(row);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function send(said, extra) {
+      var text = (typeof said === "string" ? said : input.value || "").trim();
       if (!text) return;
-      input.value = "";
+      if (typeof said !== "string") input.value = "";
+      log.querySelectorAll(".bzc-choice button").forEach(function (x) { x.disabled = true; });
       bubble("bzc-u", text);
       sendBtn.disabled = true;
       var live = bubble("bzc-a", "");
@@ -165,6 +195,8 @@
       stage.textContent = "Working…";
 
       var body = { message: text, stream: true };
+      if (extra && extra.choice) body.choice = extra.choice;
+      if (extra && extra.execute) body.execute = true;
       // Same privacy slider as Talk (stored per browser): Lockdown turns off web
       // lookups and outside makers on the server.
       try {
@@ -234,6 +266,7 @@
         (data.artifacts || []).forEach(card);
         if (data.audio && data.audio.url) card({ kind: "audio", url: data.audio.url, name: data.audio.name, bytes: data.audio.bytes });
         if (data.model3d && data.model3d.taskId) watchModel(data.model3d.taskId);
+        if (data.choice) choices(data.choice);
       }).catch(function (e) {
         sendBtn.disabled = false;
         stage.textContent = "";
@@ -241,7 +274,7 @@
       });
     }
 
-    sendBtn.addEventListener("click", send);
+    sendBtn.addEventListener("click", function () { send(); });
     input.addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
 
     return {

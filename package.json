@@ -75,6 +75,8 @@
     "test:tools": "npx tsx scripts/test-tool-registry.ts && npx tsx scripts/test-webpage-routing.ts && npx tsx scripts/test-voice-tools.ts && npx tsx scripts/test-file-intent.ts",
     "test:video": "npx tsx scripts/test-video-intent.ts && npx tsx scripts/test-video-client.ts",
     "test:mode-colors": "node scripts/test-mode-colors.mjs",
+    "test:one-mode": "npx tsx scripts/test-one-mode.ts",
+    "posttest:video": "npm run test:one-mode",
     "pretypecheck": "node scripts/sync-private.mjs",
     "private:sync": "node scripts/sync-private.mjs",
     "private:check": "node scripts/sync-private.mjs --check",

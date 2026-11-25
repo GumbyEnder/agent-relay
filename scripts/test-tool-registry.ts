@@ -81,6 +81,16 @@ check("a coding turn adds nothing else", offeredToolNames({ draftGateOpen: false
 check("lockdown withholds it (its agents reach model providers)", !offeredToolNames({ draftGateOpen: true, codeRequest: true, lockdown: true }).includes("start_code_project"));
 check("refused off a coding turn, with a reason", /software/.test(String(refusalFor("start_code_project", { draftGateOpen: true }))));
 
+console.log("one mode just going (documents only):");
+// oneMode.ts opens the gate when it decides to just do real work. That puts the
+// document makers on the table, never the outside makers that spend plan minutes.
+const going = offeredToolNames({ draftGateOpen: true, documentsOnly: true });
+check("documents, slides and sheets are offered", ["render_document", "render_presentation", "render_sheet"].every((n) => going.includes(n)), going.join(","));
+check("music and video are not", !going.includes("generate_music") && !going.includes("generate_video"), going.join(","));
+check("the always-on tools stay", ["calculate", "web_search"].every((n) => going.includes(n)), going.join(","));
+check("a withheld maker says it runs when asked", /when the owner asks/.test(refusalFor("generate_video", { draftGateOpen: true, documentsOnly: true }) ?? ""));
+check("documentsOnly changes nothing while the gate is shut", offeredToolNames({ draftGateOpen: false, documentsOnly: true }).join() === offeredToolNames({ draftGateOpen: false }).join());
+
 console.log("result clamp:");
 const clamped = clampResult("web_search", "x".repeat(20000));
 check("result is trimmed to the declared cap", clamped.length < 20000 && /trimmed/.test(clamped));

@@ -116,6 +116,61 @@ node scripts/probe-mobile-width.mjs http://127.0.0.1:PORT state.json   # PASS �
 Paste the table, not a description of it. `PASS — 0 elements past the right edge across N
 measurements` is the line that closes a CR-12 review; "the page looks fine at 390" does not.
 
+## The pointer-exit arm — `scripts/probe-no-outside-close.mjs`
+
+Width alone does not cover the other half of the same rule: **anything that opens must
+close on a pointer press, and must not close on a stray one.** That is #361, and this
+tracked probe is its gate. It is the same file the screen rules cite, extended rather
+than duplicated — a second probe doing 60% of this would drift.
+
+```bash
+node scripts/probe-no-outside-close.mjs [origin] [session] [widths]
+#   origin   default http://127.0.0.1:8080
+#   session  Playwright storageState .json, or a one-line `session_token=...` file;
+#            omitted, it signs a throwaway account in through the dev magic-link inbox
+#   widths   default 360,390,430,1366
+```
+
+Per panel it asserts three things, then the negative:
+
+- **inside** — the exit control's box is wholly inside the layout viewport;
+- **hittable** — `document.elementFromPoint(centre)` is the control (or inside it). An
+  element under an overlay screenshots fine and eats taps;
+- **closes** — a real Playwright click takes the panel out of view;
+- **stray press** — a click at the viewport corner leaves the panel open *with typed
+  text intact* (the key dialog's API key, the recipe dialog's brief).
+
+Covered panels and their exits, at `63a0278`:
+
+| page | panel | exit | mechanism |
+|---|---|---|---|
+| talk | settings `#bzSettings` | `.bzs-close` | stays in DOM, toggled `[hidden]` |
+| talk | privacy `#privacyPop` | `#privacyClose` | stays in DOM, toggled `.hidden` class |
+| talk | AI key dialog `.ob-dialog` | `.ob-x` | removed from DOM |
+| recipes | purchase dialog `.bz-modal` | `.cancel` ("Cancel") | removed from DOM |
+| recipes | "Use this recipe" `.bz-modal` | `.cancel` ("Close") | removed from DOM |
+
+**Presence is not open/closed — three mechanisms, so one test cannot cover all five.** Asking
+"is the node present" reports a false failure against the settings panel and the privacy
+pop-up, which never leave the DOM; asking "is it visible" reports a false pass against the
+two dialogs mid-close. Each check uses the mechanism that panel actually has, and the
+reason sits in the file header.
+
+**Neither recipe dialog has an X, and that is correct.** `docs/BEEZILLA-SCREEN-RULES.md`
+§Critical asks for "its own X (or a button that says Close or Cancel)". A verification that
+counts controls instead of reading the rule reports a defect in working code — that misread
+has already happened once. `.ob-x` exists only in `voice-stage.js`.
+
+Measured 2026-11-25 on `63a0278`, signed in, production build, 360 / 390 / 430 / 1366:
+**100 checks, 0 failures** (25 per width; the per-check lines are the receipt, not this
+sentence). Screenshots of the two button-only panels at 360 are in
+`docs/evidence/dialog-exits/`.
+
+The recipes half needs seeded demo data (`SEAL_SEED_BASE` + `SEAL_SEED_COOKIE` →
+`scripts/seed-demo-recipes.ts`) and a build carrying the private marketplace modules; an
+open build answers `marketplace_disabled` and those cases report FAIL instead of skipping.
+Do not "fix" that by skipping them.
+
 ## Traps
 
 - **A built checkout 500s with ENOENT on `pglite.data`** if `.output/server/_libs` was

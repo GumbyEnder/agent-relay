@@ -1632,12 +1632,14 @@ export default defineEventHandler(async (event) => {
       ? body.attemptId.trim().slice(0, 80)
       : null;
     const jobContext = typeof body.jobContext === "object" && body.jobContext !== null ? body.jobContext as Record<string, unknown> : undefined;
-    // UI mode: "work" steers toward a work effort, "chat" is ordinary
-    // conversation. Unknown values fall back to chat inside chatLoop.
-    const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
     // The composer's "Do it now": an instruction the person pressed, so it does
     // not depend on the model reading intent out of phrasing.
     const execute = body.execute === true;
+    // The button pressed under BeeZilla's last reply (oneMode.ts): a few questions,
+    // just go, the suggested answer, or a tapped budget amount. There is one mode, so an
+    // old page's `mode: "work"` means nothing any more and is ignored.
+    const choice: "ask" | "go" | "accept" | "amount" | null =
+      body.choice === "ask" || body.choice === "go" || body.choice === "accept" || body.choice === "amount" ? body.choice : null;
     // The person's own process from the whiteboard (edited agent.md, skills, output,
     // or a recipe they ran). Their instructions; chatLoop caps and appends them.
     const boardInstructions = typeof body.boardInstructions === "string"
@@ -1796,8 +1798,8 @@ export default defineEventHandler(async (event) => {
         model,
         attemptId,
         jobContext,
-        mode,
         execute,
+        choice,
         privacy,
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
@@ -1868,7 +1870,9 @@ export default defineEventHandler(async (event) => {
                 jobId,
                 sessionId,
                 source: "server",
-                mode,
+                // What one mode did this turn (go, offer, ask, ticket): how often
+                // BeeZilla stops to ask is the friction it costs people.
+                mode: result.oneMode?.step ?? null,
                 model: result.timings.model,
                 ttftMs: result.timings.ttftMs,
                 ttfaMs: result.timings.ttfaMs,
@@ -1959,7 +1963,7 @@ export default defineEventHandler(async (event) => {
           jobId,
           sessionId,
           source: "server",
-          mode,
+          mode: result.oneMode?.step ?? null,
           lane: "text",
           model: result.timings.model,
           ttftMs: result.timings.ttftMs,
@@ -2657,7 +2661,9 @@ export default defineEventHandler(async (event) => {
     `;
     return {
       honchoAvailable: honchoAvailable(),
-      facts: facts.map((r) => ({
+      // Keys starting "_" are conversation bookkeeping (where one mode's questions
+      // are up to), not something remembered about the person.
+      facts: facts.filter((r) => !String(r.key ?? "").startsWith("_")).map((r) => ({
         jobId: r.job_id,
         key: r.key,
         value: r.value,

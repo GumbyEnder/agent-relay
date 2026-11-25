@@ -25,7 +25,7 @@ export type PrivacyMode = "advocate" | "lockdown" | "open";
 
 export type AppAction = PageAction | BoardStep;
 export interface PageAction {
-  do: "go" | "tab" | "inspiration" | "whiteboard" | "privacy" | "mode" | "history" | "newChat" | "speak" | "voice";
+  do: "go" | "tab" | "inspiration" | "whiteboard" | "privacy" | "history" | "newChat" | "speak" | "voice";
   /** The place, tab, kind or mode, or "open"/"close", "on"/"off". */
   value?: string;
   /** The step in plain words, as the steps card shows it. */
@@ -153,11 +153,6 @@ const RULES: Rule[] = [
   {
     re: /^(?:turn off|leave|exit|disable|stop|end) lockdown(?: mode)?$/,
     make: (_m, current) => privacyStep("advocate", current),
-  },
-  // ── Chat or Work ─────────────────────────────────────────────────────
-  {
-    re: /^(?:(?:switch|change|go|turn|move|flip)(?: (?:it|this|me))?(?: back)?(?: (?:to|into|over to))?|start|use|enter|open|let's switch to|lets switch to|let's use|lets use) (work|chat) mode$/,
-    make: (m) => ({ do: "mode", value: m[1]!, say: `Switch to ${m[1] === "work" ? "Work" : "Chat"} mode` }),
   },
   // ── History ──────────────────────────────────────────────────────────
   {
