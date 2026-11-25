@@ -301,7 +301,11 @@ async function main() {
   //   * the image wrap must not take the pointer, or a mark in front of an image paints
   //     correctly and still cannot be clicked — the wrap stole every press in its rect.
   // Pin the served bytes; the behaviour itself is measured in a browser (CDP).
-  const srcRepoint = /el\.getAttribute\("src"\) !== url[\s\S]{0,400}?el\.src = url;/.test(pageText);
+  // The cached element remembers the URL it was last given (`_bzSrc`) and compares against that:
+  // reading a multi-megabyte data URL back out of the DOM on every paint was part of the lag
+  // when a picture is moved. The old pin looked for `el.getAttribute("src") !== url`, which the
+  // page no longer says, so it failed on a page that still re-points a changed URL correctly.
+  const srcRepoint = /el\._bzSrc !== url[\s\S]{0,1200}?el\.src = url;/.test(pageText);
   const wrapPassive = /\.img-wrap \{ position:absolute; pointer-events:none;/.test(pageText);
   const wrapTakesPress = /\.img-wrap \{ position:absolute; pointer-events:auto;/.test(pageText);
   const orderedHit = /function hitTestOrdered\(/.test(pageText);

@@ -14,6 +14,22 @@
  *   - "it's not even clear how I get out of building the hexagon ... Escape deletes all
  *      my work"                                       -> checks A (polygon exits)
  *
+ * Review fixes (an independent review of the first version found these; each has checks):
+ *   A19-A33  polygon: corners survive a zoom change; Undo takes back a corner and keeps Redo;
+ *            a held Backspace never walks on into deleting a picture; a corner takes the
+ *            keyboard focus from a slider or a menu
+ *   B15-B29  Delete acts on what was picked, not on an old pixel area; the picture's x answers
+ *            only to Select; deleting a lifted area is an undo step of its own
+ *   D8b-D23  the paper colour survives a reload beside "none"; the Canvas panel follows
+ *            Undo/Redo and stays inside a short stage
+ *   E8-E8e   Remove background's key is a real edge pixel: an exact, a two-shade and a
+ *            half-see-through background all clear
+ *   E20-E31  Fill that changes nothing changes nothing; a touch switch for Fill-to-erase
+ *   E32-E43  Remove background: a pixel budget, a size budget for the cleared picture, and a
+ *            refusal that keeps the board saveable
+ *   G1-G2    the new controls fit at phone width
+ *   F2       a DPRS with no device pixel ratio in it makes this probe exit non-zero
+ *
  * It needs no server and no account: it serves public/ from this checkout on an ephemeral
  * port, answers the few /api/buzzy calls the page makes with stubs, and drives the page
  * with Playwright. The pass/fail is on what the page really does (pixels on the canvas,
@@ -29,8 +45,10 @@
  *         SHOTS_DIR    where screenshots of the new controls go (default: <tmp>/sketch-tools-shots)
  *         DPRS         comma list of device pixel ratios to run (default "1,2")
  *         PLAYWRIGHT_DIR  a folder whose node_modules holds playwright (default: this repo's)
- * exit:   0 all checks passed, 1 a check failed, 2 the probe could not run
+ * exit:   0 all checks passed, 1 a check failed, 2 the probe could not run (including a DPRS
+ *         that holds no device pixel ratio: a run with nothing in it must never pass)
  */
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -42,7 +60,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLIC = path.join(ROOT, "public");
 const SKETCH = process.env.SKETCH_HTML || path.join(PUBLIC, "buzzy", "sketch.html");
 const SHOTS = process.env.SHOTS_DIR || path.join(os.tmpdir(), "sketch-tools-shots");
-const DPRS = (process.env.DPRS || "1,2").split(",").map(Number).filter((n) => n > 0);
+const DPR_TOKENS = (process.env.DPRS || "1,2").split(",").map((t) => t.trim()).filter((t) => t !== "");
+const DPRS = DPR_TOKENS.map(Number);
+if (!DPRS.length || DPRS.some((n) => !(n > 0))) {
+  // An empty list used to run no scenario at all and report "1 passed, 0 failed" (exit 0), and
+  // a typo in a list ("1,two") quietly ran fewer checks than asked for. Neither may pass.
+  console.error("probe-sketch-tools: DPRS=" + JSON.stringify(process.env.DPRS) + " is not a comma list of device pixel ratios above 0 (such as \"1,2\"), so the run would be empty or partial.");
+  process.exit(2);
+}
 
 // ── playwright ──────────────────────────────────────────────────────────────
 let chromium;
@@ -98,6 +123,11 @@ function check(name, ok, detail) {
   console.log((ok ? "PASS " : "FAIL ") + tag + name + (!ok && detail !== undefined ? "  <- " + (typeof detail === "string" ? detail : JSON.stringify(detail)) : ""));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitFor(fn, ms, what) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) { if (await fn()) return; await sleep(50); }
+  throw new Error("timed out waiting for " + what);
+}
 
 // ── page helpers ────────────────────────────────────────────────────────────
 const state = (page) => page.evaluate(() => window.__bzSketch.state());
@@ -142,22 +172,65 @@ async function drag(page, g, x1, y1, x2, y2) {
   await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up();
 }
 // a 160x120 test picture: flat blue background with a little noise (like a JPEG's), a red
-// ring, and a hole in the middle of the ring that is the SAME blue but sealed off from the edges
+// ring, and a hole in the middle of the ring that is the SAME blue but sealed off from the edges.
+// Options: noise (0 = a perfectly flat background), bgAlpha (a translucent background),
+// shades (10% of the background pixels are one step lighter: two shades in one colour family).
 const RING = { w: 160, h: 120, corner: [0, 0], ring: [110, 60], hole: [80, 60] };
-const makeRing = (page) => page.evaluate(() => {
+const makeRing = (page, opts = {}) => page.evaluate((o) => {
   const w = 160, h = 120, c = document.createElement("canvas"); c.width = w; c.height = h;
   const g = c.getContext("2d"), im = g.createImageData(w, h), d = im.data;
+  const amp = o.noise === undefined ? 8 : o.noise, bgAlpha = o.bgAlpha === undefined ? 255 : o.bgAlpha;
   let seed = 12345; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = (y * w + x) * 4, r = Math.hypot(x - 80, y - 60);
-    const ring = r >= 20 && r <= 40, n = (rnd() - 0.5) * 8;
-    d[i] = Math.max(0, 40 + n); d[i + 1] = Math.max(0, 120 + n); d[i + 2] = Math.max(0, 220 + n);
+    const ring = r >= 20 && r <= 40, n = (rnd() - 0.5) * amp, up = o.shades && rnd() < 0.1 ? 1 : 0;
+    d[i] = Math.max(0, 40 + n + up); d[i + 1] = Math.max(0, 120 + n + up); d[i + 2] = Math.max(0, 220 + n + up);
     if (ring) { d[i] = 220; d[i + 1] = 30; d[i + 2] = 30; }
-    d[i + 3] = 255;
+    d[i + 3] = ring ? 255 : bgAlpha;
   }
   g.putImageData(im, 0, 0);
   return c.toDataURL("image/png");
-});
+}, opts);
+// Fraction of the picture's edge pixels (in the pixel layer) that ended up see-through.
+const EDGE_PTS = (() => { const a = []; for (let x = 0; x < 160; x += 4) { a.push([x, 0], [x, 119]); } for (let y = 0; y < 120; y += 4) { a.push([0, y], [159, y]); } return a; })();
+const seeThroughShare = async (page) => (await rasterPx(page, EDGE_PTS)).filter((p) => p[3] === 0).length / EDGE_PTS.length;
+// A picture made INSIDE the page and dropped on the board through the importer, so a
+// many-megabyte picture never has to cross the wire. kind "noise": a flat background with a block of
+// random pixels in it (incompressible, so its PNG is large); kind "bytes": n random bytes that
+// are not an image at all (the importer keeps such a file as it is: a cheap way to fill the board).
+async function dropMade(page, spec, x, y) {
+  const before = (await state(page)).images;
+  await page.evaluate(async ([spec, x, y]) => {
+    let blob;
+    if (spec.kind === "noise") {
+      const c = document.createElement("canvas"); c.width = spec.w; c.height = spec.h;
+      const g = c.getContext("2d"); g.fillStyle = "rgb(" + spec.bg.join(",") + ")"; g.fillRect(0, 0, spec.w, spec.h);
+      const [bx, by, bw, bh] = spec.block, im = g.createImageData(bw, bh);
+      let s = 99; for (let i = 0; i < im.data.length; i += 4) { s = (s * 1664525 + 1013904223) >>> 0; im.data[i] = s >>> 24; im.data[i + 1] = (s >>> 16) & 255; im.data[i + 2] = (s >>> 8) & 255; im.data[i + 3] = 255; }
+      g.putImageData(im, bx, by);
+      blob = await new Promise((r) => c.toBlob(r, spec.type, spec.q));
+    } else {
+      const bytes = new Uint8Array(spec.n); let s = 5;
+      for (let i = 0; i < bytes.length; i++) { s = (s * 1664525 + 1013904223) >>> 0; bytes[i] = s >>> 24; }
+      blob = new Blob([bytes], { type: "image/png" });
+    }
+    const dt = new DataTransfer(); dt.items.add(new File([blob], "made", { type: blob.type }));
+    const r = document.getElementById("board").getBoundingClientRect(), st = window.__bzSketch.state();
+    document.getElementById("stage").dispatchEvent(new DragEvent("drop", {
+      dataTransfer: dt, clientX: r.left + st.panX + x * st.zoom, clientY: r.top + st.panY + y * st.zoom, bubbles: true, cancelable: true,
+    }));
+  }, [spec, x, y]);
+  await page.waitForFunction((n) => window.__bzSketch.state().images === n, before + 1, { timeout: 30000 });
+  await sleep(300);
+}
+const setTol = (page, v) => page.evaluate((v) => { const t = document.getElementById("tol"); t.value = String(v); t.dispatchEvent(new Event("input", { bubbles: true })); }, v);
+// Open a data-URL picture into the pixel layer (Canvas > Open image...), the way the testers did.
+const openPic = async (page, url, w = 160) => {
+  await page.setInputFiles("#cvFile", { name: "pic.png", mimeType: "image/png", buffer: Buffer.from(url.split(",")[1], "base64") });
+  await page.waitForFunction((w) => window.__bzSketch.state().w === w, w);
+};
+const selectBoardPicture = async (page, p) => { const g = await geom(page), c = at(g, p.x + p.w / 2, p.y + p.h / 2); await page.mouse.click(c.x, c.y); };
+const pictureAt = (page, i) => page.evaluate((i) => { const p = window.__bzSketch.board().images[i]; return p ? { id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, len: p.url.length, head: p.url.slice(0, 22) } : null; }, i);
 async function dropPicture(page, url, x, y) {
   const before = (await state(page)).images;
   await page.evaluate(async ([url, x, y]) => {
@@ -329,6 +402,100 @@ async function checksPolygon(ctx, shots) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Review fixes for the polygon: zoom, Undo, key repeat and keyboard focus.
+async function checksPolygonMore(ctx) {
+  const ring = await (async () => { const p = await ctx.newPage(); await p.goto("about:blank"); const u = await makeRing(p); await p.close(); return u; })();
+  let page = await fresh(ctx);
+  let g = await geom(page);
+  const newest = async () => { const b = await board(page); return b.strokes[b.strokes.length - 1]; };
+  const draw = async (pts) => { for (const [x, y] of pts) await click(page, g, x, y); };
+  let st;
+
+  // 1. corners placed zoomed in must survive finishing zoomed out
+  await page.click('[data-tool="polygon"]');
+  await page.selectOption("#zoomSel", "4");
+  g = await geom(page);
+  const s0 = await state(page), cx = Math.round(s0.w / 2), cy = Math.round(s0.h / 2);
+  await draw([[cx - 10, cy - 10], [cx + 10, cy - 10], [cx + 10, cy + 10], [cx - 10, cy + 10]]);
+  st = await state(page);
+  check("A19 four corners 20 px apart are placed with the board zoomed in to 400%", st.poly === 4 && st.zoom === 4, st);
+  await page.selectOption("#zoomSel", "0.25");                    // ...then zoom out to 25% before finishing
+  await page.click("#polyFinish");
+  const sq = await newest();
+  check("A20 finishing after zooming out keeps all 4 corners (at 25% they are 5 screen px apart; that is not a 'duplicate')",
+    (await state(page)).poly === 0 && !!sq && sq.tool === "polygon" && sq.points.length === 4, sq && sq.points && sq.points.length);
+  await page.close();
+
+  // 2. Undo while a polygon is open takes back its last corner, and Redo survives it
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 100, 100, 200, 160);                        // mark A
+  await drag(page, g, 300, 100, 400, 160);                        // mark B
+  await page.click("#undo");                                      // B is undone: Redo has something
+  st = await state(page);
+  check("A21 setup: two marks drawn, one undone (A stays, B can be redone)", st.strokes === 1, st);
+  await page.click('[data-tool="polygon"]');
+  await draw([[500, 300], [650, 300], [650, 420]]);
+  check("A22 setup: a polygon with 3 corners is open", (await state(page)).poly === 3, await state(page));
+  await page.click("#undo");                                      // the header button: the touch way
+  st = await state(page);
+  check("A23 Undo takes back the polygon's last corner (and not the earlier mark)", st.poly === 2 && st.strokes === 1, st);
+  await page.keyboard.press("Control+z");
+  st = await state(page);
+  check("A24 Ctrl+Z does the same, down to nothing", st.poly === 1 && st.strokes === 1, st);
+  await page.keyboard.press("Control+z");
+  st = await state(page);
+  check("A25 the last corner goes too, and the polygon is gone with no mark lost", st.poly === 0 && st.strokes === 1, st);
+  await page.click("#redo");
+  check("A26 Redo still brings back the mark that was undone before the polygon (Undo did not wipe it)", (await state(page)).strokes === 2, await state(page));
+  await page.close();
+
+  // 3. a held Backspace must not run on into deleting the selected picture
+  page = await fresh(ctx);
+  g = await geom(page);
+  await dropPicture(page, ring, 100, 100);
+  const pr = await pictureRect(page);
+  await click(page, g, pr.x + pr.w / 2, pr.y + pr.h / 2);          // select the picture
+  check("A27 setup: the picture is selected", !!(await state(page)).selectedImage, await state(page));
+  await page.click('[data-tool="polygon"]');
+  await draw([[600, 200], [800, 200]]);
+  await page.keyboard.down("Backspace");                           // held: the first is a press, the rest repeat
+  for (let i = 0; i < 5; i++) await page.keyboard.down("Backspace");
+  await page.keyboard.up("Backspace");
+  st = await state(page);
+  check("A28 holding Backspace takes the two corners back and then stops: the picture is still there", st.poly === 0 && st.images === 1, st);
+  await page.keyboard.press("Backspace");                          // a new press is a request to delete
+  check("A29 a separate Backspace press still deletes the selected picture", (await state(page)).images === 0, await state(page));
+  await page.close();
+
+  // 4. placing a corner takes the keyboard focus from a slider or a menu
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="polygon"]');
+  await page.focus("#size");                                       // a slider has the keyboard
+  await draw([[300, 200], [520, 200], [520, 360]]);
+  const act = await page.evaluate(() => document.activeElement && document.activeElement.id);
+  check("A30 placing a corner hands the keyboard to the board (not the slider)", act === "board", act);
+  await page.keyboard.press("Enter");
+  st = await state(page);
+  check("A31 Enter then finishes the shape even though a slider had the focus", st.poly === 0 && st.strokes === 1, st);
+  const outline = await page.evaluate(() => getComputedStyle(document.getElementById("board")).outlineStyle);
+  check("A32 the focused board shows no focus ring", outline === "none", outline);
+  await page.close();
+
+  page = await fresh(ctx);                                         // a menu has the keyboard (a page of its own: no leftovers)
+  g = await geom(page);
+  await page.click('[data-tool="polygon"]');
+  await page.focus("#opMode");
+  await draw([[300, 200], [520, 200], [520, 360]]);
+  await page.keyboard.press("Backspace");
+  st = await state(page);
+  check("A33 Backspace takes back a corner even though a menu had the focus", st.poly === 2, st);
+  await page.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 async function checksDelete(ctx, shots) {
   const ring = await (async () => { const p = await ctx.newPage(); await p.goto("about:blank"); const u = await makeRing(p); await p.close(); return u; })();
   const page = await fresh(ctx);
@@ -429,6 +596,82 @@ async function checksDelete(ctx, shots) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Review fixes for Delete: it acts on what was picked; the x belongs to Select; a lifted
+// area's delete is an undo step of its own.
+async function checksDeleteMore(ctx) {
+  const ring = await (async () => { const p = await ctx.newPage(); await p.goto("about:blank"); const u = await makeRing(p); await p.close(); return u; })();
+  let page = await fresh(ctx);
+  let g = await geom(page);
+  let st;
+
+  // 1. an old pixel area must not outrank the mark that was just picked
+  await page.click('[data-tool="fill"]');
+  await click(page, g, 50, 50);                                    // the whole pixel layer is yellow
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 100, 100, 200, 180);                         // an area is selected
+  check("B15 setup: a rectangle area is selected", !!(await state(page)).sel, await state(page));
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 400, 300, 480, 360);                         // a mark OUTSIDE the area
+  await page.click('[data-tool="select"]');
+  await click(page, g, 440, 330);                                  // pick that mark
+  st = await state(page);
+  check("B16 picking the mark puts the old area away: nothing but the mark is selected", st.sel === null && !!st.selectedMark, st);
+  await page.click("#del");
+  st = await state(page);
+  check("B17 the header Delete deletes the picked mark", st.strokes === 0, st);
+  const px = await rasterPx(page, [[150, 140], [440, 330]]);
+  check("B18 ...and leaves the old area's pixels alone", px[0][3] === 255, px[0]);
+  check("B19 ...and the mark was deleted, not flattened into the pixels first (the yellow shows, not the mark's white fill)", px[1][0] > 240 && px[1][1] > 190 && px[1][2] < 60, px[1]);
+  await page.close();
+
+  // 2. the x on a selected picture answers to Select only
+  page = await fresh(ctx);
+  g = await geom(page);
+  await dropPicture(page, ring, 100, 100);
+  const pr = await pictureRect(page);
+  await click(page, g, pr.x + pr.w / 2, pr.y + pr.h / 2);
+  const xDisplay = () => page.evaluate(() => { const b = document.querySelector(".img-wrap.selected .img-del"); return b ? getComputedStyle(b).display : "missing"; });
+  check("B20 with Select in hand a selected picture shows its x", (await xDisplay()) === "block", await xDisplay());
+  const xc = await page.evaluate(() => { const r = document.querySelector(".img-wrap.selected .img-del").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.click('[data-tool="polygon"]');
+  check("B21 with the polygon tool in hand the x is gone", (await xDisplay()) === "none", await xDisplay());
+  await page.mouse.click(xc.x, xc.y);                              // a corner, placed exactly where the x was
+  st = await state(page);
+  check("B22 a polygon corner placed on that spot is a corner: the picture is not deleted", st.images === 1 && st.poly === 1, st);
+  await page.keyboard.press("Escape");
+  await page.click('[data-tool="pencil"]');
+  check("B23 with a drawing tool in hand the x is gone too", (await xDisplay()) === "none", await xDisplay());
+  await page.click('[data-tool="select"]');
+  check("B24 picking Select brings the x back", (await xDisplay()) === "block", await xDisplay());
+  await page.close();
+
+  // 3. deleting a lifted area is one undo step of its own, even after other edits while it floated
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="fill"]');
+  await click(page, g, 50, 50);                                    // the whole pixel layer is yellow
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 100, 100, 200, 180);
+  await page.click("#flipH");                                      // the area is lifted and floats, flipped
+  check("B25 setup: the area is lifted (floating)", (await state(page)).floating === true, await state(page));
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 400, 300, 480, 360);                         // something else is done while it floats
+  await page.click("#del");
+  st = await state(page);
+  check("B26 Delete lets the lifted area go", st.floating === false && st.strokes === 1, st);
+  check("B27 ...the hole it left is still a hole", (await rasterPx(page, [[150, 140]]))[0][3] === 0, await rasterPx(page, [[150, 140]]));
+  await page.click("#undo");
+  await sleep(300);
+  st = await state(page);
+  const back = await rasterPx(page, [[150, 140]]);
+  check("B28 one Undo gives the lifted area back (and keeps the mark drawn meanwhile): the delete was its own step", back[0][3] === 255 && st.strokes === 1, { back: back[0], strokes: st.strokes });
+  await page.click("#undo");
+  await sleep(300);
+  check("B29 the next Undo takes the mark away, as it would have anyway", (await state(page)).strokes === 0, await state(page));
+  await page.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 async function checksMove(ctx) {
   const ring = await (async () => { const p = await ctx.newPage(); await p.goto("about:blank"); const u = await makeRing(p); await p.close(); return u; })();
   const page = await fresh(ctx);
@@ -511,7 +754,10 @@ async function checksSeeThrough(ctx, shots) {
   check("D7 Export JPG stays white, not transparent", dl.type === "image/jpeg" && s.px[0][3] === 255 && s.px[0][0] > 240 && s.px[0][2] > 240, { type: dl.type, px: s.px[0] });
   check("D8 ...and its tooltip says a JPG cannot be see-through", /cannot be see-through/i.test(jpgTip), jpgTip);
 
-  // paper = none
+  // paper = none (after the user has chosen a paper colour of their own)
+  await page.fill("#cvBg", "#3366cc");
+  await blur(page);
+  check("D8b setup: the paper is a colour of the user's choice", (await state(page)).bg === "#3366cc", (await state(page)).bg);
   await page.check("#cvBgNone");
   await blur(page);
   let st = await state(page);
@@ -539,19 +785,28 @@ async function checksSeeThrough(ctx, shots) {
   const jobId = (await state(page)).jobId;
   const saved = boards[jobId];
   check("D13 the saved board records the paper as none", !!saved && saved.bg === "none", saved && saved.bg);
+  check("D13b ...and the last real paper colour beside it", !!saved && saved.paper === "#3366cc", saved && saved.paper);
   const reload = await fresh(ctx, origin + "/buzzy/sketch?job=" + encodeURIComponent(jobId));
   await sleep(500);
   const gr = await geom(reload);
   st = await state(reload);
   const t2 = await screenPx(reload, gr.left + gr.panX + 4, gr.top + gr.panY + 4);
   check("D14 reloading the board brings the see-through paper back (checkerboard, not paper colour)", st.bg === "none" && grey(t2), { bg: st.bg, t2 });
+  // ...and after that reload, un-ticking None must bring back the colour that was chosen, not the default
+  await reload.click("#canvasBtn");
+  await reload.uncheck("#cvBgNone");
+  await blur(reload);
+  const afterReload = (await state(reload)).bg;
+  check("D14b after a reload, un-ticking None restores the chosen paper colour (not #141414)", afterReload === "#3366cc", afterReload);
+  const picker = await reload.inputValue("#cvBg");
+  check("D14c ...and the colour box shows it", picker === "#3366cc", picker);
   await reload.close();
 
   // un-ticking returns the colour
   await page.uncheck("#cvBgNone");
   await blur(page);
   st = await state(page);
-  check("D15 un-ticking None brings the previous paper colour back", st.bg === "#141414", st.bg);
+  check("D15 un-ticking None brings the previous paper colour back", st.bg === "#3366cc", st.bg);
   await page.close();
 
   // a selection made on a see-through paper must not carry a black box with it
@@ -568,6 +823,68 @@ async function checksSeeThrough(ctx, shots) {
   const raster = (await board(p2)).raster;
   check("D16 moving a selection over a see-through paper adds no black (the layer stays empty)", raster === null, raster && raster.length);
   await p2.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Review fixes for the Canvas panel: it follows Undo/Redo, and it fits a short stage.
+async function checksCanvasPanel(ctx, shots) {
+  // Undo restores a paper colour while the panel shows None...
+  let page = await fresh(ctx);
+  let g = await geom(page);
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 300, 200, 500, 300);                         // an edit: its snapshot holds the paper as it is now (#141414)
+  await page.click("#canvasBtn");
+  await page.fill("#cvBg", "#3366cc");
+  await page.check("#cvBgNone");
+  await blur(page);
+  check("D17 setup: the panel is open, the paper is none (and was #3366cc before)", (await state(page)).bg === "none" && await page.isChecked("#cvBgNone"), await state(page));
+  await page.click("#undo");
+  await sleep(300);
+  let st = await state(page);
+  check("D18 after Undo restores the paper colour, the None box is un-ticked", st.bg === "#141414" && !(await page.isChecked("#cvBgNone")), { bg: st.bg, none: await page.isChecked("#cvBgNone") });
+  check("D19 ...and the colour box shows that colour, not the one it was left on", (await page.inputValue("#cvBg")) === "#141414", await page.inputValue("#cvBg"));
+  await page.click("#redo");
+  await sleep(300);
+  st = await state(page);
+  check("D20 after Redo restores 'none', the None box is ticked again", st.bg === "none" && await page.isChecked("#cvBgNone"), { bg: st.bg, none: await page.isChecked("#cvBgNone") });
+  await page.close();
+
+  // ...and Undo restores 'none' while the panel shows a colour
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click("#canvasBtn");
+  await page.check("#cvBgNone");
+  await blur(page);
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 300, 200, 500, 300);                         // an edit: its snapshot holds the paper as none
+  await page.uncheck("#cvBgNone");
+  await blur(page);
+  check("D20b setup: the paper was made a colour again after the edit", (await state(page)).bg === "#141414" && !(await page.isChecked("#cvBgNone")), await state(page));
+  await page.click("#undo");
+  await sleep(300);
+  st = await state(page);
+  check("D20c after Undo restores 'none', the None box is ticked", st.bg === "none" && await page.isChecked("#cvBgNone"), { bg: st.bg, none: await page.isChecked("#cvBgNone") });
+  await page.close();
+
+  // a short stage (a small laptop, a phone held sideways): the panel must stay inside it and scroll
+  page = await fresh(ctx);
+  await page.setViewportSize({ width: 1440, height: 560 });
+  await sleep(300);
+  await page.click("#canvasBtn");
+  const m = await page.evaluate(() => {
+    const p = document.getElementById("canvasPanel"), s = document.getElementById("stage").getBoundingClientRect(), r = p.getBoundingClientRect();
+    return { stageH: Math.round(s.height), inside: r.top >= s.top - 0.5 && r.bottom <= s.bottom + 0.5, overflowY: getComputedStyle(p).overflowY, taller: p.scrollHeight > p.clientHeight + 1 };
+  });
+  check("D21 on a short stage the Canvas panel stays inside it", m.stageH < 330 && m.inside, m);
+  check("D22 ...and scrolls, so nothing in it is out of reach", /auto|scroll/.test(m.overflowY) && m.taller, m);
+  const last = await page.evaluate(() => {
+    const p = document.getElementById("canvasPanel"); p.scrollTop = p.scrollHeight;
+    const s = document.getElementById("stage").getBoundingClientRect(), b = document.getElementById("cvJpg").getBoundingClientRect();
+    return { top: b.top >= s.top - 0.5, bottom: b.bottom <= s.bottom + 0.5 };
+  });
+  check("D23 scrolled to the end, the last button (Export JPG) is reachable inside the stage", last.top && last.bottom, last);
+  if (shots) await shot(page, "5-canvas-panel-on-a-short-screen.png");
+  await page.close();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -609,13 +926,44 @@ async function checksRemoveBackground(ctx, shots) {
 
   // 2. tolerance: the Fill tol. slider decides what counts as the same colour
   page = await fresh(ctx);
-  await page.setInputFiles("#cvFile", { name: "ring.png", mimeType: "image/png", buffer: buf });
-  await page.waitForFunction(() => window.__bzSketch.state().w === 160);
-  await page.evaluate(() => { const t = document.getElementById("tol"); t.value = "0"; t.dispatchEvent(new Event("input", { bubbles: true })); });
+  await openPic(page, ring);
+  await setTol(page, 0);
   await page.click("#rmBg");
   await sleep(200);
-  px = await rasterPx(page, CORNERS);
-  check("E8 with Fill tol. at 0 the noisy background is NOT swept away (and the board says so)", px.every(opaque) && /Nothing to remove/.test(await status(page)), { px, s: await status(page) });
+  let share = await seeThroughShare(page);
+  check("E8 with Fill tol. at 0 a NOISY background is mostly NOT swept away (only pixels exactly like the key go)", share < 0.35, share);
+  await page.close();
+
+  // ...but a background that is ONE exact colour clears at tolerance 0: the key is a real pixel of it, so it matches itself
+  page = await fresh(ctx);
+  await openPic(page, await makeRing(page, { noise: 0 }));
+  await setTol(page, 0);
+  await page.click("#rmBg");
+  await sleep(200);
+  px = await rasterPx(page, [...CORNERS, RING.ring, RING.hole]);
+  check("E8b with Fill tol. at 0 a background of one exact colour clears completely (the ring and the sealed hole stay)",
+    px.slice(0, 4).every((p) => p[3] === 0) && opaque(px[4]) && opaque(px[5]) && (await seeThroughShare(page)) === 1, px);
+  await page.close();
+
+  // ...and so does a background that is mostly one colour with a few pixels one step lighter
+  // (the average of those is a colour no pixel has: at tolerance 0 it matched nothing at all)
+  page = await fresh(ctx);
+  await openPic(page, await makeRing(page, { noise: 0, shades: true }));
+  await setTol(page, 0);
+  await page.click("#rmBg");
+  await sleep(200);
+  share = await seeThroughShare(page);
+  check("E8c with Fill tol. at 0 a background of one colour plus a few lighter pixels clears (the common colour is the key)", share >= 0.8, share);
+  await page.close();
+
+  // a translucent background is a colour with an alpha, and it matches itself (the key used to be forced opaque)
+  page = await fresh(ctx);
+  await openPic(page, await makeRing(page, { bgAlpha: 128 }));
+  await page.click("#rmBg");
+  await sleep(200);
+  px = await rasterPx(page, [...CORNERS, RING.ring, RING.hole]);
+  check("E8d a half-see-through background clears at the default tolerance (all four corners)", px.slice(0, 4).every((p) => p[3] === 0), px.slice(0, 4));
+  check("E8e ...the opaque ring stays, and the sealed hole keeps its own half-see-through colour", opaque(px[4]) && px[5][3] > 100 && px[5][3] < 160, px.slice(4));
   await page.close();
 
   // 3. Fill with Alt/Option erases to see-through
@@ -694,6 +1042,185 @@ async function checksRemoveBackground(ctx, shots) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Review fixes for Fill: a click that changes nothing changes nothing, and a touch switch for erase-fill.
+async function checksFill(ctx, shots) {
+  const ring = await (async () => { const p = await ctx.newPage(); await p.goto("about:blank"); const u = await makeRing(p); await p.close(); return u; })();
+  const opaque = (p) => p[3] === 255;
+  let page = await fresh(ctx);
+  let g = await geom(page);
+  let st;
+
+  // 1. Alt+Fill on an area that is already see-through: no flattening, no undo step, no save
+  const savesBefore = saves.length;
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 300, 200, 400, 260);                         // a vector mark over an empty (see-through) pixel layer
+  await page.click('[data-tool="fill"]');
+  await waitFor(() => saves.length > savesBefore, 8000, "the mark's autosave");
+  await sleep(700);                                                // ...and nothing else is queued behind it
+  const saves0 = saves.length;
+  await click(page, g, 800, 450, { alt: true });                   // Alt+Fill far from the mark, on empty pixels
+  st = await state(page);
+  check("E20 Alt+Fill on an area that is already see-through leaves the vector mark a mark", st.strokes === 1, st);
+  check("E21 ...and says the area is already see-through", /already see-through/.test(await status(page)), await status(page));
+  await sleep(1800);
+  check("E22 ...and saves nothing", saves.length === saves0, { saves0, now: saves.length });
+  await page.click("#undo");
+  check("E23 ...and adds no undo step: one Undo takes the mark away", (await state(page)).strokes === 0, await state(page));
+  await page.close();
+
+  // 2. a plain Fill onto the colour that is already there is a no-op too
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="fill"]');
+  await click(page, g, 50, 50);                                    // paints the layer yellow: one undo step
+  await page.waitForFunction(() => !!window.__bzSketch.state().jobId);      // the board's project exists (its "ready" note comes in late)
+  await sleep(150);
+  await click(page, g, 50, 50);                                    // the same again: nothing changes
+  check("E24 Fill on an area that is already that colour says so", /already that colour/.test(await status(page)), await status(page));
+  await page.click("#undo");
+  await sleep(300);
+  check("E25 ...and adds no undo step: one Undo already empties the layer", (await rasterPx(page, [[50, 50]]))[0][3] === 0, await rasterPx(page, [[50, 50]]));
+  await page.close();
+
+  // 3. the touch way to erase-fill: the Fill makes see-through switch
+  page = await fresh(ctx);
+  await openPic(page, ring);
+  g = await geom(page);
+  const bars = () => page.evaluate(() => {
+    const el = (id) => document.getElementById(id), vis = (id) => (el(id) ? getComputedStyle(el(id)).visibility : "missing"), sw = el("fillClear");
+    return { fill: vis("fillbar"), text: vis("textbar"), poly: vis("polybar"), label: sw ? sw.textContent.trim() : "missing", pressed: sw ? sw.getAttribute("aria-pressed") : "missing", on: !!sw && sw.classList.contains("on") };
+  });
+  let b = await bars();
+  check("E26 the Fill options bar is out of sight while another tool is in hand", b.fill === "hidden", b);
+  await page.click('[data-tool="fill"]');
+  b = await bars();
+  check("E27 with Fill in hand, a 'Fill makes see-through' switch shows, off to begin with, and no other options bar shares its row",
+    b.fill === "visible" && b.text === "hidden" && b.poly === "hidden" && b.label === "Fill makes see-through" && b.pressed === "false" && !b.on, b);
+  if (shots) await shot(page, "6-fill-makes-see-through-switch.png");
+  await page.click("#fillClear");
+  b = await bars();
+  check("E28 pressing it turns it on (it reads as pressed)", b.pressed === "true" && b.on, b);
+  await click(page, g, 20, 20);                                    // a plain click, no Alt key
+  let px = await rasterPx(page, [[20, 20], [5, 100], [110, 60], [80, 60]]);
+  check("E29 with the switch on, a plain click makes the area see-through (what Alt+click does)", px[0][3] === 0 && px[1][3] === 0 && opaque(px[2]) && opaque(px[3]), px);
+  await page.click("#fillClear");
+  await click(page, g, 20, 20);
+  px = await rasterPx(page, [[20, 20]]);
+  check("E30 switched off again, a plain click paints the colour", opaque(px[0]) && px[0][0] > 240 && px[0][2] < 60, px[0]);
+  // a text mark that is selected shows the text bar; Fill must still own the row
+  await page.click('[data-tool="text"]');
+  await click(page, g, 120, 80);
+  await page.keyboard.type("hi");
+  await page.keyboard.press("Escape");                             // finishes the text; the mark stays selected
+  await page.click('[data-tool="fill"]');
+  b = await bars();
+  check("E31 with a text mark selected, Fill still owns the options row (the text bar does not show over it)", b.fill === "visible" && b.text === "hidden", b);
+  await page.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Review fixes for Remove background: a pixel budget, a size budget for the cleared picture,
+// and a refusal that keeps the board saveable.
+async function checksRemoveBudgets(ctx) {
+  const LIMIT = 8 * 1024 * 1024;
+  let page = await fresh(ctx);
+  // 1. a canvas over the pixel budget is refused at once, with a message, before anything is allocated
+  await page.click("#canvasBtn");
+  await page.fill("#cvW", "4100"); await page.fill("#cvH", "4100");
+  await page.click("#cvApply");
+  await page.waitForFunction(() => window.__bzSketch.state().w === 4100, null, { timeout: 20000 });
+  let t0 = Date.now();
+  await page.click("#rmBg");
+  let took = Date.now() - t0, msg = await status(page);
+  check("E32 Remove background on a 4100x4100 canvas (over 16 million pixels) is refused with a message", /too big/.test(msg) && /4100×4100/.test(msg) && /Apply size|Crop/.test(msg), msg);
+  check("E33 ...at once: the flood that would need hundreds of MB never starts", took < 1500, took);
+  await page.fill("#cvW", "4096"); await page.fill("#cvH", "4096");
+  await page.click("#cvApply");
+  await page.waitForFunction(() => window.__bzSketch.state().w === 4096, null, { timeout: 20000 });
+  await page.click("#rmBg");
+  msg = await status(page);
+  check("E34 a 4096x4096 canvas is within the budget (it is not refused)", !/too big/.test(msg) && /Nothing to remove/.test(msg), msg);
+  await page.close();
+
+  // 2. a big picture's cleared PNG is made smaller to fit its share of the board, alpha kept
+  page = await fresh(ctx);
+  await dropMade(page, { kind: "noise", w: 1600, h: 1200, block: [100, 100, 1400, 1000], bg: [40, 120, 220], type: "image/png" }, 100, 50);
+  let p0 = await pictureAt(page, 0);
+  await selectBoardPicture(page, p0);
+  await page.click("#rmBg");
+  await page.waitForFunction((h) => window.__bzSketch.board().images[0].url.slice(0, 22) !== h, p0.head, { timeout: 60000 });
+  await sleep(300);
+  const done = await page.evaluate(async () => {
+    const u = window.__bzSketch.board().images[0].url, im = new Image(); im.src = u; await im.decode();
+    const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
+    const g = c.getContext("2d"); g.drawImage(im, 0, 0);
+    const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
+    return { len: u.length, head: u.slice(0, 22), w: c.width, h: c.height, corner: px(1, 1), mid: px(c.width >> 1, c.height >> 1), boardLen: JSON.stringify(window.__bzSketch.board()).length };
+  });
+  check("E35 clearing the background of a big picture keeps its PNG within the per-picture budget (2 MB)", /image\/png/.test(done.head) && done.len <= 2 * 1024 * 1024, { head: done.head, len: done.len });
+  check("E36 ...by making the picture smaller in proportion, with its see-through corner and its opaque middle intact",
+    done.w < 1600 && Math.abs(done.w / done.h - 4 / 3) < 0.02 && done.corner[3] === 0 && done.mid[3] === 255, done);
+  check("E37 ...and it says so", /made smaller/.test(await status(page)), await status(page));
+  check("E38 ...so the whole board is still under the 8 MB save limit", done.boardLen < LIMIT, done.boardLen);
+  await page.close();
+
+  // 3. a cleared picture that would push the board over the save limit is refused, and nothing changes
+  const SMALL = { kind: "noise", w: 700, h: 700, block: [100, 100, 500, 500], bg: [40, 120, 220], type: "image/jpeg", q: 0.4 };
+  page = await fresh(ctx);                                          // a roomy board: measure the picture before and after
+  await dropMade(page, SMALL, 100, 100);
+  const O = (await pictureAt(page, 0)).len;
+  await selectBoardPicture(page, await pictureAt(page, 0));
+  await page.click("#rmBg");
+  await page.waitForFunction(() => /^data:image\/png/.test(window.__bzSketch.board().images[0].url), null, { timeout: 30000 });
+  const N = (await pictureAt(page, 0)).len;
+  check("E39 control: on a roomy board the same compact JPEG IS cleared, into a PNG many times its size", N > O * 4, { jpeg: O, png: N });
+  await page.close();
+
+  page = await fresh(ctx);                                          // a board with room for the JPEG, but not for the PNG
+  await dropMade(page, SMALL, 100, 100);
+  const filler = LIMIT - Math.round((O + N) / 2) - 700;             // as a data URL: halfway between the two sizes
+  await dropMade(page, { kind: "bytes", n: Math.floor((filler - 22) / 4) * 3 }, 700, 100);
+  const before = await pictureAt(page, 0);
+  await sleep(2300);                                                // the board saves: it fits
+  check("E40 setup: a board just under the 8 MB limit that still saves", (await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length)) < LIMIT && !/over the 8 MB/.test(await status(page)), await status(page));
+  await selectBoardPicture(page, before);
+  await page.click("#rmBg");
+  await sleep(1500);
+  const refused = await pictureAt(page, 0);
+  msg = await status(page);
+  check("E41 clearing the background there is refused, with a clear message", /Not done/.test(msg) && /8 MB save limit/.test(msg) && /Nothing was changed/.test(msg), msg);
+  check("E42 ...and the picture is exactly as it was (still the compact JPEG)", refused.len === before.len && refused.head === before.head, { before: before.len, now: refused.len });
+  await selectBoardPicture(page, await pictureAt(page, 1));         // make room: delete the filler
+  await page.keyboard.press("Delete");
+  await selectBoardPicture(page, before);
+  await page.click("#rmBg");
+  await page.waitForFunction(() => /^data:image\/png/.test(window.__bzSketch.board().images[0].url), null, { timeout: 30000 });
+  check("E43 once there is room, the same click works", /Background removed/.test(await status(page)), await status(page));
+  await page.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// The new controls at phone width (the page itself is too tall for a phone held upright: that
+// is as it was before; what is checked here is that nothing new spills out sideways).
+async function checksPhone(ctx) {
+  const page = await fresh(ctx);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await sleep(300);
+  await page.click('[data-tool="fill"]');
+  const m = await page.evaluate(() => {
+    const bar = document.getElementById("fillbar"), btn = document.getElementById("fillClear");
+    if (!bar || !btn) return { vis: "missing", left: -1, right: 9999, vw: window.innerWidth, spill: 9999 };
+    const r = btn.getBoundingClientRect();
+    return { vis: getComputedStyle(bar).visibility, left: r.left, right: r.right, vw: window.innerWidth, spill: bar.scrollWidth - bar.clientWidth, label: btn.textContent.trim() };
+  });
+  check("G1 at 375 px wide the Fill switch is on screen in full and the bar does not spill sideways", m.vis === "visible" && m.left >= 0 && m.right <= m.vw && m.spill <= 1, m);
+  await page.click('[data-tool="polygon"]');
+  const q = await page.evaluate(() => { const bar = document.getElementById("polybar"), r = document.getElementById("polyFinish").getBoundingClientRect(); return { right: r.right, vw: window.innerWidth, spill: bar.scrollWidth - bar.clientWidth }; });
+  check("G2 ...and the polygon bar's Finish shape button is still fully on screen too", q.right <= q.vw && q.spill <= 1, q);
+  await page.close();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 origin = "http://127.0.0.1:" + server.address().port;
 let browser;
@@ -715,10 +1242,16 @@ try {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr });
     try {
       await scenario("A polygon", () => checksPolygon(ctx, first));
+      await scenario("A polygon (review fixes)", () => checksPolygonMore(ctx));
       await scenario("B delete", () => checksDelete(ctx, first));
+      await scenario("B delete (review fixes)", () => checksDeleteMore(ctx));
       await scenario("C move", () => checksMove(ctx));
       await scenario("D see-through", () => checksSeeThrough(ctx, first));
+      await scenario("D canvas panel (review fixes)", () => checksCanvasPanel(ctx, first));
       await scenario("E remove background", () => checksRemoveBackground(ctx, first));
+      await scenario("E fill (review fixes)", () => checksFill(ctx, first));
+      await scenario("E remove background budgets (review fixes)", () => checksRemoveBudgets(ctx));
+      await scenario("G phone width", () => checksPhone(ctx));
     } finally {
       await ctx.close();
     }
@@ -726,6 +1259,13 @@ try {
   }
   tag = "";
   check("F1 no page errors or console errors during the whole run", errors.length === 0, errors.slice(0, 5));
+  // The guard at the top, guarded: an empty DPRS must make the probe exit non-zero. It used to run
+  // nothing and report a pass. (The child stops at that guard, before it starts anything; the marker
+  // keeps a child that did NOT stop there from testing itself again.)
+  if (!process.env.SKETCH_PROBE_SELFTEST) {
+    const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { env: { ...process.env, DPRS: ",", SKETCH_PROBE_SELFTEST: "1" }, stdio: "ignore", timeout: 30000 });
+    check("F2 a DPRS with no device pixel ratio in it makes the probe exit non-zero (it used to pass having run nothing)", child.status !== null && child.status !== 0, { status: child.status, signal: child.signal });
+  }
 } catch (e) {
   crashed = true;
   console.error("probe-sketch-tools: the probe itself failed: " + (e && e.stack ? e.stack.split("\n").slice(0, 6).join("\n") : e));

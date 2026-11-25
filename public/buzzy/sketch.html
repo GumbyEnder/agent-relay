@@ -48,6 +48,10 @@
      and let the backing store follow the measurement. */
   #board { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none;
            cursor:crosshair; }
+  /* The board takes the keyboard focus when a polygon corner is placed on it (see
+     focusBoard); it is focusable only from script, so it never joins the Tab order, and it
+     must not show a ring when it does. */
+  #board:focus { outline:none; }
   #layers { position:absolute; inset:0; pointer-events:none; }
   /* #296: a wrap must never take the click. The stacking order says which item is
      visible on top, and only the board's hit test knows that; a wrap that ate the
@@ -68,13 +72,16 @@
                       border-radius:2px; cursor:nwse-resize; pointer-events:none; }
   .img-wrap.selected .handle { pointer-events:auto; }
   /* The × on a selected picture's corner. Positioned from syncImages(), which keeps it
-     inside the stage so a picture dragged half off-screen can still be deleted. */
+     inside the stage so a picture dragged half off-screen can still be deleted. It is a
+     Select-tool control and is shown only while Select is in hand (setTool puts
+     .select-tool on #layers): with any other tool it sat on top of the board and a click
+     meant for the tool, like a polygon corner placed over the picture, deleted the picture. */
   .img-wrap .img-del { position:absolute; left:0; top:0; width:22px; height:22px; padding:0; border-radius:50%;
                        display:none; pointer-events:auto; cursor:pointer; z-index:2;
                        background:#1b1b1b; color:var(--bz-yellow); border:1px solid var(--bz-yellow);
                        font-size:16px; line-height:1; font-weight:600; }
   .img-wrap .img-del:hover { background:var(--bz-yellow); color:#111; border-color:var(--bz-yellow); }
-  .img-wrap.selected .img-del { display:block; }
+  #layers.select-tool .img-wrap.selected .img-del { display:block; }
   /* The right padding keeps the bar's last words clear of the settings gear, which
      nav.js pins to the bottom-right corner of every page (44px, 22px in). */
   footer { border-top:1px solid var(--bz-line); padding:0.5rem 80px 0.5rem 1rem; display:flex; gap:0.6rem; align-items:center; }
@@ -112,18 +119,18 @@
              padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
   #textbar.on { visibility:visible; }
   #textbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
-  /* The text bar and the polygon bar are both "options for the tool in your hand" and
-     are never shown together, so they share one row: stacked in one grid cell, each
-     hidden with visibility (not display) so the row never changes height. A bar that
+  /* The text bar, the polygon bar and the Fill bar are all "options for the tool in your
+     hand" and are never shown together, so they share one row: stacked in one grid cell,
+     each hidden with visibility (not display) so the row never changes height. A bar that
      appeared and disappeared would move the board under the cursor mid-click. */
   #toolopts { display:grid; }
   #toolopts > * { grid-area:1 / 1; min-width:0; }
-  #polybar { display:flex; visibility:hidden; align-items:center; gap:0.5rem;
-             padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
-  #polybar.on { visibility:visible; }
-  #polybar .lbl { color:var(--bz-muted); font-size:0.76rem; flex:none; }
-  #polybar .hint { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #polybar button { flex:none; }
+  #polybar, #fillbar { display:flex; visibility:hidden; align-items:center; gap:0.5rem;
+                       padding:0.35rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
+  #polybar.on, #fillbar.on { visibility:visible; }
+  #polybar .lbl, #fillbar .lbl { color:var(--bz-muted); font-size:0.76rem; flex:none; }
+  #polybar .hint, #fillbar .hint { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #polybar button, #fillbar button { flex:none; }
   #fontSize { width:64px; background:#101010; border:1px solid var(--bz-line); color:var(--bz-text);
               border-radius:8px; padding:0.25rem; font-size:0.8rem; }
   .text-edit { position:absolute; z-index:6; outline:1px dashed var(--bz-yellow); outline-offset:2px;
@@ -144,7 +151,12 @@
               padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0d0d0d; }
   #orderbar.on { visibility:visible; }
   #orderbar .lbl { color:var(--bz-muted); font-size:0.76rem; }
+  /* The panel grew (None, the see-through export, a note) and is taller than a short
+     stage (a laptop with the toolbar wrapped, a phone held sideways): the stage clips what
+     overflows it, which hid the buttons at the bottom. Its height is capped to the stage,
+     less the 12px it sits in from the top, and what does not fit scrolls inside it. */
   #canvasPanel { position:absolute; z-index:8; right:12px; top:12px; width:250px; display:none;
+                 max-height:calc(100% - 24px); overflow-y:auto; overscroll-behavior:contain;
                  background:var(--bz-card); border:1px solid var(--bz-line); border-radius:12px;
                  padding:0.7rem; box-shadow:0 12px 30px rgba(0,0,0,0.5); }
   #canvasPanel.on { display:block; }
@@ -201,7 +213,7 @@
   <button class="tool" data-tool="pencil" title="Pencil — hard edge (P)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-pencil"/></svg></span></button>
   <button class="tool" data-tool="brush" title="Brush (B)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-brush"/></svg></span></button>
   <button class="tool" data-tool="eraser" title="Eraser — erases pixels (E)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-eraser"/></svg></span></button>
-  <button class="tool" data-tool="fill" title="Fill with colour (F) — Alt/Option+click makes the area see-through instead"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-fill"/></svg></span></button>
+  <button class="tool" data-tool="fill" title="Fill with colour (F) — Alt/Option+click, or the Fill makes see-through switch that appears under the toolbar, makes the area see-through instead"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-fill"/></svg></span></button>
   <button class="tool" data-tool="picker" title="Pick a colour from the board (I)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-picker"/></svg></span></button>
   <button class="tool" data-tool="airbrush" title="Airbrush (A)"><span class="glyph"><svg class="tic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/buzzy/icons/bz-icons.svg#tool-airbrush"/></svg></span></button>
   <span class="sep"></span>
@@ -280,6 +292,14 @@
   <span class="hint" id="polyHint">Click the first corner, double-click or press Enter to finish · Esc keeps the shape · Backspace removes the last corner</span>
   <button id="polyFinish" class="primary is-off" aria-disabled="true" title="Finish the shape (Enter). It needs at least 3 corners.">Finish shape</button>
 </div>
+<!-- Shown while the Fill tool is in hand. Alt/Option+click erases the area to see-through
+     instead of painting it, and a touch screen has no Alt key: this switch does the same for
+     every click while it is on. -->
+<div id="fillbar">
+  <span class="lbl">Fill</span>
+  <button id="fillClear" type="button" aria-pressed="false" title="Off: a click paints the area with the colour. On: a click makes the area see-through (the same as Alt/Option+click).">Fill makes see-through</button>
+  <span class="hint" id="fillHint">Off: a click paints the area · On: a click makes it see-through (Alt/Option+click does the same)</span>
+</div>
 </div>
 
 <div id="selbar">
@@ -313,7 +333,7 @@
 
 <div id="work">
   <div id="stage">
-    <canvas id="board"></canvas>
+    <canvas id="board" tabindex="-1"></canvas>
     <div id="layers"></div>
     <div id="canvasPanel">
       <div class="row" style="display:flex;justify-content:space-between;align-items:center"><b>Canvas</b><button id="canvasClose">Close</button></div>
@@ -392,11 +412,13 @@
     var doc = { w: 1, h: 1, bg: "#141414", raster: null, strokes: [], images: [], order: [] };
     var view = { zoom: 1, panX: 0, panY: 0 };
     var tool = "select";
+    layers.classList.add("select-tool");     // setTool keeps this in step (the picture's × shows only with Select)
     var colorP = "#ffd40d";
     var colorS = "#ffffff";
     var size = 6;
     var tolerance = 24;
     var op = "both";
+    var fillClear = false;        // the Fill tool makes the area see-through (what Alt/Option+click does)
     var selected = null;          // selected image id
     var selectedStroke = null;
     var draft = null;
@@ -1005,9 +1027,18 @@
       loadRaster(d.raster || null);
       renderImages();
       paint();
+      // The Canvas panel mirrors the board's size and paper; a restored board can change
+      // both, and an open panel kept showing the state from before the Undo.
+      syncCanvasPanel();
     }
     function current() { return JSON.stringify({ strokes: doc.strokes, images: doc.images, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(), order: doc.order }); }
     function undo() {
+      // While a polygon is open, Undo takes back its last corner, as Backspace does. The
+      // corners are not on the undo stack (the shape becomes one step when it is finished),
+      // so undoing from the stack would undo the edit BEFORE the polygon and leave the open
+      // shape on a board that changed under it. Nothing is snapshotted here, so Redo keeps
+      // whatever it had.
+      if (polyDraft) { polyBack(); return; }
       if (!undoStack.length) { setStatus("Nothing to undo."); return; }
       redoStack.push(current());
       applySnapshot(undoStack.pop());
@@ -1172,6 +1203,9 @@
       orderSync();
       return {
         version: 3, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
+        // The last real paper colour, kept beside a paper of "none": un-ticking None after a
+        // reload must bring back the colour that was chosen, not the default.
+        paper: paperColor,
         strokes: doc.strokes,
         // id is persisted so `order` (and any anchor pointing at a mark) still
         // resolves after a reload — it used to be dropped and regenerated.
@@ -1195,20 +1229,39 @@
       g.restore();
       paint();
     }
+    // One pixel as the pixel tools will see it: the pixel layer with the vector marks laid
+    // over it. Worked out on a 1×1 canvas, so nothing on the board is touched.
+    function pixelAt(x, y) {
+      ensureRaster();
+      var c = document.createElement("canvas");
+      c.width = 1; c.height = 1;
+      var g = c.getContext("2d");
+      g.drawImage(rasterCv, -x, -y);
+      g.translate(-x, -y);
+      doc.strokes.forEach(function (s) { drawMark(g, s, false); });
+      return g.getImageData(0, 0, 1, 1).data;
+    }
     // `hex` null erases instead of painting: the flooded area becomes see-through
-    // (Alt/Option+click). Returns whether any pixel changed.
+    // (Alt/Option+click, or the Fill makes see-through switch). Returns whether any pixel
+    // changed. A click that would change nothing (the colour is already there, the area is
+    // already see-through) changes nothing at all: no undo step, and the vector marks stay
+    // marks, where they used to be flattened into pixels before anyone knew.
     function floodFill(p, hex) {
-      rasterize();
+      ensureRaster();
       var w = rasterCv.width, h = rasterCv.height;
       var x0 = Math.floor(p.x), y0 = Math.floor(p.y);
       if (x0 < 0 || y0 < 0 || x0 >= w || y0 >= h) return false;
+      var erase = hex === null;
+      var rgb = erase ? { r: 0, g: 0, b: 0 } : hexToRgb(hex);
+      var first = pixelAt(x0, y0);
+      if (erase ? first[3] === 0 : (first[3] === 255 && first[0] === rgb.r && first[1] === rgb.g && first[2] === rgb.b)) return false;
+      snapshot();               // the board as it is, marks and all: Undo brings the marks back as marks
+      rasterize();
       var g = rasterCv.getContext("2d");
       var img = g.getImageData(0, 0, w, h);
       var d = img.data;
       var si = (y0 * w + x0) * 4;
       var sr = d[si], sg = d[si + 1], sb = d[si + 2], sa = d[si + 3];
-      var erase = hex === null;
-      var rgb = erase ? { r: 0, g: 0, b: 0 } : hexToRgb(hex);
       var tol = tolerance;
       // Squared-distance tolerance on RGBA, so a 0 tolerance is exact-match and a
       // high one still stops at the stroke that encloses the area.
@@ -1216,7 +1269,6 @@
         var dr = d[i] - sr, dg = d[i + 1] - sg, db = d[i + 2] - sb, da = d[i + 3] - sa;
         return dr * dr + dg * dg + db * db + da * da <= tol * tol * 4;
       }
-      if (erase ? sa === 0 : (sa === 255 && sr === rgb.r && sg === rgb.g && sb === rgb.b)) return false;
       var stack = [[x0, y0]];
       var seen = new Uint8Array(w * h);
       while (stack.length) {
@@ -1243,25 +1295,54 @@
     // Fill tol. slider means the same thing here. Only what the flood reaches goes
     // see-through: a patch of the same colour sealed inside the subject (the hole in a
     // ring, the white of an eye) does not touch the edge and stays.
+
+    // The most pixels one Remove background works on. It holds the RGBA copy (4 bytes a
+    // pixel), the flood's stack (4) and a visited map (1): at 4096 × 4096, the largest
+    // picture Open image… makes, that is about 150 MB; a canvas can be 8000 × 8000, and the
+    // same click there asked for nearly 600 MB at once.
+    var REMOVE_BG_MAX_PIXELS = 16 * 1024 * 1024;
+    // The most one picture may weigh once its background is cleared, as the data URL that
+    // goes into the saved board. The whole board is capped at 8 MB (MAX_BOARD_BYTES), so one
+    // picture is allowed a quarter of it.
+    var MAX_PICTURE_BYTES = 2 * 1024 * 1024;
+
+    // The colour that touches the edges, as one real pixel of the picture. Edge pixels that
+    // are not see-through already are sorted into coarse buckets (4 bits a colour channel, 2
+    // of alpha), so a little noise (JPEG, grain) does not split one background into hundreds
+    // of colours, and the fullest bucket is the background. The key is the edge pixel in that
+    // bucket that is nearest the bucket's mean, with its own RGBA:
+    //   - not the mean itself: an average is a colour that no pixel has, so at tolerance 0 it
+    //     matched nothing, and a background that was one exact colour with a few stray shades
+    //     in it would not clear at all;
+    //   - not an alpha forced to 255: a background that is itself translucent has to match.
     function edgeColor(d, w, h) {
-      // Count the opaque edge pixels in coarse buckets, so a little noise (JPEG, grain)
-      // does not split one background into hundreds of colours, then average the winning
-      // bucket for an exact key.
-      var cnt = new Uint32Array(4096), sr = new Float64Array(4096), sg = new Float64Array(4096), sb = new Float64Array(4096);
-      var any = false;
-      function add(x, y) {
-        var i = (y * w + x) * 4;
-        if (d[i + 3] < 128) return;
-        var k = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
-        cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2]; any = true;
+      var BUCKETS = 16384;
+      var cnt = new Uint32Array(BUCKETS), sr = new Float64Array(BUCKETS), sg = new Float64Array(BUCKETS),
+          sb = new Float64Array(BUCKETS), sa = new Float64Array(BUCKETS);
+      function bucketOf(i) { return ((d[i] >> 4) << 10) | ((d[i + 1] >> 4) << 6) | ((d[i + 2] >> 4) << 2) | (d[i + 3] >> 6); }
+      function eachEdge(fn) {          // fn gets the index of an edge pixel's red byte
+        var x, y;
+        for (x = 0; x < w; x++) { fn(x * 4); fn(((h - 1) * w + x) * 4); }
+        for (y = 1; y < h - 1; y++) { fn(y * w * 4); fn((y * w + w - 1) * 4); }
       }
-      var x, y;
-      for (x = 0; x < w; x++) { add(x, 0); add(x, h - 1); }
-      for (y = 1; y < h - 1; y++) { add(0, y); add(w - 1, y); }
+      var any = false;
+      eachEdge(function (i) {
+        if (d[i + 3] < 128) return;           // already see-through: not a colour to take out
+        var k = bucketOf(i);
+        cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2]; sa[k] += d[i + 3]; any = true;
+      });
       if (!any) return null;
       var best = 0;
-      for (var k = 1; k < 4096; k++) if (cnt[k] > cnt[best]) best = k;
-      return { r: sr[best] / cnt[best], g: sg[best] / cnt[best], b: sb[best] / cnt[best] };
+      for (var k = 1; k < BUCKETS; k++) if (cnt[k] > cnt[best]) best = k;
+      var mr = sr[best] / cnt[best], mg = sg[best] / cnt[best], mb = sb[best] / cnt[best], ma = sa[best] / cnt[best];
+      var at = -1, nearest = Infinity;
+      eachEdge(function (i) {
+        if (d[i + 3] < 128 || bucketOf(i) !== best) return;
+        var dr = d[i] - mr, dg = d[i + 1] - mg, db = d[i + 2] - mb, da = d[i + 3] - ma;
+        var dist = dr * dr + dg * dg + db * db + da * da;
+        if (dist < nearest) { nearest = dist; at = i; }
+      });
+      return { r: d[at], g: d[at + 1], b: d[at + 2], a: d[at + 3] };
     }
     // Works in place on an RGBA array; returns how many pixels it made see-through.
     function clearEdgeColor(d, w, h, tol) {
@@ -1276,7 +1357,7 @@
         if (seen[idx]) return;
         seen[idx] = 1;
         var i = idx * 4;
-        var dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b, da = d[i + 3] - 255;
+        var dr = d[i] - key.r, dg = d[i + 1] - key.g, db = d[i + 2] - key.b, da = d[i + 3] - key.a;
         if (dr * dr + dg * dg + db * db + da * da <= lim) stack[top++] = idx;
       }
       var x, y;
@@ -1304,6 +1385,10 @@
     function removeRasterBackground() {
       ensureRaster();
       var w = rasterCv.width, h = rasterCv.height;
+      if (w * h > REMOVE_BG_MAX_PIXELS) {
+        setStatus("This canvas is " + w + "×" + h + ": too big to clear the background in one go (the limit is about 16 million pixels, 4096×4096). Make the canvas smaller first with Canvas… › Apply size, or Crop.");
+        return;
+      }
       var g = rasterCv.getContext("2d");
       var img = g.getImageData(0, 0, w, h);
       var n = clearEdgeColor(img.data, w, h, tolerance);
@@ -1315,6 +1400,34 @@
       paint(); autoSave();
       setStatus(removedMessage());
     }
+    // A cleared picture goes back as a PNG: a JPEG has no see-through pixels. The PNG of a
+    // photo is several times the JPEG it replaces, and the board is posted whole on every
+    // save, so it is made smaller (alpha kept) until it fits `budget`. Each try resamples
+    // the full-size copy, never the previous try, so the picture is not blurred twice.
+    function pngWithin(c, budget) {
+      var url = c.toDataURL("image/png"), scale = 1, w = c.width, h = c.height;
+      for (var tries = 0; url.length > budget && tries < 10; tries++) {
+        scale *= Math.max(0.5, Math.min(0.9, Math.sqrt(budget / url.length) * 0.95));
+        w = Math.max(1, Math.round(c.width * scale));
+        h = Math.max(1, Math.round(c.height * scale));
+        var s = document.createElement("canvas");
+        s.width = w; s.height = h;
+        var sg = s.getContext("2d");
+        sg.imageSmoothingEnabled = true;
+        sg.imageSmoothingQuality = "high";
+        sg.drawImage(c, 0, 0, w, h);
+        url = s.toDataURL("image/png");
+      }
+      return { url: url, w: w, h: h, fits: url.length <= budget };
+    }
+    // What a save would post right now, in bytes, if picture `id` held `url`.
+    function boardBytesWith(id, url) {
+      var b = boardJson(), found = false;
+      b.images.forEach(function (i) { if (i.id === id) { i.url = url; found = true; } });
+      var im = imageById(id);
+      if (!found && im) b.images.push({ id: id, x: im.x, y: im.y, w: im.w, h: im.h, url: url });
+      return bodyBytes(JSON.stringify({ action: "save", jobId: jobId || "job_art_xxxxxxxx", board: b }));
+    }
     // A picture placed on the board (dropped, pasted, or a finished render): its data URL
     // is rewritten as a PNG with the background cleared.
     function removeImageBackground(im) {
@@ -1322,27 +1435,46 @@
       setStatus("Removing the background…");
       var probe = new Image();
       probe.onload = function () {
-        var w = probe.naturalWidth, h = probe.naturalHeight;
-        if (!w || !h) { setStatus("That picture could not be read."); return; }
+        var nw = probe.naturalWidth, nh = probe.naturalHeight;
+        if (!nw || !nh) { setStatus("That picture could not be read."); return; }
+        // Work at the size the importer allows a picture (MAX_IMG_EDGE): the board never
+        // needs more, and a 6000 px picture would cost hundreds of MB to flood.
+        var k = Math.min(1, MAX_IMG_EDGE / Math.max(nw, nh));
+        var w = Math.max(1, Math.round(nw * k)), h = Math.max(1, Math.round(nh * k));
         var c = document.createElement("canvas");
         c.width = w; c.height = h;
         var g = c.getContext("2d");
-        g.drawImage(probe, 0, 0);
+        g.drawImage(probe, 0, 0, w, h);
         var data;
         try { data = g.getImageData(0, 0, w, h); }
         catch (err) { setStatus("That picture comes from another site, so its pixels cannot be changed."); return; }
         var n = clearEdgeColor(data.data, w, h, tolerance);
         if (!n) { setStatus("No background colour touches this picture's edges. Try a higher Fill tol."); return; }
         g.putImageData(data, 0, 0);
-        var url = c.toDataURL("image/png");
+        var out = pngWithin(c, MAX_PICTURE_BYTES);
         var cur = imageById(id);
         // It decoded asynchronously: if the picture was swapped or deleted meanwhile,
         // writing the result would resurrect or overwrite the wrong thing.
         if (!cur || cur.url !== src) { setStatus("That picture changed while its background was being removed. Try again."); return; }
+        // The board has to stay saveable. Refuse before anything is replaced: the picture
+        // and the undo history are exactly as they were. (A board that was already over the
+        // limit is not made worse, so an edit that makes the picture smaller is still fine.)
+        if (!out.fits) {
+          setStatus("This picture cannot be made small enough to keep on the board with its background cleared. Nothing was changed.");
+          return;
+        }
+        var total = boardBytesWith(id, out.url);
+        if (total > MAX_BOARD_BYTES && out.url.length > src.length) {
+          setStatus("Not done: with its background cleared this picture would make the board " +
+            (total / (1024 * 1024)).toFixed(1) + " MB, over the 8 MB save limit. Delete or shrink another picture first. Nothing was changed.");
+          return;
+        }
         snapshot();                 // before the write: Undo restores the old pixels
-        cur.url = url;
+        cur.url = out.url;
         renderImages(); paint(); autoSave();
-        setStatus(removedMessage());
+        setStatus(removedMessage() + (out.w < nw
+          ? " The picture was made smaller (" + out.w + "×" + out.h + ", it was " + nw + "×" + nh + ") so that the board stays small enough to save."
+          : ""));
       };
       probe.onerror = function () { setStatus("That picture could not be read."); };
       probe.src = src;
@@ -1421,8 +1553,8 @@
     function syncTextBar() {
       var sel = null;
       for (var i = 0; i < doc.strokes.length; i++) if (doc.strokes[i].id === selectedStroke) sel = doc.strokes[i];
-      // The polygon bar owns that row while the polygon tool is in hand.
-      var show = tool === "text" || (sel && sel.tool === "text" && tool !== "polygon");
+      // The polygon bar and the Fill bar own that row while their tools are in hand.
+      var show = tool === "text" || (sel && sel.tool === "text" && tool !== "polygon" && tool !== "fill");
       document.getElementById("textbar").classList.toggle("on", !!show);
       if (sel && sel.tool === "text") adoptTextStyle(sel);
       else if (tool === "text") {
@@ -1498,6 +1630,7 @@
       setStatus(doc.strokes.length + " marks on the board");
     }
     function editTextMark(hit) {
+      leavePixelSelection();
       snapshot();
       adoptTextStyle(hit);
       selectedStroke = hit.id;
@@ -1720,6 +1853,15 @@
       sel = { x: floating.x, y: floating.y, w: floating.w, h: floating.h, path: floating.path, buf: floating.buf };
       floating = null;
       paint(); autoSave(); syncSelBar();
+    }
+    // A pixel area (the selection tools') and a picture or mark (the Select tool's) are two
+    // different kinds of "selected", and Delete, Cut and Crop act on whichever one the board
+    // holds. Picking a picture or a mark makes THAT the one: the old area is put away, with
+    // its lifted pixels (if it was floating) landing where they float, so nothing is lost.
+    // Without this, picking a mark and pressing Delete cleared the old area instead.
+    function leavePixelSelection() {
+      if (floating) dropFloating();
+      if (sel) { sel = null; paint(); syncSelBar(); }
     }
     function liftSelection() {
       var fx = sel;
@@ -1999,6 +2141,7 @@
         // Front-to-back over both kinds (#296): the item you can see on top is the one
         // the click selects. A mark drawn over an image must be reachable.
         var pick = hitTestOrdered(p);
+        if (pick) leavePixelSelection();       // what was just picked is the thing Delete reaches, not an old area
         var hit = pick && pick.kind === "stroke" ? pick.item : null;
         selectedStroke = hit ? hit.id : null;
         selected = pick && pick.kind === "image" ? pick.id : null;
@@ -2020,14 +2163,15 @@
       if (tool === "picker") { pickColor(e, e.button === 2); return; }
       if (tool === "fill") {
         if (!inDoc(p)) return;
-        // Alt/Option+click erases to see-through instead of painting a colour.
-        var erase = e.altKey;
-        snapshot();
+        // Alt/Option+click erases to see-through instead of painting a colour, and so does
+        // every click while the Fill makes see-through switch is on (touch has no Alt).
+        var erase = e.altKey || fillClear;
+        // floodFill takes the undo step itself, and only when something changes.
         var filled = floodFill(p, erase ? null : (e.button === 2 ? colorS : colorP));
-        setStatus(!erase ? "Filled."
-          : filled ? "Made the area see-through. Undo brings it back."
-          : "That area is already see-through.");
-        autoSave();
+        setStatus(filled ? (erase ? "Made the area see-through. Undo brings it back." : "Filled.")
+          : erase ? "That area is already see-through."
+          : "That area is already that colour.");
+        if (filled) autoSave();
         return;
       }
       if (tool === "text") {
@@ -2036,6 +2180,7 @@
         e.preventDefault();
         var hit2 = hitTest(p);
         if (hit2 && hit2.tool === "text") { editTextMark(hit2); return; }
+        leavePixelSelection();         // the new text becomes the selected thing: an old area must not outrank it
         snapshot();
         var m = { id: newId(), tool: "text", color: e.button === 2 ? colorS : colorP,
                   x1: p.x, y1: p.y, text: "", w: 24, anchor: hit2 ? hit2.id : null };
@@ -2052,6 +2197,7 @@
         // Corners are clicks, not drags, so there is no pointer capture to take, and no
         // undo step until the shape is finished (it used to snapshot on every corner).
         e.preventDefault();
+        focusBoard();
         polyClick(p, e);
         return;
       }
@@ -2099,6 +2245,16 @@
       }
       paint();
     });
+
+    // The keys that finish or edit a polygon (Enter, Esc, Backspace) are ignored while a
+    // slider, a field or a menu has the keyboard focus. A corner is a click on the board, and
+    // its preventDefault() also cancels the focus change the press would have made, so a
+    // slider the person had just dragged kept the keys and Enter did nothing. Placing a corner
+    // hands the focus to the board.
+    function focusBoard() {
+      var a = document.activeElement;
+      if (a && a !== canvas && a !== document.body) canvas.focus({ preventScroll: true });
+    }
 
     function withPressure(p, e) {
       var q = { x: p.x, y: p.y };
@@ -2287,15 +2443,20 @@
       setStatus(polyStatus());
       paint();
     }
-    // Corners that landed on top of each other (a shaky double-click) are one corner, and
-    // a last corner sitting on the first one is the first one: the shape closes itself.
+    // Corners that are exactly the same point are one corner, and a last corner exactly on the
+    // first one is the first one: the shape closes itself. Only EXACT repeats go here. "Near"
+    // is decided when a corner is placed (polyClick), at the zoom the person was looking at;
+    // decided here it would use the zoom of the moment they finish, and zooming out between
+    // two corners would merge them and quietly change the shape they drew.
     function tidyCorners(pts) {
       var out = [];
       pts.forEach(function (c) {
-        if (out.length && screenDist(c, out[out.length - 1]) < POLY_DUP_PX) return;
+        var last = out[out.length - 1];
+        if (last && last.x === c.x && last.y === c.y) return;
         out.push(c);
       });
-      if (out.length > 1 && screenDist(out[0], out[out.length - 1]) < POLY_DUP_PX) out.pop();
+      var first = out[0], end = out[out.length - 1];
+      if (out.length > 1 && first.x === end.x && first.y === end.y) out.pop();
       return out;
     }
     // Backspace / Delete while drawing: take back the last corner.
@@ -2441,9 +2602,11 @@
         drag = { id: id, mode: "resize", sx: e.clientX, sy: e.clientY, ox: im.x, oy: im.y, ow: im.w, oh: im.h, moved: false };
       });
       // The × is a control of its own: pressing it must not start a drag, and a click on
-      // it deletes this picture.
+      // it deletes this picture. It belongs to the Select tool (CSS shows it only then); the
+      // test here keeps a stray click, from any other route, from deleting while a tool that
+      // draws is in hand.
       del.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
-      del.addEventListener("click", function (e) { e.stopPropagation(); deleteImage(id); });
+      del.addEventListener("click", function (e) { e.stopPropagation(); if (tool === "select") deleteImage(id); });
       return wrap;
     }
     // Reconcile, not rebuild. This used to throw every wrap away and make new ones on each
@@ -2547,6 +2710,8 @@
       canvas.style.cursor = t === "select" ? "default" : t === "picker" ? "copy"
         : t === "text" ? "text" : t === "pan" ? "grab" : t === "zoom" ? "zoom-in" : "crosshair";
       if (t !== "text" && editEl) closeTextEditor();
+      layers.classList.toggle("select-tool", t === "select");     // the picture's × answers only to Select
+      syncFillBar();
       syncPolyBar();          // also settles the text bar, which shares its row
       syncSelBar();
       setStatus(toolHint(t));
@@ -2557,7 +2722,7 @@
         select: "Click a picture or a mark to select it; Delete removes it. Drag a picture to move it.",
         pencil: "Pencil: drag to draw a hard edge.", brush: "Brush: drag to paint.",
         eraser: "Eraser: drag over pixels to erase them.",
-        fill: "Fill: click an area to flood it with colour. Alt/Option+click makes it see-through.", picker: "Pick: click to take a colour.",
+        fill: "Fill: click an area to flood it with colour. Alt/Option+click, or the Fill makes see-through switch, makes it see-through.", picker: "Pick: click to take a colour.",
         airbrush: "Airbrush: hold and drag to spray.",
         line: "Line: drag.", curve: "Curve: drag, then move to bend and click to fix.",
         rect: "Rectangle: drag.", rrect: "Rounded rectangle: drag.",
@@ -2578,6 +2743,19 @@
     tolEl.addEventListener("input", function () { tolerance = Number(tolEl.value); tolVal.textContent = tolerance; });
     document.getElementById("rmBg").addEventListener("click", removeBackground);
     document.getElementById("opMode").addEventListener("change", function (e) { op = e.target.value; });
+    // The Fill bar (under the toolbar while Fill is in hand) and its switch: the touch
+    // screen's way to do what Alt/Option+click does. It stays on until it is switched off,
+    // and the button says which way it is set (it is the only thing that tells a screen reader).
+    function syncFillBar() {
+      var bar = document.getElementById("fillbar");
+      if (bar) bar.classList.toggle("on", tool === "fill");
+    }
+    document.getElementById("fillClear").addEventListener("click", function () {
+      fillClear = !fillClear;
+      this.classList.toggle("on", fillClear);
+      this.setAttribute("aria-pressed", fillClear ? "true" : "false");
+      setStatus(fillClear ? "Fill now makes the area see-through. Click an area." : "Fill paints with the colour again.");
+    });
 
     document.getElementById("colorP").addEventListener("input", function (e) { colorP = e.target.value; });
     document.getElementById("colorS").addEventListener("input", function (e) { colorS = e.target.value; });
@@ -2620,16 +2798,27 @@
       delBtn.title = what ? "Delete the selected " + what + " (Delete key; Undo brings it back)"
                           : "Delete — click a picture or a mark first, then press Delete or Backspace";
     }
+    // Lifted pixels live only in the floating buffer; no snapshot holds them. The snapshot
+    // from when they were lifted has them where they used to be, so dropping the buffer used
+    // to make Undo reach back to THAT step: after any edit made while the area floated, Undo
+    // undid that edit instead, and the area did not come back. To make the delete a step of
+    // its own, the snapshot is taken with the area laid into a copy of the pixel layer (the
+    // real layer is not touched), and then the area is simply let go.
+    function deleteFloating() {
+      var real = ensureRaster();
+      var withIt = document.createElement("canvas");
+      withIt.width = real.width; withIt.height = real.height;
+      var wg = withIt.getContext("2d");
+      wg.drawImage(real, 0, 0);
+      wg.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
+      rasterCv = withIt;
+      try { snapshot(); } finally { rasterCv = real; }
+      floating = null;
+      paint(); autoSave(); syncSelBar();
+      setStatus("Deleted the lifted area. Undo brings it back.");
+    }
     function deleteSelected() {
-      if (floating) {
-        // Lifted pixels live only in the floating buffer, and the snapshot taken when
-        // they were lifted still has them where they were: dropping the buffer is the
-        // delete, and Undo gives them back.
-        floating = null;
-        paint(); autoSave(); syncSelBar();
-        setStatus("Deleted the lifted area. Undo brings it back.");
-        return;
-      }
+      if (floating) { deleteFloating(); return; }
       if (sel) { deleteSel(); return; }
       var im = selectedImage();
       if (im) { deleteImage(im.id); return; }
@@ -2655,6 +2844,10 @@
         // Mid-polygon these keys belong to the shape being drawn (Backspace takes back the
         // last corner) and must never reach whatever else happens to be selected.
         if (polyDraft) { polyBack(); return; }
+        // A held key repeats. Held Backspace takes the corners back one by one, and the
+        // repeat that arrives after the last corner has gone must not carry on into deleting
+        // the picture or mark that happens to be selected. One press deletes one thing.
+        if (e.repeat) return;
         deleteSelected();
         return;
       }
@@ -2741,11 +2934,16 @@
       paint();
     });
     var cvPanel = document.getElementById("canvasPanel");
-    function openCanvasPanel() {
+    // The panel's fields show the board's size and paper. Opening it fills them in, and so
+    // does every Undo and Redo (applySnapshot), which can change both while it stays open.
+    function syncCanvasPanel() {
       document.getElementById("cvW").value = Math.round(doc.w);
       document.getElementById("cvH").value = Math.round(doc.h);
       document.getElementById("cvBg").value = paperNone() ? paperColor : doc.bg;
       document.getElementById("cvBgNone").checked = paperNone();
+    }
+    function openCanvasPanel() {
+      syncCanvasPanel();
       cvPanel.classList.toggle("on");
     }
 
@@ -3182,6 +3380,8 @@
             if (d.board.bg) {
               doc.bg = d.board.bg === "transparent" ? "none" : d.board.bg;
               if (doc.bg !== "none") paperColor = doc.bg;
+              // A board saved with no paper remembers the colour it had before.
+              else if (/^#[0-9a-f]{6}$/i.test(String(d.board.paper || ""))) paperColor = d.board.paper;
             }
             doc.strokes = d.board.strokes || [];
             // An image with no url was a blob: pointer that could not be saved; it must
