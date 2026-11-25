@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BeeZilla — All options</title>
+  <style>
+    :root {
+      --bz-black: #0A0A0A;
+      --bz-panel: #141414;
+      --bz-col: #1A1A1A;
+      --bz-yellow: #FFC107;
+      --bz-yellow-dim: #B8860B;
+      --bz-silver: #C9CDD2;
+      --bz-charcoal: #111111;
+      --bz-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: var(--bz-font);
+      color: #E8E8E8;
+      background: var(--bz-black);
+      margin: 0;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid #222;
+      background: var(--bz-panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header > .header-inner,
+    .header-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    header .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header .brand strong {
+      letter-spacing: .06em;
+      font-size: 1.15rem;
+      color: var(--bz-yellow);
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+    header .brand .mascot-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+    }
+    header nav {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    header nav a {
+      color: #999;
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.15s;
+    }
+    header nav a:hover { color: var(--bz-yellow); }
+    header nav a.active { color: var(--bz-yellow); font-weight: 600; }
+    header .brand-link { text-decoration: none; cursor: pointer; }
+    .header-inner, header { position: relative; }
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin: 0 0 0.5rem;
+      color: #fff;
+      font-weight: 700;
+    }
+    .muted { color: #777; font-size: 0.82rem; }
+    .ao-lede { color: #B5B5B5; font-size: 0.95rem; margin: 0 0 1.25rem; max-width: 62ch; }
+
+    /* Search and the one-group drop-down */
+    .ao-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: stretch; }
+    .ao-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+    .ao-field {
+      position: relative;
+      flex: 1 1 320px;
+      min-width: 0;
+    }
+    .ao-field svg {
+      position: absolute; left: 0.85rem; top: 50%; width: 18px; height: 18px; margin-top: -9px;
+      fill: none; stroke: #8a8a8a; stroke-width: 2; stroke-linecap: round; pointer-events: none;
+    }
+    #aoQ {
+      width: 100%;
+      font: inherit;
+      font-size: 1rem;
+      color: #fff;
+      background: var(--bz-charcoal);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 0.75rem 2.6rem 0.75rem 2.6rem;
+    }
+    #aoQ::placeholder { color: #6f6f6f; }
+    #aoQ::-webkit-search-cancel-button { display: none; }
+    #aoQ:focus { outline: none; border-color: var(--bz-yellow); box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.18); }
+    .ao-x {
+      position: absolute; right: 0.4rem; top: 50%; margin-top: -16px;
+      width: 32px; height: 32px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      font: inherit; font-size: 0.95rem; line-height: 1;
+      color: #bbb; background: transparent; border: 0; border-radius: 6px; cursor: pointer;
+    }
+    .ao-x:hover { color: var(--bz-yellow); background: #222; }
+    .ao-x[hidden] { display: none; }
+    #aoGroup {
+      flex: 0 1 220px;
+      min-width: 0;
+      font: inherit;
+      font-size: 0.95rem;
+      color: #E8E8E8;
+      background: var(--bz-charcoal);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 0.7rem 0.8rem;
+    }
+    #aoGroup:focus { outline: none; border-color: var(--bz-yellow); }
+    .ao-x:focus-visible, .ao-open:focus-visible, .ao-empty a:focus-visible { outline: 2px solid var(--bz-yellow); outline-offset: 2px; }
+    #aoCount { margin: 0.85rem 0 0; min-height: 1.3em; }
+
+    /* The list, one block per group */
+    .ao-group { margin-top: 2rem; }
+    .ao-gh {
+      display: flex; align-items: baseline; gap: 0.6rem;
+      margin: 0 0 0.8rem; padding-bottom: 0.45rem;
+      font-size: 1.15rem; font-weight: 700; color: #fff;
+      border-bottom: 1px solid #262626;
+    }
+    .ao-n { font-size: 0.78rem; font-weight: 600; color: #8a8a8a; }
+    .ao-list {
+      list-style: none; margin: 0; padding: 0;
+      display: grid; gap: 0.75rem;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
+    }
+    .ao-item {
+      background: var(--bz-panel);
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      padding: 0.85rem 1rem 0.9rem;
+      min-width: 0;
+      display: flex; flex-direction: column; gap: 0.4rem;
+    }
+    .ao-top { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+    .ao-name { margin: 0; font-size: 1rem; font-weight: 700; color: var(--bz-yellow); min-width: 0; overflow-wrap: anywhere; }
+    .ao-open { flex: 0 0 auto; font-size: 0.82rem; font-weight: 600; color: var(--bz-silver); text-decoration: none; white-space: nowrap; }
+    .ao-open:hover { color: var(--bz-yellow); text-decoration: underline; }
+    .ao-what { margin: 0; font-size: 0.9rem; color: #D2D2D2; overflow-wrap: anywhere; }
+    .ao-where { margin: 0; font-size: 0.8rem; color: #8f8f8f; overflow-wrap: anywhere; }
+    .ao-where b { font-weight: 700; color: #777; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.68rem; margin-right: 0.4rem; }
+    .ao-empty { margin: 2rem 0 0; font-size: 1.05rem; color: #D2D2D2; }
+    .ao-empty[hidden] { display: none; }
+    .ao-empty a { color: var(--bz-yellow); font-weight: 600; }
+    @media (max-width: 640px) {
+      main { padding: 1.25rem 1rem 3rem; }
+      h1 { font-size: 1.5rem; }
+      #aoGroup { flex: 1 1 100%; }
+      .ao-list { grid-template-columns: 1fr; }
+    }
+  </style>
+  <link rel="stylesheet" href="/buzzy/nav.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+    <a href="/buzzy/talk" class="brand-link">
+      <div class="brand">
+        <img class="mascot-mark" src="/buzzy/brand/revision6_expressions_16-smiling.png" alt="BeeZilla" />
+        <strong>BeeZilla</strong>
+      </div>
+    </a>
+    <nav id="bzNav">
+      <a href="/buzzy/talk" data-nav="talk">Talk</a>
+      <a href="/buzzy/library" data-nav="library">Library</a>
+      <a href="/buzzy/memory" data-nav="memory">Memory</a>
+      <a href="/buzzy/experts" data-nav="experts">Experts</a>
+      <a href="/buzzy/recipes" data-nav="recipes">Recipes</a>
+      <a href="/buzzy/sketch" data-nav="sketch">Sketch</a>
+      <a href="/buzzy/orchestrate" data-nav="orchestrate">Orchestrate</a>
+      <a href="/buzzy/studio" data-nav="studio">Music studio</a>
+      <a href="/buzzy/capabilities" data-nav="capabilities">What BeeZilla can do</a>
+      <a href="/buzzy/download" data-nav="download">Download</a>
+      <a href="/buzzy/wallet" data-nav="wallet">Honey</a>
+      <a href="/buzzy/upload" data-nav="publish">Publish</a>
+      <a href="/buzzy/landing" class="account-link" id="accountLink">Sign in</a>
+    </nav>
+    <script>
+    /* ONE navigation, defined once: the active link comes from the path. All options is
+       not one of the nav's places, so nothing lights up on it. */
+    (function () {
+      var path = location.pathname.replace(/\.html$/, "").replace(/\/+$/, "");
+      var seg = (path.match(/^\/buzzy\/([a-z-]+)$/) || [])[1] || "";
+      var section = "";
+      if (/^\/buzzy(\/talk)?$/.test(path)) section = "talk";
+      else if (seg === "remember") section = "memory";
+      else if (seg === "upload") section = "publish";
+      else if (seg) section = seg;
+      if (section && !document.querySelector('#bzNav a[data-nav="' + section + '"]')) section = "";
+      var links = document.querySelectorAll("#bzNav a[data-nav]");
+      for (var i = 0; i < links.length; i++) {
+        var on = links[i].getAttribute("data-nav") === section;
+        links[i].classList.toggle("active", on);
+        if (on) links[i].setAttribute("aria-current", "page");
+        else links[i].removeAttribute("aria-current");
+      }
+    })();
+    </script>
+    </div>
+  </header>
+  <script>
+    // ── Account gate. The chrome (nav.js) owns the identity chip and its menu;
+    // this page only refuses a signed-out visitor. Only a 200 with no user may
+    // refuse: a non-2xx is an outage, not a logout. ──────────────────────────
+    (function accountGate() {
+      fetch("/api/auth/get-session", { credentials: "same-origin" })
+        .then(function (r) {
+          if (!r.ok) throw new Error("get-session " + r.status);
+          return r.json();
+        })
+        .then(function (session) {
+          if (!(session && session.user)) window.location.replace("/buzzy/landing");
+        })
+        .catch(function () {});
+    })();
+  </script>
+  <main>
+    <h1>All options</h1>
+    <p class="ao-lede">Every option, setting and tool BeeZilla has, in one place and grouped by where you use it. Can&rsquo;t find something where you expected it? Type what you&rsquo;re looking for.</p>
+    <div class="ao-bar" role="search">
+      <label class="ao-sr" for="aoQ">Search all options</label>
+      <div class="ao-field">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path></svg>
+        <input id="aoQ" type="search" placeholder="Search all options" autocomplete="off" spellcheck="false" />
+        <button type="button" id="aoClear" class="ao-x" aria-label="Clear the search" title="Clear the search (Esc)" hidden>&#10005;</button>
+      </div>
+      <label class="ao-sr" for="aoGroup">Show one group</label>
+      <select id="aoGroup"></select>
+    </div>
+    <p id="aoCount" class="muted" role="status" aria-live="polite"></p>
+    <div id="aoList"></div>
+    <p id="aoEmpty" class="ao-empty" hidden>Nothing matches &mdash; <a href="/buzzy/talk">ask BeeZilla in Talk</a></p>
+  </main>
+  <script src="/buzzy/options-data.js"></script>
+  <script>
+    (function () {
+      var DATA = window.BZ_OPTIONS || [];
+      var main = document.querySelector("main");
+      var q = document.getElementById("aoQ");
+      var clear = document.getElementById("aoClear");
+      var pick = document.getElementById("aoGroup");
+      var count = document.getElementById("aoCount");
+      var list = document.getElementById("aoList");
+      var empty = document.getElementById("aoEmpty");
+      if (!q || !pick || !list) return;
+
+      // What each address is called on the "Open …" link.
+      var PAGE = { "/buzzy/talk": "Talk", "/buzzy/library": "Library", "/buzzy/memory": "Memory", "/buzzy/experts": "Experts",
+        "/buzzy/recipes": "Recipes", "/buzzy/sketch": "Sketch", "/buzzy/orchestrate": "Orchestrate", "/buzzy/studio": "Music studio",
+        "/buzzy/capabilities": "What BeeZilla can do", "/buzzy/download": "Download", "/buzzy/wallet": "Honey Drops",
+        "/buzzy/upload": "Publish", "/buzzy/profile": "About your business", "/buzzy/options": "All options" };
+      // Small words and the verbs people put in front of what they want ("how do I change the resolution").
+      var STOP = {};
+      ("a an the to of in on at for and or my me i how do does can is it where what which with you your there any " +
+        "option options setting settings find change make get set use want need like please show way turn put see").split(" ").forEach(function (w) { STOP[w] = 1; });
+      // A phone's search box is too narrow for the long hint.
+      var HINT = "Search options: try \u201cstretch\u201d, \u201cundo\u201d, \u201ccolour\u201d or \u201cvoice\u201d";
+      function fitHint() {
+        if (!q.isConnected) { window.removeEventListener("resize", fitHint); return; }
+        q.placeholder = window.matchMedia && window.matchMedia("(min-width: 641px)").matches ? HINT : "Search all options";
+      }
+      window.addEventListener("resize", fitHint);
+
+      function h(tag, cls, text) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text != null) n.textContent = text;
+        return n;
+      }
+      // "colours" and "colour", "resizing" and "resize": one word.
+      function stem(w) {
+        return w.length > 4 ? w.replace(/(ies|ing|ed|es|s)$/, function (m) { return m === "ies" ? "y" : ""; }) : w;
+      }
+      function words(s) {
+        return String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+          .replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+      }
+
+      // Everything a search can match, worked out once: the name, what it does, where it is, its group
+      // and the other words people use for it.
+      var GROUPS = [];
+      var items = DATA.map(function (o) {
+        if (GROUPS.indexOf(o.group) < 0) GROUPS.push(o.group);
+        var seen = {}, toks = [];
+        words([o.group, o.name, o.what, o.where].concat(o.words || []).join(" ")).forEach(function (w) {
+          var s = stem(w);
+          if (!seen[s]) { seen[s] = 1; toks.push(s); }
+        });
+        return { o: o, toks: toks };
+      });
+
+      // Every word typed has to be found (as the start of a word). When no option has them all, the
+      // closest few are offered instead, rarer words counting for more.
+      function find(text) {
+        var said = words(text);
+        var terms = said.filter(function (w) { return !STOP[w]; });
+        if (!terms.length) terms = said;       // only small words typed: take them as they are
+        terms = terms.map(stem);
+        if (!terms.length) return { list: items, loose: false };
+        var hit = items.map(function (it) {
+          return terms.map(function (t) { return it.toks.some(function (k) { return k.indexOf(t) === 0; }); });
+        });
+        var rare = terms.map(function (_t, j) {
+          var n = hit.filter(function (x) { return x[j]; }).length;
+          return n ? 1 / n : 0;
+        });
+        var scored = [];
+        items.forEach(function (it, i) {
+          var score = 0, all = true;
+          hit[i].forEach(function (yes, j) { if (yes) score += rare[j]; else all = false; });
+          if (score > 0) scored.push({ it: it, score: score, all: all });
+        });
+        var full = scored.filter(function (r) { return r.all; });
+        if (full.length) return { list: full.map(function (r) { return r.it; }), loose: false };
+        scored.sort(function (a, b) { return b.score - a.score; });
+        return { list: scored.slice(0, 12).map(function (r) { return r.it; }), loose: scored.length > 0 };
+      }
+
+      function card(o) {
+        var li = h("li", "ao-item");
+        var top = h("div", "ao-top");
+        top.appendChild(h("h3", "ao-name", o.name));
+        var open = h("a", "ao-open", "Open " + (PAGE[o.href] || "page") + " →");
+        open.href = o.href;
+        open.setAttribute("aria-label", "Open " + (PAGE[o.href] || "page") + ": " + o.name);
+        top.appendChild(open);
+        li.appendChild(top);
+        li.appendChild(h("p", "ao-what", o.what));
+        var where = h("p", "ao-where");
+        where.appendChild(h("b", null, "Where"));
+        where.appendChild(document.createTextNode(o.where));
+        li.appendChild(where);
+        return li;
+      }
+
+      function render() {
+        var text = q.value.trim();
+        clear.hidden = !text;
+        var res = find(text);
+        var only = pick.value;
+        var shown = res.list.filter(function (it) { return !only || it.o.group === only; });
+
+        list.textContent = "";
+        GROUPS.forEach(function (g) {
+          var mine = shown.filter(function (it) { return it.o.group === g; });
+          if (!mine.length) return;
+          var sec = h("section", "ao-group");
+          var head = h("h2", "ao-gh", g);
+          head.appendChild(h("span", "ao-n", String(mine.length)));
+          sec.appendChild(head);
+          var ul = h("ul", "ao-list");
+          mine.forEach(function (it) { ul.appendChild(card(it.o)); });
+          sec.appendChild(ul);
+          list.appendChild(sec);
+        });
+
+        empty.hidden = shown.length > 0;
+        if (!shown.length) {
+          count.textContent = only && res.list.length
+            ? "Nothing in " + only + " matches, but " + res.list.length + " other " + (res.list.length === 1 ? "option does" : "options do") + ": choose All groups."
+            : "";
+        } else if (!text) {
+          count.textContent = only ? shown.length + " options in " + only : DATA.length + " options in " + GROUPS.length + " groups";
+        } else if (res.loose) {
+          count.textContent = "No option has all of those words. The closest " + shown.length + ":";
+        } else {
+          count.textContent = shown.length + (shown.length === 1 ? " match" : " matches") + " for “" + text + "”";
+        }
+      }
+
+      pick.appendChild(new Option("All groups", ""));
+      GROUPS.forEach(function (g) {
+        pick.appendChild(new Option(g + " (" + items.filter(function (it) { return it.o.group === g; }).length + ")", g));
+      });
+
+      q.addEventListener("input", render);
+      pick.addEventListener("change", render);
+      clear.addEventListener("click", function () { q.value = ""; render(); q.focus(); });
+      // Esc clears the search (nothing here closes on a click outside it: only Esc or the ✕).
+      main.addEventListener("keydown", function (e) {
+        if (e.key !== "Escape" || !q.value) return;
+        e.preventDefault();
+        q.value = "";
+        render();
+        q.focus();
+      });
+
+      fitHint();
+      render();
+      if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) q.focus({ preventScroll: true });
+    })();
+  </script>
+</body>
+</html>

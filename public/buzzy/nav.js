@@ -1624,6 +1624,10 @@
       '<div class="bzs-h" role="heading" aria-level="3">Honey Drops</div>',
       '<div class="bzs-row"><span class="bzs-honey"></span><a class="bzs-link" href="/buzzy/wallet">Open wallet</a></div>',
       "</div>",
+      // Every option and setting on one page, with a search, for when one isn't where you looked.
+      '<div class="bzs-sec" data-bzs="all">',
+      '<div class="bzs-row"><span class="bzs-muted">Can’t find a setting?</span><a class="bzs-link" href="/buzzy/options">All options</a></div>',
+      "</div>",
     ].join("");
     dock.appendChild(panel);
     document.body.appendChild(dock);
@@ -1702,6 +1706,7 @@
       sec("account").hidden = !on;
       sec("plan").hidden = !on;
       sec("honey").hidden = !on;
+      sec("all").hidden = !on;
     }
     function paintAccount(name, email) {
       q(".bzs-name").textContent = name || "";
