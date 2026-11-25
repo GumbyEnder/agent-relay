@@ -164,8 +164,10 @@
   /* The panel's title row, with its Close button, stays at the top while the rest scrolls
      under it: scrolled down to Export JPG on a short stage, the way out had scrolled away.
      The panel's top padding is the row's own, so the row starts at the panel's top edge and
-     nothing that scrolls can show above it. */
+     nothing that scrolls can show above it. The scroll padding is the row's height: a field
+     reached with Tab is scrolled out from under the row, not left hidden behind it. */
   #canvasPanel .panel-head { position:sticky; top:0; z-index:1; background:var(--bz-card); padding-top:0.7rem; }
+  #canvasPanel { scroll-padding-top:3.2rem; }
   #canvasPanel label { color:var(--bz-muted); font-size:0.78rem; width:88px; display:inline-block; }
   #canvasPanel input[type="number"] { width:74px; background:#101010; border:1px solid var(--bz-line);
                                       color:var(--bz-text); border-radius:6px; padding:0.2rem 0.3rem; font-size:0.78rem; }
@@ -561,13 +563,28 @@
       else if (old) g.drawImage(old, 0, 0);        // crop/extend rather than lose pixels
       return rasterCv;
     }
-    function rasterData() {
-      if (!rasterCv) return null;
+    function layerData(c) {
+      if (!c) return null;
       // An all-transparent layer is a null, not a megabyte of empty PNG.
-      var g = rasterCv.getContext("2d");
-      var d = g.getImageData(0, 0, rasterCv.width, rasterCv.height).data;
-      for (var i = 3; i < d.length; i += 4) if (d[i]) return rasterCv.toDataURL("image/png");
+      var g = c.getContext("2d");
+      var d = g.getImageData(0, 0, c.width, c.height).data;
+      for (var i = 3; i < d.length; i += 4) if (d[i]) return c.toDataURL("image/png");
       return null;
+    }
+    function rasterData() { return layerData(rasterCv); }
+    // The pixel layer as it would be with the lifted area dropped where it floats. Until it is
+    // dropped a lifted area lives only in its own buffer (the layer has a hole where it came
+    // from), and an Undo or Redo can bring one back that then just sits there: a save or an
+    // export taken meanwhile left it out, so a reload or the PNG had the hole. What is saved and
+    // exported is this; the live layer and the lifted area are not touched.
+    function rasterWithFloating() {
+      if (!floating) return rasterCv;
+      var real = ensureRaster(), c = document.createElement("canvas");
+      c.width = real.width; c.height = real.height;
+      var g = c.getContext("2d");
+      g.drawImage(real, 0, 0);
+      g.drawImage(floating.buf, floating.x, floating.y, floating.w, floating.h);
+      return c;
     }
     function clearRaster() {
       ensureRaster().getContext("2d").clearRect(0, 0, rasterCv.width, rasterCv.height);
@@ -1012,8 +1029,10 @@
     // Lifted pixels live only in their own buffer while they float (the pixel layer has a
     // hole where they came from), so a step that kept only the board lost them: flip an
     // area, draw a mark while it floats, and undoing the mark brought back the hole without
-    // the area. The buffer is kept by reference (nothing draws into it once it is made), so
-    // a step costs no more than it did.
+    // the area. The area is kept as a PNG, like the layer: a step holding the buffer itself
+    // kept its whole bitmap alive (64 MB for a 4096×4096 area) for as long as the history
+    // lasted. Nothing draws into a lifted buffer once it is made, so its PNG is made once.
+    function floatPng(buf) { return buf._bzPng || (buf._bzPng = buf.toDataURL("image/png")); }
     function historyStep() {
       return {
         board: JSON.stringify({
@@ -1025,8 +1044,20 @@
           // the picture back on top of everything instead of where it was.
           order: doc.order,
         }),
-        floating: floating ? { x: floating.x, y: floating.y, w: floating.w, h: floating.h, path: floating.path, buf: floating.buf } : null,
+        floating: floating ? { x: floating.x, y: floating.y, w: floating.w, h: floating.h, path: floating.path,
+                               png: floatPng(floating.buf), bw: floating.buf.width, bh: floating.buf.height } : null,
       };
+    }
+    // A lifted area from a step: a buffer of its size that its PNG is drawn into once that has
+    // decoded (a data URL decodes in a moment, as the pixel layer's does in loadRaster).
+    function floatFromStep(f) {
+      var buf = document.createElement("canvas");
+      buf.width = f.bw; buf.height = f.bh;
+      buf._bzPng = f.png;
+      var im = new Image();
+      im.onload = function () { buf.getContext("2d").drawImage(im, 0, 0); paint(); };
+      im.src = f.png;
+      return { x: f.x, y: f.y, w: f.w, h: f.h, path: f.path, buf: buf };
     }
     function snapshot() {
       undoStack.push(historyStep());
@@ -1051,9 +1082,13 @@
       if (selected && !selectedImage()) selected = null;   // the restored board may not have it
       // The lifted area is as it was at that step: floating where it floated, or not at all
       // (a step from before it was lifted has those pixels in the layer already, so keeping
-      // the float as well would show them twice).
-      var f = step.floating;
-      floating = f ? { x: f.x, y: f.y, w: f.w, h: f.h, path: f.path, buf: f.buf } : null;
+      // the float as well would show them twice). A drag of the area that is under way stops:
+      // it was moving the area that is gone, from where that one was picked up.
+      if (mode === "selmove") { mode = null; selMoveFrom = null; }
+      floating = step.floating ? floatFromStep(step.floating) : null;
+      // A lifted area is what Delete, Cut and the Selection bar act on, so a pixel selection
+      // made after it was lifted is put away: Delete would have cleared that one instead.
+      if (floating) sel = null;
       loadRaster(d.raster || null);
       renderImages();
       paint();
@@ -1098,12 +1133,14 @@
     // a board that silently loses a layer is worse than one that says it is too big.
     var MAX_BOARD_BYTES = 8 * 1024 * 1024;
     var blockedBytes = 0;
+    var limitNote = "";        // the status Remove background left saying the board is still over the limit
     function bodyBytes(s) {
       // Blob.size is the real encoded size; String.length undercounts non-ASCII.
       try { return new Blob([s]).size; } catch (e) { return s.length; }
     }
     function tooBig(bytes) {
       var mb = (bytes / (1024 * 1024)).toFixed(1);
+      limitNote = "";                    // this message replaces it
       setSaved(false);
       setStatus("Board is " + mb + " MB — over the 8 MB save limit. Remove an image, or Create the board as a file.");
       var el = document.getElementById("savedFlag");
@@ -1219,6 +1256,12 @@
         if (r.status === 413) { rejectedByServer(bytes); return; }
         if (!r.ok) throw new Error("save failed");
         setSaved(true);
+        // A note that the board was still over the limit (Remove background) is not true any
+        // more once a save of it is accepted: say so instead of leaving the old instruction up.
+        if (limitNote) {
+          if (statusEl.textContent === limitNote) setStatus("Saved: the board is within the 8 MB save limit now.");
+          limitNote = "";
+        }
       })
         .catch(function () { setSaved(false); })
         .then(function () {
@@ -1239,7 +1282,8 @@
     function boardJson() {
       orderSync();
       return {
-        version: 3, w: doc.w, h: doc.h, bg: doc.bg, raster: rasterData(),
+        // A lifted area is saved where it floats, as if dropped there (see rasterWithFloating).
+        version: 3, w: doc.w, h: doc.h, bg: doc.bg, raster: layerData(rasterWithFloating()),
         // The last real paper colour, kept beside a paper of "none": un-ticking None after a
         // reload must bring back the colour that was chosen, not the default.
         paper: paperColor,
@@ -1353,15 +1397,21 @@
     //     in it would not clear at all;
     //   - not an alpha forced to 255: a background that is itself translucent has to match.
     // Which bucket wins: a bucket's own pixels plus those of its neighbours (one step either
-    // way on every channel). A bucket edge cuts across values, not colours: a background of
-    // alpha 191 and 192, or a grey of 127 and 128, lands in two (or more) buckets, and counted
-    // apart each half could lose to a subject that touches the edge, which was then cleared
-    // instead of the background. Only a bucket at least as full as each of its neighbours may
-    // win, so a thin bucket sitting between two big ones is never taken for either of them.
-    function edgeColor(d, w, h) {
-      var BUCKETS = 16384;
+    // way on every channel) that the flood could clear from this bucket's key at the Fill
+    // tol. now. A bucket edge cuts across values, not colours: a background of alpha 191 and
+    // 192, or a grey of 127 and 128, lands in two (or more) buckets, and counted apart each
+    // half could lose to a subject that touches the edge, which was then cleared instead of
+    // the background. But a neighbour is only "the same colour" if it is within reach: an
+    // alpha bucket is 64 levels wide, and a translucent subject credited with the opaque
+    // background next door (127 levels away, which no flood at that tolerance crosses) won
+    // with pixels it could never clear. Only a bucket at least as full as each neighbour it
+    // reaches may win, so a thin bucket sitting between two big ones is never taken for
+    // either of them. At tolerance 0 nothing next door is in reach: the fullest bucket wins.
+    function edgeColor(d, w, h, tol) {
+      var BUCKETS = 16384, lim = tol * tol * 4;
       var cnt = new Uint32Array(BUCKETS), sr = new Float64Array(BUCKETS), sg = new Float64Array(BUCKETS),
           sb = new Float64Array(BUCKETS), sa = new Float64Array(BUCKETS);
+      var keyAt = new Int32Array(BUCKETS), keyDist = new Float64Array(BUCKETS);
       function bucketOf(i) { return ((d[i] >> 4) << 10) | ((d[i + 1] >> 4) << 6) | ((d[i + 2] >> 4) << 2) | (d[i + 3] >> 6); }
       function eachEdge(fn) {          // fn gets the index of an edge pixel's red byte
         var x, y;
@@ -1376,32 +1426,38 @@
         cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2]; sa[k] += d[i + 3];
       });
       if (!used.length) return null;
+      // Each bucket's key: its edge pixel nearest the bucket's mean.
+      keyDist.fill(Infinity);
+      eachEdge(function (i) {
+        if (d[i + 3] < 128) return;
+        var k = bucketOf(i), n = cnt[k];
+        var dr = d[i] - sr[k] / n, dg = d[i + 1] - sg[k] / n, db = d[i + 2] - sb[k] / n, da = d[i + 3] - sa[k] / n;
+        var dist = dr * dr + dg * dg + db * db + da * da;
+        if (dist < keyDist[k]) { keyDist[k] = dist; keyAt[k] = i; }
+      });
       var best = -1, bestScore = -1;
       used.forEach(function (k) {
-        var r = k >> 10, g = (k >> 6) & 15, b = (k >> 2) & 15, a = k & 3, score = 0, peak = true;
+        var r = k >> 10, g = (k >> 6) & 15, b = (k >> 2) & 15, a = k & 3, score = cnt[k], peak = true;
+        var i = keyAt[k], kr = d[i], kg = d[i + 1], kb = d[i + 2], ka = d[i + 3];
         for (var dr = -1; dr <= 1; dr++) for (var dg = -1; dg <= 1; dg++) for (var db = -1; db <= 1; db++) for (var da = -1; da <= 1; da++) {
           var R = r + dr, G = g + dg, B = b + db, A = a + da;
-          if (R < 0 || R > 15 || G < 0 || G > 15 || B < 0 || B > 15 || A < 0 || A > 3) continue;
-          var n = cnt[(R << 10) | (G << 6) | (B << 2) | A];
+          if ((!dr && !dg && !db && !da) || R < 0 || R > 15 || G < 0 || G > 15 || B < 0 || B > 15 || A < 0 || A > 3) continue;
+          var nb = (R << 10) | (G << 6) | (B << 2) | A, n = cnt[nb];
+          if (!n) continue;
+          var er = sr[nb] / n - kr, eg = sg[nb] / n - kg, eb = sb[nb] / n - kb, ea = sa[nb] / n - ka;
+          if (er * er + eg * eg + eb * eb + ea * ea > lim) continue;     // out of the flood's reach
           score += n;
           if (n > cnt[k]) peak = false;
         }
         // The fullest bucket of all is always a peak, so there is always a winner.
         if (peak && (score > bestScore || (score === bestScore && cnt[k] > cnt[best]))) { best = k; bestScore = score; }
       });
-      var mr = sr[best] / cnt[best], mg = sg[best] / cnt[best], mb = sb[best] / cnt[best], ma = sa[best] / cnt[best];
-      var at = -1, nearest = Infinity;
-      eachEdge(function (i) {
-        if (d[i + 3] < 128 || bucketOf(i) !== best) return;
-        var dr = d[i] - mr, dg = d[i + 1] - mg, db = d[i + 2] - mb, da = d[i + 3] - ma;
-        var dist = dr * dr + dg * dg + db * db + da * da;
-        if (dist < nearest) { nearest = dist; at = i; }
-      });
+      var at = keyAt[best];
       return { r: d[at], g: d[at + 1], b: d[at + 2], a: d[at + 3] };
     }
     // Works in place on an RGBA array; returns how many pixels it made see-through.
     function clearEdgeColor(d, w, h, tol) {
-      var key = edgeColor(d, w, h);
+      var key = edgeColor(d, w, h, tol);
       if (!key) return 0;
       var lim = tol * tol * 4;
       var seen = new Uint8Array(w * h);
@@ -1537,11 +1593,15 @@
         // smaller, which is why it was allowed, but it does not fit yet, and saying it does
         // would be false.
         var over = total > MAX_BOARD_BYTES;
-        setStatus(removedMessage() + (out.w < nw
+        var said = removedMessage() + (out.w < nw
           ? " The picture was made smaller (" + out.w + "×" + out.h + ", it was " + nw + "×" + nh + ")" +
             (over ? "." : " so that the board stays small enough to save.")
           : "") +
-          (over ? " The board is still " + mb + " MB, over the 8 MB save limit, so it cannot be saved yet: delete or shrink another picture." : ""));
+          (over ? " The board is still " + mb + " MB, over the 8 MB save limit, so it cannot be saved yet: delete or shrink another picture." : "");
+        setStatus(said);
+        // The save that follows may still make it fit (it makes the largest picture smaller
+        // when it can). If it does, this note would be wrong, so the save takes it back.
+        limitNote = over ? said : "";
       };
       probe.onerror = function () { setStatus("That picture could not be read."); };
       probe.src = src;
@@ -2904,12 +2964,7 @@
     // Steps taken while it floated keep it floating (historyStep), so undoing further back,
     // past a mark drawn meanwhile, does not lose it either.
     function deleteFloating() {
-      var f = floating, real = ensureRaster();
-      var withIt = document.createElement("canvas");
-      withIt.width = real.width; withIt.height = real.height;
-      var wg = withIt.getContext("2d");
-      wg.drawImage(real, 0, 0);
-      wg.drawImage(f.buf, f.x, f.y, f.w, f.h);
+      var real = ensureRaster(), withIt = rasterWithFloating();
       floating = null;
       rasterCv = withIt;
       try { snapshot(); } finally { rasterCv = real; }
@@ -3155,7 +3210,8 @@
         : paperNone() ? (paper === "solid" ? "#ffffff" : null)
         : doc.bg;
       if (under) { c.fillStyle = under; c.fillRect(0, 0, doc.w, doc.h); }
-      if (rasterCv) c.drawImage(rasterCv, 0, 0, doc.w, doc.h);
+      var layer = rasterWithFloating();          // a lifted area goes out where it floats, as if dropped
+      if (layer) c.drawImage(layer, 0, 0, doc.w, doc.h);
       // Images are decoded first and then painted in `doc.order` interleaved with the
       // vector marks, so the PNG is the board and not a re-drawing of it.
       var loaded = {};

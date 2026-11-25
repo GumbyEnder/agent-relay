@@ -47,6 +47,15 @@
  *   E52-E53  Space presses the Fill switch when the keyboard reached it, and still pans after
  *            a click on it
  *
+ * Third review (an independent review of the second-review fixes found these; each has checks):
+ *   B30b-B30d a lifted area that Undo brings back is in what is saved and exported, as if dropped
+ *   B35-B38  ...and it is what Delete acts on (a pixel area selected later is put away); an Undo
+ *            in the middle of dragging a paste stops that drag
+ *   D28      a field reached with Tab is scrolled out from under the Canvas panel's title row
+ *   E40-E40b the pictures are compared by id and content (a hash), not by length
+ *   E54-E55  a neighbouring colour bucket counts only if the flood could clear it from the key
+ *   E56-E57  the "still over the limit" note is taken back when the save makes the board fit
+ *
  * It needs no server and no account: it serves public/ from this checkout on an ephemeral
  * port, answers the few /api/buzzy calls the page makes with stubs, and drives the page
  * with Playwright. The pass/fail is on what the page really does (pixels on the canvas,
@@ -66,6 +75,7 @@
  *         that holds no device pixel ratio: a run with nothing in it must never pass)
  */
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -156,6 +166,15 @@ async function waitFor(fn, ms, what) {
   while (Date.now() < until) { if (await fn()) return; await sleep(50); }
   throw new Error("timed out waiting for " + what);
 }
+// Until the page's own save of the board as it is now has been tried and refused as too large
+// (its status names the size), so that a later click does not race that save.
+const settledTooBig = async (page) => {
+  const mb = (await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length)) / 1048576 - 0.05;
+  return cameTrue(() => page.evaluate((mb) => {
+    const m = /Board is ([\d.]+) MB/.exec(document.getElementById("status").textContent);
+    return !!m && Number(m[1]) >= mb && !window.__bzSketch.state().saving;
+  }, mb), 20000);
+};
 // waitFor for a check: whether it came true in time, instead of stopping the scenario.
 async function cameTrue(fn, ms) {
   try { await waitFor(fn, ms, "a condition"); return true; } catch { return false; }
@@ -278,6 +297,11 @@ async function dropPicture(page, url, x, y) {
   await page.waitForFunction((n) => window.__bzSketch.state().images === n, before + 1);
   await sleep(300);
 }
+// The pictures on a board, by id -> a hash of the whole data URL: "the same picture" means the
+// same bytes, not a URL of the same length.
+const urlHash = (u) => crypto.createHash("sha256").update(String(u || "")).digest("hex").slice(0, 16);
+const hashesOf = (images) => JSON.stringify((images || []).map((i) => [i.id, urlHash(i.url)]).sort());
+const pageHashes = async (page) => hashesOf(await page.evaluate(() => window.__bzSketch.board().images.map((i) => ({ id: i.id, url: i.url }))));
 const pictureRect = (page) => page.evaluate(() => {
   const i = window.__bzSketch.board().images[0];
   return i ? { x: i.x, y: i.y, w: i.w, h: i.h } : null;
@@ -732,6 +756,7 @@ async function checksDeleteMore(ctx) {
   st = await state(page);
   const back = await rasterPx(page, [[150, 140]]);
   check("B28 one Undo gives the lifted area back (and keeps the mark drawn meanwhile): the delete was its own step", back[0][3] === 255 && st.strokes === 1, { back: back[0], strokes: st.strokes });
+  const savesAt29 = saves.length;
   await page.click("#undo");
   await sleep(300);
   check("B29 the next Undo takes the mark away, as it would have anyway", (await state(page)).strokes === 0, await state(page));
@@ -741,6 +766,20 @@ async function checksDeleteMore(ctx) {
   const mid30 = at(g, 150, 140), shown30 = await screenPx(page, mid30.x, mid30.y);
   check("B30 ...and the lifted area is still there: it floats where it was when the mark was drawn",
     st.floating === true && shown30[0] > 200 && shown30[1] > 150 && shown30[2] < 80, { floating: st.floating, shown: shown30 });
+  // (third review) while it floats there, what is saved and what is exported have it, as if it
+  // were dropped: they used to read the pixel layer alone, which has the hole (a reload lost it)
+  const job30 = st.jobId;
+  await cameTrue(() => saves.slice(savesAt29).some((x) => x.jobId === job30), 8000);
+  await sleep(1600);                                               // ...and any save queued behind it
+  const lastSave = saves.filter((x) => x.jobId === job30 && x.status === 200).pop();
+  const savedPx = lastSave && lastSave.board && lastSave.board.raster ? (await samples(page, lastSave.board.raster, [[150, 140]])).px[0] : null;
+  check("B30b ...and the board saved after that Undo has the area's pixels, so a reload would too (it had the hole)",
+    !!savedPx && savedPx[3] === 255 && savedPx[0] > 200 && savedPx[2] < 80, { savedPx, saves: saves.slice(savesAt29).length });
+  await page.click("#shot");
+  const shot30 = await lastDownload(page);
+  const shotPx = (await samples(page, shot30.url, [[150, 140]])).px[0];
+  check("B30c ...and so does an Export PNG made while it floats", shotPx[3] === 255 && shotPx[0] > 200 && shotPx[2] < 80, shotPx);
+  check("B30d ...and saving and exporting left it as it was: still lifted, still floating", (await state(page)).floating === true, await state(page));
   await page.keyboard.press("Escape");                             // drop it
   await sleep(150);
   const laid = await rasterPx(page, [[150, 140]]);
@@ -750,7 +789,7 @@ async function checksDeleteMore(ctx) {
   await page.click('[data-tool="selrect"]');
   await drag(page, g, 90, 90, 210, 190);                           // a new area, around the old one
   await page.click("#flipH");                                      // flipped: lifted, floating over its hole
-  check("B32 setup: the flipped area floats over its hole", (await state(page)).floating === true && (await rasterPx(page, [[150, 140]]))[0][3] === 0, await state(page));
+  check("B32 setup: the flipped area floats", (await state(page)).floating === true, await state(page));
   await page.click("#undo");
   await sleep(300);
   st = await state(page);
@@ -760,8 +799,63 @@ async function checksDeleteMore(ctx) {
   await page.click("#redo");
   await sleep(300);
   st = await state(page);
-  const hole = await rasterPx(page, [[150, 140]]), over = await screenPx(page, mid30.x, mid30.y);
-  check("B34 Redo flips it again: the area floats over its hole, and shows", st.floating === true && hole[0][3] === 0 && over[0] > 200 && over[2] < 80, { floating: st.floating, hole: hole[0], over });
+  const kept = await rasterPx(page, [[150, 140]]), over = await screenPx(page, mid30.x, mid30.y);
+  check("B34 Redo flips it again: the area floats, shows, and is in the board that would be saved",
+    st.floating === true && over[0] > 200 && over[2] < 80 && kept[0][3] === 255, { floating: st.floating, over, saved: kept[0] });
+  await page.close();
+
+  // 4. (third review) a lifted area that an Undo brings back is what Delete acts on: a pixel
+  //    area selected after it was dropped is put away, or the Selection bar's Delete cleared
+  //    that area while the board said the lifted one was selected
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="fill"]');
+  await click(page, g, 50, 50);                                    // the whole pixel layer is yellow
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 100, 100, 200, 180);                         // area A
+  await page.click("#flipH");                                      // A is lifted
+  await page.click('[data-tool="rect"]');
+  await drag(page, g, 400, 300, 480, 360);                         // a mark while A floats
+  await page.keyboard.press("Escape");                             // A is dropped
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 600, 100, 700, 180);                         // area B, somewhere else
+  st = await state(page);
+  check("B35 setup: area B is selected and nothing floats", !!st.sel && Math.round(st.sel.x) === 600 && st.floating === false, st);
+  await page.click("#undo");
+  await sleep(300);
+  await page.click("#undo");
+  await sleep(300);
+  st = await state(page);
+  check("B36 two Undos bring A back lifted, and B (selected after A was dropped) is put away", st.floating === true && st.sel === null, { floating: st.floating, sel: st.sel });
+  await page.click("#selDel");                                     // the Selection bar's Delete
+  await sleep(200);
+  st = await state(page);
+  const bPx = await rasterPx(page, [[650, 140]]);
+  check("B37 ...so the Selection bar's Delete deletes A, the lifted area, and leaves B's pixels alone", st.floating === false && bPx[0][3] === 255, { floating: st.floating, b: bPx[0] });
+  await page.close();
+
+  // 5. (third review) an Undo in the middle of dragging a pasted area brings back the area that
+  //    was lifted before the paste, where it was: the drag stops, it does not carry that one off
+  page = await fresh(ctx);
+  g = await geom(page);
+  await page.click('[data-tool="fill"]');
+  await click(page, g, 50, 50);
+  await page.click('[data-tool="selrect"]');
+  await drag(page, g, 100, 100, 200, 180);                         // area A
+  await page.keyboard.press("Control+c");                          // copied: something to paste
+  await page.click("#flipH");                                      // A is lifted
+  await page.keyboard.press("Control+v");                          // a paste floats in the middle (A is set aside)
+  const s0 = await state(page), pc = at(g, s0.w / 2, s0.h / 2);
+  await page.mouse.move(pc.x, pc.y); await page.mouse.down();
+  await page.mouse.move(pc.x + 60, pc.y + 40, { steps: 4 });       // dragging the paste...
+  await page.keyboard.press("Control+z");                          // ...Undo, with the button still down
+  await page.mouse.move(pc.x + 160, pc.y + 90, { steps: 4 });
+  await page.mouse.up();
+  await sleep(300);
+  st = await state(page);
+  const aShown = await screenPx(page, at(g, 150, 140).x, at(g, 150, 140).y);
+  check("B38 Undo while dragging a pasted area brings back A, lifted, where it was: the rest of the drag does not move it",
+    st.floating === true && aShown[0] > 200 && aShown[2] < 80, { floating: st.floating, shown: aShown });
   await page.close();
 }
 
@@ -1011,6 +1105,25 @@ async function checksCanvasPanel(ctx, shots) {
   const shut = await page.evaluate(() => !document.getElementById("canvasPanel").classList.contains("on"));
   check("D25 scrolled to the end, the panel's Close button is still in sight at its top (nothing scrolled shows above or over it), and a click on it closes the panel",
     exit.scrolled && exit.inPanel && exit.onTop && exit.headAtTop && shut, { exit, shut });
+  // (third review) a field the keyboard reaches is not left hidden under the title row: scroll
+  // Width just under the row, then Tab to it from Close
+  await page.click("#canvasBtn");
+  const tucked = await page.evaluate(() => {
+    const p = document.getElementById("canvasPanel"), w = document.getElementById("cvW"), head = document.querySelector("#canvasPanel .panel-head");
+    p.scrollTop = 0;
+    p.scrollTop = w.getBoundingClientRect().top - p.getBoundingClientRect().top - p.clientTop - 4;   // Width's top 4 px under the panel's top edge
+    const r = w.getBoundingClientRect();
+    return { scrollTop: Math.round(p.scrollTop), covered: r.bottom <= head.getBoundingClientRect().bottom + 0.5 };
+  });
+  await page.focus("#canvasClose");
+  await page.keyboard.press("Tab");
+  await sleep(250);
+  const reached = await page.evaluate(() => {
+    const w = document.getElementById("cvW"), r = w.getBoundingClientRect(), head = document.querySelector("#canvasPanel .panel-head").getBoundingClientRect();
+    return { active: document.activeElement && document.activeElement.id, below: r.top >= head.bottom - 0.5, seen: document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === w };
+  });
+  check("D28 Width, scrolled under the title row, comes out from under it when Tab reaches it (it stayed hidden there)",
+    tucked.covered && reached.active === "cvW" && reached.below && reached.seen, { tucked, reached });
   await page.close();
 
   // a width typed into the panel but not applied yet is the person's: an Undo of a mark keeps it
@@ -1360,17 +1473,17 @@ async function checksRemoveBudgets(ctx) {
   // both pictures, that the stub (which refuses what the route refuses) accepted...
   await page.waitForFunction(() => !!window.__bzSketch.state().jobId);
   const job = (await state(page)).jobId;
-  const lens = await page.evaluate(() => window.__bzSketch.board().images.map((i) => i.url.length).sort((a, b) => a - b).join(","));
+  const held = await pageHashes(page);                              // both pictures, by id, by content
   const accepted = await cameTrue(() => saves.some((s) => s.jobId === job && s.status === 200 && s.board &&
-    s.board.images.map((i) => i.url.length).sort((a, b) => a - b).join(",") === lens), 20000);
+    s.board.images.length === 2 && hashesOf(s.board.images) === held), 20000);
   const sizeNow = await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length);
-  check("E40 setup: a board just under the 8 MB limit is saved: the server accepted a save of it with both pictures",
+  check("E40 setup: a board just under the 8 MB limit is saved: the server accepted a save of it with both pictures, the same bytes",
     accepted && sizeNow < LIMIT && sizeNow > LIMIT - 2 * 1024 * 1024, { accepted, sizeNow, saves: saves.filter((s) => s.jobId === job).map((s) => s.status + ":" + (s.board ? s.board.images.length : "-")) });
   // ...and a reload of it brings both pictures back, byte for byte
   const again = await fresh(ctx, origin + "/buzzy/sketch?job=" + encodeURIComponent(job));
   const both = await cameTrue(() => again.evaluate(() => window.__bzSketch.state().images === 2), 20000);
-  const lensAgain = await again.evaluate(() => window.__bzSketch.board().images.map((i) => i.url.length).sort((a, b) => a - b).join(","));
-  check("E40b ...and a reload of it brings both pictures back, byte for byte", both && lensAgain === lens, { both, lens, lensAgain });
+  const heldAgain = await pageHashes(again);
+  check("E40b ...and a reload of it brings both pictures back, byte for byte (same ids, same contents)", both && heldAgain === held, { both, held, heldAgain });
   await again.close();
   await selectBoardPicture(page, before);
   await page.click("#rmBg");
@@ -1398,6 +1511,7 @@ async function checksRemoveBudgets(ctx) {
   const FILL = Math.round(7.6 * 1024 * 1024);
   await dropMade(page, { kind: "bytes", n: Math.floor((FILL - 22) / 4) * 3 }, 700, 100);
   const sizeBefore = await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length);
+  await settledTooBig(page);                                        // the board's own save has said it is too large
   await selectBoardPicture(page, big);
   await page.click("#rmBg");
   const done50 = await cameTrue(() => page.evaluate(() => /Background removed/.test(document.getElementById("status").textContent)), 60000);
@@ -1407,6 +1521,32 @@ async function checksRemoveBudgets(ctx) {
     done50 && /still/.test(said50) && /over the 8 MB save limit/.test(said50) && !/small enough to save/.test(said50), { sizeBefore, after: after.size, said50 });
   check("E51 ...the clear itself is kept (it made the board smaller): the picture is the cleared, smaller PNG",
     big.len > after.len && /image\/png/.test(after.head) && sizeBefore > LIMIT && after.size > LIMIT && after.size < sizeBefore, { big: big.len, now: after.len, sizeBefore, sizeAfter: after.size });
+  await page.close();
+
+  // 5. (third review) the save that follows a clear can still make the board fit (it makes the
+  //    largest picture smaller when it can); when it does, the "still over" note is taken back
+  page = await fresh(ctx);
+  // the picture to clear: a PNG with see-through pixels, the largest on the board, and one a
+  // save cannot make smaller (it is no bigger than 1600 px), so the board stays over the limit...
+  await dropMade(page, { kind: "noise", w: 1600, h: 1200, block: [100, 100, 1400, 1000], bg: [40, 120, 220], clear: [0, 0, 24, 24], type: "image/png" }, 100, 50);
+  // ...a big noisy JPEG, the largest once that one is cleared, which a save can make much smaller...
+  await dropMade(page, { kind: "noise", w: 2560, h: 1920, block: [80, 80, 2400, 1600], bg: [200, 180, 160], type: "image/jpeg", q: 0.95 }, 700, 50);
+  const toClear = await pictureAt(page, 0), jpeg = await pictureAt(page, 1);
+  // ...and a filler a little smaller than the JPEG: after the clear the board is still over 8 MB
+  await dropMade(page, { kind: "bytes", n: Math.floor((jpeg.len - 300 * 1024 - 22) / 4) * 3 }, 700, 400);
+  const stuck = await settledTooBig(page);
+  const size56 = await page.evaluate(() => JSON.stringify(window.__bzSketch.board()).length);
+  check("E56 setup: a board over the limit whose largest picture cannot be made smaller says it is too large",
+    stuck && size56 > LIMIT && toClear.len > jpeg.len, { stuck, size56, toClear: toClear.len, jpeg: jpeg.len, status: await status(page) });
+  const savesAt56 = saves.length, job56 = (await state(page)).jobId;
+  await selectBoardPicture(page, toClear);
+  await page.click("#rmBg");
+  const noted = await cameTrue(() => page.evaluate(() => /still .* over the 8 MB save limit/.test(document.getElementById("status").textContent)), 60000);
+  const takenBack = await cameTrue(() => page.evaluate(() => /within the 8 MB save limit now/.test(document.getElementById("status").textContent)), 30000);
+  const smallerJpeg = await pictureAt(page, 1);
+  check("E57 ...after the clear it says the board is still over; when the save then makes it fit (the JPEG made smaller), that note is taken back, and the save was accepted",
+    noted && takenBack && smallerJpeg.len < jpeg.len && saves.slice(savesAt56).some((x) => x.jobId === job56 && x.status === 200),
+    { noted, takenBack, jpeg: [jpeg.len, smallerJpeg.len], status: await status(page) });
   await page.close();
 }
 
@@ -1419,12 +1559,17 @@ async function checksRemoveBudgets(ctx) {
 //   "greySplit"   the same, with a grey background of 127 and 128 in turn (a colour bucket edge)
 //   "gap"         a black band at alpha 128 along every edge, a see-through gap inside it, and a
 //                 blob of the same black in the middle that touches no edge
+//   "nextDoor"    (third review) a half-see-through blue subject on the left (220 edge pixels),
+//                 an opaque blue background (235) with a band of a lighter opaque blue along the
+//                 top (141): the band's coarse bucket is next to the subject's, though 127 alpha
+//                 levels away, and the background's is two buckets from either
 const makeEdgeCase = (page, kind) => page.evaluate((kind) => {
   const w = 200, h = 100, c = document.createElement("canvas"); c.width = w; c.height = h;
   const g = c.getContext("2d"), im = g.createImageData(w, h), d = im.data;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     let p;
-    if (kind === "gap") {
+    if (kind === "nextDoor") p = x < 61 ? [40, 120, 245, 128] : y < 3 ? [40, 120, 232, 255] : [40, 120, 200, 255];
+    else if (kind === "gap") {
       const band = x < 10 || y < 10 || x >= w - 10 || y >= h - 10, blob = x >= 80 && x < 120 && y >= 35 && y < 65;
       p = band || blob ? [0, 0, 0, 128] : [0, 0, 0, 0];
     } else if (x < 67) p = [220, 30, 30, 255];
@@ -1463,6 +1608,18 @@ async function checksEdgeKey(ctx) {
   check("E49 ...but the blob of the same black inside, beyond a see-through gap, stays: an empty pixel does not carry the flood",
     px.slice(4).every((p) => p[3] > 100 && p[3] < 160), px.slice(4));
   await page.close();
+
+  // (third review) a neighbouring bucket counts only if the flood could clear it from the key:
+  // the translucent subject used to be credited with the opaque band next door and won
+  const p3 = await fresh(ctx);
+  await openPic(p3, await makeEdgeCase(p3, "nextDoor"), 200);
+  await p3.click("#rmBg");                                         // at the default Fill tol. (24)
+  await sleep(200);
+  const q = await rasterPx(p3, [[30, 50], [0, 0], [0, 99], [100, 50], [150, 99], [199, 50], [100, 0], [150, 1], [199, 2]]);
+  check("E54 a half-see-through subject next to an opaque band is not taken for the background: it stays, as it was (Fill tol. 24)",
+    q.slice(0, 3).every((p) => p[3] > 100 && p[3] < 160 && p[2] > 220), q.slice(0, 3));
+  check("E55 ...the opaque background and the lighter band along the top are what is cleared", q.slice(3).every((p) => p[3] === 0), { px: q.slice(3), status: await status(p3) });
+  await p3.close();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
