@@ -242,8 +242,75 @@ for (const message of ["pay attention to the layout", "order a $5 coffee", "the 
 }
 // The legal arm knew "terms of service" but not the acronym, so "publish ToS" read as
 // product stakes and went ahead (1.2 ≤ 3). An acronym the owner types is still a door.
-for (const message of ["publish ToS", "update our T&Cs", "publish the terms of service"]) {
+for (const message of ["publish ToS", "update our T&Cs", "publish the terms of service", "publish the terms and conditions"]) {
   check(tier(message) === "critical", `a legal text is critical however it is spelled: "${message}" (got ${tier(message)})`);
+}
+
+// ── The discriminator: the channel verb decides, not the content verb ────────
+// The same sentence can make a thing or send it. Only the verb that leads counts,
+// so this table is pinned as pairs: maker verb → go, channel verb → offer. Raising
+// the stakes to product is how the test says "other people see it", because at play
+// a remembered "just go" is the person's own call (checked above).
+const channel = (message: string) => assessRequest(message, { minStakes: "product" });
+for (const message of [
+  "write a tweet announcing our sale",
+  "draft the email to our customers",
+  "compose the newsletter for our customers",
+  "write a post announcing the price rise",
+]) {
+  const a = channel(message);
+  check(
+    a.performsDoor !== true && askFirst(askOrGo(a), "go", a) === "go",
+    `a maker verb makes the artifact, nothing leaves: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+for (const message of [
+  "post the tweet",
+  "publish the new pricing page",
+  "send it to the vendor",
+  "upload the video to youtube",
+  "share the video with my class",
+  "announce the price increase to everyone",
+]) {
+  const a = channel(message);
+  check(
+    a.performsDoor === true && askFirst(askOrGo(a), "go", a) !== "go",
+    `a channel verb leaves the account, so it is offered: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+
+// ── The money arms cannot drift apart ────────────────────────────────────────
+// One table carries both numbers the two arms read: the amount the sentence names
+// (2,000 / 5,000) and the score the equation gives the same words at play
+// (0.32 = 0.064 × 0.5 × 1 × 10). Move CANT_UNDO_WEIGHT or REDO_MINUTES.small and
+// 0.32 breaks; stop matching the amount and the tier falls back to play, which
+// scores 0.32 on the same row. Either drift lands here, as one failure.
+const MONEY_DOOR = [
+  { message: "pay our contractor $2,000", amount: "2,000" },
+  { message: "wire $5,000 to the new supplier", amount: "5,000" },
+];
+for (const { message, amount } of MONEY_DOOR) {
+  const a = assessRequest(message);
+  const playScore = askOrGo({ ...a, stakes: "play" }).costOfMisreading;
+  const why = a.why.find((w) => w.startsWith("critical (money):")) || "";
+  check(
+    a.stakes === "critical" && why.includes(amount),
+    `the money arm reads the amount: "${message}" (got ${a.stakes}, "${why}")`,
+  );
+  check(
+    a.performsDoor === true && askFirst(askOrGo(a), "go", a) !== "go",
+    `moving an amount is a door, not just a critical tier: "${message}" (door=${a.performsDoor}, ${askFirst(askOrGo(a), "go", a)})`,
+  );
+  check(
+    Math.abs(playScore - 0.32) < 1e-9,
+    `the same words at play score 0.32, which is why the tier must carry them: "${message}" (got ${playScore})`,
+  );
+}
+// The row that was half-fixed: critical from the amount arm, but `irreversible` was
+// false, so a remembered "just go" walked the payment through on 0.4.
+{
+  const a = assessRequest("send 2000 dollars to the vendor");
+  check(a.stakes === "critical" && a.irreversible === true && a.performsDoor === true, "an amount and a recipient make a payment a door: \"send 2000 dollars to the vendor\"");
 }
 check(assessRequest("I need this ASAP").hurried === true, "ASAP is a hurry");
 check(assessRequest("write a short story").hurried === false, "no hurry words, no hurry");

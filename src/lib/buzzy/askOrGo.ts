@@ -133,11 +133,36 @@ function objectSize(m: string): { size: Size; noun: string } | null {
 
 const MULTI_PART = /\b(and then|after that|as well as|on top of that|step \d)\b|;\s|\balso\b[^.!?\n]{0,40}\b(need|want|make|add)\b/i;
 
+/**
+ * An amount of money riding with the verb that moves it: "pay our contractor $2,000",
+ * "wire $5,000 to the new supplier", "send 2000 dollars to the vendor".
+ *
+ * The *same* regex feeds the critical tier and `irreversible` (see IRREVERSIBLE), so
+ * the two arms cannot drift apart: an amount the tier calls critical is also a door,
+ * and a door that moves an amount is critical. Before this was shared, "send 2000
+ * dollars to the vendor" read critical but `irreversible=false`, so a remembered
+ * "just go" walked a payment through on a score of 0.4.
+ */
+const MONEY_AMOUNT =
+  /\b(?:pay|paid|paying|wire|wiring|transfer|transferring|send|sending|sent)\b[^.!?\n]{0,40}(?:\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:dollars?|usd|eur|gbp)\b)/i;
+
+/**
+ * The person or the bill on the other side of a payment: "pay our contractor",
+ * "pay the invoice", "pay suppliers". No amount needed, because the recipient is
+ * the signal — this is the half #404 was missing (a contractor read as play, 0.32).
+ */
+const MONEY_RECIPIENT =
+  /\b(?:pay|paid|paying|owe|owing)\b[^.!?\n]{0,25}\b(?:staff|employees?|team|vendors?|contractors?|suppliers?|bills?|invoices?|landlords?|freelancers?)\b/i;
+
 /** A mistake would be devastating: money, health, legal, security, people's data, production. */
 const CRITICAL: Array<[string, RegExp]> = [
-  ["money", /\b(checkout|payments?|billing|charg(e|es|ed|ing) (customers?|cards?|users?|people)|refunds?|payroll|tax(es)?|tax return|irs|hmrc|loans?|mortgages?|invest(ing|ment|ments)?|portfolio|stocks?|crypto|bitcoin|wire (transfer|money)|bank accounts?|routing number|credit cards?|chargebacks?|pay (my|our|the) (staff|employees|team|vendors?|contractors?|suppliers?|bills?|invoices?)|financial (statements?|reports?)|move (the )?money|(pay|paid|wire|transfer|send)\b[^.!?\n]{0,40}(\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:dollars?|usd|eur|gbp)\b))\b/i],
+  ["money", new RegExp(
+    "\\b(checkout|payments?|billing|charg(e|es|ed|ing) (customers?|cards?|users?|people)|refunds?|payroll|tax(es)?|tax return|irs|hmrc|loans?|mortgages?|invest(ing|ment|ments)?|portfolio|stocks?|crypto|bitcoin|wire (transfer|money)|bank accounts?|routing number|credit cards?|chargebacks?|financial (statements?|reports?)|move (the )?money)\\b|" +
+      MONEY_AMOUNT.source + "|" + MONEY_RECIPIENT.source,
+    "i",
+  )],
   ["health", /\b(medical|medicine|medications?|meds|doses?|dosage|prescriptions?|diagnos(is|e|ed)|symptoms?|allerg(y|ies|ic)|pregnan(t|cy)|surgery|treatment plan|mental health|suicid\w*|overdose|vaccines?|insulin|blood pressure|chemo\w*|patients?|clinical|hospital)\b/i],
-  ["legal", /\b(legal|lawyers?|attorneys?|lawsuits?|sue|suing|court|judge|contracts?|terms of (service|use)|privacy policy|compliance|gdpr|hipaa|liabilit(y|ies)|tos|t&c'?s?|(write|draft|update|make) (a|my|our) will|will and testament|living will|estate plan|custody|divorce|immigration|visas?|evict(ion)?|cease and desist|demand letter|settlement|nda|non-disclosure|trademark|patent)\b/i],
+  ["legal", /\b(legal|lawyers?|attorneys?|lawsuits?|sue|suing|court|judge|contracts?|terms (of (service|use)|and conditions)|privacy policy|compliance|gdpr|hipaa|liabilit(y|ies)|tos|t&c'?s?|(write|draft|update|make) (a|my|our) will|will and testament|living will|estate plan|custody|divorce|immigration|visas?|evict(ion)?|cease and desist|demand letter|settlement|nda|non-disclosure|trademark|patent)\b/i],
   ["security", /\b(passwords?|credentials|api keys?|secret keys?|private keys?|encrypt(ion)?|security|vulnerabilit(y|ies)|exploits?|breach(es)?|hack(ed|ing)?|two-factor|2fa|permissions|access control|firewall)\b/i],
   ["people's data", /\b(customer (data|records|database|list|details|info)|user (data|records|accounts|database)|personal data|pii|patient records|(our|the|my) database|mailing list|everyone'?s (data|emails?|details))\b/i],
   ["production", /\b(production|prod|live (site|server|app|system)|deploy(ing|ment)?|outages?|downtime|migrat(e|ion|ing)|rollback|restore (the|our|a) (backup|database)|dns)\b/i],
@@ -150,12 +175,37 @@ const PRODUCT = /\b(customers?|clients?|users|audience|public(ly)?|publish(ing|e
 const PLAY = /\b(for fun|just for fun|my kids?|my children|my son|my daughter|my family|bedtime|birthday|hobby|for myself|game night|my friends|weekend|date night|practice|homework|my pet)\b/i;
 
 /** Feeds a step that cannot be taken back. */
-const IRREVERSIBLE = /\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that)|publish|tweet (it|this)|pay|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\b/i;
+const IRREVERSIBLE = new RegExp(
+  "\\b(send(ing)? (it|this|that|them|out|to|the|a|an|our|my|these|those|everyone|all)|email (it|this|them|everyone|all)|post (it|this|that|the|a|an)|publish|tweet (it|this)|upload|share (?!my screen)|pay|transfer|wire|delete|remove all|wipe|drop (the|our|my)|deploy|launch|go live|submit|file (the|a|my|our)\\s*(claim|lawsuit|taxes|return|report)|sign (the|it|this)|order|buy|purchase|cancel (my|our|the)|terminate|fire (him|her|them)|evict|announce|migrate|overwrite|mass e-?mail|email blast)\\b|" +
+    MONEY_AMOUNT.source,
+  "i",
+);
 
 /** They seem to be in a hurry. "Just do it" is stronger than this: see isGoReply. */
 const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|immediately|hurry|in a rush|rushed|no time|real quick|need (it|this) (now|today|tonight)|by tonight|by end of (the )?day|eod|in \d+ ?(min|mins|minutes))\b|!!/i;
 
 /**
+ * ── The discriminator: the channel verb decides, not the content verb ────────
+ *
+ *   write / draft / compose / make the thing          the artifact is made,
+ *                                                     nothing leaves        → go
+ *   post / publish / send / upload / share the thing   it leaves the account  → offer
+ *
+ * The same word can be either, so only the verb that *leads* counts:
+ *
+ *   "write a tweet announcing our sale"        write leads     → go
+ *   "draft the email to our customers"         draft leads     → go
+ *   "post the tweet"                           post leads      → offer
+ *   "publish the new pricing page"             publish leads   → offer
+ *   "send it to the vendor"                    send leads      → offer
+ *   "upload the video to youtube"              upload leads    → offer
+ *   "announce the price increase to everyone"  announce leads  → offer
+ *
+ * "Announce" is on the channel side deliberately: it is in #403's own table of
+ * misses (1.5 at 589f213), so putting it with the maker verbs would restore the
+ * bug. What stays a go is announce *mentioned* after a maker verb, which the
+ * leading-verb rule already handles.
+ *
  * The leading verb of a request that *performs* a one-way door: the act itself
  * leaves the account, so a misreading cannot be read and corrected afterwards.
  *
@@ -167,7 +217,7 @@ const HURRIED = /\b(quick(ly)?|asap|a\.s\.a\.p|urgent(ly)?|right now|right away|
  * leaves the account, and pulling them in would add a tap to ordinary requests.
  */
 const DOOR_VERB =
-  /^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\s]+)*(send|email|e-?mail|mail|announce|publish|post|tweet|mass e-?mail|email blast|pay|wire|transfer|delete|remove|wipe|drop|deploy|launch|cancel|refund|terminate|fire|evict|submit|migrate|overwrite)\b/i;
+  /^(?:(?:please|now|just|ok(?:ay)?|and|also|then|so|go ahead and|i (?:want|need|'d like) you to|can you|could you|would you|will you)[,\s]+)*(send|email|e-?mail|mail|announce|publish|post|tweet|upload|share|mass e-?mail|email blast|pay|wire|transfer|delete|remove|wipe|drop|deploy|launch|cancel|refund|terminate|fire|evict|submit|migrate|overwrite)\b/i;
 
 /** Words that leave the result open. */
 const VAGUE = /\b(something|anything|some kind of|some sort of|stuff|whatever|ideas?|not sure|maybe|i don'?t know|dunno|cool|nice|fun|better|awesome|amazing|help me( with)?|figure out|kind of|sort of)\b/gi;
