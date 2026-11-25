@@ -3,7 +3,9 @@
 // don't ask for, touch a pixel outside the paint, or touch a node, mesh, image or animation that was
 // not painted. The browser probes (probe-model-paint.mjs, probe-paint-on-board.mjs) check the rest.
 //   node scripts/test-model-paint.mjs
-import { readInstruction, describeInstruction, recolourPixels, fillChannel, REGIONS } from "../public/buzzy/model-paint.js";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { readInstruction, describeInstruction, recolourPixels, fillChannel, REGIONS, SAVE_LIMIT } from "../public/buzzy/model-paint.js";
 import { GlbError, GlbPatch, copyOf, isGlb, readGlb, readModel, writeGlb } from "../public/buzzy/glb-patch.js";
 
 let pass = 0, fail = 0;
@@ -19,7 +21,21 @@ ok("a coloured glass keeps its colour", readInstruction("blue tinted glass").col
 ok("remove / delete / get rid of, said about the part itself → remove", ["remove it", "delete this part", "get rid of it", "take it off", "cut it off", "hide it", "remove", "remove the red area", "please remove it", "I want you to delete this part", "get rid of the painted area", "delete the part I painted", "take this away"].every((t) => readInstruction(t).kind === "remove"), kinds(["remove it", "delete this part", "get rid of it", "take it off"]).join());
 ok("“remove the scratches” is a repaint, never a deletion of faces", readInstruction("remove the scratches").kind === "repaint");
 ok("a named thing is not the part itself: nothing is deleted on a guess", ["get rid of the antenna", "delete the dirt", "remove the paint", "hide the logo", "remove the glass", "take off the rust"].every((t) => readInstruction(t).kind === "repaint"), kinds(["get rid of the antenna", "delete the dirt", "remove the paint", "hide the logo"]).join());
-ok("“make the windshield opaque” is not glass: it makes the part solid", (() => { const r = readInstruction("make the windshield opaque"); return r.kind === "look" && r.opaque === true && !r.colour; })());
+ok("“make the windshield opaque” is not glass: it makes the part solid", (() => { const r = readInstruction("make the windshield opaque"); return r.kind === "look" && r.opaque === true && r.opacity === 1 && !r.colour; })());
+// Which way, said without where to stop: never applied the wrong way round, never sent to a picture maker that cannot do it.
+ok("“less shiny”, “a bit more transparent”, “less transparent”, “more opaque”, “too shiny”, “not shiny”, “shinier” ask for a target", ["make it less shiny", "make it a bit more transparent", "less transparent", "more opaque", "too shiny", "make it not shiny", "make it shinier", "slightly see-through", "make it less see-through"].every((t) => readInstruction(t).kind === "ask"), kinds(["make it less shiny", "less transparent", "too shiny", "shinier"]).join());
+ok("…and what they say is the way to ask: a target to name", (() => { const r = readInstruction("make it less shiny"); return /matte/.test(r.why) && /50% see-through/.test(r.why) && /less shiny/.test(r.why) && describeInstruction(r) === r.why; })());
+ok("“less shiny” is not read as “shiny”, and “less transparent” is not clear glass", readInstruction("make it less shiny").roughness === undefined && readInstruction("less transparent").kind !== "glass");
+ok("a direction next to a colour goes to the picture maker, which can do it: “more red” is not “red”", readInstruction("make it more red").kind === "repaint" && readInstruction("make it a bit less red").kind === "repaint");
+ok("a direction next to something that is not a material word is just words: “less dirty”", readInstruction("make the glass less dirty").kind === "repaint");
+// An amount of see-through is the part's own look at that opacity, not glass, and never a paid repaint.
+ok("“half transparent”, “50% transparent”, “semi-transparent” keep the part's look at half opacity", ["make it half transparent", "50% transparent", "make it semi-transparent", "make it 50 percent see-through"].every((t) => { const r = readInstruction(t); return r.kind === "look" && r.opacity === 0.5 && !r.colour; }), kinds(["make it half transparent", "50% transparent"]).join());
+ok("“30% see-through” is 70% opaque, “70% opaque” is 70% opaque", readInstruction("30% see-through").opacity === 0.7 && readInstruction("70% opaque").opacity === 0.7);
+ok("an amount can come with a colour: “40 percent transparent blue”", (() => { const r = readInstruction("make it 40 percent transparent blue"); return r.kind === "look" && r.opacity === 0.6 && r.colour === "#1e5bd8"; })());
+ok("an amount of glass is glass at that opacity; “0% transparent” is solid", readInstruction("make it half transparent glass").kind === "glass" && readInstruction("make it half transparent glass").opacity === 0.5 && readInstruction("0% transparent").opacity === 1);
+ok("a number that is not about how much shows through is not understood: “50% bigger” is a repaint", readInstruction("make it 50% bigger").kind === "repaint" && readInstruction("make it 5 apples").kind === "repaint");
+ok("two amounts, or see-through and solid together, are asked about", readInstruction("50% transparent and 30% opaque").kind === "ask" && readInstruction("opaque glass").kind === "ask");
+ok("what an amount will do is said in words", /50% see-through/.test(describeInstruction(readInstruction("half transparent"))) && /solid/.test(describeInstruction(readInstruction("opaque"))));
 ok("“not see-through”, “not transparent”, “solid” all say opaque", ["make it not see-through", "make it not transparent", "make it solid", "non-transparent", "no longer see through"].every((t) => { const r = readInstruction(t); return r.kind === "look" && r.opaque === true; }));
 ok("words about glass that are not a request for glass go to the picture maker", ["clean the glass", "add cracks to the glass", "fix the windshield", "make the glass dirty", "clear the scratches"].every((t) => readInstruction(t).kind === "repaint"), kinds(["clean the glass", "add cracks to the glass", "fix the windshield"]).join());
 ok("a part's name on its own is harmless: “make the windshield black” recolours", (() => { const r = readInstruction("make the windshield black"); return r.kind === "look" && r.colour === "#111111"; })());
@@ -186,8 +202,81 @@ console.log("\nA .gltf with its data inside");
   ok("a .glb is read as it is", same(readModel(bytes).json, base.json));
   const outside = copyOf(base.json);
   outside.buffers = [{ byteLength: 8, uri: "model.bin" }];
-  ok("a .gltf that keeps its data in other files says so, in words", (() => { try { readModel(new TextEncoder().encode(JSON.stringify(outside))); return false; } catch (e) { return e instanceof GlbError && /other files/.test(e.message); } })());
+  ok("a .gltf that keeps its data in other files says so, in words", (() => { try { readModel(new TextEncoder().encode(JSON.stringify(outside))); return false; } catch (e) { return e instanceof GlbError && /another address or in another file/.test(e.message); } })());
   ok("text that is not a model says so too", (() => { try { readModel(new TextEncoder().encode("hello")); return false; } catch (e) { return e instanceof GlbError && /not a \.glb or \.gltf/.test(e.message); } })());
+}
+
+console.log("\nNothing is fetched from outside, and nothing in the file is dropped");
+{
+  // A GLB whose first buffer is its own binary part can still point a picture, or another buffer, at an address.
+  const withImage = (uri) => { const j = copyOf(base.json); j.images = [{ uri, mimeType: "image/png" }]; return writeGlb(j, base.bin); };
+  const refused = (fn) => { try { fn(); return null; } catch (e) { return e instanceof GlbError && /another address or in another file/.test(e.message) ? "refused" : "wrong error: " + (e && e.message); } };
+  ok("a .glb with a picture at an http: address is refused before anything opens it", refused(() => readModel(withImage("https://example.com/maker/tracks.png"))) === "refused");
+  ok("…also a picture at a relative file name, and one at a // address", refused(() => readModel(withImage("textures/tracks.png"))) === "refused" && refused(() => readModel(withImage("//example.com/a.png"))) === "refused");
+  ok("…a second buffer at an address too", (() => { const j = copyOf(base.json); j.buffers.push({ uri: "https://example.com/more.bin", byteLength: 8 }); return refused(() => readModel(writeGlb(j, base.bin))) === "refused"; })());
+  ok("…and a buffer with nothing in it that is not the file's own binary part", (() => { const j = copyOf(base.json); j.buffers.push({ byteLength: 8 }); return refused(() => readModel(writeGlb(j, base.bin))) === "refused"; })());
+  ok("…the whole file is refused, not just the part: nothing is read from it", (() => { const j = copyOf(base.json); j.images.push({ uri: "https://example.com/b.png" }); return refused(() => readModel(writeGlb(j, base.bin))) === "refused"; })());
+  ok("a picture that is a data: address inside the .glb is the file's own: it is packed into the binary part, nothing else changes", (() => {
+    const j = copyOf(base.json);
+    j.images = [{ uri: "data:image/png;base64," + Buffer.from(base.image).toString("base64") }];
+    const m = readModel(writeGlb(j, base.bin));
+    const v = m.json.bufferViews[m.json.images[0].bufferView];
+    return m.json.images[0].uri === undefined && m.json.images[0].mimeType === "image/png" && same(Array.from(m.bin.subarray(v.byteOffset, v.byteOffset + v.byteLength)), Array.from(base.image)) && same(m.json.meshes, base.json.meshes) && same(m.json.nodes, base.json.nodes);
+  })());
+  ok("a .glb with everything inside is read exactly as it is (nothing repacked)", (() => { const m = readModel(bytes); return same(m.json, base.json) && same(Array.from(m.bin), Array.from(base.bin)); })());
+
+  // A GLB may carry application chunks after its binary part.
+  const extra = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const withChunk = writeGlb(base.json, base.bin, [{ type: 0x31585859, bytes: extra }, { type: 0x32585859, bytes: new Uint8Array([9, 9, 9, 9]) }]);
+  const read = readGlb(withChunk);
+  ok("a chunk this file does not know is read, not skipped", read.extra.length === 2 && read.extra[0].type === 0x31585859 && same(Array.from(read.extra[0].bytes), Array.from(extra)));
+  const patched = new GlbPatch(readModel(withChunk));
+  patched.setNodePrimitives(2, []);
+  const back = readGlb(patched.bytes());
+  ok("…and written back, byte for byte and in order, whatever the patch changed", back.extra.length === 2 && back.extra[0].type === 0x31585859 && same(Array.from(back.extra[0].bytes), Array.from(extra)) && back.extra[1].type === 0x32585859 && back.json.nodes[2].mesh === undefined);
+  ok("a .glb with none has none to keep", readGlb(bytes).extra.length === 0);
+
+  const colours = new GlbPatch(readGlb(bytes));
+  const acc = colours.addVertexFloats([1, 1, 1, 0.25, 1, 1, 1, 0.75], 4);
+  const ca = colours.json.accessors[acc];
+  ok("per-vertex floats are a vertex accessor of their own (four to a vertex)", ca.type === "VEC4" && ca.componentType === 5126 && ca.count === 2 && colours.json.bufferViews[ca.bufferView].target === 34962);
+}
+{
+  // The Library's limit for one file is the server's, kept in step here (a change to one without the other would let a paid
+  // repaint through for a file that cannot be saved).
+  const server = readFileSync(new URL("../src/lib/buzzy/chat.nitro.ts", import.meta.url), "utf8");
+  const m = /const ASSET_MAX_BYTES = (\d+) \* 1024 \* 1024;/.exec(server);
+  ok("the painter's save limit is the Library's limit (ASSET_MAX_BYTES in chat.nitro.ts)", !!m && Number(m[1]) * 1024 * 1024 === SAVE_LIMIT, m ? m[0] : "not found");
+}
+
+// ── Which model cards are offered Paint changes (whiteboard.js, in a sandbox) ──────────────────────────
+console.log("\nWhich model cards get Paint changes");
+{
+  const store = new Map();
+  const sandbox = {
+    console,
+    localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => { store.set(k, String(v)); }, removeItem: (k) => { store.delete(k); }, key: (i) => [...store.keys()][i] ?? null, get length() { return store.size; } },
+    setTimeout: () => 0, clearTimeout: () => {}, fetch: () => Promise.reject(new TypeError("offline")),
+    document: {
+      getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+      createElement: () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, addEventListener() {}, setAttribute() {}, focus() {} }),
+      addEventListener() {}, body: { appendChild() {}, addEventListener() {}, classList: { add() {}, remove() {} } },
+    },
+    navigator: { userAgent: "node" },
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync("public/buzzy/board-nodes.js", "utf8"), sandbox, { filename: "board-nodes.js" });
+  vm.runInContext(readFileSync("public/buzzy/whiteboard.js", "utf8"), sandbox, { filename: "whiteboard.js" });
+  const paintable = sandbox.BeeZillaWhiteboard.paintableModel;
+  ok("the board offers the check", typeof paintable === "function");
+  const yes = (c) => paintable({ kind: "model", ...c }) === true;
+  const no = (c) => paintable({ kind: "model", ...c }) === false;
+  ok("a glTF type, or a .glb / .gltf name or address, is offered", yes({ title: "Tank", url: "/api/buzzy/assets/5", contentType: "model/gltf-binary" }) && yes({ title: "Tank", url: "/api/buzzy/assets/5", contentType: "model/gltf+json" }) && yes({ title: "tank.glb", url: "/api/buzzy/assets/5" }) && yes({ title: "tank.GLTF", url: "/api/buzzy/assets/5", contentType: "application/octet-stream" }) && yes({ title: "Tank", url: "https://x.example/tank.glb?sig=abc" }) && yes({ title: "Tank (changed)", url: "/api/buzzy/assets/9", contentType: "model/gltf-binary; charset=binary" }));
+  ok("an FBX card (the 3D job's quad-mesh copy) is not: by its type, its name or its address", no({ title: "model-1234abcd.fbx", url: "/api/buzzy/assets/77", contentType: "model/fbx" }) && no({ title: "Quad robot", url: "/api/buzzy/assets/77", contentType: "application/x-fbx" }) && no({ title: "model-1234abcd.fbx", url: "/api/buzzy/assets/77" }) && no({ title: "Robot", url: "https://files.example/robot.fbx?token=1" }) && no({ title: "Robot", url: "/api/buzzy/assets/77", contentType: "model/fbx" }));
+  ok("…and it stays out when the card's details contradict each other (a .glb name on an fbx type, or the other way round)", no({ title: "robot.glb", url: "/api/buzzy/assets/77", contentType: "model/fbx" }) && no({ title: "robot.fbx", url: "/api/buzzy/assets/77", contentType: "model/gltf-binary" }) && no({ title: "robot", url: "https://x.example/robot.fbx", contentType: "model/gltf-binary" }));
+  ok("other models the painter cannot read are not offered either: .obj, .stl, .usdz, .dae, .ply, .3mf, .blend", ["model/obj", "model/stl", "model/vnd.usdz+zip", "model/vnd.collada+xml", "model/ply", "model/3mf"].every((t) => no({ title: "m", url: "/api/buzzy/assets/1", contentType: t })) && ["a.obj", "a.stl", "a.usdz", "a.dae", "a.ply", "a.3mf", "a.blend", "a.step"].every((n) => no({ title: n, url: "/api/buzzy/assets/1" })));
+  ok("a card with no file details at all is not offered (an asset number says nothing about the format)", no({ title: "Model", url: "/api/buzzy/assets/5" }) && no({ title: "", url: "" }) && no({}));
 }
 
 console.log(`\nmodel paint: ${pass} passed, ${fail} failed`);

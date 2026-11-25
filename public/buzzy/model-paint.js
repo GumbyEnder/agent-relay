@@ -61,11 +61,13 @@ const SHINY = new Set(["shiny", "glossy", "gloss", "polished", "chrome", "mirror
 const METAL = new Set(["chrome", "mirror", "metal", "metallic", "steel"]);
 const MATTE = new Set(["matte", "matt", "dull", "rough", "flat"]);
 const SEE = new Set(["seethrough", "transparent", "translucent", "glass", "glassy", "tinted", "tint", "clearglass"]);
+// See-through as a STATE of the part: with an amount ("30% transparent") it is how much of it shows through.
+const SEE_STATE = new Set(["seethrough", "transparent", "translucent"]);
 const SOLID = new Set(["opaque", "solid"]);
 // Words that only frame a request ("please make it …", "the part should be …").
 const FRAME = new Set(("make makes turn turns change changes set have give paint painted colour color coloured colored should must need needs " +
   "to into be become as it its this that them these those the a an of in so all whole entire area areas part parts bit bits region regions " +
-  "piece pieces selection selected marked thing patch surface look looks like more less very really quite slightly fully completely totally " +
+  "piece pieces selection selected marked thing patch surface look looks like very really quite fully completely totally " +
   "is are was will would can could id ill lets let us we you i me my your our want wish please just now then and also with kindly").split(" "));
 // Names of parts, harmless in "make the windshield black": they say WHICH part, not what to do.
 const PARTS = new Set(("windshield windscreen window windows visor lens canopy door doors hood bonnet roof wheel wheels tire tires tyre tyres rim rims " +
@@ -76,6 +78,12 @@ const PARTS = new Set(("windshield windscreen window windows visor lens canopy d
 const WHAT = "(?:it|this|that|them|these|those|everything|all of it|(?:the |this |that |these |those )?(?:(?:whole|entire|painted|selected|marked|red|blue) )*(?:part|parts|area|areas|region|regions|bit|bits|piece|pieces|selection|patch|thing|faces)(?: (?:i|you|we) (?:painted|marked|selected))?)";
 const OFF = "(?: (?:off|out|away|completely|entirely|altogether|totally|fully))*";
 const REMOVE = new RegExp("^(?:(?:remove|delete|erase|discard|hide|scrap|drop)(?: " + WHAT + ")?|(?:take|cut)(?: " + WHAT + ")? (?:off|out|away)|get rid of(?: " + WHAT + ")?)" + OFF + "$");
+// Direction words next to a material word: "less shiny", "a bit more transparent", "not shiny", "too glossy". They say which
+// way, not where to stop, and what it looks like now is not known from the words: BeeZilla asks for a target rather than
+// apply the opposite change. (Next to a colour, "more red" goes to the picture maker, which can do it.)
+const MATERIAL_WORDS = "(?:seethrough|see through|transparent|translucent|opaque|solid|shiny|glossy|gloss|polished|chrome|metal|metallic|steel|matte|matt|dull|rough|flat|glass|glassy|clearglass|tinted|clear)";
+const RELATIVE_MATERIAL = new RegExp("\\b(?:less|more|slightly|somewhat|too|overly|not|isnt|arent|dont|doesnt|never|a bit|a little|bit more|little more|bit less|little less)\\s+(?:(?:more|less|very|really|quite|so)\\s+)?" + MATERIAL_WORDS + "\\b|\\b(?:shinier|glossier|duller|rougher|smoother|clearer)\\b");
+const ASK_TARGET = "Say what it should be: “matte”, “shiny” or “shiny metal”; “50% see-through”, “see-through glass” or “solid”; or a colour.";
 const LEAD = /^(?:please|just|now|then|ok|okay|so|and|also|kindly|go ahead and|can you|could you|would you|will you|you can|you could|you should|i want you to|i want to|i want|i would like you to|i would like to|i would like|id like you to|id like to|id like|i need you to|i need to|i need|lets|let us|we should|we can|we could|we need to|we want to|we want)\s+/;
 const TRAIL = /\s+(?:please|thanks|thank you|thx|for me|now)$/;
 
@@ -97,7 +105,11 @@ function plainWords(text) {
  */
 export function readInstruction(text) {
   const raw = String(text || "").trim();
-  let t = plainWords(raw);
+  // "50% see-through": the number is kept as a word before the punctuation goes (a bare number next to one counts too).
+  const amountWords = raw.toLowerCase()
+    .replace(/(\d{1,3})(?:\.\d+)?\s*(?:%|per\s?cent)/g, (_m, n) => " amount" + Math.min(100, Number(n)) + " ")
+    .replace(/\b(\d{1,3})\s+(?=(?:see[ -]?through|transparent|translucent|opaque|solid)\b)/g, (_m, n) => " amount" + Math.min(100, Number(n)) + " ");
+  let t = plainWords(amountWords);
   if (!t) return { kind: "none" };
   if (REMOVE.test(t)) return { kind: "remove" };
   // "the red area" names the area, it is not the colour red.
@@ -106,30 +118,45 @@ export function readInstruction(text) {
   t = t.replace(/\b(?:non|not|isnt|arent|never|no longer|stop being|without)\s+(?:be\s+|being\s+)?(?:see through|seen through|transparent|translucent|clear glass|glass|glassy)\b/g, " opaque ")
     .replace(/\bsee through\b|\bcrystal clear\b/g, "seethrough")
     .replace(/\bclear (?=glass|plastic|acrylic|perspex)/g, "clearglass ")
+    .replace(/\b(?:half|semi|partly|partially)\s*(?=(?:seethrough|transparent|translucent|opaque|solid)\b)/g, "amount50 ")
     .replace(/\b(?:make|turn|have|set|be|become|is|are)\s+(?:(?:it|this|that|them|the area|the part|the painted area|the painted part)\s+)?(?:(?:completely|fully|totally|more|very|really)\s+)?clear\b/g, (m) => m.replace(/clear$/, "seethrough"));
   if (t === "clear") t = "seethrough";
   const toks = t.split(" ").filter(Boolean);
-  const colours = [];
-  let shade = null, hex = null, shiny = false, metal = false, matte = false, see = false, tint = false, solid = false, clearish = false, content = false;
+  const colours = [], amounts = [];
+  let shade = null, hex = null, shiny = false, metal = false, matte = false, see = false, seeState = false, glassWord = false, tint = false, solid = false, clearish = false, content = false;
   const left = [];
   for (const w of toks) {
     const h = /^hex([0-9a-f]{3}|[0-9a-f]{6})$/.exec(w);
-    if (h) { hex = "#" + (h[1].length === 3 ? h[1].split("").map((c) => c + c).join("") : h[1]); colours.push(hex); content = true; }
+    const am = /^amount(\d{1,3})$/.exec(w);
+    if (am) { amounts.push(Number(am[1])); content = true; }
+    else if (h) { hex = "#" + (h[1].length === 3 ? h[1].split("").map((c) => c + c).join("") : h[1]); colours.push(hex); content = true; }
     else if (COLOURS[w]) { colours.push(COLOURS[w]); content = true; }
     else if (SHADE[w]) { shade = SHADE[w]; content = true; }
     else if (SHINY.has(w)) { shiny = true; if (METAL.has(w)) metal = true; content = true; }
     else if (MATTE.has(w)) { matte = true; content = true; }
-    else if (SEE.has(w)) { see = true; content = true; if (w === "tinted" || w === "tint") tint = true; if (w === "seethrough" || w === "transparent" || w === "clearglass") clearish = true; }
+    else if (SEE.has(w)) { see = true; content = true; if (SEE_STATE.has(w)) seeState = true; else glassWord = true; if (w === "tinted" || w === "tint") tint = true; if (w === "seethrough" || w === "transparent" || w === "clearglass") clearish = true; }
     else if (SOLID.has(w)) { solid = true; content = true; }
     else if (!FRAME.has(w) && !PARTS.has(w)) left.push(w);
   }
+  // An amount is only about how much shows through; a number that is not, is not understood.
+  if (amounts.length === 1 && !solid && !seeState) left.push("amount");
+  const ask = (why) => ({ kind: "ask", words: raw.slice(0, 200), why });
+  // Which way, not where to stop: asked for a target, never applied the wrong way round (and never paid for).
+  if (RELATIVE_MATERIAL.test(t)) return ask(`“${raw.slice(0, 50)}” says which way, not where to stop, and BeeZilla cannot tell how it looks now from words. ${ASK_TARGET}`);
+  if (amounts.length > 1) return ask(`More than one amount in “${raw.slice(0, 50)}”. ${ASK_TARGET}`);
   // Anything the words do not settle, or two things at once: the picture maker, painted pixels only.
-  if (left.length || new Set(colours).size > 1 || (see && solid)) return { kind: "repaint", words: raw.slice(0, 600) };
+  if (left.length || new Set(colours).size > 1) return { kind: "repaint", words: raw.slice(0, 600) };
+  if (see && solid) return ask(`“${raw.slice(0, 50)}” asks for both see-through and solid. ${ASK_TARGET}`);
   let colour = colours[0] || null;
   if (colour && shade && !hex) colour = scaleHex(colour, shade);
-  if (see) return { kind: "glass", colour: colour || "#203040", opacity: clearish && !tint ? 0.25 : 0.45 };
-  if (solid || colour || shiny || matte) {
-    return { kind: "look", opaque: solid, colour, metalness: shiny && metal ? 0.9 : null, roughness: shiny ? 0.15 : matte ? 0.95 : null };
+  // How much shows through, as an amount of the part's own look (opacity 1 = solid).
+  let opacity = null;
+  if (amounts.length === 1) opacity = Math.max(0.05, Math.min(1, solid ? amounts[0] / 100 : 1 - amounts[0] / 100));
+  else if (solid) opacity = 1;
+  // "Glass" or a bare "see-through" makes the part glass; an AMOUNT of see-through ("30% transparent") keeps the part's own look.
+  if (see && (glassWord || opacity === null)) return { kind: "glass", colour: colour || "#203040", opacity: opacity !== null ? opacity : clearish && !tint ? 0.25 : 0.45 };
+  if (opacity !== null || colour || shiny || matte) {
+    return { kind: "look", opaque: opacity === 1, opacity, colour, metalness: shiny && metal ? 0.9 : null, roughness: shiny ? 0.15 : matte ? 0.95 : null };
   }
   return content ? { kind: "repaint", words: raw.slice(0, 600) } : { kind: "none" };
 }
@@ -144,8 +171,10 @@ export function describeInstruction(want) {
   if (want.kind === "remove") return "Takes the painted part off the model.";
   if (want.kind === "glass") return want.opacity < 0.3 ? "Turns it into clear, see-through glass." : "Turns it into tinted, see-through glass.";
   if (want.kind === "repaint") return "The picture maker repaints the painted part of the texture.";
+  if (want.kind === "ask") return want.why;
   const bits = [];
-  if (want.opaque) bits.push("makes it solid (not see-through)");
+  if (want.opacity === 1) bits.push("makes it solid (not see-through)");
+  else if (typeof want.opacity === "number") bits.push(`makes it ${Math.round((1 - want.opacity) * 100)}% see-through`);
   if (want.colour) {
     const name = Object.keys(COLOURS).find((k) => COLOURS[k] === want.colour);
     bits.push("recolours it " + (name || want.colour));
@@ -196,6 +225,9 @@ const LOCKDOWN_SAYS = "Lockdown is on, and nothing leaves BeeZilla in that mode,
   "Colours, glass, shiny or matte finishes and “remove it” still work. The privacy control on the Talk bar switches Lockdown off.";
 const FINISH_NOT = "this part's material is flat-shaded or uses an older material type, so shininess has no effect on it";
 const MAX_TEXELS = 8192 * 8192;
+/** The most the Library keeps for one file (ASSET_MAX_BYTES in src/lib/buzzy/chat.nitro.ts; scripts/test-model-paint.mjs holds the two together). */
+export const SAVE_LIMIT = 25 * 1024 * 1024;
+const mb = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
 /** A picture's own size (an image element reports its drawn size, a bitmap its real one). */
 const sizeOf = (img) => ({ w: img.naturalWidth || img.width || 0, h: img.naturalHeight || img.height || 0 });
 
@@ -285,7 +317,7 @@ export async function open(opts) {
   let closed = false, busy = false, cancelled = false, dirty = false;
   let failed = "";                 // why the 3D view cannot be used; kept on screen, never replaced
   let renderer = null, controls = null, pickTarget = null, ro = null, raf = 0;
-  let model = null, gltf = null, source = null;
+  let model = null, source = null;
   const parts = [];                // { mesh, assoc, triCount, v, region (Uint8Array), overlay, pick, colors, idBase }
   let nextId = 0, pickFresh = false;
   let tool = "turn";
@@ -302,9 +334,9 @@ export async function open(opts) {
   box.tabIndex = -1;
   box.setAttribute("data-bz-resize", "all");
   box.setAttribute("data-bz-resize-anchor", "center");
-  // Never smaller than the canvas, the tools and the button need, nor wider than a small screen has.
-  const minW = Math.min(480, Math.max(300, window.innerWidth - 32)), minH = Math.min(480, Math.max(320, window.innerHeight - 32));
-  box.setAttribute("data-bz-resize-min", minW + " " + minH);
+  // Never smaller than the canvas, the tools and the button need, nor bigger than the window has room for.
+  const minNow = () => [Math.min(480, Math.max(300, window.innerWidth - 32)), Math.min(480, Math.max(320, window.innerHeight - 32))];
+  box.setAttribute("data-bz-resize-min", minNow().join(" "));
   box.setAttribute("data-bz-resize-key", "model-paint");
   box.setAttribute("data-bz-resize-name", "the painter");
   const head = el("div", "mp-head");
@@ -365,8 +397,16 @@ export async function open(opts) {
   });
   try { box.focus({ preventScroll: true }); } catch { /* focus is a convenience */ }
   if (window.BeeZillaResize && window.BeeZillaResize.attach) {
-    try { window.BeeZillaResize.attach(box, { edges: "all", ax: "center", ay: "center", min: [minW, minH], bound: "window", key: "model-paint", name: "the painter" }); } catch { /* the attributes find it too */ }
+    try { window.BeeZillaResize.attach(box, { edges: "all", ax: "center", ay: "center", min: minNow(), bound: "window", key: "model-paint", name: "the painter" }); } catch { /* the attributes find it too */ }
   }
+  // The window changed size (a phone turned, a window dragged smaller): the smallest this may be follows, and so does a size remembered from before.
+  function onWindowResize() {
+    const m = minNow();
+    box.setAttribute("data-bz-resize-min", m.join(" "));
+    if (box._bzrs && box._bzrs.cfg) box._bzrs.cfg.min = m;
+    if (window.BeeZillaResize && window.BeeZillaResize.fit) window.BeeZillaResize.fit(box);
+  }
+  window.addEventListener("resize", onWindowResize);
 
   const say = (text) => { if (!closed) status.textContent = text; };
   function setHint(text, isError) {
@@ -391,6 +431,7 @@ export async function open(opts) {
     closed = true;
     ctl.abort();
     document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("resize", onWindowResize);
     cancelAnimationFrame(raf);
     if (ro) ro.disconnect();
     if (renderer) {
@@ -405,7 +446,7 @@ export async function open(opts) {
     dlg.remove();
     box.textContent = "";
     parts.length = 0;
-    source = null; gltf = null; model = null;
+    source = null; model = null;
     try { if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus({ preventScroll: true }); } catch { /* focus is a convenience */ }
     if (opts.onClose) { try { opts.onClose(); } catch { /* the page's own */ } }
   }
@@ -513,7 +554,7 @@ export async function open(opts) {
     parts.length = 0;
     nextId = 0;
     if (model) { scene.remove(model); disposeTree(model); }
-    model = null; gltf = null;
+    model = null;
   }
   /** Free what a loaded model holds on the graphics card and in memory. */
   function disposeTree(root) {
@@ -540,7 +581,7 @@ export async function open(opts) {
     objects.forEach((o, i) => { if (o) nodeOf.set(o, i); });
     if (closed) { disposeTree(g.scene); return; }
     clearModel();
-    gltf = g;
+    Object.keys(lastView).forEach((k) => delete lastView[k]);
     model = g.scene;
     source = { json: glb.json, bin: glb.bin, bytes };
     scene.add(model);
@@ -559,8 +600,11 @@ export async function open(opts) {
       startLoop();
       try {
         const r = await readModel();
-        if (!closed) await install(r.gltf, r.glb, r.bytes, true);
-        else disposeTree(r.gltf.scene);
+        if (!closed) {
+          await install(r.gltf, r.glb, r.bytes, true);
+          // A changed copy is the original plus a patch, so it is never smaller: a model over the Library's limit cannot be saved changed.
+          if (!failed && r.bytes.length > SAVE_LIMIT) fail(`This model is ${mb(r.bytes.length)} MB and the Library keeps files up to ${mb(SAVE_LIMIT)} MB, so a changed copy of it could not be saved. You can look at it here; changing it needs a smaller model.`);
+        } else disposeTree(r.gltf.scene);
       } catch (e) {
         if (!closed) fail("That model could not be opened: " + whyOf(e));
       }
@@ -577,6 +621,25 @@ export async function open(opts) {
     for (let o = mesh; o; o = o.parent) if (nodeOf.has(o)) return nodeOf.get(o);
     return undefined;
   }
+  /**
+   * Where in the file a loaded mesh comes from: its node, that node's mesh, and which primitive of it. Worked
+   * out from the file itself and the loader's cache of nodes, not from the loader's notes (which are pruned
+   * per scene: a file with two scenes loses the default scene's). The mesh must hold what the file's primitive
+   * holds, or it is not matched and nothing is ever written for it.
+   */
+  function placeOf(mesh) {
+    const json = source.json;
+    const node = nodeIndexOf(mesh);
+    const meshIndex = node === undefined ? undefined : json.nodes[node].mesh;
+    const prims = meshIndex === undefined || !json.meshes ? null : json.meshes[meshIndex].primitives;
+    if (!prims) return { mesh: undefined, prim: undefined, node };
+    // A mesh of one primitive is the node's own object; of several, a group whose children are the primitives in order.
+    const prim = prims.length === 1 ? 0 : mesh.parent ? mesh.parent.children.indexOf(mesh) : -1;
+    const pos = mesh.geometry.getAttribute("position");
+    const acc = prim >= 0 && prim < prims.length && prims[prim].attributes ? json.accessors[prims[prim].attributes.POSITION] : null;
+    if (!pos || !acc || acc.count !== pos.count) return { mesh: undefined, prim: undefined, node };
+    return { mesh: meshIndex, prim, node };
+  }
   function analyse(mesh) {
     const g = mesh.geometry;
     const pos = g.getAttribute("position");
@@ -586,12 +649,22 @@ export async function open(opts) {
     const triCount = ia ? Math.floor(ia.length / 3) : Math.floor(pos.count / 3);
     if (!triCount) return null;
     const v = (t, k) => (ia ? ia[t * 3 + k] : t * 3 + k);
+    // Where each vertex is DRAWN: a mesh with morph weights, or a skin that is not in its bind pose, shows its
+    // vertices somewhere other than the position attribute says. Each vertex is worked out once.
+    const at = new Float32Array(pos.count * 3);
     const a = new THREE.Vector3();
+    const used = new Uint8Array(pos.count);
+    for (let t = 0; t < triCount; t++) for (let k = 0; k < 3; k++) used[v(t, k)] = 1;
+    for (let i = 0; i < pos.count; i++) {
+      if (!used[i]) continue;
+      mesh.getVertexPosition(i, a).applyMatrix4(mesh.matrixWorld);
+      at[i * 3] = a.x; at[i * 3 + 1] = a.y; at[i * 3 + 2] = a.z;
+    }
     const op = new Float32Array(triCount * 9);
     for (let t = 0; t < triCount; t++) {
       for (let k = 0; k < 3; k++) {
-        a.fromBufferAttribute(pos, v(t, k)).applyMatrix4(mesh.matrixWorld);
-        op[t * 9 + k * 3] = a.x; op[t * 9 + k * 3 + 1] = a.y; op[t * 9 + k * 3 + 2] = a.z;
+        const vi = v(t, k) * 3;
+        op[t * 9 + k * 3] = at[vi]; op[t * 9 + k * 3 + 1] = at[vi + 1]; op[t * 9 + k * 3 + 2] = at[vi + 2];
       }
     }
     const idBase = nextId;
@@ -617,16 +690,67 @@ export async function open(opts) {
     const mirrored = mesh.matrixWorld.determinant() < 0;
     const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
     const side = !mat || mat.side === THREE.DoubleSide ? THREE.DoubleSide : (mat.side === THREE.BackSide) !== mirrored ? THREE.BackSide : THREE.FrontSide;
-    const pm = new THREE.ShaderMaterial({
-      vertexShader: "attribute vec4 pickId; varying vec4 vPick; void main(){ vPick = pickId; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
-      fragmentShader: "varying vec4 vPick; void main(){ gl_FragColor = vPick; }",
-      side,
-    });
+    const pm = pickMaterial(mesh, mat, og, v, triCount, side);
     const pick = new THREE.Mesh(og, pm);
     pick.frustumCulled = false;
     pickScene.add(pick);
-    const assoc = gltf.parser.associations.get(mesh) || {};
-    return { mesh, assoc: { mesh: assoc.meshes, prim: assoc.primitives, node: nodeIndexOf(mesh) }, triCount, v, region: new Uint8Array(triCount), overlay, pick, colors, idBase, world: op };
+    return { mesh, assoc: placeOf(mesh), triCount, v, region: new Uint8Array(triCount), overlay, pick, colors, idBase, world: op };
+  }
+
+  /**
+   * What the number picture shows for this part. A part whose material cuts holes (glTF alphaMode MASK: a grille, a
+   * decal, leaves) is drawn with holes, and what shows through a hole is another part: the number picture cuts the
+   * same holes, by the same test as the drawing (opacity × picture alpha × vertex alpha under the cutoff).
+   */
+  function pickMaterial(mesh, mat, og, v, triCount, side) {
+    const cuts = !!mat && mat.alphaTest > 0;
+    let map = cuts && mat.map && mat.map.image && !mat.map.isCompressedTexture ? mat.map : null;
+    const g = mesh.geometry;
+    const uvs = map ? g.getAttribute(uvName(map)) : null;
+    if (map && !uvs) map = null;
+    const colour = cuts && mat.vertexColors ? g.getAttribute("color") : null;
+    const vertexAlpha = !!colour && colour.itemSize === 4;
+    if (map) {
+      map.updateMatrix();
+      const uv = new Float32Array(triCount * 6);
+      for (let t = 0; t < triCount; t++) for (let k = 0; k < 3; k++) { const vi = v(t, k); uv[t * 6 + k * 2] = uvs.getX(vi); uv[t * 6 + k * 2 + 1] = uvs.getY(vi); }
+      og.setAttribute("pickUv", new THREE.BufferAttribute(uv, 2));
+    }
+    if (vertexAlpha) {
+      const al = new Float32Array(triCount * 3);
+      for (let t = 0; t < triCount; t++) for (let k = 0; k < 3; k++) al[t * 3 + k] = colour.getW(v(t, k));
+      og.setAttribute("pickAlpha", new THREE.BufferAttribute(al, 1));
+    }
+    if (!cuts) {
+      return new THREE.ShaderMaterial({
+        vertexShader: "attribute vec4 pickId; varying vec4 vPick; void main(){ vPick = pickId; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+        fragmentShader: "varying vec4 vPick; void main(){ gl_FragColor = vPick; }",
+        side,
+      });
+    }
+    return new THREE.ShaderMaterial({
+      uniforms: { opacity: { value: mat.opacity }, alphaTest: { value: mat.alphaTest }, map: { value: map }, mapMatrix: { value: map ? map.matrix : new THREE.Matrix3() } },
+      vertexShader: [
+        "attribute vec4 pickId; varying vec4 vPick;",
+        map ? "attribute vec2 pickUv; uniform mat3 mapMatrix; varying vec2 vUv;" : "",
+        vertexAlpha ? "attribute float pickAlpha; varying float vAlpha;" : "",
+        "void main(){ vPick = pickId;",
+        map ? "  vUv = (mapMatrix * vec3(pickUv, 1.0)).xy;" : "",
+        vertexAlpha ? "  vAlpha = pickAlpha;" : "",
+        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform float opacity; uniform float alphaTest; varying vec4 vPick;",
+        map ? "uniform sampler2D map; varying vec2 vUv;" : "",
+        vertexAlpha ? "varying float vAlpha;" : "",
+        "void main(){ float a = opacity;",
+        map ? "  a *= texture2D(map, vUv).a;" : "",
+        vertexAlpha ? "  a *= vAlpha;" : "",
+        "  if (a < alphaTest) discard;",
+        "  gl_FragColor = vPick; }",
+      ].join("\n"),
+      side,
+    });
   }
 
   function frame() {
@@ -679,7 +803,7 @@ export async function open(opts) {
   };
 
   // ── Painting: what you see under the brush ──
-  function renderPick() {
+  function renderPick(cam) {
     const dim = renderer.getDrawingBufferSize(new THREE.Vector2());
     if (!pickTarget || pickTarget.width !== dim.x || pickTarget.height !== dim.y) {
       if (pickTarget) pickTarget.dispose();
@@ -690,10 +814,25 @@ export async function open(opts) {
     const clearAlpha = renderer.getClearAlpha();
     renderer.setRenderTarget(pickTarget);
     renderer.setClearColor(0x000000, 0);
-    renderer.render(pickScene, camera);
+    renderer.render(pickScene, cam || camera);
     renderer.setRenderTarget(was);
     renderer.setClearColor(clear, clearAlpha);
-    pickFresh = true;
+    pickFresh = !cam;
+  }
+  /** Does a view show at least a few pixels of this colour's paint? (What shows is what the number picture holds.) */
+  function showsPaint(cam, regionId) {
+    renderPick(cam);
+    const W = pickTarget.width, H = pickTarget.height;
+    const buf = new Uint8Array(W * H * 4);
+    renderer.readRenderTargetPixels(pickTarget, 0, 0, W, H, buf);
+    let n = 0;
+    for (let i = 0; i < buf.length; i += 4) {
+      const id = buf[i] | (buf[i + 1] << 8) | (buf[i + 2] << 16);
+      if (!id) continue;
+      const q = partOfId(id);
+      if (q && q.region[id - q.idBase - 1] === regionId && ++n >= 4) return true;
+    }
+    return false;
   }
   const partOfId = (n) => { for (const p of parts) if (n > p.idBase && n <= p.idBase + p.triCount) return p; return null; };
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tri = new THREE.Triangle(), hitAt = new THREE.Vector3(), near = new THREE.Vector3();
@@ -751,21 +890,37 @@ export async function open(opts) {
     });
     return seen;
   }
-  function paintTris(p, tris, which) {
+  let journal = null, journalDirty = false;      // the faces the stroke being drawn changed, so a second finger can take them back
+  function setTri(p, t, which) {
     const reg = which ? REGIONS.find((q) => q.id === which) : null;
+    p.region[t] = which;
+    for (let k = 0; k < 3; k++) {
+      const o = t * 12 + k * 4;
+      if (reg) { p.colors[o] = reg.rgb[0] / 255; p.colors[o + 1] = reg.rgb[1] / 255; p.colors[o + 2] = reg.rgb[2] / 255; p.colors[o + 3] = 0.78; }
+      else p.colors[o + 3] = 0;
+    }
+  }
+  function paintTris(p, tris, which) {
     let changed = 0;
     tris.forEach((t) => {
       if (p.region[t] === which) return;
-      p.region[t] = which;
+      if (journal) journal.push([p, t, p.region[t]]);
+      setTri(p, t, which);
       changed++;
-      for (let k = 0; k < 3; k++) {
-        const o = t * 12 + k * 4;
-        if (reg) { p.colors[o] = reg.rgb[0] / 255; p.colors[o + 1] = reg.rgb[1] / 255; p.colors[o + 2] = reg.rgb[2] / 255; p.colors[o + 3] = 0.78; }
-        else p.colors[o + 3] = 0;
-      }
     });
     if (changed) p.overlay.geometry.getAttribute("color").needsUpdate = true;
     return changed;
+  }
+  /** A second finger turned the gesture into a pinch or a turn: whatever the first one had painted is taken back. */
+  function rollbackStroke() {
+    if (!journal) return;
+    const list = journal;
+    journal = null;
+    const touched = new Set();
+    for (let i = list.length - 1; i >= 0; i--) { setTri(list[i][0], list[i][1], list[i][2]); touched.add(list[i][0]); }
+    touched.forEach((p) => { p.overlay.geometry.getAttribute("color").needsUpdate = true; });
+    dirty = journalDirty;
+    syncSoon();
   }
   const whichOf = (name) => (name === "erase" ? 0 : REGIONS.find((r) => r.key === name).id);
   function brushAt(clientX, clientY, name) {
@@ -773,9 +928,15 @@ export async function open(opts) {
     if (!seen) return 0;
     let changed = 0;
     seen.forEach((set, p) => { changed += paintTris(p, set, whichOf(name)); });
-    if (changed) { dirty = true; syncSoon(); }
+    if (changed) {
+      dirty = true;
+      // The view this colour was painted from: the paint was in sight from it, which is what its picture on the board must show.
+      if (whichOf(name)) lastView[whichOf(name)] = { position: camera.position.clone(), quaternion: camera.quaternion.clone() };
+      syncSoon();
+    }
     return changed;
   }
+  const lastView = {};
   let syncQueued = false;
   function syncSoon() {
     if (syncQueued) return;
@@ -792,6 +953,7 @@ export async function open(opts) {
   }
   function beginStroke(id, px, py) {
     strokeId = id; lastX = px; lastY = py;
+    journal = []; journalDirty = dirty;
     try { canvas.setPointerCapture(id); } catch { /* the moves still arrive */ }
     brushAt(px, py, tool);
   }
@@ -803,13 +965,13 @@ export async function open(opts) {
       const tap = pending; pending = null;
       if (e && e.type === "pointerup" && touches.size === 0) brushAt(tap.x, tap.y, tool);
     }
-    if (!e || e.pointerId === strokeId) strokeId = null;
+    if (!e || e.pointerId === strokeId) { strokeId = null; journal = null; }
   }
   canvas.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "touch") {
       touches.add(e.pointerId);
       // A second finger is a pinch or a turn, never paint: whatever was waiting to paint is dropped.
-      if (touches.size > 1) { if (pending) { clearTimeout(pending.timer); pending = null; } strokeId = null; return; }
+      if (touches.size > 1) { if (pending) { clearTimeout(pending.timer); pending = null; } rollbackStroke(); strokeId = null; return; }
     }
     if (tool === "turn" || e.button !== 0 || busy || !model || failed) return;
     if (e.pointerType === "touch") {
@@ -877,6 +1039,7 @@ export async function open(opts) {
     const n = counts();
     const painted = REGIONS.filter((r) => n[r.id]);
     const missing = painted.filter((r) => !String(asks[r.id] || "").trim());
+    const unclear = painted.filter((r) => { const k = readInstruction(asks[r.id] || "").kind; return k === "ask" || (k === "none" && String(asks[r.id] || "").trim()); });
     const planned = planEdits(false);
     painted.forEach((r) => {
       const a = areaEls[r.id];
@@ -894,9 +1057,10 @@ export async function open(opts) {
     });
     const repaints = planned.groups.filter((g) => g.op === "repaint").length;
     apply.textContent = repaints ? `Make the changes (uses ${repaints} picture generation${repaints === 1 ? "" : "s"})` : "Make the changes";
-    apply.disabled = busy || !!failed || !painted.length || !!missing.length;
+    apply.disabled = busy || !!failed || !painted.length || !!missing.length || !!unclear.length;
     if (busy) return;
     status.textContent = !painted.length ? "" : missing.length ? `Say how the ${missing.map((r) => r.name.toLowerCase()).join(" and ")} area should change (or erase its paint).`
+      : unclear.length ? (readInstruction(asks[unclear[0].id]).why || `Say how the ${unclear[0].name.toLowerCase()} area should change.`)
       : repaints ? `The picture maker repaints, so this uses ${repaints} picture generation${repaints === 1 ? "" : "s"} from your plan. Only the painted parts will change.`
         : "Only the painted parts will change. The original stays on your board.";
   }
@@ -929,6 +1093,7 @@ export async function open(opts) {
       const want = readInstruction(words);
       const nm = r.name.toLowerCase();
       if (want.kind === "none") { if (parts.some((q) => facesOf(q, r.id).length)) errors.push(`Say how the ${nm} area should change.`); continue; }
+      if (want.kind === "ask") { errors.push(`The ${nm} area: ${want.why}`); continue; }
       for (const p of parts) {
         const faces = facesOf(p, r.id);
         if (!faces.length) continue;
@@ -990,6 +1155,21 @@ export async function open(opts) {
       return j && j.mode === "lockdown";
     } catch { return false; }     // the server enforces it too: this is only the early, friendly no
   }
+  /** The picture maker's allowance for ALL the calls this change needs, asked before the first is made (nothing is spent by asking). */
+  async function allowanceFor(units) {
+    if (opts.allowance) {
+      const why = await opts.allowance(units);
+      if (why) throw new Refusal(why);
+      return;
+    }
+    const r = await fetch("/api/buzzy/art", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "repaint3d_check", units }), signal: ctl.signal });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) return;
+    if (j.code === "lockdown") throw new Refusal(LOCKDOWN_SAYS);
+    if (j.error) throw new Refusal(`This change needs the picture maker ${units} time${units === 1 ? "" : "s"}, and ${j.error}. Nothing has been spent: change fewer areas, or wait for the allowance to come back.`);
+    throw new Error("the picture maker's allowance could not be checked");
+  }
+  const tooBig = (n, what) => `${what} would be about ${mb(n)} MB, and the Library keeps files up to ${mb(SAVE_LIMIT)} MB, so it could not be saved.`;
   async function doApply() {
     if (busy || closed || !model || failed) return null;
     const planned = planEdits(true);
@@ -999,16 +1179,31 @@ export async function open(opts) {
     if (unsaid.length) { say(`Say how the ${unsaid[0].name.toLowerCase()} area should change (or erase its paint).`); return null; }
     busy = true; cancelled = false;
     syncTools(); sync();
-    const repaints = planned.groups.filter((g) => g.op === "repaint").length;
+    const repaintGroups = planned.groups.filter((g) => g.op === "repaint");
     try {
       guard();
-      if (repaints && (await lockdownOn())) throw new Refusal(LOCKDOWN_SAYS);
+      if (repaintGroups.length && (await lockdownOn())) throw new Refusal(LOCKDOWN_SAYS);
       guard();
       const regionsDone = painted.map((r) => ({ region: r, words: String(asks[r.id]).trim(), kind: readInstruction(asks[r.id]).kind }));
       if (opts.canPlace) { const why = opts.canPlace(1 + regionsDone.length * 2); if (why) throw new Refusal(why); }
       const views = snapshots(regionsDone.map((d) => d.region));      // the painted areas as they are now
+      // Everything that needs no picture maker first (the copies of the textures and their masks), so that what
+      // the Library can keep and what the allowance covers are known BEFORE the first paid call.
+      say("Getting the changes ready…");
+      for (const g of planned.groups) { guard(); prepareGroup(g); }
+      if (repaintGroups.length) {
+        let estimate = source.bytes.length + 4096;
+        const editedParts = new Set(planned.edits.map((e) => e.part));
+        editedParts.forEach((q) => { estimate += q.triCount * 12; });
+        for (const g of repaintGroups) { guard(); estimate += (await encodeCanvas(g.work.c, mimeOf(g))).bytes.length; }
+        if (estimate > SAVE_LIMIT) throw new Refusal(`${tooBig(estimate, "The changed model")} Nothing has been asked of the picture maker. A colour, glass, a finish or “remove it” makes a smaller file.`);
+        const uncached = repaintGroups.filter((g) => !repaintCache.has(g.work.piece.key)).length;
+        if (uncached) await allowanceFor(uncached);
+      }
+      guard();
       const bytes = await build(planned);
       guard();
+      if (bytes.length > SAVE_LIMIT) throw new Refusal(`${tooBig(bytes.length, "The changed model")} Your paint is still here.`);
       say("Checking the changed model…");
       const parsed = await parseGltf(bytes);
       const glb = readGlb(bytes);
@@ -1035,8 +1230,9 @@ export async function open(opts) {
         pictures,
         pictureUrl: pictures.length ? pictures[0].url : null,
       };
+      // The board says in words why it cannot take the result (a conversation that changed under the window, say).
       const placed = opts.place ? await opts.place(result) : true;
-      if (placed === false) throw new Refusal("The changed model was saved to your Library, but it could not be put on the board. Make room on the board and press the button again; your paint is still here.");
+      if (placed === false || typeof placed === "string") throw new Refusal(typeof placed === "string" && placed ? placed : "The changed model was saved to your Library, but it could not be put on the board. Make room on the board and press the button again; your paint is still here.");
       // Done: the painter now shows what was saved, so what you see is what is in the file.
       dirty = false;
       Object.keys(asks).forEach((k) => delete asks[k]);
@@ -1059,7 +1255,11 @@ export async function open(opts) {
   }
   apply.onclick = () => { doApply(); };
 
-  /** The painted areas as a picture each, seen from outside, so a note never speaks about an area nobody can see. */
+  /**
+   * The painted areas as a picture each, so a note never speaks about an area nobody can see. The view is the one the
+   * colour was painted from (it was in sight then), or, failing that, one from outside the model that shows it; a view
+   * that does not show the paint is not used.
+   */
   function snapshots(list) {
     const out = [];
     const bb = new THREE.Box3().setFromObject(model);
@@ -1083,13 +1283,17 @@ export async function open(opts) {
       let dir = at.clone().sub(centre);
       if (dir.length() < radius * 0.2) dir = facing.lengthSq() > 1e-12 ? facing : new THREE.Vector3(0, 0, 1);
       dir.normalize();
-      const cam = camera.clone();
-      cam.position.copy(at).addScaledVector(dir, radius * 1.8);
-      cam.up.set(0, Math.abs(dir.y) > 0.95 ? 0 : 1, Math.abs(dir.y) > 0.95 ? 1 : 0);
-      cam.lookAt(at);
-      cam.near = radius / 100; cam.far = radius * 100;
-      cam.updateProjectionMatrix();
-      cam.updateMatrixWorld();
+      const fromOutside = camera.clone();
+      fromOutside.position.copy(at).addScaledVector(dir, radius * 1.8);
+      fromOutside.up.set(0, Math.abs(dir.y) > 0.95 ? 0 : 1, Math.abs(dir.y) > 0.95 ? 1 : 0);
+      fromOutside.lookAt(at);
+      fromOutside.near = radius / 100; fromOutside.far = radius * 100;
+      fromOutside.updateProjectionMatrix();
+      fromOutside.updateMatrixWorld();
+      const painted = camera.clone();
+      if (lastView[r.id]) { painted.position.copy(lastView[r.id].position); painted.quaternion.copy(lastView[r.id].quaternion); painted.updateMatrixWorld(); }
+      const candidates = lastView[r.id] ? [painted, fromOutside] : [fromOutside];
+      const cam = candidates.find((q) => showsPaint(q, r.id)) || candidates[0];
       renderer.render(scene, cam);
       const small = document.createElement("canvas");
       const k = Math.min(1, 900 / canvas.width);
@@ -1097,6 +1301,7 @@ export async function open(opts) {
       small.getContext("2d").drawImage(canvas, 0, 0, small.width, small.height);
       out.push({ region: r, dataUrl: small.toDataURL("image/png") });
     }
+    pickFresh = false;
     renderer.render(scene, camera);
     return out;
   }
@@ -1127,6 +1332,20 @@ export async function open(opts) {
       const i0 = repeat(map.wrapS) ? Math.floor(minX / w) : 0, i1 = repeat(map.wrapS) ? Math.floor(maxX / w) : 0;
       const j0 = repeat(map.wrapT) ? Math.floor(minY / hgt) : 0, j1 = repeat(map.wrapT) ? Math.floor(maxY / hgt) : 0;
       if ((i1 - i0 + 1) * (j1 - j0 + 1) > 16) { k.fillRect(0, 0, w, hgt); any = true; continue; }     // covers the picture over and over
+      // Where the picture is clamped, a face past its edge shows the edge texels: those are painted too (drawn over the face's own span).
+      const clampTo = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      if (!repeat(map.wrapS) && (minX < 0 || maxX > w)) {
+        const ry0 = clampTo(Math.floor(minY), 0, hgt - 1), ry1 = clampTo(Math.ceil(maxY), ry0 + 1, hgt);
+        if (minX < 0) k.fillRect(0, ry0, 1, ry1 - ry0);
+        if (maxX > w) k.fillRect(w - 1, ry0, 1, ry1 - ry0);
+        any = true;
+      }
+      if (!repeat(map.wrapT) && (minY < 0 || maxY > hgt)) {
+        const rx0 = clampTo(Math.floor(minX), 0, w - 1), rx1 = clampTo(Math.ceil(maxX), rx0 + 1, w);
+        if (minY < 0) k.fillRect(rx0, 0, rx1 - rx0, 1);
+        if (maxY > hgt) k.fillRect(rx0, hgt - 1, rx1 - rx0, 1);
+        any = true;
+      }
       for (let jj = j0; jj <= j1; jj++) {
         for (let ii = i0; ii <= i1; ii++) {
           k.beginPath();
@@ -1150,32 +1369,33 @@ export async function open(opts) {
     return m;
   }
   const repaintCache = new Map();
-  /** One group's copy of its texture, with the change made in the painted pixels only; as encoded bytes. */
-  async function editTexture(g) {
+  /** The picture's type for an edited copy. A finish map is always PNG: lossy compression would move the channel nobody asked to change. */
+  const mimeOf = (g) => (g.role !== "mr" && g.map.userData && g.map.userData.mimeType === "image/jpeg" ? "image/jpeg" : "image/png");
+  async function encodeCanvas(c, mime) {
+    const blob = await new Promise((resolve) => c.toBlob(resolve, mime, 0.92));
+    if (!blob) throw new Error("the changed texture could not be saved");
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), mime };
+  }
+  /**
+   * One group's copy of its texture, and where on it the painted faces are: everything that needs no picture maker.
+   * (For a repaint it also cuts the piece to send, and names it, so the same piece is never paid for twice.)
+   */
+  function prepareGroup(g) {
     const img = g.map.image;
     const { w, h: hgt } = sizeOf(img);
     const c = document.createElement("canvas");
     c.width = w; c.height = hgt;
-    const k = c.getContext("2d");
-    k.drawImage(img, 0, 0);
+    c.getContext("2d").drawImage(img, 0, 0);
     const mask = new Uint8ClampedArray(w * hgt);
     for (const e of g.edits) {
       const m = textureMask(e.part, e.faces, g.role === "mr" ? e.mr.map : e.base.map, w, hgt);
       if (m) for (let i = 0; i < m.length; i++) if (m[i] > mask[i]) mask[i] = m[i];
     }
     if (!mask.some((v) => v)) throw new Error("the painted faces do not cover any of the texture");
-    if (g.op === "recolour" || g.op === "rough" || g.op === "metal") {
-      const px = k.getImageData(0, 0, w, hgt);
-      if (g.op === "recolour") recolourPixels(px.data, mask, g.hex); else fillChannel(px.data, mask, g.channel, 255);
-      k.putImageData(px, 0, 0);
-    } else await repaintInto(g, c, mask);
-    const mime = g.map.userData && g.map.userData.mimeType === "image/jpeg" ? "image/jpeg" : "image/png";
-    const blob = await new Promise((resolve) => c.toBlob(resolve, mime, 0.92));
-    if (!blob) throw new Error("the changed texture could not be saved");
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), mime };
+    g.work = { c, mask, w, hgt, piece: g.op === "repaint" ? repaintPiece(g, c, mask) : null };
   }
-  /** Only the painted pixels of the picture maker's repaint go back into the texture. */
-  async function repaintInto(g, c, mask) {
+  /** The piece of the texture around the paint, with its mask, as pictures to send; and the name that identifies it. */
+  function repaintPiece(g, c, mask) {
     const w = c.width;
     let x0 = c.width, y0 = c.height, x1 = 0, y1 = 0;
     for (let i = 0; i < mask.length; i++) if (mask[i]) { const xx = i % w, yy = (i - xx) / w; if (xx < x0) x0 = xx; if (yy < y0) y0 = yy; if (xx > x1) x1 = xx; if (yy > y1) y1 = yy; }
@@ -1194,8 +1414,25 @@ export async function open(opts) {
     }
     mctx.putImageData(mimg, 0, 0);
     const cropUrl = crop.toDataURL("image/png"), maskUrl = mk.toDataURL("image/png");
-    // Asked once per distinct piece: a retry after a failure later on does not buy it again.
     const key = [g.words, g.image, x0, y0, cw, ch, cropUrl.length, maskUrl.length, cropUrl.slice(-64), maskUrl.slice(-64)].join("|");
+    return { x0, y0, cw, ch, cropUrl, maskUrl, key };
+  }
+  /** One group's copy of its texture with the change made in the painted pixels only, as encoded bytes (prepareGroup first). */
+  async function finishGroup(g) {
+    const { c, mask, w, hgt } = g.work;
+    const k = c.getContext("2d");
+    if (g.op === "recolour" || g.op === "rough" || g.op === "metal") {
+      const px = k.getImageData(0, 0, w, hgt);
+      if (g.op === "recolour") recolourPixels(px.data, mask, g.hex); else fillChannel(px.data, mask, g.channel, 255);
+      k.putImageData(px, 0, 0);
+    } else await repaintInto(g);
+    return encodeCanvas(c, mimeOf(g));
+  }
+  /** Only the painted pixels of the picture maker's repaint go back into the texture. */
+  async function repaintInto(g) {
+    const { c, mask, w } = g.work;
+    const { x0, y0, cw, ch, cropUrl, maskUrl, key } = g.work.piece;
+    // Asked once per distinct piece: a retry after a failure later on does not buy it again.
     let url = repaintCache.get(key);
     if (!url) {
       const repaint = opts.repaint || defaultRepaint;
@@ -1228,7 +1465,7 @@ export async function open(opts) {
     for (const g of planned.groups) {
       guard();
       say(g.op === "repaint" ? `Repainting the ${g.region.name.toLowerCase()} area…` : `Changing the ${g.region.name.toLowerCase()} area's texture…`);
-      const made = await editTexture(g);
+      const made = await finishGroup(g);
       guard();
       g.imageIndex = patch.addImage(made.bytes, made.mime, `${g.role === "mr" ? "finish" : "texture"} (${g.region.key} area)`);
       g.textures = new Map();
@@ -1252,14 +1489,27 @@ export async function open(opts) {
         def = copyOf(e.matDef || {});
         def.name = `${def.name || "Material"} (${e.region.key} area)`;
         const pbr = def.pbrMetallicRoughness = def.pbrMetallicRoughness || {};
-        const alpha = want.opaque ? 1 : pbr.baseColorFactor && pbr.baseColorFactor[3] !== undefined ? pbr.baseColorFactor[3] : 1;
+        const alphaNow = () => (pbr.baseColorFactor && pbr.baseColorFactor[3] !== undefined ? pbr.baseColorFactor[3] : 1);
         if (want.kind === "repaint") {
           pbr.baseColorTexture = retex(groupOf(e, "base", "repaint"), pbr.baseColorTexture);
         } else {
-          if (want.opaque) { delete def.alphaMode; delete def.alphaCutoff; if (pbr.baseColorFactor) pbr.baseColorFactor[3] = 1; }
+          if (want.opacity === 1) {
+            // Solid: not blended or cut, and not letting light through either (a windshield that transmits stays see-through
+            // with alphaMode OPAQUE).
+            delete def.alphaMode; delete def.alphaCutoff;
+            if (pbr.baseColorFactor) pbr.baseColorFactor[3] = 1;
+            if (def.extensions) {
+              delete def.extensions.KHR_materials_transmission; delete def.extensions.KHR_materials_diffuse_transmission;
+              if (!Object.keys(def.extensions).length) delete def.extensions;
+            }
+          } else if (typeof want.opacity === "number") {
+            // An amount of see-through: the part keeps its own look, shown at that opacity.
+            def.alphaMode = "BLEND"; delete def.alphaCutoff;
+            pbr.baseColorFactor = [...(pbr.baseColorFactor ? pbr.baseColorFactor.slice(0, 3) : [1, 1, 1]), want.opacity];
+          }
           if (want.colour) {
-            if (pbr.baseColorTexture) { pbr.baseColorTexture = retex(groupOf(e, "base", "recolour"), pbr.baseColorTexture); pbr.baseColorFactor = [1, 1, 1, alpha]; }
-            else pbr.baseColorFactor = [...linear(want.colour), alpha];
+            if (pbr.baseColorTexture) { pbr.baseColorTexture = retex(groupOf(e, "base", "recolour"), pbr.baseColorTexture); pbr.baseColorFactor = [1, 1, 1, alphaNow()]; }
+            else pbr.baseColorFactor = [...linear(want.colour), alphaNow()];
           }
           if (want.metalness !== null) pbr.metallicFactor = want.metalness;
           if (want.roughness !== null) pbr.roughnessFactor = want.roughness;
@@ -1270,6 +1520,19 @@ export async function open(opts) {
       const index = patch.addMaterial(def);
       matCache.set(key, index);
       return index;
+    };
+    // Vertex colours with white RGB and the same opacity as before (RGBA ones only: RGB-only colours have no opacity to keep).
+    const neutral = new Map();
+    const alphaOnly = (p, q) => {
+      const key = q.attributes.COLOR_0;
+      const attr = p.mesh.geometry.getAttribute("color");
+      if (key === undefined || !attr || attr.itemSize !== 4) return null;
+      if (!neutral.has(key)) {
+        const out = new Float32Array(attr.count * 4);
+        for (let i = 0; i < attr.count; i++) { out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = 1; out[i * 4 + 3] = attr.getW(i); }
+        neutral.set(key, patch.addVertexFloats(out, 4));
+      }
+      return neutral.get(key);
     };
     // Per node: its primitives, with the painted faces moved to primitives of their own.
     const byNode = new Map();
@@ -1300,8 +1563,15 @@ export async function open(opts) {
           const q = baseOf();
           q.indices = patch.addIndices(per[i]);
           q.material = materialFor(e);
-          // A colour that is asked for is the colour, not the colour times what the vertices carried.
-          if (e.want.kind === "glass" || (e.want.kind === "look" && e.want.colour)) Object.keys(q.attributes).forEach((a) => { if (/^COLOR_\d+$/.test(a)) delete q.attributes[a]; });
+          // A colour that is asked for is the colour, not the colour times what the vertices carried. Their RGB goes; their
+          // OPACITY stays where the material uses it (a cut-out or blended surface may take its holes from it), except in glass,
+          // which is exactly as see-through as asked.
+          const used = json.materials[q.material];
+          Object.keys(q.attributes).forEach((a) => {
+            if (!/^COLOR_\d+$/.test(a)) return;
+            if (e.want.kind === "look" && e.want.colour && a === "COLOR_0" && used.alphaMode && used.alphaMode !== "OPAQUE" && alphaOnly(p, q)) { q.attributes[a] = alphaOnly(p, q); return; }
+            if (e.want.kind === "glass" || (e.want.kind === "look" && e.want.colour)) delete q.attributes[a];
+          });
           out.push(q);
         });
       });

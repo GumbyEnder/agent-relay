@@ -38,7 +38,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, "..", "public");
+const root = process.env.PAINT_PUBLIC ? path.resolve(process.env.PAINT_PUBLIC) : path.resolve(here, "..", "public");     // (PAINT_PUBLIC: a copy of public/, for mutation runs)
 const require = createRequire(path.join(process.env.PLAYWRIGHT_DIR || path.resolve(here, ".."), "package.json"));
 const { chromium } = require("playwright");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -46,11 +46,16 @@ const SHOTS = process.env.SHOTS_DIR || "";
 const TYPES = { ".js": "text/javascript", ".html": "text/html", ".css": "text/css", ".svg": "image/svg+xml" };
 const held = new Map();     // models the page posts, to be served back (slowly, for the load tests)
 let privacy = "open";       // the account's saved privacy mode, as /api/buzzy/privacy tells it
+let spied = 0;              // requests made of /spy/…: what the painter must never ask
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/favicon.ico") { res.writeHead(204); res.end(); return; }
   if (url.pathname === "/api/buzzy/privacy") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ ok: true, mode: privacy })); return; }
   if (url.pathname.startsWith("/set-privacy/")) { privacy = url.pathname.slice(13); res.writeHead(204); res.end(); return; }
+  // An address "outside": anything asked of it is counted (the painter must never ask).
+  if (url.pathname.startsWith("/spy/")) { spied++; res.writeHead(200, { "content-type": "image/png" }); res.end(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")); return; }
+  if (url.pathname === "/spyhits") { res.writeHead(200, { "content-type": "text/plain" }); res.end(String(spied)); return; }
+  if (url.pathname === "/spyreset") { spied = 0; res.writeHead(204); res.end(); return; }
   if (url.pathname === "/test.html") {
     res.writeHead(200, { "content-type": "text/html" });
     res.end("<!doctype html><html><head><meta charset=utf-8><title>paint test</title></head><body style='margin:0;background:#000'>" +
@@ -95,13 +100,21 @@ page.on("console", (m) => {
   if (/Error creating WebGL context/.test(m.text()) || /\/glb\/nothing-here$/.test(where)) return;
   errors.push(m.text() + (where ? " @ " + where : ""));
 });
-page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
+page.on("dialog", async (d) => { dialogs.push(d.message()); try { await d.accept(); } catch { /* it closed itself */ } });
 function check(name, cond, detail = "") {
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${cond ? "" : "  — " + detail}`);
   if (!cond) failures++;
 }
 const J = (v) => JSON.stringify(v);
+/** Run one block of checks; if it throws (a saved file that is not there, say) that is itself a failed check, and the rest still run. */
+async function section(name, fn) {
+  try { await fn(); } catch (e) { check(`${name} (the checks stopped: ${String(e && e.message).split("\n")[0].slice(0, 160)})`, false); }
+  try { await page.evaluate(() => { if (window.__h) { try { window.__h.close(true); } catch { /* closed */ } } localStorage.removeItem("bz.size.model-paint"); }); } catch { /* the page is gone */ }
+  try { await page.setViewportSize({ width: 1280, height: 860 }); } catch { /* the page is gone */ }
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** The window is gone (given a moment: closing may wait for an answer to a question, and a busy machine is slow). */
+const gone = async () => { for (let i = 0; i < 40; i++) { if (!(await page.$(".mp-dialog"))) return true; await sleep(100); } return false; };
 
 await page.goto(`${ORIGIN}/test.html`);
 
@@ -111,7 +124,9 @@ await page.evaluate(async () => {
   const { GLTFExporter } = await import("/buzzy/vendor/three/addons/exporters/GLTFExporter.js");
   const { GLTFLoader } = await import("/buzzy/vendor/three/addons/loaders/GLTFLoader.js");
   const { readGlb } = await import("/buzzy/glb-patch.js");
-  window.__bytes = {}; window.__glbs = {};
+  window.__bytes = {}; window.__glbs = {}; window.__GLTFLoader = GLTFLoader; window.__THREE = THREE;
+  const { writeGlb } = await import("/buzzy/glb-patch.js");
+  const b64 = (u8) => { let t = ""; for (let i = 0; i < u8.length; i += 8192) t += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(t); };
 
   // A 256² texture, left half one colour, right half another (glTF: (0,0) is the picture's top-left).
   const tex = (left, right) => {
@@ -199,6 +214,105 @@ await page.evaluate(async () => {
     await keep("vcolor", scene(mesh(g, std({ vertexColors: true }), "vcolor")));
   }
 
+  // ── Models for the second review ──
+  // A model that asks outside for its picture (and one for a second buffer): the loader would go and fetch them.
+  {
+    const g = readGlb(window.__bytes.panel);
+    const img = JSON.parse(JSON.stringify(g.json));
+    img.images[0] = { uri: location.origin + "/spy/pic.png", mimeType: "image/png" };
+    window.__bytes.spyimage = writeGlb(img, g.bin);
+    const buf = JSON.parse(JSON.stringify(g.json));
+    buf.buffers.push({ uri: location.origin + "/spy/data.bin", byteLength: 8 });
+    window.__bytes.spybuffer = writeGlb(buf, g.bin);
+    // …and one that has its picture inside as a data: address (the file's own, so allowed).
+    const emb = JSON.parse(JSON.stringify(g.json));
+    const v = emb.bufferViews[emb.images[0].bufferView];
+    emb.images[0] = { uri: "data:image/png;base64," + b64(g.bin.slice(v.byteOffset, v.byteOffset + v.byteLength)), mimeType: "image/png" };
+    window.__bytes.datauri = writeGlb(emb, g.bin);
+    for (const k of ["spyimage", "spybuffer", "datauri"]) window.__glbs[k] = URL.createObjectURL(new Blob([window.__bytes[k]], { type: "model/gltf-binary" }));
+  }
+  // A grille with holes (alphaMode MASK: left half solid red, right half cut away) in front of a wall.
+  {
+    const c = document.createElement("canvas"); c.width = 256; c.height = 256;
+    const k = c.getContext("2d"); k.fillStyle = "rgba(200,0,0,1)"; k.fillRect(0, 0, 128, 256);       // the right half stays transparent
+    const t = new THREE.CanvasTexture(c); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace;
+    await keep("cutout", scene(mesh(plane(2, 2, 8, 8), std({ map: t, alphaTest: 0.5 }), "grille"), mesh(plane(4, 4, 8, 8), std({ color: 0x889988 }), "wall", 0, 0, -0.5)));
+  }
+  // A plane with a morph weight: drawn half a unit higher than its position attribute says.
+  {
+    const g = plane(2, 2, 8, 8);
+    const n = g.getAttribute("position").count;
+    const up = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) up[i * 3 + 1] = 1;
+    g.morphAttributes.position = [new THREE.Float32BufferAttribute(up, 3)];
+    g.morphTargetsRelative = true;
+    const m = mesh(g, std({ color: 0x8899aa }), "morph");
+    m.morphTargetInfluences = [0.5];
+    await keep("morph", scene(m));
+  }
+  // Two scenes, the default holding one wheel and the other scene the other (the loader prunes its notes per scene).
+  {
+    const g = readGlb(window.__bytes.shared);
+    const j = JSON.parse(JSON.stringify(g.json));
+    j.scenes = [{ nodes: [0] }, { nodes: [1] }]; j.scene = 0;
+    window.__bytes.twoScenes = writeGlb(j, g.bin);
+    window.__glbs.twoScenes = URL.createObjectURL(new Blob([window.__bytes.twoScenes], { type: "model/gltf-binary" }));
+  }
+  // A windshield that lets light through by transmission (alphaMode OPAQUE, yet see-through).
+  {
+    const m = new THREE.MeshPhysicalMaterial({ color: 0x99ccff, transmission: 1, roughness: 0.1 });
+    await keep("transmission", scene(mesh(plane(2, 2, 8, 8), m, "windshield")));
+  }
+  // Vertex colours that carry opacity (RGBA) on a blended surface.
+  {
+    const g = plane(2, 2, 8, 8);
+    const n = g.getAttribute("position").count;
+    const rgba = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { rgba[i * 4] = 0; rgba[i * 4 + 1] = 1; rgba[i * 4 + 2] = 0; rgba[i * 4 + 3] = i % 4 === 0 ? 0.25 : 0.75; }
+    g.setAttribute("color", new THREE.Float32BufferAttribute(rgba, 4));
+    await keep("valpha", scene(mesh(g, std({ vertexColors: true, transparent: true }), "valpha")));
+  }
+  // A picture drawn clamped, and the face lies wholly past its right edge (u 1.2 … 1.4).
+  {
+    const g = plane(2, 2, 8, 8);
+    const uv = g.getAttribute("uv");
+    for (let i = 0; i < uv.count; i++) uv.setX(i, 1.2 + uv.getX(i) * 0.2);
+    await keep("clamp", scene(mesh(g, std({ map: tex("#c00000", "#00a000") }), "clamp")));
+  }
+  // A finish map that is a JPEG: roughness (green) 200, metalness (blue) a gradient the compressor would move.
+  {
+    const mr = document.createElement("canvas"); mr.width = 256; mr.height = 256;
+    const k = mr.getContext("2d");
+    for (let x = 0; x < 256; x++) { k.fillStyle = `rgb(0,200,${(x * 7) % 256})`; k.fillRect(x, 0, 1, 256); }
+    const t = new THREE.CanvasTexture(mr); t.flipY = false; t.userData.mimeType = "image/jpeg";
+    await keep("mrjpeg", scene(mesh(plane(2, 2, 16, 16), std({ map: tex("#c00000", "#00a000"), roughnessMap: t, metalnessMap: t, roughness: 1, metalness: 1 }), "mrjpeg")));
+  }
+  // Near the Library's limit (and over it): a binary part padded out.
+  {
+    const g = readGlb(window.__bytes.panel);
+    const pad = (size) => { const j = JSON.parse(JSON.stringify(g.json)); const bin = new Uint8Array(size); bin.set(g.bin); j.buffers[0].byteLength = size; return writeGlb(j, bin); };
+    const limit = 25 * 1024 * 1024;
+    window.__bytes.bigbin = pad(limit - 10000);
+    window.__bytes.toobig = pad(limit + 4000);
+    for (const k of ["bigbin", "toobig"]) window.__glbs[k] = URL.createObjectURL(new Blob([window.__bytes[k]], { type: "model/gltf-binary" }));
+  }
+  // A small panel that faces +z at x = 1, and a big cover at x = -4: seen from the side (the way the model is "seen from
+  // outside" from its middle) the small one is edge-on and shows nothing; from the front, where it was painted, it shows.
+  await keep("hidden", scene(mesh(plane(1, 1, 4, 4), std({ color: 0x8899aa }), "target", 1, 0, 0), mesh(plane(2, 2, 4, 4), std({ color: 0xaa9988 }), "cover", -4, 0, 0)));
+
+  // The numbers a vertex-colour accessor holds, per primitive of a node's mesh.
+  window.__colours = (u8, nodeName) => {
+    const { json, bin } = readGlb(u8);
+    const node = json.nodes.find((n) => n.name === nodeName);
+    return json.meshes[node.mesh].primitives.map((p) => {
+      if (p.attributes.COLOR_0 === undefined) return null;
+      const a = json.accessors[p.attributes.COLOR_0], v = json.bufferViews[a.bufferView];
+      const items = a.type === "VEC4" ? 4 : 3;
+      const f = new Float32Array(bin.slice(v.byteOffset + (a.byteOffset || 0), v.byteOffset + (a.byteOffset || 0) + a.count * items * 4).buffer);
+      return { type: a.type, count: a.count, rgbMin: Math.min(...Array.from(f).filter((_x, i) => i % items < 3)), rgbMax: Math.max(...Array.from(f).filter((_x, i) => i % items < 3)), alpha: items === 4 ? Array.from(f).filter((_x, i) => i % 4 === 3) : null, rgb0: [f[0], f[1], f[2]] };
+    });
+  };
+
   // What a saved file holds: per node its mesh; per mesh its primitives (faces, material, picture…).
   window.__desc = (u8) => {
     const { json } = readGlb(u8);
@@ -210,9 +324,11 @@ await page.evaluate(async () => {
         const mat = p.material !== undefined ? (json.materials || [])[p.material] : null;
         const pbr = (mat && mat.pbrMetallicRoughness) || {};
         return { faces: faces(p), alpha: (mat && mat.alphaMode) || "OPAQUE", image: tex(pbr.baseColorTexture), mrImage: tex(pbr.metallicRoughnessTexture), color: !!p.attributes.COLOR_0,
-          rough: pbr.roughnessFactor, metal: pbr.metallicFactor, base: pbr.baseColorFactor || null, matName: mat && mat.name };
+          rough: pbr.roughnessFactor, metal: pbr.metallicFactor, base: pbr.baseColorFactor || null, matName: mat && mat.name,
+          transmission: !!(mat && mat.extensions && mat.extensions.KHR_materials_transmission), mrMime: pbr.metallicRoughnessTexture ? (json.images[tex(pbr.metallicRoughnessTexture)] || {}).mimeType : null };
       })),
       images: (json.images || []).length,
+      uris: (json.images || []).filter((i) => i.uri !== undefined).length + (json.buffers || []).filter((b) => b.uri !== undefined).length,
       animations: json.animations || [],
       emptyAccessors: json.accessors.filter((a) => a.count === 0).length,
     };
@@ -266,6 +382,12 @@ await page.evaluate(async () => {
       },
       onClose: () => { window.__closed++; },
     };
+    // The picture maker's allowance, as the server would say it: o.allowanceLeft generations are left today.
+    window.__allowanceAsked = [];
+    opts.allowance = async (units) => {
+      window.__allowanceAsked.push(units);
+      return o.allowanceLeft !== undefined && units > o.allowanceLeft ? `This change needs the picture maker ${units} times, and image quota for the starter plan is 60 per day — ${o.allowanceLeft} left. Nothing has been spent.` : "";
+    };
     if (o.canPlace) opts.canPlace = () => o.canPlace;
     if (o.privacy) opts.privacy = async () => o.privacy;
     window.__h = await mod.open(opts);
@@ -276,7 +398,7 @@ await page.evaluate(async () => {
 
 const open = (key, o) => page.evaluate(([k, x]) => window.__open(k, x), [key, o || {}]);
 const state = () => page.evaluate(() => window.__h.state());
-const desc = () => page.evaluate(() => window.__desc(window.__model()));
+const desc = () => page.evaluate(() => { const m = window.__model(); if (!m) throw new Error("nothing was saved: " + (document.querySelector(".mp-status") || {}).textContent); return window.__desc(m); });
 const sample = (image, uvs) => page.evaluate(([i, p]) => window.__sample(window.__model(), i, p), [image, uvs]);
 const close = () => page.evaluate(() => window.__h.close(true));
 const apply = () => page.evaluate(async () => { await window.__h.apply(); return window.__placed; });
@@ -381,12 +503,12 @@ await page.evaluate(() => window.__h.paintWorld(0, 0, 0, "red", 0.2));
 dialogs.length = 0;
 await page.keyboard.press("Escape");
 await sleep(200);
-check("G. Esc asks before throwing paint away, then closes", dialogs.length === 1 && /paint will be lost/.test(dialogs[0]) && (await page.$(".mp-dialog")) === null, J(dialogs));
+check("G. Esc asks before throwing paint away, then closes", dialogs.length === 1 && /paint will be lost/.test(dialogs[0]) && (await gone()), J(dialogs));
 await open("panel");
 dialogs.length = 0;
 await page.click(".mp-x");
 await sleep(100);
-check("G. ✕ closes it (no paint, no question)", (await page.$(".mp-dialog")) === null && dialogs.length === 0);
+check("G. ✕ closes it (no paint, no question)", (await gone()) && dialogs.length === 0);
 {
   // A slow load: Esc and ✕ work at once, and the late arrival does nothing.
   await page.evaluate((u) => { window.__late = import("/buzzy/model-paint.js").then((m) => m.open({ url: u, title: "slow" })); }, `${ORIGIN}/glb/panel?delay=1200`);
@@ -394,9 +516,9 @@ check("G. ✕ closes it (no paint, no question)", (await page.$(".mp-dialog")) =
   check("G. while the model is still loading the window is there and says so", /Loading/.test(await page.textContent(".mp-hint")));
   await page.keyboard.press("Escape");
   await sleep(100);
-  check("G. Esc closes it before the model has loaded", (await page.$(".mp-dialog")) === null);
+  check("G. Esc closes it before the model has loaded", (await gone()));
   await sleep(1500);
-  check("G. …and the model that arrives afterwards changes nothing (no window, no error)", (await page.$(".mp-dialog")) === null && errors.length === 0, errors.join(" | "));
+  check("G. …and the model that arrives afterwards changes nothing (no window, no error)", (await gone()) && errors.length === 0, errors.join(" | "));
 }
 {
   const bad = await open("panel", { url: `${ORIGIN}/glb/nothing-here` });
@@ -406,13 +528,13 @@ check("G. ✕ closes it (no paint, no question)", (await page.$(".mp-dialog")) =
   check("G. …its message is not replaced by the tool hint", /could not be opened/.test(await page.textContent(".mp-hint")));
   await page.keyboard.press("Escape");
   await sleep(100);
-  check("G. …and Esc closes it", (await page.$(".mp-dialog")) === null);
+  check("G. …and Esc closes it", (await gone()));
   await page.evaluate(() => fetch("/put/notglb", { method: "POST", body: new TextEncoder().encode("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n") }));
   const txt = await open("panel", { url: `${ORIGIN}/glb/notglb` });
   check("G. a file that is not a .glb or .gltf (an .obj, say) says so", !!txt.failed && /not a \.glb or \.gltf/.test(await page.textContent(".mp-hint")), await page.textContent(".mp-hint"));
   await page.click(".mp-x");
   await sleep(100);
-  check("G. …and ✕ closes it", (await page.$(".mp-dialog")) === null);
+  check("G. …and ✕ closes it", (await gone()));
 }
 {
   // WebGL cannot start: the message stays, the window can still be closed.
@@ -423,7 +545,7 @@ check("G. ✕ closes it (no paint, no question)", (await page.$(".mp-dialog")) =
   check("G. …with nothing to paint with", await page.$eval(".mp-tools button:nth-of-type(2)", (b) => b.disabled));
   await page.keyboard.press("Escape");
   await sleep(100);
-  check("G. …and Esc closes it", (await page.$(".mp-dialog")) === null);
+  check("G. …and Esc closes it", (await gone()));
 }
 
 // H. The brush paints what you see, not what is behind it.
@@ -539,7 +661,7 @@ await open("gltf");
 }
 {
   const ext = await open("panel", { url: `${ORIGIN}/glb/external` });
-  check("K. a .gltf that keeps its data in other files says so, and can be closed", !!ext.failed && /other files/.test(await page.textContent(".mp-hint")), await page.textContent(".mp-hint"));
+  check("K. a .gltf that keeps its data in other files says so, and can be closed", !!ext.failed && /another address or in another file/.test(await page.textContent(".mp-hint")), await page.textContent(".mp-hint"));
   await page.keyboard.press("Escape");
   await sleep(100);
 }
@@ -716,7 +838,7 @@ await open("panel", { saveDelay: 900 });
   dialogs.length = 0;
   await page.keyboard.press("Escape");
   await sleep(150);
-  check("N. closing while it works asks, and a yes really stops it", dialogs.length === 1 && /Stop making the changes/.test(dialogs[0]) && (await page.$(".mp-dialog")) === null, J(dialogs));
+  check("N. closing while it works asks, and a yes really stops it", dialogs.length === 1 && /Stop making the changes/.test(dialogs[0]) && (await gone()), J(dialogs));
   await sleep(2500);
   check("N. …nothing is put on the board, and no picture is saved, after it was dismissed", (await page.evaluate(() => window.__placeCalls)) === 0 && (await page.evaluate(() => window.__saveCalls)) === 1, `place ${await page.evaluate(() => window.__placeCalls)} saves ${await page.evaluate(() => window.__saveCalls)}`);
 }
@@ -779,6 +901,16 @@ await open("panel", { privacy: "lockdown" });
   await t("touchEnd", []);
   await sleep(100);
   check("P. one finger paints", (await tp.evaluate(() => window.__h.state())).counts[1] > 0, J(await tp.evaluate(() => window.__h.state())));
+  // A second finger that lands after the first has already left paint takes that paint back: it was a pinch, not a stroke.
+  await tp.click(".mp-tools button:nth-of-type(5)");          // Clear paint
+  await t("touchStart", [{ x: at.x, y: at.y, id: 7 }]);
+  await sleep(300);
+  const dot = (await tp.evaluate(() => window.__h.state())).counts[1];
+  await t("touchStart", [{ x: at.x, y: at.y, id: 7 }, { x: at.x + 90, y: at.y, id: 8 }]);
+  await sleep(150);
+  const after = await tp.evaluate(() => window.__h.state());
+  await t("touchEnd", []);
+  check("P. a second finger that lands late takes back what the first had painted (a pinch is not a stroke)", dot > 0 && after.counts[1] === 0 && !after.dirty, J({ dot, after }));
   await tp.evaluate(() => window.__h.close(true));
   await touch.close();
 }
@@ -809,7 +941,7 @@ await open("panel");
   check("P. …at that size the canvas still has room and the button is whole", parts.canvas[1] >= 100 && parts.canvas[0] >= 150 && parts.applyInside, J(parts));
   await page.keyboard.press("Escape");
   await sleep(100);
-  check("P. Esc, with no drag, closes it", (await page.$(".mp-dialog")) === null);
+  check("P. Esc, with no drag, closes it", (await gone()));
 }
 {
   await open("panel");
@@ -819,6 +951,216 @@ await open("panel");
   const gone = await page.evaluate(() => ({ untracked: !window.__boxRef._bzrs, lost: window.__cvRef.getContext("webgl2") ? window.__cvRef.getContext("webgl2").isContextLost() : true, empty: window.__boxRef.childNodes.length === 0 }));
   check("P. closing lets go of what the window held: the resizer forgets it, the graphics context is released, the page is cleared", had && gone.untracked && gone.lost && gone.empty, J({ had, gone }));
 }
+
+// ── The second review ──────────────────────────────────────────────────────────────────────
+const asked = () => page.evaluate(() => window.__allowanceAsked.slice());
+// Q1. Nothing is fetched from outside the file.
+await section("Q1.", async () => {
+  const hits = async () => Number(await page.evaluate(async () => (await (await fetch("/spyhits")).text())));
+  await page.evaluate(() => fetch("/spyreset", { method: "POST" }));
+  // The control: a loader handed these very bytes does go and ask the address for the picture.
+  await page.evaluate(async () => { try { await new Promise((res, rej) => new window.__GLTFLoader().parse(window.__bytes.spyimage.slice().buffer, "", res, rej)); } catch { /* it asked; that is all this wants */ } });
+  await sleep(500);
+  const control = await hits();
+  check("Q. (control: a loader given a file that points a picture outside does go and ask for it)", control >= 1, String(control));
+  await page.evaluate(() => fetch("/spyreset", { method: "POST" }));
+  for (const [key, what] of [["spyimage", "a picture"], ["spybuffer", "a second buffer"]]) {
+    const st = await open(key);
+    await sleep(600);
+    const n = await hits();
+    check(`Q. a model that keeps ${what} at another address is refused before anything opens it: it says why, and the address is never asked`, !!st.failed && /another address or in another file/.test(await page.textContent(".mp-hint")) && n === 0, `${J(st)} hits ${n} ${await page.textContent(".mp-hint")}`);
+    check(`Q. …(and it is closable)`, await (async () => { await page.keyboard.press("Escape"); await sleep(100); return (await gone()); })());
+  }
+  await open("datauri");
+  const st = await state();
+  await page.evaluate(() => window.__h.paintWorld(-0.5, 0, 0, "red", 0.3));
+  await page.evaluate(() => window.__h.ask("red", "make it black"));
+  await apply();
+  const d = await desc();
+  check("Q. a picture inside the file as a data: address is the file's own: it opens, paints, and comes out inside the binary part with no address left", st.loaded && !st.failed && d.meshes[0].length === 2 && d.uris === 0 && (await hits()) === 0, J(st) + J(d.meshes));
+  await close();
+});
+// Q2. Alpha cutouts: the brush sees what the drawing shows.
+await section("Q2.", async () => {
+  const d0 = await page.evaluate(() => window.__desc(window.__bytes.cutout));
+  check("Q. (the grille is a cut-out: alphaMode MASK)", d0.meshes.flat().some((p) => p.alpha === "MASK"));
+  await open("cutout");
+  await page.evaluate(() => window.__h.setView(0, 0, 4, 0, 0, 0));
+  const hole = await page.evaluate(() => window.__h.screenOf(0.5, 0, 0));
+  const n = await page.evaluate(([x, y]) => window.__h.paintAt(x, y, "red"), [hole.x, hole.y]);
+  const per = await page.evaluate(() => window.__h.parts());
+  check("Q. brushing where the grille is cut away paints the wall that shows through, not the grille in front", n > 0 && per.find((p) => p.name === "wall").painted > 0 && per.find((p) => p.name === "grille").painted === 0, J(per));
+  await page.evaluate(() => window.__h.ask("red", "remove it"));
+  await apply();
+  const d = await desc();
+  const faces = (name) => { const n2 = d.nodes.find((q) => q.name === name); return n2 && n2.mesh !== undefined ? sum(d.meshes[n2.mesh].map((p) => p.faces)) : 0; };
+  check("Q. “remove it” there takes faces off the wall and none off the grille", faces("grille") === 128 && faces("wall") > 0 && faces("wall") < 128, `grille ${faces("grille")} wall ${faces("wall")}`);
+  await close();
+  await open("cutout");
+  await page.evaluate(() => window.__h.setView(0, 0, 4, 0, 0, 0));
+  const solid = await page.evaluate(() => window.__h.screenOf(-0.5, 0, 0));
+  await page.evaluate(([x, y]) => window.__h.paintAt(x, y, "red"), [solid.x, solid.y]);
+  const per2 = await page.evaluate(() => window.__h.parts());
+  check("Q. …and brushing the solid half paints the grille", per2.find((p) => p.name === "grille").painted > 0 && per2.find((p) => p.name === "wall").painted === 0, J(per2));
+  await close();
+});
+// Q3. Faces as they are drawn: a morph weight moves the vertices.
+await section("Q3.", async () => {
+  await open("morph");
+  await page.evaluate(() => window.__h.setView(0, 0.25, 4, 0, 0.25, 0));
+  const top = await page.evaluate(() => window.__h.screenOf(0, 1.3, 0));
+  const low = await page.evaluate(() => window.__h.screenOf(0, -0.8, 0));
+  const nLow = await page.evaluate(([x, y]) => window.__h.paintAt(x, y, "red"), [low.x, low.y]);
+  const nTop = await page.evaluate(([x, y]) => window.__h.paintAt(x, y, "red"), [top.x, top.y]);
+  check("Q. a mesh with a morph weight is picked where it is DRAWN: the top, half a unit above its raw positions, paints; the bottom, which it no longer covers, does not", nTop > 0 && nLow === 0, `top ${nTop} low ${nLow}`);
+  const w = await page.evaluate(() => window.__h.paintWorld(0, 1.4, 0, "blue", 0.2));
+  check("Q. …and the faces the world test finds are the drawn ones too", w > 0);
+  await close();
+});
+// Q4. Two scenes: the default scene's parts are still matched to the file.
+await section("Q4.", async () => {
+  await open("twoScenes");
+  const st = await state();
+  const n = await page.evaluate(() => window.__h.paintWorld(-1, 0, 0, "red", 0.45));
+  await page.evaluate(() => window.__h.ask("red", "remove it"));
+  const res = await apply();
+  const d = await desc();
+  check("Q. a file with two scenes: the default scene's wheel is matched to the file, and the change is made (the other scene's wheel, one mesh, is untouched)", st.parts === 1 && n > 0 && !!res && d.nodes[0].mesh !== d.nodes[1].mesh && sum(d.meshes[d.nodes[0].mesh].map((p) => p.faces)) === 32 - n && sum(d.meshes[d.nodes[1].mesh].map((p) => p.faces)) === 32, `${J(st)} ${J(d.nodes)} ${J(d.meshes)} ${await statusText()}`);
+  await close();
+});
+// Q5. Solid means solid: light is not let through either. Vertex opacity is kept when a colour is asked for.
+await section("Q5.", async () => {
+  await open("transmission");
+  const d0 = await page.evaluate(() => window.__desc(window.__bytes.transmission));
+  await page.evaluate(() => window.__h.paintWorld(-0.5, 0, 0, "red", 0.4));
+  await page.evaluate(() => window.__h.ask("red", "make it opaque"));
+  await apply();
+  const d = await desc();
+  check("Q. (the windshield transmits light and is alphaMode OPAQUE)", d0.meshes[0][0].transmission === true && d0.meshes[0][0].alpha === "OPAQUE");
+  check("Q. “make it opaque” turns the painted part's transmission off, and the part that was not painted keeps its own", d.meshes[0].length === 2 && d.meshes[0][0].transmission === true && d.meshes[0][1].transmission === false && d.meshes[0][1].alpha === "OPAQUE", J(d.meshes));
+  await close();
+  await open("valpha");
+  const before = await page.evaluate(() => window.__colours(window.__bytes.valpha, "valpha")[0]);
+  await page.evaluate(() => window.__h.paintWorld(-0.5, 0, 0, "red", 0.4));
+  await page.evaluate(() => window.__h.ask("red", "make it red"));
+  await apply();
+  const cols = await page.evaluate(() => window.__colours(window.__model(), "valpha"));
+  check("Q. a colour on faces whose vertices carry opacity: the colour is what was asked (vertex RGB neutral) and each vertex keeps its opacity", cols.length === 2 && !!cols[1] && cols[1].type === "VEC4" && cols[1].rgbMin === 1 && cols[1].rgbMax === 1 && J(cols[1].alpha) === J(before.alpha), J(cols[1] && { t: cols[1].type, min: cols[1].rgbMin, max: cols[1].rgbMax }));
+  check("Q. …and the faces that were not painted keep their vertex colours as they were", !!cols[0] && cols[0].rgb0[1] === 1 && cols[0].rgb0[0] === 0 && J(cols[0].alpha) === J(before.alpha));
+  await close();
+});
+// Q6. Clamped pictures, and a finish map that is a JPEG.
+await section("Q6.", async () => {
+  await open("clamp");
+  const n = await page.evaluate(() => window.__h.paintWorld(-0.5, 0, 0, "red", 0.4));
+  await page.evaluate(() => window.__h.ask("red", "make it black"));
+  const res = await apply();
+  const d = await desc();
+  const copy = d.meshes[0].find((p) => p.image !== 0);
+  const c = copy ? await sample(copy.image, [[0.999, 0.5], [0.2, 0.5]]) : [];
+  check("Q. a face past the edge of a clamped picture shows its edge texels, and those are what is changed (it used to fail: “do not cover any of the texture”)", n > 0 && !!res && !!copy && dark(c[0]) && red(c[1]), `${n} ${J(c)} ${await statusText()}`);
+  await close();
+  await open("mrjpeg");
+  const o = await page.evaluate(() => window.__desc(window.__bytes.mrjpeg));
+  await page.evaluate(() => window.__h.paintWorld(-0.5, 0, 0, "red", 0.4));
+  await page.evaluate(() => window.__h.ask("red", "make it shiny"));
+  await apply();
+  const e = await desc();
+  const made = e.meshes[0].find((p) => p.mrImage !== null && p.mrImage !== o.meshes[0][0].mrImage);
+  const uvs = [0.1, 0.2, 0.3, 0.4, 0.45].map((u) => [u, 0.5]);
+  const [blueOrig, blueCopy] = made ? await page.evaluate(async ([ia, ib, pts]) => [(await window.__sample(window.__bytes.mrjpeg, ia, pts)).map((c) => c[2]), (await window.__sample(window.__model(), ib, pts)).map((c) => c[2])], [o.meshes[0][0].mrImage, made.mrImage, uvs]) : [[], []];
+  check("Q. (the finish map is a JPEG)", o.meshes[0][0].mrMime === "image/jpeg");
+  check("Q. a finish map edited for roughness is saved lossless (PNG), and the channel nobody asked about (metalness, blue) is exactly what it was", !!made && made.mrMime === "image/png" && J(blueOrig) === J(blueCopy), `${made && made.mrMime} ${J(blueOrig)} ${J(blueCopy)}`);
+  await close();
+});
+// Q7. Words: which way, and how much.
+await section("Q7.", async () => {
+  await open("panel");
+  await page.evaluate(() => window.__h.paintWorld(-0.5, 0, 0, "red", 0.3));
+  await page.evaluate(() => window.__h.ask("red", "make it less shiny"));
+  const off = await page.$eval(".mp-apply", (b) => b.disabled);
+  check("Q. “make it less shiny” is not read as “shiny”: Apply is off, and the box says what to say instead", off && /matte/.test(await page.textContent(".mp-note")) && /less shiny/.test(await statusText()), (await page.textContent(".mp-note")) + " | " + (await statusText()));
+  check("Q. …nothing was asked of the picture maker, and nothing saved", (await page.evaluate(() => window.__repaints.length)) === 0 && (await asked()).length === 0 && (await page.evaluate(() => window.__saveCalls)) === 0);
+  await page.evaluate(() => window.__h.ask("red", "make it half transparent"));
+  check("Q. “make it half transparent” is said to be a change to the part itself, not a paid repaint", /50% see-through/.test(await page.textContent(".mp-note")) && !/picture generation/.test(await page.textContent(".mp-apply")), (await page.textContent(".mp-note")) + " | " + (await page.textContent(".mp-apply")));
+  await apply();
+  const d = await desc();
+  const made = d.meshes[0].find((p) => p.alpha === "BLEND");
+  check("Q. …it keeps the part's own look (the same picture) at half opacity, and the picture maker is never asked", !!made && made.image === 0 && made.base && made.base[3] === 0.5 && d.images === 1 && (await page.evaluate(() => window.__repaints.length)) === 0 && (await asked()).length === 0, J(d.meshes));
+  await close();
+});
+// Q8. The picture maker's allowance is checked for ALL its calls before the first is paid for; and the Library's limit too.
+await section("Q8.", async () => {
+  await open("panel", { allowanceLeft: 1 });
+  await page.evaluate(() => { window.__h.paintWorld(-0.5, 0.5, 0, "red", 0.25); window.__h.paintWorld(0.5, 0.5, 0, "blue", 0.25); window.__h.ask("red", "add rust stains"); window.__h.ask("blue", "add scratches"); });
+  const st0 = await state();
+  await apply();
+  const st1 = await state();
+  check("Q. a change that needs the picture maker twice, with one generation left, is refused before the first is paid for (and says so)", J(await asked()) === "[2]" && (await page.evaluate(() => window.__repaints.length)) === 0 && /needs the picture maker 2 times/.test(await statusText()) && (await page.evaluate(() => window.__saveCalls)) === 0 && st1.counts[1] === st0.counts[1] && st1.counts[2] === st0.counts[2] && !st1.busy, `${J(await asked())} ${await statusText()}`);
+  await close();
+  await open("panel", { allowanceLeft: 2 });
+  await page.evaluate(() => { window.__h.paintWorld(-0.5, 0.5, 0, "red", 0.25); window.__h.paintWorld(0.5, 0.5, 0, "blue", 0.25); window.__h.ask("red", "add rust stains"); window.__h.ask("blue", "add scratches"); });
+  await apply();
+  check("Q. …with two left both are made", J(await asked()) === "[2]" && (await page.evaluate(() => window.__repaints.length)) === 2 && !!(await page.evaluate(() => window.__placed)));
+  await close();
+  await open("panel", { allowanceLeft: 5, failSave: 1 });
+  await page.evaluate(() => { window.__h.paintWorld(0.5, -0.4, 0, "red", 0.3); window.__h.ask("red", "add rust stains"); });
+  await apply();
+  await apply();
+  check("Q. a repaint already bought (a save had to be tried again) is not counted against the allowance again", J(await asked()) === "[1]" && (await page.evaluate(() => window.__repaints.length)) === 1 && !!(await page.evaluate(() => window.__placed)), J(await asked()));
+  await close();
+  // The Library keeps files up to 25 MB; a changed copy is the original plus a patch.
+  await open("bigbin");
+  await page.evaluate(() => { window.__h.paintWorld(-0.5, 0, 0, "red", 0.3); window.__h.ask("red", "add rust stains"); });
+  await apply();
+  check("Q. a repaint whose result could never be saved is refused before the picture maker is asked (or the allowance)", (await page.evaluate(() => window.__repaints.length)) === 0 && (await asked()).length === 0 && /could not be saved/.test(await statusText()) && /25 MB/.test(await statusText()), await statusText());
+  await page.evaluate(() => window.__h.ask("red", "make it black"));
+  await apply();
+  check("Q. …and a local change that comes out too big is refused before it is uploaded", (await page.evaluate(() => window.__saveCalls)) === 0 && /could not be saved/.test(await statusText()), await statusText());
+  await close();
+  const big = await open("toobig");
+  check("Q. a model over the Library's limit says so when it opens, can be looked at, and can be closed", !!big.failed && big.loaded && /Library keeps files up to 25 MB/.test(await page.textContent(".mp-hint")), `${J(big)} ${await page.textContent(".mp-hint")}`);
+  await page.keyboard.press("Escape");
+  await sleep(100);
+  check("Q. …(Esc closes it)", (await gone()));
+});
+// Q9. A size remembered from a taller window opens inside this one, and follows the window.
+await section("Q9.", async () => {
+  await page.evaluate(() => localStorage.setItem("bz.size.model-paint", JSON.stringify({ w: 1200, h: 1000 })));
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await open("panel");
+  const fit = () => page.evaluate(() => { const b = document.querySelector(".mp-box").getBoundingClientRect(); const a = document.querySelector(".mp-apply").getBoundingClientRect(); const x = document.querySelector(".mp-x").getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right), applyBottom: Math.round(a.bottom), closeTop: Math.round(x.top), min: document.querySelector(".mp-box").getAttribute("data-bz-resize-min"), w: innerWidth, h: innerHeight }; });
+  const f1 = await fit();
+  check("Q. a size remembered from a taller window opens inside this one: the window, its Close and its Apply are all on the screen", f1.top >= 0 && f1.bottom <= f1.h && f1.applyBottom <= f1.h && f1.closeTop >= 0, J(f1));
+  await page.setViewportSize({ width: 700, height: 500 });
+  await sleep(500);
+  const f2 = await fit();
+  check("Q. …and when the window gets smaller while it is open it comes in again, and its smallest size follows", f2.bottom <= f2.h && f2.right <= f2.w && f2.top >= 0 && f2.left >= 0 && f2.min === "480 468", J(f2));
+  await close();
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.evaluate(() => localStorage.removeItem("bz.size.model-paint"));
+});
+// Q10. Each painted area's picture shows the paint, from the view it was painted from.
+await section("Q10.", async () => {
+  await open("hidden");
+  await page.evaluate(() => window.__h.setView(0, 0, 5, 0, 0, 0));
+  const at = await page.evaluate(() => window.__h.screenOf(1, 0, 0));
+  const n = await page.evaluate(([x, y]) => window.__h.paintAt(x, y, "red"), [at.x, at.y]);
+  await page.evaluate(() => window.__h.ask("red", "make it black"));
+  await apply();
+  const pic = await page.evaluate(async () => {
+    const f = window.__saved.find((x) => /painted-red.*\.png$/.test(x.name));
+    const bmp = await createImageBitmap(new Blob([f.bytes], { type: "image/png" }));
+    const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+    const k = c.getContext("2d"); k.drawImage(bmp, 0, 0);
+    const d = k.getImageData(0, 0, c.width, c.height).data;
+    let red = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] < 140 && d[i + 2] < 140) red++;
+    return { red, w: c.width, h: c.height };
+  });
+  check("Q. the picture saved for a painted area shows its paint, even where the view from outside the model would not (it is the view it was painted from)", n > 0 && pic.red > 40, J(pic));
+  await close();
+});
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 await context.close();

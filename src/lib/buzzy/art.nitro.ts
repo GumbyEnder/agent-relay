@@ -7,6 +7,8 @@
  *                                  → { action: "edit", jobId, imageId, mask, instruction }
  *                                  → { action: "repaint3d", crop, mask, instruction }   (the 3D painter, public/buzzy/model-paint.js:
  *                                    the repainted piece comes back, nothing is kept; refused in Lockdown)
+ *                                  → { action: "repaint3d_check", units }   (the same painter, before its first call: is there
+ *                                    allowance for ALL `units` of them? nothing is spent by asking)
  *
  * A rendered image is a deliverable of the project, exactly like a track: it lands
  * in buzzy_assets with job_id set, so the project page and the Library show the same
@@ -190,7 +192,8 @@ export default defineEventHandler(async (event) => {
   // The page sends the piece of the texture the paint covers and its mask; the answer is
   // the repainted piece, NOT kept in the Library (it is a working piece of a texture),
   // and the page puts back only the painted pixels, so nothing outside the paint changes.
-  const repaint3d = action === "repaint3d";
+  const repaint3dCheck = action === "repaint3d_check";
+  const repaint3d = action === "repaint3d" || repaint3dCheck;
   if (repaint3d) {
     // Lockdown: nothing leaves BeeZilla, and this sends the model's texture to the picture maker.
     // The account's SAVED mode decides (a page that was never told, or a second device, must not
@@ -210,6 +213,18 @@ export default defineEventHandler(async (event) => {
         error: "Lockdown is on, and nothing leaves BeeZilla in that mode, so the picture maker can't repaint this. A colour, glass, a shiny or matte finish and removing a part still work. The privacy control on the Talk bar switches Lockdown off.",
         code: "lockdown",
       });
+    }
+    if (repaint3dCheck) {
+      // Before the painter's FIRST paid call: if the allowance cannot cover them all, the first would spend it and the
+      // second would be refused, and no changed model would come of it. Asking spends nothing.
+      const units = Math.max(1, Math.min(20, Math.round(Number(body.units)) || 1));
+      if (!artConfigured()) return json(503, { error: "Art is not configured on this deployment.", code: "not_configured" });
+      const verdict = await checkQuota({ userId: user.id, scope: "image", units });
+      if (!verdict.ok) {
+        const status = verdict.code === "plan_required" ? 402 : 429;
+        return json(status, { error: verdict.error, code: verdict.code, plan: verdict.plan, limit: verdict.limit, used: verdict.used });
+      }
+      return json(200, { ok: true, units, plan: verdict.plan, used: verdict.used, limit: verdict.limit });
     }
     const crop = typeof body.crop === "string" && /^data:image\/png;base64,/.test(body.crop) ? body.crop : "";
     const mask = typeof body.mask === "string" && /^data:image\/png;base64,/.test(body.mask) ? body.mask : "";

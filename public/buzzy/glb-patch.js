@@ -16,7 +16,13 @@
  *   - a node that shares its mesh with other nodes gets a mesh of its own first, so the
  *     others do not change;
  *   - a primitive with no faces left is taken out, and a node with no primitives left loses
- *     its mesh (never an empty index list).
+ *     its mesh (never an empty index list);
+ *   - chunks this file does not know (a .glb may carry application chunks after its binary part)
+ *     are written back byte for byte.
+ *
+ * Nothing is fetched from outside. A model whose pictures or data live at another address (an
+ * http: or relative uri) is refused by readModel() BEFORE anything opens it: the loader would
+ * contact that address, and a saved copy of the model could not hold what it points at.
  *
  * Pure: bytes and JSON in, bytes out. No three.js and no page, so a plain `node` can test it
  * (scripts/test-model-paint.mjs).
@@ -26,7 +32,9 @@ const CHUNK_JSON = 0x4e4f534a;   // "JSON"
 const CHUNK_BIN = 0x004e4942;    // "BIN\0"
 const UNSIGNED_SHORT = 5123;
 const UNSIGNED_INT = 5125;
+const FLOAT = 5126;
 const ELEMENT_ARRAY_BUFFER = 34963;
+const ARRAY_BUFFER = 34962;
 
 /** A problem with the file, in words a person can read. */
 export class GlbError extends Error {}
@@ -40,7 +48,7 @@ export function isGlb(input) {
   return b.length >= 12 && new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true) === MAGIC;
 }
 
-/** A .glb as { json, bin }. */
+/** A .glb as { json, bin, extra }: extra holds any chunk that is neither the description nor the binary part. */
 export function readGlb(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (!isGlb(bytes)) throw new GlbError("That is not a .glb file. The painter changes .glb models.");
@@ -48,6 +56,7 @@ export function readGlb(input) {
   if (dv.getUint32(4, true) !== 2) throw new GlbError("That .glb is not glTF version 2.");
   const total = Math.min(dv.getUint32(8, true), bytes.length);
   let at = 12, json = null, bin = null;
+  const extra = [];
   while (at + 8 <= total) {
     const len = dv.getUint32(at, true), type = dv.getUint32(at + 4, true);
     const start = at + 8;
@@ -56,26 +65,38 @@ export function readGlb(input) {
       try { json = JSON.parse(new TextDecoder().decode(bytes.subarray(start, start + len))); }
       catch { throw new GlbError("That .glb's description could not be read."); }
     } else if (type === CHUNK_BIN && !bin) bin = bytes.slice(start, start + len);
+    else extra.push({ type, bytes: bytes.slice(start, start + len) });
     at = start + len;
   }
   if (!json || typeof json !== "object") throw new GlbError("That .glb has no description in it.");
-  return { json, bin: bin || new Uint8Array(0) };
+  return { json, bin: bin || new Uint8Array(0), extra };
 }
 
+const OUTSIDE = "This model keeps part of what it is made of (a picture or a data file) at another address or in another file, " +
+  "so the painter will not open it: nothing is fetched from outside BeeZilla. Save it as one .glb with everything inside it.";
+
 /**
- * A model file as { json, bin }: a .glb, or a .gltf whose data is all inside it (data: addresses),
- * which is packed into one binary part as a .glb keeps it. A .gltf that points at other files cannot
- * be opened from one file, and says so.
+ * A model file as { json, bin, extra }: a .glb, or a .gltf whose data is all inside it (data: addresses),
+ * packed into one binary part the way a .glb keeps it. Anything that is not inside the file (a picture or a
+ * buffer at an http: or relative address, whichever the file type) is refused here, before anything loads it.
  */
 export function readModel(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
-  if (isGlb(bytes)) return readGlb(bytes);
+  if (isGlb(bytes)) {
+    const g = readGlb(bytes);
+    return inside(g.json) ? g : { ...pack(g.json, g.bin), extra: g.extra };
+  }
   let json = null;
   try { json = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* said below */ }
   if (!json || typeof json !== "object" || !json.asset) throw new GlbError("That is not a .glb or .gltf file. The painter changes .glb and .gltf models.");
-  return packGltf(json);
+  return { ...pack(json, null), extra: [] };
 }
-function packGltf(json) {
+/** True when nothing in the description has an address of its own: the pictures and data are the file's. */
+function inside(json) {
+  // Only the first buffer may have no address (it is the .glb's own binary part); any other has one, and it is not inside.
+  return (json.buffers || []).every((b, i) => b.uri === undefined && i === 0) && (json.images || []).every((im) => im.uri === undefined);
+}
+function pack(json, bin0) {
   const chunks = [];
   let size = 0;
   const add = (bytes) => {
@@ -85,19 +106,22 @@ function packGltf(json) {
     size = at + bytes.length;
     return at;
   };
-  const inside = (uri) => {
-    const m = /^data:([^;,]*)(?:;[^,]*)?;base64,([\s\S]*)$/.exec(String(uri || ""));
-    if (!m) throw new GlbError("This .gltf keeps part of its data in other files, so the painter cannot open it from one file. Save it as a .glb first.");
+  const embedded = (uri) => {
+    const m = /^data:([^;,]*)(?:;[^,]*)?;base64,([\s\S]*)$/i.exec(String(uri || ""));
+    if (!m) throw new GlbError(OUTSIDE);
     const raw = atob(m[2]);
     const out = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
     return { bytes: out, type: m[1] };
   };
-  const base = (json.buffers || []).map((b) => add(inside(b.uri).bytes));
+  // Checked in full before anything is read: a refused file is refused whole.
+  (json.buffers || []).forEach((b, i) => { if (b.uri === undefined ? !(i === 0 && bin0) : !/^data:/i.test(String(b.uri))) throw new GlbError(OUTSIDE); });
+  (json.images || []).forEach((im) => { if (im.uri !== undefined && !/^data:/i.test(String(im.uri))) throw new GlbError(OUTSIDE); });
+  const base = (json.buffers || []).map((b) => (b.uri === undefined ? add(bin0) : add(embedded(b.uri).bytes)));
   (json.bufferViews || []).forEach((v) => { v.byteOffset = (v.byteOffset || 0) + base[v.buffer]; v.buffer = 0; });
   (json.images || []).forEach((im) => {
     if (im.uri === undefined) return;
-    const { bytes, type } = inside(im.uri);
+    const { bytes, type } = embedded(im.uri);
     if (!json.bufferViews) json.bufferViews = [];
     im.bufferView = json.bufferViews.push({ buffer: 0, byteOffset: add(bytes), byteLength: bytes.length }) - 1;
     if (!im.mimeType && type) im.mimeType = type;
@@ -111,12 +135,12 @@ function packGltf(json) {
   return { json, bin };
 }
 
-/** { json, bin } as the bytes of a .glb. */
-export function writeGlb(json, bin) {
+/** { json, bin } as the bytes of a .glb; chunks that were in the file besides those two follow, as they were. */
+export function writeGlb(json, bin, extra = []) {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
   const jsonLen = align4(jsonBytes.length);
   const binLen = align4(bin.length);
-  const total = 12 + 8 + jsonLen + (bin.length ? 8 + binLen : 0);
+  const total = 12 + 8 + jsonLen + (bin.length ? 8 + binLen : 0) + extra.reduce((n, c) => n + 8 + c.bytes.length, 0);
   const out = new Uint8Array(total);
   const dv = new DataView(out.buffer);
   dv.setUint32(0, MAGIC, true);
@@ -132,6 +156,13 @@ export function writeGlb(json, bin) {
     dv.setUint32(at + 4, CHUNK_BIN, true);
     out.set(bin, at + 8);                                       // …the binary chunk with zeros
   }
+  let end = 20 + jsonLen + (bin.length ? 8 + binLen : 0);
+  for (const c of extra) {
+    dv.setUint32(end, c.bytes.length, true);
+    dv.setUint32(end + 4, c.type, true);
+    out.set(c.bytes, end + 8);
+    end += 8 + c.bytes.length;
+  }
   return out;
 }
 
@@ -140,10 +171,11 @@ export class GlbPatch {
   constructor(glb) {
     this.json = copyOf(glb.json);
     if (this.json.buffers && this.json.buffers[0] && this.json.buffers[0].uri) {
-      throw new GlbError("This .glb keeps its data outside the file, so the painter cannot change it.");
+      throw new GlbError(OUTSIDE);
     }
     this.chunks = [glb.bin];
     this.size = glb.bin.length;
+    this.extra = glb.extra || [];
   }
 
   /** Append bytes to the binary part, 4-byte aligned; returns where they start. */
@@ -175,6 +207,12 @@ export class GlbPatch {
     const bytes = new Uint8Array(typed.buffer, typed.byteOffset, typed.byteLength);
     const view = this._bufferView(bytes, ELEMENT_ARRAY_BUFFER);
     return this._list("accessors").push({ bufferView: view, componentType: wide ? UNSIGNED_INT : UNSIGNED_SHORT, count: list.length, type: "SCALAR" }) - 1;
+  }
+  /** Per-vertex floats (items per vertex: 4 for RGBA colours) as a new vertex accessor. */
+  addVertexFloats(values, items) {
+    const typed = Float32Array.from(values);
+    const view = this._bufferView(new Uint8Array(typed.buffer, typed.byteOffset, typed.byteLength), ARRAY_BUFFER);
+    return this._list("accessors").push({ bufferView: view, componentType: FLOAT, count: typed.length / items, type: items === 4 ? "VEC4" : items === 3 ? "VEC3" : "SCALAR" }) - 1;
   }
   /** Encoded picture bytes (PNG or JPEG) as a new image. */
   addImage(bytes, mimeType, name) {
@@ -235,6 +273,6 @@ export class GlbPatch {
       if (!this.json.buffers || !this.json.buffers.length) this.json.buffers = [{ byteLength: 0 }];
       this.json.buffers[0].byteLength = bin.length;
     }
-    return writeGlb(this.json, bin);
+    return writeGlb(this.json, bin, this.extra);
   }
 }

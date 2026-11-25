@@ -2846,15 +2846,10 @@
     // board: the changed model beside the original (kept), a note per painted colour with what
     // was asked (carrying that brush's colour), a picture of each painted area, and the lines
     // between them: original → note → changed model, and picture → note.
-    // A model the painter can open and save: a .glb, or a .gltf (a .gltf that keeps its data in other
-    // files says so when it opens). Said by the card's own file details, never by its address.
-    function paintableModel(c) {
-      var type = String(c.contentType || "").toLowerCase();
-      var name = String(c.title || "").toLowerCase();
-      var url = String(c.url || "").split("?")[0].toLowerCase();
-      return /gltf/.test(type) || /\.(?:glb|gltf)$/.test(name) || /\.(?:glb|gltf)$/.test(url);
-    }
     var painterOpen = false;
+    // A board that was put away (the page switched to another conversation) takes no more cards: what the painter
+    // makes then would land in a copy nobody sees and nothing would save it.
+    var GONE_SAYS = "The board this model was on is not open any more (the conversation changed). The changed model is in your Library. Open that conversation again and press Paint changes on the model; your paint is still here.";
     function openPainter(c) {
       if (painterOpen) return;
       painterOpen = true;
@@ -2867,10 +2862,12 @@
           title: c.title || "3D model",
           // Said before any work is done, so nothing is made that has nowhere to go.
           canPlace: function (cards) {
+            if (gone || !root.isConnected) return GONE_SAYS;
             var room = MAX_CARDS - state.cards.length;
             return room >= cards ? "" : "The board needs room for " + cards + " more cards to put the changes on it and has " + Math.max(0, room) + ". Remove a few cards, then press the button again.";
           },
           place: function (res) {
+            if (gone || !root.isConnected) return GONE_SAYS;      // said in words by the painter, which keeps the paint
             var made = placePainted(current, res);
             if (made) current = made;
             return !!made;
@@ -2900,7 +2897,9 @@
       done.forEach(function (d, i) {
         var y = spot.y + i * 320;
         var pic = d.pictureUrl ? addCard({ kind: "image", title: "The " + d.region.name.toLowerCase() + " area", url: d.pictureUrl, contentType: "image/png" }, { x: spot.x, y: y, exact: true }, true) : null;
-        var note = addCard({ kind: "note", title: d.region.name + " area", body: d.words, user: true, region: d.region.key }, { x: spot.x + 290, y: y, exact: true }, true);
+        // A record of what was asked, not an instruction for the next turns: it is not the person's own card (user), so the
+        // board is told of it as "also on the board", and editing it by hand makes it theirs.
+        var note = addCard({ kind: "note", title: d.region.name + " area", body: d.words, region: d.region.key }, { x: spot.x + 290, y: y, exact: true }, true);
         if (!note) return;
         if (alive) link(src.id, note.id);
         link(note.id, made.id);
@@ -5942,6 +5941,21 @@
   }
   function dropView() { frozen = null; onset = null; }
 
+  // A model the painter can open and save: a .glb, or a .gltf (a .gltf that keeps its data in other files says so when it
+  // opens). Said by the card's own file details, never by an asset number: the Library also holds .fbx (a 3D job's quad-mesh
+  // copy lands on the board as a model card too), .obj, .usdz and the like, which the painter cannot read. A declared model
+  // type that is not glTF, or a name or address ending in another model format, settles it as "no", whatever else the card says.
+  var OTHER_MODEL_TYPE = /\b(?:fbx|obj|stl|usdz?|dae|ply|3mf|3ds|blend|step|stp)\b/;
+  var OTHER_MODEL_FILE = /\.(?:fbx|obj|stl|usdz?|dae|ply|3mf|3ds|blend|step|stp)$/;
+  function paintableModel(c) {
+    var type = String(c.contentType || "").toLowerCase().split(";")[0].trim();
+    var name = String(c.title || "").toLowerCase().trim();
+    var url = String(c.url || "").split(/[?#]/)[0].toLowerCase();
+    if ((/^model\//.test(type) || OTHER_MODEL_TYPE.test(type)) && !/gltf/.test(type)) return false;
+    if (OTHER_MODEL_FILE.test(name) || OTHER_MODEL_FILE.test(url)) return false;
+    return /gltf/.test(type) || /\.(?:glb|gltf)$/.test(name) || /\.(?:glb|gltf)$/.test(url);
+  }
+
   window.BeeZillaWhiteboard = {
     mount: mount,
     /** The board as the owner sees it now (viewOf), on screen or folded away. */
@@ -5955,6 +5969,8 @@
     /** The board open on the page, or null: BeeZilla's steps run on it (board.act). */
     current: function () { return mountedBoard && mountedBoard.isOpen() ? mountedBoard : null; },
     kindOf: kindOf,
+    /** Whether the 3D painter can open a model card: a glTF one, never an FBX or OBJ (scripts/test-model-paint.mjs). */
+    paintableModel: paintableModel,
     /** Nodes from "More" (API use, Browser use): read, worded and shown by board-nodes.js too. */
     node: { parse: nodeOf, line: nodeLine, body: nodeBody, hasContent: nodeHasContent, step: stepText, squash: squash, shortUrl: shortUrl },
     /** The person's edits on a board that is not on screen (folded away). */
