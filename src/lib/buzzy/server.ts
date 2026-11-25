@@ -54,7 +54,7 @@ import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honc
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
 import { offeredTools, refusalFor, policyFor, withToolBudget, clampResult } from "./toolRegistry";
 import {
-  isCodeRequest,
+  isCodeTurn,
   codeRequestThread,
   argsToProject,
   codeMonkeyGuide,
@@ -637,13 +637,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // workshop tool (codeMonkey.ts). Lockdown withholds it with everything else
   // that reaches an outside provider. So does the turn that answers its budget
   // question ("$5"), which names no software but finishes the same request.
+  // Whether this turn is Code Monkey's is settled below, once we know whether it
+  // builds a flow on the Idea Board (codeMonkey.ts isCodeTurn).
   const lastAssistantTurn = [...history].reverse().find((h) => h.role === "assistant");
   const budgetAsked = typeof lastAssistantTurn?.content === "string" && askedForBudget(lastAssistantTurn.content);
   const codeThread = codeRequestThread([
     ...history.filter((h) => h.role === "user" && typeof h.content === "string").map((h) => String(h.content)).slice(-6),
     message,
   ]);
-  const codeRequest = isCodeRequest(message) || (budgetAsked && codeThread !== null);
   let codeProject: ChatResponse["codeProject"] = undefined;
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
@@ -812,6 +813,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // there (boardOrchestrator.ts), and a "Your board" card would land in the middle of it.
   const flowOnBoard = boardHasFlow(boardText);
   const orchestrating = asksToOrchestrate(message, { boardHasFlow: flowOnBoard });
+  // A flow built on the board is the board's work, not a coding project, even when the
+  // request names a website or a tracker: no workshop tool and no budget question.
+  const codeRequest = isCodeTurn(message, { budgetAsked, codeThread, buildsOnBoard: orchestrating });
   req.onFlow?.({
     kind: "agent",
     id: "agent",

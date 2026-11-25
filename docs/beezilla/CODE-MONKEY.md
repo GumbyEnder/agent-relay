@@ -106,7 +106,10 @@ before you go.** In the workshop that means:
 A Talk turn that asks for software to be made or changed (`isCodeRequest` in
 `src/lib/buzzy/codeMonkey.ts`) is offered one extra tool, `start_code_project`
 (`gate: "code"` in `toolRegistry.ts`; withheld in Lockdown because the agents that build
-it talk to model providers). The model fills a **result card** and **slices**; code then:
+it talk to model providers). A turn that builds a flow on the Idea Board is never Code
+Monkey's, even when it names a website or a tracker ("build me a workflow that checks my
+website every morning"): the board builds it card by card (`asksToOrchestrate` in
+`pilot.ts`, `isCodeTurn` here). The model fills a **result card** and **slices**; code then:
 
 - **Settles the stakes** — `play` (you and people close to you), `product` (other people
   use it), `critical` (money, health, sign-in, other people's data, harm if wrong). The

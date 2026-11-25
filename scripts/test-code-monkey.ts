@@ -28,12 +28,14 @@ import {
   providerOf,
   reviewIsIndependent,
   codeRequestThread,
+  isCodeTurn,
   lookFirstNote,
   codeMonkeyGuide,
   codeProjectNeedsBudgetMessage,
   argsToProject,
   START_CODE_PROJECT_TOOL,
 } from "../src/lib/buzzy/codeMonkey";
+import { asksToOrchestrate } from "../src/lib/buzzy/pilot";
 import {
   BUDGET_QUESTION,
   amountsIn,
@@ -272,6 +274,28 @@ console.log("Talk: the request thread:");
 check("the thread starts at the message that asked for software", codeRequestThread(["write a poem", "build me a tip calculator app", "$5"])?.join("|") === "build me a tip calculator app|$5");
 check("an unrelated earlier request is left out (its words authorize nothing here)", !codeRequestThread(["publish my poem", "build me a game", "$5"])!.includes("publish my poem"));
 check("no software asked for: no thread", codeRequestThread(["write a poem", "$5"]) === null);
+
+console.log("Talk: a flow built on the Idea Board is the board's, not Code Monkey's:");
+// Owner, 2026-11-24: "you should just be able to talk to Beezilla … to make an
+// orchestration." These name a website, a tracker or a dashboard, so isCodeRequest
+// matches them, but main's own detector (pilot.ts) says the board builds them.
+const turnOf = (message: string, budgetAsked = false, earlier: string[] = []) =>
+  isCodeTurn(message, {
+    budgetAsked,
+    codeThread: codeRequestThread([...earlier, message]),
+    buildsOnBoard: asksToOrchestrate(message),
+  });
+for (const flow of [
+  "build me a workflow that checks my website every morning and tells me if it's down",
+  "set up an automation that updates my tracker from new emails",
+  "build me a pipeline that scrapes prices and puts them on a dashboard",
+  "build me an agent team that writes the landing page copy",
+]) {
+  check(`a flow stays on the board: "${flow.slice(0, 48)}…"`, asksToOrchestrate(flow) && !turnOf(flow));
+}
+check("software still goes to Code Monkey", turnOf("build me an app that tracks my kids' chores") && turnOf("fix the bug in my website's contact form"));
+check("the budget answer still finishes a coding request", turnOf("$5", true, ["build me a tip calculator app"]));
+check("…but not a flow's (a flow never asks the budget question)", !isCodeTurn("$5", { budgetAsked: true, codeThread: null, buildsOnBoard: false }));
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

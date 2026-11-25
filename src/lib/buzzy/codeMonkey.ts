@@ -558,6 +558,23 @@ export function isCodeRequest(message: string): boolean {
 }
 
 /**
+ * Does this turn go to Code Monkey? A request for software, or the answer to its budget
+ * question ("$5", which names no software but finishes the same request). Never a turn
+ * that builds a flow on the Idea Board (pilot.ts asksToOrchestrate): the board builds it
+ * card by card and the reply is one sentence. Owner, 2026-11-24: "you should just be able
+ * to talk to Beezilla, and that should be all you need to do to make an orchestration."
+ * "Build me a workflow that checks my website every morning" names a website, but what it
+ * asks for is a flow.
+ */
+export function isCodeTurn(
+  message: string,
+  turn: { budgetAsked: boolean; codeThread: string[] | null; buildsOnBoard: boolean },
+): boolean {
+  if (turn.buildsOnBoard) return false;
+  return isCodeRequest(message) || (turn.budgetAsked && turn.codeThread !== null);
+}
+
+/**
  * The person's messages that belong to the current coding request: from the last one
  * that asked for software, to now. Their budget answer and any other replies are part
  * of it; an unrelated earlier request is not (its words must never authorize anything
