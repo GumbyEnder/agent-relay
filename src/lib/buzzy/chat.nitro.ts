@@ -38,6 +38,7 @@ import { withLlmOverride } from "./llm";
 import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
 import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
 import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
+import { boardBuildResponse, readBuildRequest } from "./boardOrchestrator";
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
@@ -3243,6 +3244,38 @@ export default defineEventHandler(async (event) => {
     }
     setResponseStatus(event, 405);
     return { ok: false, error: "Use GET, PUT or DELETE.", code: "method_not_allowed" };
+  }
+
+  // ── POST /api/buzzy/board-orchestrate — BeeZilla builds a flow on the Idea Board ──
+  // Owner, 2026-11-24: "you should just be able to talk to Beezilla, and that should be
+  // all you need to do to make an orchestration." The board sends what the person said
+  // and itself in words; the answer streams back as cards and lines the board puts up
+  // one by one (boardOrchestrator.ts). Metered like a chat turn: one model call.
+  if (method === "POST" && path === "/api/buzzy/board-orchestrate") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event)).catch(() => null);
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let raw: unknown = null;
+    try { raw = await event.req.json(); } catch {
+      setResponseStatus(event, 400);
+      return { ok: false, error: "Send JSON: { request, map, known }.", code: "bad_json" };
+    }
+    const input = readBuildRequest(raw);
+    if (!input.ok) {
+      setResponseStatus(event, 400);
+      return { ok: false, error: input.error, code: "bad_request" };
+    }
+    const quota = await checkQuota({ userId: user.id, scope: "inference", units: 1 });
+    if (!quota.ok) {
+      await recordUsage({ userId: user.id, scope: "inference", units: 0, ms: 0, status: "refused", code: quota.code ?? "quota", model: null });
+      setResponseStatus(event, quota.code === "plan_required" ? 402 : 429);
+      return { ok: false, error: quota.error, code: quota.code, plan: quota.plan, limit: quota.limit, used: quota.used };
+    }
+    await recordUsage({ userId: user.id, scope: "inference", units: 1, ms: 0, status: "ok", model: null });
+    const ownKey = await overrideFor(await getSql(), user.id);
+    return boardBuildResponse(input, (fn) => withLlmOverride(ownKey, fn));
   }
 
   // ── /api/buzzy/board-recipes — recipes made from a whiteboard selection ──

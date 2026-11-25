@@ -1080,7 +1080,7 @@
   {
     "id": "sk-053",
     "q": "Can BeeZilla work the Idea Board for me?",
-    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; start a drawing; turn the drawing into a castle at sunset; who it serves is a bakery in Lisbon; the core identity is friendly and short; open the board; fold the board away. When you're editing a card, press Speak and say what it should say. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
+    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; start a drawing; turn the drawing into a castle at sunset; who it serves is a bakery in Lisbon; the core identity is friendly and short; open the board; fold the board away. It builds whole orchestrations too, live, card by card: say orchestrate a weekly newsletter, or build me a workflow that answers customer emails, then change it the same way (add a spelling check before my approval, make the writing repeat until it's short enough) and say open it in Orchestrate to check, export or save it. When you're editing a card, press Speak and say what it should say. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
     "sources": [
       {
         "file": "src/lib/buzzy/boardPilot.ts",
@@ -1093,6 +1093,10 @@
       {
         "file": "public/buzzy/pilot.js",
         "symbol": "a.do === \"board\""
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function orchestrateStep"
       }
     ],
     "surfaces": [

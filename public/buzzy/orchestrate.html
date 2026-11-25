@@ -7,112 +7,192 @@
 <link rel="stylesheet" href="/buzzy/nav.css" />
 <style>
   /* The editor is one screen: palette, canvas, inspector, output. The nav is injected
-     at serve time by pages.nitro.ts, so nothing here draws chrome. */
+     at serve time by pages.nitro.ts, so nothing here draws chrome.
+
+     Dark, like every other BeeZilla page (owner, 2026-11-24: "it's skinned in white
+     mode where everything else is dark mode. Skin it to the skin of everything
+     else"). The page and panels use the shared --bz-* blacks; the canvas is the Idea
+     Board's slate with its dot grid, and a node is drawn like a board card: dark, a
+     colour per type on its left edge, yellow lines and ports. Every colour the SVG
+     uses is a class below, so nothing in the script carries a light colour again. */
   :root {
-    --ink: #1d1b16; --muted: #6b6558; --line: #d9d3c6; --paper: #fbfaf7;
-    --node: #ffffff; --honey: #b07a12; --honey-soft: #f6e7c8; --bad: #a5342c; --warn: #8a6a12;
-    --ok: #2f6b3a;
+    --bz-black: #0A0A0A; --bz-panel: #141414; --bz-yellow: #FFC107;
+    --ink: #f2f2f2; --muted: #9aa0a8; --line: #2a2f37; --line-strong: #3a3f47;
+    --paper: #0A0A0A; --panel: #121418; --panel-2: #1a1d22; --field: #0f1114;
+    --node: #15171b; --node-head: #1c2026; --node-edge: #2f343c; --slate: #262a30;
+    --honey: #ffc107; --honey-ink: #141414; --honey-soft: rgba(255, 193, 7, 0.14); --honey-line: rgba(255, 193, 7, 0.45);
+    --bad: #ff6b6b; --warn: #e0a93b; --ok: #6ee7a8;
+    /* One colour per node type, the same family as the Idea Board's card edges. */
+    --t-start: #5baf6b; --t-agent: #9b8ec4; --t-tool: #5b8db8; --t-decision: #e0a93b; --t-parallel: #4fb3a9;
+    --t-loop: #b07ad6; --t-approval: #ffc107; --t-trigger: #6fa8dc; --t-subflow: #9aa0a8; --t-end: #5baf6b; --t-note: #e8d27a;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   html, body { min-height: 100%; height: auto; }
   body {
     margin: 0; color: var(--ink); background: var(--paper);
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 14px/1.45 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     display: flex; flex-direction: column; min-height: 100vh;
   }
   /* The chrome header and the shared #bzHead sit ABOVE this app, so a fixed
      `100vh - 56px` was always wrong; the app takes what is left (CR-13: the editor
      toolbar was pushed past the viewport). */
   #app { display: grid; grid-template-rows: auto 1fr; flex: 1 1 auto; min-height: 420px; }
-  header.bar {
-    display: flex; align-items: center; gap: 10px; padding: 8px 14px;
-    border-bottom: 1px solid var(--line); background: var(--paper); flex-wrap: wrap;
+  /* nav.js moves body's children into #bzPage on the first soft hop: keep the app a
+     flex child that fills what is left, as on a hard load (the Sketch page's rule). */
+  #bzPage { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .orch-bar {
+    display: flex; align-items: center; gap: 8px; padding: 10px 24px;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bz-panel); flex-wrap: wrap;
   }
-  header.bar h1 { font-size: 15px; margin: 0 10px 0 0; font-weight: 650; letter-spacing: -0.01em; }
-  header.bar input#orchName {
+  .orch-bar h1 { font-size: 15px; margin: 0 6px 0 0; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+  .orch-bar input#orchName {
     font: inherit; font-weight: 600; border: 1px solid transparent; background: transparent;
-    padding: 4px 6px; border-radius: 6px; min-width: 220px; color: var(--ink);
+    padding: 6px 8px; border-radius: 8px; min-width: 220px; color: var(--ink);
   }
-  header.bar input#orchName:hover, header.bar input#orchName:focus { border-color: var(--line); background: #fff; outline: none; }
+  .orch-bar input#orchName:hover, .orch-bar input#orchName:focus { border-color: var(--line-strong); background: var(--field); outline: none; }
   .spacer { flex: 1; }
   button, .btn {
-    font: inherit; border: 1px solid var(--line); background: #fff; color: var(--ink);
-    border-radius: 7px; padding: 6px 10px; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600; border: 1px solid var(--line-strong); background: #1b1e23; color: var(--ink);
+    border-radius: 8px; padding: 0 12px; min-height: 34px; cursor: pointer; white-space: nowrap;
   }
-  button:hover { border-color: #bcb4a2; }
-  button.primary { background: var(--honey); border-color: var(--honey); color: #fff; }
+  button:hover { border-color: var(--honey); color: var(--honey); }
+  button:focus-visible { outline: 2px solid var(--honey); outline-offset: 2px; }
+  button.primary { background: var(--honey); border-color: var(--honey); color: var(--honey-ink); }
+  button.primary:hover { background: #ffcd38; border-color: #ffcd38; color: var(--honey-ink); }
   button.ghost { background: transparent; }
   button:disabled { opacity: .45; cursor: default; }
-  #status { color: var(--muted); font-size: 12px; min-width: 90px; }
+  #status { color: var(--muted); font-size: 12px; min-width: 70px; }
   #status.bad { color: var(--bad); }
   #status.good { color: var(--ok); }
+  #verNote { color: var(--muted); font-size: 12px; }
+  #verSel { font: inherit; font-size: 13px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 8px; min-height: 34px; background: var(--field); color: var(--ink); }
 
-  main { display: grid; grid-template-columns: 168px minmax(0, 1fr) 300px; min-height: 0; }
-  #palette { border-right: 1px solid var(--line); padding: 10px; overflow: auto; background: #fff; }
-  #palette h2, #inspector h2, #issues h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 0 8px; }
+  main { display: grid; grid-template-columns: 200px minmax(0, 1fr) 300px; min-height: 0; }
+  #palette { border-right: 1px solid var(--line); padding: 14px 12px; overflow: auto; background: var(--panel); }
+  #palette h2, #inspector h2, #issues h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 2px 0 10px; font-weight: 700; }
   .pal-item {
-    display: flex; align-items: center; gap: 8px; padding: 7px 8px; margin-bottom: 6px;
-    border: 1px solid var(--line); border-radius: 7px; cursor: grab; background: var(--paper);
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 6px;
+    border: 1px solid var(--line); border-radius: 10px; cursor: grab; background: var(--panel-2); color: var(--ink);
     user-select: none;
   }
-  .pal-item:hover { border-color: var(--honey); background: var(--honey-soft); }
-  .pal-item .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--honey); }
+  .pal-item:hover { border-color: var(--honey); background: #22262c; }
+  .pal-item .sw { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 3px; background: var(--honey); }
   .pal-item small { color: var(--muted); font-size: 11px; display: block; }
+  #palette .hint { color: var(--muted); font-size: 11px; margin-top: 10px; line-height: 1.5; }
 
   #center { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: 1fr auto; }
-  #canvasWrap { position: relative; overflow: hidden; background:
-     radial-gradient(circle at 1px 1px, #e7e2d6 1px, transparent 0) 0 0 / 16px 16px; }
+  /* The Idea Board's surface: slate, a faint dot grid, a darker rim. */
+  #canvasWrap { position: relative; overflow: hidden; background-color: var(--slate);
+     background-image: radial-gradient(circle, rgba(255, 255, 255, 0.13) 1.1px, transparent 1.4px);
+     background-size: 16px 16px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), inset 0 0 90px rgba(0, 0, 0, 0.28); }
   svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
   /* The live connector and marquee must not be hit-testable: elementFromPoint at the
      drop target was returning this temp path, so a connect never found the node. */
   #temp, #temp * { pointer-events: none; }
   #minimap {
     position: absolute; right: 12px; bottom: 12px; width: 168px; height: 116px;
-    background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    background: rgba(18, 20, 24, .94); border: 1px solid var(--line-strong); border-radius: 10px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
   }
-  #zoomHud { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 6px; align-items: center; }
-  #zoomHud button { padding: 3px 8px; font-size: 13px; }
+  #zoomHud { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 4px; align-items: center; padding: 4px;
+    border-radius: 12px; background: rgba(18, 20, 24, .94); border: 1px solid var(--line-strong); }
+  #zoomHud button { min-height: 30px; padding: 0 10px; font-size: 14px; border: 0; background: transparent; }
+  #zoomHud button:hover { background: #262b33; color: #fff; }
 
-  #side { border-left: 1px solid var(--line); display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; background: #fff; }
-  #inspector { overflow: auto; padding: 12px; border-bottom: 1px solid var(--line); }
-  #issues { overflow: auto; padding: 12px; background: var(--paper); }
-  .field { margin-bottom: 10px; }
-  .field label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+  /* Nodes, edges and ports: drawn by the script, coloured here. */
+  .o-body { fill: var(--node); stroke: var(--node-edge); stroke-width: 1.2; }
+  .o-sel .o-body { stroke: var(--honey); stroke-width: 2.2; }
+  .o-head { fill: var(--node-head); }
+  .o-accent { fill: var(--muted); }
+  .o-kind { fill: var(--muted); font: 700 9.5px/1 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .07em; }
+  .o-warn { fill: var(--warn); font: 600 9px/1 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .04em; }
+  .o-name { fill: var(--ink); font: 650 13px/1 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .o-sub { fill: var(--muted); font: 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .o-note .o-body { fill: #2a2617; stroke: #4a4228; }
+  .o-note .o-head { fill: #332e1b; }
+  .o-port { fill: var(--node); stroke: var(--honey); stroke-width: 1.8; }
+  .o-edge { fill: none; stroke: var(--honey); stroke-width: 1.8; opacity: .8; }
+  .o-edge.o-on { stroke: #fff; stroke-width: 2.6; opacity: 1; }
+  .o-elabel { fill: #d9dde3; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; paint-order: stroke; stroke: var(--slate); stroke-width: 4px; stroke-linejoin: round; }
+  #arrow path { fill: var(--honey); }
+  .o-temp { fill: none; stroke: var(--honey); stroke-width: 2; stroke-dasharray: 5 4; }
+  .o-marquee { fill: rgba(255, 193, 7, .08); stroke: var(--honey); stroke-dasharray: 4 3; }
+  .o-mini { fill: #4a505a; }
+  .o-mini.o-on { fill: var(--honey); }
+  #miniView { stroke: var(--honey); }
+  [data-type="start"] .o-accent, [data-type="start"] .o-kind { fill: var(--t-start); }
+  [data-type="agent"] .o-accent, [data-type="agent"] .o-kind { fill: var(--t-agent); }
+  [data-type="tool"] .o-accent, [data-type="tool"] .o-kind { fill: var(--t-tool); }
+  [data-type="decision"] .o-accent, [data-type="decision"] .o-kind { fill: var(--t-decision); }
+  [data-type="parallel"] .o-accent, [data-type="parallel"] .o-kind { fill: var(--t-parallel); }
+  [data-type="loop"] .o-accent, [data-type="loop"] .o-kind { fill: var(--t-loop); }
+  [data-type="approval"] .o-accent, [data-type="approval"] .o-kind { fill: var(--t-approval); }
+  [data-type="trigger"] .o-accent, [data-type="trigger"] .o-kind { fill: var(--t-trigger); }
+  [data-type="subflow"] .o-accent, [data-type="subflow"] .o-kind { fill: var(--t-subflow); }
+  [data-type="end"] .o-accent, [data-type="end"] .o-kind { fill: var(--t-end); }
+  [data-type="note"] .o-accent, [data-type="note"] .o-kind { fill: var(--t-note); }
+  .pal-item[data-type="start"] .sw { background: var(--t-start); }
+  .pal-item[data-type="agent"] .sw { background: var(--t-agent); }
+  .pal-item[data-type="tool"] .sw { background: var(--t-tool); }
+  .pal-item[data-type="decision"] .sw { background: var(--t-decision); }
+  .pal-item[data-type="parallel"] .sw { background: var(--t-parallel); }
+  .pal-item[data-type="loop"] .sw { background: var(--t-loop); }
+  .pal-item[data-type="approval"] .sw { background: var(--t-approval); }
+  .pal-item[data-type="trigger"] .sw { background: var(--t-trigger); }
+  .pal-item[data-type="subflow"] .sw { background: var(--t-subflow); }
+  .pal-item[data-type="end"] .sw { background: var(--t-end); }
+  .pal-item[data-type="note"] .sw { background: var(--t-note); }
+
+  #side { border-left: 1px solid var(--line); display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; background: var(--panel); }
+  #inspector { overflow: auto; padding: 14px; border-bottom: 1px solid var(--line); }
+  #issues { overflow: auto; padding: 14px; background: var(--bz-black); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; font-weight: 600; }
   .field input[type=text], .field input[type=number], .field textarea, .field select {
-    width: 100%; font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 6px 7px; background: #fff;
+    width: 100%; font: inherit; border: 1px solid var(--line-strong); border-radius: 8px; padding: 7px 9px; background: var(--field); color: var(--ink);
   }
+  .field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--honey); box-shadow: 0 0 0 2px var(--honey-soft); }
   .field textarea { min-height: 64px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .field .hint { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .field .hint { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .field input[type=checkbox] { accent-color: var(--honey); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .check { display: flex; gap: 7px; align-items: center; font-size: 13px; }
+  .check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink); text-transform: none; letter-spacing: 0; }
   .empty { color: var(--muted); font-size: 13px; }
-  .issue { padding: 6px 7px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid var(--warn); background: #fff; cursor: pointer; font-size: 12px; }
+  .issue { padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; border-left: 3px solid var(--warn); background: var(--panel-2); color: var(--ink); cursor: pointer; font-size: 12px; }
   .issue.error { border-left-color: var(--bad); }
-  .issue:hover { background: var(--honey-soft); }
+  .issue.branch { border-left-color: var(--honey); }
+  .issue:hover { background: #22262c; }
   .issue b { font-weight: 650; }
+  #inspector hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+  #inspector code, #importDlg code { color: var(--honey); }
 
-  #outputPane { border-top: 1px solid var(--line); background: #fff; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 34vh; min-height: 180px; }
-  #outputHead { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  .tab { border: 1px solid transparent; background: transparent; padding: 4px 9px; border-radius: 6px; color: var(--muted); }
-  .tab.on { background: var(--honey-soft); border-color: #e6d3a6; color: var(--ink); font-weight: 600; }
+  #outputPane { border-top: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: auto minmax(0, 1fr); height: 34vh; min-height: 180px; }
+  #outputHead { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab { border: 1px solid transparent; background: transparent; padding: 0 10px; min-height: 30px; border-radius: 8px; color: var(--muted); }
+  .tab:hover { color: var(--ink); border-color: var(--line-strong); }
+  .tab.on { background: var(--honey-soft); border-color: var(--honey-line); color: var(--ink); }
   #outputBody { position: relative; min-height: 0; }
   #outputText {
-    width: 100%; height: 100%; border: 0; resize: none; padding: 10px 12px;
-    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #2b2922; background: #fcfbf8;
+    width: 100%; height: 100%; border: 0; resize: none; padding: 12px 14px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #d9dde3; background: var(--field);
     outline: none; white-space: pre;
   }
   .notRunnable { color: var(--warn); font-size: 11px; }
-  dialog { border: 1px solid var(--line); border-radius: 10px; padding: 16px; width: min(640px, 92vw); }
-  dialog textarea { width: 100%; height: 260px; font: 12px/1.5 ui-monospace, monospace; }
-  .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  dialog { border: 1px solid var(--line-strong); border-radius: 14px; padding: 18px; width: min(640px, 92vw); background: var(--panel); color: var(--ink); box-shadow: 0 20px 50px rgba(0, 0, 0, .6); }
+  dialog::backdrop { background: rgba(0, 0, 0, .6); }
+  dialog h3 { color: var(--ink); }
+  dialog p { color: var(--muted); }
+  dialog textarea { width: 100%; height: 260px; font: 12px/1.5 ui-monospace, monospace; background: var(--field); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; }
+  dialog textarea:focus { outline: none; border-color: var(--honey); }
+  .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   @media (max-width: 900px) {
     /* A phone: one column. The palette becomes a scrollable strip of node types
        above the canvas, the inspector and problems stack under it, and nothing is
        squeezed into a 168px + 1fr + 300px row on a 390px screen (CR-13: Import
        clipped, gear over the canvas, "valid" fragment, cramped inspector). */
     main { grid-template-columns: 1fr; grid-template-rows: auto minmax(360px, auto) auto; }
-    #palette { display: flex; align-items: center; gap: 8px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; }
+    #palette { display: flex; align-items: center; gap: 8px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 12px; }
     #palette h2, #palette .hint { display: none; }
     .pal-item { margin-bottom: 0; flex: 0 0 auto; }
     #side { border-left: 0; border-top: 1px solid var(--line); grid-template-columns: 1fr; grid-template-rows: auto auto; }
@@ -121,12 +201,12 @@
     #canvasWrap { min-height: 360px; }
   }
   @media (max-width: 640px) {
-    header.bar { row-gap: 6px; padding: 8px 10px; }
-    header.bar h1 { width: 100%; margin: 0; }
-    header.bar input#orchName { min-width: 0; flex: 1 1 100%; }
+    .orch-bar { row-gap: 8px; padding: 10px 16px; }
+    .orch-bar h1 { width: 100%; margin: 0; }
+    .orch-bar input#orchName { min-width: 0; flex: 1 1 100%; }
     /* Buttons keep their whole word and wrap; the old row shrank "Auto-layout"
        into "Auto-layou" (CR-13). */
-    header.bar button, header.bar .btn { flex: 0 0 auto; }
+    .orch-bar button, .orch-bar .btn { flex: 0 0 auto; }
     /* The settings gear is fixed in the bottom-right corner; leave its column
        clear instead of letting it sit on "Send to agent". */
     #app { padding-bottom: 64px; }
@@ -139,27 +219,33 @@
 <body>
 <nav id="bzNav"><a href="/buzzy/talk" data-nav="talk">Talk</a><a href="/buzzy/library" data-nav="library">Library</a></nav>
 <div id="app">
-  <header class="bar">
+  <!-- A div, not a <header>: the page shell unwraps every <header> a page brings in on
+       an in-app hop (nav.js stripChrome), which left these controls with no row at all. -->
+  <div class="orch-bar" role="toolbar" aria-label="Orchestrate">
     <h1>Orchestrate</h1>
     <input id="orchName" value="Untitled orchestration" aria-label="Orchestration name" />
     <span id="status">valid</span>
-    <span id="verNote" style="color:var(--muted);font-size:12px"></span>
+    <span id="verNote"></span>
     <span class="spacer"></span>
-    <select id="verSel" title="Saved versions" style="display:none;font:inherit;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:#fff"></select>
+    <select id="verSel" title="Saved versions" style="display:none"></select>
     <button id="btnNew" class="ghost" title="Start an empty flow">New</button>
     <button id="btnImport" class="ghost">Import…</button>
     <button id="btnLayout" class="ghost">Auto-layout</button>
     <button id="btnSave" class="ghost" title="Save to your account (⌘S)">Save</button>
     <button id="btnExport" title="Download the JSON spec">Download</button>
+    <button id="btnBoard" class="ghost" title="Put this flow on the Idea Board in Talk, card by card, where you can keep building it by talking">Put on the Idea Board</button>
     <button id="btnSend" class="primary" title="Hand the spec to Buzzy in Talk">Send to agent</button>
-  </header>
+  </div>
 
   <main>
     <aside id="palette">
       <h2>Nodes</h2>
       <div id="palList"></div>
-      <div class="hint" style="color:var(--muted);font-size:11px;margin-top:8px">
+      <div class="hint">
         Drag onto the canvas, or click to place at the centre. Drag a port to connect.
+      </div>
+      <div class="hint">
+        Or just tell BeeZilla: say “orchestrate …” in Talk and it builds the flow on your Idea Board while you watch.
       </div>
     </aside>
 
@@ -168,7 +254,7 @@
         <svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="application" aria-label="Orchestration canvas">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8d8574"></path>
+              <path d="M 0 0 L 10 5 L 0 10 z"></path>
             </marker>
           </defs>
           <g id="world">
@@ -177,7 +263,7 @@
             <g id="temp"></g>
           </g>
         </svg>
-        <svg id="minimap" viewBox="0 0 168 116" aria-hidden="true"><g id="miniWorld"></g><rect id="miniView" fill="none" stroke="#b07a12" stroke-width="1.5" rx="2"></rect></svg>
+        <svg id="minimap" viewBox="0 0 168 116" aria-hidden="true"><g id="miniWorld"></g><rect id="miniView" fill="none" stroke-width="1.5" rx="2"></rect></svg>
         <div id="zoomHud"><button id="zOut" aria-label="Zoom out">−</button><button id="zIn" aria-label="Zoom in">+</button><button id="zFit" class="ghost">Fit</button></div>
       </div>
       <div id="outputPane">
@@ -186,7 +272,7 @@
           <button class="tab" data-tab="json">JSON spec</button>
           <button class="tab" data-tab="yaml">YAML</button>
           <button class="tab" data-tab="sheet">Run sheet</button>
-          <span class="spacer" style="flex:1"></span>
+          <span class="spacer"></span>
           <button id="btnCopy" class="ghost">Copy</button>
           <button id="btnDl" class="ghost">Download this</button>
           <span id="outNote" class="notRunnable"></span>
@@ -203,8 +289,8 @@
 </div>
 
 <dialog id="importDlg">
-  <h3 style="margin:0 0 8px;font-size:15px">Import a flow</h3>
-  <p style="color:var(--muted);font-size:12px;margin:0 0 8px">Paste our Mermaid export (the <code>%% spec:</code> comment restores every field) or a JSON spec.</p>
+  <h3 style="margin:0 0 8px;font-size:16px">Import a flow</h3>
+  <p style="font-size:12px;margin:0 0 10px">Paste our Mermaid export (the <code>%% spec:</code> comment restores every field) or a JSON spec.</p>
   <textarea id="importText" placeholder="flowchart TD … or { &quot;schema&quot;: &quot;beezilla/orchestration&quot; … }"></textarea>
   <div class="dlg-actions"><button id="importCancel">Cancel</button><button id="importGo" class="primary">Import</button></div>
 </dialog>
@@ -226,7 +312,7 @@
 (function () {
   "use strict";
   var MOD = window.BZOrchestration;
-  if (!MOD) { document.body.insertAdjacentHTML("beforeend", '<p style="padding:16px;color:#a5342c">The spec module did not load.</p>'); return; }
+  if (!MOD) { document.body.insertAdjacentHTML("beforeend", '<p style="padding:16px;color:#ff6b6b">The spec module did not load.</p>'); return; }
   var validate = MOD.validateOrchestration, toMermaid = MOD.toMermaid, fromMermaid = MOD.fromMermaid;
   var toRunSheet = MOD.toRunSheet, canonicalSpec = MOD.canonicalSpec, toYaml = MOD.toYaml;
   var PORTS = MOD.PORTS, snap = MOD.snap;
@@ -363,12 +449,12 @@
     spec.edges.forEach(function (e) {
       var g = svgEl("g", { "data-edge": e.id, "class": "edge" });
       var hit = svgEl("path", { d: edgePath(e), fill: "none", stroke: "transparent", "stroke-width": 12, style: "cursor:pointer" });
-      var path = svgEl("path", { d: edgePath(e), fill: "none", stroke: selected.indexOf("e:" + e.id) >= 0 ? "#b07a12" : "#8d8574", "stroke-width": selected.indexOf("e:" + e.id) >= 0 ? 2.4 : 1.6, "marker-end": "url(#arrow)" });
+      var path = svgEl("path", { d: edgePath(e), "class": "o-edge" + (selected.indexOf("e:" + e.id) >= 0 ? " o-on" : ""), "marker-end": "url(#arrow)" });
       g.appendChild(hit); g.appendChild(path);
       var label = e.label || e.condition || "";
       if (label) {
         var mid = midpoint(e);
-        var t = svgEl("text", { x: mid.x, y: mid.y - 5, "text-anchor": "middle", "font-size": 11, fill: "#6b6558", "font-family": "ui-monospace, monospace" });
+        var t = svgEl("text", { x: mid.x, y: mid.y - 5, "text-anchor": "middle", "class": "o-elabel" });
         t.textContent = label;
         g.appendChild(t);
       }
@@ -382,25 +468,26 @@
     });
 
     spec.nodes.forEach(function (n) {
-      var g = svgEl("g", { "data-node": n.id, transform: "translate(" + n.x + "," + n.y + ")", style: "cursor:move" });
       var sel = selected.indexOf(n.id) >= 0;
-      var fill = n.type === "note" ? "#fff7df" : "#ffffff";
-      var stroke = sel ? "#b07a12" : "#cfc8b8";
-      g.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: H, rx: 9, fill: fill, stroke: stroke, "stroke-width": sel ? 2.4 : 1.2 }));
-      g.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: BODY_H, rx: 9, fill: n.type === "note" ? "#f3e3b4" : "#f1ece0" }));
-      g.appendChild(svgEl("rect", { x: 0, y: BODY_H - 9, width: W, height: 9, fill: n.type === "note" ? "#f3e3b4" : "#f1ece0" }));
-      var kind = svgEl("text", { x: 8, y: 15, "font-size": 9.5, "letter-spacing": ".06em", fill: "#7a7160", "font-family": "ui-monospace, monospace" });
+      // A board card in miniature: dark body, a darker head strip, the type's colour
+      // on the left edge and on its label (colours: the .o-* rules in the <style>).
+      var g = svgEl("g", { "data-node": n.id, "data-type": n.type, "class": "o-node" + (sel ? " o-sel" : "") + (n.type === "note" ? " o-note" : ""), transform: "translate(" + n.x + "," + n.y + ")", style: "cursor:move" });
+      g.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: H, rx: 10, "class": "o-body" }));
+      g.appendChild(svgEl("rect", { x: 1, y: 1, width: W - 2, height: BODY_H - 1, rx: 9, "class": "o-head" }));
+      g.appendChild(svgEl("rect", { x: 1, y: BODY_H - 9, width: W - 2, height: 9, "class": "o-head" }));
+      g.appendChild(svgEl("rect", { x: 0, y: 8, width: 3, height: H - 16, rx: 1.5, "class": "o-accent" }));
+      var kind = svgEl("text", { x: 11, y: 15, "class": "o-kind" });
       kind.textContent = (SHORT[n.type] || n.type).toUpperCase();
       g.appendChild(kind);
       if (!RUNNABLE[n.type]) {
-        var warn = svgEl("text", { x: W - 8, y: 15, "text-anchor": "end", "font-size": 9.5, fill: "#8a6a12", "font-family": "ui-monospace, monospace" });
+        var warn = svgEl("text", { x: W - 9, y: 15, "text-anchor": "end", "class": "o-warn" });
         warn.textContent = "NOT RUNNABLE YET";
         g.appendChild(warn);
       }
-      var name = svgEl("text", { x: 9, y: 40, "font-size": 13, "font-weight": 600, fill: "#1d1b16", "font-family": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" });
+      var name = svgEl("text", { x: 11, y: 41, "class": "o-name" });
       name.textContent = clip(n.name || n.id, 24);
       g.appendChild(name);
-      var sub = svgEl("text", { x: 9, y: 55, "font-size": 10.5, fill: "#6b6558", "font-family": "ui-monospace, monospace" });
+      var sub = svgEl("text", { x: 11, y: 56, "class": "o-sub" });
       sub.textContent = clip(subtitle(n), 30);
       g.appendChild(sub);
 
@@ -411,7 +498,7 @@
         var hit = svgEl("circle", { cx: p.x - n.x, cy: p.y - n.y, r: 11, fill: "transparent", "data-port": port, style: "cursor:crosshair" });
         hit.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); startConnect(ev, n, port); });
         g.appendChild(hit);
-        var c = svgEl("circle", { cx: p.x - n.x, cy: p.y - n.y, r: 5, fill: "#ffffff", stroke: "#b07a12", "stroke-width": 1.6, "pointer-events": "none" });
+        var c = svgEl("circle", { cx: p.x - n.x, cy: p.y - n.y, r: 5, "class": "o-port", "pointer-events": "none" });
         g.appendChild(c);
       });
       g.addEventListener("pointerdown", function (ev) { startNodeDrag(ev, n); });
@@ -452,7 +539,7 @@
     var sx = 168 / Math.max(1, box.x1 - box.x0), sy = 116 / Math.max(1, box.y1 - box.y0);
     var s = Math.min(sx, sy);
     spec.nodes.forEach(function (n) {
-      mini.appendChild(svgEl("rect", { x: (n.x - box.x0) * s, y: (n.y - box.y0) * s, width: Math.max(2, W * s), height: Math.max(2, H * s), rx: 1, fill: selected.indexOf(n.id) >= 0 ? "#b07a12" : "#cfc8b8" }));
+      mini.appendChild(svgEl("rect", { x: (n.x - box.x0) * s, y: (n.y - box.y0) * s, width: Math.max(2, W * s), height: Math.max(2, H * s), rx: 1, "class": "o-mini" + (selected.indexOf(n.id) >= 0 ? " o-on" : "") }));
     });
     mini.__box = { box: box, s: s };
     var wrap = $("#canvasWrap").getBoundingClientRect();
@@ -514,9 +601,9 @@
   function drawTemp(d) {
     gTemp.textContent = "";
     if (d.kind === "edge") {
-      gTemp.appendChild(svgEl("path", { d: "M " + d.p1.x + " " + d.p1.y + " L " + d.p2.x + " " + d.p2.y, stroke: "#b07a12", "stroke-width": 2, "stroke-dasharray": "5 4", fill: "none" }));
+      gTemp.appendChild(svgEl("path", { d: "M " + d.p1.x + " " + d.p1.y + " L " + d.p2.x + " " + d.p2.y, "class": "o-temp" }));
     } else if (d.kind === "marquee" && d.rect) {
-      gTemp.appendChild(svgEl("rect", { x: d.rect.x, y: d.rect.y, width: d.rect.w, height: d.rect.h, fill: "rgba(176,122,18,.08)", stroke: "#b07a12", "stroke-dasharray": "4 3" }));
+      gTemp.appendChild(svgEl("rect", { x: d.rect.x, y: d.rect.y, width: d.rect.w, height: d.rect.h, "class": "o-marquee" }));
     }
   }
   function onUp(ev) {
@@ -733,7 +820,7 @@
     } else if (n.type === "decision") {
       html += "<p class='empty'>A decision has no condition of its own. Each outgoing edge carries one; the edge with no condition is the else.</p>";
       spec.edges.filter(function (e) { return e.from.node === n.id; }).forEach(function (e) {
-        html += '<div class="issue" style="border-left-color:#b07a12" data-edge-open="' + e.id + '"><b>' + esc(e.label || (e.condition ? "branch" : "else")) + "</b><br/>" + esc(e.condition || "otherwise") + "</div>";
+        html += '<div class="issue branch" data-edge-open="' + e.id + '"><b>' + esc(e.label || (e.condition ? "branch" : "else")) + "</b><br/>" + esc(e.condition || "otherwise") + "</div>";
       });
     } else if (n.type === "parallel") {
       html += field("Mode", '<select data-path="node.' + n.id + '.config.mode">' + opt(["fan-out", "join"], c.mode || "fan-out") + "</select>");
@@ -764,7 +851,7 @@
     } else if (n.type === "start") {
       html += "<p class='empty'>The graph's inputs are its params, edited below.</p>";
     }
-    html += "<hr style='border:0;border-top:1px solid var(--line);margin:10px 0' />";
+    html += "<hr />";
     html += field("Params (JSON array)", '<textarea data-path="spec.params">' + esc(JSON.stringify(spec.params)) + "</textarea>", "name, type, required, default");
     html += '<div class="field"><button id="delOne">Delete node</button></div>';
     host.innerHTML = html;
@@ -867,6 +954,38 @@
     // page, so it is the shell that takes us to Talk, in place.
     if (window.BeeZillaShell && window.BeeZillaShell.go) window.BeeZillaShell.go("/buzzy/talk?fromOrchestration=1");
   });
+
+  // ── The Idea Board, both ways ──────────────────────────────────────
+  // Owner, 2026-11-24: orchestrate "on the normal whiteboard" by talking. A flow built
+  // on the board opens here (its "Open in Orchestrate", or "open it in orchestrate"),
+  // and a flow drawn here goes onto the board, where BeeZilla can keep building it.
+  // Both go through this browser's storage and the shell, like "Send to agent".
+  $("#btnBoard").addEventListener("click", function () {
+    if (!MOD.specToBoard) return;
+    try { localStorage.setItem("bz_orch_to_board", JSON.stringify(MOD.specToBoard(spec))); } catch (e) {
+      statusEl.textContent = "couldn't hand it over"; statusEl.className = "bad";
+      return;
+    }
+    if (window.BeeZillaShell && window.BeeZillaShell.go) window.BeeZillaShell.go("/buzzy/talk?board=orchestration");
+  });
+  function takeFromBoard() {
+    var raw = null;
+    try { raw = localStorage.getItem("bz_board_to_orch"); } catch (e) { return false; }
+    if (!raw || !MOD.boardToSpec) return false;
+    try { localStorage.removeItem("bz_board_to_orch"); } catch (e) {}
+    var board = null;
+    try { board = JSON.parse(raw); } catch (e) { return false; }
+    if (!board || !Array.isArray(board.cards)) return false;
+    var next = validate(MOD.boardToSpec(board)).spec;
+    graphId = ""; graphVersion = 0; $("#verSel").style.display = "none";
+    spec = next; history = []; redo = []; selected = [];
+    lastCanon = "";
+    commit();
+    fit();
+    verNote("from the Idea Board");
+    try { window.history.replaceState(null, "", "/buzzy/orchestrate"); } catch (e) {}
+    return true;
+  }
 
   // ── account save / load / versions ─────────────────────────────────
   function verNote(text) { $("#verNote").textContent = text || ""; }
@@ -1082,7 +1201,7 @@
   commit(false);
   fit();
   paintInspector();
-  if (wantGraph) openGraph(wantGraph);
+  if (!takeFromBoard() && wantGraph) openGraph(wantGraph);
 
   // Recover from an old working copy that no longer validates: keep it visible rather
   // than silently replacing a person's drawing.

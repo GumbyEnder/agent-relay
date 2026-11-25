@@ -7539,14 +7539,51 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     } catch (e) {}
     window.addEventListener("pagehide", orchHandoffLeaving);
 
+    // ── A flow put on the Idea Board from Orchestrate ("Put on the Idea Board") ──
+    // orchestrate.html saves the board's cards and lines (orchestration.ts specToBoard)
+    // under bz_orch_to_board and hops here. The board opens and puts the flow up card
+    // by card, the same way BeeZilla builds one, once the board has finished settling
+    // (a visit starts on an emptied board, and that clear must not land on top of it).
+    function applyOrchToBoard() {
+      if (chatState._orchToBoardBusy) return;
+      var raw = null;
+      try { raw = window.localStorage.getItem("bz_orch_to_board"); } catch (e) { return; }
+      if (!raw || !window.BeeZillaWhiteboard) return;
+      var payload = null;
+      try { payload = JSON.parse(raw); } catch (e) { payload = null; }
+      if (!payload || !Array.isArray(payload.cards)) {
+        try { window.localStorage.removeItem("bz_orch_to_board"); } catch (e) {}
+        return;
+      }
+      chatState._orchToBoardBusy = true;
+      var W = window.BeeZillaWhiteboard;
+      if (!W.current()) {
+        var toggle = document.getElementById("boardToggle");
+        if (toggle) toggle.click();
+      }
+      var tries = 0;
+      (function whenOpen() {
+        var b = W.current();
+        if (!b) {
+          if (++tries > 50) { chatState._orchToBoardBusy = false; return; }
+          return setTimeout(whenOpen, 100);
+        }
+        Promise.resolve(b.settled ? b.settled() : null).then(function () {
+          // Delivered now: a reload must not put it up a second time.
+          try { window.localStorage.removeItem("bz_orch_to_board"); } catch (e) {}
+          return b.addOrchestration(payload);
+        }).then(function () { chatState._orchToBoardBusy = false; }, function () { chatState._orchToBoardBusy = false; });
+      })();
+    }
     // Orchestrate -> Talk is a SOFT navigation (nav.js BeeZillaShell.go). When Talk is
     // already the kept-alive page, the shell only restores it and no script of ours
     // runs again — so the handoff needs a second door: the shell announces every page
     // it finishes with bz:page, and a restore of Talk is one of those.
     window.addEventListener("bz:page", function (e) {
       var key = e && e.detail && e.detail.key ? String(e.detail.key).split("?")[0] : "";
-      if (key === "/buzzy/talk") applyOrchHandoff();
+      if (key === "/buzzy/talk") { applyOrchHandoff(); applyOrchToBoard(); }
     });
+    setTimeout(applyOrchToBoard, 600);
 
     function checkAuthAndEnableInput() {
       fetch("/api/auth/get-session", { credentials: "same-origin" })
@@ -8136,6 +8173,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 <script src="/buzzy/share.js"></script>
 <script src="/buzzy/page-share.js"></script>
 <script src="/buzzy/waveform.js"></script>
+<script src="/buzzy/orchestration.js"></script>
 <script src="/buzzy/whiteboard.js"></script>
 <script src="/buzzy/board-nodes.js"></script>
 <script src="/buzzy/voice-stage.js"></script>

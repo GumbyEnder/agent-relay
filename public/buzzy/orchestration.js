@@ -22,18 +22,31 @@ var BZOrchestration = (() => {
   // src/lib/buzzy/orchestration.ts
   var orchestration_exports = {};
   __export(orchestration_exports, {
+    BOARD_FLOW_KINDS: () => BOARD_FLOW_KINDS,
+    BOARD_KIND_OF_TYPE: () => BOARD_KIND_OF_TYPE,
     LEGACY_NODE_TYPES: () => LEGACY_NODE_TYPES,
     NODE_TYPES: () => NODE_TYPES,
     ORCH_SCHEMA: () => ORCH_SCHEMA,
     ORCH_SCHEMA_VERSION: () => ORCH_SCHEMA_VERSION,
     PORTS: () => PORTS,
+    boardCardType: () => boardCardType,
+    boardToSpec: () => boardToSpec,
     canonicalSpec: () => canonicalSpec,
     canonicalise: () => canonicalise,
+    describeBoard: () => describeBoard,
+    flowOrigin: () => flowOrigin,
+    freeSpotNear: () => freeSpotNear,
     fromBase64Url: () => fromBase64Url,
     fromMermaid: () => fromMermaid,
+    isBackLine: () => isBackLine,
+    makeRoom: () => makeRoom,
     parseExpression: () => parseExpression,
     parseGraphDetailPath: () => parseGraphDetailPath,
+    placeCard: () => placeCard,
+    placeInFlow: () => placeInFlow,
     snap: () => snap,
+    specToBoard: () => specToBoard,
+    tidyLineLabel: () => tidyLineLabel,
     toBase64Url: () => toBase64Url,
     toGraphRows: () => toGraphRows,
     toMermaid: () => toMermaid,
@@ -870,6 +883,571 @@ var BZOrchestration = (() => {
     const n = Number(raw);
     if (!Number.isInteger(n) || n < 1) return { graphId, revision: null, bad: raw };
     return { graphId, revision: n };
+  }
+  var BOARD_FLOW_KINDS = ["start", "tool", "decision", "parallel", "loop", "approval", "trigger", "subflow"];
+  var BOARD_KIND_OF_TYPE = {
+    start: "start",
+    agent: "skill",
+    tool: "tool",
+    decision: "decision",
+    parallel: "parallel",
+    loop: "loop",
+    approval: "approval",
+    trigger: "trigger",
+    subflow: "subflow",
+    end: "document",
+    note: "note"
+  };
+  function boardCardType(c) {
+    if (!c) return null;
+    const k = String(c.kind || "").toLowerCase();
+    if (BOARD_FLOW_KINDS.includes(k)) return k;
+    if (k === "skill" || k === "memory") return "agent";
+    if (k === "note") return "note";
+    if ((k === "document" || k === "output") && !c.url && !c.contentType) return "end";
+    return null;
+  }
+  var oneLine = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+  function slug(s, fallback) {
+    const out = s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+    return /^[a-z_]/.test(out) ? out : out ? "t_" + out : fallback;
+  }
+  var SCHEDULE_WORDS = /\b(?:every|each|daily|weekly|monthly|hourly|weekdays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|mornings?|evenings?|nights?|noon|midnight|cron|schedule[ds]?|at \d{1,2}(?::\d\d)?|\d{1,2}(?::\d\d)?\s*(?:am|pm))\b/i;
+  function savedOrch(c) {
+    const none = { node: "", config: {}, spec: null };
+    if (!c.orch) return none;
+    try {
+      const j = JSON.parse(c.orch);
+      if (!isObj(j)) return none;
+      if (isObj(j.config) || typeof j.node === "string") {
+        return { node: /^n_[A-Za-z0-9_]{1,60}$/.test(str(j.node)) ? str(j.node) : "", config: isObj(j.config) ? j.config : {}, spec: isObj(j.spec) ? j.spec : null };
+      }
+      return { node: "", config: j, spec: null };
+    } catch {
+      return none;
+    }
+  }
+  function savedConfig(c) {
+    return savedOrch(c).config;
+  }
+  function outputOf(saved) {
+    const name = isObj(saved.output) ? str(saved.output.name) : "";
+    return { name: /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : "output" };
+  }
+  function configFor(type, title, body, saved, outs, ins) {
+    const text = body || title;
+    const keep = (key, fallback) => saved[key] !== void 0 ? saved[key] : fallback;
+    switch (type) {
+      case "agent":
+        return {
+          prompt: str(saved.prompt) || text,
+          ...str(saved.agent) ? { agent: str(saved.agent) } : {},
+          model: keep("model", null),
+          tools: Array.isArray(saved.tools) ? saved.tools : [],
+          inputs: isObj(saved.inputs) ? saved.inputs : {},
+          output: outputOf(saved),
+          timeoutSec: int(saved.timeoutSec, 1, 86400) ?? 180,
+          retries: int(saved.retries, 0, 10) ?? 1,
+          onError: isObj(saved.onError) ? saved.onError : { policy: "stop" },
+          needsApproval: saved.needsApproval === true
+        };
+      case "tool":
+        return {
+          tool: str(saved.tool) || slug(text.split(/[\n.:]/)[0] || "", slug(title, "tool")),
+          args: isObj(saved.args) ? saved.args : {},
+          inputs: isObj(saved.inputs) ? saved.inputs : {},
+          output: outputOf(saved),
+          timeoutSec: int(saved.timeoutSec, 1, 86400) ?? 120,
+          retries: int(saved.retries, 0, 10) ?? 0,
+          onError: isObj(saved.onError) ? saved.onError : { policy: "stop" },
+          needsApproval: saved.needsApproval === true
+        };
+      case "parallel": {
+        const mode = str(saved.mode) === "join" || str(saved.mode) === "fan-out" ? str(saved.mode) : ins >= 2 && outs <= 1 ? "join" : "fan-out";
+        return mode === "join" ? { mode, join: ["all", "any", "first"].includes(str(saved.join)) ? str(saved.join) : "all", maxConcurrency: int(saved.maxConcurrency, 1, 16) ?? 2, output: outputOf(saved) } : { mode, maxConcurrency: int(saved.maxConcurrency, 1, 16) ?? 2 };
+      }
+      case "loop": {
+        const n = /(?:at most|max(?:imum)?|up to|no more than)\s*(\d{1,2})|(\d{1,2})\s*(?:times|tries|rounds|attempts|passes|goes)\b/i.exec(text);
+        const cap = n ? Number(n[1] || n[2]) : 3;
+        return {
+          until: str(saved.until) || text,
+          maxIterations: int(saved.maxIterations, 1, 50) ?? Math.min(50, Math.max(1, cap))
+        };
+      }
+      case "approval":
+        return {
+          prompt: str(saved.prompt) || text,
+          approver: str(saved.approver) === "ops" ? "ops" : "owner",
+          timeoutSec: int(saved.timeoutSec, 1, 2592e3) ?? 86400,
+          onTimeout: str(saved.onTimeout) === "reject" ? "reject" : "stop"
+        };
+      case "trigger": {
+        const old = isObj(saved.trigger) ? saved.trigger : null;
+        if (old && ["schedule", "webhook", "event"].includes(str(old.kind))) {
+          return { mode: str(saved.mode) === "wait" || str(saved.mode) === "entry" ? str(saved.mode) : ins ? "wait" : "entry", trigger: old };
+        }
+        const kind = /\bweb ?hook\b/i.test(text) ? "webhook" : SCHEDULE_WORDS.test(text) ? "schedule" : "event";
+        const trigger = kind === "schedule" ? { kind, schedule: text.slice(0, 200) } : kind === "webhook" ? { kind, webhook: "/hooks/" + slug(title, "hook") } : { kind, event: slug(text, "event") };
+        return { mode: ins ? "wait" : "entry", trigger };
+      }
+      case "subflow": {
+        const ref = isObj(saved.ref) ? saved.ref : {};
+        return { ref: { graphId: str(ref.graphId), revision: ref.revision ?? null }, inputs: isObj(saved.inputs) ? saved.inputs : {}, output: outputOf(saved) };
+      }
+      case "end":
+        return { outputs: isObj(saved.outputs) ? saved.outputs : {} };
+      case "note":
+        return { text };
+      default:
+        return {};
+    }
+  }
+  var DEFAULT_NAME = {
+    start: "Start",
+    agent: "Step",
+    tool: "Tool",
+    decision: "Decision",
+    parallel: "At the same time",
+    loop: "Repeat",
+    approval: "Your approval",
+    trigger: "When",
+    subflow: "Another orchestration",
+    end: "End result",
+    note: "Note"
+  };
+  function boardToSpec(board) {
+    const cards = (Array.isArray(board?.cards) ? board.cards : []).filter((c) => c && c.id && boardCardType(c));
+    const idOf = /* @__PURE__ */ new Map();
+    const used = /* @__PURE__ */ new Set();
+    for (const c of cards) {
+      const kept2 = savedOrch(c).node;
+      if (kept2 && !used.has(kept2)) {
+        used.add(kept2);
+        idOf.set(String(c.id), kept2);
+      }
+    }
+    for (const c of cards) {
+      if (idOf.has(String(c.id))) continue;
+      let nid = "n_" + String(c.id).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40);
+      while (used.has(nid)) nid += "_";
+      used.add(nid);
+      idOf.set(String(c.id), nid);
+    }
+    const typeOf = /* @__PURE__ */ new Map();
+    for (const c of cards) typeOf.set(String(c.id), boardCardType(c));
+    const seenPair = /* @__PURE__ */ new Set();
+    const links = (Array.isArray(board?.links) ? board.links : []).filter((l) => {
+      if (!l || !idOf.has(String(l.from)) || !idOf.has(String(l.to)) || l.from === l.to) return false;
+      if (typeOf.get(String(l.from)) === "note" || typeOf.get(String(l.to)) === "note") return false;
+      const k = l.from + ">" + l.to + ">" + oneLine(l.label, 40);
+      if (seenPair.has(k)) return false;
+      seenPair.add(k);
+      return true;
+    });
+    const nodes = [];
+    let minX = Infinity, minY = Infinity;
+    for (const c of cards) {
+      minX = Math.min(minX, num(c.x) ?? 0);
+      minY = Math.min(minY, num(c.y) ?? 0);
+    }
+    if (!Number.isFinite(minX)) {
+      minX = 0;
+      minY = 0;
+    }
+    for (const c of cards) {
+      const id = String(c.id);
+      const type = typeOf.get(id);
+      const title = oneLine(c.title, 160) || DEFAULT_NAME[type];
+      const body = String(c.body ?? "").trim().slice(0, 4e3);
+      const outs = links.filter((l) => l.from === id).length;
+      const ins = links.filter((l) => l.to === id).length;
+      const config = configFor(type, title, body, savedConfig(c), outs, ins);
+      const prose = type !== "agent" && type !== "approval" && type !== "note";
+      nodes.push({
+        id: idOf.get(id),
+        type,
+        name: title,
+        x: snap(64 + ((num(c.x) ?? 0) - minX) * 0.8, 16),
+        y: snap(64 + ((num(c.y) ?? 0) - minY) * 0.6, 16),
+        notes: prose ? body.slice(0, 2e3) : "",
+        config
+      });
+    }
+    const byNode = new Map(nodes.map((n) => [n.id, n]));
+    const next = /* @__PURE__ */ new Map();
+    for (const l of links) (next.get(String(l.from)) ?? next.set(String(l.from), []).get(String(l.from))).push(String(l.to));
+    function reaches(from, target, skip) {
+      const seen = /* @__PURE__ */ new Set([from]);
+      const q = [from];
+      while (q.length) {
+        const at = q.shift();
+        for (const to of next.get(at) || []) {
+          if (to === target) return true;
+          if (to === skip || seen.has(to)) continue;
+          seen.add(to);
+          q.push(to);
+        }
+      }
+      return false;
+    }
+    const edges = [];
+    const outCount = /* @__PURE__ */ new Map();
+    for (const l of links) {
+      const from = String(l.from), to = String(l.to);
+      const a = byNode.get(idOf.get(from)), b = byNode.get(idOf.get(to));
+      const label2 = oneLine(l.label, 60);
+      const nth = outCount.get(from) ?? 0;
+      outCount.set(from, nth + 1);
+      let fromPort = "out";
+      const keptFrom = str(l.fp), keptTo = str(l.tp);
+      if (keptFrom && PORTS[a.type].includes(keptFrom)) {
+        fromPort = keptFrom;
+      } else if (a.type === "approval") {
+        fromPort = /\b(?:reject\w*|no|denied|declin\w*|not ok|refus\w*)\b/i.test(label2) ? "rejected" : /\b(?:approv\w*|yes|ok|okay|accept\w*)\b/i.test(label2) ? "approved" : nth === 0 ? "approved" : "rejected";
+      } else if (a.type === "loop") {
+        fromPort = /\b(?:done|exit|finish\w*|after|then|next|end|stop|leave)\b/i.test(label2) ? "exit" : /\b(?:repeat|body|each|again|loop|try|do|run)\b/i.test(label2) ? "body" : nth === 0 ? "body" : "exit";
+      } else if (!PORTS[a.type].includes("out")) {
+        continue;
+      }
+      let toPort = "in";
+      if (keptTo && PORTS[b.type].includes(keptTo)) toPort = keptTo;
+      else if (b.type === "loop" && (/\b(?:again|back|repeat|retry|loop)\b/i.test(label2) || reaches(to, from, ""))) toPort = "back";
+      if (!PORTS[b.type].includes(toPort)) continue;
+      const condition = str(l.cond).trim().slice(0, 500) || null;
+      edges.push({ id: "e_" + (edges.length + 1), from: { node: a.id, port: fromPort }, to: { node: b.id, port: toPort }, label: label2, condition });
+    }
+    const hasStart = nodes.some((n) => n.type === "start") || nodes.some((n) => n.type === "trigger" && n.config.mode === "entry");
+    const flowNodes = nodes.filter((n) => n.type !== "note");
+    if (!hasStart && flowNodes.length) {
+      const firsts = flowNodes.filter((n) => !edges.some((e) => e.to.node === n.id && e.to.port !== "back"));
+      const x0 = Math.min(...flowNodes.map((n) => n.x));
+      let sid = "n_start";
+      while (byNode.has(sid)) sid += "_";
+      const s = { id: sid, type: "start", name: "Start", x: snap(x0 - 240, 16), y: snap(Math.min(...flowNodes.map((n) => n.y)), 16), notes: "", config: {} };
+      nodes.unshift(s);
+      byNode.set(sid, s);
+      for (const f of firsts.length ? firsts : [flowNodes[0]]) {
+        edges.push({ id: "e_" + (edges.length + 1), from: { node: sid, port: "out" }, to: { node: f.id, port: "in" }, label: "", condition: null });
+      }
+    }
+    if (!nodes.some((n) => n.type === "end")) {
+      const lasts = nodes.filter((n) => n.type !== "note" && n.type !== "end" && PORTS[n.type].includes("out") && !edges.some((e2) => e2.from.node === n.id));
+      const x1 = Math.max(64, ...nodes.map((n) => n.x));
+      let eid = "n_end";
+      while (byNode.has(eid)) eid += "_";
+      const e = { id: eid, type: "end", name: "End", x: snap(x1 + 240, 16), y: snap(Math.min(...nodes.map((n) => n.y), 64), 16), notes: "", config: { outputs: {} } };
+      nodes.push(e);
+      byNode.set(eid, e);
+      for (const l of lasts) edges.push({ id: "e_" + (edges.length + 1), from: { node: l.id, port: "out" }, to: { node: eid, port: "in" }, label: "", condition: null });
+    }
+    const start = nodes.find((n) => n.type === "start") || nodes.find((n) => n.type === "trigger" && n.config.mode === "entry");
+    const kept = cards.map((c) => savedOrch(c).spec).find((x) => !!x) || null;
+    const spec = {
+      schema: ORCH_SCHEMA,
+      schemaVersion: ORCH_SCHEMA_VERSION,
+      name: oneLine(board?.name, 160) || "Orchestration from the Idea Board",
+      description: kept ? str(kept.description).slice(0, 2e3) : "",
+      direction: "LR",
+      grid: 16,
+      entry: start ? start.id : "",
+      params: kept && Array.isArray(kept.params) ? kept.params : [{ name: "goal", type: "string", required: true, default: null, description: "What this run is for" }],
+      policy: kept && isObj(kept.policy) ? kept.policy : { maxConcurrency: 4, budgetSec: 900, onError: "stop" },
+      nodes,
+      edges,
+      meta: { generator: "import", from: "idea-board" }
+    };
+    return validateOrchestration(spec).spec;
+  }
+  function boardBody(n) {
+    const c = n.config || {};
+    switch (n.type) {
+      case "agent":
+        return str(c.prompt);
+      case "approval":
+        return str(c.prompt);
+      case "note":
+        return str(c.text);
+      case "tool":
+        return n.notes || (str(c.tool) ? "Tool: " + str(c.tool) : "");
+      case "loop":
+        return n.notes || (str(c.until) ? "Until " + str(c.until) : "Repeat") + (int(c.maxIterations, 1, 50) ? " · at most " + c.maxIterations + " times" : "");
+      case "trigger": {
+        const t = isObj(c.trigger) ? c.trigger : {};
+        return n.notes || str(t.schedule) || (str(t.webhook) ? "Webhook " + str(t.webhook) : "") || (str(t.event) ? "When " + str(t.event) + " happens" : "");
+      }
+      case "subflow": {
+        const ref = isObj(c.ref) ? c.ref : {};
+        return n.notes || (str(ref.graphId) ? "Runs " + str(ref.graphId) : "");
+      }
+      default:
+        return n.notes || "";
+    }
+  }
+  function specToBoard(spec) {
+    const nodes = Array.isArray(spec?.nodes) ? spec.nodes : [];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const first = nodes.find((n) => n.id === spec?.entry) || nodes[0];
+    const cards = nodes.map((n) => {
+      const card = {
+        id: n.id,
+        kind: BOARD_KIND_OF_TYPE[n.type] || "note",
+        title: oneLine(n.name, 140) || DEFAULT_NAME[n.type],
+        body: boardBody(n).slice(0, 4e3),
+        x: Math.round(n.x),
+        y: Math.round(n.y)
+      };
+      const keep = { node: n.id, config: n.config || {} };
+      if (n === first) keep.spec = { params: spec.params || [], policy: spec.policy || {}, description: spec.description || "" };
+      let orch = JSON.stringify(keep);
+      if (orch.length > 4e3) orch = JSON.stringify({ node: n.id, config: n.config || {} });
+      if (orch.length > 4e3) orch = JSON.stringify({ node: n.id });
+      card.orch = orch;
+      return card;
+    });
+    const links = [];
+    for (const e of Array.isArray(spec?.edges) ? spec.edges : []) {
+      const a = byId.get(e.from.node), b = byId.get(e.to.node);
+      if (!a || !b || a.type === "note" || b.type === "note") continue;
+      const portWord = { approved: "approved", rejected: "rejected", body: "repeat", exit: "done" };
+      const label2 = oneLine(e.label, 40) || (e.to.port === "back" ? "again" : portWord[e.from.port] || "");
+      const line = { from: a.id, to: b.id, fp: e.from.port, tp: e.to.port };
+      if (label2) line.label = label2;
+      if (e.condition) line.cond = String(e.condition).slice(0, 500);
+      links.push(line);
+    }
+    return { name: spec?.name || "", cards, links };
+  }
+  var BACK_WORDS = /^(?:again|back|loop back|go back|retry|try again|repeat again)$/i;
+  function isBackLine(line, boxes) {
+    const m = boxes instanceof Map ? boxes : new Map(boxes.map((b) => [b.id, b]));
+    const to = m.get(line.to);
+    if (BACK_WORDS.test(String(line.label || "").trim())) return true;
+    return !!(to && to.kind === "loop" && /\bagain\b/i.test(String(line.label || "")));
+  }
+  function overlaps(a, b, pad) {
+    return a.x < b.x + b.w + pad && a.x + a.w + pad > b.x && a.y < b.y + b.h + pad && a.y + a.h + pad > b.y;
+  }
+  function freeSpotNear(x, y, w, h, boxes, skip, pad = 24) {
+    const others = boxes.filter((b) => !skip || !skip.has(b.id));
+    const free = (yy) => !others.some((b) => overlaps({ x, y: yy, w, h }, b, pad));
+    for (let i = 0; i < 120; i++) if (free(y + i * 24)) return { x: Math.round(x), y: Math.round(y + i * 24) };
+    for (let i = 1; i < 40; i++) if (free(y - i * 24)) return { x: Math.round(x), y: Math.round(y - i * 24) };
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+  function flowOrigin(x, y, boxes, opts = {}) {
+    const w = opts.cardW ?? 210, h = (opts.cardH ?? 130) + 20, step = w + (opts.colGap ?? 120);
+    const width = step * (opts.columns ?? 5);
+    let at = x;
+    for (let k = 0; k < 8; k++) {
+      const hit = boxes.filter((b) => overlaps({ x: at, y, w, h }, b, 24));
+      if (!hit.length) break;
+      at = Math.max(...hit.map((b) => b.x + b.w)) + 60;
+    }
+    for (let i = 0; i < 80; i++) {
+      const yy = y + i * 40;
+      if (!boxes.some((b) => overlaps({ x: at, y: yy, w: width, h }, b, 24))) return { x: Math.round(at), y: Math.round(yy) };
+    }
+    return { x: Math.round(at), y: Math.round(y) };
+  }
+  function downstream(id, lines, boxes, stop) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set([id]);
+    const q = [id];
+    while (q.length) {
+      const at = q.shift();
+      for (const l of lines) {
+        if (l.from !== at || seen.has(l.to) || l.to === stop) continue;
+        if (isBackLine(l, boxes)) continue;
+        seen.add(l.to);
+        out.push(l.to);
+        q.push(l.to);
+      }
+    }
+    return out;
+  }
+  function idealSpot(id, size, boxes, lines, opts) {
+    const colGap = opts.colGap ?? 120, rowGap = opts.rowGap ?? 40;
+    const m = new Map(boxes.map((b) => [b.id, b]));
+    const forwardIn = lines.filter((l) => l.to === id && m.has(l.from) && !isBackLine(l, m));
+    const preds = forwardIn.map((l) => m.get(l.from));
+    if (preds.length) {
+      let right = Math.max(...preds.map((p2) => p2.x + p2.w));
+      for (const l of forwardIn) {
+        const p2 = m.get(l.from);
+        if (p2.kind === "loop" && /\b(?:done|exit|finish|after|then|next)\b/i.test(String(l.label || ""))) {
+          for (const d of downstream(p2.id, lines.filter((x2) => !(x2.from === p2.id && x2.to === id)), m)) {
+            const b = m.get(d);
+            if (b) right = Math.max(right, b.x + b.w);
+          }
+        }
+      }
+      const x = right + colGap;
+      if (preds.length >= 2) {
+        return { x, y: preds.reduce((s, p2) => s + p2.y + p2.h / 2, 0) / preds.length - size.h / 2 };
+      }
+      const p = preds[0];
+      const siblings = lines.filter((l) => l.from === p.id && l.to !== id && m.has(l.to) && !isBackLine(l, m)).map((l) => m.get(l.to)).filter((b) => b.x >= p.x + p.w);
+      const after = new Set(downstream(id, lines, m));
+      const others = siblings.filter((b) => !after.has(b.id));
+      return { x, y: others.length ? Math.max(...others.map((s) => s.y + s.h)) + rowGap : p.y };
+    }
+    const succIds = lines.filter((l) => l.from === id && m.has(l.to) && !isBackLine(l, m)).map((l) => l.to);
+    if (succIds.length) {
+      const s = m.get(succIds[0]);
+      return { x: s.x - colGap - size.w, y: s.y };
+    }
+    return opts.origin ?? { x: 0, y: 0 };
+  }
+  function placeCard(id, size, boxes, lines, opts = {}) {
+    const at = idealSpot(id, size, boxes, lines, opts);
+    return freeSpotNear(at.x, at.y, size.w, size.h, boxes, /* @__PURE__ */ new Set([id]));
+  }
+  function placeInFlow(id, size, boxes, lines, opts = {}) {
+    const colGap = opts.colGap ?? 120;
+    const at = idealSpot(id, size, boxes, lines, opts);
+    const m = new Map(boxes.map((b) => [b.id, b]));
+    const here = { x: at.x, y: at.y, w: size.w, h: size.h };
+    const blocking = boxes.filter((b) => b.id !== id && overlaps(here, b, 24));
+    if (blocking.length) {
+      const after = new Set(downstream(id, lines, m));
+      if (blocking.every((b) => after.has(b.id))) {
+        const dx = Math.round(at.x + size.w + colGap - Math.min(...blocking.map((b) => b.x)));
+        const moves = Array.from(after).map((bid) => m.get(bid)).filter((b) => !!b && b.x >= at.x - size.w).map((b) => ({ id: b.id, x: Math.round(b.x + dx), y: Math.round(b.y) }));
+        const moved = new Map(moves.map((v) => [v.id, v]));
+        const after2 = boxes.map((b) => moved.has(b.id) ? { ...b, x: moved.get(b.id).x } : b);
+        const spot2 = freeSpotNear(at.x, at.y, size.w, size.h, after2, /* @__PURE__ */ new Set([id]));
+        return { x: spot2.x, y: spot2.y, moves };
+      }
+    }
+    const spot = freeSpotNear(at.x, at.y, size.w, size.h, boxes, /* @__PURE__ */ new Set([id]));
+    return { x: spot.x, y: spot.y, moves: [] };
+  }
+  function tidyLineLabel(label2, fromKind, toKind) {
+    const l = String(label2 || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    if (!l) return "";
+    const low = l.toLowerCase();
+    if (/^(?:again|back|loop back|go back|retry|try again|repeat again)$/.test(low)) return toKind === "loop" ? "again" : "";
+    if (/^(?:repeat|body|each|loop|do|run)$/.test(low)) return fromKind === "loop" ? "repeat" : "";
+    if (/^(?:done|exit|finished|finish|after|then|next)$/.test(low)) return fromKind === "loop" ? "done" : fromKind === "decision" ? l : "";
+    if (/^(?:approved|rejected|approve|reject)$/.test(low)) return fromKind === "approval" ? low.startsWith("approve") ? "approved" : "rejected" : fromKind === "decision" ? l : "";
+    return l;
+  }
+  function makeRoom(from, to, boxes, lines, opts = {}, label2) {
+    const colGap = opts.colGap ?? 120;
+    const m = new Map(boxes.map((b2) => [b2.id, b2]));
+    const a = m.get(from), b = m.get(to);
+    if (!a || !b || isBackLine({ from, to, label: label2 }, m)) return [];
+    const need = a.x + a.w + colGap - b.x;
+    if (need <= 0) return [];
+    const chain = [to, ...downstream(to, lines, m, from)].filter((id) => id !== from);
+    const before = new Set(lines.filter((l) => l.to === from).map((l) => l.from));
+    return chain.filter((id) => !before.has(id) && m.has(id)).map((id) => {
+      const c = m.get(id);
+      return { id, x: Math.round(c.x + need), y: Math.round(c.y) };
+    });
+  }
+  var MAP_KIND = {
+    skill: "step",
+    memory: "step",
+    agent: "core-identity",
+    person: "who-it-serves",
+    chat: "conversation",
+    note: "note",
+    image: "picture",
+    track: "music",
+    model: "3d-model",
+    video: "video",
+    document: "document",
+    sheet: "spreadsheet",
+    slides: "slides",
+    pdf: "pdf",
+    file: "file",
+    sketch: "drawing",
+    area: "area",
+    start: "start",
+    tool: "tool",
+    decision: "decision",
+    parallel: "parallel",
+    loop: "loop",
+    approval: "approval",
+    trigger: "trigger",
+    subflow: "subflow"
+  };
+  function describeBoard(input) {
+    const budget = input.budget ?? 3200;
+    const cards = (input.cards || []).filter((c) => c && c.id && c.kind !== "area");
+    const view = input.view;
+    const r10 = (v) => Math.round(v / 10) * 10;
+    const inView = (c) => !!view && c.x < view.x2 && c.x + c.w > view.x1 && c.y < view.y2 && c.y + c.h > view.y1;
+    const where = (c) => {
+      if (!view || inView(c)) return "";
+      const s = [];
+      if (c.y + c.h < view.y1) s.push("above");
+      else if (c.y > view.y2) s.push("below");
+      if (c.x + c.w < view.x1) s.push("left");
+      else if (c.x > view.x2) s.push("right");
+      return " off view " + s.join("-");
+    };
+    const ordered = cards.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+    const ids = {};
+    const short = /* @__PURE__ */ new Map();
+    ordered.forEach((c, i) => {
+      const s = "c" + (i + 1);
+      ids[s] = c.id;
+      short.set(c.id, s);
+    });
+    const linked = /* @__PURE__ */ new Set();
+    for (const l of input.links || []) {
+      linked.add(l.from);
+      linked.add(l.to);
+    }
+    const cx = view ? (view.x1 + view.x2) / 2 : 0, cy = view ? (view.y1 + view.y2) / 2 : 0;
+    const rank = (c) => (c.selected ? 0 : inView(c) ? 1 : linked.has(c.id) ? 2 : 3) * 1e7 + Math.hypot(c.x - cx, c.y - cy);
+    const listed = new Set(cards.slice().sort((a, b) => rank(a) - rank(b)).slice(0, 80).map((c) => c.id));
+    const head = [];
+    const links = (input.links || []).filter((l) => short.has(l.from) && short.has(l.to));
+    head.push(`Board: ${cards.length} card${cards.length === 1 ? "" : "s"}, ${links.length} line${links.length === 1 ? "" : "s"}.` + (view ? ` In view: x ${r10(view.x1)}..${r10(view.x2)}, y ${r10(view.y1)}..${r10(view.y2)} at ${Math.round(view.z * 100)}%.` : ""));
+    const lines = [];
+    let used = head.join("\n").length;
+    const skipped = [];
+    for (const c of ordered) {
+      if (!listed.has(c.id)) {
+        skipped.push(c);
+        continue;
+      }
+      const kind = MAP_KIND[c.kind] || c.kind || "card";
+      const title = oneLine(c.title, 60).replace(/"/g, "'");
+      const body = oneLine(c.body, 90);
+      const web = /^https?:\/\//i.test(String(c.url || "")) ? " " + String(c.url).slice(0, 80) : "";
+      const line = `${short.get(c.id)} ${kind === "file" && web ? "link" : kind} "${title}"${body ? " — " + body : ""}${web} @${r10(c.x)},${r10(c.y)} ${r10(c.w)}x${r10(c.h)}${where(c)}`;
+      if (used + line.length + 1 > budget - 400) {
+        skipped.push(c);
+        continue;
+      }
+      lines.push(line);
+      used += line.length + 1;
+    }
+    const out = head.concat(lines);
+    if (skipped.length) {
+      const kinds = Array.from(new Set(skipped.map((c) => MAP_KIND[c.kind] || c.kind))).slice(0, 5).join(", ");
+      out.push(`(+${skipped.length} more card${skipped.length === 1 ? "" : "s"} not listed: ${kinds})`);
+    }
+    if (links.length) {
+      const parts = links.slice(0, 120).map((l) => `${short.get(l.from)}>${short.get(l.to)}${oneLine(l.label, 24) ? ' "' + oneLine(l.label, 24).replace(/"/g, "'") + '"' : ""}`);
+      out.push("Lines: " + parts.join(", "));
+    }
+    for (const a of input.areas || []) {
+      const held = (a.holds || []).map((id) => short.get(id)).filter(Boolean);
+      if (held.length) out.push(`Area "${oneLine(a.title, 40).replace(/"/g, "'")}" holds ${held.join(" ")}`);
+    }
+    const sel = cards.filter((c) => c.selected).map((c) => short.get(c.id));
+    if (sel.length) out.push("Selected: " + sel.join(" "));
+    if (cards.length) {
+      const right = Math.max(...cards.map((c) => c.x + c.w));
+      const below = Math.max(...cards.map((c) => c.y + c.h));
+      out.push(`Room: right of x ${r10(right)}; below y ${r10(below)}.`);
+    } else out.push("The board is empty.");
+    return { text: out.join("\n").slice(0, budget), ids };
   }
   return __toCommonJS(orchestration_exports);
 })();

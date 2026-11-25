@@ -679,6 +679,8 @@
   var PAGE_PLACE = {
     library: "library", memory: "memory", remember: "memory", experts: "experts", recipes: "recipes",
     sketch: "sketch", studio: "studio", capabilities: "capabilities", wallet: "wallet", upload: "publish",
+    // Orchestrate joined the row with CR-3 but not this map, so the row went dark on it.
+    orchestrate: "orchestrate",
   };
   var places = document.querySelector("#bzPlaces .bz-places");
   function paintPlaces() {
