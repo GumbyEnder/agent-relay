@@ -200,7 +200,7 @@
         method stays sealed</strong> until you buy it.
       </p>
       <p class="lede">
-        Got a sequence of your own? <a href="/buzzy/graph">Put it on the canvas</a> — steps, models
+        Got a sequence of your own? <a href="/buzzy/orchestrate">Put it on the canvas</a> — steps, models
         and the review, in the order you want them run.
       </p>
     </div>
@@ -335,7 +335,7 @@
         function onKey(e) { if (e.key === "Escape") close(); }
         document.addEventListener("keydown", onKey);
         cancel.addEventListener("click", close);
-        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) close(); });
+        // Cancel, or Esc: never a click on the page around it ("no click-outside-to-close").
         confirm.addEventListener("click", function () { close(); doPurchase(btn, r); });
       }
 
@@ -369,7 +369,8 @@
         function onKey(e) { if (e.key === "Escape") dismiss(); }
         document.addEventListener("keydown", onKey);
         close.addEventListener("click", dismiss);
-        backdrop.addEventListener("click", function (e) { if (e.target === backdrop) dismiss(); });
+        // Close, or Esc: never a click on the page around it. What was typed in the brief
+        // is only lost on purpose ("no click-outside-to-close").
 
         run.addEventListener("click", function () {
           var text = brief.value.trim();

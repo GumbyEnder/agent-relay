@@ -87,7 +87,16 @@
         })
           .then(function (r) {
             var moved = r.type === "opaqueredirect" || (r.status >= 300 && r.status < 400);
-            if (moved && here()) window.location.replace("/buzzy/talk");
+            if (!moved || !here()) return;
+            // Back inside an app that already runs the shell (a restored tab): let the
+            // shell take us, so the document that is listening stays alive.
+            var shell = window.BeeZillaShell;
+            if (shell && shell.go) { shell.go("/buzzy/talk"); return; }
+            // A cold landing is the welcome page: the shell is not up yet and this page
+            // has no header and no recogniser, so there is nothing to keep alive and a
+            // hard load is the only way in. That one load is named in
+            // scripts/gate-hard-nav.mjs (HARD_NAV_ALLOW) rather than hidden.
+            window.location.replace("/buzzy/talk");
           })
           .catch(function () {});
       }

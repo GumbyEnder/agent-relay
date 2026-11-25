@@ -74,6 +74,16 @@ check("lockdown keeps the local tools", ["calculate", "render_document", "render
 check("a withheld outside tool explains Lockdown", /Lockdown/.test(refusalFor("web_search", { draftGateOpen: true, lockdown: true }) ?? ""));
 check("without lockdown nothing changes", outside.filter((n) => policyFor(n)?.offered).every((n) => offeredToolNames({ draftGateOpen: true }).includes(n)));
 
+console.log("one mode just going (documents only):");
+// oneMode.ts opens the gate when it decides to just do real work. That puts the
+// document makers on the table, never the outside makers that spend plan minutes.
+const going = offeredToolNames({ draftGateOpen: true, documentsOnly: true });
+check("documents, slides and sheets are offered", ["render_document", "render_presentation", "render_sheet"].every((n) => going.includes(n)), going.join(","));
+check("music and video are not", !going.includes("generate_music") && !going.includes("generate_video"), going.join(","));
+check("the always-on tools stay", ["calculate", "web_search"].every((n) => going.includes(n)), going.join(","));
+check("a withheld maker says it runs when asked", /when the owner asks/.test(refusalFor("generate_video", { draftGateOpen: true, documentsOnly: true }) ?? ""));
+check("documentsOnly changes nothing while the gate is shut", offeredToolNames({ draftGateOpen: false, documentsOnly: true }).join() === offeredToolNames({ draftGateOpen: false }).join());
+
 console.log("result clamp:");
 const clamped = clampResult("web_search", "x".repeat(20000));
 check("result is trimmed to the declared cap", clamped.length < 20000 && /trimmed/.test(clamped));

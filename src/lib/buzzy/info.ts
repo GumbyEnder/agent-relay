@@ -168,24 +168,9 @@ export async function searchKnowledge(
   return [
     ...companyRows.map((r: any) => ({ source: "company facts", label: r.label, value: r.value })),
     ...paperRows.map((r: any) => ({ source: "your documents", label: r.label, value: r.value })),
-    ...memoryRows.map((r: any) => ({ source: "remembered decisions", label: r.label, value: r.value })),
+    // Keys starting "_" are conversation bookkeeping (oneMode.ts), not decisions.
+    ...memoryRows
+      .filter((r: any) => !String(r.label ?? "").startsWith("_"))
+      .map((r: any) => ({ source: "remembered decisions", label: r.label, value: r.value })),
   ];
 }
-
-/**
- * Planning heuristic: is this job complex enough to ask for a plan first?
- * Deliberately cheap — never always-on (plan doc 23, loop contract).
- */
-export function shouldPlanFirst(message: string): boolean {
-  const complex =
-    message.split(/[.;?!]\s/).filter((s) => s.trim().length > 12).length >= 3 ||
-    /\b(and then|after that|also need|plus|step 1|first.*then)\b/i.test(message);
-  const short = message.trim().length < 80;
-  return complex && !short;
-}
-
-/** The plan-first instruction injected into the system prompt for complex jobs. */
-export const PLAN_FIRST_INSTRUCTION =
-  "\n\nThis is a multi-part job. BEFORE writing anything, reply with a short numbered plan " +
-  "(3-6 steps, one line each, plain words) and ask: 'Does this plan look right?' Do not " +
-  "produce the deliverable until the owner confirms the plan.";

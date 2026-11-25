@@ -45,8 +45,6 @@ const commands: [string, string, ("advocate" | "lockdown" | "open")?][] = [
   ["set my privacy to advocate", "privacy:advocate", "open"],
   ["turn off lockdown", "privacy:advocate?", "lockdown"],
   ["switch to open", "privacy:open?"],
-  ["switch to work mode", "mode:work"],
-  ["go back to chat mode", "mode:chat"],
   ["show my history", "history"],
   ["start a new chat", "newChat"],
   ["read your replies out loud", "speak:on"],
@@ -77,6 +75,9 @@ const chat = [
   "go to the shops",
   "take me to Lisbon",
   "switch to the other supplier",
+  // One mode (oneMode.ts): there is no Chat/Work switch to press any more, so this is
+  // a question BeeZilla answers (from its self-knowledge), not a step on the page.
+  "switch to work mode",
   "open the whiteboard and write a poem",
   "take me to my library and open the whiteboard",
   "show me only music and pictures and documents and 3d and everything",
@@ -103,7 +104,7 @@ const talk = readFileSync(resolve(root, "public/buzzy/talk.html"), "utf8");
 const browse = readFileSync(resolve(root, "public/buzzy/browse.js"), "utf8");
 const pilot = readFileSync(resolve(root, "public/buzzy/pilot.js"), "utf8");
 const navjs = readFileSync(resolve(root, "public/buzzy/nav.js"), "utf8");
-for (const id of ["boardToggle", "privacyBtn", "privacyClose", "modeTabs", "newSessionBtn", "micBtn"]) {
+for (const id of ["boardToggle", "privacyBtn", "privacyClose", "newSessionBtn", "micBtn"]) {
   check(talk.includes(`id="${id}"`), `talk.html still has #${id}`);
   check(pilot.includes(`#${id}`), `pilot.js presses #${id}`);
 }

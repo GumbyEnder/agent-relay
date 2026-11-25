@@ -203,10 +203,22 @@ export interface ToolContext {
   draftGateOpen: boolean;
   /** The owner chose Lockdown: nothing that leaves BeeZilla is offered. */
   lockdown?: boolean;
+  /**
+   * The gate is open only because one mode decided to just do the work (oneMode.ts),
+   * not because anyone asked for a file: the document makers are offered, the
+   * outside makers that spend plan minutes (music, video) are not. Those start when
+   * the person asks for them, and the harness starts them itself.
+   */
+  documentsOnly?: boolean;
 }
 
 function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
-  return p.offered && (p.gate === "always" || ctx.draftGateOpen) && !(ctx.lockdown && p.egress);
+  return (
+    p.offered &&
+    (p.gate === "always" || ctx.draftGateOpen) &&
+    !(ctx.lockdown && p.egress) &&
+    !(ctx.documentsOnly && p.gate === "draft" && p.egress)
+  );
 }
 
 /** The schemas the model is allowed to see on this turn. */
@@ -237,6 +249,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
+  }
+  if (ctx.documentsOnly && policy.gate === "draft" && policy.egress) {
+    return `${name} runs when the owner asks for it — this turn only writes documents.`;
   }
   return null;
 }

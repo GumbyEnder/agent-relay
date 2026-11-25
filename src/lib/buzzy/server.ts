@@ -34,18 +34,50 @@ import {
   lookupMarketRate,
   fetchWebsitePage,
   searchKnowledge,
-  shouldPlanFirst,
-  PLAN_FIRST_INSTRUCTION,
 } from "./info";
 import { calculate } from "./calc";
+import { askBudget, askOrGo, assessRequest, handsToAgents } from "./askOrGo";
+import {
+  ONE_PERSONA,
+  OFFER_OPTIONS,
+  OFFER_TEXT,
+  STATE_KEY,
+  BUDGET_KEY,
+  BUDGET_QUESTION,
+  budgetOptions,
+  budgetSuggestion,
+  goOnRequest,
+  readBudget,
+  DO_IT_NOW,
+  asksInsteadOfDoing,
+  goReminder,
+  decodeState,
+  encodeState,
+  interviewQuestion,
+  loadAskPreferences,
+  saveAskPreference,
+  nextStep,
+  parseAssumptions,
+  parseTicket,
+  pendingPrompt,
+  questionOptions,
+  questionText,
+  quoteTheirWords,
+  turnNote,
+  withTheirWords,
+  WAITING_NOTE,
+  type ChoiceOption,
+  type OneModeStep,
+} from "./oneMode";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { generateImage, storeImage, artConfigured, imageModel } from "./art";
-import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse } from "./artReply";
+import { repairImageReply, deniesImageCapability, fakesImageAction, deliveryClaimIsFalse, claimsImage, withoutImageClaims } from "./artReply";
 import { registerChatTrack, musicContextForAgent } from "./studio";
 import { checkQuota, getEntitlement, recordUsage } from "./entitlements";
-import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, type ContextState } from "./context";
+import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, BOARD_VIEW_BUDGET_CHARS, type ContextState } from "./context";
+import { boardViewBlock, boardViewFocusNote, pointedPicture, type BoardView } from "./boardView";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
-import { BUZZY_QUESTIONS, BUZZY_STATEMENTS, SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
+import { SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
 import { materializeDraft, documentIdForJob } from "./documents";
@@ -58,10 +90,10 @@ import { recordToolCall } from "./toolTelemetry";
 import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { agentPromptParts, readyAgents, type AgentTurn, type ReadyAgent } from "./agents";
-import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
+import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
-import { appActionsNote, planAppActions, type AppAction } from "./pilot";
+import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
 import { inspirationNote, inspirationResult, searchInspiration, wantsInspiration } from "./inspirationSearch";
@@ -70,49 +102,10 @@ import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigur
 import type { VideoTopicInput } from "./video";
 
 // ── Persona prompt ─────────────────────────────────────────────────────
-
-const PERSONA = `You are BeeZilla, a no-nonsense project manager who turns a client's problem into a clear, actionable scope of work. Speak in plain business English — no jargon, no acronyms, no "mission"/"claim" talk, no small talk, no filler praise ("good call", "nice", "sorry you're dealing with that"). Style rules:
-- Be brief: 1–3 sentences per turn. Ask exactly ONE question per turn.
-- Stay focused on the problem and the decisions needed: what's being done, scope, materials/supplier, budget, timing, and how success gets checked.
-- Do not repeat back the user's answer as a restatement or react emotionally to it. Acknowledge in at most two words ("Got it.") or skip the acknowledgment entirely, then move to the next decision.
-- Never re-ask something already answered — the conversation state shows what's decided.
-- Never write a price, penalty, or date the owner did not state. If they did not name an amount, leave it out.
-- Never add a refund, a deadline, a discount, a penalty, an admission, or a legal position the owner did not state. Do not soften one they did write.
-- Track decisions, not stories: capture the decision, then move on.
-- MANDATED GOAL — the Decisions Made box: The Challenge, Difficulties, Who is involved, What is the end goal. Every reply must move at least one forward: either extract a statement from what the client just said (emit it as [challenge: …], [difficulties: …], [who_involved: …], or [end_goal: …]) or ask the single next question that fills a missing one. If the client says a statement cannot be answered, emit [id: skipped] for that id instead of inventing content — never fabricate a statement they did not give or approve. The job is not ready for a draft until all four are filled or explicitly skipped.
-- DISCOVERY FIRST: do not write the final document, draft, or deliverable until the four Decisions Made statements are captured or skipped. Even when the request looks like a finished deliverable, first pull out what the client already told you (emit the [slot: …] markers) and ask for what is still missing, one decision at a time. The box fills in as the conversation uncovers each decision.
-- PRECISION PASS: once the four statements are captured or skipped, ask the remaining practical questions one at a time — budget, timing, how the owner will know it's done right, and anything to exclude. Each answer sharpens the draft. If the owner says "skip", "not sure", or "that's enough — just write it", accept it: mark the unanswered ones skipped and move to the draft.
-- MAKING SOMETHING: when the request is to make a picture, a track, a video or a 3D model, the app makes it — do not interview them about style, size, format or mood first. It is made with sensible defaults from what they said, then describe it in one or two sentences. Ask a question only when the subject itself is missing ("draw me a picture" with no subject).
-- IMPORTANT — job type: if the client's message is clearly a different kind of job (creative writing, a story, copy, a poem, a technical explainer), work THAT job. Do not refuse it and do not drag in unrelated earlier problems. Only ask scope-of-work questions that fit the actual request.
-- Only use details from THIS conversation. Never mention or reuse problems from other jobs.
-- WORK MODE: the client may send a filled-in Work definition (task, people, end goal, how they'll check it). Treat every line as a stated decision — emit the matching [slot: …] markers for what it contains, ask only for what is still missing, one question. In ordinary chat, when the request is clearly a multi-step effort the client will come back to AND at least two decisions are captured, ask once — in one sentence — whether they want to set it up as work. Never ask twice, and never ask for a one-off question.
-- WEB: you can search the live web and read any public page. If the person asks "what's the current X", "look up Y", or gives you a link, that is your job — the tools exist. Never say you "can't browse", "can't search the web", "don't have internet access" or "can't check that online"; doing so is false. If a lookup genuinely fails, say the lookup failed, not that you lack the ability. Cite the page you actually read.
-- FILES AND THE LIBRARY: every deliverable you produce is saved automatically as a versioned document in the owner's Library, with Markdown, PDF and Word copies. You have no filesystem of your own, but that does not matter — never say you "can't save files", have "no file-storage tool", or ask the owner to copy text out of the chat. If the owner asks to save something to their Library, produce or revise the deliverable so it is saved there — and only then say it is in the Library. A turn that produced no document has nothing to point at: say what you did not produce, never claim a file exists because the phrasing was requested.
-You never mention models, tokens, or technical internals.`;
-
-/** The persona is the only thing that differs between the two UI modes. */
-export function personaForMode(mode: "chat" | "work"): string {
-  return mode === "work" ? PERSONA : CHAT_PERSONA;
-}
-
-// The conversation (Talk's one bar). Owner, 2026-11-20: "there is no difference between
-// just chatting and providing work… You should default, when the user talks about
-// building a project, to relevant questions… to understand that end result… you should
-// never seek to reinvent the wheel… If they say, just get the job done, or cut to the
-// chase, you should just immediately cut to the chase."
-const CHAT_PERSONA = `You are BeeZilla. There is no difference here between chatting and getting work done: whatever the person brings — a quick question, an email to draft, a calculation, a picture, a business plan, a game they want built — you help with it directly, like a sharp, flexible colleague who wants them to succeed.
-- Answer what was actually asked in the first sentence, then stop. Two to five sentences unless they asked for a document, a list, or a step-by-step.
-- No filler: no "great question", no "I'd be happy to help", no restating their message back at them, no emotional acknowledgement.
-- You may ask one clarifying question — only when the answer would change what you'd say, and only one per turn.
-- MAKING SOMETHING: when the request is to make a picture, a track, a video or a 3D model, the app makes it — do not interview them about style, size, format or mood first. It is made with sensible defaults from what they said, then describe it in one or two sentences. Ask a question only when the subject itself is missing ("draw me a picture" with no subject).
-- THE END RESULT FIRST: when they describe something bigger they want built or done — a project, a product, an app, a game, a website, a business, a campaign — people usually start with the means ("make a hide-and-seek game set in Chongqing") when what matters is the end they have in mind. Before you build, ask one or two short questions about that end result — who it is for, what they will do with it, what "done" looks like — and say in a few words why you are asking: so you build what they actually need, or find something that already does it. Treat the answers as a direction, not a contract: build from them and adjust as you go. Don't do this for quick asks, and never turn it into a form (no list of boxes to fill).
-- DON'T REINVENT THE WHEEL: before building anything from scratch, think about what already exists — a product, a free tool, an open-source project, a template, a ready-made dataset or 3D world. If something would get them most of the way, say so plainly, with the trade-off, and ask which they prefer. For example: "Building all of Chongqing in 3D would be slow and expensive, but a free, detailed 3D New York already exists. Shall I set the game in New York, or stick with Chongqing and build it from scratch?"
-- SUGGEST, NEVER FORCE: if they say "just do it", "cut to the chase", "get the job done", or brush the questions off, stop asking and do it straight away with sensible assumptions, naming the one or two you made.
-- If they want something actually accomplished (bids gathered, a refund chased, a contract prepared), look it up and draft it here; anything that goes out waits for your OK. Never describe what you could do later instead of doing the part that stays inside.
-- Never write a price, penalty, date, or fact the person did not state. If you do not know, say so.
-- WEB: you can search the live web and read any public page. If the person asks "what's the current X", "look up Y", or gives you a link, that is your job — the tools exist. Never say you "can't browse", "can't search the web", "don't have internet access" or "can't check that online"; doing so is false. If a lookup genuinely fails, say the lookup failed, not that you lack the ability. Cite the page you actually read.
-- Only use details from THIS conversation.
-You never mention models, tokens, or technical internals.`;
+// One persona, ONE_PERSONA in oneMode.ts. There used to be two (Chat, and a Work
+// interview with plan-first), switched by a hidden tab; owner, 2026-11-23: one mode
+// that decides per request whether to ask first or just go. The rule, the quick
+// choice and the questions all live in oneMode.ts.
 
 // ── Helper: str ────────────────────────────────────────────────────────
 
@@ -130,6 +123,35 @@ function str(v: unknown): string | undefined {
   if (typeof v === "string") return v;
   if (typeof v === "number") return String(v);
   return undefined;
+}
+
+/**
+ * Say a settled text aloud in BeeZilla's own voice (the audio model as a reader).
+ * AUDIO ONLY: the readout must not emit text deltas, or the spoken words leak into
+ * the visible transcript before the real reply lands. True when it was spoken; the
+ * client keeps its own fallback, so a failure never fails the turn.
+ */
+async function readAloud(speech: VoiceHandlers, text: string): Promise<boolean> {
+  try {
+    await voiceCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "You are a reader, not an assistant. Say the last assistant message aloud, word for word, " +
+            "in your normal speaking voice. Never answer it, never add or remove words.",
+        },
+        { role: "assistant", content: text },
+        { role: "user", content: "Now say that message aloud, exactly as written." },
+      ],
+      { maxTokens: 320 },
+      { onAudio: speech.onAudio },
+    );
+    return true;
+  } catch (err) {
+    console.warn("[buzzy/voice] readout failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
 }
 
 // ── Helper: extract slot updates from LLM reply ────────────────────────
@@ -263,9 +285,6 @@ export interface ChatRequest {
   companyFacts?: ConfirmedCompanyFact[];
   /** Customer memory rollup (component #2) — approved-work history block. */
   customerMemoryBlock?: string;
-  /** UI mode. "work" steers the conversation toward a work effort (scope
-   *  interview + decisions). "chat" (default) is ordinary conversation. */
-  mode?: "chat" | "work";
   /** "voice" turns stream text + audio so speech starts on the first chunk. */
   surface?: "text" | "voice";
   /** Streaming sinks. Present only on the voice lane. */
@@ -283,6 +302,10 @@ export interface ChatRequest {
   /** The composer's "Do it now" control. An explicit execute flag beats any
    *  phrase-matching: the person pressed a button that means "produce it". */
   execute?: boolean;
+  /** The button pressed under BeeZilla's last reply (oneMode.ts): "ask" for a few
+   *  questions, "go" to just go, "accept" to take the suggested answer, "amount" for
+   *  a tapped budget (the amount itself is in the message). */
+  choice?: "ask" | "go" | "accept" | "amount" | null;
   /**
    * The owner's privacy mode from the Talk bar. "lockdown": nothing leaves
    * BeeZilla this turn except the call to the model that answers — no web
@@ -311,6 +334,13 @@ export interface ChatRequest {
    * Their instructions for this conversation — appended to the system prompt, capped.
    */
   boardInstructions?: string | null;
+  /**
+   * What the owner is looking at on the Idea Board as this turn started (owner,
+   * 2026-11-21: "a clear understanding of everything that the user is seeing… it knows
+   * what this or that is"): cleaned by boardView.ts, written into this turn's
+   * instructions only, never stored with the conversation.
+   */
+  boardView?: BoardView | null;
 }
 
 /** One step of a turn, as the whiteboard draws it. */
@@ -415,6 +445,15 @@ export interface ChatResponse {
    * owner can see them, with Stop at every step (public/buzzy/pilot.js).
    */
   actions?: AppAction[];
+  /**
+   * One mode (oneMode.ts). `choice`: buttons under this reply, either the one quick
+   * choice (a few questions, or just go) or the suggested answer to a question.
+   * `oneMode`: what the rule decided this turn and why, in numbers.
+   * `assumptions`: what BeeZilla decided on the person's behalf, to review.
+   */
+  choice?: { kind: "offer" | "question"; options: ChoiceOption[]; note?: string };
+  oneMode?: { step: "go" | "offer" | "ask" | "ticket" | "budget"; why: string };
+  assumptions?: string[];
   /** What ran this turn, in order — the "what happened" strip reads this. */
   tools?: Array<{ name: string; ms: number; ok: boolean; code?: string }>;
   /** The file this turn produced, with links the chat can show inline. */
@@ -442,7 +481,6 @@ function confirmedCompanySection(
 
 export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const { userId, jobId, sessionId, message, model, jobContext, companyName, companyFacts } = req;
-  const mode: "chat" | "work" = req.mode === "work" ? "work" : "chat";
   const surface: "text" | "voice" = req.surface === "voice" ? "voice" : "text";
   // Turn clock: every stage below is timed so a slow turn names its own cause.
   const turnStart = Date.now();
@@ -622,7 +660,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const lockdown = req.privacy === "lockdown";
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
-  const requestedDraft = !wants3d && !wantsVideo && (isDraftRequest(message) || req.execute === true);
+  // "Just go" and the end of the questions also mean "produce it now": set below, once
+  // the one-mode step is known.
+  let requestedDraft = !wants3d && !wantsVideo && (isDraftRequest(message) || req.execute === true);
 
   // ── Extract this turn's newly-revealed decisions (fills the box) ────
   // Structural, separate from the reply turn: a dedicated JSON extraction
@@ -653,9 +693,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (surface !== "voice") {
     // The extract used to be awaited in full before the reply model was even
     // called: +3.3s p50 on every typed turn, measured. Give it a small head
-    // start (Work mode gets a real budget because the brief IS the product),
-    // then let the reply go and merge whatever lands afterwards.
-    const budgetMs = mode === "work" ? 6000 : 700;
+    // start, then let the reply go and merge whatever lands afterwards.
+    const budgetMs = 700;
     const firstPass = await Promise.race([
       extractPromise,
       new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
@@ -671,15 +710,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
 
   // ── Build system prompt ────────────────────────────────────────────
   const factsText = await memory.get_facts();
+  // Conversation bookkeeping (keys starting "_", like where the one-mode questions
+  // are up to) is not a fact about the work: never shown to the model, never counted.
+  const knownFacts = factsText.filter((f) => !f.key.startsWith("_") && String(f.value ?? "").trim());
   const factsSection =
-    factsText.length > 0
+    knownFacts.length > 0
       ? "\n\nYou have gathered these details so far:\n" +
-        factsText.map(f => `- ${f.key}: ${f.value}`).join("\n")
+        knownFacts.map(f => `- ${f.key}: ${f.value}`).join("\n")
       : "";
-
-  const nextSlot = [...REQUIRED_SLOTS, ...DEEPENING_IDS].find(id => !slotValues[id]);
-  const nextQ = nextSlot ? BUZZY_QUESTIONS.find(q => q.id === nextSlot) : null;
-  const nextS = nextSlot ? BUZZY_STATEMENTS.find(s => s.id === nextSlot) : null;
 
   const knownCompany = companyName
     ? " Confirmed company facts are already known — do not ask for them again."
@@ -689,27 +727,212 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     [message, ...history.filter((h) => h.role === "user").map((h) => h.content), ...Object.values(slotValues)].join(" "),
   );
   const typeHint = TYPE_DRAFT_HINTS[jobType] ? `\n\nThis is ${jobType} work — ${TYPE_DRAFT_HINTS[jobType]}` : "";
-  // A plan-then-confirm round trip is exactly what "just do it" forbids.
-  const planFirst = shouldPlanFirst(message) && !isExecuteCommand(message) ? PLAN_FIRST_INSTRUCTION : "";
-  const playbookBlock = playbookGuidance(jobType);
-  const chatGuidance = hasExistingDraft
-    ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
-    : requestedDraft
-    ? `\n\nThey asked for the deliverable now. Produce it — fold in everything captured so far and mark anything still unknown rather than inventing it.${knownCompany}${typeHint}`
-    : `\n\nONE CONVERSATION — chatting and getting work done are the same thing here. Answer or do what they asked, directly. Don't run a form-style interview (the challenge, the difficulties, who is involved). When they describe something bigger to build, first understand the end result they have in mind (one or two short questions, saying why) and point out anything that already exists — unless they have told you to just do it.${knownCompany}`;
 
-  const guidance = mode === "work" ? (hasExistingDraft
-    ? `\n\nThe owner is revising the existing draft. Revise it per their request — keep the captured decisions, note anything still unknown rather than inventing it, and do not re-ask the earlier questions.${knownCompany}${typeHint}`
+  // ── The owner's whiteboard, as read this turn ────────────────────────
+  // Read before one mode decides: a turn that builds on the board must not get one
+  // mode's quick choice in front of it (the choice comes back without the page's actions).
+  // The board's summary is up to 7,800 characters (whiteboard.js BOARD_TEXT_MAX).
+  const BOARD_TEXT_MAX = 8000;
+  // Things joined with a line into one of BeeZilla's steps come under "Connected to
+  // BeeZilla's steps", in full (owner, 2026-11-20); a first line naming connected
+  // pictures is taken off here and those pictures go to the picture maker instead.
+  const board = takeBoardPictures(typeof req.boardInstructions === "string"
+    ? req.boardInstructions.split(String.fromCharCode(0)).join("")
+    : "");
+  const boardText = board.text.trim().slice(0, BOARD_TEXT_MAX);
+  const boardPictureIds = board.ids;
+  // A turn that builds (or opens) an orchestration on the board (boardOrchestrator.ts).
+  // That build is the go: one mode asks nothing and adds no note of its own, and the
+  // reply is one sentence (pilot.ts ORCHESTRATE_USER_LINE: nothing asked first).
+  const flowOnBoard = boardHasFlow(boardText);
+  const orchestrating = asksToOrchestrate(message, { boardHasFlow: flowOnBoard });
+
+  // ── One mode: ask first, or just go (oneMode.ts) ─────────────────────
+  // Silently weigh the cost of misreading this request against the cost of asking.
+  // Clear or small: go. Significant and easy to misread: one quick choice. If they
+  // take the questions: the fewest that change the result, each with a suggested
+  // answer, then a ticket and the work. "Just go" or Do it ends the asking at once.
+  const conversationKey = jobId || sessionId;
+  const savedStep = decodeState(factsText.find((f) => f.key === STATE_KEY)?.value);
+  const makerLane = wants3d || wantsVideo || isMusicRequest(message) || isImageRequest(message, { history });
+  // Work handed to agents (a coding project, research at scale) costs more than a
+  // reply: it needs a budget before it starts (askOrGo.ts). Lockdown sends nothing to
+  // outside agents, and a maker lane makes its thing inside the turn.
+  const agentWork = !lockdown && !makerLane && handsToAgents(message);
+  const knownBudget = readBudget(factsText.find((f) => f.key === BUDGET_KEY)?.value);
+  const assessment = assessRequest(message, {
+    priorTurns: history.filter((h) => h.role === "user").length,
+    knownFacts: knownFacts.length,
+    hasDraft: hasExistingDraft,
+    hasBoardBrief: /\b(who it serves|end result)\b/i.test(String(req.boardInstructions ?? "")),
+    makerLane,
+  });
+  const verdict = askOrGo(assessment);
+  // What they answered to "questions first, or just go?" before, per stakes tier:
+  // asked once, then their answer stands (oneMode.ts).
+  let remembered: Awaited<ReturnType<typeof loadAskPreferences>> = {};
+  try { remembered = await loadAskPreferences(sql, userId); } catch (_) { /* a preference helps, it never gates */ }
+  const decided = nextStep(savedStep, {
+    message,
+    execute: req.execute === true,
+    choice: req.choice ?? null,
+    fresh: verdict,
+    assessment,
+    remembered: remembered[assessment.stakes] ?? null,
+    makerLane,
+    agentWork,
+    knownBudget,
+    buildsOnBoard: orchestrating,
+    canFollowUp: Boolean(conversationKey),
+  });
+  if (decided.remember) {
+    try { await saveAskPreference(sql, userId, decided.remember); } catch (_) { /* next time it simply asks again */ }
+  }
+  const oneModeWhy =
+    (orchestrating ? "building on the Idea Board, nothing asked · " : "") +
+    verdict.why +
+    (remembered[assessment.stakes] ? ` · remembered for ${assessment.stakes} work: ${remembered[assessment.stakes]}` : "") +
+    (decided.step.kind === "budget" || (decided.step.kind === "go" && decided.step.agentWork)
+      ? ` · ${askBudget(assessment, { agentWork: true, budget: decided.step.kind === "go" ? (decided.step.budget ?? null) : null }).why}`
+      : "");
+  let step: OneModeStep = decided.step;
+  let oneState = decided.state;
+  let carry = decided.carry === true;
+  let asked: { q: string; suggested: string } | null = null;
+  if (step.kind === "ask" && oneState) {
+    req.onStage?.({ phase: "question", label: "Picking the next question", etaMs: 2500 });
+    const transcript = [...history, { role: "user", content: message }]
+      .slice(-12)
+      .map((h) => `${h.role === "user" ? "Them" : "BeeZilla"}: ${String(h.content).slice(0, 400)}`)
+      .join("\n");
+    const known = [
+      factsSection.trim(),
+      companyName
+        ? `Working for ${companyName}: ` + (companyFacts ?? []).slice(0, 8).map((f) => `${f.label}: ${f.value}`).join("; ")
+        : "",
+      typeof req.boardInstructions === "string" && req.boardInstructions.trim()
+        ? "On their board: " + req.boardInstructions.slice(0, 800)
+        : "",
+    ].filter(Boolean).join("\n");
+    asked = await interviewQuestion({
+      index: step.index,
+      request: oneState.request,
+      transcript,
+      known,
+      asked: oneState.asked.map((a) => a.q),
+      // A slow provider never holds the person up: past 8 s (BZ_QUESTION_TIMEOUT_MS on a
+      // deployment whose own model is slower) the question goes without a suggestion,
+      // or, after the openers, the work starts.
+      complete: (messages, o) =>
+        Promise.race([
+          chatCompletion(messages, o),
+          new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error("question timed out")), Number(process.env.BZ_QUESTION_TIMEOUT_MS) || 8000),
+          ),
+        ]),
+      models: [EXTRACT_MODEL, resolvedModel].filter(
+        (m, i, all): m is string => typeof m === "string" && m.length > 0 && all.indexOf(m) === i,
+      ),
+    });
+    if (asked) {
+      oneState = { ...oneState, asked: [...oneState.asked, asked] };
+    } else {
+      // Nothing left whose answer would change the result: write the ticket and start
+      // (with the budget, when the work goes to agents).
+      const ticket = goOnRequest(oneState, "ticket", { message, knownBudget, canFollowUp: Boolean(conversationKey), assessment });
+      step = ticket.step;
+      oneState = ticket.state;
+      carry = ticket.carry === true;
+    }
+  }
+  // A turn built on the board leaves a waiting question exactly as it was stored.
+  if (!orchestrating) {
+    if (oneState) await memory.remember(STATE_KEY, encodeState(oneState));
+    else if (savedStep) await memory.remember(STATE_KEY, "");
+  }
+  // Numbers only: the person's words never go into the log.
+  console.info(`[buzzy/one-mode] ${step.kind === "go" ? `go (${step.how})` : step.kind} — ${oneModeWhy}`);
+
+  // ── The quick choice, a question, or how much to spend: written here, no model reply needed ──
+  if (step.kind === "offer" || step.kind === "budget" || (step.kind === "ask" && asked)) {
+    const tier = oneState?.stakes ?? assessment.stakes;
+    const replyText =
+      step.kind === "offer"
+        ? OFFER_TEXT
+        : step.kind === "budget"
+          ? questionText(BUDGET_QUESTION, budgetSuggestion(tier))
+          : questionText(asked!.q, asked!.suggested);
+    const options =
+      step.kind === "offer" ? OFFER_OPTIONS : step.kind === "budget" ? budgetOptions(tier) : questionOptions(asked!.suggested);
+    await sql`
+      INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content)
+      VALUES (${userId}, ${jobId}, ${sessionId}, 'user', ${message})
+    `;
+    await sql`
+      INSERT INTO buzzy_chat_messages (user_id, job_id, session_id, role, content, latency_ms, model, attempt_id)
+      VALUES (${userId}, ${jobId}, ${sessionId}, 'assistant', ${replyText}, ${Date.now() - turnStart}, 'one-mode', ${req.attemptId ?? null})
+    `;
+    if (sessionId) await touchSession(sql, sessionId, userId);
+    req.onText?.(replyText);
+    if (surface === "voice") req.speech?.onText?.(replyText);
+    const spoke = surface === "voice" && !!req.speech && voiceAvailable() ? await readAloud(req.speech, replyText) : false;
+    const quickCtx = contextState(
+      estimateTokens([...history, { role: "user", content: message }]) + CONTEXT_TOOL_OVERHEAD_TOKENS,
+      ctxLimit,
+      compacted,
+      droppedCount,
+    );
+    const quick: ChatResponse = {
+      ok: true,
+      reply: replyText,
+      context: quickCtx,
+      choice: { kind: step.kind === "offer" ? "offer" : "question", options, note: WAITING_NOTE },
+      oneMode: { step: step.kind, why: oneModeWhy },
+      timings: {
+        extractMs,
+        artMs: 0,
+        llmMs: 0,
+        honchoMs: 0,
+        totalMs: Date.now() - turnStart,
+        ttftMs: null,
+        ttfaMs: null,
+        model: "one-mode",
+        surface,
+        lane: spoke ? "audio" : "text",
+      },
+    };
+    if (Object.keys(newlyExtracted).length) quick.slots = { ...newlyExtracted };
+    // Whatever the extraction finds after its head start still fills the brief.
+    void extractPromise.then(mergeExtracted).catch(() => {});
+    return quick;
+  }
+
+  // "Just go" after the choice, or the end of the questions: produce it now, the
+  // same as pressing Do it.
+  const goHow = step.kind === "go" ? step.how : "fresh";
+  // The rule's "go" on a request to make something real (a document, a plan, a project).
+  const goMakesSomething = step.kind === "go" && assessment.size !== "small" && !orchestrating;
+  if (goHow !== "fresh" && !wants3d && !wantsVideo) requestedDraft = true;
+  const oneModeNote = orchestrating ? "" : turnNote(goHow, {
+    spoken: surface === "voice",
+    interview: step.kind === "go" ? step.interview : undefined,
+    budget: step.kind === "go" ? step.budget : undefined,
+    agentWork: step.kind === "go" ? step.agentWork : undefined,
+  });
+  // The amount they set is kept for this conversation, so a follow-up to the same work
+  // is not asked again (a turn with no conversation id would write an account-wide row).
+  if (step.kind === "go" && step.budget != null && conversationKey && step.budget !== knownBudget) {
+    await memory.remember(BUDGET_KEY, String(step.budget));
+  }
+  // A job type's playbook shapes the deliverable (its required lines, its register),
+  // never an interview: the only questions are the ones the person chose. Not on a turn
+  // built on the board: its reply is one sentence, not a deliverable.
+  const playbookBlock = !orchestrating && (requestedDraft || hasExistingDraft) ? playbookGuidance(jobType, { questions: false }) : "";
+  const guidance = hasExistingDraft
+    ? `\n\nThey are revising the existing draft. Revise it per their request — keep what was decided, note anything still unknown rather than inventing it, and do not re-ask earlier questions.${knownCompany}${typeHint}${goHow === "fresh" ? "" : oneModeNote}`
     : requestedDraft
-    ? `\n\nThe owner has asked for the deliverable now. Generate the full draft — fold in everything captured so far and note anything still unknown rather than inventing it.${knownCompany}${typeHint}`
-    : nextQ
-    ? `\n\nYour next question should be: "${nextQ.prompt}"${knownCompany}`
-    : nextS
-      ? `\n\nDISCOVERY — one decision is still blank: "${nextS.prompt}" Read the conversation before asking: if the client already answered this, use their answer (emit the matching [challenge: …] / [difficulties: …] / [who_involved: …] / [end_goal: …] marker) and do NOT ask it again. Only ask when the answer is genuinely absent, and ask that single question. Never re-ask something they already said.${knownCompany}`
-      : !wereAllFilled
-        ? `\n\nAll four decisions are now captured. Restate each in one short plain-English sentence, then ask the owner: "Does that sound right — and anything else before I write the deliverable?" Do NOT write the full draft or deliverable yet.${knownCompany}`
-        : `\n\nAll required details have been gathered and confirmed. Generate the full draft now.${knownCompany}${typeHint}`)
-    : chatGuidance;
+    ? `\n\nThey asked for the deliverable now. Produce it — fold in everything said so far and mark anything still unknown rather than inventing it.${knownCompany}${typeHint}${oneModeNote}`
+    : `${oneModeNote}${knownCompany}`;
 
   // ── Job context from the Jobs-card "Chat" button ────────────────────
   const jobCtxSection =
@@ -749,9 +972,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (!req.agent) {
     try { readyForRoster = await readyAgents(sql, userId); } catch { readyForRoster = []; }
   }
-  const agentParts = agentPromptParts(req.agent, personaForMode(mode), readyForRoster);
+  const agentParts = agentPromptParts(req.agent, ONE_PERSONA, readyForRoster);
   // (agentParts.section rides with the persona, so the system prompt below is built as before.)
-  const persona = agentParts.persona + agentParts.section + audioRule + (mode === "work" ? planFirst + playbookBlock + resumeRecap : "");
+  const persona = agentParts.persona + agentParts.section + audioRule + playbookBlock + resumeRecap;
   // Freshness: without a date the model cannot tell a superseded price from the
   // current one. It answered "78 cents" the day USPS's own page said 82.
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -771,17 +994,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // never able to switch off the rules above (it is appended, not substituted).
   // Below them, under "Also on the board", is what else the board holds (owner,
   // 2026-11-19: "anything that's in the whiteboard, it should be able to see in its
-  // context"): things to see and talk about, not instructions.
-  // The board's summary is up to 7,800 characters (whiteboard.js BOARD_TEXT_MAX).
-  const BOARD_TEXT_MAX = 8000;
-  // Things joined with a line into one of BeeZilla's steps come under "Connected to
-  // BeeZilla's steps", in full (owner, 2026-11-20); a first line naming connected
-  // pictures is taken off here and those pictures go to the picture maker instead.
-  const board = takeBoardPictures(typeof req.boardInstructions === "string"
-    ? req.boardInstructions.split(String.fromCharCode(0)).join("")
-    : "");
-  const boardText = board.text.trim().slice(0, BOARD_TEXT_MAX);
-  const boardPictureIds = board.ids;
+  // context"): things to see and talk about, not instructions. (boardText is read
+  // above, before one mode decides.)
   const boardSection = boardText
     ? "\n\nTHE OWNER'S WHITEBOARD for this conversation. Who it serves (the person you work for), their own changes to your core identity (agent.md), the skills they want used and " +
       "in what order, and the output they defined come first: follow those as their instructions for how to do the " +
@@ -793,6 +1007,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     : "";
 
   // ── The live whiteboard: what the agent read, before it does anything else ──
+  // Not on a turn that builds an orchestration on the board: the build is what goes up
+  // there (boardOrchestrator.ts), and a "Your board" card would land in the middle of it.
+  // (`orchestrating` is worked out above, before one mode decides.)
   req.onFlow?.({
     kind: "agent",
     id: "agent",
@@ -800,16 +1017,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     detail: persona.replace(/\s+/g, " ").trim().slice(0, 600),
     state: "done",
   });
-  if (factsText.length) {
+  if (knownFacts.length && !orchestrating) {
     req.onFlow?.({
       kind: "memory", id: "memory", title: "Memory", parent: "agent", state: "done",
-      detail: `${factsText.length} thing${factsText.length === 1 ? "" : "s"} it already knows about this work`,
+      detail: `${knownFacts.length} thing${knownFacts.length === 1 ? "" : "s"} it already knows about this work`,
     });
   }
-  if (boardText) {
+  if (boardText && !orchestrating) {
     req.onFlow?.({ kind: "skill", id: "board", title: "Your board", parent: "agent", state: "done", detail: boardText.slice(0, 400) });
   }
-  if (mode === "work" && playbookBlock) {
+  if (playbookBlock && !orchestrating) {
     req.onFlow?.({
       kind: "skill", id: "skill:" + jobType, parent: "agent", state: "done",
       title: jobType.charAt(0).toUpperCase() + jobType.slice(1) + " playbook",
@@ -845,10 +1062,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // picture maker draws the new version from it (owner: "I can iterate on that image
   // by just talking about the image"). Only when the newest thing made is a picture.
   const newestMade = madeThings.length ? madeThings[madeThings.length - 1]! : null;
-  const pictureToChange =
-    newestMade && String(newestMade.contentType || "").toLowerCase().startsWith("image/") &&
+  // One of their pictures they point at or hold on the board as they ask ("make this
+  // darker") is the one changed, newest or not (boardView.ts).
+  const pointedPictureId = pointedPicture(req.boardView ?? null);
+  const pictureToChange: { id: number } | null =
     !isNewPictureAsk(message) && isPictureChange(message)
-      ? newestMade
+      ? pointedPictureId !== null
+        ? { id: pointedPictureId }
+        : newestMade && String(newestMade.contentType || "").toLowerCase().startsWith("image/") ? newestMade : null
       : null;
   // A picture connected on the board is the one a change is about.
   // Only when the words are about how something looks: "make it shorter" with a
@@ -864,6 +1085,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let appPlan: AppAction[] | null = planAppActions(message, req.privacy ?? null, {
     lastReply,
     startingBoards: STARTING_BOARDS.map((b) => b.title),
+    boardHasFlow: flowOnBoard,
   });
   let boardFound = false;
   const boardNotes: string[] = [];
@@ -899,8 +1121,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
     appPlan = kept.length ? kept : null;
   }
+  // What the owner is looking at right now (the board as they started speaking or
+  // pressed send): last, nearest their words; rebuilt every turn, never stored.
+  const boardViewText = boardViewBlock(req.boardView ?? null, BOARD_VIEW_BUDGET_CHARS);
+  const boardViewSection = boardViewText ? "\n\n" + boardViewText : "";
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings);
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings) + boardViewSection;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
@@ -924,13 +1150,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let videoJob: { jobId: string; recipe: string; etaMinutes: number; state: string } | null = null;
   let videoRefusal: { code: string; error: string } | null = null;
 
+  // "what is this?": the card it is on their board, in their own words, on the message
+  // the model reads this turn only (boardView.ts); the stored message stays theirs.
+  const focusNote = boardViewFocusNote(req.boardView ?? null, message);
   const messages: Array<{ role: string; content: string }> = [
     { role: "system", content: systemPrompt },
     ...history.map((h) => ({
       role: h.role as "user" | "assistant" | "system",
       content: h.content,
     })),
-    { role: "user", content: message },
+    { role: "user", content: focusNote ? `${message}\n\n${focusNote}` : message },
   ];
 
   // ── Music pre-pass ────────────────────────────────────────────────
@@ -1287,7 +1516,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // So when the request is a lookup, the harness does it and hands the model
   // what it read, with the URLs. The model cannot skip the research.
   const researchIntent = /\b(research|look ?up|find out|check|verify|current|latest|today|right now|how much|price|cost|deadline|hours)\b/i.test(message);
-  const runWebPrepass = !lockdown && (surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent))));
+  // A turn that builds on the board answers in one sentence: nothing to look up.
+  const runWebPrepass = !lockdown && !orchestrating && (surface === "voice" || (surface === "text" && (needsWebLookup(message) || (wantsLibraryFile && researchIntent))));
   if (runWebPrepass) {
     const webCtx = await buildVoiceWebContext(message);
     for (const call of webCtx.calls) {
@@ -1312,6 +1542,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The lying checks further down stay the guarantee; this exists so the audio
   // lane is not already speaking the wrong sentence before any text can repair it.
   const afterNotes: string[] = [];
+  // Building on the board this turn (pilot.ts ORCHESTRATE_USER_LINE says why it goes here).
+  if (appPlan && appPlan.some((s) => s.do === "board" && s.value === "orchestrate")) {
+    const own = messages[messages.length - 1];
+    if (own && own.role === "user") own.content = String(own.content) + "\n\n" + ORCHESTRATE_USER_LINE;
+  }
   if (renderedImage) {
     afterNotes.push(
       "A picture was already made for this request and is attached to this reply. " +
@@ -1348,6 +1583,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         "Never say it is finished or attached, and never answer with JSON or a tool call.",
     );
   }
+  // One mode's turn note, said once more as the last thing in the instructions: do
+  // the work, placeholders not questions, and end with what was assumed for them.
+  // Not as a system message after theirs: some providers refuse a system message
+  // anywhere but first ("system message must be at the beginning", Ollama, seen
+  // 2026-11-23), and a person's own AI key may be one of them.
+  if (step.kind === "go" && (goHow !== "fresh" || goMakesSomething)) {
+    messages[0] = { role: "system", content: String(messages[0]!.content) + "\n\n" + goReminder(surface === "voice") };
+  }
   if (afterNotes.length) messages.push({ role: "system", content: afterNotes.join("\n\n") });
 
   // ── Context accounting ─────────────────────────────────────────────
@@ -1375,11 +1618,18 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // the render_document tool and may run a bounded loop (max 3 iterations).
   // Read-only tool execution only — render-to-memory is autonomous per the
   // side-effect classification; the artifact itself stays approval-gated.
-  const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft;
+  // One mode: the gate used to wait for four discovered decisions (plan first, by
+  // default). Now the rule's "go" on a request to make something real (a document,
+  // a plan, a project) is itself the go-ahead, so the makers are on the table.
+  const draftGateOpen = wereAllFilled || requestedDraft || hasExistingDraft || goMakesSomething;
   // The registry is the single source of truth for what may be called. No
   // hand-assembled arrays here: adding a tool must not require editing this
   // function, and a gated tool must never leak into the offered set.
-  const toolCtx = { draftGateOpen, lockdown };
+  const toolCtx = {
+    draftGateOpen,
+    lockdown,
+    documentsOnly: goMakesSomething && !(wereAllFilled || requestedDraft || hasExistingDraft),
+  };
   // Only a turn that can actually produce something gets a tool surface. An
   // always-on tool list forced every chat turn onto the buffered path (a
   // non-empty tool list is what disables streaming), which is the 12s answer.
@@ -1462,10 +1712,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // Deliverable turns stay on the text lane — a draft is announced, not
     // read aloud, and only the text lane can carry the render tools.
     // When does a spoken turn actually NEED the tool-bearing text lane? Only
-    // when it must produce a file, or when a Work-mode brief is driving the
-    // turn. A stale brief in a chat-mode conversation must not push every reply
-    // onto the slow lane — that is what made a two-second answer take 21 seconds.
-    const toolTurnNeeded = explicitDocumentRequest || (mode === "work" && draftGateOpen);
+    // when it must produce a file. A brief left over from earlier must not push
+    // every reply onto the slow lane — that is what made a two-second answer take
+    // 21 seconds.
+    const toolTurnNeeded = explicitDocumentRequest;
     const useVoiceLane =
       surface === "voice" && !!req.speech && voiceAvailable() && !toolTurnNeeded;
     if (useVoiceLane) { spokeThisTurn = true; lane = "audio"; }
@@ -1473,7 +1723,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       // Say WHY the audio lane was skipped — otherwise a slow text turn looks
       // like a slow voice model.
       console.log(
-        `[buzzy/voice] audio lane skipped: mode=${mode} gate=${draftGateOpen} requestedDraft=${requestedDraft} ` +
+        `[buzzy/voice] audio lane skipped: step=${goHow} gate=${draftGateOpen} requestedDraft=${requestedDraft} ` +
           `allFilled=${wereAllFilled} existing=${hasExistingDraft} docRequest=${explicitDocumentRequest} ` +
           `speechSink=${!!req.speech} available=${voiceAvailable()}`,
       );
@@ -1851,6 +2101,24 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         };
       }
     }
+    // ── Guard: "go" is not a questionnaire (oneMode.ts) ──────────────────
+    // The rule (or the person) said go. A reply that asks for their name, prices
+    // and services instead is the old plan mode creeping back through the model
+    // (seen 2026-11-23 after "Just go for it"). Ask once for the work itself, with
+    // marked placeholders; the second answer stands either way.
+    if (
+      step.kind === "go" &&
+      (goHow !== "fresh" || goMakesSomething) &&
+      !renderedDocText &&
+      reply.toolCalls.length === 0 &&
+      asksInsteadOfDoing(reply.content)
+    ) {
+      console.warn("[buzzy/one-mode] a go turn asked instead of doing — asking for the work once");
+      reply = await chatCompletionFull(
+        [...messages, { role: "assistant", content: reply.content }, { role: "user", content: DO_IT_NOW }],
+        { model: routedModel, maxTokens: 4096 },
+      );
+    }
     // Limit-trip rule: if we exited on iterations with tool calls still pending,
     // reply.content holds the model's last text — surface it as-is below. Never silent.
   } catch (err) {
@@ -1897,7 +2165,6 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const deliversThisTurn = !wants3d && producesDeliverable({
     renderedDocText,
     requestedDraft,
-    mode,
     draftGateOpen,
     hasExistingDraft,
     message,
@@ -1992,15 +2259,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       : "I can make music here. Ask for a track and I will generate the audio and attach it to my reply.";
   }
   // The same lie, one medium over: "I have created an image and attached it below"
-  // with no image in the envelope. Image nouns are stricter than audio ones because
-  // "art" and "picture" appear in ordinary sentences.
-  const IMAGE_NOUN = /\b(image|picture|illustration|drawing|poster|logo|artwork|thumbnail|banner|mockup)\b/i;
-  const IMAGE_CLAIM = /\b(created|made|generated|drew|drawn|attached|rendered|here is|here's|ready|saved)\b/i;
-  const claimsImage = (text: string): boolean =>
-    text.split(/(?<=[.!?])\s+/).some((sentence) =>
-      IMAGE_NOUN.test(sentence) && IMAGE_CLAIM.test(sentence) && !/\b(can'?t|cannot|unable|failed|didn'?t)\b/i.test(sentence));
+  // with no image in the envelope (claimsImage, artReply.ts). When the turn delivered
+  // a document, the sentence is about the document's content ("a banner with your
+  // logo"): only the claiming sentences go, and the rest of the reply stays.
   if (!renderedImage && claimsImage(finalReply)) {
-    finalReply = artRefusal
+    const kept = renderedDocText && !artRefusal ? withoutImageClaims(finalReply) : "";
+    finalReply = kept
+      ? kept
+      : artRefusal
       ? `I tried to draw that and it failed: ${artRefusal.error}.`
       : "I did not produce an image on that turn — nothing was rendered and nothing was saved. " +
         "Ask me to draw it and I will.";
@@ -2096,9 +2362,16 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // Strip a leading machine token before the reply becomes the answer. The model
   // learned the filename from project memory, so it survived removing it from the
   // prompt; and cleanReply is copied here, so stripping afterwards changed nothing.
-  const cleanReply = renderedImage
+  let cleanReply = renderedImage
     ? finalReply.replace(/^\s*(?:\/api\/buzzy\/assets\/\d+|art-[\w.-]+\.png)\s*/i, "")
     : finalReply;
+  // One mode: the ticket points back to their words as typed; and a question that was
+  // waiting when they asked for something else is still open, said once under this
+  // reply with its buttons (a pending answer never stalls unrelated work).
+  const theirRequest = step.kind === "go" && step.interview ? step.interview.request : message;
+  if (goHow === "ticket") cleanReply = withTheirWords(cleanReply, theirRequest);
+  const carried = carry && oneState ? pendingPrompt(oneState) : null;
+  if (carried) cleanReply = `${cleanReply}\n\n${carried.line}`;
 
   // ── Same voice, always ──────────────────────────────────────────────
   // Turns that need tools or produce a deliverable run on the text lane, which
@@ -2106,31 +2379,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // so the owner heard a different (robotic) voice mid-conversation. Read the
   // settled reply through the audio model instead, so the voice never changes.
   if (surface === "voice" && !spokeThisTurn && req.speech && voiceAvailable() && cleanReply.trim()) {
-    try {
-      const spokenText = deliversThisTurn
-        ? `Saved it — the document is ready for your approval. ${cleanReply}`.slice(0, 700)
-        : cleanReply.slice(0, 900);
-      await voiceCompletion(
-        [
-          {
-            role: "system",
-            content:
-              "You are a reader, not an assistant. Say the last assistant message aloud, word for word, " +
-              "in your normal speaking voice. Never answer it, never add or remove words.",
-          },
-          { role: "assistant", content: spokenText },
-          { role: "user", content: "Now say that message aloud, exactly as written." },
-        ],
-        { maxTokens: 320 },
-        // AUDIO ONLY: this readout must not emit text deltas, or the spoken
-        // words leak into the visible transcript before the real reply lands.
-        { onAudio: req.speech.onAudio },
-      );
-      spokeThisTurn = true;
-    } catch (err) {
-      // The client still has its own fallback; never fail the turn over audio.
-      console.warn("[buzzy/voice] readout failed:", err instanceof Error ? err.message : err);
-    }
+    const spokenText = deliversThisTurn
+      ? `Saved it — the document is ready for your approval. ${cleanReply}`.slice(0, 700)
+      : cleanReply.slice(0, 900);
+    if (await readAloud(req.speech, spokenText)) spokeThisTurn = true;
   }
 
   if (leaksJargon(sanitizedReply)) {
@@ -2172,6 +2424,67 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     }
   }
 
+  // ── One mode: what BeeZilla decided for them, and the ticket ─────────
+  // The assumptions a go turn lists are kept where the person can review them: in
+  // the reply itself, on the Idea Board as a card, and in this conversation's memory
+  // (which the Memory page shows and the next turn reads). The ticket written after
+  // the questions fills the brief: who it is for, the outcome, done when.
+  // Both are summaries, so both point back to their words as typed and never replace
+  // them (owner, 2026-11-23): the request stays in the conversation, word for word.
+  const assumptions = parseAssumptions(cleanReply);
+  if (assumptions.length) {
+    // Kept per conversation; a turn with no conversation id would write an account-wide row.
+    if (conversationKey) {
+      await memory.remember(
+        "assumptions",
+        `${assumptions.join(" · ").slice(0, 800)} — for your request ${quoteTheirWords(theirRequest, 160)}`,
+      );
+    }
+    req.onFlow?.({
+      kind: "memory",
+      id: "assumptions",
+      title: "What I assumed for you",
+      parent: "agent",
+      state: "done",
+      detail: `For ${quoteTheirWords(theirRequest, 140)}\n` + assumptions.map((a) => "• " + a).join("\n"),
+    });
+  }
+  const ticketSlots: Record<string, string> = {};
+  if (goHow === "ticket") {
+    const ticket = parseTicket(cleanReply);
+    const lines: Record<string, string | undefined> = {
+      who_involved: ticket.for,
+      challenge: ticket.why,
+      end_goal: ticket.outcome,
+      done_right_check: ticket.doneWhen,
+    };
+    const said = [message, ...history.map((h) => String(h.content))].join(" ");
+    for (const [slotId, val] of Object.entries(lines)) {
+      // A brief line they already gave (or the extraction took from their words) is
+      // never overwritten by the ticket's summary of it.
+      if (!val || slotValues[slotId] || mentionsInventedAmount(val, said)) continue;
+      ticketSlots[slotId] = val;
+      slotValues[slotId] = val;
+      await memory.remember(slotId, val);
+    }
+    if (ticket.for || ticket.outcome || ticket.doneWhen) {
+      // The why and their idea are kept apart: the idea is a starting point, not a spec.
+      await memory.remember(
+        "ticket",
+        [
+          ticket.for && `For: ${ticket.for}`,
+          ticket.why && `Why: ${ticket.why}`,
+          ticket.idea && `Their idea: ${ticket.idea}`,
+          ticket.outcome && `Outcome: ${ticket.outcome}`,
+          ticket.limits && `Limits: ${ticket.limits}`,
+          ticket.doneWhen && `Done when: ${ticket.doneWhen}`,
+        ]
+          .filter(Boolean)
+          .join(" · ") + ` — from your words: ${quoteTheirWords(theirRequest, 300)}`,
+      );
+    }
+  }
+
   // ── Recency + summary (list labels, off the critical path) ──────────
   // updated_at is what "most recent conversation" means; it was only written on
   // rename, so a busy chat could sort below a stale one. The summary keeps the
@@ -2209,7 +2522,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   for (const [slotId, val] of Object.entries(markersFromReply)) {
     if (!newlyExtracted[slotId] && !mentionsInventedAmount(val, message)) safeMarkers[slotId] = val;
   }
-  const deltaSlots: Record<string, string> = { ...safeMarkers };
+  const deltaSlots: Record<string, string> = { ...safeMarkers, ...ticketSlots };
   for (const [slotId, val] of Object.entries(newlyExtracted)) {
     // Never broadcast a re-extraction that regresses an already-captured
     // decision to a vaguer restatement (only strictly-more-specific wins).
@@ -2236,6 +2549,9 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     },
   };
   if (appPlan) response.actions = appPlan;
+  response.oneMode = { step: goHow === "ticket" ? "ticket" : "go", why: oneModeWhy };
+  if (carried) response.choice = { kind: carried.kind, options: carried.options, note: WAITING_NOTE };
+  if (assumptions.length) response.assumptions = assumptions;
   // ── Audio-only turns ───────────────────────────────────────────────
   // A track is the deliverable, not a draft of one. Materialising the reply as a
   // document beside the mp3 gave the owner two artifacts for one request: a

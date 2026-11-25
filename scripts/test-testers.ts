@@ -77,7 +77,10 @@ check(!/Number\(f\.id\)|Number\(j\.id\)/.test(page), "the page never turns a TEX
 
 const pagesSrc = read("src/lib/buzzy/pages.nitro.ts");
 check(/"testers"/.test(pagesSrc), "/buzzy/testers is a served page");
-check(/const PAGES = new Set\(\[[\s\S]*"testers"\]/.test(pagesSrc), "and it sits in the page set");
+// Membership, not position: the old pattern required "testers" to be the LAST
+// entry before the closing bracket, so appending any new page failed this check
+// with a message that pointed at /buzzy/testers instead of the appended page.
+check(/const PAGES = new Set\(\[[\s\S]*"testers"[\s\S]*\n/.test(pagesSrc), "and it sits in the page set");
 
 // ── the panel ────────────────────────────────────────────────────────────────
 const nav = read("public/buzzy/nav.js");

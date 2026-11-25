@@ -115,6 +115,32 @@
   pointer-events: none;
 }
 .wb-hint strong { color: #eef1f4; font-size: 1.05rem; }
+/* No card in sight (zoomed or moved far off): one press brings them all back. */
+.wb-lost {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  max-width: min(440px, 80%);
+  min-height: 2.6rem;
+  padding: 0.5rem 1.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ob-yellow);
+  color: #141414;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.3;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+}
+.wb-lost:hover { filter: brightness(1.06); }
+.wb-lost:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+/* A pinch anywhere on the board is the board's (whiteboard.js), never the page's:
+   fingers can still scroll the page from the board's bars, but not zoom it. */
+.wb-panel { touch-action: pan-x pan-y; }
 .wb-marquee {
   position: absolute;
   border: 1.5px solid var(--ob-yellow);
@@ -422,7 +448,7 @@
 }
 .wb-ed-head { display: flex; align-items: center; justify-content: space-between; color: #eef1f4; }
 .wb-ed-title, .wb-ed-body { width: 100%; box-sizing: border-box; border-radius: 9px; border: 1px solid #3a3f47; background: #0d0f12; color: #fff; font: inherit; padding: 8px 10px; }
-.wb-ed-body { resize: vertical; min-height: 8em; line-height: 1.45; font-size: 0.9rem; }
+.wb-ed-body { resize: vertical; min-height: 8em; line-height: 1.45; font-size: 0.9rem; flex: 1 1 auto; }   /* a taller editor (resize.js) gives the extra room to the words */
 .wb-ed-row { display: flex; align-items: center; gap: 10px; }
 .wb-ed-note { font-size: 0.78rem; color: var(--ob-muted); }
 .wb-toast {
@@ -516,6 +542,7 @@
    as a thing that you could scroll by. It would just be sitting there.") ─────────
    Hold it by the bar on top to move it; inside, the words scroll and can be selected. */
 .wb-card.wb-k-chat {
+  box-sizing: border-box;   /* its size is the outside one, the one resize.js and the card remember */
   width: 360px;
   height: 480px;
   padding: 0;
@@ -770,3 +797,87 @@
 }
 .ob-see-board:hover, .ob-see-board:focus-visible { background: rgba(255, 193, 7, 0.12); outline: none; }
 .ob-see-board[hidden] { display: none; }
+
+/* ── Orchestrations on the board (owner, 2026-11-24: "use it on the normal whiteboard
+   and tell the AI what we want to orchestrate, and it can put the pieces together live
+   in front of us"). Each orchestration card keeps the board's card look with its own
+   edge colour, the same colours the Orchestrate editor uses for each type. ───────── */
+.wb-r-flow { border-left: 4px solid var(--ob-skill); }
+.wb-k-start { border-left-color: #5baf6b; }
+.wb-k-tool { border-left-color: #5b8db8; }
+.wb-k-decision { border-left-color: #e0a93b; }
+.wb-k-parallel { border-left-color: #4fb3a9; }
+.wb-k-loop { border-left-color: #b07ad6; }
+.wb-k-approval { border-left-color: var(--ob-yellow); }
+.wb-k-trigger { border-left-color: #6fa8dc; }
+.wb-k-subflow { border-left-color: #9aa0a8; }
+.wb-k-start .wb-ctop { color: #7fcf8e; }
+.wb-k-tool .wb-ctop { color: #86b2db; }
+.wb-k-decision .wb-ctop { color: #f0c066; }
+.wb-k-parallel .wb-ctop { color: #77cfc6; }
+.wb-k-loop .wb-ctop { color: #cba0ea; }
+.wb-k-approval .wb-ctop { color: var(--ob-yellow); }
+.wb-k-trigger .wb-ctop { color: #93c1ea; }
+.wb-k-subflow .wb-ctop { color: #c4c9d0; }
+
+/* An end result that is still a description: the end of a flow, not a Word file. */
+.wb-card.wb-end .wb-glyph { display: none; }
+.wb-card.wb-end .wb-ctop { color: #7fcf8e; }
+
+/* What a line says ("yes", "approved", "again"): a small pill at its middle. */
+.wb-llabel rect { fill: #121418; stroke: rgba(255, 193, 7, 0.55); stroke-width: 1; }
+.wb-llabel text { fill: #f2f2f2; font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: 0.01em; }
+.wb-llabel.wb-sel rect { stroke: #fff; }
+
+/* A card BeeZilla just put up, and cards moving over to make room. */
+.wb-card.wb-arrive { animation: wbArrive 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes wbArrive { from { opacity: 0; transform: translateY(10px) scale(0.92); } to { opacity: 1; transform: none; } }
+.wb-card.wb-shift { transition: left 0.42s ease, top 0.42s ease; }
+@media (prefers-reduced-motion: reduce) { .wb-card.wb-arrive { animation: none; } .wb-card.wb-shift { transition: none; } }
+
+/* While BeeZilla builds: what it said it is doing, and Stop. Top centre of the board,
+   clear of the tools on the left and the zoom on the right. */
+.wb-buildbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 48;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(640px, calc(100% - 140px));
+  padding: 8px 8px 8px 14px;
+  border-radius: 14px;
+  background: rgba(18, 20, 24, 0.96);
+  border: 1px solid rgba(255, 193, 7, 0.5);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: #eef1f4;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.wb-buildbar[hidden] { display: none; }
+.wb-build-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: var(--ob-yellow); animation: wbPulse 1s ease-in-out infinite; }
+@keyframes wbPulse { 50% { opacity: 0.35; transform: scale(0.8); } }
+@media (prefers-reduced-motion: reduce) { .wb-build-dot { animation: none; } }
+.wb-build-text { flex: 1 1 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wb-build-stop {
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #3a3f47;
+  background: transparent;
+  color: #d9dde3;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wb-build-stop:hover, .wb-build-stop:focus-visible { border-color: var(--ob-yellow); color: var(--ob-yellow); outline: none; }
+@media (max-width: 760px) {
+  .wb-buildbar { top: auto; bottom: 64px; max-width: calc(100% - 24px); }
+  /* The selection bar is one line; on a phone this button keeps only its icon. */
+  .wb-orch-btn > span { display: none; }
+}

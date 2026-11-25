@@ -39,8 +39,11 @@
   .cap-label { font-weight: 600; font-size: 0.95rem; }
   .cap-detail { color: var(--bz-muted); font-size: 0.83rem; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
   h2 { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--bz-muted); margin: 1.7rem 0 0.6rem; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
-  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--bz-line); }
+  /* A phone: five columns of tool/gate/cost/budget/state have a wider min-content
+     than a 360px screen, so the table pushed 121px past the right edge (CR-13).
+     Fixed layout + anywhere-wrapping keeps every cell inside the card. */
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; table-layout: fixed; }
+  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--bz-line); overflow-wrap: anywhere; word-break: break-word; }
   th { color: var(--bz-muted); font-weight: 500; }
   td.num { font-variant-numeric: tabular-nums; color: var(--bz-muted); }
   .stamp { color: var(--bz-muted); font-size: 0.75rem; margin-top: 1.4rem; }
