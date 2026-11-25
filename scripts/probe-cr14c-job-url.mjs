@@ -59,7 +59,7 @@ for (let i = 0; i < 40 && !actionUrl; i++) {
       const rec = JSON.parse(line || "{}");
       if (rec.to === EMAIL && rec.actionUrl) { actionUrl = rec.actionUrl; break; }
     }
-  } catch (_) {}
+  } catch (_) { /* the log is written a moment after the POST returns */ }
   if (!actionUrl) await sleep(250);
 }
 check("the dev mailbox holds its action link", Boolean(actionUrl), "no outbound-mail.jsonl line for the walk account");
