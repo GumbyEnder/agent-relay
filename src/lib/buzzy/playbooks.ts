@@ -201,11 +201,13 @@ export const TYPE_PLAYBOOKS: Record<string, Playbook> = {
 };
 
 /** Civilian guidance block appended to the system prompt for this job type. */
-export function playbookGuidance(jobType: string): string {
+export function playbookGuidance(jobType: string, opts: { questions?: boolean } = {}): string {
   const pb = TYPE_PLAYBOOKS[jobType];
   if (!pb) return "";
   let out = `\n\nThis is ${pb.name} work.`;
-  if (pb.extraQuestions.length) {
+  // One mode (oneMode.ts) never runs an interview the person did not choose, so the
+  // turn that writes the deliverable takes the shape and the required lines only.
+  if (opts.questions !== false && pb.extraQuestions.length) {
     out += ` After the four core decisions, also find out: ${pb.extraQuestions.map((q) => q.prompt).join(" ")}`;
   }
   out += ` Deliverable shape: ${pb.artifactHint}`;

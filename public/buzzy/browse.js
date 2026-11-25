@@ -38,20 +38,30 @@
 
   var input = $("bzSearch");
   // ── The placeholder has to FIT ──────────────────────────────────────────
-  // Measured on live at 390px: the input's content box is 79px wide (two 48px
-  // tap-target tools next to it), while the shipped placeholder needs 551px at
-  // 16px — so a phone rendered "Search eve…", a cut-off sentence that reads as a
-  // broken field. Pick the longest wording that actually fits and re-pick on
-  // resize; the markup keeps the long line for a wide window and for no-JS.
-  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search or paste a link", "Search"];
+  // The markup carries a SHORT wording and the full sentence in
+  // data-placeholder-full. It used to carry the sentence itself: at 390px that
+  // needs 551px in a 120px content box, so every moment before this script runs
+  // (a slow phone, a blocked/errored bundle) painted "Search eve…" — a cut-off
+  // sentence that reads as a broken field. A JS-only fix cannot cover that
+  // first paint; the markup must be honest on its own. JS then lengthens the
+  // wording to the longest that fits and re-picks on resize.
+  var PLACEHOLDER_SHRINKS = ["Search your work or a web address", "Search your work or a link", "Search your work", "Search"];
   (function () {
     if (!input) return;
-    var long = input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
-    var all = [long].concat(PLACEHOLDER_SHRINKS);
+    var long = input.getAttribute("data-placeholder-full") || input.getAttribute("placeholder") || PLACEHOLDER_SHRINKS[0];
+    var all = [long].concat(PLACEHOLDER_SHRINKS.filter(function (s) { return s !== long; }));
     var canvas = null;
+    var tries = 0;
     function pick() {
       var room = input.clientWidth - (parseFloat(window.getComputedStyle(input).paddingLeft) || 0) - (parseFloat(window.getComputedStyle(input).paddingRight) || 0);
-      if (!(room > 0)) return;                       // not laid out yet: keep the long line
+      // Not laid out yet. The old code returned here and NEVER re-picked on its own,
+      // so Safari's first paint (before the input had width) kept the 551px sentence
+      // in a phone-sized field — "Search everything — your wor…" (CR-13). Wait for
+      // the box to exist, then measure; the ResizeObserver below covers later moves.
+      if (!(room > 0)) {
+        if (tries++ < 60) requestAnimationFrame(pick);
+        return;
+      }
       var cs = window.getComputedStyle(input);
       canvas = canvas || document.createElement("canvas");
       var ctx = canvas.getContext && canvas.getContext("2d");
@@ -62,6 +72,7 @@
         if (ctx.measureText(all[i]).width <= room) { chosen = all[i]; break; }
       }
       if (input.placeholder !== chosen) input.placeholder = chosen;
+      input.style.textOverflow = "ellipsis";
     }
     var t = null;
     function soon() { clearTimeout(t); t = setTimeout(pick, 60); }
@@ -134,28 +145,16 @@
     if (msg) say.t = setTimeout(function () { note.textContent = ""; }, 6000);
   }
 
-  // ── Copy this page's link, and say truthfully whether it worked ────────
-  function copyLink() {
-    var href = window.location.href;
-    // Say what was copied and what did NOT happen. "Link copied." next to a
-    // share-looking icon was ambiguous: the owner could not tell whether the
-    // page had just been shared with someone.
-    var done = "Copied this page's address. Nothing was shared or sent.";
-    function fallback() {
-      var ta = document.createElement("textarea");
-      ta.value = href;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed"; ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      var ok = false;
-      try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
-      document.body.removeChild(ta);
-      say(ok ? done : "Couldn't copy here — the address is " + href);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(href).then(function () { say(done); }, fallback);
-    } else fallback();
+  // ── The QR code and Copy page link share the page, so both ask first ───
+  // Owner, 2026-11-21: "When you use a QR code or copy a page link, you have to be given a
+  // prompt… everything on this page… becomes available… a little pop-up to say yes and
+  // confirm before they do that." They used to hand out the page's own address, which opens
+  // nothing for anyone else. Now nothing is copied, drawn or made until the window
+  // (page-share.js) gets its "Yes, share this page"; it lists what becomes public, to whom,
+  // and carries the small "Block searches" tick.
+  function askToShare(kind) {
+    if (window.BeeZillaPageShare) { window.BeeZillaPageShare.open(kind); return; }
+    say("Sharing isn't ready on this page. Reload it and try again.");
   }
 
   // ── Sources (cached per page view; search queries the server each time) ─
@@ -399,7 +398,7 @@
     }
   });
   var copyBtn = $("bzCopy");
-  if (copyBtn) copyBtn.addEventListener("click", copyLink);
+  if (copyBtn) copyBtn.addEventListener("click", function () { askToShare("copy"); });
 
   // ── Reader: the built-in browser for a typed web address ──────────────
   // Home · Back · breadcrumbs · the page as text with its links. Fetched by the
@@ -661,7 +660,7 @@
       pane.innerHTML = '<div class="bz-pane-head"><h2>Experts</h2>' + link("/buzzy/experts", "All experts") + "</div>" +
         '<div class="bz-experts">' + ex.map(function (e) {
           return '<a class="bz-expert" href="/buzzy/experts#' + esc(e.id) + '">' +
-            '<span class="bz-expert-ico" aria-hidden="true">' + esc(icons[e.id] || "★") + "</span>" +
+            '<span class="bz-expert-ico" aria-hidden="true">' + (icons[e.id] || icons.other || "") + "</span>" +
             '<span class="bz-expert-name">' + esc(e.name) + "</span>" +
             '<span class="bz-expert-blurb">' + esc(e.blurb || "") + "</span></a>";
         }).join("") + "</div>";
@@ -680,6 +679,8 @@
   var PAGE_PLACE = {
     library: "library", memory: "memory", remember: "memory", experts: "experts", recipes: "recipes",
     sketch: "sketch", studio: "studio", capabilities: "capabilities", wallet: "wallet", upload: "publish",
+    // Orchestrate joined the row with CR-3 but not this map, so the row went dark on it.
+    orchestrate: "orchestrate",
   };
   var places = document.querySelector("#bzPlaces .bz-places");
   function paintPlaces() {
@@ -751,6 +752,19 @@
 
   window.bzBrowseSelect = function (name) { choose(name); };
 
+  // The bee in the corner (nav.js) brings you to the top page: a search or a web page
+  // you were reading is put away, the QR code closes, and Inspiration is under the row
+  // again, as on a fresh visit. Only called once Talk is the page showing.
+  window.bzBrowseHome = function () {
+    // The share window stands in for the old QR popover: going home closes it.
+    if (window.BeeZillaPageShare) window.BeeZillaPageShare.close();
+    readSeq++;            // a page still being fetched must not open itself afterwards
+    closeSearch();        // also hides the reader and brings the row and its pane back
+    // Already on a mounted Inspiration wall: leave it, rather than rebuild it for nothing.
+    if (current === "inspiration" && mounted) paintPlaces();
+    else select("inspiration");
+  };
+
   // A privacy change can hide or show the wall.
   window.addEventListener("bz:privacy", function () { if (current === "inspiration") select("inspiration"); });
 
@@ -761,49 +775,9 @@
     if (current === "inspiration" && !mounted && window.BeeZillaInspiration) select("inspiration");
   });
 
-  // ── QR code: this page's address, to open it on a phone ─────────────────
+  // ── QR code: asks first, then draws the shared page's code in the window ──
   var qrBtn = $("bzQr");
-  var qrPop = null;
-  function closeQr(focusBack) {
-    if (!qrPop) return;
-    qrPop.remove();
-    qrPop = null;
-    if (qrBtn) qrBtn.setAttribute("aria-expanded", "false");
-    if (focusBack && qrBtn) qrBtn.focus();
-  }
-  function openQr() {
-    var href = window.location.href;
-    var code = "";
-    try { code = window.BeeZillaQR ? window.BeeZillaQR.svg(href, { size: 196, margin: 3, label: "QR code for this page" }) : ""; } catch (_) { code = ""; }
-    if (!code) { say("The QR code couldn't be drawn here — Copy page link works instead."); return; }
-    qrPop = document.createElement("div");
-    qrPop.className = "bz-qr-pop";
-    qrPop.setAttribute("role", "dialog");
-    qrPop.setAttribute("aria-label", "QR code for this page");
-    qrPop.innerHTML =
-      '<div class="bz-qr-head"><strong>Open this page on your phone</strong>' +
-      '<button type="button" class="bz-icon-btn bz-qr-x" aria-label="Close the QR code" title="Close">&#10005;</button></div>' +
-      '<div class="bz-qr-code">' + code + "</div>" +
-      '<p class="bz-qr-url">' + esc(href) + "</p>" +
-      '<p class="bz-qr-note">Point your phone\'s camera at it. Nothing is shared or sent.</p>';
-    var bar = root.querySelector(".bz-search");
-    (bar || root).appendChild(qrPop);
-    qrBtn.setAttribute("aria-expanded", "true");
-    qrPop.querySelector(".bz-qr-x").addEventListener("click", function () { closeQr(true); });
-    qrPop.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); closeQr(true); } });
-    qrPop.querySelector(".bz-qr-x").focus();
-  }
-  if (qrBtn) {
-    qrBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      if (qrPop) closeQr(false); else openQr();
-    });
-    document.addEventListener("click", function (e) {
-      if (qrPop && !qrPop.contains(e.target) && e.target !== qrBtn) closeQr(false);
-    });
-    // The address is the page's: a new page under the header closes the old code.
-    window.addEventListener("bz:page", function () { closeQr(false); });
-  }
+  if (qrBtn) qrBtn.addEventListener("click", function (e) { e.stopPropagation(); askToShare("qr"); });
 
   // ── Back to top ────────────────────────────────────────────────────────
   var top = document.createElement("button");

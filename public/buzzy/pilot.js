@@ -72,9 +72,6 @@
           { sel: '.pp-slider [data-mode="' + v + '"]', name: "“" + cap(v) + "”" },
           { sel: "#privacyClose", name: "Close", optional: true },
         ];
-      case "mode":
-        // Chat and Work are one bar now; the switch stays in the page, out of sight.
-        return [{ sel: '#modeTabs [data-mode="' + v + '"]', name: "the " + cap(v) + " setting", hiddenOk: true }];
       case "history":
         return [{ sel: '[data-tab="history"]', name: "History, under the search bar" }];
       case "newChat":
@@ -206,6 +203,12 @@
   Run.prototype.stop = function () {
     if (this.stopped || this.finished) return;
     this.stopped = true;
+    // This run's own board build stops too (what is already on the board stays).
+    if (this.building) {
+      var W = window.BeeZillaWhiteboard;
+      var wb = W && W.current ? W.current() : null;
+      if (wb && wb.stopBuild) wb.stopBuild();
+    }
     if (this.resolveAsk) this.resolveAsk(false);
     for (var i = 0; i < this.rows.length; i++) {
       var s = this.rows[i].li.getAttribute("data-state");
@@ -347,7 +350,15 @@
       this.set(i, "doing", "");
       this.status.textContent = "Step " + (i + 1) + " of " + n + "…";
       if (a.do === "board") {
+        // A long board step (BeeZilla building an orchestration) says how it's going.
+        if (a.value === "orchestrate") {
+          a.progress = (function (run, row) {
+            return function (text) { if (!run.stopped) run.set(row, "doing", String(text || "").slice(0, 200)); };
+          })(this, i);
+        }
+        this.building = a.value === "orchestrate";
         var did = await this.board(a);
+        this.building = false;
         if (did.stopped || this.stopped) return;
         this.set(i, did.ok ? "done" : "failed", did.note || "");
         if (!did.ok) {
@@ -376,7 +387,9 @@
   window.BeeZillaPilot = {
     run: function (actions) {
       if (!Array.isArray(actions) || !actions.length) return null;
-      if (current) { current.stop(); current.remove(); }
+      // A build still going on the board keeps going when a new command comes in ("zoom
+      // out" while it builds); only its card makes way. Any other run stops as before.
+      if (current) { if (!current.building) current.stop(); current.remove(); }
       current = new Run(actions.slice(0, 4));
       current.play();
       return current;

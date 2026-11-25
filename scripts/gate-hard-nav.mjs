@@ -32,19 +32,26 @@ const HARD_NAV_ALLOW = {
   "public/buzzy/nav.js": {
     "/buzzy/": "explicit sign-out: the session is gone, the engine must die with it",
   },
+  // The welcome page is served before the shell exists (nav.js is injected after it and
+  // this check runs first), it carries no header and owns no recogniser, so the cold
+  // load into Talk is the only route in and preserves nothing. The bfcache re-check
+  // still prefers the shell when one has since loaded.
+  "public/buzzy/landing.html": {
+    "/buzzy/talk": "welcome page, pre-shell: no header, no recogniser, nothing to keep alive",
+  },
 };
 
 // `location.href = "..."`, `location.assign("...")`, `window.location.replace("...")`
 const ASSIGN = /(?:window\.)?location\s*(?:\.href\s*=\s*|\.assign\(\s*|\.replace\(\s*)["'`](\/buzzy[^"'`]*)/g;
 
-const files = (await fs.readdir(path.join(root, "public/buzzy")))
-  .filter((f) => /\.(html|js)$/.test(f))
-  .sort();
-
-const hits = [];
-for (const f of files) {
-  const rel = `public/buzzy/${f}`;
-  const text = await fs.readFile(path.join(root, rel), "utf8");
+// One scanner, used for the working tree AND for the bytes production serves.
+// It was two copies once, and they disagreed: the tree pass skipped comment
+// lines, the served pass did not, so a comment that NAMES the trap (e.g. "the
+// old `else location.href = \"/buzzy/talk\"` could only fire…") failed the gate
+// against production while the tree was clean. A gate that only agrees with
+// itself is not a gate.
+function scanText(text, rel) {
+  const hits = [];
   text.split("\n").forEach((line, i) => {
     const trimmed = line.trim();
     // A comment can name the trap without committing it.
@@ -57,6 +64,18 @@ for (const f of files) {
       hits.push({ file: rel, line: i + 1, target, reason: fileReason ? allow[fileReason] : authReason ? AUTH_EJECT[authReason] : null });
     }
   });
+  return hits;
+}
+
+const files = (await fs.readdir(path.join(root, "public/buzzy")))
+  .filter((f) => /\.(html|js)$/.test(f))
+  .sort();
+
+const hits = [];
+for (const f of files) {
+  const rel = `public/buzzy/${f}`;
+  const text = await fs.readFile(path.join(root, rel), "utf8");
+  hits.push(...scanText(text, rel));
 }
 
 const bad = hits.filter((h) => !h.reason);
@@ -70,6 +89,7 @@ console.log(
 );
 
 let servedBad = [];
+const unchecked = [];
 if (ORIGIN) {
   const pages = files.filter((f) => f.endsWith(".html"));
   console.log(`\nserved bytes at ${ORIGIN}:`);
@@ -78,28 +98,25 @@ if (ORIGIN) {
     let html;
     try {
       const res = await fetch(ORIGIN + route, { headers: { "cache-control": "no-cache" } });
-      if (!res.ok) { console.log(`  ${route}  HTTP ${res.status}`); continue; }
+      if (!res.ok) { console.log(`  ${route}  HTTP ${res.status}  NOT MEASURED`); unchecked.push(`${route} HTTP ${res.status}`); continue; }
       html = await res.text();
     } catch (e) {
-      console.log(`  ${route}  fetch failed: ${e.message}`);
+      console.log(`  ${route}  fetch failed: ${e.message}  NOT MEASURED`);
+      unchecked.push(`${route} fetch failed: ${e.message}`);
       continue;
     }
-    const found = [...html.matchAll(ASSIGN)].map((m) => m[1]);
-    const isAllowed = (t) =>
-      Object.keys(AUTH_EJECT).some((p) => t === p || t.startsWith(p + "?")) ||
-      Object.keys(HARD_NAV_ALLOW[`public/buzzy/${f}`] || {}).some((p) => t === p || t.startsWith(p + "?"));
-    const strays = found.filter((t) => !isAllowed(t));
+    const found = scanText(html, `public/buzzy/${f}`);
+    const strays = found.filter((h) => !h.reason).map((h) => h.target);
     console.log(`  ${route}  assignments=${found.length}  ${strays.length ? "STRAY: " + strays.join(", ") : "ok"}`);
     if (strays.length) servedBad.push({ route, strays });
   }
   const nav = await (await fetch(ORIGIN + "/buzzy/nav.js", { headers: { "cache-control": "no-cache" } })).text();
-  const navStrays = [...nav.matchAll(ASSIGN)]
-    .map((m) => m[1])
-    .filter((t) => !Object.keys(HARD_NAV_ALLOW["public/buzzy/nav.js"]).some((p) => t === p || t.startsWith(p + "?")));
+  const navStrays = scanText(nav, "public/buzzy/nav.js").filter((h) => !h.reason).map((h) => h.target);
   console.log(`  /buzzy/nav.js  ${navStrays.length ? "STRAY: " + navStrays.join(", ") : "ok"}`);
   if (navStrays.length) servedBad.push({ route: "/buzzy/nav.js", strays: navStrays });
 }
 
-const fail = bad.length > 0 || servedBad.length > 0;
-console.log(`\nVERDICT ${fail ? "FAIL" : "PASS"}  tree_strays=${bad.length} served_strays=${servedBad.length}`);
+const fail = bad.length > 0 || servedBad.length > 0 || unchecked.length > 0;
+if (unchecked.length) console.log(`  NOT MEASURED (fails the gate, not skipped): ${unchecked.join(", ")}`);
+console.log(`\nVERDICT ${fail ? "FAIL" : "PASS"}  tree_strays=${bad.length} served_strays=${servedBad.length} unmeasured=${unchecked.length}`);
 process.exit(fail ? 1 : 0);

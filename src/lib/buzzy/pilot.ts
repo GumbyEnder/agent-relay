@@ -19,13 +19,13 @@
  * The Idea Board's own steps (zoom, add a note, connect two cards, make an area…)
  * are listed in boardPilot.ts and run by the board itself (whiteboard.js `act`).
  */
-import { acceptedOffer, boardStep, closedBoardStep, type BoardStep } from "./boardPilot";
+import { acceptedOffer, boardStep, closedBoardStep, orchestrateStep, type BoardStep } from "./boardPilot";
 
 export type PrivacyMode = "advocate" | "lockdown" | "open";
 
 export type AppAction = PageAction | BoardStep;
 export interface PageAction {
-  do: "go" | "tab" | "inspiration" | "whiteboard" | "privacy" | "mode" | "history" | "newChat" | "speak" | "voice";
+  do: "go" | "tab" | "inspiration" | "whiteboard" | "privacy" | "history" | "newChat" | "speak" | "voice";
   /** The place, tab, kind or mode, or "open"/"close", "on"/"off". */
   value?: string;
   /** The step in plain words, as the steps card shows it. */
@@ -36,6 +36,8 @@ export interface PageAction {
 
 const MAX_STEPS = 4;
 const MAX_LENGTH = 160;
+/** An orchestration can take a few sentences to describe ("…then I approve it, then…"). */
+const ORCH_MAX_LENGTH = 1500;
 
 function normal(message: string): string {
   return String(message || "")
@@ -152,11 +154,6 @@ const RULES: Rule[] = [
     re: /^(?:turn off|leave|exit|disable|stop|end) lockdown(?: mode)?$/,
     make: (_m, current) => privacyStep("advocate", current),
   },
-  // ── Chat or Work ─────────────────────────────────────────────────────
-  {
-    re: /^(?:(?:switch|change|go|turn|move|flip)(?: (?:it|this|me))?(?: back)?(?: (?:to|into|over to))?|start|use|enter|open|let's switch to|lets switch to|let's use|lets use) (work|chat) mode$/,
-    make: (m) => ({ do: "mode", value: m[1]!, say: `Switch to ${m[1] === "work" ? "Work" : "Chat"} mode` }),
-  },
   // ── History ──────────────────────────────────────────────────────────
   {
     re: /^(?:show|open|see|view|pull up|bring up)(?: me)?(?: my| the)? (?:chat history|history|past chats|old chats|previous chats|earlier chats|past conversations|previous conversations)$/,
@@ -188,6 +185,13 @@ export interface PlanContext {
   lastReply?: string | null;
   /** The starting boards BeeZilla can offer (starterBoards.ts), by title. */
   startingBoards?: string[];
+  /** The board this turn was sent with has a flow on it: "add a check before…" changes it. */
+  boardHasFlow?: boolean;
+}
+
+/** Does the board text a turn carries (whiteboard.js compile) hold a flow to change? */
+export function boardHasFlow(boardText: string | null | undefined): boolean {
+  return /^The orchestration on the board\b|^Step \d+ — /m.test(String(boardText || ""));
 }
 
 function clauseStep(clause: string, current?: PrivacyMode | null): AppAction | null {
@@ -214,12 +218,23 @@ function withCase(message: string, plan: AppAction[] | null): AppAction[] | null
 
 /** The actions a command asks for, or null when the message is not one. */
 export function planAppActions(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
-  return withCase(message, planInLowerCase(message, current, ctx));
+  const plan = withCase(message, planInLowerCase(message, current, ctx));
+  // "Orchestrate…": BeeZilla is handed the person's own words, capitals and all.
+  return plan && plan.length === 1 && plan[0]!.do === "board" && plan[0]!.value === "orchestrate"
+    ? [{ ...plan[0]!, query: String(message || "").replace(/\s+/g, " ").trim().slice(0, ORCH_MAX_LENGTH) }]
+    : plan;
 }
 function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: PlanContext): AppAction[] | null {
   const m = normal(message);
+  if (!m) return null;
+  // Building or changing an orchestration on the board (boardPilot.ts orchestrateStep):
+  // the whole message is the request, however long, so it is never split into clauses.
+  if (m.length <= ORCH_MAX_LENGTH) {
+    const orch = orchestrateStep(m.replace(LEAD, "").replace(TAIL, ""), { boardHasFlow: ctx?.boardHasFlow });
+    if (orch) return [orch];
+  }
   // A note can carry a sentence or two; any other command is short.
-  if (!m || m.length > (/\bnote\b/.test(m) ? 400 : MAX_LENGTH)) return null;
+  if (m.length > (/\bnote\b/.test(m) ? 400 : MAX_LENGTH)) return null;
   const yes = acceptedOffer(m, ctx?.lastReply, ctx?.startingBoards ?? []);
   if (yes) return [yes];
   const body = m.replace(LEAD, "").replace(TAIL, "");
@@ -247,6 +262,32 @@ function planInLowerCase(message: string, current?: PrivacyMode | null, ctx?: Pl
   if (plan.slice(0, -1).some((s) => s.do === "go")) return null;
   return plan;
 }
+
+/**
+ * The person asked BeeZilla to build or change an orchestration on the Idea Board, or
+ * to open the one there in the Orchestrate editor: a turn whose work is on the board.
+ */
+export function asksToOrchestrate(message: string, ctx?: PlanContext): boolean {
+  const m = normal(message);
+  if (!m || m.length > ORCH_MAX_LENGTH) return false;
+  if (orchestrateStep(m.replace(LEAD, "").replace(TAIL, ""), { boardHasFlow: ctx?.boardHasFlow })) return true;
+  const plan = planAppActions(message, null, ctx);
+  return !!plan && plan.some((s) => s.do === "board" && s.value === "openOrchestrate");
+}
+
+/**
+ * On a turn where BeeZilla builds on the board, the board does the work, so the reply
+ * only says so. Measured 2026-11-24 with a local model: told only in the leading system
+ * note, it answered "I can't set up the recurring send" while the board was building
+ * it. It goes on the end of the model's copy of the person's message, in their voice:
+ * a note in the leading system message is ignored (server.ts afterNotes), and a system
+ * message after theirs is refused outright by some models ("system message must be at
+ * the beginning", local Qwen) — the person's own AI key can be any of them.
+ */
+export const ORCHESTRATE_USER_LINE =
+  "(You're building this on my Idea Board right now, card by card, and I can watch it happen there. " +
+  "Just tell me in one short sentence that you're building it on the board. Don't say you can't build workflows, " +
+  "automations, schedules or orchestrations, don't ask me anything first, and don't list the steps.)";
 
 /** The system note that tells the model what the page is doing. */
 export function appActionsNote(plan: AppAction[]): string {

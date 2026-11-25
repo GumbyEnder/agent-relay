@@ -201,7 +201,7 @@ const model = http.createServer((req, res) => {
   };
   /** The system prompt of the main completion of a turn (the longest one, as the other tests take it). */
   const mainCall = () => calls.filter((c) => !nested(c) && /You are /.test(c.system)).sort((a, b) => b.system.length - a.system.length)[0]!;
-  const chat = server.personaForMode("chat");
+  const { ONE_PERSONA: chat } = await import("../src/lib/buzzy/oneMode"); // one persona since one mode
 
   // ── The table ─────────────────────────────────────────────────────────────
 

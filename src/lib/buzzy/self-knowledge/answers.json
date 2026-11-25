@@ -2,7 +2,7 @@
   {
     "id": "sk-001",
     "q": "What is BeeZilla?",
-    "a": "You describe a job in plain words. BeeZilla asks for the details it needs, writes a draft you can check, and keeps your drafts, decisions and documents together in one place.",
+    "a": "You describe what you want in plain words and BeeZilla does it, asking first only when a big request could easily be misread. It keeps your drafts, decisions and documents together in one place.",
     "sources": [
       {
         "file": "src/routes/__root.tsx",
@@ -40,11 +40,15 @@
   {
     "id": "sk-003",
     "q": "How do I start a job?",
-    "a": "Type what you need into the Talk bar (it says \"What would you like to make?\") and press Send. BeeZilla may ask a few questions first, then writes a draft for you to check.",
+    "a": "Type what you need into the Talk bar (it says \"What would you like to make?\") and press Send. Most things BeeZilla just does. For something big that could easily be misread, it first offers one quick choice: a few questions, or just go.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
         "symbol": "What would you like to make?"
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "I can ask a few questions before I start, or just go for it — which do you prefer?"
       }
     ],
     "surfaces": [
@@ -55,11 +59,19 @@
   {
     "id": "sk-004",
     "q": "What does the Do it button do?",
-    "a": "Do it tells BeeZilla to stop asking questions and make the thing now, using what it already knows.",
+    "a": "Do it tells BeeZilla to stop asking questions and make the thing now, using what it already knows. Pressing \"Just go for it\" under one of its questions does the same. For work it hands to its agents (a coding project or big research), it still asks one thing first, as a single tap: how much to spend, unless you already said an amount.",
     "sources": [
       {
         "file": "public/buzzy/talk.html",
         "symbol": "Stop asking — produce it now"
+      },
+      {
+        "file": "public/buzzy/talk.html",
+        "symbol": "\"Just go for it\" is the Do it button by another name."
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "How much should I spend on this, at most? I'll keep my work under that amount."
       }
     ],
     "surfaces": [
@@ -70,19 +82,43 @@
   {
     "id": "sk-005",
     "q": "What is the difference between Chat and Work?",
-    "a": "There's no difference any more: one conversation for both. BeeZilla answers, drafts and makes things straight away. When you want something bigger built, it first asks a question or two about the end result you have in mind, and points out anything that already exists so you don't build it from scratch. Say \"just do it\" or \"cut to the chase\" and it skips straight to the work.",
+    "a": "There's no difference any more: BeeZilla has one mode. For each request it weighs how likely it is to misread you and how costly a mistake would be (more for work other people will see, most for money, health, legal matters, security, people's data or live systems) against the time it takes you to answer. Clear or small things it just does, then shows what it made and lists what it assumed so you can change it. For something big and open it first offers one quick choice: a few questions, or just go. The questions ask why you want it and what it must stay within (time, money, who it's for, what must never happen), never how it should work or anything technical, and each comes with its suggested answer, so one tap accepts it. Anything else you ask meanwhile goes ahead. It remembers your answer for that kind of work, so it asks once. Say \"just do it\" or press Do it and it goes straight to the work. Work it hands to its agents costs money, so before that starts it asks how much to spend, with three amounts to tap, unless you already named one; that question stays even when you say just go.",
     "sources": [
       {
-        "file": "src/lib/buzzy/server.ts",
-        "symbol": "There is no difference here between chatting and getting work done"
+        "file": "src/lib/buzzy/askOrGo.ts",
+        "symbol": "export function askOrGo"
       },
       {
-        "file": "src/lib/buzzy/server.ts",
-        "symbol": "DON'T REINVENT THE WHEEL"
+        "file": "src/lib/buzzy/askOrGo.ts",
+        "symbol": "export function askFirst"
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "I can ask a few questions before I start, or just go for it — which do you prefer?"
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "What I assumed for you:"
       },
       {
         "file": "src/lib/buzzy/intent.ts",
         "symbol": "cut to the chase|just get (it|the job|this) done"
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "Anything else you ask meanwhile goes ahead."
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "export function isTechnicalQuestion"
+      },
+      {
+        "file": "src/lib/buzzy/askOrGo.ts",
+        "symbol": "export function askBudget"
+      },
+      {
+        "file": "src/lib/buzzy/oneMode.ts",
+        "symbol": "export function isSpecQuestion"
       }
     ],
     "surfaces": [
@@ -643,7 +679,7 @@
   {
     "id": "sk-033",
     "q": "What is the Idea Board (formerly the Whiteboard)?",
-    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: a line to each skill it uses, and what it makes \u2014 pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about. To point BeeZilla at something, drag the dot on a card's right edge onto one of its steps: what you connect, it uses there in full, and a connected picture is what it draws from. Make an area around a piece of the board to move, save or share it together; selling an orchestration (for Honey Drops or Honey, or open-sourcing it) is coming soon. You can draw on it too: the Draw tool (D) gives you a pen, shapes and colours, and Make it real turns your drawing into a finished picture beside it. Once you've laid out a few cards, BeeZilla drafts your agent's core identity (how it works here) from them, and a Who it serves card holds who it's working for, which stays private when you share.",
+    "a": "It's where BeeZilla's work happens (it used to be called the Whiteboard). Each visit starts with it folded and blank. When you talk or send a message it opens full width and draws what BeeZilla does as it does it: a line to each skill it uses, and what it makes — pictures, music with a waveform, 3D models and documents. Your conversation sits on it as a card you can move and scroll. You can drag anything on the site onto it, edit any card, draw your own process with the tools on the left, and select an area to save it as a recipe. BeeZilla sees the whole board with your next message: your own edits as instructions, and the pictures, music, files and links on it to look at and talk about. To point BeeZilla at something, drag the dot on a card's right edge onto one of its steps: what you connect, it uses there in full, and a connected picture is what it draws from. Make an area around a piece of the board to move, save or share it together; selling an orchestration (for Honey Drops or Honey, or open-sourcing it) is coming soon. You can draw on it too: the Draw tool (D) gives you a pen, shapes and colours, and Make it real turns your drawing into a finished picture beside it. Once you've laid out a few cards, BeeZilla drafts your agent's core identity (how it works here) from them, and a Who it serves card holds who it's working for, which stays private when you share.",
     "sources": [
       {
         "file": "public/buzzy/whiteboard.js",
@@ -1080,7 +1116,7 @@
   {
     "id": "sk-053",
     "q": "Can BeeZilla work the Idea Board for me?",
-    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; start a drawing; turn the drawing into a castle at sunset; who it serves is a bakery in Lisbon; the core identity is friendly and short; open the board; fold the board away. When you're editing a card, press Speak and say what it should say. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
+    "a": "Yes, just say it. For example: show me the whole board; zoom in on the poster step; add a note saying call the printer; add a step called write the caption; connect the beach photo to the poster step; remove the palette note; rename the step to draw the banner; move the photo next to the poster step; make an area around everything called poster kit; save this as a recipe; sell this orchestration; show the board's history; show the shortcuts; undo; grab my beach photo; start me off with a simple starting board for a logo; start a drawing; turn the drawing into a castle at sunset; who it serves is a bakery in Lisbon; the core identity is friendly and short; open the board; fold the board away. It builds whole orchestrations too, live, card by card: say orchestrate a weekly newsletter, or build me a workflow that answers customer emails, then change it the same way (add a spelling check before my approval, make the writing repeat until it's short enough) and say open it in Orchestrate to check, export or save it. When you're editing a card, press Speak and say what it should say. You watch each step happen, Stop ends it, everything can be undone with Ctrl/⌘+Z, and clearing the whole board waits for your Allow.",
     "sources": [
       {
         "file": "src/lib/buzzy/boardPilot.ts",
@@ -1093,6 +1129,10 @@
       {
         "file": "public/buzzy/pilot.js",
         "symbol": "a.do === \"board\""
+      },
+      {
+        "file": "src/lib/buzzy/boardPilot.ts",
+        "symbol": "export function orchestrateStep"
       }
     ],
     "surfaces": [

@@ -83,7 +83,6 @@ const turn = (over: Partial<Parameters<typeof producesDeliverable>[0]>) =>
   producesDeliverable({
     renderedDocText: null,
     requestedDraft: false,
-    mode: "chat" as const,
     draftGateOpen: false,
     hasExistingDraft: false,
     message: "",
@@ -99,8 +98,10 @@ expect("chat + existing draft + 'pong' (the bug)", turn({ draftGateOpen: true, h
 expect("chat + owner asks for the file", turn({ requestedDraft: true, draftGateOpen: true, message: "save it in the file" }), true);
 expect("chat + revision of the draft", turn({ draftGateOpen: true, hasExistingDraft: true, message: "make the second paragraph shorter" }), true);
 expect("the render tool actually ran", turn({ renderedDocText: "# Quote\n…" }), true);
-expect("work mode, brief confirmed", turn({ mode: "work", draftGateOpen: true, message: "ok, go ahead" }), true);
-expect("work mode, still discovering", turn({ mode: "work", draftGateOpen: false, message: "it's a fence job" }), false);
+// One mode (oneMode.ts): a gate opened by an earlier brief no longer makes every
+// reply a new version (Work mode did); "go ahead", Do it and "just go" ask for it.
+expect("one mode, they said go ahead", turn({ requestedDraft: true, draftGateOpen: true, message: "ok, go ahead" }), true);
+expect("one mode, gate open from an earlier brief, a plain reply", turn({ draftGateOpen: true, message: "it's a fence job" }), false);
 expect("fresh chat, no gate", turn({ message: "hello" }), false);
 
 // Talk has no Music or 3D button: the words in the box are the only way in, so a

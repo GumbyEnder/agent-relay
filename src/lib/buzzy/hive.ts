@@ -35,6 +35,7 @@
 import { randomBytes } from "node:crypto";
 import type { Sql } from "@/lib/db";
 import { chatCompletionFull } from "./llm";
+import { ONE_PERSONA } from "./oneMode";
 import {
   AGENTS_MAX,
   BZILLA,
@@ -508,13 +509,9 @@ function nameList(names: string[], max: number): string {
 /** A text as a sentence that can be followed by another: with an end mark, which it is given if it has none. */
 export const sentence = (q: string): string => (/[.?!…)"'”]$/.test(q) ? q : `${q}.`);
 
-/**
- * BeeZilla's own persona, the one she speaks in conversation. server.ts holds the words (and
- * loads this file), so they are fetched when a delegation runs, by which time it is loaded.
- */
+/** BeeZilla's own persona, the one she speaks in conversation: the one persona (oneMode.ts). */
 async function chatPersona(): Promise<string> {
-  const { personaForMode } = await import("./server");
-  return personaForMode("chat");
+  return ONE_PERSONA;
 }
 
 /**

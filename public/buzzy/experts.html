@@ -240,7 +240,9 @@
   <style>
     .expert-card { cursor: pointer; transition: border-color 0.12s, transform 0.12s; }
     .expert-card:hover, .expert-card:focus-visible { border-color: var(--bz-yellow); transform: translateY(-1px); outline: none; }
-    .expert-icon { font-size: 1.15rem; margin-right: 0.15rem; vertical-align: -0.05em; }
+    .expert-icon { font-size: 1.15rem; margin-right: 0.15rem; vertical-align: -0.05em; color: var(--bz-yellow); }
+    .expert-icon .bz-line-ico { display: inline-block; vertical-align: -0.18em; }
+    .expert-detail h1 .expert-icon { font-size: 1.6rem; }
     .view-hint { color: var(--bz-yellow); font-size: 0.78rem; font-weight: 600; margin-top: auto; }
     .back-link { background: none; border: none; color: var(--bz-yellow); cursor: pointer; font-size: 0.9rem; font-weight: 600; padding: 0; margin: 0 0 1rem; }
     .back-link:hover { text-decoration: underline; }
@@ -264,7 +266,7 @@
       function renderList() {
         var cards = EXPERTS.map(function (e) {
           return '<div class="expert-card" data-expert="' + e.id + '" role="button" tabindex="0">' +
-            '<h2><span class="expert-icon">' + (ICONS[e.id] || "✦") + '</span> ' + esc(e.name) + '</h2>' +
+            '<h2><span class="expert-icon">' + (ICONS[e.id] || ICONS.other || "") + '</span> ' + esc(e.name) + '</h2>' +
             '<p>' + esc(e.blurb) + '</p>' +
             '<span class="view-hint">View skills &rarr;</span>' +
             '</div>';
@@ -286,7 +288,7 @@
         root.innerHTML =
           '<button type="button" class="back-link" id="backExperts">&larr; All experts</button>' +
           '<div class="expert-detail">' +
-            '<h1><span class="expert-icon">' + (ICONS[e.id] || "✦") + '</span> ' + esc(e.name) + '</h1>' +
+            '<h1><span class="expert-icon">' + (ICONS[e.id] || ICONS.other || "") + '</span> ' + esc(e.name) + '</h1>' +
             '<p class="detail-blurb">' + esc(e.blurb) + '</p>' +
             '<h2>What BeeZilla excels at here</h2>' +
             '<ul class="skill-library">' + skills + '</ul>' +

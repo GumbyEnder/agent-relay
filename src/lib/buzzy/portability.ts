@@ -148,6 +148,8 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_document_versions:
     "DELETE FROM buzzy_document_versions WHERE doc_id IN (SELECT id FROM buzzy_documents WHERE user_id = $1) RETURNING 1",
   buzzy_share_links: "DELETE FROM buzzy_share_links WHERE user_id = $1 RETURNING 1",
+  // Pages the person shared by link (0064): the copies go with the account.
+  buzzy_page_shares: "DELETE FROM buzzy_page_shares WHERE user_id = $1 RETURNING 1",
   buzzy_outbound_actions: "DELETE FROM buzzy_outbound_actions WHERE user_id = $1 RETURNING 1",
   buzzy_telemetry: "DELETE FROM buzzy_telemetry WHERE user_id = $1 RETURNING 1",
   buzzy_documents: "DELETE FROM buzzy_documents WHERE user_id = $1 RETURNING 1",
