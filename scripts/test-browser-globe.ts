@@ -185,6 +185,12 @@ section("Buttons BeeZilla never presses, and blanks");
   for (const name of ["Create", "Download", "Generate song", "Next", "Sign in", "Save", "Upload", "Play"]) {
     ok(`“${name}” is fine for BeeZilla`, personOnly(name) === null);
   }
+  // The other doors (remoteBrowser.ts DOOR_WORDS): a press that puts the person's words out
+  // where they can't be taken back. One line in personOnly — the arm the owner can lift.
+  for (const name of ["Post", "Publish", "Send", "Submit", "Post comment", "Publish now", "Send message", "Submit application"]) {
+    ok(`“${name}” is the person's to press`, !!personOnly(name));
+  }
+  ok("a door's stop says whose press it is", /that press is yours/.test(personOnly("Publish now") ?? ""));
   ok("blanks' words are names to text, capped", JSON.stringify(cleanFill({ "Song idea": "jazz", n: 3, bad: { x: 1 } })) === JSON.stringify({ "Song idea": "jazz", n: "3" }));
   ok("blanks' words from nowhere are nothing", JSON.stringify(cleanFill("nope")) === "{}");
   ok("a blank is filled whatever case or spacing its name was given in", fillFor({ "song  idea": "jazz" }, "Song idea") === "jazz" && fillFor({}, "Song idea") === undefined);
@@ -306,10 +312,14 @@ section("One mode lets a browser job go");
   ok("the server works it out before one mode decides, and tells one mode",
     at("const browserGo = !lockdown && !orchestrating &&") > 0 && at("const browserGo =") < at("const decided = nextStep(savedStep") &&
       /\n\s+buildsOnBoard: orchestrating \|\| browserGo,\n/.test(src) && /browserCommand\(message, \[\]\)\) \|\| setsUpBrowserJob\(message\)\)/.test(src));
+  ok("…and tells one mode which kind of build it is, so a door still asks",
+    /const browserDoor = browserGo && \(assessment\.performsDoor === true/.test(src) &&
+      at("const browserDoor =") > at("const verdict = askOrGo(assessment)") && at("const browserDoor =") < at("const decided = nextStep(savedStep") &&
+      /\n\s+buildsOnBoard: orchestrating \|\| browserGo,\n\s+browserGo,\n/.test(src));
   ok("on that turn: no document, no one-mode note, and a waiting question is left alone",
     /assessment\.size !== "small" && !orchestrating && !browserGo;/.test(src) &&
       /const oneModeNote = orchestrating \|\| browserGo \? "" : turnNote\(/.test(src) &&
-      /if \(!orchestrating && !browserGo\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(src));
+      /if \(!orchestrating && !\(browserGo && !browserDoor\)\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(src));
   ok("the browser gate and one mode's documents-only gate are both on the turn",
     /const toolCtx = \{[^}]*\n\s+browser: browserTurn,\n/.test(src) && /const toolCtx = \{[^}]*\n\s+documentsOnly: goMakesSomething/.test(src) &&
       /const toolTurnNeeded = explicitDocumentRequest \|\| browserTurn;/.test(src));

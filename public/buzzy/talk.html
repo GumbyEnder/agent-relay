@@ -195,10 +195,23 @@
       background: transparent;
       padding: 0;
     }
+    /* The box grows with what you type or paste; nothing else on the bar does (owner,
+       2026-11-22: "the talk button gets larger the more text I put in the text field…
+       pin the button to the top of it and allow the text box to grow without growing
+       the button"). So the bar lines its parts up at the top, and the button, the
+       buttons beside the box and the Do it / Send pair all keep the height of ONE line
+       of the box (--tb-h, worked out from the box's own line and padding) however tall
+       the box gets. --tf-max is how tall the box may grow before it scrolls. */
     .talk-bar {
+      --tf-line: 1.6rem;
+      --tf-padt: 0.95rem;
+      --tf-padb: 0.9rem;
+      --tb-min: 0px;   /* the button's own least height, where its bar sets one (oneboard.css, whiteboard.css) */
+      --tb-h: max(calc(var(--tf-line) + var(--tf-padt) + var(--tf-padb) + 2px), var(--tb-min)); /* + the box's 1px border a side */
+      --tf-max: clamp(9rem, 38vh, 20rem);
       position: relative;
       display: flex;
-      align-items: stretch;
+      align-items: flex-start;
       gap: 0.6rem;
       padding: 0.55rem;
       border-radius: 999px;
@@ -215,6 +228,7 @@
       gap: 0.6rem;
       padding: 0 1.6rem 0 1.3rem;
       min-height: 3.25rem;
+      height: var(--tb-h);   /* one line of the box, never the box's whole height */
       border: none;
       color: #141414;
       font: inherit;
@@ -241,6 +255,8 @@
     .talk-field {
       flex: 1 1 auto;
       min-width: 0;
+      min-height: var(--tb-h);
+      box-sizing: border-box;
       display: flex;
       align-items: center;
       gap: 0.4rem;
@@ -252,20 +268,21 @@
     .composer-card .talk-field #chatInput {
       flex: 1 1 auto;
       min-height: 0;
-      height: 1.6rem;
-      max-height: 9rem;
-      padding: 0.95rem 0 0.9rem;
+      height: var(--tf-line);
+      max-height: var(--tf-max);
+      padding: var(--tf-padt) 0 var(--tf-padb);
       box-sizing: content-box;
       background: transparent;
       border: none;
       color: #F2F2F2;
       font-size: 1.02rem;
-      line-height: 1.6rem;
+      line-height: var(--tf-line);
       resize: none;
       overflow-y: auto;
     }
     .composer-card .talk-field #chatInput::placeholder { color: #6F6F6F; }
-    .talk-actions { display: none; align-items: center; gap: 0.35rem; flex: 0 0 auto; }
+    /* Do it and Send stay on the first line, at the box's right end, like the button. */
+    .talk-actions { display: none; align-items: center; align-self: flex-start; min-height: calc(var(--tb-h) - 2px); gap: 0.35rem; flex: 0 0 auto; }
     .talk-bar.has-text .talk-actions { display: inline-flex; }
     .talk-doit { min-height: 0; padding: 0.42rem 0.8rem; border-radius: 999px; font-size: 0.85rem; }
     .talk-send {
@@ -281,7 +298,7 @@
       position: absolute; inset: 0;
       margin: 0;
       align-items: center; justify-content: center;
-      border-radius: 999px;
+      border-radius: inherit;
       background: rgba(20, 20, 20, 0.92);
       color: var(--bz-yellow);
       font-weight: 700;
@@ -305,13 +322,20 @@
     .board-solo .wb-panel { min-height: 20rem; }
     #boardToggle[aria-pressed="true"] { color: #FFC107; border-color: #FFC107; }
     @media (max-width: 640px) {
-      .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; }
+      .talk-bar { --tf-padt: 0.7rem; --tf-padb: 0.7rem; border-radius: 22px; padding: 0.45rem; gap: 0.45rem; }
       .talk-btn { padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
                   clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%); }
       .talk-btn .tb-label { display: none; }
       .talk-field { padding-left: 0.85rem; border-radius: 18px; }
-      .composer-card .talk-field #chatInput { font-size: 16px; padding: 0.7rem 0; }
+      .composer-card .talk-field #chatInput { font-size: 16px; }
       .talk-doit { display: none; }
+    }
+    /* Once the box is more than one line, the pill's half-circle ends would cut into the
+       words; the bar and the box keep the corners they had as one line and become
+       rounded rectangles (the JS below sets .is-grown). */
+    @media (min-width: 641px) {
+      .talk-bar.is-grown { border-radius: 2.45rem; }
+      .talk-bar.is-grown .talk-field { border-radius: 1.8rem; }
     }
     /* The composer never moves. A conversation adds a transcript below it. */
 .chat-messages:empty { flex: 0 0 auto; max-height: none; padding: 0; }
@@ -7686,14 +7710,45 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           });
         });
       });
+      // The box grows with what is typed or pasted, up to --tf-max (about 38% of the
+      // window; the bar's CSS), then scrolls. Only the box grows: the Talk button, the
+      // paper clip and Do it / Send keep the height of one line (owner, 2026-11-22).
       function fit() {
+        // An empty box is one line, whatever its hint says: a hint too long for a narrow
+        // box (the Idea Board's top bar, with the agents sidebar open) used to wrap, and
+        // the box and the Talk button beside it grew to match.
+        if (!input.value) { input.style.height = ""; bar.classList.remove("has-text"); return; }
         var cs = window.getComputedStyle(input);
         var pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-        input.style.height = "auto";
-        input.style.height = Math.min(Math.max(input.scrollHeight - pad, 0), 144) + "px";
+        if (input.getClientRects().length) {             // hidden, it would measure 0 tall
+          var max = parseFloat(cs.maxHeight);             // clamp(…vh…) read back as pixels
+          if (!(max > 0)) max = 144;
+          var keep = input.scrollTop;
+          input.style.height = "auto";
+          input.style.height = Math.min(Math.max(input.scrollHeight - pad, 0), max) + "px";
+          input.scrollTop = keep;
+        }
         bar.classList.toggle("has-text", !!input.value.trim());
       }
       input.addEventListener("input", fit);
+      // Two lines or more make the bar a rounded box (the CSS keys on .is-grown): a pill's
+      // half-circle ends would cut into the words. It follows the box's height whoever
+      // sets it, so a hint that wraps, a paste and a refit all count.
+      function paintGrown() {
+        var cs = window.getComputedStyle(input);
+        var inner = input.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+        bar.classList.toggle("is-grown", inner > (parseFloat(cs.lineHeight) || 26) * 1.5);
+      }
+      // The words wrap differently when the bar moves into the board's top edge (or back)
+      // or the window changes size, and the limit follows the window's height.
+      var fitWidth = 0;
+      window.addEventListener("resize", fit);
+      if (window.ResizeObserver) {
+        new ResizeObserver(function () {
+          if (input.offsetWidth !== fitWidth) { fitWidth = input.offsetWidth; fit(); }
+          paintGrown();
+        }).observe(input);
+      }
       // Sending, a starter chip and a voice transcript all set the field from code,
       // which fires no input event — so refit on every programmatic write too.
       var native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");

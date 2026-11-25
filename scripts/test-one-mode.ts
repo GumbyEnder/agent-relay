@@ -240,6 +240,52 @@ for (const message of [
 for (const message of ["pay attention to the layout", "order a $5 coffee", "the pay page needs a tidier header"]) {
   check(tier(message) !== "critical", `no money signal here: "${message}" (got ${tier(message)})`);
 }
+// The recipient is a door on its own, not only the amount. "owe the landlord" read
+// critical through MONEY_RECIPIENT but was neither irreversible nor a door, so a
+// remembered "just go" walked it through as a payment.
+for (const message of ["owe the landlord", "owe the landlord $500", "we owe the landlord $500"]) {
+  check(tier(message) === "critical", `owing a bill is critical: "${message}" (got ${tier(message)})`);
+}
+{
+  const a = assessRequest("owe the landlord");
+  check(a.irreversible === true && a.performsDoor === true, "owe with a payment recipient is irreversible and performs the door");
+  check(
+    askFirst(askOrGo(a), "go", a) === "offer",
+    `critical + irreversible is offered even after a remembered "just go" (got ${askFirst(askOrGo(a), "go", a)})`,
+  );
+}
+// ... and only then: owing a favour is not owing money.
+for (const message of ["owe you one", "owe my team an apology", "owe it to myself to rest"]) {
+  const a = assessRequest(message);
+  check(
+    a.irreversible !== true && a.performsDoor !== true,
+    `not a payment: "${message}" (irreversible=${a.irreversible}, door=${a.performsDoor})`,
+  );
+}
+// An adverb of degree rides between the verb and the recipient. The bare `more|less`
+// guard that kept "pay more attention" out also swallowed "pay more to our suppliers",
+// a real payment that then read as play and went on a remembered "just go".
+for (const message of ["pay more to our suppliers", "pay less to our suppliers", "pay more to our landlord"]) {
+  const a = assessRequest(message);
+  const asked = askFirst(askOrGo(a), "go", a);
+  check(
+    a.stakes === "critical" && a.performsDoor === true && asked === "offer",
+    `a degree adverb still pays: "${message}" (${a.stakes}, door=${a.performsDoor}, ${asked})`,
+  );
+}
+for (const message of [
+  "pay more attention to our vendors",
+  "pay less attention to the bills",
+  "pay more heed to the warnings",
+  "pay closer attention to the invoice",
+  "pay more attention to the team's feedback",
+]) {
+  const a = assessRequest(message);
+  check(
+    a.irreversible === false && a.performsDoor === false && a.stakes !== "critical",
+    `paying attention is not paying: "${message}" (${a.stakes}, irreversible=${a.irreversible}, door=${a.performsDoor})`,
+  );
+}
 // The legal arm knew "terms of service" but not the acronym, so "publish ToS" read as
 // product stakes and went ahead (1.2 ≤ 3). An acronym the owner types is still a door.
 for (const message of ["publish ToS", "update our T&Cs", "publish the terms of service", "publish the terms and conditions"]) {
@@ -993,6 +1039,15 @@ check(parseQuestion('{"question":"When do you need it by?","suggested":"Before t
   check(noBudget.step.kind === "go" && noBudget.step.agentWork !== true && noBudget.step.budget === undefined, "no budget question for a board build (one model call)");
   const critical = nextStep(null, { message: "build an automation that deletes customer records older than a year", fresh: ASK, assessment: { stakes: "critical", irreversible: true }, canFollowUp: true, buildsOnBoard: true });
   check(critical.step.kind === "go", "a one-way door in the words still goes: the board only lays the flow out, nothing in it runs");
+  // A browser job is different: the globe presses the buttons for real, so a door in its words
+  // does not step the ladder aside (server.ts browserGo → oneMode.ts). Measured before the fix:
+  // "post it to linkedin.com" went on #375 and was offered on main.
+  const browserDoor = nextStep(null, { message: "post it to linkedin.com", fresh: GO, assessment: { stakes: "product", irreversible: true, performsDoor: true }, canFollowUp: true, buildsOnBoard: true, browserGo: true });
+  check(browserDoor.step.kind === "offer", "a browser job that would press a door still gets the quick choice");
+  const boardDoor = nextStep(null, { message: "build an automation that posts my invoices to Slack every Monday", fresh: GO, assessment: { stakes: "product", irreversible: true, performsDoor: true }, canFollowUp: true, buildsOnBoard: true });
+  check(boardDoor.step.kind === "go", "a board build with a door in its words still goes: nothing in it runs until the person runs it");
+  const browserOpen = nextStep(null, { message: "go to mureka.ai/create and make a song", fresh: GO, assessment: { stakes: "product", irreversible: false, performsDoor: false }, canFollowUp: true, buildsOnBoard: true, browserGo: true });
+  check(browserOpen.step.kind === "go" && browserOpen.step.how === "fresh", "an ordinary browser job still goes at once, nothing asked");
   const waiting: OneModeState = { stage: "asking", request: "Build me a website for my bakery", stakes: "product", asked: [{ q: OPENING_QUESTIONS[0], suggested: "Regulars can't find our hours" }], answers: [] };
   const meanwhile = nextStep(waiting, { message: "Orchestrate a weekly newsletter: find this week's news, write it, I approve it, then email it every Monday.", fresh: GO, canFollowUp: true, buildsOnBoard: true });
   check(meanwhile.step.kind === "go" && meanwhile.state === waiting && !meanwhile.carry, "a question still waiting stays as it was: not carried under the one-sentence reply, not dropped");
@@ -1019,7 +1074,7 @@ check(parseQuestion('{"question":"When do you need it by?","suggested":"Before t
     /const oneModeNote = orchestrating(?: \|\| browserGo)? \? "" : turnNote\(/.test(serverSrc) &&
       /assessment\.size !== "small" && !orchestrating(?: && !browserGo)?;/.test(serverSrc) &&
       /const playbookBlock = !orchestrating && \(requestedDraft \|\| hasExistingDraft\)/.test(serverSrc) &&
-      /if \(!orchestrating(?: && !browserGo)?\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(serverSrc),
+      /if \(!orchestrating && !\(browserGo && !browserDoor\)\) \{\n\s+if \(oneState\) await memory\.remember\(STATE_KEY/.test(serverSrc),
     "and on that turn: no one-mode note, go reminder, redo or playbook, and the stored question is left alone",
   );
 }

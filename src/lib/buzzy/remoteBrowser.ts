@@ -999,11 +999,19 @@ export interface PageView {
  */
 export const MONEY_WORDS = /\b(?:pay|payment|paying|buy|buying|purchase|checkout|check out|place (?:my |your |the )?order|order now|subscribe|subscription|upgrade|start (?:my |your |a |the )?(?:free )?trial|add (?:a )?(?:card|payment(?: method)?)|billing|donate|top ?up|add funds|confirm (?:and pay|purchase|payment)|complete (?:purchase|payment|order)|book now|reserve now|go premium|get (?:pro|premium|plus))\b/i;
 export const ACCOUNT_WORDS = /\b(?:delete (?:my |your |the )?account|close (?:my |your |the )?account|deactivate|cancel (?:my |your |the )?(?:subscription|plan|membership))\b/i;
+/**
+ * The other doors: a press that puts the person's words out in the world where they cannot be
+ * taken back — a post, a publish, a send, a submit. Same rule as money and the account: the
+ * person presses it (docs/TOOL-AND-BROWSER-PLAN.md D4). This is one line on purpose: if the
+ * owner decides his own "post it" is the approval, this arm is what he lifts.
+ */
+export const DOOR_WORDS = /\b(?:post|publish|send|submit)\b/i;
 export function personOnly(name: string | undefined): string | null {
   const n = plain(name ?? "", 60);
   if (!n) return null;
   if (MONEY_WORDS.test(n)) return `BeeZilla stopped before pressing “${n}”: paying, buying and subscribing are yours to press. Press it yourself in BeeZilla's browser if you mean to.`;
   if (ACCOUNT_WORDS.test(n)) return `BeeZilla stopped before pressing “${n}”: that changes your account, so it is yours to press.`;
+  if (DOOR_WORDS.test(n)) return `BeeZilla stopped before pressing “${n}”: posting, publishing and sending put your words out where they can't be taken back, so that press is yours. Press it yourself in BeeZilla's browser if you mean to.`;
   return null;
 }
 /** Keys a job or a played step may press. */
