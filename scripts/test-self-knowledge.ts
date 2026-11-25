@@ -22,7 +22,7 @@ function check(ok: unknown, label: string): void {
 // ── The answer base ──────────────────────────────────────────────────
 // 50 until 2026-11-20; the owner: "Beezilla has got to know about itself. That is a core
 // principle" (what it can do, what makes it different, working and reading the board).
-check(SELF_ANSWERS.length === 55, `exactly 55 answers (got ${SELF_ANSWERS.length})`);
+check(SELF_ANSWERS.length === 56, `exactly 56 answers (got ${SELF_ANSWERS.length})`);
 const ids = new Set<string>();
 const root = resolve(import.meta.dirname, "..");
 const fileText = new Map<string, string>();

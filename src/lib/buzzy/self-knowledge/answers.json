@@ -129,7 +129,7 @@
   {
     "id": "sk-006",
     "q": "What can BeeZilla make?",
-    "a": "Documents (Word), slide decks (PowerPoint) and spreadsheets (Excel). It can also make pictures, music and 3D models when your plan and this site's setup allow it.",
+    "a": "Documents (Word), slide decks (PowerPoint) and spreadsheets (Excel). It can also make pictures, music and 3D models — a 3D model from your own picture or concept art, or from words — when your plan and this site's setup allow it.",
     "sources": [
       {
         "file": "src/lib/buzzy/toolRegistry.ts",
@@ -153,7 +153,7 @@
       },
       {
         "file": "src/lib/buzzy/models3d.ts",
-        "symbol": "Text → 3D, from Meshy."
+        "symbol": "3D models, from Meshy."
       }
     ],
     "surfaces": [
@@ -184,15 +184,15 @@
   {
     "id": "sk-008",
     "q": "How long does a 3D model take?",
-    "a": "Usually a minute or two. BeeZilla starts it, shows progress in the chat, and the model appears as a download when it is finished.",
+    "a": "Usually two to four minutes: BeeZilla makes the shape, then paints it, and checks it has its colours before it appears in the chat as a download. Meshy can take longer when it is busy.",
     "sources": [
       {
         "file": "src/lib/buzzy/models3d.ts",
-        "symbol": "Generation takes 40–90 seconds"
+        "symbol": "Generation takes one to four minutes"
       },
       {
         "file": "src/lib/buzzy/server.ts",
-        "symbol": "it takes a minute or two"
+        "symbol": "it takes two to four minutes"
       }
     ],
     "surfaces": [
@@ -1194,5 +1194,25 @@
     "surfaces": [
       "website"
     ]
+  },
+  {
+    "id": "sk-056",
+    "q": "Can BeeZilla see and understand my pictures?",
+    "a": "Yes. When you point at a picture on the Idea Board, add one in Talk, join one to a step, or have pictures on your board, BeeZilla looks at them and knows what is in them — shapes, colours, words written in them. Ask about a picture and it looks at that picture to answer. It also reads the board in the order your lines join the cards.",
+    "sources": [
+      {
+        "file": "src/lib/buzzy/vision.ts",
+        "symbol": "BeeZilla looks at pictures."
+      },
+      {
+        "file": "public/buzzy/whiteboard.js",
+        "symbol": "How the cards are joined"
+      }
+    ],
+    "surfaces": [
+      "website",
+      "desktop"
+    ],
+    "limits": "In Lockdown no picture is sent out to be looked at: only what BeeZilla already saw is used. A picture over 8 MB is not looked at."
   }
 ]

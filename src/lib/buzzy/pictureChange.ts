@@ -203,3 +203,34 @@ export function boardReferencePrompt(message: string, count: number): string {
     " Keep what they show (the subject, the style and the colours) unless the request says otherwise.\n\nThe request: " + ask
   );
 }
+
+/**
+ * Every picture of theirs on the Idea Board, joined or not, named on a line of the
+ * board's summary (whiteboard.js `seenLine`): "[[board-seen: 12:Ark Titan concept;
+ * 40:made here]]". It sits first, or second after the pictures line, and is taken off
+ * here before the summary reaches the model; BeeZilla looks at those pictures
+ * (vision.ts). Ids only reach the person's own files: the caller loads them with the
+ * person's own user id. At most eight; a name is the board's own words, cut short.
+ */
+export const BOARD_SEEN_MAX = 8;
+export function takeBoardSeen(text: string | null | undefined): { text: string; seen: Array<{ id: number; label: string }> } {
+  const seen: Array<{ id: number; label: string }> = [];
+  const lines = String(text ?? "").split("\n");
+  for (let i = 0; i < Math.min(2, lines.length); i++) {
+    const m = /^\s*\[\[board-seen:\s*([^\]\n]{1,1200})\]\][^\S\n]*$/.exec(lines[i]!);
+    if (!m) continue;
+    for (const part of m[1]!.split(";")) {
+      const at = part.indexOf(":");
+      const idText = (at >= 0 ? part.slice(0, at) : part).trim();
+      if (!/^\d{1,15}$/.test(idText)) continue;
+      const id = Number(idText);
+      if (!Number.isSafeInteger(id) || id <= 0 || seen.some((s) => s.id === id) || seen.length >= BOARD_SEEN_MAX) continue;
+      // eslint-disable-next-line no-control-regex
+      const label = (at >= 0 ? part.slice(at + 1) : "").replace(/[\u0000-\u001f\u007f-\u009f[\]{}<>]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+      seen.push({ id, label: label === "made here" ? "" : label });
+    }
+    lines.splice(i, 1);
+    break;
+  }
+  return { text: lines.join("\n"), seen };
+}

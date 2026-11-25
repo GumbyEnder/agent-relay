@@ -96,6 +96,8 @@ export interface WhiteboardLink {
   tc?: string;
   /** What a line says in a flow ("yes", "approved", "again"). */
   label?: string;
+  /** Drawn by the person (or asked for by them), not by BeeZilla as it worked. */
+  user?: true;
   /** From the Orchestrate editor: the line's ports and condition (orchestration.ts specToBoard). */
   fp?: string;
   tp?: string;
@@ -223,6 +225,7 @@ export function cleanWhiteboard(raw: unknown): CleanBoard | Refusal {
     const to = text(l.to, 40);
     if (!from || !to || from === to || !ids.has(from) || !ids.has(to)) return;
     const link: WhiteboardLink = { id: text(l.id, 40) || `l${i}`, from, to };
+    if (l.user === true) link.user = true;
     if (CORNERS.has(String(l.fc))) link.fc = String(l.fc);
     if (CORNERS.has(String(l.tc))) link.tc = String(l.tc);
     // What a line says in a flow: "yes", "no", "approved", "again"… (a few words).

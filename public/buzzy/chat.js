@@ -105,6 +105,16 @@
 
     function card(art) {
       var c = el("div", "bzc-card");
+      // Dragged onto the Idea Board, it lands as what it is (voice-stage.js reads data-bz-card).
+      if (art.url) {
+        c.draggable = true;
+        c.style.cursor = "grab";
+        c.title = "Drag it onto your Idea Board";
+        c.setAttribute("data-bz-card", JSON.stringify({
+          kind: art.kind === "image" || art.kind === "model" ? art.kind : "file",
+          title: art.name || "", url: art.url, contentType: art.type || "",
+        }));
+      }
       if (art.kind === "image" && art.url) {
         var img = el("img");
         img.src = art.url;
@@ -131,29 +141,66 @@
       var line = bubble("bzc-a", "Building the 3D model…");
       var tries = 0;
       var misses = 0;
-      var tick = setInterval(function () {
-        tries++;
-        fetch("/api/buzzy/model3d/" + encodeURIComponent(taskId), {
+      // A job moves through steps (shape, then paint): follow `next`, say `stage`.
+      var pollId = taskId;
+      var stage = "Building the 3D model";
+      // As Talk does (talk.html watchModel3d): one request at a time; time paused in
+      // Lockdown doesn't count toward giving up; a model that stayed bare is said so; the
+      // FBX copy (for Blender) is offered too, also when it comes in a little later.
+      var asking = false;
+      var restFor = 0;
+      function fbxCard(f) { card({ kind: "model", url: f.url, name: f.name || "model.fbx", bytes: f.bytes, type: f.type || "model/fbx" }); }
+      // Each status request has a deadline: one that never answers counts as a miss.
+      function ask(id) {
+        return fetch("/api/buzzy/model3d/" + encodeURIComponent(id), {
           credentials: "same-origin",
           headers: authHeaders(),
-        }).then(function (r) { return r.json(); }).then(function (p) {
+          signal: window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
+        }).then(function (r) { return r.json(); });
+      }
+      function companion(left) {
+        if (left <= 0) return;
+        setTimeout(function () {
+          ask(pollId)
+            .then(function (p) {
+              if (p.fbx && p.fbx.url) fbxCard(p.fbx);
+              else if (p.fbxPending) companion(left - 1);
+            })
+            .catch(function () { companion(left - 1); });
+        }, 8000);
+      }
+      var tick = setInterval(function () {
+        if (asking) return;
+        if (restFor > 0) { restFor--; return; }
+        tries++;
+        asking = true;
+        ask(pollId).then(function (p) {
           var status = String(p.status || "");
+          if (p.next) { pollId = String(p.next); misses = 0; }
+          if (p.stage) stage = String(p.stage);
           if (p.asset) {
             clearInterval(tick);
-            line.textContent = "Your 3D model is ready.";
-            card({ kind: "model", url: p.asset.url, name: p.asset.name, bytes: p.asset.bytes });
-          } else if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED" || tries > 60) {
+            line.textContent = p.warning ? String(p.warning) : "Your 3D model is ready.";
+            card({ kind: "model", url: p.asset.url, name: p.asset.name, bytes: p.asset.bytes, type: p.asset.type || "model/gltf-binary" });
+            if (p.fbx && p.fbx.url) fbxCard(p.fbx);
+            else if (p.fbxPending) companion(14);
+          } else if (status === "PAUSED") {
+            tries--;
+            misses = 0;
+            restFor = 4;
+            line.textContent = stage;
+          } else if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED" || tries > 225) {
             clearInterval(tick);
             line.textContent = "The 3D model did not finish" + (p.error ? ": " + p.error : ".");
           } else if (status === "error") {
             if (++misses >= 4) { clearInterval(tick); line.textContent = "Lost touch with the 3D model."; }
           } else {
             misses = 0;
-            line.textContent = "Building the 3D model… " + (p.progress || 0) + "%";
+            line.textContent = stage + "… " + (p.progress || 0) + "%";
           }
         }).catch(function () {
           if (++misses >= 4) { clearInterval(tick); line.textContent = "Lost touch with the 3D model — check the connection."; }
-        });
+        }).then(function () { asking = false; });
       }, 4000);
     }
 

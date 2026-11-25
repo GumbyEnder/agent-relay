@@ -44,6 +44,14 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   const memory = await sql`
     SELECT key, value, updated_at FROM buzzy_user_memory
     WHERE user_id = ${userId} ORDER BY updated_at DESC`;
+  // The 3D models they asked for (0072): the words or picture each was made from — a
+  // prompt sent straight to the 3D maker has no conversation of its own to export.
+  let models3d: any[] = [];
+  try {
+    models3d = await sql`
+      SELECT meshy_id, kind, purpose, prompt, texture_prompt, picture_id, parent_id, created_at
+      FROM buzzy_model3d_jobs WHERE user_id = ${userId} ORDER BY created_at ASC`;
+  } catch { /* an older schema: nothing to export */ }
 
   const zip = new JSZip();
   const stamp = new Date().toISOString().slice(0, 10);
@@ -53,6 +61,14 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   zip.file("company_facts.csv", toCsv(facts.map((f: any) => ({ company_id: f.company_id, key: f.fact_key, label: f.label, value: f.value, status: f.status, source: f.source_label }))));
   zip.file("remembered_decisions.csv", toCsv(memory.map((m: any) => ({ key: m.key, value: m.value, updated_at: m.updated_at }))));
   zip.file("templates.csv", toCsv(templates.map((t: any) => ({ id: t.id, name: t.name, kind: t.kind, headings: (t.structure?.headings ?? []).join(" | ") }))));
+  // A step names its parent the way the parent's own row is named ("txt.…", "ref.…").
+  const jobName = new Map<string, string>(models3d.map((m: any) => [String(m.meshy_id), `${m.kind}.${m.meshy_id}`]));
+  zip.file("3d_models.csv", toCsv(models3d.map((m: any) => ({
+    job: `${m.kind}.${m.meshy_id}`,
+    step_of: m.parent_id ? (jobName.get(String(m.parent_id)) ?? String(m.parent_id)) : "",
+    made_from: m.picture_id ? `picture ${m.picture_id}` : "words",
+    purpose: m.purpose, prompt: m.prompt, look_asked_for: m.texture_prompt ?? "", created_at: m.created_at,
+  }))));
 
   // Approved documents as markdown files
   const docs = zip.folder("approved-documents");
@@ -73,6 +89,7 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
     `Confirmed facts: ${facts.filter((f: any) => f.status === "confirmed").length}`,
     `Approved documents: ${docCount}`,
     `Templates: ${templates.length}`,
+    `3D model steps: ${models3d.length}`,
     "",
     "Data files are CSV (opens in any spreadsheet). Documents are Markdown",
     "(opens in any text editor or Word). Nothing here is a special format.",
@@ -122,6 +139,12 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   buzzy_user_ai_keys: "DELETE FROM buzzy_user_ai_keys WHERE user_id = $1 RETURNING 1",
   buzzy_board_recipes: "DELETE FROM buzzy_board_recipes WHERE user_id = $1 RETURNING 1",
   buzzy_asset_tags: "DELETE FROM buzzy_asset_tags WHERE user_id = $1 RETURNING 1",
+  // What BeeZilla saw in each picture (0071): it goes with the account, not only the picture.
+  buzzy_picture_looks: "DELETE FROM buzzy_picture_looks WHERE user_id = $1 RETURNING 1",
+  // 3D model jobs (0072): who started each and which step continues it.
+  buzzy_model3d_jobs: "DELETE FROM buzzy_model3d_jobs WHERE user_id = $1 RETURNING 1",
+  // The pictures added to each conversation (0073): ids only, gone with the account.
+  buzzy_chat_pictures: "DELETE FROM buzzy_chat_pictures WHERE user_id = $1 RETURNING 1",
   // The Talk whiteboards (0060): the history first (FK child; cascade covers it too,
   // but the explicit pass keeps the receipt truthful), then the boards.
   buzzy_whiteboard_versions: "DELETE FROM buzzy_whiteboard_versions WHERE user_id = $1 RETURNING 1",

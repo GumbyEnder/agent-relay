@@ -424,7 +424,11 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
       card("link", { kind: "link", title: "Recipe ideas", url: "https://example.com/ideas", user: true, x: 60 }),
       card("plan", { kind: "note", title: "Plan", body: "Two steps", x: 70 }),
     ]), sync: { rev: null, dirty: false, base: null } });
-    const text = C.api.instructionsFor("ctx");
+    const raw = C.api.instructionsFor("ctx");
+    // Every picture is named first on a line the server takes off before the model reads
+    // the board (takeBoardSeen), so BeeZilla can look at it: made ones by kind, never by name.
+    truthy(raw.startsWith("[[board-seen: 5:made here; 6:beach.jpg]]\n"), "the pictures line: " + raw);
+    const text = raw.replace(/^\[\[board-seen: [^\]\n]*\]\]\n/, "");
     truthy(/^Core identity \(how BeeZilla works here\): Keep it friendly\n/.test(text), "their words first: " + text);
     truthy(/Also on the board:\n- Picture made here\n- Picture they added — beach\.jpg\n- Music made here\n- Link they added — Recipe ideas \(https:\/\/example\.com\/ideas\)\n- Note — Plan: Two steps$/.test(text), "then the rest: " + text);
     truthy(!/art-2026|music-2026|\/api\/buzzy\/assets|BeeZilla's own words|Picture maker/.test(text), "no made file names, inside links or untouched process cards: " + text);

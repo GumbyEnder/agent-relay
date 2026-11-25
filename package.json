@@ -72,7 +72,7 @@
     "test:bz-f001-profile": "npx tsx scripts/test-bz-f001-profile.ts",
     "test:model-policy": "npx tsx scripts/test-model-policy.ts",
     "test:talk-box": "node scripts/test-talk-box.mjs",
-    "tui": "npm --prefix apps/tui run dev",
+    "posttest:model-policy": "npx tsx scripts/test-vision.ts && npx tsx scripts/test-model3d.ts",    "tui": "npm --prefix apps/tui run dev",
     "tui:status": "npm --prefix apps/tui run status",
     "tui:build": "npm --prefix apps/tui run build",
     "test:openapi-sync": "node scripts/test-openapi-sync.mjs",

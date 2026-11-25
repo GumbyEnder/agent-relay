@@ -271,13 +271,15 @@ ok("the route reads it for the turn; the turn puts it in its instructions and ne
   truthy(/const boardView = cleanBoardView\(body\.boardView\);/.test(chat) && /boardInstructions,\s*boardView,/.test(chat));
   const server = readFileSync("src/lib/buzzy/server.ts", "utf8");
   truthy(/boardViewBlock\(req\.boardView \?\? null, BOARD_VIEW_BUDGET_CHARS\)/.test(server));
-  truthy(/madeThingsSection\(madeThings\) \+ boardViewSection;/.test(server), "in this turn's instructions, last");
+  // What the pictures show (vision.ts) sits just before it; the view stays last.
+  truthy(/madeThingsSection\(madeThings\) \+ picturesSection \+ boardViewSection;/.test(server), "in this turn's instructions, last");
   for (const insert of server.match(/INSERT INTO buzzy_chat_messages[\s\S]{0,400}?`/g) ?? []) {
     truthy(!/boardView/.test(insert), "never stored with the conversation");
   }
   truthy(/const pointedPictureId = pointedPicture\(req\.boardView \?\? null\);/.test(server), "a picture change is to the picture they point at");
   truthy(/const focusNote = boardViewFocusNote\(req\.boardView \?\? null, message\);/.test(server) &&
-    /\{ role: "user", content: focusNote \? `\$\{message\}\\n\\n\$\{focusNote\}` : message \}/.test(server), "the line on the message the model reads");
+    // (what the pictures show, vision.ts, rides on the same copy of the message, after it)
+    /\{ role: "user", content: \(focusNote \? `\$\{message\}\\n\\n\$\{focusNote\}` : message\) \+ /.test(server), "the line on the message the model reads");
   truthy(!/afterNotes\.push\(focusNote\)/.test(server), "never a second system message (some models refuse one)");
 });
 
