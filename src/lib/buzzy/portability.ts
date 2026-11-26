@@ -44,6 +44,42 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   const memory = await sql`
     SELECT key, value, updated_at FROM buzzy_user_memory
     WHERE user_id = ${userId} ORDER BY updated_at DESC`;
+  // The Zilla agents the person made and the job they gave each one (0065). Their own
+  // words, so they leave with them. An older database without the table exports none.
+  let agents: any[] = [];
+  try {
+    agents = await sql`
+      SELECT id, name, creature, look, role, instructions, face, created_at
+      FROM buzzy_agents WHERE user_id = ${userId} ORDER BY pos ASC, created_at ASC`;
+  } catch { agents = []; }
+  // The colonies those agents are grouped into (0066), each with the person's own words for
+  // its purpose. Read apart from the agents so a database that has not had 0066 yet still
+  // exports every agent, just with no colony named.
+  let seats: any[] = [];
+  try {
+    seats = await sql`
+      SELECT a.id AS agent_id, c.id AS colony_id, c.name, c.purpose
+      FROM buzzy_agents a
+      JOIN buzzy_agent_colonies c ON c.id = a.colony_id AND c.user_id = a.user_id
+      WHERE a.user_id = ${userId}
+      ORDER BY c.pos ASC, c.created_at ASC, a.pos ASC, a.created_at ASC`;
+  } catch { seats = []; }
+  // What the agents asked each other and what came back, kept by the Hive (0067): their own
+  // agents' words, so they leave with them. The kept lines only (the newest 2000), oldest first;
+  // an older database without the table exports none.
+  let hive: any[] = [];
+  try {
+    hive = await sql`
+      SELECT created_at, from_name, to_name, kind, body
+      FROM buzzy_hive_messages WHERE user_id = ${userId} ORDER BY id ASC LIMIT 2000`;
+  } catch { hive = []; }
+  const colonyOf = new Map<string, string>(seats.map((s: any) => [s.agent_id, s.name]));
+  const colonies = new Map<string, { name: string; purpose: string; agents: string[] }>();
+  for (const s of seats) {
+    const c: { name: string; purpose: string; agents: string[] } = colonies.get(s.colony_id) ?? { name: s.name, purpose: s.purpose, agents: [] };
+    c.agents.push(agents.find((a: any) => a.id === s.agent_id)?.name ?? "");
+    colonies.set(s.colony_id, c);
+  }
 
   const zip = new JSZip();
   const stamp = new Date().toISOString().slice(0, 10);
@@ -53,6 +89,21 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   zip.file("company_facts.csv", toCsv(facts.map((f: any) => ({ company_id: f.company_id, key: f.fact_key, label: f.label, value: f.value, status: f.status, source: f.source_label }))));
   zip.file("remembered_decisions.csv", toCsv(memory.map((m: any) => ({ key: m.key, value: m.value, updated_at: m.updated_at }))));
   zip.file("templates.csv", toCsv(templates.map((t: any) => ({ id: t.id, name: t.name, kind: t.kind, headings: (t.structure?.headings ?? []).join(" | ") }))));
+  if (agents.length) {
+    zip.file("zilla_agents.csv", toCsv(agents.map((a: any) => ({
+      name: a.name, zilla: a.look ? `${a.look} ${a.creature}` : a.creature, helps_with: a.role, in_your_words: a.instructions, face: a.face,
+      colony: colonyOf.get(a.id) ?? "",
+    }))));
+  }
+  if (colonies.size) {
+    zip.file("zilla_colonies.csv", toCsv([...colonies.values()].map((c) => ({ name: c.name, purpose: c.purpose, agents: c.agents.join(" | ") }))));
+  }
+  if (hive.length) {
+    zip.file("zilla_hive.csv", toCsv(hive.map((m: any) => ({
+      time: m.created_at instanceof Date ? m.created_at.toISOString() : m.created_at,
+      from: m.from_name, to: m.to_name, kind: m.kind, text: m.body,
+    }))));
+  }
 
   // Approved documents as markdown files
   const docs = zip.folder("approved-documents");
@@ -126,6 +177,14 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   // but the explicit pass keeps the receipt truthful), then the boards.
   buzzy_whiteboard_versions: "DELETE FROM buzzy_whiteboard_versions WHERE user_id = $1 RETURNING 1",
   buzzy_whiteboards: "DELETE FROM buzzy_whiteboards WHERE user_id = $1 RETURNING 1",
+  // The Zilla agents (0065): the person's helpers, with the words they used to give each
+  // one its job, and the marker that they were handed their starter agent.
+  buzzy_agents: "DELETE FROM buzzy_agents WHERE user_id = $1 RETURNING 1",
+  buzzy_agent_seed: "DELETE FROM buzzy_agent_seed WHERE user_id = $1 RETURNING 1",
+  // The colonies those agents are grouped into (0066), with the purpose the person wrote for each.
+  buzzy_agent_colonies: "DELETE FROM buzzy_agent_colonies WHERE user_id = $1 RETURNING 1",
+  // What the agents asked each other and what came back (0067), the Hive's whole log.
+  buzzy_hive_messages: "DELETE FROM buzzy_hive_messages WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */

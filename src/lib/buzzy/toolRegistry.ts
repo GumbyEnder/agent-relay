@@ -14,6 +14,10 @@
  *   - A declared-but-not-offered tool returns a plain-language refusal naming
  *     why, so the reply can say "not yet, because …" instead of "can't".
  *   - Adding a tool means adding ONE entry here plus its executor branch.
+ *   - The Hive's two tools (ask_bzilla, ask_agent: one agent asking another, hive.ts) are
+ *     never in the always-on list. They have their own gate, "hive", and are offered only
+ *     when the turn says so (ToolContext.hive): an agent's turn is offered the first, a
+ *     BeeZilla turn that is about one of the person's agents the second.
  */
 
 import { CALCULATE_TOOL } from "./calc";
@@ -24,14 +28,16 @@ import { WEB_SEARCH_TOOL } from "./search";
 import { READ_WEB_PAGE_TOOL } from "./webpage";
 import { GENERATE_MUSIC_TOOL } from "./music";
 import { GENERATE_VIDEO_TOOL } from "./video";
+import { ASK_AGENT_TOOL, ASK_BZILLA_TOOL } from "./hive";
 import { USE_BROWSER_TOOL } from "./browserRun";
 
 /**
  * always: every tool turn. draft: once the brief is complete or the owner asked for the file.
  * browser: a turn whose board has a browser node (the globe), or whose message asks BeeZilla to
  * do something on a website — never an ordinary chat turn (a tool list turns streaming off).
+ * hive: only on a turn whose ToolContext.hive says so (the Hive's delegation tools, hive.ts).
  */
-export type ToolGate = "always" | "draft" | "browser";
+export type ToolGate = "always" | "draft" | "browser" | "hive";
 export type ToolCost = "free" | "metered";
 /** acts-on-websites: clicks and types on a website for the owner, who asked for it (and watches it). */
 export type ToolSideEffect = "read-only" | "render-to-memory" | "acts-on-websites";
@@ -55,6 +61,16 @@ export interface ToolPolicy {
    * Lockdown privacy mode withholds every such tool.
    */
   egress?: boolean;
+  /** For a `hive` tool: the flag in ToolContext.hive that offers it. */
+  hiveFlag?: keyof HiveFlags;
+}
+
+/** Which of the Hive's two tools a turn is offered (hive.ts decides; see hiveOffer). */
+export interface HiveFlags {
+  /** An agent's turn may ask BeeZilla. */
+  askBzilla?: boolean;
+  /** BeeZilla's turn may ask one of the person's agents. */
+  askAgent?: boolean;
 }
 
 export const TOOL_POLICIES: ToolPolicy[] = [
@@ -223,6 +239,39 @@ export const TOOL_POLICIES: ToolPolicy[] = [
     sideEffects: "render-to-memory",
     withheldReason: "the deliverable is not ready yet — same gate as the document.",
   },
+  // ── The Hive: one agent asking another (hive.ts) ─────────────────────
+  // Owner, 2026-11-21: agents "talking to each other to get things done". Each call is ONE
+  // model completion with no tools (so depth is one, nothing can chain) and writes the
+  // question and its answer to the Hive log. Nothing leaves BeeZilla that the turn's own
+  // model call does not, so Lockdown leaves them on. They write only to the person's own log.
+  {
+    name: "ask_bzilla",
+    schema: ASK_BZILLA_TOOL,
+    gate: "hive",
+    hiveFlag: "askBzilla",
+    offered: true,
+    timeoutMs: 45_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "read-only",
+    egress: false,
+    withheldReason:
+      "only one of the person's agents that has a job can ask BeeZilla for help, and this conversation is not with one (it is BeeZilla's own, or an agent that has no job yet).",
+  },
+  {
+    name: "ask_agent",
+    schema: ASK_AGENT_TOOL,
+    gate: "hive",
+    hiveFlag: "askAgent",
+    offered: true,
+    timeoutMs: 45_000,
+    maxResultBytes: 4_000,
+    cost: "metered",
+    sideEffects: "read-only",
+    egress: false,
+    withheldReason:
+      "only BeeZilla herself can ask one of the person's agents, and only when what the person said is about one of them (it names one, or is about its job), which this message is not.",
+  },
 ];
 
 export interface ToolContext {
@@ -230,6 +279,8 @@ export interface ToolContext {
   draftGateOpen: boolean;
   /** The owner chose Lockdown: nothing that leaves BeeZilla is offered. */
   lockdown?: boolean;
+  /** The Hive's tools this turn is offered. Absent or false: none, which is every ordinary turn. */
+  hive?: HiveFlags;
   /**
    * The gate is open only because one mode decided to just do the work (oneMode.ts),
    * not because anyone asked for a file: the document makers are offered, the
@@ -244,6 +295,7 @@ export interface ToolContext {
 function gateOpen(p: ToolPolicy, ctx: ToolContext): boolean {
   if (p.gate === "always") return true;
   if (p.gate === "browser") return !!ctx.browser;
+  if (p.gate === "hive") return Boolean(p.hiveFlag && ctx.hive?.[p.hiveFlag]);
   return ctx.draftGateOpen;
 }
 function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
@@ -258,6 +310,15 @@ function allowed(p: ToolPolicy, ctx: ToolContext): boolean {
 /** The schemas the model is allowed to see on this turn. */
 export function offeredTools(ctx: ToolContext): unknown[] {
   return TOOL_POLICIES.filter((p) => allowed(p, ctx)).map((p) => p.schema);
+}
+
+/**
+ * Only the Hive's tools this turn is offered, for a turn that is not offered the others (no
+ * draft gate, no document asked for): the schemas of ask_bzilla and ask_agent, whichever
+ * ctx.hive allows, and [] when it allows neither.
+ */
+export function offeredHiveTools(ctx: ToolContext): unknown[] {
+  return TOOL_POLICIES.filter((p) => p.gate === "hive" && allowed(p, ctx)).map((p) => p.schema);
 }
 
 export function offeredToolNames(ctx: ToolContext): string[] {
@@ -280,6 +341,9 @@ export function refusalFor(name: string, ctx: ToolContext): string | null {
   }
   if (ctx.lockdown && policy.egress) {
     return `${name} is off in Lockdown — nothing leaves BeeZilla in that mode. The privacy control on the Talk bar switches it back.`;
+  }
+  if (policy.gate === "hive" && !allowed(policy, ctx)) {
+    return `${name} is not available in this conversation — ${policy.withheldReason ?? "this conversation is not one that may ask."}`;
   }
   if (policy.gate === "draft" && !ctx.draftGateOpen) {
     return `${name} is not available yet — ${policy.withheldReason ?? "the brief is not complete."}`;
