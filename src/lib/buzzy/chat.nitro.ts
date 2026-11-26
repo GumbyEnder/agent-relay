@@ -48,7 +48,7 @@ import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
-import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
+import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision, deleteGraph } from "./graphs";
 import { parseGraphDetailPath } from "./orchestration";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
 import { conversationPictures } from "./chatPictures";
@@ -1766,8 +1766,33 @@ export default defineEventHandler(async (event) => {
       return { ok: true, id: saved.id, version: saved.version };
     }
 
+    if (method === "DELETE") {
+      // A graph a person created is theirs to remove. Before this branch the
+      // request fell through to the 405 below, so the only copy of a scratch
+      // workflow could never be deleted.
+      if (!graphId) {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Name the graph to delete: DELETE /api/buzzy/graphs/:id", code: "graph_id_required" };
+      }
+      const r = await deleteGraph(user.id, graphId);
+      if (!r.ok && r.code === "not_found") {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such graph on this account.", code: "not_found" };
+      }
+      if (!r.ok) {
+        setResponseStatus(event, 409);
+        return {
+          ok: false,
+          error: `This graph has a run that is still ${r.status === "awaiting_approval" ? "waiting for approval" : r.status === "running" ? "running" : "queued"} — finish or cancel it first.`,
+          code: "active_run",
+          status: r.status,
+        };
+      }
+      return { ok: true, deleted: graphId, runsDeleted: r.runs };
+    }
+
     setResponseStatus(event, 405);
-    return { ok: false, error: "Use GET or POST.", code: "method_not_allowed" };
+    return { ok: false, error: "Use GET, POST or DELETE.", code: "method_not_allowed" };
   }
 
   // ── POST /api/buzzy/chat — session-gated ─────────────────────────────
