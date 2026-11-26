@@ -188,6 +188,7 @@ try {
     ["experts", "Experts"],
     ["recipes", "Recipes"],
     ["sketch", "Sketch"],
+    ["orchestrate", "Orchestrate"],
     ["studio", "Music studio"],
     ["capabilities", "What BeeZilla can do"],
     ["download", "Download"],
@@ -200,7 +201,11 @@ try {
   const absent = new Set(
     absentBlock ? [...absentBlock[1].matchAll(/([a-z][a-z0-9-]*)\s*:/g)].map((m) => m[1]) : [],
   );
-  const linksBlock = /var LINKS = \[([\s\S]*?)\]\.filter\(/.exec(navjs.body);
+  // LINKS is either a plain array or `.filter(...)`ed (DESKTOP_ABSENT). Both are
+  // read the same way, so the smoke does not break on whether the tree is missing a page.
+  const linksBlock =
+    /var LINKS = \[([\s\S]*?)\n {2}\];/.exec(navjs.body) ??
+    /var LINKS = \[([\s\S]*?)\]\.filter\(/.exec(navjs.body);
   if (!linksBlock) await die("/buzzy/nav.js has no LINKS table to read (nav rebuilt by hand?)");
   const links = [...linksBlock[1].matchAll(/\{ id: "([^"]+)", href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => ({ id: m[1], href: m[2], label: m[3] }),
@@ -208,7 +213,7 @@ try {
   const row = links.filter((l) => !absent.has(l.id));
   if (row.length !== NAV_ORDER.length) {
     await die(
-      `nav.js LINKS carries ${row.length} places after DESKTOP_ABSENT, expected ${NAV_ORDER.length}: ${JSON.stringify(row.map((l) => [l.id, l.label]))}`,
+      `nav.js LINKS carries ${row.length} places in web order, expected ${NAV_ORDER.length}: ${JSON.stringify(row.map((l) => [l.id, l.label]))}`,
     );
   }
   NAV_ORDER.forEach(([id, label], i) => {
