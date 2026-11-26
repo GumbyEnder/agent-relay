@@ -119,6 +119,48 @@ assert(
   `#bzPlaces order (${placeIds.join(",")}) does not match the nav's extras (${expectedPlaces.join(",")}) — the places row and the nav disagree`,
 );
 
+// ── the row is BUILT from LINKS, and the rule is `more` plus Download ──────
+// talk.html still ships the seven anchors, but nav.js now rebuilds the row from
+// LINKS on every paint (that is how the markup stops being a second copy nobody
+// updates). The rule is the contract, so it is asserted as a rule and then
+// applied to LINKS in this file — not hard-coded as seven ids that would have to
+// be edited in the same breath as the nav.
+assert(
+  /window\.BeeZillaChrome = \{[^}]*\blinks: LINKS\b/.test(navJs),
+  "nav.js does not publish LINKS on window.BeeZillaChrome — the places row would read a second list",
+);
+assert(
+  /function buildPlacesRow\(\)/.test(navJs),
+  "nav.js has no buildPlacesRow() — #bzPlaces is back to whichever anchors the markup shipped",
+);
+assert(
+  /var wanted = links\.filter\(function \(l\) \{ return l\.more === true \|\| l\.id === "download"; \}\);/.test(navJs),
+  "nav.js buildPlacesRow does not select LINKS' `more: true` entries plus download",
+);
+assert(
+  /function paintPlacesRow\(\) \{\s*buildPlacesRow\(\);/.test(navJs),
+  "nav.js paintPlacesRow no longer builds the row before painting it — the state would be painted onto stale anchors",
+);
+assert(
+  /if \(isTalk\(currentKey\)\) \{[\s\S]{0,400}?paintPlacesRow\(\);/.test(navJs),
+  "a direct load of Talk never calls paintPlacesRow() — the row would stay whatever the markup shipped",
+);
+
+// Exactly the seven the row can hold, in nav order: the six `more: true` places
+// plus Download. The five main places are #bzTabs tabs, not place anchors.
+const builtPlaces = navLinks.filter((l) => l.more || l.id === "download").map((l) => l.id);
+assert(
+  builtPlaces.length === 7,
+  `buildPlacesRow would put ${builtPlaces.length} places in the row (${builtPlaces.join(",")}), not 7`,
+);
+assert(
+  builtPlaces.join(",") === expectedPlaces.join(","),
+  `buildPlacesRow would build (${builtPlaces.join(",")}) but the row expects (${expectedPlaces.join(",")})`,
+);
+for (const mainId of ["talk", "library", "memory", "experts", "recipes"]) {
+  assert(!builtPlaces.includes(mainId), `nav.js puts the main place "${mainId}" in the places row — it is a #bzTabs tab`);
+}
+
 // The raw file is what /buzzy/talk.html serves directly; the rendered /buzzy/talk
 // gets NAV_ROW substituted into the same <nav id="bzNav">. Both are read by real
 // people, so the hand-written header must carry the same links in the same order.

@@ -1972,7 +1972,9 @@
     setInterval(function () { paint(); }, 1500);
   }
 
-  window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed };
+  // `links` is the one place list, published so the places row can be built from
+  // the same array the nav row is built from. Two lists is how rows drift.
+  window.BeeZillaChrome = { boot: boot, section: section, syncBleed: applyBleed, links: LINKS };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
@@ -2022,6 +2024,56 @@
     return /^\/buzzy(\/talk)?$/.test(String(key || "").replace(/[?#].*$/, "").replace(/\.html$/, "").replace(/\/+$/, ""));
   }
 
+  // ── The row of places is LINKS, not a second hand-written list ───────────
+  // #bzPlaces used to carry its own seven anchors while nav.js carried the same
+  // places in LINKS. Two lists, one order to keep — so they drift. The row is
+  // built here from LINKS, but only the entries that belong in this row: the
+  // extras (`more: true`) plus Download.
+  //
+  // NOT talk, library, memory, experts or recipes. Those five are the main places
+  // and they already have a home in #bzTabs — Talk is the talk bar, the other four
+  // are its tabs. Adding them here would put eleven links beside the six tabs and
+  // crowd the phone row (the gear already overlaps the place labels there). The
+  // row is the same seven Talk ships: Sketch, Orchestrate, Music studio, What
+  // BeeZilla can do, Download, Honey, Publish.
+  //
+  // Download is included by id, not by a `more` flag: #350 put it in the row on
+  // purpose (a person who wants the installer should not open "More" to find it),
+  // so LINKS does not mark it `more: true`. The flag alone is not the rule.
+  function buildPlacesRow() {
+    var row = document.getElementById("bzPlaces");
+    if (!row) return;
+    var list = row.querySelector("nav.bz-places");
+    if (!list) {
+      list = document.createElement("nav");
+      list.className = "bz-places";
+      list.setAttribute("aria-label", "Places");
+      row.appendChild(list);
+    }
+    // LINKS lives in the chrome IIFE above; read it through the one export rather
+    // than re-declaring a second list here.
+    var links = (window.BeeZillaChrome && window.BeeZillaChrome.links) || [];
+    var wanted = links.filter(function (l) { return l.more === true || l.id === "download"; });
+    Array.prototype.forEach.call(list.querySelectorAll("a[data-place]"), function (a) {
+      var id = a.getAttribute("data-place");
+      var keep = wanted.some(function (l) { return l.id === id; });
+      if (!keep) list.removeChild(a);
+    });
+    wanted.forEach(function (l) {
+      var a = list.querySelector('a[data-place="' + l.id + '"]');
+      if (!a) {
+        a = document.createElement("a");
+        a.setAttribute("data-place", l.id);
+      }
+      a.textContent = l.label;
+      a.href = l.href;
+      // Append in LINKS order: reusing an anchor that is already in the row keeps
+      // its old position, so the row would still be whatever the markup shipped.
+      list.appendChild(a);
+    });
+  }
+  window.bzBuildPlacesRow = buildPlacesRow;
+
   // ── Who lights the places row, and when ──────────────────────────────────
   // #bzPlaces belongs to Talk's header, which this shell paints onto every other
   // page — so its "you are here" state must be painted by the thing that paints
@@ -2032,6 +2084,7 @@
   // mapping and one answer. On Talk the open TAB is Talk's own state (the pane you
   // have open), which browse.js owns; this only clears the row off Talk.
   function paintPlacesRow() {
+    buildPlacesRow();
     var row = document.getElementById("bzPlaces");
     if (!row) return;
     var chrome = window.BeeZillaChrome;
@@ -2752,6 +2805,9 @@
       // Talk opened directly: its header is in its own markup; copy its sheets for it.
       ensurePageWrapper();
       buildHeadCss(firstSheets);
+      // Build the row now: on a soft navigation finish() paints it, but a direct
+      // load of Talk never goes through finish().
+      paintPlacesRow();
     } else {
       // Another page opened directly: its sheets keep out of the header, then the
       // header is fetched.
