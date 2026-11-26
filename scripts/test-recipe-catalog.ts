@@ -280,7 +280,7 @@ const entry = {
       try {
         const rt = JSON.parse(readFileSync(file, "utf8"));
         if (rt?.port) return rt as { port: number; host: string; token: string };
-      } catch {}
+      } catch { /* nothing to do */ }
       await new Promise((r) => setTimeout(r, 500));
     }
     return null;

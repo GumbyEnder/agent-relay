@@ -41,7 +41,7 @@ async function boot(dataDir) {
     try {
       const parsed = JSON.parse(readFileSyncSafe(join(dataDir, "runtime.json")));
       if (parsed?.port) rt = parsed;
-    } catch {}
+    } catch { /* nothing to do */ }
     if (!rt) await sleep(500);
   }
   return { child, rt };

@@ -241,7 +241,7 @@ let dataDir = mkdtempSync(join(tmpdir(), "bz-connect-"));
   let result = null;
   try {
     result = JSON.parse(line.slice(line.indexOf("CONNECT_RESULT:") + "CONNECT_RESULT:".length));
-  } catch {}
+  } catch { /* nothing to do */ }
 
   check("the fake cloud was asked for a token", mintCalls >= 2, `${mintCalls} mint call(s)`);
   check("a signed-out first attempt is retried after sign-in", result?.ok === true, result?.error ?? line.slice(0, 80));
@@ -271,7 +271,7 @@ let dataDir = mkdtempSync(join(tmpdir(), "bz-connect-"));
   let result = null;
   try {
     result = JSON.parse(line.slice(line.indexOf("CONNECT_RESULT:") + "CONNECT_RESULT:".length));
-  } catch {}
+  } catch { /* nothing to do */ }
   check("a 503 is refused", result?.ok !== true, result?.error);
   check("the 503 message names the deployment, not the user", /not configured|not available/i.test(String(result?.error ?? "")), String(result?.error ?? "").slice(0, 80));
   check("nothing is saved when minting fails", readStore(dataDir) === null, readStore(dataDir) ? "store written" : "no store");
@@ -289,7 +289,7 @@ let dataDir = mkdtempSync(join(tmpdir(), "bz-connect-"));
   let result = null;
   try {
     result = JSON.parse(line.slice(line.indexOf("CONNECT_RESULT:") + "CONNECT_RESULT:".length));
-  } catch {}
+  } catch { /* nothing to do */ }
 
   check("sign-in still succeeds when search is missing", result?.ok === true, result?.error ?? line.slice(0, 60));
   check("the search failure is reported as 'not deployed'", result?.search?.notDeployed === true, JSON.stringify(result?.search ?? {}).slice(0, 80));
@@ -346,7 +346,7 @@ searchMode = "ok";
   let result = null;
   try {
     result = JSON.parse(line.slice(line.indexOf("REFRESH_RESULT:") + "REFRESH_RESULT:".length));
-  } catch {}
+  } catch { /* nothing to do */ }
   const stored = readStore(dataDir);
   const storedExpiry = stored?.expiresAt ? Date.parse(stored.expiresAt) : 0;
   check("an expired managed token re-mints on launch, no prompt", result?.ok === true && result?.needsSignIn !== true, result?.error ?? line.slice(0, 80));
@@ -385,7 +385,7 @@ searchMode = "ok";
   });
   const line = out.split("\n").find((l) => l.includes("REFRESH_RESULT:")) ?? "";
   let result = null;
-  try { result = JSON.parse(line.slice(line.indexOf("REFRESH_RESULT:") + "REFRESH_RESULT:".length)); } catch {}
+  try { result = JSON.parse(line.slice(line.indexOf("REFRESH_RESULT:") + "REFRESH_RESULT:".length)); } catch { /* nothing to do */ }
   check("a silent refresh with no cloud session reports 'sign in needed'", result?.ok === false && result?.needsSignIn === true, result?.error ?? line.slice(0, 80));
   check("a failed refresh does not invent a credential", readStore(dataDir)?.keyCipher === "bz1.expired.payload", "store untouched");
 }

@@ -93,7 +93,7 @@ const waitForRuntime = async (dataDir, ms = 60_000) => {
     if (alive(serverPid)) {
       try {
         process.kill(serverPid, "SIGKILL");
-      } catch {}
+      } catch { /* nothing to do */ }
     }
   }
   rmSync(dataDir, { recursive: true, force: true });
@@ -139,7 +139,7 @@ const waitForRuntime = async (dataDir, ms = 60_000) => {
     for (const pid of [launcherPid, serverPid]) {
       try {
         process.kill(pid, "SIGKILL");
-      } catch {}
+      } catch { /* nothing to do */ }
     }
   }
   rmSync(dataDir, { recursive: true, force: true });

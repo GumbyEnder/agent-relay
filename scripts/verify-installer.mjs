@@ -133,7 +133,7 @@ if (!existsSync(APP)) {
       // nothing. Counting rows hid exactly that.
       pins = rows.filter((r) => r && typeof r.publicKey === "string" && r.publicKey.trim() !== "").length;
     }
-  } catch {}
+  } catch { /* nothing to do */ }
   const pinDetail = `${pins >= 0 ? pins : "?"} usable of ${pinRows} row(s)`;
   check("the publisher pin file is staged", pins >= 0, pins >= 0 ? pinDetail : "missing/unreadable");
   if (allowZeroPins) {

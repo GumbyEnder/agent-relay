@@ -74,7 +74,7 @@ async function boot(store) {
         rt = parsed;
         break;
       }
-    } catch {}
+    } catch { /* nothing to do */ }
     await sleep(500);
   }
   return { child, dataDir, rt };
