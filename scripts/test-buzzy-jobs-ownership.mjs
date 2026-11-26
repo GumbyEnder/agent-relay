@@ -189,13 +189,26 @@ async function readMailUrl(email) {
 }
 
 async function signIn(email) {
-  const res = await fetch(`${BASE}/api/auth/sign-in/magic-link`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: BASE },
-    body: JSON.stringify({ email, callbackURL: "/" }),
-  });
+  // Readiness, not entitlement: on a freshly booted server `/` answers while the
+  // API route table is still settling, and this POST then comes back 404 — which
+  // is indistinguishable from "this deployment has no auth". Retry a couple of
+  // seconds before believing it (a test:ci flake, not a product bug).
+  const deadline = Date.now() + 5_000;
+  let res;
+  let body = "";
+  for (;;) {
+    res = await fetch(`${BASE}/api/auth/sign-in/magic-link`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({ email, callbackURL: "/" }),
+    });
+    if (res.ok) break;
+    body = await res.text();
+    const settling = [404, 405, 429, 502, 503].includes(res.status) && !/INVALID_ORIGIN/i.test(body);
+    if (!settling || Date.now() >= deadline) break;
+    await sleep(250);
+  }
   if (!res.ok) {
-    const body = await res.text();
     // Driving a server you did not start (the `[baseUrl]` mode) only works when
     // that server trusts this origin: Better Auth compares the request's origin
     // against its baseURL/trustedOrigins, and a bare localhost:PORT server is not
@@ -207,7 +220,7 @@ async function signIn(email) {
           `or run this suite with no arguments so it boots its own server.`,
       );
     }
-    throw new Error(`magic-link request failed ${res.status}: ${body}`);
+    throw new Error(`magic-link request failed ${res.status} after the retry window: ${body}`);
   }
   const url = await readMailUrl(email);
   const vres = await fetch(url, { redirect: "manual" });
