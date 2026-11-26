@@ -31,6 +31,11 @@
  *   PUT  /api/buzzy/whiteboards/:id — save it ({ state, baseRev }; 409 + the account's copy on a clash)
  *   GET  /api/buzzy/whiteboards/:id/versions — its history, newest first
  *   POST /api/buzzy/whiteboards/:id/versions/:vid/restore — go back to an earlier version
+ *   GET  /api/buzzy/agents          — the Zilla agents (BeeZilla herself first), what + adds next, the colours
+ *   POST /api/buzzy/agents          — add an agent ({ creature?, look?, name?, size?, color? })
+ *   PATCH /api/buzzy/agents/:id     — change its name, colour, size, job or face
+ *   DELETE /api/buzzy/agents/:id    — remove it (its conversations stay in History)
+ *   POST /api/buzzy/agents/:id/identity — tell it its job ({ text, sessionId? })
  */
 
 import { defineEventHandler, getMethod, getHeader, setResponseHeader, setResponseStatus } from "h3";
@@ -42,6 +47,7 @@ import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
 import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
 import { boardBuildResponse, readBuildRequest } from "./boardOrchestrator";
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
+import { agentsRoute, agentForSession, ownsAgent, AGENT_BODY_MAX_BYTES, type AgentTurn } from "./agents";
 import type { VoiceHandlers } from "./voice";
 import { summarizeSessionNow } from "./sessions";
 import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
@@ -848,6 +854,17 @@ export default defineEventHandler(async (event) => {
         }
       }
     }
+    // Which of the person's Zilla agents this conversation belongs to (null: BeeZilla's
+    // own), so reopening it from History can carry on as that agent.
+    let agentId: string | null = null;
+    if (sessionId) {
+      try {
+        const ag = await sql<{ agent_id: string | null }>`
+          SELECT agent_id FROM buzzy_sessions WHERE id = ${sessionId} AND user_id = ${user.id} LIMIT 1
+        `;
+        agentId = typeof ag[0]?.agent_id === "string" ? ag[0].agent_id : null;
+      } catch { agentId = null; }
+    }
     return {
       messages: rows.map((r) => ({
         jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
@@ -856,6 +873,7 @@ export default defineEventHandler(async (event) => {
         createdAt: r.created_at,
       })),
       slots,
+      agentId,
     };
   }
 
@@ -1692,6 +1710,15 @@ export default defineEventHandler(async (event) => {
 
     const sql = await getSql();
 
+    // Who answers: the conversation decides. A session that belongs to one of the person's
+    // Zilla agents is spoken by that agent (agents.ts: its name, its job, in the prompt);
+    // any other conversation is BeeZilla's own. Never a field of the request: a page that
+    // says "agent: x" cannot make a conversation speak as an agent it does not belong to.
+    let agent: AgentTurn | null = null;
+    if (sessionId) {
+      try { agent = await agentForSession(sql, userId, sessionId); } catch { agent = null; }
+    }
+
     // The account's privacy mode wins when it is Lockdown: a second device, or a
     // page whose slider was never touched, must not run outside calls the owner
     // turned off. (Table from migration 0057; absent on an older database.)
@@ -1837,6 +1864,7 @@ export default defineEventHandler(async (event) => {
         companyName: company?.name ?? null,
         companyFacts: company?.facts ?? [],
         customerMemoryBlock,
+        agent,
         surface,
         speech: opts?.speech,
         voiceName,
@@ -3392,6 +3420,41 @@ export default defineEventHandler(async (event) => {
     }
     const sql = await getSql();
     const out = await whiteboardRoute(sql, user.id, method, path.slice("/api/buzzy/whiteboards/".length), body);
+    setResponseStatus(event, out.status);
+    return out.body;
+  }
+
+  // ── /api/buzzy/agents — the Zilla agents in the left sidebar ──────────────
+  // Owner, 2026-11-21: dedicated helpers, each with a name, a size, a colour and a job;
+  // the bee (BeeZilla herself) first, one greyed-out bunny under her, and a plus to add
+  // more. The person's own agents only; agents.ts has the rules (list, add, change,
+  // remove, and POST :id/identity, where they tell an agent its job).
+  if (path === "/api/buzzy/agents" || path.startsWith("/api/buzzy/agents/")) {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { ok: false, error: "Sign in required", code: "signed_out" };
+    }
+    let body: unknown = undefined;
+    if (method === "POST" || method === "PATCH") {
+      const tooBig = () => {
+        setResponseStatus(event, 413);
+        return { ok: false, error: "That is more than an agent needs. A few sentences are plenty.", code: "too_big" };
+      };
+      if (Number(getHeader(event, "content-length") || 0) > AGENT_BODY_MAX_BYTES) return tooBig();
+      let raw = "";
+      try { raw = await event.req.text(); } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "That could not be read.", code: "bad_body" };
+      }
+      if (new TextEncoder().encode(raw).length > AGENT_BODY_MAX_BYTES) return tooBig();
+      try { body = raw ? JSON.parse(raw) : {}; } catch {
+        setResponseStatus(event, 400);
+        return { ok: false, error: "Send JSON.", code: "bad_json" };
+      }
+    }
+    const sql = await getSql();
+    const out = await agentsRoute(sql, user.id, method, path.slice("/api/buzzy/agents".length), body);
     setResponseStatus(event, out.status);
     return out.body;
   }
@@ -5378,7 +5441,7 @@ export default defineEventHandler(async (event) => {
     }
     const rows = companyFilter
       ? await sql`
-          SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.created_at, s.updated_at,
+          SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.agent_id, s.created_at, s.updated_at,
             (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count,
             (SELECT left(m.content, 220) FROM buzzy_chat_messages m
               WHERE m.session_id = s.id AND m.role = 'user'
@@ -5389,7 +5452,7 @@ export default defineEventHandler(async (event) => {
           LIMIT 100
         `
       : await sql`
-          SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.created_at, s.updated_at,
+          SELECT s.id, s.job_id, s.title, s.summary, s.company_id, s.agent_id, s.created_at, s.updated_at,
             (SELECT count(*) FROM buzzy_chat_messages m WHERE m.session_id = s.id) AS message_count,
             (SELECT left(m.content, 220) FROM buzzy_chat_messages m
               WHERE m.session_id = s.id AND m.role = 'user'
@@ -5406,6 +5469,8 @@ export default defineEventHandler(async (event) => {
         title: r.title,
         summary: r.summary,
         companyId: typeof r.company_id === "string" ? r.company_id : null,
+        // The Zilla agent this conversation is with (null: BeeZilla's own).
+        agentId: typeof r.agent_id === "string" ? r.agent_id : null,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
         messageCount: Number(r.message_count),
@@ -5445,27 +5510,40 @@ export default defineEventHandler(async (event) => {
     }
     const id = `sess_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     const sql = await getSql();
+    // A conversation with one of the person's Zilla agents carries its id (agents.ts):
+    // only the person's own agents, so a conversation can't be tagged with someone else's.
+    let agentId: string | null = null;
+    if (typeof body.agentId === "string" && body.agentId) {
+      if (!(await ownsAgent(sql, user.id, body.agentId))) {
+        setResponseStatus(event, 400);
+        return { error: "That agent isn't on your account.", code: "bad_agent" };
+      }
+      agentId = body.agentId;
+    }
     // Resume, don't multiply. Every POST used to mint a new session, and a new
     // session mints its own job: one lullaby request left 56 identical work items
     // in the list. An open thread for this account (same company scope, touched in
     // the last 12 hours) IS the thread the next turn belongs to. `fresh: true`
     // is the explicit opt-out, which is what the New chat button sends.
     if (body.fresh !== true) {
+      // An agent's conversations and BeeZilla's own never stand in for each other.
       const recent = companyId
         ? await sql<{ id: string; job_id: string | null; title: string; company_id: string | null }>`
             SELECT id, job_id, title, company_id FROM buzzy_sessions
             WHERE user_id = ${user.id} AND company_id = ${companyId}
+              AND agent_id IS NOT DISTINCT FROM ${agentId}
               AND updated_at > now() - interval '12 hours'
             ORDER BY updated_at DESC LIMIT 1
           `
         : await sql<{ id: string; job_id: string | null; title: string; company_id: string | null }>`
             SELECT id, job_id, title, company_id FROM buzzy_sessions
             WHERE user_id = ${user.id} AND company_id IS NULL
+              AND agent_id IS NOT DISTINCT FROM ${agentId}
               AND updated_at > now() - interval '12 hours'
             ORDER BY updated_at DESC LIMIT 1
           `;
       if (recent.length) {
-        return { ok: true, resumed: true, session: { id: recent[0]!.id, jobId: recent[0]!.job_id, title: recent[0]!.title, companyId: recent[0]!.company_id } };
+        return { ok: true, resumed: true, session: { id: recent[0]!.id, jobId: recent[0]!.job_id, title: recent[0]!.title, companyId: recent[0]!.company_id, agentId } };
       }
     }
     if (companyId) {
@@ -5478,9 +5556,9 @@ export default defineEventHandler(async (event) => {
       }
     }
     const rows = await sql`
-      INSERT INTO buzzy_sessions (id, user_id, job_id, title, company_id)
-      VALUES (${id}, ${user.id}, ${jobId}, ${title}, ${companyId})
-      RETURNING id, job_id, title, summary, company_id, created_at, updated_at
+      INSERT INTO buzzy_sessions (id, user_id, job_id, title, company_id, agent_id)
+      VALUES (${id}, ${user.id}, ${jobId}, ${title}, ${companyId}, ${agentId})
+      RETURNING id, job_id, title, summary, company_id, agent_id, created_at, updated_at
     `;
     const s = rows[0];
     setResponseStatus(event, 201);
@@ -5488,6 +5566,7 @@ export default defineEventHandler(async (event) => {
       session: {
         id: s.id, jobId: s.job_id, title: s.title, summary: s.summary,
         companyId: typeof s.company_id === "string" ? s.company_id : null,
+        agentId: typeof s.agent_id === "string" ? s.agent_id : null,
         createdAt: s.created_at, updatedAt: s.updated_at, messageCount: 0,
       },
     };

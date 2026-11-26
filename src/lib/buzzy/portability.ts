@@ -44,6 +44,14 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   const memory = await sql`
     SELECT key, value, updated_at FROM buzzy_user_memory
     WHERE user_id = ${userId} ORDER BY updated_at DESC`;
+  // The Zilla agents the person made and the job they gave each one (0065). Their own
+  // words, so they leave with them. An older database without the table exports none.
+  let agents: any[] = [];
+  try {
+    agents = await sql`
+      SELECT name, creature, look, role, instructions, face, created_at
+      FROM buzzy_agents WHERE user_id = ${userId} ORDER BY pos ASC, created_at ASC`;
+  } catch { agents = []; }
 
   const zip = new JSZip();
   const stamp = new Date().toISOString().slice(0, 10);
@@ -53,6 +61,11 @@ export async function buildExportBundle(sql: any, userId: string): Promise<Expor
   zip.file("company_facts.csv", toCsv(facts.map((f: any) => ({ company_id: f.company_id, key: f.fact_key, label: f.label, value: f.value, status: f.status, source: f.source_label }))));
   zip.file("remembered_decisions.csv", toCsv(memory.map((m: any) => ({ key: m.key, value: m.value, updated_at: m.updated_at }))));
   zip.file("templates.csv", toCsv(templates.map((t: any) => ({ id: t.id, name: t.name, kind: t.kind, headings: (t.structure?.headings ?? []).join(" | ") }))));
+  if (agents.length) {
+    zip.file("zilla_agents.csv", toCsv(agents.map((a: any) => ({
+      name: a.name, zilla: a.look ? `${a.look} ${a.creature}` : a.creature, helps_with: a.role, in_your_words: a.instructions, face: a.face,
+    }))));
+  }
 
   // Approved documents as markdown files
   const docs = zip.folder("approved-documents");
@@ -126,6 +139,10 @@ export const DELETION_STATEMENTS: Record<string, string> = {
   // but the explicit pass keeps the receipt truthful), then the boards.
   buzzy_whiteboard_versions: "DELETE FROM buzzy_whiteboard_versions WHERE user_id = $1 RETURNING 1",
   buzzy_whiteboards: "DELETE FROM buzzy_whiteboards WHERE user_id = $1 RETURNING 1",
+  // The Zilla agents (0065): the person's helpers, with the words they used to give each
+  // one its job, and the marker that they were handed their starter agent.
+  buzzy_agents: "DELETE FROM buzzy_agents WHERE user_id = $1 RETURNING 1",
+  buzzy_agent_seed: "DELETE FROM buzzy_agent_seed WHERE user_id = $1 RETURNING 1",
 };
 
 /** One-action account deletion. Returns per-table row counts for the receipt. */
