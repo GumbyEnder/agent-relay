@@ -790,6 +790,7 @@
     doc.sync.rev = rev;
     doc.sync.dirty = false;
     doc.sync.base = null;
+    delete doc.sync.fresh;
     ours(doc);
     e.cleanCopy = copy(content);
     if (changed) applyTo(e, doc, content);
@@ -843,6 +844,9 @@
     var doc = docOf(e);
     if (!doc || !doc.sync.dirty || e.off) return Promise.resolve();
     if (foreign(doc)) { e.off = true; setStatus(e, "local"); return Promise.resolve(); }
+    // Emptied for a new conversation (reset): the account gets what was on it, then the
+    // blank board, before anything put on it since.
+    if (doc.sync.fresh) return startFresh(e).then(function (ok) { if (ok) return pushNow(e, round); });
     if (doc.sync.rev == null && !hasContent(doc)) {
       // Never in the account, and nothing on it now: there is nothing to send.
       doc.sync.dirty = false;
@@ -875,6 +879,9 @@
         return;
       }
       if (res.status === 409 && j.board) {
+        // Emptied for a new conversation while this save was out (reset): the account's
+        // copy is dealt with next (startFresh), never merged into the new board.
+        if (now.sync.fresh) return;
         return mergeWith(e, j.board).then(function (again) {
           if (!again) { settled(e); return; }
           if (round < 3) return pushNow(e, round + 1);
@@ -926,6 +933,9 @@
       settled(e);
       return;
     }
+    // Emptied for a new conversation and not saved so yet: that goes first (pushNow),
+    // and nothing the account still has from before comes back on top of it.
+    if (doc.sync.fresh) return pushNow(e, 0);
     if (!board) {
       if (doc.sync.rev != null && !doc.sync.dirty) {
         // The account no longer has it (it moved on into its conversation): follow.
@@ -964,6 +974,7 @@
       if (!doc.sync.dirty) { doc.sync.dirty = true; doc.sync.base = doc.sync.rev == null ? null : copy(contentOf(doc)); }
       ours(doc);
       applyTo(e, doc, merged);
+      if (!writtenDown(e, doc)) return pushNow(e, 0);   // kept set aside until this board is written down
     }
     try { localStorage.removeItem(key); } catch (_) { /* best effort */ }
     return pushNow(e, 0);
@@ -1053,20 +1064,225 @@
     return Promise.all([push(se), de.live ? push(de) : syncBoard(de)]);
   }
 
-  // A fresh visit starts on a blank board (owner, 2026-11-20: "It should open to a blank
-  // page each time"). The board in front of a new conversation is emptied, here and in
-  // the account, after the account's copy has been read, so nothing from another
-  // computer comes back on top of it. Its earlier versions stay in History.
+  // ── A blank board: every fresh visit, and New conversation ────────────────
+  // Owner, 2026-11-20: "It should open to a blank page each time"; testers, 2026-11-24:
+  // New conversation has to give a clean board. The board in front of a new conversation
+  // is emptied at once — whatever is put on it from then on is the new conversation's,
+  // and stays — and nothing that was on it is lost: the account keeps it in the board's
+  // History. A copy the account hadn't got yet (not sent, or offline) is kept on this
+  // computer ("bz.board.<id>~left") and sent there first; then the account's copy is
+  // emptied, which always starts a new History entry (whiteboards.ts recordVersion), so
+  // the drawing stays there to go back to and nothing from before comes back on top.
+  function leftKey(id) { return keyFor(id) + "~left"; }   // never an account's code: those are hex
+  function listAt(key) {
+    try {
+      var v = JSON.parse(localStorage.getItem(key) || "[]");
+      return Array.isArray(v) ? v.filter(function (d) { return d && Array.isArray(d.cards) && d.sync; }) : [];
+    } catch (_) { return []; }
+  }
+  function leftsOf(id) { return listAt(leftKey(id)); }
+  // One kept copy leaves the list (it is in History now, or back on the board).
+  function dropLeft(id, d) {
+    var q = leftsOf(id), sig = canon(contentOf(d)), who = d.sync.who || "";
+    for (var i = 0; i < q.length; i++) {
+      if ((q[i].sync.who || "") === who && canon(contentOf(q[i])) === sig) {
+        q.splice(i, 1);
+        try { if (q.length) save(leftKey(id), q); else localStorage.removeItem(leftKey(id)); } catch (_) { /* best effort */ }
+        return;
+      }
+    }
+  }
+  // Is this copy of the board what this browser has written down for it?
+  function writtenDown(e, doc) { return canon(contentOf(load(keyFor(e.id)) || blank())) === canon(contentOf(doc)); }
   function reset(id) {
     var e = engine(id || SCRATCH);
+    var doc = docOf(e);
+    // Another account's copy (someone else was signed in on this computer): reading the
+    // account sets it aside for them (settleWith); this account's own is emptied after.
+    if (doc && foreign(doc)) {
+      return pull(e).then(function () { var d = docOf(e); if (d && !foreign(d)) return reset(e.id); });
+    }
+    if (e.off) return Promise.resolve();
+    doc = doc || blank();
+    var had = hasContent(doc);
+    if (had) {
+      // The account hasn't got this copy yet: kept here, with any kept before, until it
+      // has (startFresh). If this browser can't keep it, the board stays as it is.
+      if (doc.sync.dirty) {
+        var queue = leftsOf(e.id);
+        queue.push(copy(doc));
+        if (!save(leftKey(e.id), queue)) return Promise.resolve();
+      }
+      editDoc(doc, function (d) { d.cards = []; d.links = []; });
+    }
+    doc.sync.fresh = true;
+    if (!doc.sync.dirty) { doc.sync.dirty = true; doc.sync.base = doc.sync.rev == null ? null : copy(contentOf(doc)); }
+    if (e.live && e.live.state === doc) { if (had) e.live.apply({ cards: [], links: [] }); else e.live.write(); }
+    else save(keyFor(e.id), doc);
+    return push(e);
+  }
+  // One save of a whole board as it is (a copy being kept, or the blank board), for the
+  // account `owner` names: { rev } once saved; { conflict: board } when another computer
+  // saved since; { refused: true } when the account won't keep it as it is (too big, or
+  // not a board); null when it can't be saved now (signed out, or someone else is
+  // signed in now).
+  function putWhole(e, rev, body, owner) {
+    var send = { state: body, baseRev: rev };
+    if (owner) send.owner = owner;
+    return request("PUT", API + encodeURIComponent(e.id), send).then(function (res) {
+      var j = res.json || {};
+      if (owner && j.who && j.who !== owner) return null;    // answered for someone else: not about this copy
+      if (res.status === 200 && j.ok) return { rev: j.rev };
+      if (res.status === 409 && j.board) return { conflict: j.board };
+      if (res.status === 401) { setStatus(e, "signedout"); return null; }
+      if (res.status === 403 && j.code === "other_account") return null;
+      if (res.status === 404 && j.code === "not_your_conversation") { e.off = true; setStatus(e, "local"); return null; }
+      if (res.status === 413 || res.status === 400) return { refused: true };
+      throw new Error("status " + res.status);
+    });
+  }
+  // The board was emptied for a new conversation (reset). The account first closes the
+  // History entry of what it still has (a blank save always starts a new entry, so the
+  // newest drawing is never overwritten); then each copy it hadn't got goes in as an entry
+  // of its own, oldest first, each followed by the blank board. Every save names the
+  // account (owner), so a copy never lands in an account that signed in meanwhile; a copy
+  // last saved to another account waits here for that one. When another computer saves
+  // in between, its entry is closed first, so its save keeps its own place. A copy the
+  // account won't keep (too big) goes back on the board, whose save then says why — never
+  // thrown away. Resolves true once done; false when it can't be done now (no connection
+  // is tried again later).
+  function startFresh(e) {
+    var queued = leftsOf(e.id);
+    return request("GET", API + encodeURIComponent(e.id)).then(function (res) {
+      if (res.status === 401) { setStatus(e, "signedout"); return false; }
+      if (res.status !== 200 || !res.json || !res.json.ok) throw new Error("status " + res.status);
+      var board = res.json.board || null;
+      var owner = whoNow;
+      var current = board ? contentOf(board.state) : { cards: [], links: [] };
+      var doc0 = docOf(e) || blank();
+      var blankBody = { v: 2, cards: [], links: [], view: doc0.view || { x: 0, y: 0, z: 1 } };
+      // This account's copy that was set aside while someone else was signed in here: kept
+      // in History too, so it never comes back on top of the new board (bringBack).
+      var asideKey = owner ? keyFor(e.id) + "~" + owner : "";
+      var aside = asideKey ? load(asideKey) : null;
+      var todo = [], others = [], refused = [];
+      if (aside && hasContent(aside)) todo.push(aside);
+      queued.forEach(function (d) { if (d.sync.who && owner && d.sync.who !== owner) others.push(d); else todo.push(d); });
+      // A copy that is already the account's latest needs no save of its own: it leaves the
+      // list once the blank save has closed its History entry.
+      var already = [];
+      while (todo.length && canon(contentOf(todo[0])) === canon(current)) already.push(todo.shift());
+      // A kept copy is done with: off the list (the set-aside one only if its slot still
+      // holds that very copy — someone else's newer draft may have taken it meanwhile).
+      function retire(d) {
+        if (d === aside) {
+          var still = load(asideKey);
+          if (still && canon(contentOf(still)) === canon(contentOf(aside))) { try { localStorage.removeItem(asideKey); } catch (_) { /* best effort */ } }
+        } else dropLeft(e.id, d);
+      }
+      // { again: true }: other saves kept winning — tried again later (retryLater).
+      function blankAt(at, round) {
+        return putWhole(e, at.rev, blankBody, owner).then(function (r) {
+          if (r && r.conflict) return (round || 0) < 3 ? blankAt({ rev: r.conflict.rev }, (round || 0) + 1) : { again: true };
+          return r && typeof r.rev === "number" ? r : null;
+        });
+      }
+      function keepOne(at, d, round) {
+        return putWhole(e, at.rev, forAccount(d), owner).then(function (r) {
+          if (!r) return null;
+          if (r.refused) { refused.push(d); return at; }
+          if (r.conflict) {
+            if ((round || 0) >= 3) return { again: true };
+            var next = { rev: r.conflict.rev };
+            var closing = hasContent(contentOf(r.conflict.state)) ? blankAt(next) : Promise.resolve(next);
+            return closing.then(function (b) { return !b || b.again ? b : keepOne(b, d, (round || 0) + 1); });
+          }
+          return blankAt(r).then(function (b) {
+            // In History now: off the list at once, so a later retry never keeps it twice.
+            if (b && !b.again) retire(d);
+            return b;
+          });
+        });
+      }
+      var chain = Promise.resolve({ rev: board ? board.rev : null });
+      if (hasContent(current)) {
+        chain = chain.then(function (at) {
+          return blankAt(at).then(function (b) { if (b && !b.again) already.forEach(retire); return b; });
+        });
+      }
+      todo.forEach(function (d) {
+        chain = chain.then(function (at) { return at && !at.again ? keepOne(at, d, 0) : at; });
+      });
+      return chain.then(function (at) {
+        if (!at) return false;
+        if (at.again) { retryLater(e); return false; }
+        var doc = docOf(e);
+        if (!doc) return false;
+        if (refused.length) {
+          var back = { cards: doc.cards, links: doc.links };
+          refused.forEach(function (d) { back = graft(back, contentOf(d)); });
+          if (e.live && e.live.state === doc) e.live.apply(back);
+          else { doc.cards = back.cards; doc.links = back.links; }
+          e.stuck = null;                 // its save is tried again, and says why it can't be kept
+        }
+        doc.sync.rev = at.rev;
+        doc.sync.base = at.rev == null ? null : { cards: [], links: [] };
+        ours(doc);
+        e.cleanCopy = { cards: [], links: [] };
+        // Copies of this account's still waiting: kept by a New conversation pressed
+        // meanwhile (the ones dealt with here already left the list) — they go next.
+        var waiting = leftsOf(e.id).filter(function (d) {
+          if (d.sync.who && owner && d.sync.who !== owner) return false;
+          return !refused.some(function (r) { return canon(contentOf(r)) === canon(contentOf(d)); });
+        });
+        if (waiting.length) { doc.sync.fresh = true; doc.sync.dirty = true; }    // pushNow goes round again
+        else { delete doc.sync.fresh; doc.sync.dirty = hasContent(doc); }
+        keep(e, doc);
+        // Not written down (this browser's storage is full): nothing more is dropped, and it
+        // is tried again later, never at once.
+        if (!writtenDown(e, doc)) { retryLater(e); return false; }
+        // A copy brought back onto the board leaves the list now that the board holds it.
+        refused.forEach(retire);
+        wentWell(e);
+        setStatus(e, doc.sync.dirty ? "saving" : "saved");
+        return true;
+      });
+    }).catch(function () { couldNotReach(e); return false; });
+  }
+
+  // What the end of a step changes on its card: the same as flow() on the board on screen.
+  function endFields(c, step) {
+    var f = { state: step.state === "failed" ? "failed" : "" };
+    if (step.title && !c.user) f.title = String(step.title).slice(0, 140);   // a title they gave it stays
+    if (step.url) f.url = String(step.url);
+    if (step.contentType) f.contentType = String(step.contentType);
+    if (step.thumb) f.thumb = String(step.thumb);
+    if (step.detail != null && !c.user && (step.kind === "agent" || !c.body)) f.body = String(step.detail).slice(0, 4000);
+    if (step.state === "failed") f.err = String(step.detail || c.err || "");
+    if (step.kind === "output" && step.url) f.kind = kindOf({ title: f.title || c.title, url: f.url, contentType: f.contentType || c.contentType });
+    return f;
+  }
+  // A turn that finished after the person moved to another conversation (or a 3D model or
+  // video of it that finished later): its board is not the one on screen, so the steps
+  // whose end is known ("done", "failed") are finished on that board, here and in the
+  // account. A step with no known end is left as it is: it may still be working.
+  function settle(id, steps) {
+    var e = engine(id || SCRATCH);
+    var last = {}, ends = {}, any = false;
+    (steps || []).forEach(function (st) { if (st && st.id) last[String(st.id)] = st; });
+    Object.keys(last).forEach(function (k) {
+      if (last[k].state === "done" || last[k].state === "failed") { ends[k] = last[k]; any = true; }
+    });
+    if (!any) return Promise.resolve();
     return pull(e).then(function () {
       return enqueue(e, function () {
         var doc = docOf(e);
         if (!doc || e.off || foreign(doc)) return;
-        if (!editDoc(doc, function (d) { d.cards = []; d.links = []; })) return;
-        if (e.live && e.live.state === doc) e.live.apply({ cards: [], links: [] });
-        else save(keyFor(e.id), doc);
-        return pushNow(e, 0);
+        // Card by card (patchCard): on screen again (reopened from History) that is the
+        // board's own settleCard, so the person's undo stays as it was.
+        (doc.cards || []).forEach(function (c) {
+          if (c && c.flow && c.state === "running" && ends[c.flow]) patchCard(e.id, c.id, endFields(c, ends[c.flow]));
+        });
       });
     });
   }
@@ -1547,6 +1763,18 @@
     function restore(json) {
       closeNodes();                 // its window holds the card that is about to be replaced
       var s = JSON.parse(json);
+      // A step of BeeZilla's shows where it is now: undoing or redoing the person's own
+      // change never puts a finished one back to "Working" (nor drops its file), nor
+      // marks one that is working again as finished.
+      var steps = {};
+      state.cards.forEach(function (c) { if (c && c.flow) steps[c.id] = c; });
+      (s.cards || []).forEach(function (c) {
+        var now = c && c.flow ? steps[c.id] : null;
+        if (!now || now.flow !== c.flow) return;
+        ["state", "url", "err", "kind", "contentType", "thumb"].forEach(function (k) {
+          if (Object.prototype.hasOwnProperty.call(now, k)) c[k] = now[k]; else delete c[k];
+        });
+      });
       state.cards = s.cards; state.links = s.links;
       rebuild();
       persist();
@@ -5665,6 +5893,8 @@
     sweep: sweep,
     /** Empty a board that isn't on screen, here and in the account (a fresh visit's "talk"). */
     reset: reset,
+    /** Finish the steps of a turn whose board is no longer on screen (New conversation mid-answer). */
+    settle: settle,
     merge: merge3,
     graft: graft,
     /** How much one wheel or pinch step zooms (scripts/test-board-zoom.ts). */

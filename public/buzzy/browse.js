@@ -597,8 +597,10 @@
           if (!b) return;
           var c = sessions[Number(b.getAttribute("data-open"))];
           if (c && window.bzOpenSession) {
+            // Talk moves the board along once the conversation has loaded (openSession):
+            // switching it here first drew a reply still on its way in the one being left
+            // onto the board of the one being opened.
             window.bzOpenSession(c);
-            try { localStorage.setItem("bz_session_id", c.id); } catch (_) { /* best effort */ }
             try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (_) { /* best effort */ }
           }
         });

@@ -65,7 +65,9 @@ printed in the server log as `[mail:dev] … Link: …`.) `scripts/probe-*.mjs` 
   answers `/v1/chat/completions` — stream and non-stream — and returns the tool call your test
   needs. Start BeeZilla with `BZ_CHAT_BASE_URL=http://127.0.0.1:<port>/v1 BZ_CHAT_KEY=local-test
   BZ_CHAT_MODEL=stand-in BZ_EXTRACT_MODEL=stand-in`. Pointing the base URL at localhost makes
-  the model catalog local.
+  the model catalog local. `scripts/stand-in-model.mjs` is that server for the built-server
+  probes (`--port`, `--delay`; default 8246 and 3500 ms); it echoes the ask back, which
+  `probe-new-conversation.mjs` asserts on.
 - **A real local model**: this Mac runs Ollama at 127.0.0.1:11434 with
   `browser-use:qwen3.8-27b-q8-64k`. It is a thinking model: through the OpenAI-style API it
   returns only `reasoning` unless the request has `"reasoning_effort": "none"`, so put a small

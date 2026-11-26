@@ -39,6 +39,7 @@
   }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
   function boardId() {
+    if (typeof window.bzTabSession === "function") return window.bzTabSession() || "talk";   // Talk: this tab's
     try { return localStorage.getItem("bz_session_id") || "talk"; } catch (_) { return "talk"; }
   }
   function absolute(path) {
@@ -414,7 +415,8 @@
   // ── What the buttons do ──────────────────────────────────────────────
   function share(s, searchBlocked) {
     busy(s, "Sharing…");
-    api("POST", "/api/buzzy/page-shares", { board: boardId(), searchBlocked: searchBlocked !== false, confirm: true }).then(function (res) {
+    // The board that was previewed, never whatever the page shows by now.
+    api("POST", "/api/buzzy/page-shares", { board: s.board, searchBlocked: searchBlocked !== false, confirm: true }).then(function (res) {
       if (session !== s) return;
       var d = res.data || {};
       if (!res.ok || !d.ok || !d.share) { showError(s, failure(res), function () { open(s.kind, true); }); return; }
@@ -429,7 +431,7 @@
   }
   function reshare(s, searchBlocked) {
     busy(s, "Updating…");
-    api("POST", "/api/buzzy/page-shares", { board: boardId(), searchBlocked: searchBlocked !== false, confirm: true }).then(function (res) {
+    api("POST", "/api/buzzy/page-shares", { board: s.board, searchBlocked: searchBlocked !== false, confirm: true }).then(function (res) {
       if (session !== s) return;
       var d = res.data || {};
       if (!res.ok || !d.ok || !d.share) { showError(s, failure(res), function () { open(s.kind, true); }); return; }
@@ -453,7 +455,9 @@
     session = s;
     s.body.appendChild(make("p", "pshare-lead", "Checking what is on this page…"));
     s.box.focus();
-    api("GET", "/api/buzzy/page-shares/preview?board=" + encodeURIComponent(boardId())).then(function (res) {
+    // Which board this Share is about is decided once, here: what is confirmed is what was previewed.
+    s.board = boardId();
+    api("GET", "/api/buzzy/page-shares/preview?board=" + encodeURIComponent(s.board)).then(function (res) {
       if (session !== s) return;
       var d = res.data || {};
       if (!res.ok || !d.ok) { showError(s, failure(res), function () { open(kind, true); }); return; }
