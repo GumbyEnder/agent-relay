@@ -214,7 +214,11 @@
   // opens the board. It opens once the person presses Talk to BeeZilla in this page.
   var asked = false;
   micBtn.addEventListener("click", function () { asked = true; }, true);
+  // The conversation on screen in THIS tab (talk.html): bz_session_id is shared by every
+  // tab, so another tab opening Talk or History used to swap this tab's board under a
+  // reply still on its way. The shared id stays for pages without Talk's own.
   function boardId() {
+    if (typeof window.bzTabSession === "function") return window.bzTabSession() || "talk";
     try { return localStorage.getItem("bz_session_id") || "talk"; } catch (_) { return "talk"; }
   }
   function hasConversation() { return !!(thread && thread.querySelector(".bubble.me")); }
@@ -363,6 +367,9 @@
     if (d) return "out:doc:" + decodeURIComponent(d[1]);
     return "out:url:" + url;
   }
+  // New conversation while a turn was answering: its steps are no longer on this board,
+  // so the face stops showing them as work in progress.
+  window.__bzClearRunning = function () { running = {}; paintFace(); };
   window.__bzTurnDone = function (data) {
     running = {};
     if (!data) { paintFace(); return; }

@@ -2492,6 +2492,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // This UI must never send owner IDs or conversations to an ambient third party.
 
     // ── Intake mode tabs: chat (default) / form ────────────────────────
+    // Which conversation this tab shows, as a count of the times it moved to another one
+    // (New conversation, History, a job, another company, Back to recent work). A reply
+    // still on its way checks it to know whether the conversation it was asked in is the
+    // one on screen. Kept in this tab on purpose: bz_session_id is shared by every tab,
+    // and another tab opening Talk clears it without this tab moving anywhere.
+    let chatEpoch = 0;
     let chatState = {
       jobId: null,
       // Every visit opens on a blank page (owner, 2026-11-20: "I guess it opened my most
@@ -2590,6 +2596,18 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // opens on the empty board in front of a new conversation. Only a real visit — a
     // header-donor run must not clear the id of the conversation the reader is in.
     if (bzOwnPage) { try { localStorage.removeItem("bz_session_id"); } catch (_) {} }
+    // The conversation this tab shows, for the Idea Board (voice-stage.js) and Share: on
+    // Talk's own page, Talk's; on a page that only borrows Talk's header (Project, Music
+    // studio), the one its own chat uses (chat.js keeps bz_session_id).
+    // Asked each time: the shell keeps this header across pages. A page with its own chat
+    // (Project, Music studio: chat.js, ".bzc") keeps its conversation in bz_session_id;
+    // everywhere else it is the header's own, this tab's (another tab can't move it).
+    window.bzTabSession = function () {
+      if (document.querySelector(".bzc")) {
+        try { return localStorage.getItem("bz_session_id") || null; } catch (_) { return null; }
+      }
+      return chatState.sessionId || null;
+    };
 
     // ── Expert query param ─────────────────────────────────────────────
     var expertFromUrl = bzOwnPage ? new URLSearchParams(window.location.search).get("expert") : null;
@@ -2872,6 +2890,85 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // so this polls until the server has stored the file, shows progress under the
     // reply, then attaches the model to that same reply. Progress is written in
     // place, not by re-rendering the chat, so a track playing above keeps playing.
+    // A 3D model or a video from a turn whose conversation is no longer on screen (New
+    // conversation, History or another company was picked while it was answering),
+    // followed to its end out of sight: asking about it is what files the finished file
+    // into the Library (the server stores it then), and once its end is known its card on
+    // the board it was asked on is marked done or failed (BeeZillaWhiteboard.settle).
+    // One request at a time — a finished one downloads the file — each a while after the
+    // last one answered. "Try again" answers count against the overall limit; no answer
+    // at all four times in a row is giving up.
+    function followQuietly(o) {
+      var tries = 0, misses = 0;
+      function end(step) {
+        if (o.boardId && window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.settle) {
+          window.BeeZillaWhiteboard.settle(o.boardId, [Object.assign({ kind: "output", id: o.flowId }, step)]);
+        }
+      }
+      function later() { setTimeout(ask, o.every); }
+      function lost(text) { if (++misses >= 4) end({ state: "failed", detail: text }); else later(); }
+      function ask() {
+        // A request that stalls (no answer, or a body that never ends) is given up after a
+        // while (o.wait) and counts as no answer, so one stall never stops the checks.
+        fetch(o.url(), { credentials: "same-origin", signal: AbortSignal.timeout(o.wait || 120000) })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            var v = o.read(p || {}) || {};
+            // Paused (Lockdown is on): waiting, not working — never counted against the limit.
+            if (v.paused) { misses = 0; setTimeout(ask, Math.max(o.every, 20000)); return; }
+            if (v.done) { end(Object.assign({ state: "done", detail: "" }, v.done)); return; }
+            if (v.failed) { end({ state: "failed", detail: v.failed }); return; }
+            if (++tries >= o.tries) { end({ state: "failed", detail: o.tooLong }); return; }
+            if (v.lost) lost(v.lost);
+            else { misses = 0; later(); }     // still working, or "try again"
+          })
+          .catch(function () {
+            if (++tries >= o.tries) { end({ state: "failed", detail: o.tooLong }); return; }
+            lost(o.lost);
+          });
+      }
+      later();
+    }
+
+    function finishModelQuietly(taskId, boardId) {
+      var pollId = taskId;
+      followQuietly({
+        url: function () { return "/api/buzzy/model3d/" + encodeURIComponent(pollId); },
+        every: 4000, tries: 225, wait: 300000, boardId: boardId, flowId: "out:3d:" + taskId,
+        tooLong: "The 3D model is taking too long — ask again in a moment.",
+        lost: "Lost touch with the 3D model — check the connection.",
+        read: function (p) {
+          if (p.next) pollId = String(p.next);
+          var status = String(p.status || "");
+          if (status === "PAUSED") return { paused: true };
+          if (p.asset) return { done: { title: p.asset.name || "3D model", url: p.asset.url, contentType: p.asset.type || "model/gltf-binary" } };
+          if (p.ok === false && p.code === "download_failed") return null;   // made, not fetched yet: ask again
+          if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
+            return { failed: "The 3D model did not finish" + (p.error ? ": " + p.error : ".") };
+          }
+          if (status === "error") return { lost: "Lost touch with the 3D model" + (p.error ? ": " + p.error : ".") };
+          return null;
+        },
+      });
+    }
+
+    function finishVideoQuietly(jobId, boardId) {
+      followQuietly({
+        url: function () { return "/api/buzzy/video/" + encodeURIComponent(jobId); },
+        // A finished check downloads the video and its picture first: up to ten minutes.
+        every: 8000, tries: 240, wait: 600000, boardId: boardId, flowId: "out:video:" + jobId,
+        tooLong: "The video is taking far longer than promised — ask again in a moment.",
+        lost: "Lost touch with the video — check the connection.",
+        read: function (p) {
+          if (p.video && p.video.url) return { done: { title: p.video.name || "video.mp4", url: p.video.url, contentType: p.video.type || "video/mp4" } };
+          if (p.state === "failed") return { failed: p.message || "The video did not finish." };
+          if (p.ok === false && p.retryable) return null;                   // a full queue or a hiccup (503): it may still finish
+          if (p.ok === false) return { failed: p.error || "The video did not finish." };
+          return null;
+        },
+      });
+    }
+
     function watchModel3d(taskId, msg) {
       var tries = 0;
       var misses = 0;
@@ -5877,6 +5974,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           // before this it passed only the id, so opening the same job from
           // Talk and from the Library gave two different greetings.
           if (!ctx && provided) ctx = bzJobCtx(provided);
+          chatEpoch++;
           chatState.sessionId = null;
           try { localStorage.removeItem("bz_session_id"); } catch (_) {}
           chatState.jobId = id;
@@ -6076,7 +6174,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         done: function () { clearTimeout(timer); }
       };
     }
-    function streamVoiceTurn(sendBody, metrics, sendStarted, myTurn) {
+    function streamVoiceTurn(sendBody, metrics, sendStarted, myTurn, isCurrent, late) {
+      // `isCurrent()` is false once the person moved on to another conversation (New
+      // conversation, History, another company) while this turn was still answering:
+      // its words, sound and board steps then belong to the conversation it was sent
+      // in (the server keeps them there), never to the one now on screen.
+      var current = typeof isCurrent === "function" ? isCurrent : function () { return true; };
       // Two minutes, as before — unless BeeZilla's browser is at work, when it is how long the
       // turn may go quiet (the browser's steps arrive every few seconds), up to 15 minutes.
       var turnClock = longTurnClock(120000);
@@ -6115,6 +6218,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           if (ev === "stage") {
             if (window.__bzStage) window.__bzStage(payload);
           } else if (ev === "text") {
+            if (!current()) { if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble); return; }
             if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
             liveText += payload.t || "";
             if (!liveBubble) {
@@ -6143,15 +6247,17 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             // Stamp "to talk" only for audio that was actually scheduled: an
             // audio frame on a turn the owner cut is not sound they heard, and
             // claiming it was is how a silent turn reported 1.45s.
-            if (playPcm(payload.b64, myTurn)) {
+            if (current() && playPcm(payload.b64, myTurn)) {
               if (metrics.ttfaMs == null) {
                 metrics.ttfaMs = Math.round(performance.now() - sendStarted);
                 metrics.spoken = true;
               }
             }
           } else if (ev === "flow") {
-            // The live whiteboard: agent.md, each skill, each output, as it happens.
-            if (window.__bzFlow) window.__bzFlow(payload);
+            // The live whiteboard: agent.md, each skill, each output, as it happens —
+            // on this turn's own board only.
+            if (!current()) { if (late) late.push(payload); }
+            else if (window.__bzFlow) window.__bzFlow(payload);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -6184,7 +6290,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     // Typed turns stream for the same reason the voice lane does: a buffered
     // reply paints nothing until the whole answer exists. Same SSE contract,
     // no audio.
-    function streamTextTurn(sendBody, metrics, sendStarted) {
+    function streamTextTurn(sendBody, metrics, sendStarted, isCurrent, late) {
+      // `isCurrent()` is false once the person moved on to another conversation (New
+      // conversation, History, another company) while this turn was still answering:
+      // its words, sound and board steps then belong to the conversation it was sent
+      // in (the server keeps them there), never to the one now on screen.
+      var current = typeof isCurrent === "function" ? isCurrent : function () { return true; };
       // Two minutes, as before — unless BeeZilla's browser is at work, when it is how long the
       // turn may go quiet (the browser's steps arrive every few seconds), up to 15 minutes.
       var turnClock = longTurnClock(120000);
@@ -6237,6 +6348,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 : { label: "Done — " + Math.round((payload.ms || 0) / 100) / 10 + "s. Writing the reply…" });
             }
           } else if (ev === "text") {
+            if (!current()) { if (liveBubble && liveBubble.parentNode) liveBubble.parentNode.removeChild(liveBubble); return; }
             if (metrics.ttftMs == null) metrics.ttftMs = Math.round(performance.now() - sendStarted);
             liveText += payload.t || "";
             if (!liveBubble) {
@@ -6246,7 +6358,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             }
             liveBubble.textContent = liveText;
           } else if (ev === "flow") {
-            if (window.__bzFlow) window.__bzFlow(payload);
+            if (!current()) { if (late) late.push(payload); }
+            else if (window.__bzFlow) window.__bzFlow(payload);
           } else if (ev === "done") {
             finalData = payload;
           } else if (ev === "error") {
@@ -6834,6 +6947,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     function goBackToRecent() {
+      chatEpoch++;
       chatState.sessionId = null;
       try { localStorage.removeItem("bz_session_id"); } catch (_) {}
       try { localStorage.removeItem("bz_session_id"); } catch (_) {}
@@ -6864,10 +6978,23 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
     function newChatNow() {
       resetContextMeter();
+      // A reply still being spoken belongs to the conversation being left: stop it.
+      if (typeof voice !== "undefined" && voice && (voice.speaking || voice.sending)) {
+        voice.cutTurn = voice.turnSeq;
+        try { stopSpeaking(); } catch (_) { /* nothing playing */ }
+      }
+      if (window.__bzClearRunning) window.__bzClearRunning();
+      // A turn still answering now finishes out of sight, in its own conversation (send).
+      chatEpoch++;
       chatState.sessionId = null;
       // The board follows bz_session_id (voice-stage.js): without this, New conversation
       // kept the old conversation's board on screen until the next message.
       try { localStorage.removeItem("bz_session_id"); } catch (_) {}
+      // …and the board in front of a new conversation starts blank, as the button says:
+      // cards put on it since the page opened (before any message) would otherwise stay.
+      // Blank at once, so nothing put on it after the press is lost; what was there stays
+      // in the board's History (kept on this computer until the account has it).
+      if (window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.reset) window.BeeZillaWhiteboard.reset("talk");
       chatState.jobId = null;
       chatState.jobContext = null;
       // A new conversation has no job, so it must not carry the old job in the
@@ -7358,6 +7485,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       try { await ensureChatSession(); } catch (e) {
         if (e && e.message === "signed_out") return;
       }
+      // The conversation this turn belongs to. Testers, 2026-11-24: "When I click new
+      // conversation it's not actually giving me a new conversation … I still have all
+      // these nodes here." A turn still answering when New conversation (or History, or
+      // another company) is pressed used to finish in whatever was on screen: its board
+      // steps were drawn on the new blank board and its reply joined the new
+      // conversation. Now it finishes where it was asked; the server keeps it there.
+      const turnSession = chatState.sessionId;
+      const turnEpoch = chatEpoch;
+      // Still the conversation on screen in this tab? (Never bz_session_id: every tab
+      // shares it, so another tab opening Talk would hide this tab's reply.)
+      const turnIsCurrent = function () { return chatEpoch === turnEpoch && chatState.sessionId === turnSession; };
+      // The ends of this turn's steps that arrived after the person moved on: written onto
+      // this turn's own board at the end (BeeZillaWhiteboard.settle), so none stays "Working".
+      const lateSteps = [];
 
       // A Zilla agent with no job yet: what the person says first IS its job (owner,
       // 2026-11-21: "you're prompted to give it an identity… 'my job is to help with
@@ -7521,9 +7662,9 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
 
         let data;
         if (useVoiceLane) {
-          data = await streamVoiceTurn(sendBody, metrics, sendStarted, myTurn);
+          data = await streamVoiceTurn(sendBody, metrics, sendStarted, myTurn, turnIsCurrent, lateSteps);
         } else if (typeof ReadableStream !== "undefined") {
-          data = await streamTextTurn(sendBody, metrics, sendStarted);
+          data = await streamTextTurn(sendBody, metrics, sendStarted, turnIsCurrent, lateSteps);
           metrics.turnMs = Math.round(performance.now() - sendStarted);
         } else {
           let resp;
@@ -7534,6 +7675,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
           data = await resp.json();
           metrics.turnMs = Math.round(performance.now() - sendStarted);
+        }
+
+        // They moved on while this turn was answering: it belongs to the conversation it
+        // was asked in (stored there by the server, in History). A 3D model it started
+        // is still followed to the end, out of sight, so the file reaches their Library.
+        if (!turnIsCurrent()) {
+          if (data && data.model3d && data.model3d.taskId) finishModelQuietly(data.model3d.taskId, turnSession);
+          // A video is only filed into the Library when it is asked about: keep asking.
+          if (data && data.video && data.video.jobId) finishVideoQuietly(data.video.jobId, turnSession);
+          // Music minutes are the account's, not the conversation's.
+          if (data && data.audio && window.bzRefreshPlan) window.bzRefreshPlan();
+          if (turnSession && window.BeeZillaWhiteboard && window.BeeZillaWhiteboard.settle) window.BeeZillaWhiteboard.settle(turnSession, lateSteps);
+          // Opened again from History while it was answering, and nothing sent since: it is
+          // on screen once more, so show it as stored, reply included (no sound replayed,
+          // nothing redone).
+          var stillShown = function () { return chatState.sessionId === turnSession && myTurn === voice.turnSeq; };
+          if (turnSession && stillShown() && window.bzOpenSession) {
+            window.bzOpenSession({ id: turnSession, companyId: chatState.boundCompanyId || null }, stillShown);
+          }
+          return;
         }
 
         if (!data.ok) {
@@ -8165,7 +8326,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
     // Hooks for the browse half (browse.js): open a chat from a search result, and
     // put a suggested prompt into the Talk bar without sending it.
-    window.bzOpenSession = function (sess) { openSession(sess); };
+    window.bzOpenSession = function (sess, stillWanted) { openSession(sess, stillWanted); };
     window.bzPrompt = function (text) {
       var el = document.getElementById("chatInput");
       if (!el) return;
@@ -8177,7 +8338,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
     };
 
-    async function openSession(s) {
+    let openSeq = 0;
+    async function openSession(s, stillWanted) {
+      // An open from History is a new request; a quiet refresh (stillWanted) never cancels
+      // one: it gives way to any open started after it.
+      const mine = stillWanted ? openSeq : ++openSeq, ep = chatEpoch;
       try {
         const r = await fetch("/api/buzzy/transcript?sessionId=" + encodeURIComponent(s.id), {
           credentials: "same-origin",
@@ -8188,6 +8353,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         const msgs = (data.messages || []).map(function (m) {
           return { role: m.role, content: m.content };
         });
+        // Moved on while it was loading (another conversation opened, New conversation, a
+        // new message): what was asked for is no longer wanted.
+        if (mine !== openSeq || chatEpoch !== ep || (stillWanted && !stillWanted())) return;
+        if (s.id !== chatState.sessionId) chatEpoch++;
         chatState.sessionId = s.id;
         syncAgentFor(typeof data.agentId === "string" ? data.agentId : null);
         // A conversation that was started in a job is a page in that job. Without
@@ -8290,6 +8459,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         const s = data.session;
         // The board follows the conversation (voice-stage.js reads bz_session_id).
         try { if (s && s.id) localStorage.setItem("bz_session_id", s.id); else localStorage.removeItem("bz_session_id"); } catch (_) {}
+        chatEpoch++;
         chatState = {
           jobId: null,
           sessionId: s ? s.id : null,
@@ -8403,6 +8573,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         chatState.sessionId = null;
         chatState.jobId = null;
         chatState.jobContext = null;
+        chatEpoch++;
         // A different company cannot keep the old company's job in the address.
         bzJobUrl();
         chatState.slots = {};
