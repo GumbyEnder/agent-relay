@@ -518,7 +518,12 @@
       // under the face row instead. Desktop keeps the pinned bar: there the editor
       // starts at y=406. The class is boot()'s (section() === "orchestrate"); a page
       // cannot reach this element with its own CSS — HEAD_AREA rewrites page rules.
-      "@media (max-width:640px){html.bz-on-orchestrate .bz-head{position:static}}",
+      //
+      // Library is the same 515 / 477 / 440px bar (measured at 360 / 390 / 430), and
+      // pinned it held a document list to the 146px strip under it for the whole visit
+      // (buzzygrok, 2026-11-26). There is no workspace under this one to keep clear, so
+      // the list scrolls and the bar goes with it — it comes back on a scroll up.
+      "@media (max-width:640px){html.bz-on-orchestrate .bz-head,html.bz-on-library .bz-head{position:static}}",
       // Tooltips you can read, beside the thing, never under the pointer (bzTips below).
       "#bzTip{position:fixed;left:0;top:0;z-index:2147483600;box-sizing:border-box;max-width:min(340px,calc(100vw - 24px));padding:9px 13px;border-radius:10px;border:1px solid #3a3a3a;background:#1b1b1b;color:#f4f4f4;font:500 15px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:none}",
       "#bzTip[hidden]{display:none}",
@@ -1381,6 +1386,13 @@
     // it: page rules are rewritten to exclude the head (HEAD_AREA). Desktop keeps
     // the pinned bar — there the editor starts at y=406 and needs nothing.
     document.documentElement.classList.toggle("bz-on-orchestrate", section() === "orchestrate");
+    // Library is a document list, not a workspace: on a phone the same pinned bar left
+    // 146px of an 800px screen for rows, forever, and rows that had already been read
+    // still filled it. There is nothing under it that needs the bar clear of it, so it
+    // unpins too and scrolls away with the list. Measured on a local production build
+    // at 360x800 with a real session: pinned, the list could never rise above y=654;
+    // unpinned, a 600px scroll puts the head at y=-462 and hands the list 662px.
+    document.documentElement.classList.toggle("bz-on-library", section() === "library");
     // The website's header (#bzHead: Talk to BeeZilla, the search, the row of places)
     // is on every page that has it, so the old link row up here hides there too.
     document.documentElement.classList.toggle("bz-has-head", !!document.getElementById("bzHead"));
