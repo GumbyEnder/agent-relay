@@ -57,8 +57,14 @@ const BUZZY = join(LIB, "buzzy");
  *                           `analytics.ts` — that would drag the browser SDK into
  *                           the server bundle — and because the two projects must
  *                           stay one mapping in one place.
+ *   runtime               — the ONE switch between hosted and self-hosted
+ *                           (BZ_RUNTIME). Leaf module: node builtins only, no DB
+ *                           handle, no `ar_*` table. pages.nitro.ts must ask "is this
+ *                           install the local runtime" at the serve-time seam, the
+ *                           same seam analytics-id rides, so the packaged app does
+ *                           not load our tracker or copy the cloud header.
  */
-const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server", "analytics-id"]);
+const ALLOWED = new Set(["db", "auth/verify.server", "operator-prefs.server", "board-server", "analytics-id", "runtime"]);
 
 /**
  * The console may import exactly one thing from `src/lib/buzzy`: the package
