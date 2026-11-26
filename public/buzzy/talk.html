@@ -1567,45 +1567,6 @@
   text-align: left;
   max-width: 100%;
 }
-@media (max-width: 640px) {
-  .talk-bar { border-radius: 22px; padding: 0.45rem; gap: 0.45rem; flex-wrap: wrap; row-gap: 6px; }
-  .talk-btn {
-    padding: 0 0.95rem; font-size: 0; gap: 0; min-height: 2.9rem;
-    clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
-  }
-  .talk-btn .tb-label { display: none; }
-  .talk-field { flex: 1 1 calc(100% - 4.4rem); padding-left: 0.85rem; border-radius: 18px; }
-  .composer-card .talk-field #chatInput { font-size: 16px; padding: 0.7rem 0; }
-  .talk-extras { flex: 1 0 100%; justify-content: flex-end; }
-  .bz-search { min-height: 3.1rem; padding-left: 1rem; gap: 0.5rem; }
-  .bz-search input { height: 3rem; font-size: 16px; }
-  .bz-share-btn { font-size: 0.74rem; padding: 0.2rem 0.55rem; }
-  .bz-share-btn span { display: none; }
-  .bz-results { padding: 1rem; }
-  .bz-results-grid { grid-template-columns: 1fr; }
-  .bz-reader-out { display: none; }
-  .bz-reader-body { padding: 1rem; }
-}
-
-/* ── The Idea Board's place on the page ───────────────────────────────────
-   The board's own look is whiteboard.css (it defines its own --ob-* tokens).
-   These are the four rules the page owns: where it sits (#bzHead, under the
-   Talk bar, which voice-stage.js moves into it while it is open), how wide it
-   is, and what happens on a phone. Deliberately NOT copied from web's
-   oneboard.css wholesale: that sheet is the web page's whole shell (header
-   order, hidden chat header, .bz-head layout) and this line already has its
-   own shell, measured at 77px desktop / 114px phone (slice 3). */
-#obBoard { order: 2; margin-top: 10px; height: clamp(520px, 72vh, 1100px); display: flex; width: 100%; }
-#obBoard.hidden { display: none; }
-#obBoard .wb-panel {
-  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
-  border-radius: 18px; border: 1px solid var(--ob-slate-edge);
-  background: #1b1e23; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45); overflow: hidden;
-}
-@media (max-width: 760px) {
-  #obBoard { height: auto; min-height: 80vh; }
-  #obBoard .wb-panel { min-height: 80vh; }
-}
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
   <link rel="stylesheet" href="/buzzy/browse.css" />
@@ -5294,9 +5255,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
-            // CR-8 resync: main's barge-in signal (bzSpeechHeard) plus the desktop
-            // diagnostics and the lower threshold the desktop line measured (0.02 was
-            // a shout on a headset and silence on a laptop array).
+            // Desktop diagnostics (frames/peak) ride the web check; the threshold is
+            // the constant above, measured on a laptop array.
             if (recState) recState.frames = (recState.frames || 0) + 1;
             if (recState) recState.peak = Math.max(recState.peak || 0, rms);
             if (rms > SPEECH_RMS) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
