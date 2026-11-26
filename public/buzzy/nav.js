@@ -509,6 +509,16 @@
       "html.bz-has-head .bz-brandrow .bz-brand img{width:44px;height:44px;border-radius:10px;object-fit:contain}",
       "html.bz-has-head .bz-brandrow .bz-brand strong{font-size:1.1rem;font-weight:800;letter-spacing:.01em}",
       "html.bz-has-head #bzMicLive{display:none!important}",
+      // A phone on Orchestrate: the website's bar is ~515px tall at 360px wide (the
+      // composer 183 + search 68 + the places row 224) and CR-14 pins it. Pinned, it
+      // left 142px of an 800px screen for the editor — the toolbar began at y=658 and
+      // could never be scrolled clear of it, and the fixed gear (44px at 16/16) sat on
+      // its second button row, so "Import" read "Imp" (buzzygrok, 2026-11-26). On this
+      // page, on a phone, the bar scrolls away and Orchestrate pins its own toolbar
+      // under the face row instead. Desktop keeps the pinned bar: there the editor
+      // starts at y=406. The class is boot()'s (section() === "orchestrate"); a page
+      // cannot reach this element with its own CSS — HEAD_AREA rewrites page rules.
+      "@media (max-width:640px){html.bz-on-orchestrate .bz-head{position:static}}",
       // Tooltips you can read, beside the thing, never under the pointer (bzTips below).
       "#bzTip{position:fixed;left:0;top:0;z-index:2147483600;box-sizing:border-box;max-width:min(340px,calc(100vw - 24px));padding:9px 13px;border-radius:10px;border:1px solid #3a3a3a;background:#1b1b1b;color:#f4f4f4;font:500 15px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:none}",
       "#bzTip[hidden]{display:none}",
@@ -1363,6 +1373,14 @@
     // Talk keeps its places along the bottom (owner: "put the top menu below everything
     // else"), so the link row hides there; every other page keeps it.
     document.documentElement.classList.toggle("bz-on-talk", section() === "talk");
+    // A canvas workspace on a phone: the website's bar above it is ~515px tall at
+    // 360px wide (composer + search + the places row), and CR-14 pins it. On
+    // Orchestrate that pinned bar left 142px of an 800px screen for the editor and
+    // the fixed settings gear landed on its toolbar (buzzygrok, 2026-11-26), so this
+    // class lets the bar scroll away at phone widths. The page's own CSS may not do
+    // it: page rules are rewritten to exclude the head (HEAD_AREA). Desktop keeps
+    // the pinned bar — there the editor starts at y=406 and needs nothing.
+    document.documentElement.classList.toggle("bz-on-orchestrate", section() === "orchestrate");
     // The website's header (#bzHead: Talk to BeeZilla, the search, the row of places)
     // is on every page that has it, so the old link row up here hides there too.
     document.documentElement.classList.toggle("bz-has-head", !!document.getElementById("bzHead"));

@@ -210,6 +210,18 @@
     /* The settings gear is fixed in the bottom-right corner; leave its column
        clear instead of letting it sit on "Send to agent". */
     #app { padding-bottom: 64px; }
+    /* A phone opens on the editor, not on the website's bar above it. That bar is
+       ~515px tall at 360px wide (the composer 183 + search 68 + the places row 224)
+       and CR-14 pins it. Pinned, it left 142px of an 800px screen for this page: the
+       toolbar began at y=658 and could never be scrolled clear of it, and the fixed
+       gear (44px at 16/16) sat exactly on the second button row — "Import" read
+       "Imp" and Auto-layout/Save/Delete were under the fold (buzzygrok, 2026-11-26).
+       nav.js unpins the bar for this page at phone widths (html.bz-on-orchestrate):
+       page CSS cannot, because every page rule is rewritten to exclude #bzHead
+       (HEAD_AREA). The toolbar then pins under the still-pinned face row, so it never
+       travels through the gear's corner while you work, and the script below lands
+       the page on it. */
+    .orch-bar { position: sticky; top: var(--bz-chrome-h, 0px); z-index: 30; }
     #canvasWrap { min-height: 300px; }
     #minimap { display: none; }
     #zoomHud { bottom: 8px; left: 8px; }
@@ -1255,6 +1267,35 @@
     statusEl.textContent = "needs fixing";
     statusEl.className = "bad";
   }
+
+  // ── a phone lands on the editor ──────────────────────────────────────
+  // nav.js unpins the website's bar for this page at phone widths; that only helps if
+  // the editor is what a phone sees. Put the toolbar directly under the still-pinned
+  // face row. The chrome is built after this script runs and changes height as its
+  // parts land, so re-measure every frame for a couple of seconds. Any pointer, wheel,
+  // touch or key stops it: after that the page belongs to the person.
+  // (Do NOT compare scrollY against the value read back after scrollTo: the position
+  // lands on the next frame, so that guard killed the loop after its first move.)
+  var autoAbort = false, autoUntil = 0;
+  ["pointerdown", "wheel", "touchstart", "keydown"].forEach(function (type) {
+    window.addEventListener(type, function () { autoAbort = true; }, { passive: true, once: true });
+  });
+  function openOnEditor() {
+    if (autoAbort || performance.now() > autoUntil) return;
+    if (!window.matchMedia || !matchMedia("(max-width: 640px)").matches) return;
+    var bar = document.querySelector(".orch-bar");
+    if (!bar) { requestAnimationFrame(openOnEditor); return; }
+    var chrome = document.querySelector("header.bz-chrome-head");
+    var under = chrome ? Math.ceil(chrome.getBoundingClientRect().height) : 0;
+    var r = bar.getBoundingClientRect();
+    if (Math.abs(r.top - under) > 1) {
+      var target = Math.round(r.top + window.scrollY) - under;   // the bar's document top
+      if (target > 0) window.scrollTo(0, target);
+    }
+    requestAnimationFrame(openOnEditor);
+  }
+  autoUntil = performance.now() + 2500;
+  requestAnimationFrame(openOnEditor);
 })();
 </script>
 </body>
