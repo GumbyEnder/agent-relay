@@ -39,10 +39,28 @@ function replyTo(messages) {
   return ask ? `Stand-in reply: ${ask}` : "Stand-in reply."; // echoed back on purpose
 }
 
+// What the server actually sent. probe-agent-colonies.mjs reads GET /last to
+// assert BeeZilla's system prompt names the colony it is working inside; a probe
+// that cannot see the prompt only looks like it checks that. Bounded so a long
+// probe cannot grow this without limit.
+const seen = [];
+function remember(messages) {
+  const list = messages || [];
+  const system = list.filter((m) => m?.role === "system").map(contentOf).join("\n");
+  const user = contentOf([...list].reverse().find((m) => m?.role === "user")).trim();
+  seen.push({ at: Date.now(), system, user: user.slice(0, 300) });
+  if (seen.length > 50) seen.splice(0, seen.length - 50);
+}
+
 const server = createServer((req, res) => {
   if (req.method === "GET" && /\/models$/.test(req.url || "")) {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ object: "list", data: [{ id: "stand-in", object: "model" }] }));
+    return;
+  }
+  if (req.method === "GET" && /\/last$/.test(req.url || "")) {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(seen));
     return;
   }
   if (req.method !== "POST" || !(req.url || "").includes("chat/completions")) {
@@ -55,6 +73,7 @@ const server = createServer((req, res) => {
   req.on("end", () => {
     let body = {};
     try { body = JSON.parse(raw); } catch { body = {}; }
+    if (body.messages) remember(body.messages);
     const text = replyTo(body.messages);
     console.log(`[stand-in] ${body.stream ? "stream" : "buffered"} ${body.model || "?"} -> ${text.slice(0, 70)}`);
     if (body.stream) return stream(res, text);

@@ -116,6 +116,40 @@ Owner, 2026-11-18, in order of the page:
    conversation. BeeZilla asks about the end result before building something big,
    points out what already exists, and cuts to the chase when asked.
 
+## The Zilla agents, down the left of every page
+
+Owner, 2026-11-21 (agents.js, agents.css; the server side is src/lib/buzzy/agents.ts):
+
+1. A strip of faces is fixed to the left edge of every page that has the header, and the
+   whole page moves over to make room (`html.bz-has-agents`, `--bzag-w`). The Zillas are
+   pictures (`public/buzzy/zillas`), never drawn in code. BeeZilla (the bee) is first, then
+   the person's agents, then a plus. A new account starts with one agent, the bunny, grey.
+2. An agent has a name by default, a colour and a size. Its first job is given in Talk:
+   pressing the plus or the grey one opens Talk as that agent, with the Idea Board open and
+   the Talk button in the agent's colour, and it asks "What role do you want me to play?".
+   The answer becomes its job ("helps with to-do list") and its face: an emoji for the job,
+   ringed in its colour, with its Zilla in the corner. BeeZilla keeps its own face.
+3. Pressing the bare strip (or the button at its foot) opens it into a sidebar: each name in
+   small type, and under it what that agent helps with. It scrolls (hundreds of agents), and
+   its right edge pulls it wider or narrower.
+4. Every agent can be dragged onto the Idea Board (it lands as a picture card with its name
+   and job), like everything else on the site.
+5. Only Esc or the X closes the edit dialog (the site's rule: nothing closes on a click outside
+   it); pulling its corner resizes it.
+6. On a phone the strip is a drawer: a small tab at the left edge opens it, and only its X or
+   Esc closes it.
+7. Colonies (owner: "you can drop it on another agent, just like you can drop a Discord server
+   on another Discord server"): dragging one agent onto the middle of another makes a colony
+   and asks for its name and purpose, with grey examples chosen from what the agents inside
+   help with ("These agents are dedicated to my real estate business", "…my personal
+   productivity", "…fun and hobbies"). Onto a colony adds to it; between two rows reorders; out
+   to a gap leaves. A colony opens and closes like a folder and can be ungrouped (its agents
+   stay). Dragging is never the only way: an agent's Edit window has a Colony choice.
+8. More Zillas arrive as files: a picture named `<creature>.webp` (and `<creature>-<colour>.webp`
+   for each colour) in `public/buzzy/zillas`, and one line in the roster in agents.ts. The
+   colour versions there now are stand-ins made from the owner's starter picture
+   (`scripts/zilla-art.py`); a real picture takes a stand-in's place by using its file name.
+
 ## Rules from the games
 
 Each rule is a lesson the owner taught on a game; the quote is theirs.

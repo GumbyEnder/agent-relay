@@ -146,6 +146,49 @@ jobs:
           fi
           exit "$probe_rc"
 
+      # Third of the same shape: colonies are drag-and-drop in the agents strip,
+      # so the only honest check is a real browser against the built server. The
+      # probe was already in scripts/ and wired to nothing — the trap the two
+      # probes above exist to close. BZ_FAKE_LLM points at the stand-in model so
+      # its last check (BeeZilla's prompt names the colony) runs instead of
+      # quietly skipping.
+      - name: Probe — colonies in the agents strip (#364)
+        env:
+          NODE_ENV: production
+        run: |
+          set -euo pipefail
+          node scripts/stand-in-model.mjs --port 8248 --delay 800 > /tmp/stand-in-colonies.log 2>&1 &
+          stand_in_pid=$!
+          cp node_modules/@electric-sql/pglite/dist/pglite.data \
+             node_modules/@electric-sql/pglite/dist/pglite.wasm \
+             node_modules/@electric-sql/pglite/dist/initdb.wasm \
+             .output/server/_libs/
+          PORT=8247 AGENT_RELAY_DEV_MAIL=1 \
+            BETTER_AUTH_URL=http://127.0.0.1:8247 \
+            BETTER_AUTH_TRUSTED_ORIGINS=http://127.0.0.1:8247 \
+            BETTER_AUTH_SECRET=ci-agent-colonies-secret \
+            BZ_CHAT_BASE_URL=http://127.0.0.1:8248/v1 \
+            BZ_CHAT_KEY=ci-stand-in BZ_CHAT_MODEL=stand-in BZ_EXTRACT_MODEL=stand-in \
+            BZ_MAIL_LOG="$PWD/.data/outbound-mail.jsonl" \
+            node .output/server/index.mjs > /tmp/agent-colonies-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill $server_pid $stand_in_pid 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8247/buzzy/talk; then break; fi
+            sleep 2
+          done
+          set +e
+          BZ_FAKE_LLM=http://127.0.0.1:8248 \
+            BZ_MAIL_LOG="$PWD/.data/outbound-mail.jsonl" \
+            npm run test:agent-colonies -- http://127.0.0.1:8247
+          probe_rc=$?
+          set -e
+          if [ "$probe_rc" -ne 0 ]; then
+            tail -60 /tmp/agent-colonies-server.log
+            tail -20 /tmp/stand-in-colonies.log
+          fi
+          exit "$probe_rc"
+
       - name: Upload build output on failure
         if: failure()
         uses: actions/upload-artifact@v7
