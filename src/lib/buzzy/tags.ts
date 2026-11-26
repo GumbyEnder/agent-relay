@@ -269,11 +269,18 @@ const inFlight = new Set<string>();
  * Tag a file that was just stored, without holding up the reply. Safe to call
  * twice for the same file; a missing table (older local runtime) is ignored.
  */
-export function enrichLater(sql: Sql, userId: string, assetId: number | string, input: TagInput): Promise<void> {
+export function enrichLater(
+  sql: Sql,
+  userId: string,
+  assetId: number | string,
+  input: TagInput,
+  /** local: the words are written here from the request and the file name, and no model is asked (Lockdown: nothing leaves BeeZilla). */
+  opts: { local?: boolean } = {},
+): Promise<void> {
   const key = `${userId}:${assetId}`;
   if (inFlight.has(key)) return Promise.resolve();
   inFlight.add(key);
-  return tagsFor(input)
+  return (opts.local ? Promise.resolve(wordTags(input)) : tagsFor(input))
     .then((r) => saveTags(sql, userId, assetId, r))
     .catch((e) => console.warn("[buzzy/tags] enrich failed:", e instanceof Error ? e.message : e))
     .finally(() => inFlight.delete(key));

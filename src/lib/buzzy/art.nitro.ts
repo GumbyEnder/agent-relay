@@ -5,6 +5,10 @@
  *   POST /api/buzzy/art            → { action: "save", jobId, board }
  *                                  → { action: "render", prompt, jobId, refs[] }
  *                                  → { action: "edit", jobId, imageId, mask, instruction }
+ *                                  → { action: "repaint3d", crop, mask, instruction }   (the 3D painter, public/buzzy/model-paint.js:
+ *                                    the repainted piece comes back, nothing is kept; refused in Lockdown)
+ *                                  → { action: "repaint3d_check", units }   (the same painter, before its first call: is there
+ *                                    allowance for ALL `units` of them? nothing is spent by asking)
  *
  * A rendered image is a deliverable of the project, exactly like a track: it lands
  * in buzzy_assets with job_id set, so the project page and the Library show the same
@@ -183,6 +187,59 @@ export default defineEventHandler(async (event) => {
     body.refs = [base, mask];
   }
 
+  // Repainting the painted part of a 3D model's texture (public/buzzy/model-paint.js;
+  // testers, 2026-11-24: fixing the windshield "completely messed up all the treads").
+  // The page sends the piece of the texture the paint covers and its mask; the answer is
+  // the repainted piece, NOT kept in the Library (it is a working piece of a texture),
+  // and the page puts back only the painted pixels, so nothing outside the paint changes.
+  const repaint3dCheck = action === "repaint3d_check";
+  const repaint3d = action === "repaint3d" || repaint3dCheck;
+  if (repaint3d) {
+    // Lockdown: nothing leaves BeeZilla, and this sends the model's texture to the picture maker.
+    // The account's SAVED mode decides (a page that was never told, or a second device, must not
+    // get past it), and a mode that cannot be read is not "Open": like the other things that
+    // leave BeeZilla (boardNodes.nitro.ts), this refuses until it can be. Local edits (a colour,
+    // glass, a finish, removing a part) never come here, so they keep working in Lockdown.
+    let privacy: string | null = null;
+    try {
+      const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+      privacy = pm[0]?.mode ?? "";
+    } catch { privacy = null; }
+    if (privacy === null) {
+      return json(503, { error: "BeeZilla can't read your privacy setting right now, and nothing leaves it until it can. Try again in a moment.", code: "privacy_unknown" });
+    }
+    if (privacy === "lockdown") {
+      return json(403, {
+        error: "Lockdown is on, and nothing leaves BeeZilla in that mode, so the picture maker can't repaint this. A colour, glass, a shiny or matte finish and removing a part still work. The privacy control on the Talk bar switches Lockdown off.",
+        code: "lockdown",
+      });
+    }
+    if (repaint3dCheck) {
+      // Before the painter's FIRST paid call: if the allowance cannot cover them all, the first would spend it and the
+      // second would be refused, and no changed model would come of it. Asking spends nothing.
+      const units = Math.max(1, Math.min(20, Math.round(Number(body.units)) || 1));
+      if (!artConfigured()) return json(503, { error: "Art is not configured on this deployment.", code: "not_configured" });
+      const verdict = await checkQuota({ userId: user.id, scope: "image", units });
+      if (!verdict.ok) {
+        const status = verdict.code === "plan_required" ? 402 : 429;
+        return json(status, { error: verdict.error, code: verdict.code, plan: verdict.plan, limit: verdict.limit, used: verdict.used });
+      }
+      return json(200, { ok: true, units, plan: verdict.plan, used: verdict.used, limit: verdict.limit });
+    }
+    const crop = typeof body.crop === "string" && /^data:image\/png;base64,/.test(body.crop) ? body.crop : "";
+    const mask = typeof body.mask === "string" && /^data:image\/png;base64,/.test(body.mask) ? body.mask : "";
+    const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 600) : "";
+    if (!crop || !mask) return json(400, { error: "Send the piece of the texture and its mask (PNG).", code: "bad_request" });
+    if (crop.length > 12_000_000 || mask.length > 12_000_000) return json(413, { error: "That piece of the texture is too big.", code: "too_big" });
+    if (!instruction) return json(400, { error: "Say how the painted area should change.", code: "bad_request" });
+    body.prompt =
+      `${instruction}\n\nThe FIRST attached image is part of a 3D model's texture map (flattened surface colours, not a photo). ` +
+      "The SECOND is a mask: white marks the ONLY area you may change. Repaint that area as instructed, matching the " +
+      "texture's style, scale, lighting and detail, and keep every pixel outside the white area exactly as it is. " +
+      "Return an image of exactly the same size and framing as the first.";
+    body.refs = [crop, mask];
+  }
+
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 4000) : "";
   if (!prompt) return json(400, { error: "Describe what to create.", code: "bad_request" });
   if (!artConfigured()) return json(503, { error: "Art is not configured on this deployment.", code: "not_configured" });
@@ -202,7 +259,8 @@ export default defineEventHandler(async (event) => {
   // The reference image the render was conditioned on is an INPUT of this project.
   // Storing it is what makes "source in, output out" auditable instead of folklore.
   let referenceSource: { kind: string; label: string; url: string; bytes: number } | null = null;
-  if (refs.length) {
+  // A texture piece sent for repainting is a working piece, not a picture of theirs: not kept.
+  if (refs.length && !repaint3d) {
     try {
       const m = /^data:([^;,]+);base64,(.*)$/s.exec(refs[0]);
       if (m) {
@@ -228,6 +286,9 @@ export default defineEventHandler(async (event) => {
   if (!made.ok || !made.bytes) {
     const status = made.code === "provider_plan_required" ? 402 : 502;
     return json(status, { error: made.error ?? "the provider did not return an image", code: made.code ?? "image_failed" });
+  }
+  if (repaint3d) {
+    return json(200, { ok: true, image: `data:${made.contentType || "image/png"};base64,${made.bytes.toString("base64")}` });
   }
 
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");

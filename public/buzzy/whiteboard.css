@@ -405,6 +405,15 @@
 @media (prefers-reduced-motion: reduce) { .wb-cube.wb-spin { animation: none; } }
 .wb-progress { font-size: 0.82rem; color: #d8c36a; }
 .wb-open { color: var(--ob-yellow); font-size: 0.85rem; font-weight: 600; }
+/* "Paint changes" on a 3D model card: a button that reads as one (model-paint.js). */
+.wb-paint3d { display: inline-block; margin-top: 0.35rem; padding: 0.2rem 0.6rem; background: transparent; border: 1px solid var(--ob-yellow); border-radius: 8px; color: var(--ob-yellow); font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.wb-paint3d:hover, .wb-paint3d:focus-visible { background: var(--ob-yellow); color: #111; }
+/* A note that came from a painted area carries that brush's colour: an edge and a dot, beside its words. */
+.wb-card.wb-reg-red { border-left: 5px solid #ff4d4d; }
+.wb-card.wb-reg-blue { border-left: 5px solid #4d8dff; }
+.wb-regdot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+.wb-reg-red .wb-regdot { background: #ff4d4d; }
+.wb-reg-blue .wb-regdot { background: #4d8dff; }
 .wb-video { width: 100%; margin-top: 8px; border-radius: 10px; background: #000; }
 
 /* The bar over a selection, and the editor beside a card. */

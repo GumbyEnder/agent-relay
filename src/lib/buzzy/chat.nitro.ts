@@ -185,6 +185,19 @@ async function recordVoiceMetrics(
   }
 }
 
+/**
+ * Lockdown, from the account's saved privacy mode: nothing leaves BeeZilla. A mode that cannot be read counts as Lockdown
+ * here, so the worst a failed read costs is plainer search words, never a file's name sent to a model.
+ */
+async function lockdownOn(sql: Sql, userId: string): Promise<boolean> {
+  try {
+    const pm = await sql<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${userId} LIMIT 1`;
+    return pm[0]?.mode === "lockdown";
+  } catch {
+    return true;
+  }
+}
+
 /** Parse JSON safely; return a fallback object on malformed input. */
 function safeParseJson(raw: string): Record<string, unknown> {
   try {
@@ -1277,11 +1290,13 @@ export default defineEventHandler(async (event) => {
     // Search words for the upload, from its name, its folder and any note the page
     // sent about it (x-bz-note: what the person said the file is).
     const note = Array.from(getHeader(event, "x-bz-note") || "", (ch) => (ch.charCodeAt(0) < 32 ? " " : ch)).join("").trim().slice(0, 600);
+    // In Lockdown nothing leaves BeeZilla: the file's name and note are not sent to a model to be tagged (the 3D painter saves
+    // a changed model here), and the words are written locally from them instead.
     void enrichLater(sql, user.id, inserted[0]!.id, {
       prompt: [note, relPath.replace(/[/_-]+/g, " ")].filter(Boolean).join(" — "),
       filename,
       contentType,
-    });
+    }, { local: await lockdownOn(sql, user.id) });
     return {
       ok: true,
       duplicate: false,
@@ -3452,7 +3467,7 @@ export default defineEventHandler(async (event) => {
     // "house" finds the house picture, not only a file named house.png. Older files
     // without words get them a few at a time as people search.
     const assetHits = typeFilter === "jobs" ? [] : await searchTagged(sql, user.id, raw, 24);
-    void backfillTags(sql, user.id, 4).catch(() => {});
+    if (!(await lockdownOn(sql, user.id))) void backfillTags(sql, user.id, 4).catch(() => {});     // it asks a model: not in Lockdown
     return {
       assets: assetHits,
       ok: true,

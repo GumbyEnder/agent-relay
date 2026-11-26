@@ -251,6 +251,7 @@
       el.appendChild(handle(el, edge, edge === main));
     });
     sync(el);
+    if (first) fitOne(el);      // a size remembered from a bigger window opens inside this one
   }
   function handle(el, edge, isMain) {
     var h = document.createElement("span");
@@ -428,21 +429,25 @@
     var found = node.querySelectorAll(sels);
     for (var i = 0; i < found.length; i++) consider(found[i]);
   }
+  // The window got smaller (or a box opened with a size remembered from a bigger window): a box that was made big
+  // enough to leave it comes back in. The remembered size itself is kept.
+  function fitOne(el) {
+    var st = el._bzrs;
+    if (!st || st.off || st.drag || !st.size || st.cfg.bound === "none") return;
+    var rect = el.getBoundingClientRect();
+    if (!rect.width) return;
+    var dir = dirsOf(st.cfg);
+    var o = limitsFor(el, st.cfg, dir.x, dir.y, rect, scaleOf(el, rect));
+    var put = {};
+    if (el.offsetWidth > o.maxW + 0.5) put.w = o.maxW;
+    if (el.offsetHeight > o.maxH + 0.5) put.h = o.maxH;
+    if (put.w != null || put.h != null) setBox(el, put);
+  }
   function refit() {
     tracked = tracked.filter(function (el) { return el.isConnected; });
     tracked.forEach(function (el) {
-      var st = el._bzrs;
       sync(el);
-      if (st.off || st.drag || !st.size || st.cfg.bound === "none") return;
-      // The window got smaller: a box that was made big enough to leave it comes back in.
-      var rect = el.getBoundingClientRect();
-      if (!rect.width) return;
-      var dir = dirsOf(st.cfg);
-      var o = limitsFor(el, st.cfg, dir.x, dir.y, rect, scaleOf(el, rect));
-      var put = {};
-      if (el.offsetWidth > o.maxW + 0.5) put.w = o.maxW;
-      if (el.offsetHeight > o.maxH + 0.5) put.h = o.maxH;
-      if (put.w != null || put.h != null) setBox(el, put);
+      fitOne(el);
     });
   }
 
@@ -523,6 +528,14 @@
     sizeBy: sizeBy,
     /** Make one box resizable now (the same attributes, as an object: edges, ax, ay, min, max, bound, key, name). */
     attach: function (el, cfg) { if (el && cfg) ensure(el, cfg); },
+    /** Bring a box back inside the window now (its limits may have changed: a window that got smaller, a new minimum). */
+    fit: function (el) { if (el) fitOne(el); },
+    /** Forget a box that is going away (a dialog that closed): it is no longer tracked, so nothing here keeps it alive. */
+    detach: function (el) {
+      if (!el) return;
+      tracked = tracked.filter(function (x) { return x !== el; });
+      try { delete el._bzrs; } catch (_) { el._bzrs = null; }
+    },
     /** Put a box back at the size it opens at. */
     reset: reset,
     boxes: BOXES,

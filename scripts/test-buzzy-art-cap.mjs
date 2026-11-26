@@ -18,6 +18,11 @@
  *   CAP-4  a board over the limit (9 MB) is refused: 413 payload_too_large + bytes
  *   CAP-5  the refusal writes nothing: the stored board is still the 7 MB one
  *   CAP-6  an unauthenticated save is 401 before any size logic runs
+ *   CAP-9  the server this suite boots never inherits an image-provider key (cleanEnv)
+ *   REPAINT-0…11  the 3D painter's texture repaint is refused in Lockdown (from the account's saved
+ *          mode), and only there; the allowance check it makes before its first paid call follows
+ *          the same gate. They run only against a server that says it has NO image provider
+ *          (REPAINT-0): a request must never be able to spend a real generation.
  *
  * The mutant to run against this: delete the MAX_BOARD_BYTES block in
  * src/lib/buzzy/art.nitro.ts — CAP-4 goes red while CAP-1..3 stay green, which is
@@ -35,6 +40,16 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER_ENTRY = join(ROOT, ".output", "server", "index.mjs");
 const MB = 1024 * 1024;
+
+/**
+ * The environment a server this suite boots gets: nothing that could reach a real provider or send a real mail. An image
+ * request that passes the gates must stop at "not configured", never spend a real generation (the REPAINT checks rely on it).
+ */
+function cleanEnv(env) {
+  const out = { ...env };
+  for (const key of ["RESEND_API_KEY", "SMTP_URL", "SMTP_HOST", "BZ_CHAT_KEY", "BZ_MESHY_KEY", "BZ_ELEVEN_KEY", "BZ_BRAVE_KEY", "BZ_HYPERBROWSER_KEY", "BZ_VIDEO_KIT_TOKEN"]) delete out[key];
+  return out;
+}
 
 let BASE = process.argv[2] || "";
 let MAIL_LOG = process.argv[3] || "";
@@ -81,8 +96,7 @@ async function boot() {
 
   // Provider credentials disable the dev inbox, and the magic link has to be readable
   // from somewhere for the suite to sign in.
-  const env = { ...process.env };
-  for (const key of ["RESEND_API_KEY", "SMTP_URL", "SMTP_HOST"]) delete env[key];
+  const env = cleanEnv(process.env);
 
   child = spawn(process.execPath, [SERVER_ENTRY], {
     cwd: ROOT,
@@ -311,6 +325,80 @@ async function main() {
     srcRepoint && wrapPassive && !wrapTakesPress && orderedHit && selectUsesOrdered,
     `srcRepoint=${srcRepoint} wrapPassive=${wrapPassive} wrapAuto=${wrapTakesPress} orderedHit=${orderedHit} select=${selectUsesOrdered}`,
   );
+
+  // CAP-9: the server this suite starts gets no provider key, whatever this shell has.
+  {
+    const dirty = cleanEnv({ BZ_CHAT_KEY: "sk-real-looking", BZ_MESHY_KEY: "x", BZ_ELEVEN_KEY: "x", RESEND_API_KEY: "x", PATH: "/usr/bin" });
+    check("CAP-9  the environment given to the test server carries no provider key (and keeps the rest)", !dirty.BZ_CHAT_KEY && !dirty.BZ_MESHY_KEY && !dirty.BZ_ELEVEN_KEY && !dirty.RESEND_API_KEY && dirty.PATH === "/usr/bin", JSON.stringify(Object.keys(dirty)));
+  }
+
+  // REPAINT: the 3D painter's repaint (public/buzzy/model-paint.js) sends a model's texture to the
+  // image provider, so Lockdown ("nothing leaves BeeZilla") must refuse it, from the ACCOUNT's saved
+  // mode (not from anything the page says). Local edits never reach this route. This build has no
+  // image provider, so a request that gets past the privacy gate stops at "not configured": that is
+  // what tells "refused for Lockdown" from "refused for nothing in particular".
+  //
+  // None of this may ever spend a real generation. The server this suite starts gets no provider key
+  // (CAP-9); a server handed in as an argument might have one, and then these checks would submit real
+  // images, so they are not run against it: the suite says so and fails.
+  const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const repaint = async (ck, action = "repaint3d", extra = {}) => {
+    const res = await fetch(`${BASE}/api/buzzy/art`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, ...(ck ? { cookie: ck } : {}) },
+      body: JSON.stringify({ action, crop: PNG, mask: PNG, instruction: "add rust", ...extra }),
+    });
+    const text = await res.text();
+    let j = null;
+    try { j = JSON.parse(text); } catch { /* not json */ }
+    return { status: res.status, json: j, text };
+  };
+  const setMode = (mode) => fetch(`${BASE}/api/buzzy/privacy`, { method: "PUT", headers: { "content-type": "application/json", origin: BASE, cookie }, body: JSON.stringify({ mode }) });
+
+  const noProvider = gotJson?.configured === false;
+  check(
+    "REPAINT-0  this server has no image provider configured, so no request below can spend a real generation",
+    noProvider,
+    noProvider ? "" : `the server at ${BASE} says configured=${gotJson?.configured}: the repaint checks are NOT run against it (start the suite with no argument, or point it at a server without BZ_CHAT_KEY)`,
+  );
+  if (noProvider) {
+    const anon3d = await repaint("");
+    check("REPAINT-1  a repaint without a session is 401", anon3d.status === 401, `HTTP ${anon3d.status}`);
+
+    const openMode = await repaint(cookie);
+    check(
+      "REPAINT-2  with no privacy mode saved, the request gets past the gate (and stops at the missing provider)",
+      openMode.status === 503 && openMode.json?.code === "not_configured",
+      `HTTP ${openMode.status} ${openMode.text.slice(0, 140)}`,
+    );
+
+    check("REPAINT-3  Lockdown can be saved", (await setMode("lockdown")).ok);
+    const locked = await repaint(cookie);
+    check(
+      "REPAINT-4  in Lockdown the repaint is refused: 403, code lockdown, and the message says how to switch it off",
+      locked.status === 403 && locked.json?.code === "lockdown" && /Lockdown/.test(locked.json?.error || "") && /Talk bar/.test(locked.json?.error || ""),
+      `HTTP ${locked.status} ${locked.text.slice(0, 200)}`,
+    );
+    const lockedCheck = await repaint(cookie, "repaint3d_check", { units: 2 });
+    check(
+      "REPAINT-9  the allowance check before the first paid call follows the same gate: in Lockdown it is refused too",
+      lockedCheck.status === 403 && lockedCheck.json?.code === "lockdown",
+      `HTTP ${lockedCheck.status} ${lockedCheck.text.slice(0, 160)}`,
+    );
+
+    check("REPAINT-5  Advocate can be saved", (await setMode("advocate")).ok);
+    const advocate = await repaint(cookie);
+    check("REPAINT-6  Advocate is not Lockdown: the repaint is not refused for privacy", advocate.json?.code !== "lockdown" && advocate.status === 503, `HTTP ${advocate.status} ${advocate.text.slice(0, 140)}`);
+
+    check("REPAINT-7  Lockdown can be switched off again", (await setMode("open")).ok);
+    const reopened = await repaint(cookie);
+    check("REPAINT-8  …and the repaint is no longer refused for privacy", reopened.json?.code !== "lockdown" && reopened.status === 503, `HTTP ${reopened.status} ${reopened.text.slice(0, 140)}`);
+
+    const checkOpen = await repaint(cookie, "repaint3d_check", { units: 2 });
+    check("REPAINT-10  with no provider the allowance check says so (it is not an answer about the quota)", checkOpen.status === 503 && checkOpen.json?.code === "not_configured", `HTTP ${checkOpen.status} ${checkOpen.text.slice(0, 140)}`);
+    const checkAnon = await repaint("", "repaint3d_check", { units: 1 });
+    check("REPAINT-11  …and without a session it is 401", checkAnon.status === 401, `HTTP ${checkAnon.status}`);
+  }
 
   await stop();
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

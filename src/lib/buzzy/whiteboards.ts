@@ -66,6 +66,8 @@ const CARD_FIELDS: Record<string, Field> = {
   flow: { kind: "text", max: 160 },
   state: { kind: "text", max: 16 },
   user: { kind: "flag" },
+  // The brush a note came from ("red" | "blue"; the 3D painter, model-paint.js): its card wears that colour.
+  region: { kind: "text", max: 8 },
   taskId: { kind: "text", max: 160 },
   err: { kind: "text", max: 400 },
   // An orchestration card (start, decision, approval, loop…; orchestration.ts
