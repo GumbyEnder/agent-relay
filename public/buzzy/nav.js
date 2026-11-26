@@ -2039,8 +2039,19 @@
   // #bzPlaces used to carry its own eleven anchors while nav.js carried the same
   // eleven in LINKS. Two lists, one order to keep — so they drifted (web shipped
   // Download out of order for exactly that reason). The row is built here from
-  // LINKS, and Talk is dropped once the Talk-to-BeeZilla bar exists because the
-  // bar IS the way back (same rule as the website).
+  // LINKS, but only the entries that belong in this row: the extras (`more: true`)
+  // plus Download.
+  //
+  // NOT talk, library, memory, experts or recipes. Those five are the main places
+  // and they already have a home in #bzTabs — Talk is the talk bar, the other four
+  // are its tabs. Adding them here would put eleven links beside the six tabs and
+  // crowd the phone row (the gear already overlaps the place labels there). The
+  // row is the same seven Talk ships: Sketch, Orchestrate, Music studio, What
+  // BeeZilla can do, Download, Honey, Publish.
+  //
+  // Download is included by id, not by a `more` flag: #350 put it in the row on
+  // purpose (a person who wants the installer should not open "More" to find it),
+  // so LINKS does not mark it `more: true`. The flag alone is not the rule.
   function buildPlacesRow() {
     var row = document.getElementById("bzPlaces");
     if (!row) return;
@@ -2051,11 +2062,10 @@
       list.setAttribute("aria-label", "Places");
       row.appendChild(list);
     }
-    var bar = document.querySelector("#bzHead #obStart, #bzHead .talk-bar");
     // LINKS lives in the chrome IIFE above; read it through the one export rather
     // than re-declaring a second list here.
     var links = (window.BeeZillaChrome && window.BeeZillaChrome.links) || [];
-    var wanted = links.filter(function (l) { return !(bar && l.id === "talk"); });
+    var wanted = links.filter(function (l) { return l.more === true || l.id === "download"; });
     Array.prototype.forEach.call(list.querySelectorAll("a[data-place]"), function (a) {
       var id = a.getAttribute("data-place");
       var keep = wanted.some(function (l) { return l.id === id; });
