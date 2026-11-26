@@ -259,7 +259,22 @@ try {
     await die("#bzPlaces still ships hand-written anchors; nav.js must build them from LINKS");
   }
   if (!/function buildPlacesRow\(/.test(navjs.body)) await die("/buzzy/nav.js does not build #bzPlaces from LINKS");
-  if (!/l\.id === "talk"/.test(navjs.body)) await die("/buzzy/nav.js does not drop Talk from the row when the bar exists");
+  // CR-8: the row is LINKS' extras (`more: true`) plus Download — not every link.
+  // It used to take everything except Talk, which put the four main places that
+  // are #bzTabs tabs (Library, Memory, Experts, Recipes) beside the tabs as well:
+  // eleven links next to six tabs, crowding the phone row.
+  if (
+    !/var wanted = links\.filter\(function \(l\) \{ return l\.more === true \|\| l\.id === "download"; \}\);/.test(
+      navjs.body,
+    )
+  ) {
+    await die("/buzzy/nav.js does not build the places row from LINKS' `more: true` entries plus download");
+  }
+  for (const mainId of ["talk", "library", "memory", "experts", "recipes"]) {
+    if (new RegExp(`id: "${mainId}"[^}]*more: true`).test(navjs.body)) {
+      await die(`nav.js marks ${mainId} more: true — the main places are #bzTabs, not place anchors`);
+    }
+  }
   const browsejs = await get("/buzzy/browse.js");
   if (browsejs.status !== 200) await die(`/buzzy/browse.js -> ${browsejs.status}`);
   for (const route of ["/api/buzzy/search", "/api/buzzy/read"]) {
