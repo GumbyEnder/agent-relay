@@ -14,8 +14,8 @@
  * status, and a Server-Sent-Events stream for the voice lane. The caller maps
  * them onto its own transport; this module never sets a status code itself.
  */
-import { getSql } from "../db";
-import type { Sql } from "../db";
+import { getSql } from "@/lib/db";
+import type { Sql } from "@/lib/db";
 import { chatLoop } from "./server";
 import { recordTelemetry } from "./telemetry";
 import { recordVoiceMetrics } from "./voiceMetrics";

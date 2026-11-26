@@ -5,7 +5,7 @@
  * without dragging a private helper with it. One INSERT per turn; a lost metric
  * must never break a turn, so every failure is swallowed and logged.
  */
-import type { Sql } from "../db";
+import type { Sql } from "@/lib/db";
 
 export async function recordVoiceMetrics(
   sql: Sql,

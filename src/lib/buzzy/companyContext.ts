@@ -5,7 +5,7 @@
  * Nitro handler without importing it (that would be a cycle). Pure data access
  * over `buzzy_companies` / `buzzy_company_facts` — no transport, no auth.
  */
-import type { Sql } from "../db";
+import type { Sql } from "@/lib/db";
 import type { MoneyBriefLine } from "./money";
 
 export function isCompanyId(id: string): boolean {
