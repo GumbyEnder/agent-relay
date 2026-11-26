@@ -40,7 +40,9 @@ html.bz-on-talk main { padding: 0 var(--ob-gutter) 40px; max-width: none; }
 /* ── Header: the face top-left, the account top-right; the links moved down ── */
 html.bz-on-talk .bz-navbar,
 html.bz-on-talk #bzNav { display: none !important; } /* the places live under the search on Talk */
-html.bz-on-talk header { border-bottom: 0 !important; background: transparent !important; }
+/* The pinned name row must be OPAQUE: a transparent one shows the page scrolling
+   through the face while the bar holds still (CR-14). */
+html.bz-on-talk header { border-bottom: 0 !important; background: var(--bz-panel, #0A0A0A) !important; }
 .bz-brandrow .bz-brand img.bz-face,
 html.bz-on-talk .bz-brandrow .bz-brand img {
   width: 44px;
@@ -65,7 +67,7 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
 .chat-mascot { display: none !important; }
 
 /* ── Talk to BeeZilla, on top while the board is folded ──────────────── */
-.ob-start { order: 1; margin-top: 4px; }
+.ob-start { order: 1; margin-top: 2px; }
 .ob-start:empty { display: none; }
 .ob-start .talk-bar { --tb-min: 3.4rem; padding: 0.6rem; }
 .ob-start .talk-btn { min-height: 3.4rem; font-size: 1.15rem; }
@@ -121,13 +123,43 @@ html.bz-on-talk .bz-brandrow .bz-brand strong { font-size: 1.1rem; font-weight: 
 .bz-head > .ob-board { order: 2; }
 .bz-head > #chatError { order: 4; }
 .bz-head > .bz-browse { order: 5; }
+
+/* ── The bar holds still (CR-14, owner via buzzygrok 2026-11-25) ──────────
+   "A slim pinned bar: face/name + Talk to BeeZilla + search + places row,
+   position:sticky; top:0 … Waiting items scroll under it."
+
+   The chrome head above pins at top:0 and this pins directly under it, at the
+   head's MEASURED height (--bz-chrome-h, set by nav.js). Between them they are one
+   bar: face and name, the Talk row, the search, the places. Everything in the page
+   — the paper you dropped, a draft waiting, the transcript — scrolls behind them.
+
+   The paper panel and the draft banner used to live INSIDE this element, which is why
+   an open paper added ~267px to the header and pushed the row of places to y=748 on a
+   390px phone. They are page content now (talk.html, top of .chat-main).
+
+   Not while the Idea board is open: the board is a workspace inside this element, and
+   pinning 520-1100px of board over the page is not a bar. */
+.bz-head {
+  position: sticky;
+  top: var(--bz-chrome-h, 0px);
+  z-index: 40;
+  /* One stacking context for the bar, so a child's own z-index can never lift part of
+     it over a dialog (all 1000+) or the gear (45). This is 40 on purpose: under both. */
+  isolation: isolate;
+}
+.bz-head:has(.ob-board:not(.hidden)) { position: static; }
+@media (max-width: 760px) {
+  /* Keyboard up on a phone: only the Talk row stays pinned (html.bz-kb, nav.js). */
+  html.bz-kb .bz-head { top: 0 !important; }
+  html.bz-kb .bz-head .bz-browse { display: none !important; }
+}
 /* Talk's own page under the header: what the chosen place holds. */
 .chat-main > * { order: 3; }
 .chat-main > #recentBelow { order: 6; }
 
 /* ── Under the board: one search, then the places ───────────────────── */
-.bz-browse { margin-top: 18px; }
-.bz-tabrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 36px; margin: 1.1rem 0.6rem 0.4rem; border-bottom: 1px solid #1e1e1e; }
+.bz-browse { margin-top: 10px; }
+.bz-tabrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 36px; margin: 0.6rem 0.6rem 0.3rem; border-bottom: 1px solid #1e1e1e; }
 /* The settings gear (#326) is fixed to the bottom-right corner of the viewport,
    nowhere near the search, so the old 80px reservation only stole width: at 390px
    it left a 290px bar with a 106px input (CR-13). The search takes the row. */
@@ -312,6 +344,9 @@ a.ob-item { text-decoration: none; }
      under it, at any header height or scroll position. 50px clears the 44px gear with a
      gap, and the divider line still spans the row (padding sits inside the border box). */
   .bz-tabrow { padding-right: 50px; }
+  /* A pinned bar cannot spend four lines of a 390px phone on the menu: same labels,
+     tighter rows, still ONE wrapping flow that never scrolls sideways. */
+  .bz-tabrow .bz-tabs > *, .bz-tabrow .bz-places > a { font-size: 0.95rem; padding: 0.3rem 0.1rem 0.45rem; }
   /* The six tabs and the seven links are one menu, so they wrap as one flow:
      two flex containers gave two independent wrap groups of 2 + 3 rows (5 rows
      of places on a 360px phone). display:contents joins them into one row that
