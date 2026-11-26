@@ -37,8 +37,10 @@ const contentOf = (m) => (typeof m?.content === "string" ? m.content
 // ask_agent calls it — that is what an agent asking for help looks like from the server's
 // side — and the completion that follows the tool's result is the one the person sees, so it
 // says "Fake model reply" (the words the probe waits for). Everything else keeps echoing the
-// ask, which the new-conversation and colonies probes assert on.
-const AFTER_TOOL = /^(ask_bzilla answered|ask_agent answered|tool_refused \()/;
+// ask, which the new-conversation and colonies probes assert on. make_agent is here for
+// probe-brain.mjs: BeeZilla is offered it only on a turn whose words ask for an agent, so the
+// same words get the call back — the probe's last check is that the new agent reaches the strip.
+const AFTER_TOOL = /^(ask_bzilla answered|ask_agent answered|make_agent made |tool_refused \()/;
 
 function replyTo(messages, tools) {
   const list = messages || [];
@@ -56,6 +58,18 @@ function replyTo(messages, tools) {
   if (names.includes("ask_agent")) {
     const named = ask.match(/^.*?\bask\s+(.+?)\s+(?:what|which|if|about|how|to)\b/i);
     if (named) return { toolCalls: [{ name: "ask_agent", args: { agent: named[1].trim(), question: ask } }] };
+  }
+  // A Zilla agent's own conversation that is not a delegation (its system prompt says
+  // "You are <name>, one of the person's Zilla agents"): answer in words, with the greeting
+  // the .ts suites' fake model uses — the line probe-brain.mjs waits for after talking to
+  // Code Monkey. Delegations above keep their tool calls; this only catches the ordinary turn.
+  const system = list.filter((m) => m?.role === "system").map(contentOf).join("\n");
+  if (/one of the person's Zilla agents/.test(system)) return { content: "Happy to help with that." };
+  // BeeZilla makes an agent (probe-brain.mjs asks "Can you make me an agent for my taxes?").
+  // The server only offers make_agent when the words ask for one, so the words are the cue.
+  if (names.includes("make_agent") && /\b(?:make|create|add)\b[^?]*\bagent\b/i.test(ask)) {
+    const job = (ask.match(/\bfor\s+(.+?)\s*\?*\s*$/i) || [])[1] || "my taxes";
+    return { toolCalls: [{ name: "make_agent", args: { name: "Tax Owl", job, subjects: ["money"] } }] };
   }
   return { content: ask ? `Stand-in reply: ${ask}` : "Stand-in reply." };
 }
