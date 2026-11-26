@@ -77,6 +77,7 @@ import { checkQuota, getEntitlement, recordUsage } from "./entitlements";
 import { compactHistory, normalizeToolResult, estimateTokens, conversationWindowFor, contextState, CONTEXT_COMPACT_AT, CONTEXT_TOOL_OVERHEAD_TOKENS, BOARD_VIEW_BUDGET_CHARS, type ContextState } from "./context";
 import { boardViewBlock, boardViewFocusNote, pointedPicture, type BoardView } from "./boardView";
 import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
+import { turnStageFor } from "./turnStage";
 import { SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
@@ -1790,6 +1791,19 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       );
       llmMs = Date.now() - llmStarted;
     } else {
+      // Buffered path: no words reach the page until the whole answer exists
+      // (a tool surface is what disables streaming). Emit ONE stage at the
+      // start — a document and a chat reply are different waits, and the page
+      // used to show only a seconds counter for both. The streaming branch
+      // above deliberately emits nothing before its first token.
+      const bufferedStage = turnStageFor("buffered", {
+        // A file is expected only when the person asked for one (or pressed
+        // Do it / said go). A gate that merely allows a draft — one already
+        // exists, or the slots happen to be full — must not turn a question
+        // into a claimed document.
+        expectsDocument: explicitDocumentRequest || requestedDraft,
+      });
+      if (bufferedStage) req.onStage?.(bufferedStage);
       reply = await chatCompletionFull(messages, { model: routedModel, tools: loopTools, toolChoice, maxTokens: loopTools ? 4096 : undefined });
       llmMs = Date.now() - llmStarted;
     }
