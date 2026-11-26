@@ -259,7 +259,10 @@ ok("the Talk page sends the view with each turn, frozen as speech starts", () =>
   truthy(sendAt > 0 && takeAt > sendAt && takeAt < talk.indexOf("ensureChatSession()", sendAt) && takeAt < talk.indexOf("__bzTurnStart", sendAt),
     "taken first as the turn is sent, before sending changes the board");
   truthy(/boardView: boardView,/.test(talk), "and sent with the turn");
-  truthy(/if \(rms > 0\.02\) \{ if \(!speechSeen\) bzSpeechHeard\(\);/.test(talk), "the recorder lane marks the first loud frame");
+  // The threshold is a constant now (SPEECH_RMS = 0.008, measured: 0.02 was a shout
+  // on a headset and silence on a laptop array). What this asserts is the SIGNAL —
+  // the first loud frame reaches bzSpeechHeard — not the number it is compared to.
+  truthy(/if \(rms > (?:0\.02|SPEECH_RMS)\) \{ if \(!speechSeen\) bzSpeechHeard\(\);/.test(talk), "the recorder lane marks the first loud frame");
   truthy(/if \(rms > 0\.02\) \{ if \(!capState\.speechSeen\) bzSpeechHeard\(\);/.test(talk), "the recogniser lane's clip too");
   truthy(/voice\.firstInterimAt = performance\.now\(\);\s*bzSpeechHeard\(\);/.test(talk), "and the recogniser's first words");
   truthy(/if \(t\) bzFreezeView\(\);/.test(talk) && /if \(String\(text \|\| ""\)\.trim\(\)\) bzFreezeView\(\);/.test(talk), "kept once words reach the box");
