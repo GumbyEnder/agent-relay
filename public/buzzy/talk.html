@@ -5294,7 +5294,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
+            // CR-8 resync: main's barge-in signal (bzSpeechHeard) plus the desktop
+            // diagnostics and the lower threshold the desktop line measured (0.02 was
+            // a shout on a headset and silence on a laptop array).
+            if (recState) recState.frames = (recState.frames || 0) + 1;
+            if (recState) recState.peak = Math.max(recState.peak || 0, rms);
+            if (rms > SPEECH_RMS) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
             // Live words: the clip so far, shown while the person is still talking.
@@ -7655,8 +7660,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
                 window.beezilla.app.log("managed token re-minted after expiry (expires " + (mintedData.expiresAt || "unknown") + ")");
               }
             } catch (_) {}
-            if (useVoiceLane) data = await streamVoiceTurn(sendBody, metrics, sendStarted, myTurn);
-            else if (typeof ReadableStream !== "undefined") data = await streamTextTurn(sendBody, metrics, sendStarted);
+            // Same signature as the first attempt: a re-sent turn must keep the
+            // conversation it belongs to and the steps it has already drawn.
+            if (useVoiceLane) data = await streamVoiceTurn(sendBody, metrics, sendStarted, myTurn, turnIsCurrent, lateSteps);
+            else if (typeof ReadableStream !== "undefined") data = await streamTextTurn(sendBody, metrics, sendStarted, turnIsCurrent, lateSteps);
             else data = await (await postOnce()).json();
             metrics.turnMs = Math.round(performance.now() - sendStarted);
           } else if (mintedData && mintedData.needsSignIn) {
