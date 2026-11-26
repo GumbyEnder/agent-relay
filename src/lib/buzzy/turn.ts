@@ -50,9 +50,16 @@ export async function runChatTurn({ userId, body }: ChatTurnInput): Promise<Chat
   const jobContext = typeof body.jobContext === "object" && body.jobContext !== null
     ? (body.jobContext as Record<string, unknown>)
     : undefined;
-  // UI mode: "work" steers toward a work effort, "chat" is ordinary
-  // conversation. Unknown values fall back to chat inside chatLoop.
-  const mode: "chat" | "work" = body.mode === "work" ? "work" : "chat";
+  // There is one mode. Main replaced `mode` with the composer's "Do it now"
+  // (`execute`), the button pressed under the last reply (`choice`), and the Talk
+  // bar's privacy control (`privacy`); this mirrors that derivation so the local
+  // runtime routes a turn exactly as the hosted route does. A legacy page still
+  // sending `mode: "work"` is ignored, as it is on main.
+  const execute = body.execute === true;
+  const choice: "ask" | "go" | "accept" | "amount" | null =
+    body.choice === "ask" || body.choice === "go" || body.choice === "accept" || body.choice === "amount" ? body.choice : null;
+  const privacy: "advocate" | "lockdown" | "open" | undefined =
+    body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
   // Voice lane: stream text + audio back over SSE so speech starts on the
   // first audio chunk instead of after the whole buffered reply.
   const voice = body.voice === true;
@@ -160,7 +167,9 @@ export async function runChatTurn({ userId, body }: ChatTurnInput): Promise<Chat
       model,
       attemptId,
       jobContext,
-      mode,
+      execute,
+      choice,
+      privacy,
       companyName: company?.name ?? null,
       companyFacts: company?.facts ?? [],
       customerMemoryBlock,
@@ -198,7 +207,6 @@ export async function runChatTurn({ userId, body }: ChatTurnInput): Promise<Chat
               jobId,
               sessionId,
               source: "server",
-              mode,
               model: result.timings.model,
               ttftMs: result.timings.ttftMs,
               ttfaMs: result.timings.ttfaMs,
