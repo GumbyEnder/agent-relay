@@ -11,11 +11,62 @@
  */
 
 const env = (key: string): string => process.env[key]?.trim() ?? "";
-const BRAVE_KEY = env("BZ_BRAVE_KEY");
 const ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 
+/**
+ * Where to search. Brave's real endpoint unless BZ_BRAVE_URL says otherwise —
+ * that override exists so the search PATH can be tested end-to-end (tool loop,
+ * citation formatting, failure copy) without spending a live Brave quota, and so a
+ * deployment can point at its own gateway later.
+ */
+function endpoint(): string {
+  const override = (process.env.BZ_BRAVE_URL ?? "").trim();
+  return override || ENDPOINT;
+}
+
+/**
+ * Read at CALL time, not module load.
+ *
+ * Capturing the key at import meant a credential resolved after boot (a BYOK key
+ * saved by the user, a desktop store) never took effect until a restart, and a
+ * key cleared in the store kept working for the life of the process.
+ */
+function braveKey(): string {
+  return env("BZ_BRAVE_KEY");
+}
+
+/**
+ * OUR search. The Brave key never leaves the server: a desktop install gets a
+ * short-lived, search-scoped token instead and calls our gateway, which is the only
+ * thing that holds the real key. BYOK always wins — a user who brought their own key
+ * goes straight to Brave and never touches our quota.
+ */
+function gatewayUrl(): string {
+  return env("BZ_SEARCH_GATEWAY_URL").replace(/\/+$/, "");
+}
+
+function managedToken(): string {
+  return env("BZ_SEARCH_TOKEN");
+}
+
+/**
+ * A managed (BeeZilla) search session that has expired. Reported to the UI so the app
+ * can say "reconnect" instead of "search is off" — the user's account is fine, their
+ * 15-minute token is just stale.
+ */
+export function searchNeedsReconnect(): boolean {
+  return env("BZ_SEARCH_EXPIRED") === "1";
+}
+
 export function searchAvailable(): boolean {
-  return BRAVE_KEY !== "";
+  return braveKey() !== "" || (gatewayUrl() !== "" && managedToken() !== "");
+}
+
+/** Which provider would serve a search right now. */
+export function searchProvider(): "brave" | "beezilla" | null {
+  if (braveKey() !== "") return "brave";
+  if (gatewayUrl() !== "" && managedToken() !== "") return "beezilla";
+  return null;
 }
 
 export interface SearchHit {
@@ -57,24 +108,33 @@ export async function webSearch(
 ): Promise<SearchResult> {
   const q = String(query || "").trim().slice(0, 400);
   if (!q) return { ok: false, query: q, results: [], error: "empty query" };
-  if (!BRAVE_KEY) return { ok: false, query: q, results: [], error: "search is not configured" };
+  const key = braveKey();
+  const managed = key === "" ? managedToken() : "";
+  if (!key && !(managed && gatewayUrl())) {
+    return { ok: false, query: q, results: [], error: "search is not configured" };
+  }
 
   const count = Math.max(1, Math.min(10, Math.round(opts?.count ?? 5)));
-  const url = new URL(ENDPOINT);
+  // Two routes to the same payload: our own key direct, or our gateway with a
+  // short-lived token when the user is on BeeZilla search.
+  const url = new URL(managed ? gatewayUrl() : endpoint());
   url.searchParams.set("q", q);
   url.searchParams.set("count", String(count));
   url.searchParams.set("safesearch", "moderate");
   url.searchParams.set("text_decorations", "false");
   if (opts?.freshness) url.searchParams.set("freshness", opts.freshness);
 
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Accept-Encoding": "gzip",
+  };
+  if (managed) headers.Authorization = `Bearer ${managed}`;
+  else headers["X-Subscription-Token"] = key;
+
   try {
     const res = await fetch(url.toString(), {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": BRAVE_KEY,
-      },
+      headers,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {

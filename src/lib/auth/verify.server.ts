@@ -1,5 +1,7 @@
 import { getRequest } from "@tanstack/react-start/server";
 import { auth, authConfigured } from "./server";
+import { isLocalRuntime } from "../runtime";
+import { resolveLocalRequester } from "../local-owner";
 import {
   gateCapability,
   resolveOperatorRoleFromEnv,
@@ -75,7 +77,7 @@ export class ForbiddenError extends Error {
   }
 }
 
-export type VerifiedUser = { id: string; email: string | null };
+export type VerifiedUser = { id: string; email: string | null; name?: string | null };
 
 /**
  * Resolve session user from arbitrary request headers (agent API / Nitro path).
@@ -84,6 +86,12 @@ export type VerifiedUser = { id: string; email: string | null };
 export async function getSessionUserFromHeaders(
   headers: Headers,
 ): Promise<VerifiedUser | null> {
+  // Local (desktop / CLI) installs: Host allowlist + per-launch bearer token,
+  // NOT a cookie session. This is the single chokepoint every Nitro handler
+  // already goes through, so local auth needs no per-route changes.
+  if (isLocalRuntime()) {
+    return resolveLocalRequester(headers);
+  }
   if (!authConfigured) return null;
   try {
     const session = await auth.api.getSession({ headers });
@@ -114,7 +122,6 @@ export async function getSessionUserFromHeaders(
 export async function getSessionUser(
   bearerToken?: string,
 ): Promise<VerifiedUser | null> {
-  if (!authConfigured) return null;
   const request = getRequest();
   if (!request) return null;
   let headers = request.headers;
@@ -122,6 +129,9 @@ export async function getSessionUser(
     headers = new Headers(request.headers);
     headers.set("Authorization", `Bearer ${bearerToken}`);
   }
+  // Local installs resolve identity without better-auth (routes through
+  // getSessionUserFromHeaders' local branch); do not gate on authConfigured.
+  if (!authConfigured && !isLocalRuntime()) return null;
   return getSessionUserFromHeaders(headers);
 }
 

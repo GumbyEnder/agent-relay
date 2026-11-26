@@ -3780,7 +3780,14 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // Which transcriber this session uses. "sr" = the browser's SpeechRecognition
       // (Chrome, and anything with a working speech service); "recorder" = record
       // locally and let the server transcribe (Firefox, Brave, blocked service).
-      asr: "sr",
+      //
+      // The desktop shell is ALWAYS "recorder": Electron exposes
+      // window.webkitSpeechRecognition because it is Chromium, but that API posts
+      // the clip to Google's speech service, which a packaged app cannot use —
+      // rec.start() throws (or answers `network`) and the mic dies silently with
+      // nothing in the dialogue tree. Measured: /api/buzzy/transcribe on the local
+      // runtime answers {ok:true,text,model:"openai/gpt-audio-mini"} in ~1.9 s.
+      asr: window.beezilla ? "recorder" : "sr",
       // Playback + lip-sync
       ctx: null, gain: null, analyser: null, nextTime: 0, active: 0, raf: 0,
       // Capture, held for the whole listen session (see ensureMic) — one
@@ -4180,7 +4187,10 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       voice.textClaim = false;
       // Firefox ships no SpeechRecognition and Brave's service is blocked, so
       // those browsers record the clip and let the server transcribe it.
-      if (!srAvailable() || voice.asr === "recorder") { startRecording(); return; }
+      // The desktop shell is included by name: Electron HAS the API object but
+      // cannot reach the speech service, so taking the SR branch there means the
+      // mic never produces a transcript.
+      if (!srAvailable() || voice.asr === "recorder" || window.beezilla) { startRecording(); return; }
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       var rec = new SR();
       // One stretch of listening = one piece of the box's text (see dictation).
@@ -5174,6 +5184,24 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       paintVoice();
     }
 
+    // 0.02 RMS was a shout on a good headset and silence on a laptop array: the
+    // clip never reached the transcriber, so the user saw "didn't catch that" with
+    // nothing in any log. 0.008 still ignores room noise but hears a normal voice.
+    var SPEECH_RMS = 0.008;
+
+    // A mic that hears nothing and a mic that is broken are indistinguishable from
+    // the outside: both are silence with no message. Every step below writes a line
+    // to main.log (desktop) or the console (web), so the failure names itself.
+    function micLog(msg) {
+      try {
+        if (window.beezilla && window.beezilla.app && window.beezilla.app.log) {
+          window.beezilla.app.log("voice: " + msg);
+          return;
+        }
+      } catch (_) {}
+      try { console.log("[voice] " + msg); } catch (_) {}
+    }
+
     function startRecording() {
       if (recState || voice.sending) return;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -5227,7 +5255,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             var sum = 0;
             for (var i = 0; i < copy.length; i++) sum += copy[i] * copy[i];
             var rms = Math.sqrt(sum / copy.length);
-            if (rms > 0.02) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
+            // Desktop diagnostics (frames/peak) ride the web check; the threshold is
+            // the constant above, measured on a laptop array.
+            if (recState) recState.frames = (recState.frames || 0) + 1;
+            if (recState) recState.peak = Math.max(recState.peak || 0, rms);
+            if (rms > SPEECH_RMS) { if (!speechSeen) bzSpeechHeard(); speechSeen = true; quietSince = 0; }
             else if (speechSeen && !quietSince) { quietSince = Date.now(); }
             if (recState) recState.speechSeen = speechSeen;
             // Live words: the clip so far, shown while the person is still talking.
@@ -5253,6 +5285,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         })
         .catch(function (e) {
           var name = (e && e.name) || "";
+          micLog("getUserMedia failed " + name + ": " + ((e && e.message) || ""));
           if (name === "NotAllowedError" || name === "SecurityError") {
             stageNote("Microphone blocked — allow the mic for this site, then tap it again.");
             voice.mic = false;
@@ -5276,10 +5309,20 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       // (releaseMic() closes them when the listen session ends.)
       // Nothing was said: re-arm instead of uploading a silent clip and paying
       // the model to tell us it heard nothing.
-      if (!r.speechSeen) { rearmListening(); return; }
+      if (!r.speechSeen) {
+        micLog("dropped: no speech above " + SPEECH_RMS + " (peak " + (r.peak || 0).toFixed(4) + ")");
+        stageNote("The microphone heard nothing above room noise (peak " + (r.peak || 0).toFixed(4) + "). Check Settings → Microphone.");
+        rearmListening();
+        return;
+      }
       var total = 0;
       for (var i = 0; i < r.chunks.length; i++) total += r.chunks[i].length;
-      if (total < r.rate * 0.3) { rearmListening(); return; }
+      if (total < r.rate * 0.3) {
+        micLog("dropped: clip too short (" + total + " samples at " + r.rate + " Hz)");
+        rearmListening();
+        return;
+      }
+      micLog("clip " + (total / r.rate).toFixed(2) + " s peak=" + (r.peak || 0).toFixed(4) + " → transcribe");
       var flat = new Float32Array(total);
       var off = 0;
       for (var k = 0; k < r.chunks.length; k++) { flat.set(r.chunks[k], off); off += r.chunks[k].length; }
@@ -7559,6 +7602,33 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           }
           data = await resp.json();
           metrics.turnMs = Math.round(performance.now() - sendStarted);
+        }
+
+        // A managed token is good for 15 minutes. The desktop shell can mint a new
+        // one from the cloud session it already holds, so an expiry mid-session is
+        // recovered here — silently, then the same turn is sent once more — instead
+        // of telling the owner to go find Settings. Only when that session is gone
+        // too do we open the sign-in window, which is the one case a person must act.
+        // Web has no minting window, so this is a no-op there (window.beezilla is
+        // the desktop shell's preload bridge).
+        if (data && data.ok === false && data.code === "managed_expired" && window.beezilla && window.beezilla.account) {
+          var minted = await window.beezilla.account.refresh();
+          var mintedData = minted && minted.ok ? minted.data : null;
+          if (mintedData && mintedData.ok) {
+            try {
+              if (window.beezilla.app && window.beezilla.app.log) {
+                window.beezilla.app.log("managed token re-minted after expiry (expires " + (mintedData.expiresAt || "unknown") + ")");
+              }
+            } catch (_) {}
+            // Same signature as the first attempt: a re-sent turn must keep the
+            // conversation it belongs to and the steps it has already drawn.
+            if (useVoiceLane) data = await streamVoiceTurn(sendBody, metrics, sendStarted, myTurn, turnIsCurrent, lateSteps);
+            else if (typeof ReadableStream !== "undefined") data = await streamTextTurn(sendBody, metrics, sendStarted, turnIsCurrent, lateSteps);
+            else data = await (await postOnce()).json();
+            metrics.turnMs = Math.round(performance.now() - sendStarted);
+          } else if (mintedData && mintedData.needsSignIn) {
+            await window.beezilla.account.signin();
+          }
         }
 
         // They moved on while this turn was answering: it belongs to the conversation it

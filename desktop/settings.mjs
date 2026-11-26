@@ -1,0 +1,173 @@
+/**
+ * Settings bridge — the non-technical path.
+ *
+ * A BeeZilla user is not going to run `beezilla key set`. They open the window,
+ * pick "our inference" or "my own key", paste it, and it works. This module is
+ * that operation, kept Electron-free so it can be tested without a display:
+ * `cipher` is injected (safeStorage in the app, nothing in tests).
+ *
+ * Saving a credential requires restarting the runtime, because the key is
+ * injected into the child's environment at spawn. Doing that here — rather than
+ * telling the user to "restart the app" — is the difference between a product
+ * and a wrapper around a CLI.
+ */
+import { runtimeLib } from "./paths.mjs";
+
+// Loaded from the runtime tree, not by a relative path: inside app.asar a
+// `../scripts/...` import resolves to <install>/resources/scripts, which the
+// installer does not ship (it lives at resources/app/scripts). That import
+// killed 0.2.0 on launch before this file ran. See paths.mjs.
+const {
+  loadInference,
+  saveInference,
+  clearInference,
+  resolveInference,
+  isExpired,
+  redactKey,
+} = await runtimeLib("scripts/lib/inference.mjs");
+const {
+  resolveSearch,
+  saveSearchKey,
+  clearSearchKey,
+  saveManagedSearch: saveManagedSearchStore,
+  loadManagedSearch,
+} = await runtimeLib("scripts/lib/search-keys.mjs");
+const {
+  resolveMusicKey,
+  saveMusicKey,
+  clearMusicKey,
+} = await runtimeLib("scripts/lib/music-keys.mjs");
+
+/**
+ * @param {{ dataDir: () => string, supervisor?: any, cipher?: {encrypt?:Function, decrypt?:Function} }} deps
+ */
+export function createSettingsHandlers({ dataDir, supervisor, cipher = {}, beforeRestart }) {
+  const describe = () => {
+    const dir = dataDir();
+    const inf = resolveInference(dir, cipher);
+    const search = resolveSearch(dir, cipher);
+    const music = resolveMusicKey(dir, cipher);
+    return {
+      inference: inf
+        ? {
+            provider: inf.provider,
+            source: inf.source,
+            key: redactKey(inf.key),
+            baseUrl: inf.baseUrl || null,
+            model: inf.model || null,
+            encrypted: inf.encrypted,
+            expiresAt: inf.expiresAt ?? null,
+            expired: Boolean(inf.expired),
+          }
+        : null,
+      search: search
+        ? {
+            provider: search.provider,
+            source: search.source,
+            // A managed credential has no user-visible key to redact.
+            key: search.provider === "beezilla" ? null : redactKey(search.key),
+            expiresAt: search.expiresAt ?? null,
+          }
+        : null,
+      // Present only when we HAVE a BeeZilla search credential and it lapsed: the
+      // difference between "off" and "reconnect", which the UI must not blur.
+      searchNeedsReconnect: !search && Boolean(loadManagedSearch(dir, cipher)),
+      // Music is a separate account (ElevenLabs) with its own plan, so the app must
+      // be able to say "no key" and "key present, plan refuses" as different things.
+      music: music ? { provider: music.provider, source: music.source, key: redactKey(music.key) } : null,
+    };
+  };
+
+  const restart = async () => {
+    if (!supervisor) return { restarted: false, reason: "no supervisor" };
+    try {
+      // The runtime inherits credentials from the parent environment, so the new
+      // key must be decrypted into process.env BEFORE the child is spawned.
+      if (beforeRestart) await beforeRestart();
+      // Always start afterwards, even if nothing was running: a user who saves a
+      // key on a stopped (or crashed) runtime must end up with a working app, not
+      // a "saved" dialog over a dead window.
+      const wasRunning = await supervisor.isHealthy();
+      await supervisor.stop();
+      const rt = await supervisor.start();
+      return { restarted: wasRunning, started: !wasRunning, port: rt?.port ?? null };
+    } catch (err) {
+      return { restarted: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  return {
+    status: () => describe(),
+
+    /** @param {{provider?: "beezilla"|"byok", key: string, baseUrl?: string, model?: string, expiresAt?: string}} cfg */
+    async saveInference(cfg) {
+      const key = (cfg?.key ?? "").trim();
+      if (!key) throw new Error("a key is required");
+      const provider = cfg.provider === "beezilla" ? "beezilla" : "byok";
+      const saved = saveInference(dataDir(), {
+        provider,
+        key,
+        baseUrl: cfg.baseUrl ?? "",
+        model: cfg.model ?? "",
+        expiresAt: cfg.expiresAt ?? "",
+      }, cipher);
+      const restartInfo = await restart();
+      return { saved: { provider: saved.provider, encrypted: saved.encrypted, key: redactKey(key) }, ...restartInfo, status: describe() };
+    },
+
+    /** @param {{key: string}} cfg  ElevenLabs key for the Music button */
+    async saveMusic(cfg) {
+      const saved = saveMusicKey(dataDir(), { key: cfg?.key ?? "" }, cipher);
+      const restartInfo = await restart();
+      return { saved: { provider: saved.provider, encrypted: saved.encrypted, key: redactKey(cfg?.key ?? "") }, ...restartInfo, status: describe() };
+    },
+
+    async saveSearch(cfg) {
+      const key = (cfg?.key ?? "").trim();
+      if (!key) throw new Error("a search key is required");
+      const saved = saveSearchKey(dataDir(), { key }, cipher);
+      const restartInfo = await restart();
+      return { saved: { provider: saved.provider, encrypted: saved.encrypted }, ...restartInfo, status: describe() };
+    },
+
+    /**
+     * Store the search-scoped token minted by our cloud. Kept separate from
+     * saveSearch (a BYOK key) because they can coexist and BYOK wins.
+     */
+    async saveManagedSearch(cfg) {
+      const saved = saveManagedSearchStore(dataDir(), cfg, cipher);
+      const restarted = await restart();
+      return { saved: { gateway: saved.gateway, expiresAt: saved.expiresAt }, ...restarted };
+    },
+
+    async clear(kind) {
+      if (kind === "search") clearSearchKey(dataDir());
+      else if (kind === "inference") clearInference(dataDir());
+      else if (kind === "music") clearMusicKey(dataDir());
+      else throw new Error(`unknown credential kind: ${String(kind)}`);
+      const restartInfo = await restart();
+      return { cleared: kind, ...restartInfo, status: describe() };
+    },
+
+    /**
+     * "Log out" on a desktop install.
+     *
+     * There is no better-auth session in this process to end: the page's session
+     * comes from the local owner row, and `/api/auth/sign-out` cannot un-provision
+     * it. What a person means by log out here is "stop using my BeeZilla account on
+     * this machine", which is exactly the managed credential pair (inference +
+     * search). Both go in one pass so one restart covers it, and the app is left in
+     * a state the UI can describe honestly: nothing configured, BYOK still possible.
+     */
+    async signOut() {
+      clearInference(dataDir());
+      clearSearchKey(dataDir());
+      const restartInfo = await restart();
+      return { cleared: ["inference", "search"], ...restartInfo, status: describe() };
+    },
+
+    /** Exposed for doctor-style surfaces that need the raw state. */
+    raw: () => loadInference(dataDir(), cipher),
+    expired: () => isExpired(loadInference(dataDir(), cipher)),
+  };
+}

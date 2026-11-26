@@ -1,3 +1,5 @@
+import { isLocalRuntime, localDataDir } from "./runtime";
+
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
@@ -7,6 +9,25 @@ const rawDatabaseUrl =
   typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
 const databaseUrl =
   rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
+
+const rawPgliteDataDir =
+  typeof process !== "undefined" ? process.env.BZ_DATA_DIR : undefined;
+/**
+ * Durability for a local/desktop install. PGLite constructed with no `dataDir`
+ * is **in-memory** — every process restart wipes the whole local database, which
+ * is fine for a laptop demo and the test suites but fatal for an app the user
+ * runs every day. `BZ_DATA_DIR` opts into an on-disk store (the desktop shell
+ * points it at the per-user app data directory); unset keeps the in-memory
+ * behaviour every suite depends on.
+ */
+const pgliteDataDir =
+  rawPgliteDataDir && rawPgliteDataDir.trim()
+    ? rawPgliteDataDir.trim()
+    : // Local installs get a durable store without any env plumbing: the
+      // desktop app is useless if a restart forgets every job.
+      isLocalRuntime()
+      ? localDataDir()
+      : undefined;
 
 /**
  * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured
@@ -160,6 +181,7 @@ async function createPgliteSql(): Promise<Sql> {
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
     const pg = new PGlite({
+      ...(pgliteDataDir ? { dataDir: pgliteDataDir } : {}),
       parsers: {
         [OID_INT8]: Number,
         [OID_DATE]: identity,

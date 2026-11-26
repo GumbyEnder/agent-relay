@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BeeZilla — Settings</title>
+    <style>
+      :root {
+        --ink: #12161f;
+        --muted: #5c6675;
+        --line: #e3e7ee;
+        --bg: #f7f8fa;
+        --accent: #2f6f4f;
+        --warn: #8a5a12;
+        --err: #a4262c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 15px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      main { max-width: 680px; margin: 0 auto; padding: 32px 24px 64px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 24px; }
+      section {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+      h2 { font-size: 15px; margin: 0 0 2px; }
+      .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+      label.opt {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin-bottom: 8px;
+        cursor: pointer;
+      }
+      label.opt:has(input:checked) { border-color: var(--accent); background: #f3f8f5; }
+      label.opt strong { display: block; font-weight: 600; }
+      label.opt span { color: var(--muted); font-size: 13px; }
+      input[type="text"], input[type="password"], input[type="url"] {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+        background: #fff;
+      }
+      input:focus { outline: 2px solid #bcd8c9; outline-offset: 1px; }
+      .field { margin-top: 10px; }
+      .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+      details { margin-top: 12px; }
+      summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+      button {
+        font: inherit;
+        padding: 9px 16px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary { background: #fff; border-color: var(--line); color: var(--ink); }
+      button:disabled { opacity: 0.55; cursor: default; }
+      .status { margin-top: 14px; font-size: 13px; min-height: 18px; }
+      .status.ok { color: var(--accent); }
+      .status.warn { color: var(--warn); }
+      .status.err { color: var(--err); }
+      .current { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+      code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+      .nobridge {
+        display: none;
+        border: 1px solid #f0d9a8;
+        background: #fffaf0;
+        color: var(--warn);
+        border-radius: 10px;
+        padding: 14px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <style>
+      /* Disabled, not hidden: see the comment on #byok-fields. */
+      .locked { opacity: .45; }
+      .locked input, .locked button, .locked summary { pointer-events: none; }
+      .mic-meter { height: 8px; background: #1c2128; border-radius: 4px; margin: 10px 0; overflow: hidden; }
+      .mic-meter span { display: block; height: 100%; width: 0%; background: #3fb950; }
+    </style>
+    <main>
+      <h1>Settings</h1>
+      <p class="sub">Choose how BeeZilla thinks and searches. Everything stays on this machine.</p>
+
+      <div class="nobridge" id="nobridge">
+        This page manages app credentials, so it only works inside the BeeZilla window.
+        Open BeeZilla, then choose <strong>BeeZilla → Settings</strong>.
+      </div>
+
+      <!-- ── inference ─────────────────────────────────────────────── -->
+      <section id="inference">
+        <h2>Intelligence</h2>
+        <p class="hint">Where answers come from. Your key is stored in this computer's secure storage.</p>
+
+        <label class="opt">
+          <input type="radio" name="provider" value="beezilla" id="provider-beezilla" checked />
+          <span>
+            <strong>BeeZilla inference</strong>
+            <span>Included with your account. Sign in and we handle the rest.</span>
+          </span>
+        </label>
+        <div id="managed-fields">
+          <button id="connect-account" class="secondary">Connect BeeZilla account…</button>
+          <p class="hint" id="connect-hint">A short-lived token is issued to this computer; your password never reaches the app.</p>
+        </div>
+        <label class="opt">
+          <input type="radio" name="provider" value="byok" id="provider-byok" />
+          <span>
+            <strong>My own key</strong>
+            <span>Bring a key from any OpenAI-compatible provider.</span>
+          </span>
+        </label>
+
+        <!-- Shown, never hidden: a form that disappears when you pick "BeeZilla
+             inference" reads as a bug ("where did my key go?"). It is disabled and
+             dimmed instead, with one sentence saying who holds the key now. -->
+        <div id="byok-fields" class="locked">
+          <p class="hint" id="byok-locked-note">Managed by your BeeZilla account — no key is needed on this computer. Choose <strong>My own key</strong> to type one.</p>
+          <div class="field">
+            <label for="key">API key</label>
+            <input type="password" id="key" placeholder="sk-…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label for="model">Model <span id="model-hint"></span></label>
+            <input type="text" id="model" placeholder="e.g. gpt-4o-mini" autocomplete="off" />
+          </div>
+          <details>
+            <summary>Advanced</summary>
+            <div class="field">
+              <label for="baseUrl">Base URL</label>
+              <input type="url" id="baseUrl" placeholder="https://api.openai.com/v1" autocomplete="off" />
+            </div>
+          </details>
+        </div>
+
+        <div class="row">
+          <button id="save-inference">Save intelligence</button>
+          <button id="clear-inference" class="secondary">Remove key</button>
+          <span class="status" id="inference-status"></span>
+        </div>
+        <p class="current" id="inference-current"></p>
+      </section>
+
+      <!-- ── search ────────────────────────────────────────────────── -->
+      <section id="search">
+        <h2>Web search</h2>
+        <p class="hint">Lets answers cite real pages. BeeZilla includes search when configured, or use your own Brave key.</p>
+        <div class="field">
+          <label for="search-key">Brave Search API key</label>
+          <input type="password" id="search-key" placeholder="BSA…" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <button id="save-search">Save search</button>
+          <button id="clear-search" class="secondary">Remove key</button>
+          <span class="status" id="search-status"></span>
+        </div>
+        <p class="current" id="search-current"></p>
+      </section>
+
+      <!-- ── music ─────────────────────────────────────────────────── -->
+      <!-- The Music button talks to ElevenLabs directly from this machine, so the
+           app needs its own key: a desktop install has no service environment to
+           inherit one from. Paste it here and it is stored encrypted (DPAPI). -->
+      <section id="music">
+        <h2>Music</h2>
+        <p class="hint">
+          Lets BeeZilla make music from a description. Uses your own ElevenLabs key.
+          The Music API needs a paid ElevenLabs plan (Starter, $6/month) — a free
+          account answers <code>paid_plan_required</code> no matter how good the key is.
+        </p>
+        <div class="field">
+          <label for="music-key">ElevenLabs API key</label>
+          <input type="password" id="music-key" placeholder="sk_…" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <button id="save-music">Save music key</button>
+          <button id="clear-music" class="secondary">Remove key</button>
+          <span class="status" id="music-status"></span>
+        </div>
+        <p class="current" id="music-current"></p>
+      </section>
+
+      <!-- ── microphone ────────────────────────────────────────────── -->
+      <!-- "It didn't hear me" is the hardest report to act on, because every layer
+           above the speaker (permission, device, level, transcriber) fails the same
+           way from the outside: silence. This section names the layer.
+           Desktop only: a browser tab has no main.log to write to. -->
+      <section id="microphone" hidden>
+        <h2>Microphone</h2>
+        <p class="hint">
+          BeeZilla records a short clip and has it transcribed — the browser's speech engine is
+          never used, so silence here is never a browser quirk. If it cannot hear you, this
+          page says which part failed.
+        </p>
+        <div class="field">
+          <label for="mic-device">Input device</label>
+          <select id="mic-device"><option value="">System default</option></select>
+        </div>
+        <div class="row">
+          <button id="mic-allow" class="secondary">Allow microphone</button>
+          <button id="mic-test">Record 3 s &amp; transcribe</button>
+          <span class="status" id="mic-status"></span>
+        </div>
+        <div id="mic-meter" class="mic-meter" hidden><span id="mic-fill"></span></div>
+        <p class="current" id="mic-result">Not tested yet.</p>
+        <div class="row">
+          <button id="mic-copy" class="secondary">Copy diagnostics</button>
+          <span class="status" id="mic-copy-status"></span>
+        </div>
+      </section>
+
+      <!-- ── troubleshooting ───────────────────────────────────────── -->
+      <!-- A packaged app that fails must not be a dead end: every launch writes
+           %APPDATA%\BeeZilla\logs\main.log, and this is the one-click path to it.
+           Shown only inside the desktop shell (no window.beezilla.app in a browser). -->
+      <section id="diagnostics" hidden>
+        <h2>Troubleshooting</h2>
+        <p class="hint">
+          If something goes wrong, the log records what the app was doing. Opening it is often
+          faster than describing the problem.
+        </p>
+        <div class="row">
+          <button id="open-logs" class="secondary">Open logs folder</button>
+          <span class="status" id="logs-status"></span>
+        </div>
+        <p class="current" id="logs-path"></p>
+
+        <!-- Updates. Every release before 0.2.12 reached an installed copy only
+             because someone reinstalled by hand; the app could be days behind the
+             server it talks to and nothing said so. -->
+        <h2 style="margin-top: 22px">Updates</h2>
+        <div class="row">
+          <span class="current" id="update-version">Checking…</span>
+          <button id="update-check" class="secondary">Check for updates</button>
+          <button id="update-download" class="secondary" hidden>Download</button>
+          <button id="update-install" hidden>Restart and install</button>
+          <span class="status" id="update-status"></span>
+        </div>
+      </section>
+
+      <p class="sub" style="margin-top: 26px">
+        Changes restart BeeZilla's local engine automatically — the button tells you when it is ready.
+      </p>
+    </main>
+
+    <script>
+      const bridge = window.beezilla?.settings;
+      const $ = (id) => document.getElementById(id);
+
+      const say = (el, text, kind) => {
+        el.textContent = text;
+        el.className = `status ${kind || ""}`.trim();
+      };
+
+      let lastState = null;
+
+      // The status line has to agree with the radio the user just picked.
+      // "BeeZilla inference — nothing to configure" next to "no key, answers will
+      // refuse" reads like a broken app, so the unconfigured copy is written per
+      // selection instead of once.
+      function selectionNote(state) {
+        const selected = document.querySelector('input[name="provider"]:checked')?.value;
+        if (selected === "beezilla") {
+          return "Nothing configured yet. Connect your BeeZilla account, or pick “My own key” to start working.";
+        }
+        return "Nothing configured yet. Paste your key above and choose Save intelligence.";
+      }
+
+      function renderStatus(state) {
+        lastState = state ?? lastState;
+        const inf = state?.inference;
+        $("inference-current").innerHTML = inf
+          ? `Now: <strong>${inf.provider === "beezilla" ? "BeeZilla inference" : "your own key"}</strong> · ${inf.key}` +
+            (inf.expired ? ' · <span style="color:#a4262c">session expired — press “Connect BeeZilla account…” to renew</span>' : "") +
+            (inf.encrypted === false ? " · stored unencrypted" : "")
+          : selectionNote(state);
+        // Nothing to remove when nothing is configured.
+        $("clear-inference").disabled = !inf;
+        if (inf) {
+          const radio = document.querySelector(`input[name="provider"][value="${inf.provider}"]`);
+          if (radio) {
+            radio.checked = true;
+            paintProvider();
+          }
+          if (inf.provider === "byok" && inf.baseUrl) $("baseUrl").value = inf.baseUrl;
+          if (inf.provider === "byok" && inf.model) $("model").value = inf.model;
+        }
+        const search = state?.search;
+        // Three different situations, three different sentences. "Off" would send a
+        // signed-in user hunting for a key they were never meant to need.
+        if (state?.searchNeedsReconnect) {
+          $("search-current").innerHTML =
+            "Now: <strong>BeeZilla search</strong> · session expired — <strong>Connect your account again</strong> to keep citing sources. Your own Brave key works meanwhile.";
+        } else if (search) {
+          $("search-current").innerHTML = search.provider === "beezilla"
+            ? "Now: <strong>BeeZilla search</strong> · included with your account (renews when you connect)."
+            : `Now: <strong>${search.provider}</strong> · your own key · from ${search.source}`;
+        } else {
+          $("search-current").innerHTML = "Now: off — answers will not cite sources. Connect your account or paste a Brave key.";
+        }
+
+        // Music is its own account: a key can be present and still be refused by the
+        // plan, so name the two cases separately instead of one "off".
+        var music = state?.music;
+        $("music-current").innerHTML = music
+          ? `Now: <strong>${music.provider}</strong> · your own key · from ${music.source}`
+          : "Now: off — press <strong>&#9835; Music</strong> and BeeZilla will ask for an ElevenLabs key.";
+      }
+
+      async function refresh() {
+        const res = await bridge.get();
+        if (res.ok) renderStatus(res.data);
+        return res;
+      }
+
+      // Grey out, don't hide. A key field that vanishes when you pick "BeeZilla
+      // inference" looks like a bug; a dimmed field with one sentence explaining who
+      // holds the key reads as a decision. Every input inside is really disabled, so
+      // a stray paste cannot put a key on a managed install.
+      function paintProvider() {
+        const selected = document.querySelector('input[name="provider"]:checked')?.value ?? "beezilla";
+        const managed = selected === "beezilla";
+        $("byok-fields").classList.toggle("locked", managed);
+        $("byok-fields").querySelectorAll("input, button, summary").forEach((el) => {
+          el.disabled = managed;
+          if (managed) el.setAttribute("tabindex", "-1");
+          else el.removeAttribute("tabindex");
+        });
+        $("byok-locked-note").hidden = !managed;
+        $("managed-fields").hidden = !managed;
+        $("model-hint").textContent = managed ? "" : "(optional)";
+      }
+
+      // Only the sentence follows the selection. Calling renderStatus() here would
+      // re-tick the radio from the saved state one line later — picking "My own key"
+      // would flip straight back to "BeeZilla inference" and look like a broken click.
+      function renderSelectionNote() {
+        if (lastState?.inference) return;
+        $("inference-current").innerHTML = selectionNote(lastState);
+      }
+
+      document.querySelectorAll('input[name="provider"]').forEach((radio) => {
+        radio.addEventListener("change", () => {
+          paintProvider();
+          renderSelectionNote();
+        });
+      });
+      paintProvider();
+
+      async function withBusy(button, label, fn) {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = label;
+        try {
+          return await fn();
+        } finally {
+          button.disabled = false;
+          button.textContent = original;
+        }
+      }
+
+      // "Connect BeeZilla account": the token is minted inside our own sign-in
+      // window and stored here — the app never sees the password or the cookie.
+      $("connect-account").addEventListener("click", async () => {
+        await withBusy($("connect-account"), "Waiting for sign-in…", async () => {
+          const res = await window.beezilla.settings.connect();
+          if (!res?.ok || res.data?.ok === false) {
+            $("connect-hint").textContent = res?.error || res?.data?.error || "Could not connect.";
+            return;
+          }
+          $("connect-hint").textContent = "Connected. BeeZilla started.";
+          await refresh();
+        });
+      });
+
+      $("save-inference").addEventListener("click", async () => {
+        const provider = document.querySelector('input[name="provider"]:checked')?.value ?? "byok";
+        const status = $("inference-status");
+        if (provider === "beezilla") {
+          say(status, "Managed inference needs a BeeZilla account session, which this build cannot mint yet. Add your own key for now.", "warn");
+          return;
+        }
+        const key = $("key").value.trim();
+        if (!key) return say(status, "Paste your key first.", "err");
+        await withBusy($("save-inference"), "Saving…", async () => {
+          const res = await bridge.saveInference({
+            provider: "byok",
+            key,
+            baseUrl: $("baseUrl").value.trim(),
+            model: $("model").value.trim(),
+          });
+          if (!res.ok) return say(status, res.error || "Could not save.", "err");
+          $("key").value = "";
+          say(status, res.data.started ? "Saved. BeeZilla started." : "Saved. BeeZilla restarted.", "ok");
+          renderStatus(res.data.status);
+        });
+      });
+
+      $("save-search").addEventListener("click", async () => {
+        const status = $("search-status");
+        const key = $("search-key").value.trim();
+        if (!key) return say(status, "Paste a Brave key first.", "err");
+        await withBusy($("save-search"), "Saving…", async () => {
+          const res = await bridge.saveSearch({ key });
+          if (!res.ok) return say(status, res.error || "Could not save.", "err");
+          $("search-key").value = "";
+          say(status, res.data.started ? "Saved. BeeZilla started." : "Saved. BeeZilla restarted.", "ok");
+          renderStatus(res.data.status);
+        });
+      });
+
+      $("clear-inference").addEventListener("click", async () => {
+        const res = await bridge.clear("inference");
+        if (!res.ok) return say($("inference-status"), res.error || "Could not remove.", "err");
+        say($("inference-status"), "Key removed.", "ok");
+        renderStatus(res.data.status);
+      });
+
+      $("clear-search").addEventListener("click", async () => {
+        const res = await bridge.clear("search");
+        if (!res.ok) return say($("search-status"), res.error || "Could not remove.", "err");
+        say($("search-status"), "Key removed.", "ok");
+        renderStatus(res.data.status);
+      });
+
+      $("save-music").addEventListener("click", async () => {
+        const status = $("music-status");
+        const key = $("music-key").value.trim();
+        if (!key) return say(status, "Paste your ElevenLabs key first (it starts with sk_).", "err");
+        await withBusy($("save-music"), "Saving…", async () => {
+          const res = await bridge.saveMusic({ key });
+          if (!res.ok) return say(status, res.error || "Could not save.", "err");
+          $("music-key").value = "";
+          say(status, res.data.started ? "Saved. BeeZilla started." : "Saved. BeeZilla restarted.", "ok");
+          renderStatus(res.data.status);
+        });
+      });
+
+      $("clear-music").addEventListener("click", async () => {
+        const res = await bridge.clear("music");
+        if (!res.ok) return say($("music-status"), res.error || "Could not remove.", "err");
+        say($("music-status"), "Key removed.", "ok");
+        renderStatus(res.data.status);
+      });
+
+      if (!bridge) {
+        $("nobridge").style.display = "block";
+        document.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      } else {
+        refresh().catch(() => say($("inference-status"), "Could not read current settings.", "err"));
+      }
+
+      // Diagnostics — desktop only. `window.beezilla.app` exists only under the
+      // Electron shell, so a browser view of this page simply never shows it.
+      const appBridge = window.beezilla?.app;
+      if (appBridge?.logs) {
+        $("diagnostics").hidden = false;
+        appBridge
+          .logs()
+          .then((res) => {
+            if (res?.ok && res.data?.file) $("logs-path").textContent = `Log: ${res.data.file}`;
+          })
+          .catch(() => {});
+        // ── updates ──────────────────────────────────────────────────────────
+        (function initUpdates() {
+          const updates = window.beezilla?.updates;
+          const ver = $("update-version");
+          const status = $("update-status");
+          const btnCheck = $("update-check");
+          const btnDownload = $("update-download");
+          const btnInstall = $("update-install");
+          if (!updates) {
+            if (ver) ver.textContent = "Updates are available in the desktop app only.";
+            return;
+          }
+          const paint = (state) => {
+            const installed = state.version ? `Installed ${state.version}` : "BeeZilla";
+            if (state.downloaded) {
+              ver.textContent = `${installed} · ${state.downloaded} ready to install`;
+              btnDownload.hidden = true;
+              btnInstall.hidden = false;
+            } else if (state.available) {
+              ver.textContent = `${installed} · ${state.available} available`;
+              btnDownload.hidden = false;
+              btnInstall.hidden = true;
+            } else {
+              ver.textContent = state.checkedAt ? `${installed} · up to date` : installed;
+              btnDownload.hidden = true;
+              btnInstall.hidden = true;
+            }
+            if (state.downloading) say(status, `Downloading ${state.downloading}%…`, "");
+            else if (state.error) say(status, `Update check failed: ${state.error}`, "bad");
+            else if (state.downloaded) say(status, "Downloaded. It installs when you press the button.", "ok");
+            else say(status, state.available ? "A newer version is available." : "", state.available ? "ok" : "");
+          };
+          updates.status().then((r) => paint(r?.data ?? {})).catch(() => {});
+          btnCheck?.addEventListener("click", async () => {
+            say(status, "Checking…", "");
+            const r = await updates.check();
+            paint(r?.data ?? r ?? {});
+          });
+          btnDownload?.addEventListener("click", async () => {
+            say(status, "Downloading…", "");
+            const r = await updates.download();
+            paint(r?.data ?? r ?? {});
+          });
+          btnInstall?.addEventListener("click", async () => {
+            say(status, "Restarting to install…", "");
+            await updates.install();
+          });
+        })();
+
+        $("open-logs").addEventListener("click", async () => {
+          const res = await appBridge.openLogs();
+          if (!res?.ok) say($("logs-status"), res?.error || "Could not open the folder.", "err");
+          else say($("logs-status"), "Opened.", "ok");
+        });
+      }
+
+      // ── microphone diagnostics ──────────────────────────────────────
+      // Four layers produce the same symptom — silence: permission, device, input
+      // level, transcriber. Each is inspected and named here, and every step goes
+      // into main.log, so "it didn't hear me" is answerable from disk instead of
+      // from memory.
+      const micLog = (msg) => { try { void appBridge?.log?.(`mic: ${msg}`); } catch (_) {} };
+      let micStream = null, micPeak = -100, micInfo = {}, lastMicResult = "not run";
+      let micFrames = 0, micCtxState = "(none)";
+
+      const pct = (db) => Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
+      function dbfs(analyser, buf) {
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        return 10 * Math.log10(sum / buf.length || 1e-10);
+      }
+
+      async function fillDevices() {
+        if (!navigator.mediaDevices?.enumerateDevices) return;
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const inputs = devices.filter((d) => d.kind === "audioinput");
+          const sel = $("mic-device");
+          const chosen = sel.value;
+          sel.innerHTML = '<option value="">System default</option>' +
+            inputs.map((d, i) => `<option value="${d.deviceId}">${d.label || `Microphone ${i + 1}`}</option>`).join("");
+          if (chosen) sel.value = chosen;
+          micLog(`devices=${inputs.length} [${inputs.map((d) => d.label || "(unlabelled)").join(" | ")}]`);
+        } catch (err) {
+          micLog(`enumerateDevices failed ${err?.name}: ${err?.message}`);
+        }
+      }
+
+      function startMeter(stream) {
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          const ctx = new AC();
+          const src = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 1024;
+          src.connect(analyser);
+          const buf = new Float32Array(analyser.fftSize);
+          micCtxState = ctx.state;
+          if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} micCtxState = ctx.state + "→" + ctx.state; }
+          micLog(`meter ctx state=${ctx.state}`);
+          $("mic-meter").hidden = false;
+          const tick = () => {
+            if (!micStream) { ctx.close().catch(() => {}); return; }
+            const db = dbfs(analyser, buf);
+            micFrames += 1;
+            micPeak = Math.max(micPeak, db);
+            $("mic-fill").style.width = pct(db) + "%";
+            $("mic-fill").style.background = db > -35 ? "#3fb950" : db > -50 ? "#d29922" : "#8b949e";
+            requestAnimationFrame(tick);
+          };
+          tick();
+        } catch (err) {
+          micLog(`meter failed ${err?.message}`);
+        }
+      }
+
+      async function micAllow() {
+        if (micStream) return micStream;
+        if (!navigator.mediaDevices?.getUserMedia) {
+          say($("mic-status"), "This build has no microphone API.", "err");
+          micLog("no mediaDevices.getUserMedia in this renderer");
+          return null;
+        }
+        try {
+          const audio = { channelCount: 1, echoCancellation: true, noiseSuppression: true };
+          if ($("mic-device").value) audio.deviceId = { exact: $("mic-device").value };
+          micLog(`getUserMedia device=${$("mic-device").value || "system default"}`);
+          micStream = await navigator.mediaDevices.getUserMedia({ audio });
+          const track = micStream.getAudioTracks()[0];
+          micInfo = { label: track?.label || "(unlabelled)", settings: track?.getSettings?.() || {}, readyState: track?.readyState, muted: track?.muted };
+          micLog(`track readyState=${track?.readyState} muted=${track?.muted} enabled=${track?.enabled}`);
+          if (track?.muted) say($("mic-status"), "The device opened but is muted by the system.", "err");
+          micLog(`stream ok label="${micInfo.label}" rate=${micInfo.settings.sampleRate || "?"} ch=${micInfo.settings.channelCount || "?"}`);
+          say($("mic-status"), "Microphone ready — speak and the bar should move.", "ok");
+          await fillDevices();
+          startMeter(micStream);
+          return micStream;
+        } catch (err) {
+          const name = err?.name || "Error";
+          const hint =
+            name === "NotAllowedError" ? " — permission was refused (Windows: Settings → Privacy → Microphone)"
+            : name === "NotFoundError" ? " — no input device is present"
+            : name === "NotReadableError" ? " — another app is holding the device"
+            : "";
+          micLog(`getUserMedia failed ${name}: ${err?.message}`);
+          say($("mic-status"), `${name}${hint}`, "err");
+          return null;
+        }
+      }
+
+      function toBlob(stream) {
+        return new Promise((resolve) => {
+          const type = window.MediaRecorder?.isTypeSupported?.("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
+            : window.MediaRecorder?.isTypeSupported?.("audio/webm") ? "audio/webm" : "";
+          const rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+          const chunks = [];
+          rec.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+          rec.onstop = () => resolve(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+          rec.start();
+          setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 3000);
+        });
+      }
+
+      $("mic-allow")?.addEventListener("click", () => void micAllow());
+      $("mic-device")?.addEventListener("change", async () => {
+        micLog(`device changed → ${$("mic-device").value || "default"}`);
+        micStream?.getTracks().forEach((t) => t.stop());
+        micStream = null;
+        micPeak = -100;
+        await micAllow();
+      });
+
+      $("mic-test")?.addEventListener("click", async () => {
+        const status = $("mic-status");
+        const stream = await micAllow();
+        if (!stream) return;
+        micPeak = -100;
+        await withBusy($("mic-test"), "Recording 3 s…", async () => {
+          const started = Date.now();
+          try {
+            const blob = await toBlob(stream);
+            micLog(`recorded ${blob.size} B in ${Date.now() - started} ms`);
+            say(status, `Sending ${Math.round(blob.size / 1024)} KB…`, "");
+            const res = await fetch("/api/buzzy/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": blob.type || "audio/webm" },
+              body: blob,
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) {
+              lastMicResult = `${res.status} ${data?.error || "transcription failed"}`;
+              micLog(`transcribe ${res.status} ${JSON.stringify(data).slice(0, 200)}`);
+              $("mic-result").textContent = `Failed: ${lastMicResult}`;
+              say(status, "The transcriber refused that clip.", "err");
+              return;
+            }
+            lastMicResult = data.text || "(empty transcript)";
+            micLog(`transcribe ok ms=${data.ms} model=${data.model} text="${(data.text || "").slice(0, 120)}"`);
+            const facts = `peak ${micPeak.toFixed(0)} dBFS · frames ${micFrames} · ctx ${micCtxState} · track ${micInfo.readyState || "?"}`;
+            $("mic-result").textContent = data.text
+              ? `Heard: “${data.text}”  ·  ${data.ms} ms  ·  ${data.model}  ·  ${facts}`
+              : `Heard nothing. ${facts} — ${
+                  micFrames === 0
+                    ? "the audio graph never ran, which is a permission or device problem, not a level problem."
+                    : micPeak < -55
+                      ? "the stream is delivering near-silence. On Windows check Settings → Privacy → Microphone → “Let desktop apps access your microphone”; a browser tab has its own grant and can work while the app is refused."
+                      : "audio arrived, so the clip was too short or too quiet."
+                }`;
+            say(status, data.text ? "Transcribed." : "No words in that clip.", data.text ? "ok" : "err");
+          } catch (err) {
+            lastMicResult = `${err?.name || "error"}: ${err?.message || ""}`;
+            micLog(`test threw ${lastMicResult}`);
+            say(status, lastMicResult, "err");
+          }
+        });
+      });
+
+      $("mic-copy")?.addEventListener("click", async () => {
+        const version = await appBridge?.version?.().catch(() => null);
+        const block = [
+          `BeeZilla ${version?.ok ? version.data.version : "?"}`,
+          `user agent: ${navigator.userAgent}`,
+          `device: ${micInfo.label || "(none)"} rate=${micInfo.settings.sampleRate || "?"} ch=${micInfo.settings.channelCount || "?"}`,
+          `peak: ${micPeak.toFixed(0)} dBFS · frames ${micFrames} · ctx ${micCtxState}`,
+          `track: readyState=${micInfo.readyState || "?"} muted=${micInfo.muted ?? "?"}`,
+          `last result: ${lastMicResult}`,
+          `log: ${$("logs-path").textContent || "(unknown)"}`,
+        ].join("\n");
+        try {
+          await navigator.clipboard.writeText(block);
+          say($("mic-copy-status"), "Copied.", "ok");
+        } catch (_) {
+          $("mic-result").textContent = block;
+          say($("mic-copy-status"), "Copy blocked — the block is shown above.", "err");
+        }
+        micLog(`diagnostics copied peak=${micPeak.toFixed(0)}`);
+      });
+
+      if (appBridge) {
+        $("microphone").hidden = false;
+        void fillDevices();
+        navigator.permissions?.query?.({ name: "microphone" }).then((p) => {
+          micLog(`permission state=${p.state}`);
+          if (p.state === "granted") say($("mic-status"), "Already allowed — press “Record 3 s & transcribe”.", "ok");
+        }).catch(() => { micLog("permission query unsupported"); });
+      }
+    </script>
+  </body>
+</html>

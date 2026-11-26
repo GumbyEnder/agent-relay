@@ -48,6 +48,7 @@ import { getSessionUserFromHeaders } from "@/lib/auth/verify.server";
 import { getModels, chatCompletion } from "./llm";
 import { getSql, type Sql } from "@/lib/db";
 import { honchoAvailable } from "./honcho";
+import { searchAvailable, searchProvider, searchNeedsReconnect } from "./search";
 import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision } from "./graphs";
 import { parseGraphDetailPath } from "./orchestration";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
@@ -3369,6 +3370,30 @@ export default defineEventHandler(async (event) => {
     const out = await whiteboardRoute(sql, user.id, method, path.slice("/api/buzzy/whiteboards/".length), body);
     setResponseStatus(event, out.status);
     return out.body;
+  }
+
+  // ── GET /api/buzzy/search-status — can this install search, and with what?
+  // Three scripts (test-search-live, test-search-managed, test-search-reconnect)
+  // and the desktop settings/doctor bridge already expect this route; the search
+  // itself was here, the question "is it on, whose quota, is my session stale"
+  // was not. The answer names a provider and never the credential: an owner who
+  // sees "reconnect" must not go hunting for a Brave key they were never meant
+  // to need, and a page must not be able to read the key out of the status.
+  if (method === "GET" && path === "/api/buzzy/search-status") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    const needsReconnect = searchNeedsReconnect();
+    return {
+      ok: true,
+      // An expired managed session is NOT available — the caller must say
+      // "reconnect", not "search is off".
+      available: searchAvailable() && !needsReconnect,
+      provider: searchProvider(),
+      needsReconnect,
+    };
   }
 
   // ── GET /api/buzzy/search — work search across ALL of the user's companies

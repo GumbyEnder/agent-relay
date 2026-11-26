@@ -1,0 +1,64 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS by construction: a sandboxed renderer cannot load an ESM preload */
+/**
+ * Preload — the ONLY privileged surface the page gets.
+ *
+ * CommonJS on purpose: a sandboxed renderer cannot load an ESM preload, and the
+ * failure is silent — `window.beezilla` is simply undefined while the window
+ * looks fine. Sandboxing wins over module style, so this file stays .cjs.
+ *
+ * Earlier the app tried to inject the auth header by patching `window.fetch`
+ * here, which failed: with contextIsolation the preload's `fetch` is a different
+ * JS world from the page's. Network auth now happens in
+ * `session.onBeforeSendHeaders`. What a preload IS for is exactly this: a narrow,
+ * explicit IPC bridge.
+ *
+ * Every method returns a promise and the main process answers
+ * `{ ok, data }` / `{ ok: false, error }` — no silent `false`, so a settings form
+ * can show the real error instead of "something went wrong".
+ */
+const { contextBridge, ipcRenderer } = require("electron");
+
+const call = (channel, payload) => ipcRenderer.invoke(`beezilla:${channel}`, payload);
+
+contextBridge.exposeInMainWorld("beezilla", {
+  settings: {
+    get: () => call("settings:get"),
+    saveInference: (cfg) => call("settings:saveInference", cfg),
+    saveSearch: (cfg) => call("settings:saveSearch", cfg),
+    /** ElevenLabs key for the Music button — the local runtime has no env of its own */
+    saveMusic: (cfg) => call("settings:saveMusic", cfg),
+    clear: (kind) => call("settings:clear", kind),
+    /** sign in on our site and store the short-lived inference token */
+    connect: () => call("settings:connect"),
+  },
+  /**
+   * The account itself — the thing a person thinks "log out" and "sign in" refer to.
+   *
+   * A desktop install's session is the local owner row: `/api/auth/sign-out` on this
+   * runtime has nothing to end, so the page cannot log out with a fetch. These three
+   * channels are the honest version: `refresh` re-mints silently (used automatically
+   * when a turn says the token expired), `signin` opens the sign-in window, and
+   * `signout` drops the managed credential and the adopted name.
+   */
+  account: {
+    refresh: () => call("account:refresh"),
+    signin: () => call("account:signin"),
+    signout: () => call("account:signout"),
+  },
+  updates: {
+    /** installed version, what is available, download progress, last error */
+    status: () => call("update:status"),
+    check: () => call("update:check"),
+    download: () => call("update:download"),
+    /** only ever called from a button — never a surprise restart */
+    install: () => call("update:install"),
+  },
+  app: {
+    version: () => call("app:version"),
+    /** where main.log lives — so a bug report can name a file instead of a symptom */
+    logs: () => call("app:logPath"),
+    openLogs: () => call("app:openLogs"),
+    /** write a line into main.log from the page — mic and transcriber diagnostics */
+    log: (message) => call("app:log", message),
+  },
+});
