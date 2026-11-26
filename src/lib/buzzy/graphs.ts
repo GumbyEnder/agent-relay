@@ -254,6 +254,55 @@ async function replaceChildren(
   }
 }
 
+/**
+ * Delete a graph the caller owns.
+ *
+ * 0049 declares ON DELETE CASCADE on every child of buzzy_graphs (nodes, edges,
+ * revisions, runs and their node results), so one row delete takes its whole
+ * subtree with it — there is no half-deleted graph to read. The id and the
+ * owner are in the same statement on purpose: a stranger's id matches nothing
+ * and reports not_found, never a silent success.
+ *
+ * A live run is refused instead of cascaded away. A worker holding a run that
+ * disappears underneath it would write results into a deleted run and a person
+ * would see a workflow fail with no reason; cancelling first is the honest order.
+ *
+ * Run history is part of what is deleted (the FK is CASCADE). That is the
+ * trade this endpoint makes, and the page's confirm says so out loud.
+ */
+export async function deleteGraph(
+  userId: string,
+  graphId: string,
+  sqlIn?: Sql,
+): Promise<{ ok: true; runs: number } | { ok: false; code: "not_found" | "active_run"; status?: string }> {
+  const sql = sqlIn ?? await getSql();
+
+  const owned = await sql<{ id: string }>`
+    SELECT id FROM buzzy_graphs WHERE id = ${graphId} AND user_id = ${userId} LIMIT 1
+  `;
+  if (!owned.length) return { ok: false, code: "not_found" };
+
+  const live = await sql<{ status: string }>`
+    SELECT status FROM buzzy_graph_runs
+     WHERE graph_id = ${graphId} AND user_id = ${userId}
+       AND status IN ('pending', 'running', 'awaiting_approval')
+     ORDER BY started_at DESC
+     LIMIT 1
+  `;
+  if (live.length) return { ok: false, code: "active_run", status: live[0]!.status };
+
+  const counted = await sql<{ n: number }>`
+    SELECT COUNT(*)::int AS n FROM buzzy_graph_runs WHERE graph_id = ${graphId} AND user_id = ${userId}
+  `;
+  const gone = await sql<{ id: string }>`
+    DELETE FROM buzzy_graphs WHERE id = ${graphId} AND user_id = ${userId} RETURNING id
+  `;
+  // Lost the race to a second delete in another tab: the row is gone either way,
+  // so the caller gets the same answer the second tab got.
+  if (!gone.length) return { ok: false, code: "not_found" };
+  return { ok: true, runs: Number(counted[0]?.n ?? 0) };
+}
+
 export async function listGraphs(userId: string, limit = 50): Promise<Array<{
   id: string; title: string; version: number; updated_at: string; nodes: number;
 }>> {
