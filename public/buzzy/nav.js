@@ -18,11 +18,16 @@
  *
  * Loaded by pages.nitro.ts on every HTML page, so a new page inherits it for free.
  *
- * DESKTOP PORT (feat/local-runtime) — this file is web main's file verbatim, with
- * one block: DESKTOP_ABSENT below. A place whose page is not in this tree is left
- * out of LINKS, because a nav that 404s is worse than a nav with fewer places.
- * When re-syncing, take main's whole file and re-apply that one block — nothing
- * else in here may drift between the two lines.
+ * DESKTOP PORT (feat/local-runtime) — this file is web main's file verbatim, plus
+ * two things the desktop shell needs and the website does not notice: `links` is
+ * exported from BeeZillaChrome, and the places row is BUILT from that same list
+ * (see buildPlacesRow) instead of being a second hand-written copy.
+ *
+ * It used to carry DESKTOP_ABSENT, which dropped a place whose page was missing
+ * from this tree. After the resync onto main every page in LINKS exists here
+ * (orchestrate included), so the filter is gone — a nav that hides a page it can
+ * serve is the same lie in the other direction. Put it back, one id at a time,
+ * the day a page really is absent from this tree.
  */
 (function () {
   "use strict";
@@ -183,12 +188,6 @@
     return bzRedact(d);
   }
 
-  // Desktop line only (see the file header): Orchestrate has no page in this
-  // tree — pages.nitro.ts answers 404 for it — so the row does not offer it.
-  // Music studio and Download ARE ported here (public/buzzy/studio.html and
-  // download.html), so they stay. Remove an id here the day its page lands.
-  var DESKTOP_ABSENT = { orchestrate: 1 };
-
   var LINKS = [
     // The owner's roadmap names five main places: Talk, Library, Memory, Experts,
     // Recipes. Everything else stays one click away under "More" (`more: true`).
@@ -211,7 +210,7 @@
     // anchor looks like on a page that did not hand-write one.
     { id: "wallet", href: "/buzzy/wallet", label: "Honey", more: true },
     { id: "publish", href: "/buzzy/upload", label: "Publish", more: true },
-  ].filter(function (l) { return !DESKTOP_ABSENT[l.id]; });
+  ];
 
   function section(pathname) {
     var p = (pathname || location.pathname).replace(/\.html$/, "").replace(/\/+$/, "");
@@ -2040,8 +2039,8 @@
   // #bzPlaces used to carry its own eleven anchors while nav.js carried the same
   // eleven in LINKS. Two lists, one order to keep — so they drifted (web shipped
   // Download out of order for exactly that reason). The row is built here from
-  // LINKS, minus DESKTOP_ABSENT, and Talk is dropped once the Talk-to-BeeZilla bar
-  // exists because the bar IS the way back (same rule as the website).
+  // LINKS, and Talk is dropped once the Talk-to-BeeZilla bar exists because the
+  // bar IS the way back (same rule as the website).
   function buildPlacesRow() {
     var row = document.getElementById("bzPlaces");
     if (!row) return;
