@@ -163,7 +163,11 @@ jobs:
              node_modules/@electric-sql/pglite/dist/pglite.wasm \
              node_modules/@electric-sql/pglite/dist/initdb.wasm \
              .output/server/_libs/
-          PORT=8247 AGENT_RELAY_DEV_MAIL=1 \
+          # Code Monkey is a starter on every account now (#369). This probe was written for one
+          # agent at a time from the grey bunny, which is what BZ_STARTER_AGENTS=bunny keeps it
+          # (agents.ts says the same); the default pair is checked by scripts/test-brain.ts and
+          # the #369 probe below, which run on the real starter set.
+          PORT=8247 BZ_STARTER_AGENTS=bunny AGENT_RELAY_DEV_MAIL=1 \
             BETTER_AUTH_URL=http://127.0.0.1:8247 \
             BETTER_AUTH_TRUSTED_ORIGINS=http://127.0.0.1:8247 \
             BETTER_AUTH_SECRET=ci-agent-colonies-secret \
@@ -205,7 +209,9 @@ jobs:
              node_modules/@electric-sql/pglite/dist/pglite.wasm \
              node_modules/@electric-sql/pglite/dist/initdb.wasm \
              .output/server/_libs/
-          PORT=8249 AGENT_RELAY_DEV_MAIL=1 \
+          # Bunny-only, for the same reason as the colonies probe above: this one follows
+          # agents[0] from a one-agent account.
+          PORT=8249 BZ_STARTER_AGENTS=bunny AGENT_RELAY_DEV_MAIL=1 \
             BETTER_AUTH_URL=http://127.0.0.1:8249 \
             BETTER_AUTH_TRUSTED_ORIGINS=http://127.0.0.1:8249 \
             BETTER_AUTH_SECRET=ci-agent-hive-secret \
