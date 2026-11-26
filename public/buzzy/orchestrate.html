@@ -232,6 +232,7 @@
     <button id="btnImport" class="ghost">Import…</button>
     <button id="btnLayout" class="ghost">Auto-layout</button>
     <button id="btnSave" class="ghost" title="Save to your account (⌘S)">Save</button>
+    <button id="btnDelete" class="ghost" disabled title="Delete this orchestration from your account">Delete</button>
     <button id="btnExport" title="Download the JSON spec">Download</button>
     <button id="btnBoard" class="ghost" title="Put this flow on the Idea Board in Talk, card by card, where you can keep building it by talking">Put on the Idea Board</button>
     <button id="btnSend" class="primary" title="Hand the spec to Buzzy in Talk">Send to agent</button>
@@ -978,6 +979,7 @@
     if (!board || !Array.isArray(board.cards)) return false;
     var next = validate(MOD.boardToSpec(board)).spec;
     graphId = ""; graphVersion = 0; $("#verSel").style.display = "none";
+    syncDeleteBtn();
     spec = next; history = []; redo = []; selected = [];
     lastCanon = "";
     commit();
@@ -1011,6 +1013,7 @@
       }
       graphId = j.id;
       graphVersion = j.version;
+      syncDeleteBtn();
       if (j.spec) spec = j.spec;
       lastCanon = canonicalSpec(spec);
       try { window.history.replaceState(null, "", "/buzzy/orchestrate?graph=" + encodeURIComponent(graphId)); } catch (e) {}
@@ -1054,6 +1057,7 @@
       spec = j.graph.spec;
       graphId = j.graph.id;
       graphVersion = j.graph.version;
+      syncDeleteBtn();
       history = []; redo = []; selected = [];
       commit(false); fit();
       verNote("v" + graphVersion);
@@ -1086,6 +1090,47 @@
     graphId = ""; graphVersion = 0; $("#verSel").style.display = "none"; verNote("");
     try { window.history.replaceState(null, "", "/buzzy/orchestrate"); } catch (e) {}
     spec = starter(); history = []; redo = []; selected = []; commit();
+    syncDeleteBtn();
+  });
+  // ── delete a saved orchestration ─────────────────────────────────────
+  // GET and POST existed, so a scratch flow could never be removed from the
+  // account at all (the API answered 405). Only a saved graph has something to
+  // delete; the button says why it is disabled instead of hiding.
+  function syncDeleteBtn() {
+    var b = $("#btnDelete");
+    b.disabled = !graphId;
+    b.title = graphId
+      ? "Delete this orchestration from your account"
+      : "Open a saved orchestration to delete it";
+  }
+  $("#btnDelete").addEventListener("click", async function () {
+    if (!graphId) return;
+    var name = (spec && spec.name) || graphId;
+    if (!confirm('Delete "' + name + '" from your account? Its saved versions and run history go with it. This cannot be undone.')) return;
+    var b = this; b.disabled = true;
+    try {
+      var res = await fetch("/api/buzzy/graphs/" + encodeURIComponent(graphId), { method: "DELETE", credentials: "same-origin" });
+      var j = await res.json().catch(function () { return {}; });
+      if (!res.ok || !j.ok) {
+        statusEl.textContent = res.status === 401 ? "sign in to delete" : (j.error || "delete failed");
+        statusEl.className = "bad";
+        return;
+      }
+      graphId = ""; graphVersion = 0;
+      $("#verSel").style.display = "none"; verNote("");
+      try { window.history.replaceState(null, "", "/buzzy/orchestrate"); } catch (e) {}
+      spec = starter(); history = []; redo = []; selected = []; commit();
+      // The browser draft belongs to the graph that just went: leaving it would
+      // put the deleted flow back on screen on the next visit.
+      clearTimeout(saveTimer);
+      try { localStorage.removeItem("bz_orch_spec"); } catch (e) {}
+      dirty = false;
+      statusEl.textContent = "deleted"; statusEl.className = "good";
+    } catch (e) {
+      statusEl.textContent = "delete failed"; statusEl.className = "bad";
+    } finally {
+      syncDeleteBtn();
+    }
   });
   $("#btnSave").addEventListener("click", saveToAccount);
   $("#btnLayout").addEventListener("click", autoLayout);
@@ -1201,6 +1246,7 @@
   commit(false);
   fit();
   paintInspector();
+  syncDeleteBtn();
   if (!takeFromBoard() && wantGraph) openGraph(wantGraph);
 
   // Recover from an old working copy that no longer validates: keep it visible rather
