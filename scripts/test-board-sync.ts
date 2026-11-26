@@ -297,7 +297,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   };
   function computer(user: string | null, shared?: Map<string, string>) {
     const store = shared ?? new Map<string, string>();
-    const net = { online: true, calls: [] as string[], during: null as null | ((call: string) => void) };
+    const net = { online: true, calls: [] as string[], during: null as null | ((call: string) => void | Promise<void>), user };
     const sandbox: Record<string, unknown> = {
       console,
       localStorage: {
@@ -313,10 +313,12 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
       fetch: (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
         net.calls.push(`${init.method || "GET"} ${url}`);
         if (!net.online) return Promise.reject(new TypeError("Failed to fetch"));
-        if (net.during) net.during(`${init.method || "GET"} ${url}`);
-        const headers: Record<string, string> = { ...(init.headers || {}) };
-        if (user) headers["x-test-user"] = user;
-        return fetch(base + url, { method: init.method, headers, body: init.body });
+        const waited = net.during ? net.during(`${init.method || "GET"} ${url}`) : undefined;
+        return Promise.resolve(waited).then(() => {
+          const headers: Record<string, string> = { ...(init.headers || {}) };
+          if (net.user) headers["x-test-user"] = net.user;
+          return fetch(base + url, { method: init.method, headers, body: init.body });
+        });
       },
     };
     sandbox.window = sandbox;
@@ -586,6 +588,96 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     const r = await route("u6", "POST", `talk/versions/${drawn!.id}/restore`);
     eq(ids(r.body.board as wb.StoredWhiteboard), ["two-1", "two-2"], "and going back to it brings them back");
   });
+  // New conversation empties the board in front of a new conversation at once, and loses
+  // nothing (testers, 2026-11-24; reviews of the New conversation fix): a copy the account
+  // hadn't got is kept here and sent first, each emptied drawing gets an entry of its own.
+  await ok("a save can name its account: another account's copy is refused, nothing saved", async () => {
+    const mine = await route("u7", "GET", "talk");
+    const other = await route("u7", "PUT", "talk", { state: board([card("not-yours")]), baseRev: null, owner: String((await route("u8", "GET", "talk")).body.who) });
+    eq([other.status, other.body.code], [403, "other_account"]);
+    eq(ids(await account("u7", "talk")), [], "nothing was saved");
+    const big = board(Array.from({ length: 300 }, (_, i) => card("c" + i, { body: "x".repeat(4000) })));
+    const bigOther = await route("u7", "PUT", "talk", { state: big, baseRev: null, owner: String((await route("u8", "GET", "talk")).body.who) });
+    eq([bigOther.status, bigOther.body.code], [403, "other_account"], "the account is checked first: no other answer is taken as being about that copy");
+    const own = await route("u7", "PUT", "talk", { state: board([]), baseRev: null, owner: String(mine.body.who) });
+    eq(own.status, 200, "its own account's copy is saved");
+  });
+  await ok("New conversation offline: each emptied drawing keeps its own History entry once back online", async () => {
+    const disk = new Map<string, string>();
+    const c = computer("u13", disk);
+    await c.api.sync("talk");
+    c.edit("talk", (b) => { b.cards.push(card("saved-1")); });
+    await c.api.sync("talk");
+    eq(ids(await account("u13", "talk")), ["saved-1"]);
+    c.net.online = false;
+    await c.api.reset("talk");                  // saved already: nothing to keep aside
+    eq(ids(c.read("talk")), [], "blank at once");
+    c.edit("talk", (b) => { b.cards.push(card("offline-1")); });
+    await c.api.reset("talk");
+    c.edit("talk", (b) => { b.cards.push(card("offline-2")); });
+    await c.api.reset("talk");
+    eq(ids(c.read("talk")), [], "blank each time, offline too");
+    eq((JSON.parse(disk.get("bz.board.talk~left") || "[]") as Board[]).map((d) => ids(d)), [["offline-1"], ["offline-2"]], "kept on this computer meanwhile");
+    c.net.online = true;
+    await c.api.sync("talk");
+    eq(ids(await account("u13", "talk")), [], "the board itself stays blank");
+    const hist = await versions("u13", "talk");
+    const alone = (t: string) => hist.some((v) => v.cards === 1 && (v.titles || []).includes(t));
+    truthy(alone("saved-1") && alone("offline-1") && alone("offline-2"), `each has its own entry: ${JSON.stringify(hist.map((v) => v.titles))}`);
+    eq(disk.has("bz.board.talk~left"), false, "nothing is left only on this computer");
+  });
+  await ok("another computer's save while a kept copy goes up keeps its own History entry", async () => {
+    const disk = new Map<string, string>();
+    const c = computer("u14", disk);
+    await c.api.sync("talk");
+    c.net.online = false;
+    c.edit("talk", (b) => { b.cards.push(card("waiting-1")); });
+    await c.api.reset("talk");
+    c.net.online = true;
+    let once = false;
+    c.net.during = async (call: string) => {
+      if (once || !call.startsWith("PUT ")) return;
+      once = true;
+      const now = await account("u14", "talk");
+      eq((await route("u14", "PUT", "talk", { state: board([card("other-device")]), baseRev: now ? now.rev : null })).status, 200);
+    };
+    await c.api.sync("talk");
+    c.net.during = null;
+    const hist = await versions("u14", "talk");
+    const alone = (t: string) => hist.some((v) => v.cards === 1 && (v.titles || []).includes(t));
+    truthy(alone("other-device") && alone("waiting-1"), `both keep their own entry: ${JSON.stringify(hist.map((v) => v.titles))}`);
+    eq(ids(await account("u14", "talk")), [], "and the board is blank");
+  });
+  await ok("a kept copy never goes into an account that signed in meanwhile", async () => {
+    const disk = new Map<string, string>();
+    const c = computer("u15", disk);
+    await c.api.sync("talk");
+    c.edit("talk", (b) => { b.cards.push(card("u15-draft")); });
+    await c.api.sync("talk");                   // saved once: the copy knows its account
+    c.net.online = false;
+    c.edit("talk", (b) => { b.cards.push(card("u15-more")); });
+    await c.api.reset("talk");
+    c.net.online = true;
+    c.net.during = (call: string) => { if (call.startsWith("PUT ")) c.net.user = "u16"; };   // someone else signs in, mid-way
+    await c.api.sync("talk");
+    c.net.during = null;
+    const theirs = ids(await account("u16", "talk"));
+    truthy(!theirs.includes("u15-draft") && !theirs.includes("u15-more"), `nothing of u15's in u16's account: ${JSON.stringify(theirs)}`);
+    truthy((JSON.parse(disk.get("bz.board.talk~left") || "[]") as Board[]).some((d) => ids(d).includes("u15-more")), "still kept here for u15");
+  });
+  await ok("a kept copy the account won't keep (too big) goes back on the board, never lost", async () => {
+    const disk = new Map<string, string>();
+    const c = computer("u17", disk);
+    await c.api.sync("talk");
+    c.net.online = false;
+    c.edit("talk", (b) => { for (let i = 0; i < 300; i++) b.cards.push(card("big" + i, { body: "x".repeat(4000) })); });
+    await c.api.reset("talk");
+    eq(ids(c.read("talk")), [], "blank at once");
+    c.net.online = true;
+    await c.api.sync("talk");
+    eq(ids(c.read("talk")).length, 300, "all 300 cards are back on the board");
+    eq(ids(await account("u17", "talk")), []);
+  });
   await ok("the board inside a conversation survives a reload", async () => {
     // "talk" is emptied on a visit; a conversation's board is only read back.
     const disk = new Map<string, string>();
@@ -614,7 +706,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   // board stayed on the blank new-conversation board while its cards sat in the account.
   await ok("opening a conversation from the list moves the board to that conversation", () => {
     const page = readFileSync(join(process.cwd(), "public/buzzy/talk.html"), "utf8");
-    const body = page.slice(page.indexOf("async function openSession(s)"), page.indexOf("function renameSession(s, card)"));
+    const body = page.slice(page.indexOf("async function openSession("), page.indexOf("function renameSession(s, card)"));
     truthy(/localStorage\.setItem\("bz_session_id", s\.id\)/.test(body), "openSession names the conversation to the board");
   });
   await ok("History covers the settings gear, and the page's menus still cover History", () => {
