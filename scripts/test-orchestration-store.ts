@@ -14,6 +14,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Sql } from "../src/lib/db";
 import {
+  deleteGraph,
   loadGraph,
   loadGraphRevision,
   listGraphRevisions,
@@ -146,6 +147,49 @@ const clone = (): Record<string, any> => JSON.parse(JSON.stringify(golden));
     eq(spec.edges.length, golden.edges.length);
     eq(spec.nodes.length, golden.nodes.length);
     eq(loaded!.nodes.find((n) => n.key === "n_dec")!.kind, "decision");
+  });
+
+  // ── deleting a graph a person created ────────────────────────────────
+  // The API answered 405 to DELETE for every graph, so a scratch workflow could
+  // not be removed at all. These hold the rule at the store, where the cascade
+  // and the ownership check actually live.
+  await ok("a stranger's delete matches nothing and leaves the graph alone", async () => {
+    const r = await deleteGraph("u2", id, sql);
+    eq(r, { ok: false, code: "not_found" });
+    truthy(await loadGraph("u1", id, sql), "owner's graph must still exist");
+  });
+
+  await ok("a live run refuses the delete instead of being cascaded away", async () => {
+    await db.query(
+      "INSERT INTO buzzy_graph_runs (id, graph_id, user_id, status, spec) VALUES ($1, $2, $3, $4, $5::jsonb)",
+      ["run_live", id, "u1", "running", JSON.stringify({ schema: "beezilla/orchestration", schemaVersion: 1 })],
+    );
+    const refused = await deleteGraph("u1", id, sql);
+    eq(refused, { ok: false, code: "active_run", status: "running" });
+    truthy(await loadGraph("u1", id, sql), "refused delete must not remove the graph");
+    await db.query("UPDATE buzzy_graph_runs SET status = 'done', finished_at = now() WHERE id = $1", ["run_live"]);
+  });
+
+  await ok("the owner's delete takes the graph and its whole subtree", async () => {
+    const nodesBefore = await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM buzzy_graph_nodes WHERE graph_id = $1", [id]);
+    truthy(nodesBefore.rows[0]!.n > 0, "fixture should have node rows");
+    const r = await deleteGraph("u1", id, sql);
+    eq(r, { ok: true, runs: 1 });
+    eq(await loadGraph("u1", id, sql), null);
+    eq(await listGraphRevisions("u1", id, sql), []);
+    for (const table of ["buzzy_graph_nodes", "buzzy_graph_edges", "buzzy_graph_revisions", "buzzy_graph_runs"]) {
+      const left = await db.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM ${table} WHERE graph_id = $1`, [id]);
+      eq(left.rows[0]!.n, 0, `${table} should cascade`);
+    }
+    eq(await deleteGraph("u1", id, sql), { ok: false, code: "not_found" });
+  });
+
+  await ok("a deleted graph's id can be saved again as a new graph", async () => {
+    const again = clone();
+    again.id = id;
+    again.name = "reused id";
+    const saved = await saveOrchestrationGraph("u1", again, sql);
+    eq([saved.id, saved.version], [id, 1]);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
