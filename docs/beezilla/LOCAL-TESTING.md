@@ -19,10 +19,17 @@ cd <folder>
 npm ci                                                 # ~5-10 s; main's lockfile moves ahead of shared node_modules
 node scripts/sync-private.mjs                          # stubs are fine
 NODE_ENV=production npm run build                      # ~1-3 min
-cp node_modules/@electric-sql/pglite/dist/{pglite.data,pglite.wasm,initdb.wasm} .output/server/_libs/
 ```
 
-Without the three PGlite files, PGlite fails and sign-in breaks. PGlite is in memory: a
+The build copies `pglite.data`, `pglite.wasm` and `initdb.wasm` into
+`.output/server/_libs/` (postbuild → `scripts/copy-pglite-assets.mjs`), so there is nothing
+to copy by hand any more. Nitro externalises `@electric-sql/pglite` and emits only its JS;
+before that postbuild step existed, a build with the files missing still booted and answered
+200, then died with `ENOENT: .../_libs/pglite.data` on every DB call — which reads as
+"sign-in is broken", not "the build is incomplete". The runner image installs without dev
+dependencies (`npm ci --omit=dev`), so the copy has to happen at build time.
+
+PGlite is in memory: a
 rebuild or restart starts empty, so sign in again (an old cookie lands on the sign-in page and
 `#chatInput` never appears).
 
