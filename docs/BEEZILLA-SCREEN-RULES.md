@@ -5,6 +5,44 @@ It joins three sources: the owner's own words about BeeZilla, the interface less
 from the owner's games (Unbearable, Gone Dark / Cozy Driver, Mech Arena), and Miro's
 standard ways of working, which people already know.
 
+## Critical: findable, logical, and yours (the design philosophy)
+
+Owner, 2026-11-23: "I strongly believe that we should be making the user interface as clear to
+understand as possible, using colors and shapes to help ground people's thinking and where they
+are in the greater tree of knowledge… Think the difference between Mac and Windows. Mac abstracts
+everything. Windows gives you full control… The abstractions are useful for quick mental
+shortcuts, but you need to be able to just understand it logically, step by step as well,
+everything."
+
+1. One tree, one address for everything. Everything BeeZilla and the agents keep has a place in
+   the brain (`brain/knowledge`, `brain/systems`, `brain/assets`, see "The brain" below), and the
+   person can always see where something is: its full address (`brain/knowledge/programming`)
+   and a breadcrumb that starts at `brain`, where every part takes you back up. Nothing is
+   findable only by search or only by knowing a trick.
+2. A clear hierarchy, A to Z. A level lists its folders and things A to Z (a "Newest" order is
+   one press away, never the only one). A thing has one home; a skill, which belongs to no bot,
+   is listed under each use it has and says where else it is listed.
+3. Colours and shapes say where you are, and mean the same everywhere. Each part of the brain has
+   one colour and one shape: brain a pink hexagon, knowledge a blue circle, systems a teal square,
+   assets a violet triangle. A folder wears its branch's colour and shape in the tree, the
+   breadcrumb, an agent's panel and a chip. The agent you are talking to colours the interface
+   (its Talk button, the open place in the row, links and focus rings: Code Monkey is #B8591F).
+   Fixed meanings never change colour: the privacy modes stay green, yellow and red, and a warning
+   stays yellow, whoever is talking.
+4. Shortcuts are welcome; a shortcut alone is not. A summary, a lit folder or "Works here" is a
+   quick way in, and the same thing can always be reached and understood step by step from
+   `brain`. Explain what the automatic parts do, in a sentence, where they act (the tidy says when
+   it ran and what it does).
+5. The person is in control of their environment. What the person can see they can change: move a
+   memory, conversation, file or recipe; make and remove folders; give an agent another name,
+   picture, colour, job or folders; tidy now. What they decide is never undone by the automatic
+   parts (the tidy never moves what they placed, a starter agent they removed never comes back).
+
+Before you ship a screen, also check: can everything on it be found step by step from `brain`,
+with its address shown and a breadcrumb back? Does every folder wear its branch's colour and
+shape, and does the interface wear the colour of the agent being talked to, with the modes
+keeping theirs?
+
 ## Critical: everything moves to the Idea Board
 
 Owner, 2026-11-20: "Everything on this website has got to be movable to the
@@ -115,6 +153,107 @@ Owner, 2026-11-18, in order of the page:
 8. "We don't need to have a difference between chat and work." One bar, one
    conversation. BeeZilla asks about the end result before building something big,
    points out what already exists, and cuts to the chase when asked.
+
+## The Zilla agents, down the left of every page
+
+Owner, 2026-11-21 (agents.js, agents.css; the server side is src/lib/buzzy/agents.ts):
+
+1. A strip of faces is fixed to the left edge of every page that has the header, and the
+   whole page moves over to make room (`html.bz-has-agents`, `--bzag-w`). The Zillas are
+   pictures (`public/buzzy/zillas`), never drawn in code. BeeZilla (the bee) is first, then
+   the person's agents, then a plus. A new account starts with one agent, the bunny, grey.
+2. An agent has a name by default, a colour and a size. Its first job is given in Talk:
+   pressing the plus or the grey one opens Talk as that agent, with the Idea Board open and
+   the Talk button in the agent's colour, and it asks "What role do you want me to play?".
+   The answer becomes its job ("helps with to-do list") and its face: an emoji for the job,
+   ringed in its colour, with its Zilla in the corner. BeeZilla keeps its own face.
+3. Pressing the bare strip (or the button at its foot) opens it into a sidebar: each name in
+   small type, and under it what that agent helps with. It scrolls (hundreds of agents), and
+   its right edge pulls it wider or narrower.
+4. Every agent can be dragged onto the Idea Board (it lands as a picture card with its name
+   and job), like everything else on the site.
+5. Only Esc or the X closes the edit dialog (the site's rule: nothing closes on a click outside
+   it); pulling its corner resizes it.
+6. On a phone the strip is a drawer: a small tab at the left edge opens it, and only its X or
+   Esc closes it.
+7. Colonies (owner: "you can drop it on another agent, just like you can drop a Discord server
+   on another Discord server"): dragging one agent onto the middle of another makes a colony
+   and asks for its name and purpose, with grey examples chosen from what the agents inside
+   help with ("These agents are dedicated to my real estate business", "…my personal
+   productivity", "…fun and hobbies"). Onto a colony adds to it; between two rows reorders; out
+   to a gap leaves. A colony opens and closes like a folder and can be ungrouped (its agents
+   stay). Dragging is never the only way: an agent's Edit window has a Colony choice.
+8. The Hive (owner: "When it scrolls above Bzilla, you see something called Hive… you can see
+   your agents talking to each other to get things done, agent-to-agent chat, and observe it
+   happening in the background: a window of chats that say 'Bunnyzilla asked Bzilla for
+   this.'"): the first row of the strip, above BeeZilla and scrolled out of sight; a small
+   "Hive" label at the top of the strip says it is there and scrolls to it. It opens a window
+   beside the strip (not a modal: the page behind stays usable) that lists who asked whom and
+   what came back, and updates while it is open. Only Esc or its X closes it; its corner
+   resizes it. BeeZilla manages the agents and can talk across all of them, so the asking
+   goes through her: an agent calls ask_bzilla, and she calls ask_agent.
+9. More Zillas arrive as files: a picture named `<creature>.webp` (and `<creature>-<colour>.webp`
+   for each colour) in `public/buzzy/zillas`, and one line in the roster in agents.ts. The
+   colour versions there now are stand-ins made from the owner's starter picture
+   (`scripts/zilla-art.py`); a real picture takes a stand-in's place by using its file name.
+10. Code Monkey (owner, 2026-11-23: "By default, there's going to be this monkey on the left side
+    underneath the Bzilla thing… this is your coding monkey… that color should be hex B8591F"):
+    every account starts with it right under BeeZilla, ready to talk to (its job is coding), in
+    the owner's monkey picture, working in `brain/knowledge/programming`,
+    `brain/knowledge/web-design` and the programming and web design skills. It is an agent like
+    any other: rename it, recolour it, change its job or folders, or remove it (it stays removed).
+    A deployment can leave it out with `BZ_STARTER_AGENTS=bunny`.
+11. Pressing an agent (or BeeZilla) opens its panel beside the strip (owner: "Each time you click
+    one, there's a list of folders that is highlighted and a list of folders that is grayed out.
+    The highlighted ones are on top. Those are the domains that the bot in question often operates
+    from."): its folders of the brain, lit on top (its own folders and those it has talked about
+    most, most first), the rest of the brain grey below; then its History, the recent conversations
+    with it. The Talk button says "Talk to <its name>" and the interface takes its colour. Like
+    Discord: servers down the left, their channels beside them. The page moves over for the panel;
+    only Esc or its X closes it (Esc on a folder steps back to the agent first); its right edge
+    makes it wider or narrower; on a phone it covers the page until closed.
+12. Pressing a folder (owner: "it will highlight many of the bots that work frequently in that
+    folder. It'll also give you a list of recent sessions related to that folder… When you click on
+    a folder, you see the entire folder tree. But it switches to the memory tab."): the bots that
+    work there light up in the strip and the others step back; the panel lists them ("Works here")
+    and the recent conversations about the folder; and the Memory tab opens at that folder, with the
+    whole tree and the breadcrumb back to brain. A folder chosen in the Memory tab does the same.
+13. History, while you talk to one of your agents, lists its conversations first, with "Show
+    everything" one press away.
+14. BeeZilla makes agents too (owner: "Bzilla is an orchestrator agent that can create new
+    sub-agents itself, not only the human, give them defined domains of expertise"): ask her for
+    a new agent and she makes it (the make_agent tool, orchestrate.ts) with a name, a job and the
+    folders it works in. It appears in the strip at once and the Hive notes it. She is offered the
+    tool only when the person asks for an agent, and may not say she made one unless she did.
+
+## The brain: one tree for everything that is kept
+
+Owner, 2026-11-23: "whenever somebody clicks a folder, they should also see a /brain at the very
+core, which they can breadcrumb back to. When they breadcrumb back to it, it shows them their
+memories… At the core, it'll be like, instead of /C, it'll be like brain." The Memory tab (and the
+full Memory page) is a plain explorer of it (public/buzzy/brain.js; the server is
+src/lib/buzzy/brain.ts, the map src/lib/buzzy/brainMap.ts).
+
+1. `brain/knowledge`: what has been learned. Remembered decisions and conversations, filed by
+   subject (programming, web design, home, money, travel… and general), each under the job it
+   came from when a subject grows big.
+2. `brain/systems`: everything that isn't knowledge. `bots/<bot>` holds each bot's agent.md (who it
+   is, its job, its folders) and its picture (changed from its Edit window). `skills/<use>` holds
+   BeeZilla's skills by what they are useful for (programming, web design, research, writing…):
+   a skill belongs to no bot, any of them can use it, and it is listed under every use it has.
+   `recipes` holds the recipes made on the Idea Board.
+3. `brain/assets`: media to use again, so nothing is made twice: pictures, videos, music and
+   sounds, 3D models, other files.
+4. `brain` itself shows the three branches and the person's memories, newest first.
+5. The tidy ("the fastest path", on a cadence): everything goes in the folder for its subject or
+   kind; a folder with more than 12 loose things is split by the job they came from wherever three
+   or more share one, and a split that shrinks back is undone. It runs once a day, or sooner once
+   20 new things are waiting, when the brain is next opened (or at once with "Tidy now"). New
+   things are placed the moment they are first seen and stay put until the next tidy, so nothing
+   moves while the person is looking. What the person moved, and folders they made, are never
+   touched.
+6. Every folder and thing can be dragged onto the Idea Board. Moving, making a folder and
+   forgetting a memory are in the explorer; dialogs close only with Esc or their X.
 
 ## Rules from the games
 

@@ -783,6 +783,10 @@ check(parseQuestion('{"question":"What is the deadline","suggested":"Before the 
     "Do deep research on the meal-kit market",
     "Research every grant my bakery could get",
     "Compare 30 CRM tools for me",
+    // Naming Code Monkey in an order is code work; so is asking it to do code.
+    "Code Monkey, fix the login bug on my site",
+    "Ask Code Monkey to fix the bug on our site",
+    "Ask Code Monkey if it can build me a website",
   ]) check(handsToAgents(m), `goes to agents: "${m}"`);
   for (const m of [
     "Write me a short poem about rain",
@@ -799,6 +803,9 @@ check(parseQuestion('{"question":"What is the deadline","suggested":"Before the 
     "research the best stroller for city walks",
     "look up the current USPS stamp price",
     "Find all my receipts from March",
+    // A question for Code Monkey (the Hive's ask_agent) is answered in the turn: its name is not an order.
+    "Please ask Code Monkey what is on its list today",
+    "Ask Code Monkey which bugs are left",
   ]) check(!handsToAgents(m), `done inside a reply: "${m}"`);
 
   // An amount in their words, and only a limit counts (a price inside the thing is not one).

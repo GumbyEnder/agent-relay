@@ -52,113 +52,8 @@
        "Memory has a different header" report (BZ-15 follow-up, Nov 2026). A page
        styles its own content; the header belongs to the shell. */
     .brand-link { text-decoration: none; cursor: pointer; display: flex; align-items: center; gap: 0.75rem; }
-    main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
-    /* Memory redesign: digest card + per-job drill-down */
-    .mem-digest {
-      border: 1px solid var(--line);
-      background: var(--panel2);
-      border-radius: 8px;
-      padding: 1rem 1.2rem;
-      margin: 1.2rem 0;
-    }
-    .mem-digest h2 { margin: 0 0 0.4rem; color: var(--yellow); font-size: 1rem; }
-    .mem-digest p { margin: 0; color: var(--text); font-size: 0.92rem; line-height: 1.5; }
-    .mem-job {
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      margin-bottom: 0.6rem;
-      overflow: hidden;
-    }
-    .mem-job-head {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 0.8rem;
-      background: none;
-      border: none;
-      color: var(--text);
-      font: inherit;
-      text-align: left;
-      padding: 0.7rem 0.9rem;
-      cursor: pointer;
-    }
-    .mem-job-head:hover { background: rgba(255,193,7,0.05); }
-    .mem-job-head .mj-title { font-weight: 600; color: #fff; min-width: 90px; }
-    .mem-job-head .mj-digest {
-      flex: 1;
-      color: var(--muted);
-      font-size: 0.82rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .mem-job-head .mj-count {
-      background: rgba(255,193,7,0.12);
-      color: var(--yellow);
-      border-radius: 10px;
-      font-size: 0.72rem;
-      padding: 0.1rem 0.55rem;
-      font-weight: 600;
-    }
-    .mem-job-detail { padding: 0.4rem 0.9rem 0.8rem; border-top: 1px solid var(--line); }
-    .mem-conv { margin-top: 1.5rem; }
-    .mem-conv summary {
-      cursor: pointer;
-      color: var(--yellow);
-      font-weight: 600;
-      font-size: 1rem;
-      margin-bottom: 0.6rem;
-    }
-    .muted { color: var(--muted); }
-    .mem-status {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      margin-bottom: 1.5rem;
-    }
-    .stat {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 0.9rem 1.2rem;
-      min-width: 140px;
-    }
-    .stat b { font-size: 1.5rem; display: block; color: var(--yellow); }
-    .stat span { font-size: 0.8rem; color: var(--muted); }
-    section h2 {
-      font-size: 0.95rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--muted);
-      border-bottom: 1px solid var(--line);
-      padding-bottom: 0.4rem;
-    }
-    .fact {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-left: 3px solid var(--yellow);
-      border-radius: 8px;
-      padding: 0.6rem 0.9rem;
-      margin-bottom: 0.5rem;
-      display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      align-items: baseline;
-    }
-    .fact .v { font-weight: 600; }
-    .fact .k { color: var(--muted); font-size: 0.85rem; }
-    .fact .j { color: var(--muted); font-size: 0.75rem; }
-    .msg {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 0.6rem 0.9rem;
-      margin-bottom: 0.5rem;
-      font-size: 0.9rem;
-    }
-    .msg.assistant { border-left: 3px solid #6c7bd9; }
-    .msg.user { border-left: 3px solid var(--yellow); }
-    .msg .who { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
+    main { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
+    /* The page itself is the brain explorer (brain.js + brain.css). */
     .empty { color: var(--muted); padding: 1rem 0; }
     .signout {
       text-align: center;
@@ -195,6 +90,7 @@
     .header-inner, header { position: relative; }
 </style>
 <link rel="stylesheet" href="/buzzy/nav.css" />
+<link rel="stylesheet" href="/buzzy/brain.css" />
 </head>
 <body>
   <header>
@@ -250,7 +146,10 @@
   </div>
   </header>
   <main>
-    <div id="content"><p class="empty">Loading memory…</p></div>
+    <!-- The brain (brain.js, owner 2026-11-23): the whole tree from brain at the core down, A to
+         Z, the same explorer as Talk's Memory tab, on a page of its own. The address keeps the
+         folder you are in (#brain/knowledge/programming), so it can be bookmarked or shared. -->
+    <div id="content"><p class="empty">Loading your brain…</p></div>
   </main>
   <script src="/buzzy/companies.js"></script>
   <script>
@@ -272,131 +171,31 @@
         })
         .catch(function () {});
     })();
-    // esc is hoisted via function declaration, but keep it above the IIFE for
-    // safety — the memory render previously could throw mid-template and leave
-    // "Loading memory…" stuck (dogfood 10016).
-    function esc(s) {
-      const d = document.createElement("div");
-      d.textContent = String(s ?? "");
-      return d.innerHTML;
-    }
-    var memGen = 0;
-    async function loadMemory() {
-      var gen = ++memGen;
-      try {
-      const res = await fetch("/api/buzzy/memory", { credentials: "same-origin" });
-      const root = document.getElementById("content");
-      if (gen !== memGen) return;
-      if (res.status === 401) {
-        root.innerHTML =
-          '<div class="signout"><p class="muted">Memory is tied to your account.</p><a href="/buzzy/landing">Sign in</a></div>';
-        return;
+    // ── The brain, full page ───────────────────────────────────────────────
+    // brain.js is loaded for the whole document by agents.js (and by the tag below when this
+    // page is opened on its own); it says "bz:brain-ready" when it is in.
+    (function brainPage() {
+      var host = document.getElementById("content");
+      var handle = null;
+      function fromHash() {
+        var h = "";
+        try { h = decodeURIComponent(location.hash.replace(/^#/, "")); } catch (e) { h = ""; }
+        return h.replace(/^\/?brain\/?/, "");
       }
-      if (!res.ok) {
-        root.innerHTML = '<p class="empty">Couldn\u2019t load memory right now. Try refreshing.</p>';
-        return;
+      function keep(p) {
+        try { history.replaceState(history.state, "", location.pathname + location.search + "#brain" + (p ? "/" + p : "")); } catch (e) { /* best effort */ }
       }
-      const data = await res.json();
-      var facts = data.facts || [];
-      var messages = data.messages || [];
-      var company = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.active() : null;
-      if (company) {
-        var jr = await fetch("/api/buzzy/jobs?companyId=" + encodeURIComponent(company.id), { credentials: "same-origin" });
-        if (gen !== memGen) return;
-        if (!jr.ok) {
-          root.innerHTML = '<p class="empty">Couldn\u2019t open memory for this company. Try refreshing.</p>';
-          return;
-        }
-        var jd = await jr.json();
-        var allowed = {};
-        (jd.jobs || []).forEach(function (j) { if (j && j.id) allowed[j.id] = true; });
-        facts = facts.filter(function (f) { return f.jobId && allowed[f.jobId]; });
-        messages = messages.filter(function (m) { return m.jobId && allowed[m.jobId]; });
+      function mountIt() {
+        if (handle || !window.BeeZillaBrain || !host || !host.isConnected) return;
+        var wanted = window.BeeZillaBrain.wanted && window.BeeZillaBrain.wanted();
+        handle = window.BeeZillaBrain.mount(host, { path: wanted || fromHash(), onPath: keep });
       }
-      const honcho = data.honchoAvailable;
-      const jobLabel = (id) => (id ? id.slice(0, 8) : "General");
-
-      // ── Memory redesign: summary first, drill-down on demand ──────────
-      // Group facts by job, show a plain-language summary line per job plus
-      // a one-line "what we know" digest; details hidden behind toggles.
-      const jobsMap = {};
-      facts.forEach((f) => {
-        const k = f.jobId || "general";
-        (jobsMap[k] = jobsMap[k] || []).push(f);
-      });
-
-      const digest = facts.length
-        ? facts.slice(0, 5).map((f) => esc(f.value)).join(" · ")
-        : "Nothing yet — chat with BeeZilla and what it learns will appear here.";
-
-      const stats = `
-        <div class="mem-status">
-          <div class="stat"><b>${facts.length}</b><span>things known</span></div>
-          <div class="stat"><b>${Object.keys(jobsMap).length}</b><span>jobs touched</span></div>
-          <div class="stat"><b>${honcho ? "on" : "off"}</b><span>long-term memory</span></div>
-        </div>`;
-
-      const summaryCard = `
-        <div class="mem-digest">
-          <h2>At a glance</h2>
-          <p>${digest}</p>
-        </div>`;
-
-      const jobsHtml = Object.keys(jobsMap).length
-        ? Object.entries(jobsMap).map(([jobId, fs]) => {
-            const label = jobLabel(jobId);
-            const digestLine = fs.map((f) => esc(f.value)).join(" · ");
-            const detailRows = fs
-              .map((f) => `<div class="fact"><span class="k">${esc(f.key)}</span><span class="v">${esc(f.value)}</span></div>`)
-              .join("");
-            return `<div class="mem-job">
-              <button type="button" class="mem-job-head" data-job="${esc(jobId)}">
-                <span class="mj-title">${esc(label)}</span>
-                <span class="mj-digest">${digestLine}</span>
-                <span class="mj-count">${fs.length}</span>
-              </button>
-              <div class="mem-job-detail" style="display:none">${detailRows}</div>
-            </div>`;
-          }).join("")
-        : '<p class="empty">No decisions captured yet. Talk to BeeZilla and locked-in decisions will appear here.</p>';
-
-      const msgsHtml = messages.length
-        ? messages.slice(0, 20)
-            .map(
-              (m) =>
-                `<div class="msg ${esc(m.role)}"><div class="who">${m.role === "assistant" ? "BeeZilla" : "You"} · ${jobLabel(m.jobId)}</div>${esc(m.content)}</div>`,
-            )
-            .join("")
-        : '<p class="empty">No conversations yet.</p>';
-
-      var coTitle = company
-        ? '<h1 style="font-size:1.45rem;margin:0 0 0.8rem">Memory for ' + esc(company.name) + '</h1>'
-        : '';
-      root.innerHTML =
-        coTitle +
-        stats +
-        summaryCard +
-        '<section><h2>By job</h2>' + jobsHtml + '</section>' +
-        '<details class="mem-conv"><summary>Recent conversations</summary>' + msgsHtml + '</details>';
-
-      // Wire drill-down toggles
-      root.querySelectorAll(".mem-job-head").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const d = btn.parentElement.querySelector(".mem-job-detail");
-          const open = d.style.display !== "none";
-          d.style.display = open ? "none" : "block";
-          btn.classList.toggle("open", !open);
-        });
-      });
-      } catch (err) {
-        if (gen !== memGen) return;
-        const root = document.getElementById("content");
-        if (root) root.innerHTML = '<p class="empty">Couldn\u2019t load memory right now. Try refreshing.</p>';
-      }
-    }
-    if (window.BZCompanies) BZCompanies.onChange(function () { loadMemory(); });
-    else loadMemory();
+      if (window.BeeZillaBrain) mountIt();
+      else window.addEventListener("bz:brain-ready", mountIt);
+      window.addEventListener("hashchange", function () { if (handle && host.isConnected) handle.open(fromHash()); });
+    })();
   </script>
+  <script src="/buzzy/brain.js"></script>
   <!-- BZ-15 residual: common.js was the SECOND gate on this page (the accountGate IIFE
        above is the first, and it refuses only on a 200 with no user). common.js's
        __bzHeader() ran gateSignedOut(), whose resolveSession() answers a non-2xx with

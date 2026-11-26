@@ -1,0 +1,809 @@
+/* The Zilla agents: the sidebar down the left of every page (agents.js).
+ *
+ * Owner, 2026-11-21: "On the left side, we need to create an agent system… a series of
+ * agents that can do things on your behalf. Each agent should have a name by default
+ * given to them and a size and color… We're going to move everything on the Zilla
+ * website slightly to the right, and we're going to insert these as images."
+ *
+ * Pages style bare `button`, `a`, `h2` and `body`, and the shell rewrites their sheets,
+ * so every rule here names its own box with an id (#bzAgents, #bzAgentsModal) and sets
+ * what it needs. This sheet is the document's, not a page's: it is never switched off
+ * when you move between pages.
+ */
+
+/* ── The page moves over ──────────────────────────────────────────────────
+   agents.js sets --bzag-w on <html> (72px for the strip of faces, wider when it is
+   opened to show names) and everything in the flow of the page follows. */
+html.bz-has-agents { padding-left: var(--bzag-w, 72px) !important; }
+html.bz-agents-anim { transition: padding-left 0.16s ease; }
+html.bz-has-agents #bzFeedback.min { left: calc(var(--bzag-w, 72px) + 1rem); }
+html.bz-has-agents { scroll-padding-left: var(--bzag-w, 72px); }
+
+/* ── The strip ─────────────────────────────────────────────────────────── */
+#bzAgents {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 44;
+  width: var(--bzag-w, 72px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #0b0b0b;
+  border-right: 1px solid #232323;
+  color: #e8e8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: left;
+  transition: width 0.16s ease;
+}
+#bzAgents.bzag-noanim, #bzAgents.bzag-noanim * { transition: none !important; }
+#bzAgents[hidden] { display: none; }
+#bzAgents *, #bzAgents *::before, #bzAgents *::after { box-sizing: border-box; }
+#bzAgents .bzag-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding: 10px 0 0;
+}
+#bzAgents .bzag-scroll::-webkit-scrollbar { display: none; }
+/* The strip always has room to scroll by the height of the Hive row, so the Hive can sit
+   just above BeeZilla, out of sight, however few agents there are. */
+#bzAgents .bzag-inner { display: flex; flex-direction: column; min-height: calc(100% + var(--hive-h, 64px)); }
+#bzAgents .bzag-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+#bzAgents .bzag-row { position: relative; margin: 0; padding: 0; display: flex; align-items: center; }
+
+/* One agent: the face, and (when the strip is open) its name and what it helps with. */
+#bzAgents .bzag-item {
+  all: unset;
+  position: relative;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 6px 0 6px 8px;
+  cursor: grab;
+  color: #e8e8e8;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: element;
+}
+#bzAgents .bzag-item:active { cursor: grabbing; }
+#bzAgents .bzag-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 4px;
+  height: 0;
+  margin-top: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--c, #ffd40d);
+  transition: height 0.14s ease, margin-top 0.14s ease;
+}
+#bzAgents .bzag-item:hover::before { height: 20px; margin-top: -10px; }
+#bzAgents .bzag-item[aria-current="true"]::before { height: 38px; margin-top: -19px; }
+#bzAgents .bzag-item:focus-visible { outline: 2px solid var(--c, #ffd40d); outline-offset: -3px; border-radius: 12px; }
+#bzAgents .bzag-item.bzag-dragging { opacity: 0.45; }
+
+/* The faces sit in a column 56 px wide, so names line up whatever size each face is. */
+#bzAgents .bzag-slot { flex: 0 0 56px; width: 56px; display: flex; align-items: center; justify-content: center; }
+#bzAgents .bzag-av {
+  position: relative;
+  flex: 0 0 auto;
+  display: block;
+  width: var(--s, 46px);
+  height: var(--s, 46px);
+}
+#bzAgents .bzag-pic {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: filter 0.16s ease, opacity 0.16s ease;
+}
+/* Not given a job yet: grey, and quiet, like a seat waiting for someone. */
+#bzAgents .is-unset .bzag-pic { filter: grayscale(1); opacity: 0.5; }
+#bzAgents .is-unset:hover .bzag-pic, #bzAgents .is-unset:focus-visible .bzag-pic { opacity: 0.8; }
+/* Given a job: its face is the thing it helps with (an emoji), ringed in its own colour,
+   with the Zilla it is peeking from the corner. */
+#bzAgents .bzag-ring {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #1a1a1a;
+  background: color-mix(in srgb, var(--c, #ffd40d) 22%, #121212);
+  border: 2px solid var(--c, #ffd40d);
+  transition: transform 0.14s ease;
+}
+#bzAgents .bzag-item:hover .bzag-ring { transform: scale(1.06); }
+#bzAgents .bzag-face {
+  font-size: calc(var(--s, 46px) * 0.52);
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+  user-select: none;
+}
+#bzAgents .bzag-badge {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: calc(var(--s, 46px) * 0.52);
+  height: calc(var(--s, 46px) * 0.52);
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+#bzAgents .bzag-text { display: none; min-width: 0; flex: 1 1 auto; padding-right: 8px; }
+#bzAgents .bzag-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#bzAgents .bzag-role {
+  display: block;
+  font-size: 12px;
+  color: #9a9a9a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#bzAgents .is-unset .bzag-role { color: #7d7d7d; font-style: italic; }
+#bzAgents .bzag-more {
+  all: unset;
+  box-sizing: border-box;
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  border-radius: 8px;
+  color: #8d8d8d;
+  cursor: pointer;
+}
+#bzAgents .bzag-more svg { width: 18px; height: 18px; fill: currentColor; display: block; }
+#bzAgents .bzag-more:hover, #bzAgents .bzag-more:focus-visible { color: #ffd40d; background: #1b1b1b; }
+#bzAgents .bzag-more:focus-visible { outline: 2px solid #ffd40d; outline-offset: -2px; }
+
+/* ── The Hive ────────────────────────────────────────────────────────────
+   The first row, above BeeZilla and scrolled out of sight; "Hive" at the very top says it
+   is there; its window sits beside the strip and does not cover the page. */
+#bzAgents .bzag-hexbox { display: flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 14px; background: #1a1708; border: 2px solid #3d3510; color: #ffd40d; transition: border-color 0.14s ease; }
+#bzAgents .bzag-hexbox svg, #bzHive .bzag-hexbox svg { width: 26px; height: 26px; fill: currentColor; display: block; }
+#bzAgents .bzag-hive:hover .bzag-hexbox, #bzAgents .bzag-hive:focus-visible .bzag-hexbox { border-color: #ffd40d; }
+#bzAgents .bzag-hive { cursor: pointer; }
+#bzAgents .bzag-peek {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #c9a900;
+  background: linear-gradient(180deg, #0b0b0b 55%, rgba(11, 11, 11, 0));
+}
+#bzAgents .bzag-peek[hidden] { display: none; }
+#bzAgents .bzag-peek-ico svg { width: 12px; height: 12px; fill: currentColor; display: block; }
+#bzAgents .bzag-peek:hover, #bzAgents .bzag-peek:focus-visible { color: #ffd40d; }
+#bzAgents .bzag-peek:focus-visible { outline: 2px solid #ffd40d; outline-offset: -2px; }
+#bzAgents .bzag-scroll { padding-top: 14px; }
+#bzHive {
+  position: fixed;
+  left: calc(var(--bzag-w, 72px) + 18px);
+  top: 84px;
+  z-index: 60;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 480px;
+  height: min(560px, calc(100vh - 110px));
+  min-width: 320px;
+  min-height: 240px;
+  max-width: calc(100vw - var(--bzag-w, 72px) - 36px);
+  max-height: calc(100vh - 40px);
+  resize: both;
+  overflow: hidden;
+  background: #121212;
+  border: 1px solid #2c2c2c;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  color: #e8e8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+#bzHive:focus { outline: none; }
+#bzHive *, #bzHive *::before, #bzHive *::after { box-sizing: border-box; }
+#bzHive .bzh-top { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #232323; }
+#bzHive .bzag-hexbox { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; background: #1a1708; border: 2px solid #3d3510; color: #ffd40d; }
+#bzHive .bzh-title { flex: 1 1 auto; min-width: 0; }
+#bzHive .bzh-title h2 { margin: 0; font-size: 1.05rem; font-weight: 700; color: #f4f4f4; }
+#bzHive .bzh-title p { margin: 2px 0 0; font-size: 0.8rem; color: #8d8d8d; }
+#bzHive .bzh-x { all: unset; box-sizing: border-box; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; border: 1px solid #333; color: #ddd; cursor: pointer; font-size: 16px; }
+#bzHive .bzh-x:hover { color: #ffd40d; border-color: #ffd40d; }
+#bzHive .bzh-x:focus-visible, #bzHive .bzh-feed:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+#bzHive .bzh-feed { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+#bzHive .bzh-empty { margin: 0; padding: 0 22px 28px; color: #9a9a9a; font-size: 0.92rem; line-height: 1.55; text-align: center; }
+#bzHive .bzh-empty[hidden] { display: none; }
+#bzHive .bzh-msg { border-radius: 14px; padding: 10px 12px 12px; background: #181818; border: 1px solid #262626; cursor: grab; }
+#bzHive .bzh-msg.is-answer { background: #17160b; border-color: #34300f; margin-left: 22px; }
+#bzHive .bzh-head { display: flex; align-items: center; gap: 10px; }
+#bzHive .bzh-head .bzag-av { position: relative; flex: 0 0 auto; display: block; width: 30px; height: 30px; }
+#bzHive .bzh-head .bzag-pic { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+#bzHive .bzh-head .bzag-ring { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #1a1a1a; border: 2px solid var(--c, #ffd40d); }
+#bzHive .bzh-head .bzag-face { font-size: 15px; line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif; }
+#bzHive .bzh-head .bzag-badge { position: absolute; right: -5px; bottom: -5px; width: 15px; height: 15px; object-fit: contain; pointer-events: none; }
+#bzHive .bzh-head .bzag-hexbox { width: 30px; height: 30px; border-radius: 9px; }
+#bzHive .bzh-head .bzag-hexbox svg { width: 18px; height: 18px; }
+#bzHive .bzh-line { flex: 1 1 auto; min-width: 0; font-size: 0.88rem; color: #cfcfcf; }
+#bzHive .bzh-line b { color: #f4f4f4; font-weight: 650; }
+#bzHive time { flex: 0 0 auto; font-size: 0.75rem; color: #7d7d7d; }
+#bzHive .bzh-body { margin: 8px 0 0; font-size: 0.92rem; color: #e6e6e6; white-space: pre-wrap; overflow-wrap: anywhere; }
+#bzHive .bzh-note { align-self: center; max-width: 92%; padding: 2px 10px; border-radius: 999px; font-size: 0.78rem; color: #8d8d8d; text-align: center; cursor: grab; }
+@media (max-width: 700px) {
+  #bzHive { left: 8px; right: 8px; top: 64px; width: auto; max-width: none; height: min(70vh, calc(100vh - 80px)); }
+}
+@media print { #bzHive { display: none !important; } }
+
+/* ── Colonies: folders of agents ─────────────────────────────────────────
+   A colony is a rounded square with up to four of its agents' faces in it; open, its
+   agents sit under it behind a thin line. While something is dragged, the row under the
+   pointer shows where it would land: a line above or below, or a dashed ring for "into". */
+#bzAgents .bzag-folder {
+  width: var(--s, 46px);
+  height: var(--s, 46px);
+  border-radius: 14px;
+  background: #171717;
+  border: 2px solid #3a3a3a;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  align-content: center;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  overflow: hidden;
+  transition: border-color 0.14s ease;
+}
+#bzAgents .bzag-folder img { width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: contain; display: block; pointer-events: none; -webkit-user-drag: none; }
+#bzAgents .bzag-colony[aria-expanded="true"] .bzag-folder { border-color: #ffd40d; }
+#bzAgents .bzag-colony:hover .bzag-folder { border-color: #ffd40d; }
+#bzAgents .bzag-fold { display: none; flex: 0 0 auto; align-items: center; margin-right: 6px; color: #8d8d8d; }
+#bzAgents .bzag-fold svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.14s ease; }
+#bzAgents .bzag-colony[aria-expanded="true"] .bzag-fold svg { transform: rotate(90deg); }
+html.bz-agents-open #bzAgents .bzag-fold, html.bz-agents-drawer #bzAgents .bzag-fold { display: flex; }
+#bzAgents .bzag-row.in-colony { margin-left: 6px; border-left: 2px solid #2f2f2f; }
+#bzAgents .bzag-row.in-colony .bzag-item { padding-left: 2px; }
+#bzAgents .bzag-row.bzag-drop-before::before, #bzAgents .bzag-row.bzag-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: #ffd40d;
+  z-index: 3;
+  pointer-events: none;
+}
+#bzAgents .bzag-row.bzag-drop-before::before { top: -2px; }
+#bzAgents .bzag-row.bzag-drop-after::after { bottom: -2px; }
+#bzAgents .bzag-row.bzag-drop-into .bzag-item {
+  background: rgba(255, 212, 13, 0.1);
+  outline: 2px dashed #ffd40d;
+  outline-offset: -5px;
+  border-radius: 14px;
+}
+
+/* The plus: add one more. Sticks to the bottom of the strip when the list is long. */
+#bzAgents .bzag-addrow {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  padding: 8px 0 10px 8px;
+  background: linear-gradient(180deg, rgba(11, 11, 11, 0), #0b0b0b 22%);
+}
+#bzAgents .bzag-add {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+  color: #9a9a9a;
+}
+#bzAgents .bzag-plus {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s, 46px);
+  height: var(--s, 46px);
+  border-radius: 50%;
+  border: 2px dashed #3b3b3b;
+  color: #9a9a9a;
+  transition: border-color 0.14s ease, color 0.14s ease;
+}
+#bzAgents .bzag-plus svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; }
+#bzAgents .bzag-add:hover .bzag-plus, #bzAgents .bzag-add:focus-visible .bzag-plus { border-color: #ffd40d; color: #ffd40d; }
+#bzAgents .bzag-add:focus-visible { outline: 2px solid #ffd40d; outline-offset: 3px; border-radius: 12px; }
+#bzAgents .bzag-add-text { display: none; font-size: 13px; font-weight: 600; color: #bdbdbd; white-space: nowrap; }
+#bzAgents .bzag-add[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+
+/* The foot: show or hide the names. */
+#bzAgents .bzag-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid #1f1f1f;
+}
+#bzAgents .bzag-toggle {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  cursor: pointer;
+  color: #8d8d8d;
+  font-size: 12px;
+  font-weight: 650;
+}
+#bzAgents .bzag-toggle svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.16s ease; }
+#bzAgents .bzag-toggle:hover, #bzAgents .bzag-toggle:focus-visible { color: #ffd40d; background: #141414; }
+#bzAgents .bzag-toggle:focus-visible { outline: 2px solid #ffd40d; outline-offset: -3px; }
+#bzAgents .bzag-toggle-text { display: none; }
+#bzAgents .bzag-msg {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #ffd54f;
+  background: #17140a;
+  border-top: 1px solid #3a3210;
+}
+#bzAgents .bzag-msg[hidden] { display: none; }
+
+/* The edge: drag it to make the opened strip wider or narrower. */
+#bzAgents .bzag-edge {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+#bzAgents .bzag-edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.14s ease;
+}
+#bzAgents .bzag-edge:hover::after, #bzAgents .bzag-edge:focus-visible::after, #bzAgents.bzag-sizing .bzag-edge::after { background: #ffd40d; }
+#bzAgents .bzag-edge:focus-visible { outline: none; }
+
+/* ── Opened: names and what each helps with ───────────────────────────── */
+html.bz-agents-open #bzAgents .bzag-text { display: block; }
+html.bz-agents-open #bzAgents .bzag-more { display: inline-flex; }
+html.bz-agents-open #bzAgents .bzag-add-text { display: block; }
+html.bz-agents-open #bzAgents .bzag-toggle-text { display: inline; }
+html.bz-agents-open #bzAgents .bzag-toggle svg { transform: rotate(180deg); }
+html.bz-agents-open #bzAgents .bzag-edge { display: block; }
+
+/* ── Phone width: the strip is a drawer you open, never a column eating the page ── */
+#bzAgentsTab { display: none; }
+@media (max-width: 700px) {
+  html.bz-has-agents { padding-left: 0 !important; }
+  html.bz-has-agents #bzFeedback.min { left: 1rem; }
+  #bzAgents { width: min(300px, 86vw); transform: translateX(-102%); transition: transform 0.18s ease; box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
+  html.bz-agents-drawer #bzAgents { transform: none; }
+  html.bz-agents-drawer #bzAgents .bzag-text { display: block; }
+  html.bz-agents-drawer #bzAgents .bzag-more { display: inline-flex; }
+  html.bz-agents-drawer #bzAgents .bzag-add-text { display: block; }
+  #bzAgents .bzag-foot { display: none; }
+  #bzAgents .bzag-edge { display: none !important; }
+  #bzAgentsTab {
+    all: unset;
+    position: fixed;
+    left: 0;
+    bottom: 84px;
+    z-index: 43;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 56px;
+    border-radius: 0 14px 14px 0;
+    background: #121212;
+    border: 1px solid #2c2c2c;
+    border-left: 0;
+    cursor: pointer;
+  }
+  #bzAgentsTab img { width: 26px; height: 26px; object-fit: contain; display: block; pointer-events: none; }
+  #bzAgentsTab:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+  html.bz-agents-drawer #bzAgentsTab { display: none; }
+  #bzAgents .bzag-close { display: flex; }
+}
+#bzAgents .bzag-close {
+  all: unset;
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #333;
+  color: #ddd;
+  background: #141414;
+  cursor: pointer;
+  font-size: 16px;
+}
+#bzAgents .bzag-close:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+/* ── The light palette (<html data-theme="light">, as inspiration.css and share.css have it) ── */
+html[data-theme="light"] #bzAgents { background: #f6f6f4; border-right-color: #dcdcd6; color: #1c1c1c; }
+html[data-theme="light"] #bzAgents .bzag-item, html[data-theme="light"] #bzAgents .bzag-name { color: #1c1c1c; }
+html[data-theme="light"] #bzAgents .bzag-role, html[data-theme="light"] #bzAgents .bzag-add-text { color: #5d5d58; }
+html[data-theme="light"] #bzAgents .bzag-ring { background: #ffffff; background: color-mix(in srgb, var(--c, #ffd40d) 16%, #ffffff); }
+html[data-theme="light"] #bzAgents .bzag-plus { border-color: #b9b9b2; color: #5d5d58; }
+html[data-theme="light"] #bzAgents .bzag-foot { border-top-color: #dcdcd6; }
+html[data-theme="light"] #bzAgents .bzag-toggle, html[data-theme="light"] #bzAgents .bzag-more { color: #5d5d58; }
+html[data-theme="light"] #bzAgents .bzag-toggle:hover, html[data-theme="light"] #bzAgents .bzag-more:hover { background: #ebebe6; color: #8a6a00; }
+html[data-theme="light"] #bzAgents .bzag-hexbox { background: #fff7d1; border-color: #e7d377; color: #8a6a00; }
+html[data-theme="light"] #bzAgents .bzag-addrow { background: linear-gradient(180deg, rgba(246, 246, 244, 0), #f6f6f4 22%); }
+
+@media print { #bzAgents, #bzAgentsTab, #bzAgentsModal { display: none !important; } html.bz-has-agents { padding-left: 0 !important; } }
+@media (prefers-reduced-motion: reduce) {
+  #bzAgents, #bzAgents *, html.bz-agents-anim { transition: none !important; }
+}
+
+/* ── The agent you are talking to: the Talk button wears its colour ─────────
+   Owner: "the color of the button will change to the primary color of the creature in
+   question. In the case of the bunny, the most prominent color is probably the pink in
+   the ears. So it'd be pink." agents.js sets the --bzag-* colours on <html>, and
+   data-bz-agent says whose conversation is open. It follows the header onto every page. */
+html[data-bz-agent] #micBtn.talk-btn {
+  background: linear-gradient(180deg, var(--bzag-hi) 0%, var(--bzag) 55%, var(--bzag-lo) 100%);
+  color: var(--bzag-ink, #141414);
+  filter: drop-shadow(0 0 10px var(--bzag-glow));
+}
+html[data-bz-agent] #micBtn.talk-btn:hover { filter: drop-shadow(0 0 16px var(--bzag-glow-strong)); }
+html[data-bz-agent] #micBtn.talk-btn.on { animation: bzagPulse 1.6s ease-in-out infinite; }
+@keyframes bzagPulse {
+  0%, 100% { filter: drop-shadow(0 0 8px var(--bzag-glow)); }
+  50% { filter: drop-shadow(0 0 20px var(--bzag-glow-strong)); }
+}
+/* On a phone the board's Talk bar is one row: the button shows its sign only (as it does on
+   a page with the board folded), so the box beside it keeps room to type in. */
+@media (max-width: 520px) {
+  html[data-bz-agent] .wb-dock #micBtn .tb-label { display: none; }
+}
+/* A long name must not stretch the bar: the words shorten with an ellipsis. */
+html[data-bz-agent] #micBtn .tb-label { display: inline-block; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* The strip leaves the board less room, and its header (the Talk bar, then New
+   conversation, Sell this orchestration, Fold away) has to wrap the way it does on a phone
+   or the box you type in shrinks to a sliver. */
+@media (min-width: 761px) {
+  html.bz-has-agents .wb-head { flex-wrap: wrap; }
+  html.bz-has-agents .wb-dock { flex: 1 1 600px; min-width: 600px; }
+}
+/* One line, clipped: a hint that is too long for the box must not wrap into a second line
+   (on a phone the box is narrow too). */
+html.bz-has-agents .wb-dock #chatInput::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The face and name at the top left become the agent's. */
+.bz-brand .bz-agent-face { display: none; }
+html[data-bz-agent] .bz-brand .bz-face { display: none !important; }
+html[data-bz-agent] .bz-brand .bz-agent-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  background: color-mix(in srgb, var(--bzag) 22%, #121212);
+  border: 2px solid var(--bzag);
+  font-size: 24px;
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+  overflow: hidden;
+}
+html[data-bz-agent] .bz-brand .bz-agent-face.is-picture { background-color: transparent; background-size: contain; background-position: center; background-repeat: no-repeat; border-color: transparent; border-radius: 0; }
+
+/* ── The dialogs (edit an agent) ─────────────────────────────────────────
+   Nothing closes on a click outside it: only Esc or the X (owner, 2026-11-21: "a
+   fundamental principle of our design"), so what you typed is only lost on purpose.
+   The box can be pulled bigger or smaller by its corner. */
+#bzAgentsModal { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.55); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1.4; color: #e8e8e8; }
+#bzAgentsModal.open { display: flex; }
+#bzAgentsModal *, #bzAgentsModal *::before, #bzAgentsModal *::after { box-sizing: border-box; }
+#bzAgentsModal .bzag-box {
+  width: min(480px, 100%);
+  min-width: min(300px, 100%);
+  max-width: 100%;
+  min-height: 200px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  resize: both;
+  padding: 18px 20px 20px;
+  border-radius: 16px;
+  background: #151515;
+  border: 1px solid #2c2c2c;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#bzAgentsModal .bzag-head { display: flex; align-items: center; gap: 12px; }
+#bzAgentsModal .bzag-head img { width: 44px; height: 44px; object-fit: contain; flex: 0 0 auto; }
+#bzAgentsModal .bzag-head h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #f4f4f4; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentsModal .bzag-x {
+  all: unset;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #333;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 16px;
+}
+#bzAgentsModal .bzag-x:hover { color: #ffd40d; border-color: #ffd40d; }
+#bzAgentsModal .bzag-x:focus-visible, #bzAgentsModal .bzag-btn:focus-visible, #bzAgentsModal .bzag-sw:focus-visible, #bzAgentsModal .bzag-emo:focus-visible, #bzAgentsModal .bzag-size button:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+#bzAgentsModal .bzag-note { margin: 0; color: #a8a8a8; font-size: 0.88rem; line-height: 1.5; }
+#bzAgentsModal .bzag-field { display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; color: #bdbdbd; margin: 0; }
+#bzAgentsModal .bzag-field > span { font-weight: 600; }
+#bzAgentsModal input[type="text"] { all: unset; box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border-radius: 9px; border: 1px solid #333; background: #0d0d0d; color: #fff; font: inherit; }
+#bzAgentsModal input[type="text"]::placeholder { color: #707070; }
+#bzAgentsModal input[type="text"]:focus { border-color: #ffd40d; box-shadow: 0 0 0 2px rgba(255, 212, 13, 0.25); }
+#bzAgentsModal .bzag-members { display: flex; flex-wrap: wrap; gap: 8px; }
+#bzAgentsModal .bzag-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px 3px 4px; border-radius: 999px; background: #101010; border: 1px solid #2c2c2c; font-size: 0.85rem; color: #e0e0e0; }
+#bzAgentsModal .bzag-chip img { width: 28px; height: 28px; object-fit: contain; display: block; }
+#bzAgentsModal select.bzag-select { box-sizing: border-box; width: 100%; height: 40px; padding: 0 10px; border-radius: 9px; border: 1px solid #333; background: #0d0d0d; color: #fff; font: inherit; }
+#bzAgentsModal select.bzag-select:focus { outline: none; border-color: #ffd40d; box-shadow: 0 0 0 2px rgba(255, 212, 13, 0.25); }
+#bzAgentsModal .bzag-faces { display: flex; flex-wrap: wrap; gap: 6px; }
+#bzAgentsModal .bzag-emo { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid #2c2c2c; background: #101010; cursor: pointer; font-size: 20px; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif; }
+#bzAgentsModal .bzag-emo:hover { border-color: #ffd40d; }
+#bzAgentsModal .bzag-emo[aria-pressed="true"] { border-color: #ffd40d; background: #231d06; }
+#bzAgentsModal .bzag-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+#bzAgentsModal .bzag-sw { all: unset; box-sizing: border-box; width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; background: var(--c); cursor: pointer; box-shadow: inset 0 0 0 2px #151515; }
+#bzAgentsModal .bzag-sw[aria-pressed="true"] { border-color: #fff; }
+#bzAgentsModal .bzag-sw.bzag-sw-own { background: conic-gradient(from 0deg, #ffc107, #f08ca0, #8cb83a, #ffc107); }
+#bzAgentsModal .bzag-size { display: flex; gap: 8px; }
+#bzAgentsModal .bzag-size button { all: unset; box-sizing: border-box; min-width: 64px; height: 38px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; border: 1px solid #3a3a3a; color: #e0e0e0; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+#bzAgentsModal .bzag-size button[aria-pressed="true"] { background: #ffd40d; border-color: #ffd40d; color: #141414; }
+#bzAgentsModal .bzag-msg { margin: 0; min-height: 1.2em; font-size: 0.88rem; color: #ffd54f; }
+#bzAgentsModal .bzag-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+#bzAgentsModal .bzag-row .bzag-gap { flex: 1 1 auto; }
+#bzAgentsModal .bzag-btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 18px; border-radius: 999px; border: 1px solid #3a3a3a; color: #e6e6e6; font-size: 0.92rem; font-weight: 600; cursor: pointer; }
+#bzAgentsModal .bzag-btn:hover { border-color: #ffd40d; color: #ffd40d; }
+#bzAgentsModal .bzag-btn.primary { background: #ffd40d; border-color: #ffd40d; color: #141414; font-weight: 700; }
+#bzAgentsModal .bzag-btn.primary:hover { background: #ffe14d; color: #141414; }
+#bzAgentsModal .bzag-btn.danger { color: #ffb4b4; border-color: #5b2a2e; }
+#bzAgentsModal .bzag-btn.danger:hover { border-color: #ff7a7a; color: #ff9a9a; }
+#bzAgentsModal .bzag-btn[disabled] { opacity: 0.55; cursor: default; }
+
+/* ── The whole interface in the colour of the agent you are talking to ────
+   Owner, 2026-11-23: "You should also change the standard color based on the one you have
+   loaded of the button and the interface and all that. In this case, that color should be hex
+   B8591F for CodeMonkey." agents.js sets --bzag (the exact colour: the Talk button and the
+   underlines are filled with it) and --bzag-text (the same colour, lightened only as far as it
+   takes to read as words on the dark page). The site's own accent variables follow, on the page
+   and in the header's copy of Talk's sheets (where :root became #bzHead, so it is set there
+   too). The privacy modes never use these: Open stays green, Advocate yellow, Lockdown red. */
+html[data-bz-agent] {
+  --bz-yellow: var(--bzag-text, var(--bzag)) !important;
+  --bz-yellow-dim: var(--bzag-lo, var(--bzag)) !important;
+  --yellow: var(--bzag-text, var(--bzag)) !important;
+  --accent: var(--bzag-text, var(--bzag)) !important;
+  --ob-yellow: var(--bzag-text, var(--bzag)) !important;
+}
+html[data-bz-agent] #bzHead,
+html[data-bz-agent] .bz-talk-own {
+  --bz-yellow: var(--bzag-text, var(--bzag)) !important;
+  --bz-yellow-dim: var(--bzag-lo, var(--bzag)) !important;
+  --ob-yellow: var(--bzag-text, var(--bzag)) !important;
+}
+/* The yellow written into a few sheets by hand: the pane's links, back to top, the Feedback pill. */
+html[data-bz-agent] .bz-pane-link { color: var(--bzag-text, var(--bzag)) !important; }
+html[data-bz-agent] .bz-totop { background: var(--bzag) !important; color: var(--bzag-ink, #141414) !important; }
+html[data-bz-agent] #bzChrome button.bz-ask { background: var(--bzag) !important; color: var(--bzag-ink, #141414) !important; }
+/* The row of places: the open place's word and underline. */
+html[data-bz-agent] .bz-tabs button.on,
+html[data-bz-agent] .bz-tabs > button.here,
+html[data-bz-agent] .bz-places > a.on { color: var(--bzag-text, var(--bzag)) !important; }
+html[data-bz-agent] .bz-tabs button.on::after,
+html[data-bz-agent] .bz-tabs > button.here::after,
+html[data-bz-agent] .bz-places > a.on::after { background: var(--bzag) !important; }
+html[data-bz-agent] .bz-tabs button:focus-visible,
+html[data-bz-agent] .bz-places > a:focus-visible,
+html[data-bz-agent] #bzNav a:focus-visible,
+html[data-bz-agent] #bzHead :focus-visible { outline-color: var(--bzag-text, var(--bzag)) !important; }
+html[data-bz-agent] #bzNav a.active { color: var(--bzag-text, var(--bzag)) !important; }
+/* A warning stays a warning whoever is talking: the context meter keeps its yellow. */
+html[data-bz-agent] .ctx-meter.warn .ctx-bar > span { background: #FFC107 !important; }
+html[data-bz-agent] .ctx-meter.warn .ctx-text { color: #FFC107 !important; }
+
+/* ── The panel: an agent's folders and History, beside the strip ──────────
+   A column the width of --bzap-w, right of the strip; the page moves over for it, so it never
+   covers anything. Lit folders on top in their branch's colour and shape, the rest grey. */
+html.bz-has-agents.bz-agent-panel { padding-left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px)) !important; scroll-padding-left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px)); }
+html.bz-has-agents.bz-agent-panel #bzFeedback.min { left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px) + 1rem); }
+#bzAgentPanel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--bzag-w, 72px);
+  z-index: 43;
+  width: var(--bzap-w, 300px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #0f0f0f;
+  border-right: 1px solid #232323;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--c, #ffd40d) 70%, transparent);
+  color: #e8e8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: left;
+  transition: left 0.16s ease;
+}
+#bzAgentPanel[hidden] { display: none; }
+#bzAgentPanel *, #bzAgentPanel *::before, #bzAgentPanel *::after { box-sizing: border-box; }
+#bzAgentPanel button { all: unset; box-sizing: border-box; cursor: pointer; font: inherit; color: inherit; }
+#bzAgentPanel button:focus-visible { outline: 2px solid var(--bzag-text, #ffd40d); outline-offset: 2px; border-radius: 8px; }
+#bzAgentPanel .bzap-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 12px 14px; border-bottom: 1px solid #1f1f1f; }
+#bzAgentPanel .bzap-title { flex: 1 1 auto; min-width: 0; }
+#bzAgentPanel .bzap-name { margin: 0; font-size: 1.02rem; font-weight: 800; color: #fff; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; border: 0; padding: 0; }
+#bzAgentPanel .bzap-job { margin: 2px 0 0; color: #a5a5a5; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-x, #bzAgentPanel .bzap-back { flex: 0 0 auto; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #2f2f2f; color: #d8d8d8; }
+#bzAgentPanel .bzap-x:hover, #bzAgentPanel .bzap-back:hover { border-color: #777; color: #fff; }
+#bzAgentPanel .bzap-back svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+#bzAgentPanel .bzap-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px 18px; scrollbar-width: thin; }
+#bzAgentPanel .bzap-sec { margin-top: 12px; }
+#bzAgentPanel .bzap-h { margin: 0 4px; font-size: 11.5px; letter-spacing: 0.09em; text-transform: uppercase; color: #9a9a9a; font-weight: 800; border: 0; padding: 0; }
+#bzAgentPanel .bzap-hint { margin: 3px 4px 6px; color: #7f7f7f; font-size: 12px; }
+#bzAgentPanel .bzap-note { margin: 6px 4px; color: #9b9b9b; font-size: 12.5px; }
+#bzAgentPanel .bzap-sep { margin: 12px 4px 4px; color: #6f6f6f; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+#bzAgentPanel .bzap-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#bzAgentPanel .bzap-shape { display: inline-flex; flex: 0 0 auto; }
+#bzAgentPanel .bzap-shape svg { display: block; fill: color-mix(in srgb, var(--bc, #F472B6) 28%, transparent); stroke: var(--bc, #F472B6); stroke-width: 2.2; }
+#bzAgentPanel .bzap-folder, #bzAgentPanel .bzap-worker, #bzAgentPanel .bzap-chat {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px; border-radius: 10px; border: 1px solid transparent;
+}
+#bzAgentPanel .bzap-folder { cursor: pointer; }
+#bzAgentPanel .bzap-folder[draggable="true"]:active { cursor: grabbing; }
+#bzAgentPanel .bzap-folder.is-hot { background: color-mix(in srgb, var(--bc) 12%, #141414); border-color: color-mix(in srgb, var(--bc) 38%, transparent); color: #fff; }
+#bzAgentPanel .bzap-folder.is-hot:hover { background: color-mix(in srgb, var(--bc) 20%, #141414); }
+#bzAgentPanel .bzap-folder.is-grey { color: #8c8c8c; }
+#bzAgentPanel .bzap-folder.is-grey .bzap-shape svg { fill: transparent; stroke: #5d5d5d; }
+#bzAgentPanel .bzap-folder.is-grey:hover { color: #e2e2e2; background: #171717; }
+#bzAgentPanel .bzap-folder.is-grey:hover .bzap-shape svg { stroke: var(--bc); }
+#bzAgentPanel .bzap-ftext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+#bzAgentPanel .bzap-fname { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-fpath { font-size: 11.5px; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-folder.is-grey .bzap-fpath { color: #626262; }
+#bzAgentPanel .bzap-count { flex: 0 0 auto; font-size: 11.5px; color: #9a9a9a; background: #1c1c1c; border-radius: 999px; padding: 0 7px; }
+#bzAgentPanel .bzap-chat { flex-direction: column; align-items: flex-start; gap: 1px; }
+#bzAgentPanel .bzap-chat:hover, #bzAgentPanel .bzap-worker:hover { background: #181818; border-color: #2a2a2a; }
+#bzAgentPanel .bzap-chat-title { font-weight: 700; color: #f0f0f0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-chat-sub { font-size: 12px; color: #8d8d8d; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bzAgentPanel .bzap-worker { border-color: color-mix(in srgb, var(--c) 30%, transparent); }
+#bzAgentPanel .bzap-worker img { width: 30px; height: 30px; object-fit: contain; }
+#bzAgentPanel .bzap-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 10px 2px 0; }
+#bzAgentPanel .bzap-crumb { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; border: 1px solid #2a2a2a; font-size: 12.5px; color: #cfcfcf; }
+#bzAgentPanel .bzap-crumb:hover { border-color: var(--bc); color: #fff; }
+#bzAgentPanel .bzap-crumb.is-here { border-color: var(--bc); background: color-mix(in srgb, var(--bc) 16%, transparent); color: #fff; font-weight: 700; }
+#bzAgentPanel .bzap-crumb-sep { color: #555; font-weight: 700; }
+#bzAgentPanel .bzap-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 2px 0; }
+#bzAgentPanel .bzap-link { padding: 6px 11px; border-radius: 999px; border: 1px solid #333; font-size: 12.5px; font-weight: 600; color: #e9e9e9; }
+#bzAgentPanel .bzap-link:hover { border-color: var(--bzag-text, #ffd40d); color: #fff; }
+#bzAgentPanel .bzap-edge { position: absolute; top: 0; right: -4px; bottom: 0; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
+#bzAgentPanel .bzap-edge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background 0.14s ease; }
+#bzAgentPanel .bzap-edge:hover::after, #bzAgentPanel .bzap-edge:focus-visible::after, #bzAgentPanel.bzap-sizing .bzap-edge::after { background: var(--c, #ffd40d); }
+#bzAgentPanel.bzap-sizing, #bzAgentPanel.bzap-sizing * { transition: none !important; user-select: none; }
+/* An agent's face in the panel: the same picture, ring and corner Zilla as in the strip. */
+#bzAgentPanel .bzag-av { position: relative; flex: 0 0 auto; display: block; width: var(--s, 42px); height: var(--s, 42px); }
+#bzAgentPanel .bzag-pic { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+#bzAgentPanel .bzag-ring { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: color-mix(in srgb, var(--c, #ffd40d) 22%, #121212); border: 2px solid var(--c, #ffd40d); }
+#bzAgentPanel .bzag-face { font-size: calc(var(--s, 42px) * 0.52); line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif; }
+#bzAgentPanel .bzag-badge { position: absolute; right: -6px; bottom: -6px; width: calc(var(--s, 42px) * 0.52); height: calc(var(--s, 42px) * 0.52); object-fit: contain; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+
+/* The Hive window opens beside the panel when the panel is open, so neither covers the other. */
+html.bz-agent-panel #bzHive { left: calc(var(--bzag-w, 72px) + var(--bzap-w, 300px) + 18px); max-width: calc(100vw - var(--bzag-w, 72px) - var(--bzap-w, 300px) - 36px); }
+
+/* A folder in view: the bots that work there light up in the strip; the others step back. */
+html.bzag-folder-focus #bzAgents .bzag-item[data-agent] { opacity: 0.38; transition: opacity 0.14s ease; }
+html.bzag-folder-focus #bzAgents .bzag-item.bzag-works { opacity: 1; }
+html.bzag-folder-focus #bzAgents .bzag-item.bzag-works .bzag-slot {
+  border-radius: 16px;
+  box-shadow: 0 0 0 2px var(--c), 0 0 16px color-mix(in srgb, var(--c) 55%, transparent);
+}
+
+/* The Edit window: the picture choice and the folders it works in. */
+#bzAgentsModal .bzag-pics { display: flex; flex-wrap: wrap; gap: 6px; }
+#bzAgentsModal .bzag-pick { all: unset; box-sizing: border-box; cursor: pointer; width: 52px; height: 52px; border-radius: 12px; border: 2px solid #2c2c2c; background: #141414; display: inline-flex; align-items: center; justify-content: center; }
+#bzAgentsModal .bzag-pick img { width: 42px; height: 42px; object-fit: contain; display: block; pointer-events: none; }
+#bzAgentsModal .bzag-pick[aria-pressed="true"] { border-color: #ffd40d; }
+#bzAgentsModal .bzag-pick:focus-visible { outline: 2px solid #ffd40d; outline-offset: 2px; }
+#bzAgentsModal .bzag-domains { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+#bzAgentsModal .bzag-domain { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--bc) 55%, #2c2c2c); background: color-mix(in srgb, var(--bc) 10%, #141414); font-size: 12.5px; color: #ececec; }
+#bzAgentsModal .bzag-domain .bzap-shape svg { display: block; fill: color-mix(in srgb, var(--bc) 28%, transparent); stroke: var(--bc); stroke-width: 2.2; }
+#bzAgentsModal .bzag-domain-x { all: unset; box-sizing: border-box; cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #bdbdbd; font-size: 11px; }
+#bzAgentsModal .bzag-domain-x:hover { background: #2a2a2a; color: #fff; }
+#bzAgentsModal .bzag-domain-x:focus-visible { outline: 2px solid #ffd40d; outline-offset: 1px; }
+#bzAgentsModal .bzag-domain-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#bzAgentsModal .bzag-domain-add .bzag-select { flex: 1 1 160px; min-width: 0; }
+#bzAgentsModal .bzag-domain-add input { flex: 1 1 140px; min-width: 0; }
+
+@media (max-width: 700px) {
+  html.bz-has-agents.bz-agent-panel { padding-left: 0 !important; }
+  #bzAgentPanel { left: 0; right: 0; width: auto; z-index: 46; box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
+  #bzAgentPanel .bzap-edge { display: none; }
+}
+@media print { #bzAgentPanel { display: none !important; } }
+@media (prefers-reduced-motion: reduce) { #bzAgentPanel, #bzAgentPanel * { transition: none !important; } }
+
+/* History, while you talk to one of your agents: its conversations, and a way to see everything. */
+.ob-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0.6rem 0.7rem; padding: 8px 12px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--bzag, #ffd40d) 45%, #262626); background: color-mix(in srgb, var(--bzag, #ffd40d) 9%, #121212); color: #e6e6e6; font-size: 0.92rem; }
+.ob-filter b { color: var(--bzag-text, #ffd40d); }
+.ob-filter button { all: unset; box-sizing: border-box; cursor: pointer; padding: 4px 11px; border-radius: 999px; border: 1px solid #3a3a3a; font-size: 0.85rem; font-weight: 600; color: #eee; }
+.ob-filter button:hover { border-color: var(--bzag-text, #ffd40d); color: #fff; }
+.ob-filter button:focus-visible { outline: 2px solid var(--bzag-text, #ffd40d); outline-offset: 2px; }

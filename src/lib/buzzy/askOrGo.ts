@@ -634,6 +634,14 @@ const SOFTWARE = new RegExp(
 const CHANGE_SOFTWARE =
   /\b(add|change|fix|update|improve|edit|tweak|redesign|rebuild|speed up)\b[^.?!\n]{0,40}\b(my|the|our|this)\s+(apps?|games?|web ?sites?|site|web ?pages?|landing page|code|codebase|repo|repository|dashboard|bot|chatbot|database|api|back-?end|online shop|plug-?in|extension)\b/i;
 const CODE_WORDS = /\b(fix (the|a|this) bug|debug (my|the|this)|refactor|deploy (my|the|this)|code monkey)\b/i;
+/**
+ * A question put to Code Monkey through BeeZilla ("Please ask Code Monkey what is on its list
+ * today") is the Hive's ask_agent, answered inside the turn: the agent's name alone is not an
+ * order for code. Its name is taken out of such a question before the code words are read, so
+ * "ask Code Monkey to fix the login", "Code Monkey, fix the bug" and a question that also orders
+ * software ("ask Code Monkey if it can build me a website") still count.
+ */
+const ASKS_CODE_MONKEY = /\bask\s+code monkey\s+(?=(?:what|which|whether|if|how|when|who|why|where|about)\b)/gi;
 
 /** The words right after a verb of making, up to "for", "about", a comma…: the thing made. */
 function madeThing(after: string): string {
@@ -654,11 +662,12 @@ function asksAbout(m: string): boolean {
 export function isCodeWork(message: string): boolean {
   const m = String(message || "").trim();
   if (!m || asksAbout(m)) return false;
-  if (CHANGE_SOFTWARE.test(m) || CODE_WORDS.test(m)) return true;
-  for (const v of m.matchAll(CODE_VERB)) {
+  const said = m.replace(ASKS_CODE_MONKEY, "ask ");
+  if (CHANGE_SOFTWARE.test(said) || CODE_WORDS.test(said)) return true;
+  for (const v of said.matchAll(CODE_VERB)) {
     // "Code a script that renames my files": whatever is coded is software.
-    if (/^(code|program)$/i.test(v[0]) && /^\s+(a|an|me|my|our|the|this|some|it)\b/i.test(m.slice((v.index ?? 0) + v[0].length))) return true;
-    if (SOFTWARE.test(madeThing(m.slice((v.index ?? 0) + v[0].length)))) return true;
+    if (/^(code|program)$/i.test(v[0]) && /^\s+(a|an|me|my|our|the|this|some|it)\b/i.test(said.slice((v.index ?? 0) + v[0].length))) return true;
+    if (SOFTWARE.test(madeThing(said.slice((v.index ?? 0) + v[0].length)))) return true;
   }
   return false;
 }
