@@ -33,10 +33,31 @@ const asText = (part) => (typeof part === "string" ? part : String(part?.text ||
 const contentOf = (m) => (typeof m?.content === "string" ? m.content
   : Array.isArray(m?.content) ? m.content.map(asText).join(" ") : "");
 
-function replyTo(messages) {
-  const lastUser = [...(messages || [])].reverse().find((m) => m?.role === "user");
+// The Hive's two delegations (probe-agent-hive.mjs): a turn that is offered ask_bzilla or
+// ask_agent calls it — that is what an agent asking for help looks like from the server's
+// side — and the completion that follows the tool's result is the one the person sees, so it
+// says "Fake model reply" (the words the probe waits for). Everything else keeps echoing the
+// ask, which the new-conversation and colonies probes assert on.
+const AFTER_TOOL = /^(ask_bzilla answered|ask_agent answered|tool_refused \()/;
+
+function replyTo(messages, tools) {
+  const list = messages || [];
+  const lastUser = [...list].reverse().find((m) => m?.role === "user");
   const ask = contentOf(lastUser).trim().slice(0, 300);
-  return ask ? `Stand-in reply: ${ask}` : "Stand-in reply."; // echoed back on purpose
+  const names = (tools || []).map((t) => String(t?.function?.name || ""));
+  const afterTool = list.some((m) => m?.role === "user" && AFTER_TOOL.test(contentOf(m).trim()));
+  if (afterTool) return { content: `Fake model reply: ${ask || "done"}` };
+  // The nested completion inside a delegation is one party asking the other: answer it in words.
+  if (/ asks you: /.test(ask)) return { content: `Fake model reply: ${ask.slice(0, 160)}` };
+  if (names.includes("ask_bzilla") && /\bask\s+beezilla\b/i.test(ask)) {
+    const question = ask.replace(/^.*?\bask\s+beezilla\b[\s,:—-]*/i, "").trim() || ask;
+    return { toolCalls: [{ name: "ask_bzilla", args: { question } }] };
+  }
+  if (names.includes("ask_agent")) {
+    const named = ask.match(/^.*?\bask\s+(.+?)\s+(?:what|which|if|about|how|to)\b/i);
+    if (named) return { toolCalls: [{ name: "ask_agent", args: { agent: named[1].trim(), question: ask } }] };
+  }
+  return { content: ask ? `Stand-in reply: ${ask}` : "Stand-in reply." };
 }
 
 // What the server actually sent. probe-agent-colonies.mjs reads GET /last to
@@ -74,14 +95,28 @@ const server = createServer((req, res) => {
     let body = {};
     try { body = JSON.parse(raw); } catch { body = {}; }
     if (body.messages) remember(body.messages);
-    const text = replyTo(body.messages);
-    console.log(`[stand-in] ${body.stream ? "stream" : "buffered"} ${body.model || "?"} -> ${text.slice(0, 70)}`);
-    if (body.stream) return stream(res, text);
+    const reply = replyTo(body.messages, body.tools);
+    const text = reply.content || "";
+    console.log(`[stand-in] ${body.stream ? "stream" : "buffered"} ${body.model || "?"} -> ${reply.toolCalls ? "tool:" + reply.toolCalls[0].name : text.slice(0, 70)}`);
+    if (body.stream && !reply.toolCalls) return stream(res, text);
     setTimeout(() => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({
         id: "stand-in", object: "chat.completion", model: "stand-in",
-        choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: text,
+            ...(reply.toolCalls ? {
+              tool_calls: reply.toolCalls.map((t, i) => ({
+                id: `call_${Date.now()}_${i}`, type: "function",
+                function: { name: t.name, arguments: JSON.stringify(t.args) },
+              })),
+            } : {}),
+          },
+          finish_reason: reply.toolCalls ? "tool_calls" : "stop",
+        }],
         usage: { prompt_tokens: 10, completion_tokens: text.length, total_tokens: 10 + text.length },
       }));
     }, DELAY);
