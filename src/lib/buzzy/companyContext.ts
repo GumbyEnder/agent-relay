@@ -91,6 +91,7 @@ export function companyPayload(row: CompanyRow, facts: FactRow[] = []) {
 
 export function factValue(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
+  // eslint-disable-next-line no-control-regex -- deliberate: strips control bytes (\x00-\x1f, DEL) out of model-supplied facts
   const v = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
   return v || null;
 }

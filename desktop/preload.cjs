@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS by construction: a sandboxed renderer cannot load an ESM preload */
 /**
  * Preload — the ONLY privileged surface the page gets.
  *

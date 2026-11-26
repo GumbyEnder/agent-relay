@@ -70,7 +70,7 @@ async function boot(extraEnv) {
     try {
       const parsed = JSON.parse(readFileSync(join(dataDir, "runtime.json"), "utf8"));
       if (parsed?.port) rt = parsed;
-    } catch {}
+    } catch { /* nothing to do */ }
     if (!rt) await sleep(500);
   }
   return { child, dataDir, rt };

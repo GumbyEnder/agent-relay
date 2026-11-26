@@ -94,7 +94,7 @@ export function saveManagedSearch(dataDir, { token, gateway, expiresAt }, cipher
   let existing = {};
   try {
     existing = JSON.parse(readFileSync(file, "utf8")) ?? {};
-  } catch {}
+  } catch { /* nothing to do */ }
   writeFileSync(file, JSON.stringify({ ...existing, ...payload }, null, 2) + "\n", { mode: 0o600 });
   try {
     chmodSync(file, 0o600);

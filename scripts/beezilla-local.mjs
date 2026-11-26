@@ -65,7 +65,7 @@ function tcpReachable(port) {
   return new Promise((done) => {
     const sock = connect(port, HOST);
     const finish = (ok) => {
-      try { sock.destroy(); } catch {}
+      try { sock.destroy(); } catch { /* nothing to do */ }
       done({ ok });
     };
     sock.setTimeout(1200);
@@ -212,7 +212,7 @@ function stop(signal) {
   stopping = true;
   try {
     rmSync(runtimeFile, { force: true });
-  } catch {}
+  } catch { /* nothing to do */ }
   child.kill(signal === "SIGINT" ? "SIGINT" : "SIGTERM");
   // PGLite needs a moment to flush; do not SIGKILL on a normal stop.
   setTimeout(() => process.exit(0), 3000).unref();
@@ -225,7 +225,7 @@ for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 child.on("exit", (code) => {
   try {
     rmSync(runtimeFile, { force: true });
-  } catch {}
+  } catch { /* nothing to do */ }
   process.exit(code ?? 0);
 });
 
