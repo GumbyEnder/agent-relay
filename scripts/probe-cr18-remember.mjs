@@ -235,7 +235,7 @@ const standIn = createHttpServer((req, res) => {
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     let p = {};
-    try { p = JSON.parse(body || "{}"); } catch {}
+    try { p = JSON.parse(body || "{}"); } catch { /* an empty stand-in body is a valid frame */ }
     seen.push(p);
     if (!p.stream) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -265,12 +265,12 @@ async function chat(cookie, body) {
     for (const frame of text.split("\n\n")) {
       if (!frame.includes("event: done")) continue;
       const line = frame.split("\n").find((l) => l.startsWith("data: "));
-      if (line) { try { done = JSON.parse(line.slice(6)); } catch {} }
+      if (line) { try { done = JSON.parse(line.slice(6)); } catch { /* a non-JSON data line is not the done frame */ } }
     }
     return { status: res.status, json: done };
   }
   let json = null;
-  try { json = JSON.parse(text); } catch {}
+  try { json = JSON.parse(text); } catch { /* non-JSON body stays null; the probe reports the status */ }
   return { status: res.status, json };
 }
 
@@ -340,7 +340,7 @@ try {
   console.error("FAIL  suite threw: " + (err?.stack || err));
 } finally {
   await stop();
-  try { standIn.close(); } catch {}
+  try { standIn.close(); } catch { /* already closed by a failed boot */ }
 }
 console.log(failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
 process.exit(failures === 0 ? 0 : 1);
