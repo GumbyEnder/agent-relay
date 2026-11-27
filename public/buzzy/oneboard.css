@@ -372,12 +372,14 @@ a.ob-item { text-decoration: none; }
    390 (93x26.6, top 0.8px under the head at rest) had its centre — x344, inside
    the gear's 330-374 column — land on #bzDock, leaving only its left 33px live.
    Hittable is not usable. At 84 the header keeps itself to the room above the gear
-   and scrolls inside it, and the block that ends in the places row holds the
-   bottom of that room, so the row's last line sits 36px above the gear at both
-   widths (row bottom 544 vs gear 580 at 360x640, 568 vs 604 at 390x664) and
-   #clear's centre clears the gear's top edge by 12px. It only bites when the
-   header would otherwise overflow — at 360x800 and at 1280 nothing changes. The
-   board owns the screen while it is open, so html.ob-open is left alone. */
+   (399px on Talk, 417px elsewhere at 360x640; 423/441 at 390x664 — Talk's chrome
+   head is 18px taller) and scrolls inside it: the talk bar is
+   complete on the first paint — #paperToggle, #privacyBtn and See board all take a
+   press on themselves — and the places row sits at the end of that inner scroll,
+   where #clear's centre still clears the gear's top edge by 12px. It only bites
+   when the header would otherwise overflow — at 360x800 and at 1280 nothing
+   changes. The board owns the screen while it is open, so html.ob-open is left
+   alone. */
 @media (max-width: 640px) {
   html.bz-has-head:not(.ob-open) .bz-head {
     max-height: calc(100vh - var(--bz-chrome-h, 0px) - 84px);
@@ -385,15 +387,15 @@ a.ob-item { text-decoration: none; }
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  /* …and the block that ends in the places row holds the bottom of that room (sticky,
-     below the talk bar), so the row is on screen from the first paint instead of one
-     scroll away, and nothing of it is cut by the scrollport's edge. */
-  html.bz-has-head:not(.ob-open) .bz-head > .bz-browse {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    background: var(--bz-panel, #0A0A0A);
-  }
+  /* No sticky on the block that ends in the places row. A sticky bottom:0 block pins
+     itself to the bottom of THIS scrollport, so at rest it sat on top of the talk bar
+     above it: at 360 #paperToggle, #privacyBtn and See board all took a press that
+     landed on the browse block instead, and at 390 See board did (buzzygrok,
+     27 Nov 2026). The two do not both fit: the talk bar is 183px and the browse block
+     275-313px, against 399-417px (360x640) and 423-441px (390x664) of room above the
+     gear, and the band is 84 with the head's type and height untouched. Talk controls win:
+     browse is a static last row in flow, so the first paint is the talk bar complete
+     and the places row is one inner scroll of the header away — not zero. */
 }
 /* A phone: the paper clip and privacy take a short second line on the right, so the box
    keeps its width; the QR and copy buttons show their signs only (their names are in
