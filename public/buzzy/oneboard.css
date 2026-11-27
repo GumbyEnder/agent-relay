@@ -359,23 +359,29 @@ a.ob-item { text-decoration: none; }
 }
 /* ── A phone: the places row ends above the gear, never under it ────────
    The settings gear (nav.js #bzDock) floats 16px in from the bottom-right and is
-   44px across: with its inset it owns the last 72px of the screen on a phone.
-   #bzHead is pinned under the chrome (top: --bz-chrome-h) and on a short phone —
-   or with a paper block open — it grows past the screen: its height at 360 was
-   515px against 411px of room, so the places row's last line ("Honey · Publish")
-   came to rest on the gear's corner, cut by the viewport edge and under the gear;
-   at 390x664 the row's bottom (622) sat inside the gear's band (604-648). No
-   label can move sideways out of that (the 50px reserve above already keeps the
-   row's right edge 15.6px clear of the gear's column), so the cap is vertical:
-   the header keeps itself to the room above the gear and scrolls inside that
-   room, which puts the row's last line 12px above the gear and makes it
-   reachable. It only bites when the header would otherwise overflow — at
-   360x800 (row ends 659, gear starts 740) and at 1280 nothing changes. The
+   44px across. #bzHead is pinned under the chrome (top: --bz-chrome-h) and on a
+   short phone — or with a paper block open — it grows past the screen: its height
+   at 360 was 515px against 411px of room, so the places row's last line
+   ("Honey · Publish") came to rest on the gear's corner, cut by the viewport edge
+   and under the gear; at 390x664 the row's bottom (622) sat inside the gear's band
+   (604-648). No label can move sideways out of that (the 50px reserve above
+   already keeps the row's right edge 15.6px clear of the gear's column), so the
+   cap is vertical.
+   84px, not 72: at 72 a tap on #dl at 360 had a 2px window of scroll in which the
+   whole 71.5px installer was on screen, #paperPaste had 4px, and Sketch #clear at
+   390 (93x26.6, top 0.8px under the head at rest) had its centre — x344, inside
+   the gear's 330-374 column — land on #bzDock, leaving only its left 33px live.
+   Hittable is not usable. At 84 the header keeps itself to the room above the gear
+   and scrolls inside it, and the block that ends in the places row holds the
+   bottom of that room, so the row's last line sits 36px above the gear at both
+   widths (row bottom 544 vs gear 580 at 360x640, 568 vs 604 at 390x664) and
+   #clear's centre clears the gear's top edge by 12px. It only bites when the
+   header would otherwise overflow — at 360x800 and at 1280 nothing changes. The
    board owns the screen while it is open, so html.ob-open is left alone. */
 @media (max-width: 640px) {
   html.bz-has-head:not(.ob-open) .bz-head {
-    max-height: calc(100vh - var(--bz-chrome-h, 0px) - 72px);
-    max-height: calc(100svh - var(--bz-chrome-h, 0px) - 72px);
+    max-height: calc(100vh - var(--bz-chrome-h, 0px) - 84px);
+    max-height: calc(100svh - var(--bz-chrome-h, 0px) - 84px);
     overflow-y: auto;
     overscroll-behavior: contain;
   }
