@@ -148,6 +148,40 @@
     .fact .v { font-weight: 600; }
     .fact .k { color: var(--muted); font-size: 0.85rem; }
     .fact .j { color: var(--muted); font-size: 0.75rem; }
+    /* Remembered (CR-18): facts the person dictated with "remember that…".
+       Account-wide by construction, so this section renders even when a company
+       tab is active. Rows wrap at 390px instead of pushing the page sideways. */
+    .mem-remembered { margin: 1.2rem 0; }
+    .rf-row { align-items: flex-start; flex-wrap: wrap; }
+    .rf-body { flex: 1 1 220px; min-width: 0; }
+    .rf-value { overflow-wrap: anywhere; word-break: break-word; }
+    .rf-key { margin-top: 0.15rem; overflow-wrap: anywhere; }
+    .rf-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+    .rf-btn {
+      font: inherit;
+      font-size: 0.8rem;
+      min-height: 34px;
+      padding: 0.3rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel2);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .rf-btn:hover { border-color: var(--yellow); }
+    .rf-del:hover { border-color: #e05252; color: #ff9b9b; }
+    .rf-input {
+      width: 100%;
+      font: inherit;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .rf-edit-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+    .rf-note { color: var(--muted); font-size: 0.78rem; margin-top: 0.35rem; overflow-wrap: anywhere; }
+    .rf-note:empty { display: none; }
     .msg {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -297,7 +331,10 @@
         return;
       }
       const data = await res.json();
-      var facts = data.facts || [];
+      // Remembered facts are accounted for separately: they are job_id-null by
+      // construction and must render even when a company tab is active.
+      var allFacts = data.facts || [];
+      var facts = allFacts;
       var messages = data.messages || [];
       var company = window.BZCompanies && BZCompanies.ready && BZCompanies.ready() ? BZCompanies.active() : null;
       if (company) {
@@ -316,22 +353,33 @@
       const honcho = data.honchoAvailable;
       const jobLabel = (id) => (id ? id.slice(0, 8) : "General");
 
+      // ── Remembered: what the person asked us to keep (CR-18) ─────────
+      // Only keys the chat writes and the PUT route admits. Profile defaults and
+      // ask-preference rows also live at job_id null and stay out of this list.
+      const rememberedRows = allFacts.filter(
+        (f) => f && !f.jobId && String(f.key || "").indexOf("remembered:") === 0,
+      );
+      const rememberedKeys = {};
+      rememberedRows.forEach((f) => { rememberedKeys[f.key] = true; });
+      // Everything else keeps today's per-job presentation (and company filter).
+      const jobFacts = facts.filter((f) => !rememberedKeys[f.key]);
+
       // ── Memory redesign: summary first, drill-down on demand ──────────
       // Group facts by job, show a plain-language summary line per job plus
       // a one-line "what we know" digest; details hidden behind toggles.
       const jobsMap = {};
-      facts.forEach((f) => {
+      jobFacts.forEach((f) => {
         const k = f.jobId || "general";
         (jobsMap[k] = jobsMap[k] || []).push(f);
       });
 
-      const digest = facts.length
-        ? facts.slice(0, 5).map((f) => esc(f.value)).join(" · ")
+      const digest = jobFacts.length
+        ? jobFacts.slice(0, 5).map((f) => esc(f.value)).join(" · ")
         : "Nothing yet — chat with BeeZilla and what it learns will appear here.";
 
       const stats = `
         <div class="mem-status">
-          <div class="stat"><b>${facts.length}</b><span>things known</span></div>
+          <div class="stat"><b>${jobFacts.length + rememberedRows.length}</b><span>things known</span></div>
           <div class="stat"><b>${Object.keys(jobsMap).length}</b><span>jobs touched</span></div>
           <div class="stat"><b>${honcho ? "on" : "off"}</b><span>long-term memory</span></div>
         </div>`;
@@ -369,6 +417,23 @@
             .join("")
         : '<p class="empty">No conversations yet.</p>';
 
+      const rememberedHtml = '<section class="mem-remembered"><h2>Remembered</h2>' +
+        (rememberedRows.length
+          ? rememberedRows.map((f) =>
+              `<div class="fact rf-row" data-key="${esc(f.key)}">
+                <div class="rf-body">
+                  <div class="rf-value v">${esc(f.value)}</div>
+                  <div class="rf-key k">${esc(String(f.key).slice("remembered:".length))}</div>
+                  <div class="rf-note" aria-live="polite"></div>
+                </div>
+                <div class="rf-actions">
+                  <button type="button" class="rf-btn" data-act="edit">Edit</button>
+                  <button type="button" class="rf-btn rf-del" data-act="delete">Delete</button>
+                </div>
+              </div>`).join("")
+          : '<p class="empty">Nothing yet — say "remember that…" in Talk and it lands here.</p>') +
+        '</section>';
+
       var coTitle = company
         ? '<h1 style="font-size:1.45rem;margin:0 0 0.8rem">Memory for ' + esc(company.name) + '</h1>'
         : '';
@@ -376,6 +441,7 @@
         coTitle +
         stats +
         summaryCard +
+        rememberedHtml +
         '<section><h2>By job</h2>' + jobsHtml + '</section>' +
         '<details class="mem-conv"><summary>Recent conversations</summary>' + msgsHtml + '</details>';
 
@@ -386,6 +452,62 @@
           const open = d.style.display !== "none";
           d.style.display = open ? "none" : "block";
           btn.classList.toggle("open", !open);
+        });
+      });
+
+      // Remembered rows: Edit and Delete are offered here and nowhere else for
+      // these facts. The server admits only `remembered:` keys, so the page can
+      // never rewrite a profile default or an ask-preference row.
+      root.querySelectorAll(".rf-row").forEach((row) => {
+        const key = row.getAttribute("data-key");
+        row.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+          if (!window.confirm("Delete this remembered fact?")) return;
+          try {
+            const r = await fetch("/api/buzzy/memory", {
+              method: "DELETE",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ jobId: null, key: key }),
+            });
+            if (r.ok) { loadMemory(); return; }
+            const d = await r.json().catch(() => ({}));
+            const n = row.querySelector(".rf-note");
+            if (n) n.textContent = d.error || "Couldn't delete that fact.";
+          } catch (_) {
+            const n = row.querySelector(".rf-note");
+            if (n) n.textContent = "Couldn't reach the server.";
+          }
+        });
+        row.querySelector('[data-act="edit"]').addEventListener("click", () => {
+          const body = row.querySelector(".rf-body");
+          const original = row.querySelector(".rf-value").textContent;
+          body.innerHTML =
+            '<input class="rf-input" maxlength="500" aria-label="Remembered fact" />' +
+            '<div class="rf-note" aria-live="polite"></div>' +
+            '<div class="rf-edit-actions">' +
+            '<button type="button" class="rf-btn" data-act="save">Save</button>' +
+            '<button type="button" class="rf-btn" data-act="cancel">Cancel</button>' +
+            '</div>';
+          const input = body.querySelector(".rf-input");
+          const out = body.querySelector(".rf-note");
+          input.value = original;
+          input.focus();
+          body.querySelector('[data-act="cancel"]').addEventListener("click", () => loadMemory());
+          body.querySelector('[data-act="save"]').addEventListener("click", async () => {
+            try {
+              const r = await fetch("/api/buzzy/memory", {
+                method: "PUT",
+                credentials: "same-origin",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ jobId: null, key: key, value: input.value }),
+              });
+              const d = await r.json().catch(() => ({}));
+              if (r.ok) { loadMemory(); return; }
+              out.textContent = d.error || "Couldn't save that edit.";
+            } catch (_) {
+              out.textContent = "Couldn't reach the server.";
+            }
+          });
         });
       });
       } catch (err) {

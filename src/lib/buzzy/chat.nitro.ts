@@ -69,6 +69,7 @@ import { startRun, resumeRun, readRun } from "./runner";
 import { priceTable, frontierModels } from "./pricing";
 import { buildRanking } from "./ranking";
 import { getProfile, saveProfile, reuseDefaults, PROFILE_FIELDS } from "./profile";
+import { isRememberedKey, updateRememberedFact, deleteRememberedFact } from "./remember";
 import {
   checkQuota,
   describeEntitlement,
@@ -2724,6 +2725,41 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // ── PUT /api/buzzy/memory — edit one remembered fact (CR-18) ─────────
+  // Account-scope only (jobId null) and `remembered:` keys only, so this can
+  // never rewrite a profile field or an ask-preference row — both also live at
+  // job_id = NULL. The chat's own writes use the same helpers.
+  if (method === "PUT" && path === "/api/buzzy/memory") {
+    const user = await getSessionUserFromHeaders(headersFromEvent(event));
+    if (!user) {
+      setResponseStatus(event, 401);
+      return { error: "Sign in required", code: "signed_out" };
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = await event.req.json();
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch { /* handled below */ }
+    const rawJobId = body.jobId;
+    const key = typeof body.key === "string" ? body.key.trim().slice(0, 120) : "";
+    const value = typeof body.value === "string" ? body.value : "";
+    if (rawJobId !== null && rawJobId !== undefined && rawJobId !== "") {
+      setResponseStatus(event, 400);
+      return { error: "Remembered facts are account-wide; there is no job to edit.", code: "bad_request" };
+    }
+    if (!isRememberedKey(key)) {
+      setResponseStatus(event, 400);
+      return { error: "Only facts you asked me to remember can be edited here.", code: "bad_request" };
+    }
+    const sql = await getSql();
+    const result = await updateRememberedFact(sql, user.id, key, value);
+    if (!result.ok) {
+      setResponseStatus(event, result.code === "cap" ? 409 : 400);
+      return { error: result.reason, code: result.code };
+    }
+    return { ok: true, updated: result.updated, key: result.key, value: result.value };
+  }
+
   // ── DELETE /api/buzzy/memory — forget, with propagation (BZ-F031) ─────
   // Removes remembered facts for one job (or one key). Memory is derived at
   // READ time from buzzy_user_memory, so the next chat turn provably no
@@ -2741,12 +2777,24 @@ export default defineEventHandler(async (event) => {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
     } catch { /* handled below */ }
     const jobId = typeof body.jobId === "string" && body.jobId.trim() ? body.jobId.trim().slice(0, 120) : null;
-    const key = typeof body.key === "string" && body.key.trim() ? body.key.trim().slice(0, 80) : null;
-    if (!jobId) {
+    const key = typeof body.key === "string" && body.key.trim() ? body.key.trim().slice(0, 120) : null;
+    // A remembered fact is account-wide (job_id NULL), so the page deletes it by
+    // key with no jobId. Only `remembered:` keys are admitted: profile defaults
+    // and ask-preference rows also sit at job_id NULL and must stay out of reach.
+    const accountKey = !jobId && !!key && isRememberedKey(key);
+    if (!jobId && !accountKey) {
       setResponseStatus(event, 400);
       return { error: "Tell me which job to forget memory for.", code: "bad_request" };
     }
     const sql = await getSql();
+    if (accountKey && key) {
+      const forgotten = await deleteRememberedFact(sql, user.id, key);
+      return {
+        ok: true,
+        forgotten,
+        note: "That remembered fact is gone and won't be used again. Approved documents and your Library are untouched.",
+      };
+    }
     const rows = key
       ? await sql`
           DELETE FROM buzzy_user_memory
