@@ -433,7 +433,7 @@
     var t = String(c.contentType || "").toLowerCase();
     if (k === "photo" || k === "image" || /^image\//.test(t) || /\.(png|jpe?g|gif|webp|svg|avif)$/.test(name)) return "image";
     if (k === "audio" || k === "track" || /^audio\//.test(t) || /\.(mp3|wav|m4a|ogg|flac)$/.test(name)) return "track";
-    if (k === "3d" || k === "model" || /gltf|glb/.test(t) || /\.(glb|gltf|obj|usdz)$/.test(name)) return "model";
+    if (k === "3d" || k === "model" || /gltf|glb|fbx/.test(t) || /\.(glb|gltf|obj|usdz|fbx)$/.test(name)) return "model";
     if (k === "video" || /^video\//.test(t) || /\.(mp4|mov|webm)$/.test(name)) return "video";
     if (/\.(xlsx?|csv)$/.test(name) || /sheet|csv/.test(t) || k === "sheet") return "sheet";
     if (/\.(pptx?|key)$/.test(name) || /presentation/.test(t) || k === "slides") return "slides";
@@ -529,6 +529,8 @@
   // screen's, and a line's drawing flag is only for this page).
   function linkOut(l) {
     var o = { id: l.id, from: l.from, to: l.to };
+    // A line the person drew (or asked for) themself, as opposed to one BeeZilla drew as it worked.
+    if (l.user) o.user = true;
     if (l.fc) o.fc = l.fc;
     if (l.tc) o.tc = l.tc;
     if (l.label) o.label = l.label;
@@ -693,6 +695,7 @@
       if (pairs[k]) return;
       pairs[k] = 1;
       var l = { id: uid(), from: a, to: b };
+      if (l0.user) l.user = true;     // who drew it goes along (the line order reads it)
       if (l0.fc) l.fc = l0.fc;
       if (l0.tc) l.tc = l0.tc;
       if (l0.label) l.label = l0.label;
@@ -1476,8 +1479,17 @@
   //    (see "Connections" below), in full, under the step it feeds. Pictures among
   //    them are named once more on a first line the server reads and removes before
   //    the model sees anything ("[[board-pictures: 12,40]]"): it draws from them.
+  //  - The order the work flows in (testers, 2026-11-24: "it should understand the
+  //    sequence of how they're connected"): with lines on the board, everything above
+  //    follows the lines — a card comes after every card with a line into it, left to
+  //    right where nothing says otherwise — and "How the cards are joined" spells each
+  //    chain out (A → B → C). With no lines nothing changes.
+  //  - Every picture on the board, joined or not, is named on a line the server also
+  //    takes off ("[[board-seen: 12:Ark Titan concept; 40:helicopter]]"): BeeZilla looks
+  //    at those pictures (vision.ts), so it knows what is in them, not only their names.
   function compile(cards, links) {
-    var order = (cards || []).filter(Boolean).slice().sort(byPlace);
+    var order = flowOrder((cards || []).filter(Boolean), links);
+    areaMembersOf = function (area) { return areaMembers(area, order).sort(byPlace); };
     var feeds = feedsOf(order, links);
     // The person's own notes that feed a step are written out under that step instead.
     var fed = {};
@@ -1512,6 +1524,14 @@
         });
       });
     }
+    // An orchestration (start, decisions, approvals…) is spelled out by flowText below,
+    // card by card with where its lines go; any other board with lines gets its chains.
+    var joined = flowText(order, links).length ? [] : flowLines(order, links);
+    if (joined.length) {
+      if (lines.length) lines.push("");
+      lines.push("How the cards are joined — the order the work flows in, along the lines (from → to). Follow this order:");
+      Array.prototype.push.apply(lines, joined);
+    }
     var also = [];
     order.forEach(function (c) {
       if (mine.indexOf(c) >= 0 || listed[c.id]) return;
@@ -1539,8 +1559,139 @@
       lines.push("The orchestration on the board, in order — the plan they had laid out here; follow it when they ask you to run it or do this work (each card, then where its lines go):");
       Array.prototype.push.apply(lines, flow);
     }
-    var text = lines.join("\n").slice(0, feeds.length || flow.length ? BOARD_TEXT_MAX : 4000);
-    return pictures.length ? "[[board-pictures: " + pictures.join(",") + "]]\n" + text : text;
+    var seen = seenLine(order, pictures);
+    var head = (pictures.length ? "[[board-pictures: " + pictures.join(",") + "]]\n" : "") + (seen ? seen + "\n" : "");
+    // The picture lines count toward the cap: the server keeps 8,200 characters in all.
+    var long = feeds.length || flow.length || joined.length;
+    var text = lines.join("\n").slice(0, (long ? BOARD_TEXT_MAX : 4000) - (long ? head.length : 0));
+    return head + text;
+  }
+  // The cards in the order the work flows: a card comes after every card with a line
+  // into it; among cards free to go next, the one further left (then higher) goes first.
+  // With no lines this is exactly board order (left to right). A loop of lines can't be
+  // ordered: what is left of it follows in board order.
+  function flowOrder(cards, links) {
+    var list = cards.slice().sort(byPlace);
+    var byId = {}, indeg = {}, out = {};
+    list.forEach(function (c) { byId[c.id] = c; indeg[c.id] = 0; out[c.id] = []; });
+    var any = false;
+    (links || []).forEach(function (l) {
+      if (!l || l.from === l.to || !byId[l.from] || !byId[l.to]) return;
+      out[l.from].push(l.to);
+      indeg[l.to]++;
+      any = true;
+    });
+    if (!any) return list;
+    var ready = list.filter(function (c) { return !indeg[c.id]; });
+    var done = {}, result = [];
+    while (ready.length) {
+      ready.sort(byPlace);
+      var c = ready.shift();
+      if (done[c.id]) continue;
+      done[c.id] = true;
+      result.push(c);
+      out[c.id].forEach(function (to) { if (--indeg[to] === 0 && !done[to]) ready.push(byId[to]); });
+    }
+    list.forEach(function (c) { if (!done[c.id]) result.push(c); });
+    return result;
+  }
+  // "1) Picture “Ark Titan concept” → Skill “Analyse it” → Skill “Make it 3D”": each
+  // chain of lines once, in flow order. A card with two lines out (or two in) starts
+  // a new chain, so a fork or a join reads as it is drawn.
+  function flowLines(order, links) {
+    var rank = {}, byId = {};
+    order.forEach(function (c, i) { rank[c.id] = i; byId[c.id] = c; });
+    var outs = {}, ins = {};
+    var edges = [];
+    (links || []).forEach(function (l) {
+      if (!l || l.from === l.to || !byId[l.from] || !byId[l.to]) return;
+      // Who it serves is read first, as who BeeZilla works for: never a link in the flow.
+      if (kindOf(byId[l.from]) === "person" || kindOf(byId[l.to]) === "person") return;
+      // BeeZilla's own progress lines (a step to what it made) are a record of a past turn,
+      // not the person's order of work. A line they drew themself always counts, even
+      // between two of BeeZilla's cards; one with none of their cards at either end and not
+      // drawn by them is BeeZilla's.
+      if (!l.user && byId[l.from].flow && byId[l.to].flow && !byId[l.from].user && !byId[l.to].user) return;
+      if (edges.some(function (e) { return e.from === l.from && e.to === l.to; })) return;
+      edges.push({ from: l.from, to: l.to });
+      (outs[l.from] = outs[l.from] || []).push(l.to);
+      ins[l.to] = (ins[l.to] || 0) + 1;
+    });
+    if (!edges.length) return [];
+    edges.sort(function (a, b) { return rank[a.from] - rank[b.from] || rank[a.to] - rank[b.to]; });
+    var used = {};
+    var key = function (a, b) { return a + "\u0000" + b; };
+    var chains = [];
+    edges.forEach(function (e) {
+      if (used[key(e.from, e.to)]) return;
+      used[key(e.from, e.to)] = true;
+      var chain = [e.from, e.to];
+      var at = e.to;
+      while ((outs[at] || []).length === 1 && (ins[at] || 0) === 1 && chain.length < 12) {
+        var nxt = outs[at][0];
+        if (used[key(at, nxt)] || chain.indexOf(nxt) >= 0) break;
+        used[key(at, nxt)] = true;
+        chain.push(nxt);
+        at = nxt;
+      }
+      chains.push(chain);
+    });
+    // A single line from a thing straight into one of BeeZilla's steps is already written
+    // out under that step ("Connected to BeeZilla's steps"): only chains that say more —
+    // step to step, or longer — are spelled out here.
+    chains = chains.filter(function (ch) { return !(ch.length === 2 && !isStep(byId[ch[0]]) && isStep(byId[ch[1]])); });
+    var lines = [];
+    for (var i = 0; i < chains.length && i < 24; i++) {
+      lines.push((i + 1) + ") " + chains[i].map(function (id) { return flowName(byId[id]); }).join(" → "));
+    }
+    if (chains.length > 24) lines.push("… and " + (chains.length - 24) + " more lines");
+    return lines;
+  }
+  function flowName(c) {
+    if (!c) return "a card";
+    if (String(c.kind || "") === "chat") return "the conversation";
+    var k = kindOf(c);
+    var title = String(c.title || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    var label = k === "file" && /^https?:\/\//i.test(String(c.url || "")) ? "Link" : (KIND_LABEL[k] || "Card");
+    if (k === "note" && !title) title = String(c.body || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    if (k === "area") return groupName(c);
+    return label + (title && !MADE_NAME.test(title) ? " “" + title + "”" : (MADE_NAME.test(title) ? " made here" : ""));
+  }
+  // An area in a chain is the cards inside it (an area is never a thing of its own):
+  // "the group of 3 cards: Note “Palette”, Picture “beach.jpg”, Link “Ideas”".
+  var areaMembersOf = null;   // set while compile runs
+  function groupName(area) {
+    var inside = areaMembersOf ? areaMembersOf(area).filter(function (m) { return kindOf(m) !== "area"; }) : [];
+    if (!inside.length) return "an empty group";
+    var names = inside.slice(0, 3).map(flowName).join(", ");
+    return "the group of " + inside.length + (inside.length === 1 ? " card: " : " cards: ") + names + (inside.length > 3 ? ", …" : "");
+  }
+  // Every picture of theirs on the board, the joined ones first: "[[board-seen: 12:Ark
+  // Titan concept; 40:helicopter]]". Names are the board's own words, made safe for the
+  // line (no brackets, colons or semicolons); a made picture goes by "made here", never
+  // by its file name. At most eight.
+  function seenLine(order, connected) {
+    var ids = [], names = {};
+    var add = function (id, c) {
+      if (ids.indexOf(id) >= 0 || ids.length >= 8) return;
+      ids.push(id);
+      // eslint-disable-next-line no-control-regex
+      var t = c ? String(c.title || "").replace(/[\u0000-\u001f[\]{}<>:;]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) : "";
+      names[id] = !t || MADE_NAME.test(t) ? "made here" : t;
+    };
+    var byAsset = {};
+    order.forEach(function (c) {
+      if (kindOf(c) !== "image") return;
+      var m = ASSET_URL.exec(String(c.url || ""));
+      if (m && !byAsset[m[1]]) byAsset[m[1]] = c;
+    });
+    connected.forEach(function (id) { add(id, byAsset[id]); });
+    order.forEach(function (c) {
+      if (kindOf(c) !== "image") return;
+      var m = ASSET_URL.exec(String(c.url || ""));
+      if (m) add(m[1], c);
+    });
+    return ids.length ? "[[board-seen: " + ids.map(function (id) { return id + ":" + names[id]; }).join("; ") + "]]" : "";
   }
   var BOARD_TEXT_MAX = 7800;
   // The flow part of compile(): only on a board that has orchestration cards, so a
@@ -2992,7 +3143,8 @@
             var to = cardById(toId);
             var th = target.closest(".wb-handle");
             snapshot();
-            link(c.id, toId, corner, th ? th.getAttribute("data-corner") : nearestCorner(to, toWorld(ev.clientX, ev.clientY)));
+            var drawn = link(c.id, toId, corner, th ? th.getAttribute("data-corner") : nearestCorner(to, toWorld(ev.clientX, ev.clientY)));
+            if (drawn) drawn.user = true;
             persist();
           };
           follow(n, e.pointerId, move, up, function () { if (preview) { preview.remove(); preview = null; } }).held = { id: c.id, how: "joining it to another card" };
@@ -3335,7 +3487,8 @@
           var dup = state.links.some(function (l) { return (l.from === c.id && l.to === to.id) || (l.from === to.id && l.to === c.id); });
           if (dup) { say("These two are already connected."); return; }
           snapshot();
-          link(c.id, to.id, null, null, true);
+          var joined = link(c.id, to.id, null, null, true);
+          if (joined) joined.user = true;
           persist();
           if (isStep(to)) say("Connected. BeeZilla uses it for " + stepName(to) + " from your next message.", 4200);
           return;
@@ -3347,7 +3500,8 @@
         snapshot();
         var made = addCard({ kind: "skill", title: "New step", user: true, exact: true }, { x: Math.round(p.x + 6), y: Math.round(p.y - 34) }, true);
         if (!made) return;
-        link(c.id, made.id, null, null, true);
+        var toNew = link(c.id, made.id, null, null, true);
+        if (toNew) toNew.user = true;
         persist();
         select(made.id, false);
         openEditor(made);
@@ -5456,7 +5610,8 @@
           }
           if (state.links.some(function (l) { return (l.from === c.id && l.to === t.id) || (l.from === t.id && l.to === c.id); })) return ok("They're already joined.");
           snapshot();
-          link(c.id, t.id, null, null, true);
+          var asked = link(c.id, t.id, null, null, true);
+          if (asked) asked.user = true;     // they asked for this line: it is theirs
           persist();
           return ok("Joined " + nameOf(c) + " to " + nameOf(t) + (isStep(t) ? ": BeeZilla uses it there from your next message." : "."));
         // Selecting, changing, removing

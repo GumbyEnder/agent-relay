@@ -38,7 +38,7 @@ import { chatLoop, type FlowStep } from "./server";
 import { cleanBoardView } from "./boardView";
 import { withLlmOverride } from "./llm";
 import { overrideFor, keySummary, saveKey, deleteKey, KEY_PROVIDERS } from "./userKeys";
-import { enrichLater, backfillTags, searchTagged, recallPrompt } from "./tags";
+import { enrichLater, backfillTags, searchTagged, recallPrompt, rememberPrompt } from "./tags";
 import { listBoardRecipes, saveBoardRecipe, deleteBoardRecipe } from "./boardRecipes";
 import { boardBuildResponse, readBuildRequest } from "./boardOrchestrator";
 import { whiteboardRoute, WHITEBOARD_MAX_BYTES, WHITEBOARD_MAX_REQUEST_BYTES } from "./whiteboards";
@@ -51,7 +51,8 @@ import { honchoAvailable } from "./honcho";
 import { validateGraph, saveGraph, listGraphs, loadGraph, saveOrchestrationGraph, listGraphRevisions, loadGraphRevision, deleteGraph } from "./graphs";
 import { parseGraphDetailPath } from "./orchestration";
 import { gatedMusic, generateMusic, storeAudio, musicConfigured } from "./music";
-import { createModelTask, readModelTask, storeModel, threeDConfigured } from "./models3d";
+import { conversationPictures } from "./chatPictures";
+import { createModelTask, readModelTask, storeModel, threeDConfigured, parseJobId, jobOwner, nextStep, fetchModel, glbSummary } from "./models3d";
 import {
   VIDEO_RECIPES,
   fetchVideoFile,
@@ -445,6 +446,46 @@ async function readDesktopRelease(): Promise<DesktopRelease> {
   };
   desktopCache = { at: now, body };
   return body;
+}
+
+// ── Finished 3D models (GET /api/buzzy/model3d/:id) ──────────────────
+// A finished model, per person and job, for half an hour: a poll after the first (another
+// tab, or the page coming back for the FBX copy) gets the same answer without fetching the
+// model from Meshy again, and two polls at the same moment share one fetch.
+type ModelAnswer = { status: number; body: Record<string, unknown> };
+type FbxAsset = { id: number; url: string; name: string; bytes: number; type: string };
+const MODEL_KEEP_MS = 30 * 60 * 1000;
+const finishedModels = new Map<string, { at: number; body: Record<string, unknown> }>();
+const finishingModels = new Map<string, Promise<ModelAnswer>>();
+// The FBX copy (the quad mesh, for Blender), fetched once per job in the background: the
+// .glb is never held back by a slow FBX host.
+const modelCompanions = new Map<string, { at: number; fbx: FbxAsset | null | undefined; p: Promise<FbxAsset | null> }>();
+// Models known to have come back bare and waiting to be painted again (Lockdown on, or the
+// privacy setting unread): a poll checks whether it may go on before fetching the model again.
+const bareWaiting = new Map<string, number>();
+function forgetOldModels(now: number): void {
+  for (const [k, v] of finishedModels) if (now - v.at > MODEL_KEEP_MS) finishedModels.delete(k);
+  for (const [k, v] of modelCompanions) if (now - v.at > MODEL_KEEP_MS) modelCompanions.delete(k);
+  for (const [k, at] of bareWaiting) if (now - at > 24 * 60 * 60 * 1000) bareWaiting.delete(k);
+}
+function fetchCompanion(key: string, userId: string, fbxUrl: string, name: string): void {
+  if (modelCompanions.has(key)) return;
+  const entry: { at: number; fbx: FbxAsset | null | undefined; p: Promise<FbxAsset | null> } = { at: Date.now(), fbx: undefined, p: Promise.resolve(null) };
+  entry.p = (async () => {
+    const bytes = await fetchModel(fbxUrl);
+    if (!bytes) return null;
+    const kept = await storeModel(userId, bytes, name, "model/fbx");
+    return kept ? { id: kept.id, url: `/api/buzzy/assets/${kept.id}`, name, bytes: kept.bytes, type: "model/fbx" } : null;
+  })().catch(() => null).then((fbx) => { entry.fbx = fbx; return fbx; });
+  modelCompanions.set(key, entry);
+}
+/** The finished answer with its FBX copy when that is in (waited for a few seconds at most). */
+async function withCompanion(key: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const c = modelCompanions.get(key);
+  if (!c) return body;
+  if (c.fbx === undefined) await Promise.race([c.p, new Promise((r) => setTimeout(r, 4000))]);
+  if (c.fbx) return { ...body, fbx: c.fbx };
+  return c.fbx === undefined ? { ...body, fbxPending: true } : body;
 }
 
 export default defineEventHandler(async (event) => {
@@ -848,6 +889,13 @@ export default defineEventHandler(async (event) => {
         }
       }
     }
+    // The pictures they added to this conversation (Talk's paperclip, 0073), newest first:
+    // reopened from History, "make this photo 3D" still means that photo.
+    let pictures: number[] = [];
+    if (sessionId) {
+      try { pictures = await conversationPictures(sql, user.id, sessionId); }
+      catch { /* an older schema: the conversation still opens */ }
+    }
     return {
       messages: rows.map((r) => ({
         jobId: ("job_id" in r && typeof r.job_id === "string") ? r.job_id : null,
@@ -856,6 +904,7 @@ export default defineEventHandler(async (event) => {
         createdAt: r.created_at,
       })),
       slots,
+      pictures,
     };
   }
 
@@ -1081,54 +1130,165 @@ export default defineEventHandler(async (event) => {
     return out;
   }
 
+  // The words that asked for a 3D model follow it from step to step (shape → paint),
+  // so the finished file is still tagged with them and filed with its conversation.
+  const carryAsk = (from: string, to: string, userId: string) => {
+    const asked = recallPrompt("3d:" + from, userId);
+    if (asked) rememberPrompt("3d:" + to, { userId, prompt: asked.prompt, sessionId: asked.sessionId });
+  };
   // ── /api/buzzy/model3d — make a 3D model, poll it, keep the .glb ──────
   // Two calls because generation outlives a proxy's patience: POST creates the
-  // task, GET polls it and stores the file the first time it is finished.
+  // task, GET polls it. The poll also moves the job along (models3d.ts): a shape made
+  // from words gets its paint next, a model that came back bare is painted again, and
+  // the .glb is stored the first time the last step is done. When a step starts the
+  // answer carries `next` — the id to poll from then on — and `stage`, what it is doing.
   if (path === "/api/buzzy/model3d" || path.startsWith("/api/buzzy/model3d/")) {
     const user = await getSessionUserFromHeaders(headersFromEvent(event));
     if (!user) {
       setResponseStatus(event, 401);
       return { ok: false, error: "Sign in required", code: "signed_out" };
     }
-    const taskId = path.startsWith("/api/buzzy/model3d/") ? path.split("/").pop()! : "";
+    const taskId = path.startsWith("/api/buzzy/model3d/") ? decodeURIComponent(path.split("/").pop()!) : "";
 
     if (method === "GET" && !taskId) return { ok: true, configured: threeDConfigured() };
 
     if (method === "GET" && taskId) {
+      const job = parseJobId(taskId);
+      // Only the person who started a job may poll it (and keep its file): its owner is on
+      // record (buzzy_model3d_jobs, 0072); an unknown job is nobody's.
+      if (!job || (await jobOwner(job.meshyId)) !== user.id) {
+        setResponseStatus(event, 404);
+        return { ok: false, error: "No such 3D model.", code: "not_found" };
+      }
+      // Finished already (this tab, another one, or the page back for the FBX copy): the
+      // same answer, without asking Meshy again — a hiccup there never hides a kept file.
+      const key = `${user.id}:${taskId}`;
+      forgetOldModels(Date.now());
+      const kept = finishedModels.get(key);
+      if (kept) return withCompanion(key, kept.body);
       const state = await readModelTask(taskId);
       if (!state) {
         setResponseStatus(event, 503);
         return { ok: false, error: "No 3D provider is configured.", code: "not_configured" };
       }
       if (state.status !== "SUCCEEDED" || !state.glbUrl) {
-        return { ok: true, taskId, status: state.status, progress: state.progress, error: state.error };
+        const stage = job.kind === "txt" || job.kind === "legacy" ? "Shaping the model" : job.kind === "ref" ? "Painting the textures" : job.kind === "rtx" ? "Painting it again" : "Building the model from your picture";
+        return { ok: true, taskId, status: state.status, progress: state.progress, stage, error: state.error };
       }
-      const name = `model-${taskId.slice(0, 8)}.glb`;
-      const stored = await storeModel(user.id, state.glbUrl, name);
-      if (!stored) {
-        setResponseStatus(event, 502);
-        return { ok: false, error: "Meshy finished but the file could not be fetched.", code: "download_failed" };
-      }
-      if (!stored.duplicate) {
-        // Tag the model from the words that asked for it (kept since the turn started it).
-        const asked = recallPrompt("3d:" + taskId, user.id);
-        const sqlTags = await getSql();
-        if (asked?.sessionId) {
-          try {
-            await sqlTags`UPDATE buzzy_assets SET session_id = ${asked.sessionId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
-          } catch { /* older schema: the link is a bonus */ }
-        }
-        void enrichLater(sqlTags, user.id, stored.id, { prompt: asked?.prompt || "", filename: name, contentType: "model/gltf-binary" });
-      }
-      return {
-        ok: true,
-        taskId,
-        status: "SUCCEEDED",
-        progress: 100,
-        thumbnail: state.thumbnailUrl,
-        asset: { id: stored.id, url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: "model/gltf-binary" },
-        duplicate: stored.duplicate,
+      const sqlJob = await getSql();
+      // The next step starts only while the account allows outside makers: switched to
+      // Lockdown mid-job, it waits (the request is not standing permission). When the
+      // setting can't be read, nothing is started either: the poll asks again.
+      const privacyNow = async (): Promise<"lockdown" | "open" | "unknown"> => {
+        try {
+          const pm = await sqlJob<{ mode: string }>`SELECT mode FROM buzzy_privacy_mode WHERE user_id = ${user.id} LIMIT 1`;
+          return pm[0]?.mode === "lockdown" ? "lockdown" : "open";
+        } catch { return "unknown"; }
       };
+      const paused = { ok: true, taskId, status: "PAUSED", progress: 100, stage: "Paused while Lockdown is on — switch privacy back to finish it" };
+      const checking = { ok: true, taskId, status: "IN_PROGRESS", progress: 100, stage: "Checking your privacy setting before the next step" };
+      const busy = { ok: true, taskId, status: "IN_PROGRESS", progress: 100, stage: "Checking the next step" };
+      const failedStep = (next: { code: string; error: string }) => {
+        setResponseStatus(event, next.code === "no_credits" ? 402 : 502);
+        return { ok: false, error: next.error, code: next.code };
+      };
+      // A repaint uses the person's own picture, read by its Library id (never kept in memory).
+      const loadPicture = async (id: number) => {
+        try {
+          const rows = await sqlJob<{ body: Uint8Array; content_type: string | null }>`
+            SELECT body, content_type FROM buzzy_assets WHERE user_id = ${user.id} AND id = ${id} LIMIT 1`;
+          const r = rows[0];
+          if (!r || !/^image\/(?:png|jpe?g|webp)$/i.test(String(r.content_type || "")) || r.body.byteLength > 20 * 1024 * 1024) return null;
+          return `data:${r.content_type};base64,${Buffer.from(r.body).toString("base64")}`;
+        } catch { return null; }
+      };
+      // The shape from words is done: paint it (Text to 3D refine) before anything is kept.
+      if (job.kind === "txt" || job.kind === "legacy") {
+        const pv = await privacyNow();
+        if (pv === "lockdown") return paused;
+        if (pv === "unknown") return checking;
+        const next = await nextStep(job.kind === "legacy" ? `txt.${job.meshyId}` : taskId, user.id, "shape-done");
+        if (next && next.ok && "pending" in next) return { ok: true, taskId, status: "IN_PROGRESS", progress: 100, stage: "Starting the paint" };
+        if (next && next.ok) {
+          carryAsk(taskId, next.taskId, user.id);
+          return { ok: true, taskId, next: next.taskId, status: "IN_PROGRESS", progress: 0, stage: next.label };
+        }
+        if (next && next.code === "busy") return busy;
+        if (next) return failedStep(next);
+      }
+      let finishing = finishingModels.get(key);
+      if (!finishing) {
+        finishing = (async (): Promise<ModelAnswer> => {
+          // Known to be bare and waiting for privacy to allow the repaint: asked first, so a
+          // tab left open in Lockdown doesn't fetch the whole model on every poll.
+          if (bareWaiting.has(key) && job.kind !== "rtx") {
+            const pv = await privacyNow();
+            if (pv === "lockdown") return { status: 200, body: paused };
+            if (pv === "unknown") return { status: 200, body: checking };
+            bareWaiting.delete(key);
+          }
+          const bytes = await fetchModel(state.glbUrl!);
+          if (!bytes) return { status: 502, body: { ok: false, error: "Meshy finished but the file could not be fetched.", code: "download_failed" } };
+          // A model with no texture is not finished: paint it again from the same picture or
+          // words, once (testers: "kinda disappointing and textureless").
+          const look = glbSummary(bytes);
+          const bareModel = look.ok && look.texturedMaterials === 0 && look.images === 0;
+          let warning = "";
+          if (bareModel) {
+            if (job.kind !== "rtx") {
+              const pv = await privacyNow();
+              if (pv !== "open") bareWaiting.set(key, Date.now());
+              if (pv === "lockdown") return { status: 200, body: paused };
+              if (pv === "unknown") return { status: 200, body: checking };
+            }
+            const again = await nextStep(taskId, user.id, "bare", loadPicture);
+            if (again && again.ok && "pending" in again) return { status: 200, body: { ok: true, taskId, status: "IN_PROGRESS", progress: 100, stage: "Starting the repaint" } };
+            if (again && again.ok) {
+              carryAsk(taskId, again.taskId, user.id);
+              return { status: 200, body: { ok: true, taskId, next: again.taskId, status: "IN_PROGRESS", progress: 0, stage: again.label } };
+            }
+            if (again && again.code === "busy") return { status: 200, body: busy };
+            // It stays bare (already repainted once, or the repaint was refused): kept, and said.
+            warning = again
+              ? `This model came back without colour, and painting it again failed: ${again.error}`
+              : "This model came back without colour, even after painting it again.";
+          }
+          const name = `model-${job.meshyId.slice(0, 8)}.glb`;
+          const stored = await storeModel(user.id, bytes, name);
+          if (!stored) return { status: 502, body: { ok: false, error: "Meshy finished but the file could not be kept.", code: "store_failed" } };
+          // The quad mesh as FBX too (glTF holds only triangles), for editing in Blender:
+          // fetched in the background, once; the .glb doesn't wait for it.
+          if (state.fbxUrl) fetchCompanion(key, user.id, state.fbxUrl, `model-${job.meshyId.slice(0, 8)}.fbx`);
+          if (!stored.duplicate) {
+            // Tag the model from the words that asked for it (kept since the turn started it).
+            const asked = recallPrompt("3d:" + taskId, user.id);
+            if (asked?.sessionId) {
+              try {
+                await sqlJob`UPDATE buzzy_assets SET session_id = ${asked.sessionId} WHERE user_id = ${user.id} AND id = ${stored.id}`;
+              } catch { /* older schema: the link is a bonus */ }
+            }
+            void enrichLater(sqlJob, user.id, stored.id, { prompt: asked?.prompt || "", filename: name, contentType: "model/gltf-binary" });
+          }
+          const body: Record<string, unknown> = {
+            ok: true,
+            taskId,
+            status: "SUCCEEDED",
+            progress: 100,
+            thumbnail: state.thumbnailUrl,
+            ...(state.thumbnailUrls ? { views: state.thumbnailUrls } : {}),
+            model: look.ok ? { faces: look.triangles, textured: !bareModel, maps: look.images, uvs: look.hasUvs } : undefined,
+            ...(warning ? { warning } : {}),
+            asset: { id: stored.id, url: `/api/buzzy/assets/${stored.id}`, name, bytes: stored.bytes, type: "model/gltf-binary" },
+            duplicate: stored.duplicate,
+          };
+          finishedModels.set(key, { at: Date.now(), body });
+          return { status: 200, body };
+        })().finally(() => finishingModels.delete(key));
+        finishingModels.set(key, finishing);
+      }
+      const answer = await finishing;
+      if (answer.status !== 200) setResponseStatus(event, answer.status);
+      return answer.body.asset ? withCompanion(key, answer.body) : answer.body;
     }
 
     if (method === "POST" && !taskId) {
@@ -1139,7 +1299,7 @@ export default defineEventHandler(async (event) => {
         setResponseStatus(event, 400);
         return { ok: false, error: "Send JSON: { prompt }.", code: "bad_json" };
       }
-      const r = await createModelTask(String(body.prompt || ""));
+      const r = await createModelTask(String(body.prompt || ""), user.id);
       if (!r.ok) {
         setResponseStatus(event, r.code === "not_configured" ? 503 : r.code === "no_credits" ? 402 : 502);
         return { ok: false, error: r.error, code: r.code };
@@ -1681,6 +1841,20 @@ export default defineEventHandler(async (event) => {
     // What the owner is looking at on the Idea Board as this turn started (whiteboard.js
     // viewOf): read for this turn only, never stored with the conversation (boardView.ts).
     const boardView = cleanBoardView(body.boardView);
+    // Pictures they added to the conversation since their last message (Talk's paper
+    // clip or a drop on the chat): their own Library ids; BeeZilla looks at them.
+    const pictureIds = Array.isArray(body.pictureIds)
+      ? (body.pictureIds as unknown[])
+          .map((v) => (typeof v === "number" ? v : typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : NaN))
+          .filter((n) => Number.isSafeInteger(n) && n > 0)
+          .slice(0, 4)
+      : [];
+    // Pictures added earlier in this conversation (Talk keeps them with the conversation).
+    const chatPictureIds = Array.isArray(body.chatPictureIds)
+      ? (body.chatPictureIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isSafeInteger(n) && n > 0).slice(0, 6)
+      : [];
+    // The expert they came from on the Experts page (a known id only).
+    const expert = typeof body.expert === "string" && /^[a-z0-9]{2,20}$/.test(body.expert) ? body.expert : null;
     // The Talk bar's privacy control. Unknown values mean the default (no change).
     let privacy: "advocate" | "lockdown" | "open" | undefined =
       body.privacy === "lockdown" || body.privacy === "advocate" || body.privacy === "open" ? body.privacy : undefined;
@@ -1850,7 +2024,10 @@ export default defineEventHandler(async (event) => {
         onFlow: opts?.onFlow,
         boardInstructions,
         boardView,
+        pictureIds,
         browserNodes,
+        chatPictureIds,
+        expert,
       })).then(async (result) => {
         try {
           await sql`

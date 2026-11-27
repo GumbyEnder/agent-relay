@@ -15,6 +15,12 @@
     { id: "government", name: "Government & Forms", blurb: "DMV, benefits, permits, citizenship paperwork, complaints.", skills: ["Form-completion walkthroughs", "Permit and license guidance", "Benefits application help", "Complaint letters", "Citizenship and immigration paperwork explainers", "Deadline and doc checklists"] },
     { id: "education", name: "Education", blurb: "School disputes, IEP/504 plans, applications, financial aid.", skills: ["IEP and 504 request letters", "School dispute correspondence", "Application and essay guidance", "Financial-aid explainers", "Advocacy talking points", "Meeting-preparation checklists"] },
     { id: "landlord", name: "Landlord & Tenant", blurb: "Leases, deposits, repairs, eviction questions, notices.", skills: ["Lease and room-rental agreements", "Security-deposit returns and letters", "Repair request notices", "Eviction and notice guidance", "Move-in/move-out checklists", "Tenant rights explainers"] },
+    // Testers, 2026-11-24: "under experts, there's not even one for 3D modeling or image
+    // generation … or image analyzation." Each opens Talk like any expert; the 3D one
+    // brings Meshzilla's 3D know-how (src/lib/buzzy/model3dSkill.ts) into the conversation.
+    { id: "model3d", name: "3D Models", blurb: "Turn your picture, concept art or words into a textured 3D model.", skills: ["A 3D model from your picture or concept art — its shape and colours kept", "Front, side and back views made into one model", "Game-ready: a clean mesh, real textures, the size you need", "Low-poly, highly detailed, or ready for 3D printing", "Why a model came out wrong, and how to fix it", "Getting it into Blender, Unity, Unreal or a website"] },
+    { id: "pictures", name: "Pictures & Art", blurb: "Make and change pictures — from words, a sketch, or a picture on your board.", skills: ["A picture from a description", "A picture drawn from your sketch on the board", "Changing a picture by saying what to change", "Logos, posters, icons and thumbnails", "Recolouring a picture in Sketch", "Concept art to turn into a 3D model"] },
+    { id: "seeing", name: "Picture Analysis", blurb: "Show BeeZilla a picture and ask about it — what is in it, what it says, what to fix.", skills: ["What is in a picture, described plainly", "Reading the words in a picture or screenshot", "Comparing two pictures", "Feedback on a design or concept art", "Listing parts, colours and materials before a 3D model", "Checking a picture before you use it"] },
     { id: "travel", name: "Travel", blurb: "Refunds, cancellations, disputes with airlines and hotels.", skills: ["Refund and cancellation requests", "Airline and hotel dispute letters", "Chargeback documentation", "Itinerary-change planning", "Rights explainers for travelers", "Escalation templates"] }
   ];
   // Each icon is a ready-made <svg> from the shared sprite (icons/bz-icons.svg). It is 1em square, so it
@@ -26,7 +32,7 @@
   }
   var ICONS = { other: ico("other") };
   ["legal", "medical", "software", "technology", "accounting", "home", "career", "insurance",
-    "government", "education", "landlord", "travel"].forEach(function (id) { ICONS[id] = ico(id); });
+    "government", "education", "landlord", "travel", "model3d", "pictures", "seeing"].forEach(function (id) { ICONS[id] = ico(id); });
   window.BZ_EXPERTS = EXPERTS;
   window.BZ_EXPERT_ICONS = ICONS;
 })();

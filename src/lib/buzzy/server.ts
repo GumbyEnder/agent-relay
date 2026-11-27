@@ -16,7 +16,7 @@
  * 9. Return structured response.
  */
 
-import { chatCompletion, chatCompletionFull, chatCompletionStream, resolveModel, resolveReasoningModel } from "./llm";
+import { chatCompletion, chatCompletionFull, chatCompletionStream, resolveModel, resolveReasoningModel, CATALOG_IS_LOCAL, CATALOG_DEFAULT_PROVIDER } from "./llm";
 import { selectModel } from "./modelPolicy";
 import { readModelPrefs } from "./modelPrefs";
 import {
@@ -91,12 +91,16 @@ import { buildVoiceWebContext, needsWebLookup } from "./voiceTools";
 import { touchSession, maybeSummarizeSession } from "./sessions";
 import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteCommand, isMusicRequest, isImageRequest, is3dRequest, videoAsk, producesDeliverable } from "./intent";
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
-import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, boardReferencePrompt, type MadeThing } from "./pictureChange";
+import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, takeBoardSeen, boardReferencePrompt, type MadeThing } from "./pictureChange";
+import { keepConversationPictures } from "./chatPictures";
+import { lookAtPictures, lookBudgetMs, waitsForLook, picturesSeenBlock, asksAboutPicture, namesAPicture, lookAtPicture, PICTURES_NOTE, type LookBlock, type LookPick, type PictureLook } from "./vision";
 import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, setsUpBrowserJob, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
 import { inspirationNote, inspirationResult, searchInspiration, wantsInspiration } from "./inspirationSearch";
-import { createModelTask, threeDConfigured } from "./models3d";
+import { startModel, threeDConfigured } from "./models3d";
+import { planModel3d } from "./model3dPlan";
+import { model3dSkillBlock, needsModel3dSkill } from "./model3dSkill";
 import { VIDEO_RECIPES, createVideoJob, recipeById, topicJobInput, videoConfigured, videoDailyLimit, videoJobsToday, videoRecipeHeldBack } from "./video";
 import type { VideoTopicInput } from "./video";
 import { browserCommand, cleanToolNodes, useBrowserTool, wantsBrowser } from "./browserRun";
@@ -340,6 +344,16 @@ export interface ChatRequest {
    * instructions only, never stored with the conversation.
    */
   boardView?: BoardView | null;
+  /**
+   * Pictures the person added to the conversation since their last message (Talk's
+   * paper clip or a drop on the chat): Library ids of their own files. BeeZilla looks at
+   * them this turn (vision.ts); ids only reach their own files.
+   */
+  pictureIds?: number[] | null;
+  /** Pictures added earlier in this conversation (Talk), newest first: "this photo" later on. */
+  chatPictureIds?: number[] | null;
+  /** The expert they came from (Experts page), e.g. "model3d": brings that know-how. */
+  expert?: string | null;
 }
 
 /** One step of a turn, as the whiteboard draws it. */
@@ -389,6 +403,8 @@ export interface TurnTimings {
    *  clock as slot extraction, so it is subtracted from extractMs and named here
    *  rather than hidden inside it (a 20s draw read as a 20s extraction). */
   artMs: number;
+  /** Time the turn waited for its pictures to be looked at (vision.ts); 0 with none. */
+  lookMs?: number;
   llmMs: number;
   honchoMs: number;
   totalMs: number;
@@ -664,6 +680,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const videoRequest = videoAsk(message);
   const wantsVideo = Boolean(videoRequest);
   const lockdown = req.privacy === "lockdown";
+
   // A pressed button outranks a matched phrase: "Do it now" is an instruction,
   // and the regex behind isDraftRequest is only ever an approximation of one.
   // "Just go" and the end of the questions also mean "produce it now": set below, once
@@ -745,8 +762,104 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const board = takeBoardPictures(typeof req.boardInstructions === "string"
     ? req.boardInstructions.split(String.fromCharCode(0)).join("")
     : "");
-  const boardText = board.text.trim().slice(0, BOARD_TEXT_MAX);
+  // Every picture on the board is named on a line of its own ([[board-seen: …]]), taken
+  // off here too: BeeZilla looks at those pictures (vision.ts, below).
+  const boardSeen = takeBoardSeen(board.text);
+  const boardText = boardSeen.text.trim().slice(0, BOARD_TEXT_MAX);
   const boardPictureIds = board.ids;
+
+  // ── Pictures BeeZilla looks at this turn (vision.ts) ───────────────
+  // Testers, 2026-11-24: "BeeZilla able to read and analyze a referred or uploaded
+  // image … it should be reading everything on that board". The pictures that matter —
+  // the one they point at or hold, one they just added, the ones joined into a step, the
+  // ones in view, the rest of the board — are looked at by a model that can see. Started
+  // as soon as the board is read, so it runs while the turn gets ready; read when the
+  // instructions are written.
+  // A question about one picture ("how many wheels does this have?") is asked of that
+  // picture itself. Lockdown: nothing is sent out, only what was already seen is used.
+  const earlySeen = boardSeen.seen;
+  const viewPictures = [...(req.boardView?.items ?? []), ...(req.boardView?.offItems ?? [])].filter((i) => i.kind === "Picture" && i.file);
+  const pointedLookId = pointedPicture(req.boardView ?? null);
+  const ids = (v: unknown, max: number) => (Array.isArray(v) ? v : [])
+    .filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0)
+    .slice(0, max);
+  const attachedPictureIds = ids(req.pictureIds, 4);
+  const chatPictureIds = ids(req.chatPictureIds, 6).filter((id) => !attachedPictureIds.includes(id));
+  // A picture added to this conversation stays with it (0073): reopened from History,
+  // "make this photo 3D" still means that photo. The ones just added, and the ones the page
+  // still holds from earlier in it (a send that failed before reaching here loses none).
+  // Only the person's own pictures.
+  // The ones just added are the newest; the ones held from before keep their order, older.
+  if (sessionId && (attachedPictureIds.length || chatPictureIds.length)) {
+    try { await keepConversationPictures(sql, userId, sessionId, attachedPictureIds, chatPictureIds); }
+    catch (_) { /* an older schema: the pictures still count this turn */ }
+  }
+  // The account's own model rules apply to pictures too: local only, a chosen provider, or a
+  // spent budget mean nothing new is sent out to be looked at (kept descriptions still help).
+  // Rules that can't be read are not a yes: nothing new is sent out then either.
+  const lookPrefs = await readModelPrefs(sql, userId).catch(() => null);
+  const lookBlock: LookBlock | null = lockdown
+    ? "lockdown"
+    : lookPrefs === null
+      ? "unknown"
+      : lookPrefs.localOnly && !CATALOG_IS_LOCAL
+        ? "local-only"
+        // A provider name compares as selectModel compares it: in any case.
+        : lookPrefs.provider && lookPrefs.provider.trim().toLowerCase() !== CATALOG_DEFAULT_PROVIDER.toLowerCase()
+          ? "provider"
+          : typeof lookPrefs.budgetCapCents === "number" && lookPrefs.spentCents >= lookPrefs.budgetCapCents
+            ? "budget"
+            : null;
+  const lookBlocked = lookBlock !== null;
+  const seenLabel = (id: number): string =>
+    earlySeen.find((s) => s.id === id)?.label || viewPictures.find((i) => i.file === id)?.title || "";
+  const lookPicks: LookPick[] = [];
+  if (pointedLookId !== null) lookPicks.push({ id: pointedLookId, why: "pointed", label: seenLabel(pointedLookId) });
+  for (const id of attachedPictureIds) lookPicks.push({ id, why: "attached" });
+  for (const id of boardPictureIds) lookPicks.push({ id, why: "connected", label: seenLabel(id) });
+  for (const i of viewPictures) lookPicks.push({ id: i.file!, why: "in view", label: i.title });
+  for (const p of earlySeen) lookPicks.push({ id: p.id, why: "on the board", label: p.label });
+  for (const id of chatPictureIds) lookPicks.push({ id, why: "in the conversation" });
+  const lookIds = new Set(lookPicks.map((p) => p.id));
+  // A picture named by its card ("read the wiring diagram"): when exactly one picture's
+  // name is in the message, that is the one the question is about.
+  const said = message.toLowerCase();
+  const namedPicks = [...new Map(lookPicks
+    .filter((p) => p.label && p.label.replace(/\.(?:png|jpe?g|webp|gif)$/i, "").trim().length >= 3 &&
+      said.includes(p.label.replace(/\.(?:png|jpe?g|webp|gif)$/i, "").trim().toLowerCase()))
+    .map((p) => [p.id, p])).values()];
+  const namedPictureId = namedPicks.length === 1 ? namedPicks[0]!.id : null;
+  // The picture a question is about: the one pointed at, the one just added, the one named,
+  // or the only picture there is.
+  const questionPictureId = asksAboutPicture(message) || namedPictureId !== null
+    ? pointedLookId ?? attachedPictureIds[0] ?? namedPictureId ?? (lookIds.size === 1 && namesAPicture(message) ? [...lookIds][0]! : null)
+    : null;
+  // The turn is about a picture: pointed at, just added, named, or a 3D model to make.
+  // (A bare "is it…?" with pictures on the board is not enough: "is it raining?")
+  const picturesMatter = pointedLookId !== null || attachedPictureIds.length > 0 || namedPictureId !== null || namesAPicture(message) || wants3d;
+  // Which looks the reply waits for (waitsForLook): all of them on a turn about a picture;
+  // on any other turn, the pictures on the board — the person put them there for BeeZilla,
+  // so the turn right after one lands knows what it shows, whatever the words ("what do you
+  // see?", "what's on my board?"). A picture already looked at costs no wait (its
+  // description is kept), so only a new one is ever waited for; the rest get a quick look.
+  const lookStarted = Date.now();
+  const lookPromise = lookPicks.length
+    ? lookAtPictures(sql, userId, lookPicks, {
+        question: message,
+        questionFor: questionPictureId,
+        cachedOnly: lookBlocked,
+        blocked: lookBlock ?? undefined,
+        budgetMs: lookBudgetMs({ voice: surface === "voice" }),
+        waitFor: (p) => waitsForLook(userId, p, { aboutAPicture: picturesMatter }),
+      }).catch(() => null)
+    : Promise.resolve(null);
+  if (lookPicks.length) {
+    req.onFlow?.({
+      kind: "skill", id: "skill:look", title: "Looking at your pictures", parent: "agent", state: "running",
+      detail: `${lookIds.size} picture${lookIds.size === 1 ? "" : "s"}`,
+    });
+  }
+
   // A turn that builds (or opens) an orchestration on the board (boardOrchestrator.ts).
   // That build is the go: one mode asks nothing and adds no note of its own, and the
   // reply is one sentence (pilot.ts ORCHESTRATE_USER_LINE: nothing asked first).
@@ -1140,8 +1253,49 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // pressed send): last, nearest their words; rebuilt every turn, never stored.
   const boardViewText = boardViewBlock(req.boardView ?? null, BOARD_VIEW_BUDGET_CHARS);
   const boardViewSection = boardViewText ? "\n\n" + boardViewText : "";
+  // What the pictures show (started above). The newest picture made here is looked at
+  // too when the words are about it ("what do you think of it?", "make it 3D").
+  const looked = await lookPromise;
+  const seenPictures: PictureLook[] = looked ? [...looked.looks] : [];
+  const newestPicture = newestMade && String(newestMade.contentType || "").toLowerCase().startsWith("image/") ? newestMade : null;
+  if (newestPicture && !lookIds.has(newestPicture.id) && (asksAboutPicture(message) || wants3d || pictureToChange)) {
+    const one = await lookAtPicture(sql, userId, { id: newestPicture.id, why: "made here" }, {
+      question: asksAboutPicture(message) && questionPictureId === null ? message : null,
+      cachedOnly: lookBlocked,
+      blocked: lookBlock ?? undefined,
+      timeoutMs: surface === "voice" ? 4000 : 12000,
+    }).catch(() => null);
+    if (one && "note" in one && one.note) seenPictures.push(one);
+  }
+  const picturesText = seenPictures.length || looked?.failed.length || looked?.late
+    ? picturesSeenBlock(seenPictures, { failed: looked?.failed, late: looked?.late, blocked: lookBlock })
+    : "";
+  // The instructions only say how to treat pictures; what they show rides with the person's
+  // message below, as observed data (words read off a picture are never instructions).
+  const picturesSection = picturesText ? "\n\n" + PICTURES_NOTE : "";
+  if (lookPicks.length || seenPictures.length) {
+    // Nothing back yet, and nothing failed: the looks are still going (a slow reader), not
+    // broken — the card says so, as the reply does.
+    const stillLooking = !seenPictures.length && !looked?.failed.length && (looked?.late ?? 0) > 0;
+    req.onFlow?.({
+      kind: "skill", id: "skill:look", title: stillLooking ? "Still looking at your pictures" : "Looked at your pictures", parent: "agent",
+      state: seenPictures.length || stillLooking ? "done" : "failed",
+      detail: seenPictures.length
+        ? seenPictures.map((l) => (l.label ? `“${l.label}”: ` : "") + l.note.replace(/\s+/g, " ").slice(0, 140)).join(" · ").slice(0, 600)
+        : stillLooking
+          ? "not back yet — ask again in a moment"
+          : (looked?.failed[0]?.error ?? "no picture could be looked at"),
+    });
+  }
+  const lookMs = lookPicks.length || seenPictures.length ? Date.now() - lookStarted : 0;
+  // Meshzilla's 3D skill (model3dSkill.ts), only on a turn about 3D: asked for a model,
+  // came from the 3D Models expert, a 3D model pointed at, or words about meshes.
+  const focusItem = req.boardView?.focus
+    ? [...(req.boardView.items ?? []), ...(req.boardView.offItems ?? [])].find((i) => i.id === req.boardView!.focus!.id)
+    : undefined;
+  const model3dSection = model3dSkillBlock(needsModel3dSkill({ message, wants3d, history, pointedKind: focusItem?.kind ?? null, expert: req.expert ?? null }));
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings) + boardViewSection;
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + model3dSection + madeThingsSection(madeThings) + picturesSection + boardViewSection;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
@@ -1160,6 +1314,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   let artRefusal: { code: string; error: string } | null = null;
   // The 3D model this turn started, or why it could not be started.
   let model3dTask: { taskId: string } | null = null;
+  /** What the 3D model is made from, in words for the reply ("their picture “Ark Titan”"). */
+  let model3dFrom = "";
   let threeDRefusal: { code: string; error: string } | null = null;
   // The video this turn started (kit job), or why it could not be started.
   let videoJob: { jobId: string; recipe: string; etaMinutes: number; state: string } | null = null;
@@ -1174,7 +1330,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
       role: h.role as "user" | "assistant" | "system",
       content: h.content,
     })),
-    { role: "user", content: focusNote ? `${message}\n\n${focusNote}` : message },
+    { role: "user", content: (focusNote ? `${message}\n\n${focusNote}` : message) + (picturesText ? `\n\n${picturesText}` : "") },
   ];
 
   // ── Music pre-pass ────────────────────────────────────────────────
@@ -1476,20 +1632,66 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     } else {
       req.onStage?.({ phase: "model3d", label: "Starting your 3D model", etaMs: 4000 });
       req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "running", detail: message.slice(0, 240) });
-      const started = await createModelTask(message);
-      if (started.ok) {
+      // What it is made from (model3dPlan.ts): the picture they point at, added, joined
+      // into the step or named — or, with no picture in play, words rewritten into the
+      // one-object description Text to 3D needs (never the sentence as typed).
+      const planned = await planModel3d({
+        message,
+        pointed: pointedPictureId,
+        attached: attachedPictureIds,
+        connected: boardPictureIds,
+        seen: seenPictures,
+        onBoard: earlySeen.map((p) => p.id),
+        inChat: chatPictureIds,
+        newestMade: newestPicture ? newestPicture.id : null,
+        boardText,
+        // The person's own picture, as Meshy takes it: JPG, PNG or WebP up to 20 MB.
+        load: async (id) => {
+          try {
+            const rows = await sql<{ body: Uint8Array; content_type: string | null }>`
+              SELECT body, content_type FROM buzzy_assets WHERE user_id = ${userId} AND id = ${id} LIMIT 1`;
+            const r = rows[0];
+            if (!r || !/^image\/(?:png|jpe?g|webp)$/i.test(String(r.content_type || "")) || !r.body.byteLength || r.body.byteLength > 20 * 1024 * 1024) return null;
+            return `data:${String(r.content_type).toLowerCase()};base64,${Buffer.from(r.body).toString("base64")}`;
+          } catch { return null; }
+        },
+        write: async (instruction, ask) =>
+          chatCompletion([{ role: "system", content: instruction }, { role: "user", content: ask }], { model: resolvedModel, temperature: 0.3, maxTokens: 400 }),
+      });
+      if ("error" in planned && planned.code === "which_picture") {
+        // Not plain which picture (model3dPlan.ts): nothing is started; the reply asks.
+        threeDRefusal = { code: planned.code, error: planned.error };
+        req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "done", detail: "Asked which picture to make it from" });
+        messages[0]!.content +=
+          `\n\nNo 3D model was started: it isn't plain which picture to make it from, so nothing was sent and nothing was paid for. ` +
+          `Ask exactly this, and nothing else about the model: ${JSON.stringify(planned.error)} Do not start, describe or promise a model.`;
+      } else if ("error" in planned) {
+        threeDRefusal = { code: planned.code, error: planned.error };
+        req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "failed", detail: planned.error });
+        messages[0]!.content += `\n\nNo 3D model was started: ${planned.error}. Say exactly that in one sentence and suggest a JPG or PNG under 20 MB. Do not claim any model exists.`;
+      }
+      const { plan, from } = "error" in planned ? { plan: null, from: null } : planned;
+      const fromWords = from
+        ? `their picture${from.label ? ` “${from.label}”` : ""}${from.ids.length > 1 ? ` and ${from.ids.length - 1} more view${from.ids.length > 2 ? "s" : ""} of it` : ""}`
+        : "their words";
+      if (plan) req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "running", detail: from ? `From ${fromWords}` : `From words: ${plan.prompt.slice(0, 220)}` });
+      const started = plan ? await startModel(plan, userId, { pictureId: from ? from.ids[0] ?? null : null }) : null;
+      if (started && plan && started.ok) {
         model3dTask = { taskId: started.taskId };
+        model3dFrom = fromWords;
         rememberPrompt("3d:" + started.taskId, { userId, prompt: message, sessionId });
-        req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "done" });
+        req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "done", detail: from ? `From ${fromWords}` : `From words: ${plan.prompt.slice(0, 220)}` });
         req.onFlow?.({
           kind: "output", id: "out:3d:" + started.taskId, title: "3D model", parent: "skill:model3d",
           state: "running", contentType: "model/gltf-binary", taskId: started.taskId,
         });
         messages[0]!.content +=
-          "\n\nA 3D model was STARTED this turn and is being built now; it takes a minute or two. It appears in this " +
-          "conversation as a download the moment it is finished. Do not say it is finished, attached or saved, and do not " +
-          "describe the finished model. Say in one short sentence that you are making it, and stop.";
-      } else {
+          `\n\nA 3D model was STARTED this turn from ${fromWords}` +
+          (from ? " (the picture itself goes to the 3D maker, so the model follows its shape and colours)" : ` (described to the 3D maker as: "${plan.prompt.slice(0, 300)}")`) +
+          ". It is being built now, textured and with a clean mesh; it takes two to four minutes and appears in this conversation " +
+          "the moment it is finished. Do not say it is finished, attached or saved, and do not describe the finished model. " +
+          `Say in one short sentence that you are making it from ${fromWords}, and stop.`;
+      } else if (started && !started.ok) {
         threeDRefusal = { code: started.code, error: started.error };
         req.onFlow?.({ kind: "skill", id: "skill:model3d", title: "3D maker", parent: "agent", state: "failed", detail: started.error });
         messages[0]!.content +=
@@ -1609,15 +1811,12 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   if (afterNotes.length) messages.push({ role: "system", content: afterNotes.join("\n\n") });
 
   // ── Context accounting ─────────────────────────────────────────────
-  // Measured on exactly what we send: persona + history + this message, plus
-  // a fixed allowance for the tool schemas and protocol overhead.
+  // Measured on exactly what we send: the messages as they go out (instructions, history,
+  // this message with what its pictures show), plus a fixed allowance for the tool schemas
+  // and protocol overhead.
   const TOOL_OVERHEAD_TOKENS = CONTEXT_TOOL_OVERHEAD_TOKENS;
   const usedTokens =
-    estimateTokens([
-      { role: "system", content: systemPrompt },
-      ...history,
-      { role: "user", content: message },
-    ]) + TOOL_OVERHEAD_TOKENS;
+    estimateTokens(messages.map((m) => ({ role: m.role, content: String(m.content ?? "") }))) + TOOL_OVERHEAD_TOKENS;
   const ctx: ContextState = contextState(usedTokens, ctxLimit, compacted, droppedCount);
 
   // ── Persist user message ───────────────────────────────────────────
@@ -2400,8 +2599,10 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // of them rewrote it, say the one sentence that is true instead.
   if (wants3d && finalReply !== guardedReply && !renderedAudio) {
     finalReply = model3dTask
-      ? "I'm making that 3D model now — it will appear right here when it's finished, usually in a minute or two."
-      : `I couldn't make that 3D model: ${threeDRefusal?.error ?? "the 3D service did not start it"}.`;
+      ? `I'm making that 3D model now${model3dFrom && model3dFrom !== "their words" ? ` from ${model3dFrom.replace(/^their /, "your ")}` : ""} — it will appear right here when it's finished, usually in two to four minutes.`
+      : threeDRefusal?.code === "which_picture"
+        ? threeDRefusal.error
+        : `I couldn't make that 3D model: ${threeDRefusal?.error ?? "the 3D service did not start it"}.`;
   }
 
   // A video turn's reply went through checks written for audio, pictures and 3D,
@@ -2604,6 +2805,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     timings: {
       extractMs,
       artMs,
+      lookMs,
       llmMs,
       honchoMs,
       totalMs: Date.now() - turnStart,

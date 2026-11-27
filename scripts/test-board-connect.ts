@@ -21,7 +21,7 @@ import vm from "node:vm";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { cleanWhiteboard } from "../src/lib/buzzy/whiteboards";
-import { takeBoardPictures, boardReferencePrompt, BOARD_PICTURES_MAX } from "../src/lib/buzzy/pictureChange";
+import { takeBoardPictures, takeBoardSeen, boardReferencePrompt, BOARD_PICTURES_MAX } from "../src/lib/buzzy/pictureChange";
 
 let pass = 0;
 let fail = 0;
@@ -59,6 +59,9 @@ function boardCode(source: string) {
   const api = sandbox.BeeZillaWhiteboard as Api;
   let n = 0;
   return {
+    graft(into: { cards: Card[]; links: Link[] }, from: { cards: Card[]; links: Link[] }) {
+      return (sandbox.BeeZillaWhiteboard as { graft(a: unknown, b: unknown): { cards: Card[]; links: Array<Link & { user?: boolean }> } }).graft(into, from);
+    },
     summary(cards: Card[], links: Link[] = []) {
       const id = "b" + ++n;
       store.set("bz.board." + id, JSON.stringify({ v: 2, cards, links, view: { x: 0, y: 0, z: 1 }, sync: { rev: null, dirty: false, base: null } }));
@@ -108,8 +111,11 @@ ok("with no lines, the summary is exactly main's, on every board", () => {
   // sides to one token: the assert is about everything except the wording, and the
   // wording itself is pinned below.
   const labelStep = (t: string) => t.replace(/^(?:Core identity \(how BeeZilla works here\)|agent\.md \(how to work\)): /gm, "AGENT STEP: ");
+  // The one addition with no lines: every picture is named on a line the server takes
+  // off before the model reads the board (takeBoardSeen), so BeeZilla can look at it.
+  const unseen = (t: string) => t.replace(/^\[\[board-seen: [^\]\n]*\]\]\n/, "");
   for (const b of boards) {
-    const text = now.summary(b);
+    const text = unseen(now.summary(b));
     if (before) eq(labelStep(text), labelStep(before.summary(b)), "same as main:");
     truthy(!/Connected to BeeZilla/.test(text), "no Connected section without lines");
     truthy(!/\[\[board-pictures/.test(text), "no pictures line without lines");
@@ -121,9 +127,12 @@ ok("with no lines, the summary is exactly main's, on every board", () => {
   const many: Card[] = Array.from({ length: 24 }, (_, i) => ({ id: "z" + i, kind: "note", title: "Idea " + i, body: "word ".repeat(60), x: 0, y: i * 150 }));
   if (before) eq(now.summary(many), before.summary(many), "a long board, cut at the same place:");
   truthy(now.summary(many).length <= 4000, "no lines: at most 4,000 characters, as on main");
-  // Lines that lead to no step change nothing either.
+  // Lines that lead to no step add only how the cards are joined (testers, 2026-11-24:
+  // "it should understand the sequence of how they're connected"); the rest is main's.
   const noStep = now.summary([note, photo, web], [L("n", "p"), L("p", "w")]);
-  if (before) eq(noStep, before.summary([note, photo, web], [L("n", "p"), L("p", "w")]), "lines between things only:");
+  truthy(noStep.includes("1) Note “Palette” → Picture “beach.jpg” → Link “Fair poster ideas”"), noStep);
+  const withoutFlow = unseen(noStep).replace(/^How the cards are joined[^\n]*\n(?:\d+\) [^\n]*\n)+\n/, "");
+  if (before) eq(withoutFlow, before.summary([note, photo, web], [L("n", "p"), L("p", "w")]), "lines between things only, apart from the flow:");
 });
 
 ok("a note joined to a step goes in full under that step, and not again below", () => {
@@ -218,7 +227,79 @@ ok("a drawing is a thing on the board, by what it should become", () => {
   truthy(/Into the step “Draw the poster”:\n- Drawing they added — Drawing: a castle at sunset/.test(text), text);
 });
 
+ok("every picture on the board is named for the server to look at, joined ones first", () => {
+  const pics: Card[] = [1, 2, 3].map((i) => ({ id: "v" + i, kind: "image", title: `view ${i}.png`, url: `/api/buzzy/assets/${200 + i}`, contentType: "image/png", x: i * 300, y: 0 }));
+  const madePic: Card = { id: "m", kind: "image", title: "art-2026-11-20-abc.png", url: "/api/buzzy/assets/299", contentType: "image/png", x: 50, y: 900 };
+  const webPic: Card = { id: "o", kind: "image", title: "far.png", url: "https://example.com/far.png", x: 0, y: 2000 };
+  const loose = now.summary([...pics, madePic, webPic]);
+  eq(loose.split("\n")[0], "[[board-seen: 299:made here; 201:view 1.png; 202:view 2.png; 203:view 3.png]]", "board order (left to right), made ones by kind:");
+  const joined = now.summary([skill, ...pics], [L("v3", "s")]);
+  eq(joined.split("\n")[0], "[[board-pictures: 203]]", "the joined picture is still the one to draw from:");
+  eq(joined.split("\n")[1], "[[board-seen: 203:view 3.png; 201:view 1.png; 202:view 2.png]]", "joined first, then the rest:");
+  const tricky: Card = { id: "t", kind: "image", title: "a; b: [c]]", url: "/api/buzzy/assets/7", contentType: "image/png", x: 0, y: 0 };
+  eq(now.summary([tricky]).split("\n")[0], "[[board-seen: 7:a b c]]", "names can't break the line:");
+  const nine: Card[] = Array.from({ length: 9 }, (_, i) => ({ id: "n" + i, kind: "image", title: `n${i}`, url: `/api/buzzy/assets/${300 + i}`, contentType: "image/png", x: i * 10, y: 0 }));
+  eq((now.summary(nine).split("\n")[0].match(/\d+:/g) || []).length, 8, "at most eight:");
+});
+
+ok("the order follows the lines, not where the cards sit (testers: \"the sequence of how they're connected\")", () => {
+  // Concept art at the start of a string of cards, laid out right to left and up and down.
+  const concept: Card = { id: "c", kind: "image", title: "Ark Titan concept", url: "/api/buzzy/assets/55", contentType: "image/png", x: 900, y: 0 };
+  const s1: Card = { id: "s1", kind: "skill", title: "Look closely at the concept art", body: "List every part, colour and material", user: true, x: 600, y: 400 };
+  const s2: Card = { id: "s2", kind: "skill", title: "Make it a 3D model", body: "Keep the shape of the concept art", user: true, x: 0, y: 0 };
+  const s3: Card = { id: "s3", kind: "skill", title: "Check the textures", body: "Every face has colour", user: true, x: 300, y: 800 };
+  const text = now.summary([s3, s2, concept, s1], [L("c", "s1"), L("s1", "s2"), L("s2", "s3")]);
+  const steps = text.split("\n").filter((l) => /^Step \d/.test(l));
+  eq(steps.map((l) => l.replace(/:.*/, "")), ["Step 1 — Look closely at the concept art", "Step 2 — Make it a 3D model", "Step 3 — Check the textures"], "steps in line order:");
+  truthy(/How the cards are joined — the order the work flows in/.test(text), text);
+  truthy(text.includes("1) Picture “Ark Titan concept” → Skill “Look closely at the concept art” → Skill “Make it a 3D model” → Skill “Check the textures”"), text);
+  // A fork reads as drawn: one chain, then the branch.
+  const fork = now.summary([s1, s2, s3], [L("s1", "s2"), L("s1", "s3")]);
+  truthy(/1\) Skill “Look closely at the concept art” → Skill “Make it a 3D model”\n2\) Skill “Look closely at the concept art” → Skill “Check the textures”/.test(fork), fork);
+  // Without lines, board order as before.
+  const plain = now.summary([s3, s2, s1]).split("\n").filter((l) => /^Step \d/.test(l)).map((l) => l.replace(/:.*/, ""));
+  eq(plain, ["Step 1 — Make it a 3D model", "Step 2 — Check the textures", "Step 3 — Look closely at the concept art"], "no lines: left to right:");
+  // A loop of lines can't be ordered, and still lists every card once.
+  const loop = now.summary([s1, s2], [L("s1", "s2"), L("s2", "s1")]);
+  eq(loop.split("\n").filter((l) => /^Step \d/.test(l)).length, 2, "a loop keeps both steps:");
+});
+
+ok("a line the person drew between two of BeeZilla's cards is theirs, and counts (independent review, 2026-11-25)", () => {
+  // Two steps BeeZilla drew as it worked (neither is the person's card).
+  const look: Card = { id: "g1", kind: "skill", flow: "skill:look", title: "Looked at your pictures", x: 0, y: 0 };
+  const make: Card = { id: "g2", kind: "skill", flow: "skill:model3d", title: "3D maker", x: 300, y: 0 };
+  const drawn = now.summary([look, make], [{ ...L("g1", "g2"), user: true } as Link]);
+  truthy(drawn.includes("1) Skill “Looked at your pictures” → Skill “3D maker”"), drawn);
+  // The same line drawn by BeeZilla as it worked: a record of a past turn, not their order.
+  const auto = now.summary([look, make], [L("g1", "g2")]);
+  truthy(!/How the cards are joined/.test(auto), auto);
+  // Carried from the board in front of a new conversation into the conversation's own: still theirs.
+  const carried = now.graft({ cards: [], links: [] }, { cards: [look, make], links: [{ ...L("g1", "g2"), user: true } as Link] });
+  eq(carried.links.map((l) => l.user === true), [true], "carried:");
+  // An FBX copy dragged onto the board is a 3D model.
+  const fbx: Card = { id: "f", kind: "file", title: "model-1234abcd.fbx", url: "/api/buzzy/assets/77", contentType: "model/fbx", x: 0, y: 300 };
+  truthy(/3D model “model-1234abcd\.fbx”|3D model/.test(now.summary([fbx])), now.summary([fbx]));
+  // The account keeps who drew a line, and nothing else new.
+  const c = cleanWhiteboard({ v: 2, cards: [look, make], links: [{ ...L("g1", "g2"), user: true, secret: "x" }, L("g2", "g1")] });
+  truthy(c.ok, "clean");
+  if (!c.ok) return;
+  eq(c.state.links.map((l) => (l as Record<string, unknown>).user ?? null), [true, null], "kept:");
+  truthy(!("secret" in (c.state.links[0] as Record<string, unknown>)), "nothing else");
+});
+
 console.log("\nThe server's side");
+
+ok("takeBoardSeen takes the seen line off (first or second) and keeps ids and names", () => {
+  const both = takeBoardSeen(takeBoardPictures("[[board-pictures: 12]]\n[[board-seen: 12:Ark Titan; 40:made here]]\nStep 1 — x").text);
+  eq(both.seen, [{ id: 12, label: "Ark Titan" }, { id: 40, label: "" }], "ids and names:");
+  eq(both.text, "Step 1 — x", "the rest:");
+  const alone = takeBoardSeen("[[board-seen: 9:helicopter]]\nAlso on the board:");
+  eq(alone.seen, [{ id: 9, label: "helicopter" }], "first line:");
+  eq(alone.text, "Also on the board:", "taken off:");
+  eq(takeBoardSeen("Note — [[board-seen: 7:x]]").seen, [], "only the first two lines count:");
+  eq(takeBoardSeen("[[board-seen: 1:a; x:b; 0:c; 2]]").seen, [{ id: 1, label: "a" }, { id: 2, label: "" }], "only real ids:");
+  eq(takeBoardSeen(undefined).text, "", "nothing is nothing:");
+});
 
 ok("takeBoardPictures takes the first line off and keeps the ids", () => {
   const t = takeBoardPictures("[[board-pictures: 12, 40,12, 0]]\nConnected to BeeZilla's steps — use these where they are joined:\n- Note");
@@ -249,7 +330,7 @@ ok("an area's size and its share choice are kept by the account; nothing else ne
 ok("server.ts reads the pictures line before the model sees the board, and draws from them", () => {
   const src = readFileSync("src/lib/buzzy/server.ts", "utf8");
   truthy(/const board = takeBoardPictures\(/.test(src), "takeBoardPictures on the board text");
-  truthy(/boardText = board\.text/.test(src), "the model gets the text without the line");
+  truthy(/const boardSeen = takeBoardSeen\(board\.text\);/.test(src) && /boardText = boardSeen\.text/.test(src), "the model gets the text without the lines");
   truthy(/WHERE user_id = \$\{userId\} AND id = \$\{id\}/.test(src), "connected pictures load by the person's own user id");
   truthy(/boardPictureChange/.test(src) && /Drawing from your board/.test(src), "a change or a new picture from the board");
   truthy(/isPictureChange\(message\) && LOOKS\.test\(message\)/.test(src), "a connected picture changes only when the words are about how it looks");

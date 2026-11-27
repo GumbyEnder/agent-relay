@@ -120,9 +120,49 @@ export function is3dRequest(message: string): boolean {
   const WANT = new RegExp(`\\b(want|need|would like|[’']d like|can i (get|have)|could i (get|have))\\s+((a|an|some|the|my|our|this|that)\\s+)?${D3}\\b`, "i");
   // "3D model of a red sports car": the noun phrase alone is the order.
   const NOUN_ONLY = new RegExp(`^\\s*((a|an)\\s+)?${D3}\\s+(model|object|asset|mesh|version|figure|figurine|sculpture|statue|character)\\b`, "i");
+  const D3_ALL = new RegExp(`\\b${D3}\\b`, "gi");
   return orders(message)
     .map((s) => s.replace(TOPIC, " "))
-    .some((s) => MAKE.test(s) || WANT.test(s) || NOUN_ONLY.test(s));
+    .some((s) =>
+      [MAKE, WANT, NOUN_ONLY].some((re) => {
+        // Every match in the sentence, not just the first: a refusal of one 3D
+        // model must not hide an order for another in the same sentence.
+        for (const m of s.matchAll(new RegExp(re.source, `${re.flags.replace("g", "")}g`))) {
+          // The order is only an order where the 3D word it matched is not being
+          // refused. "I don't want a 3D model" matched WANT on "want … 3D" and
+          // started a paid Meshy job on a refusal — the person said no and the
+          // credits went anyway. The 3D word inside this match is the trigger.
+          const from = m.index ?? 0;
+          const to = from + m[0].length;
+          for (const d of s.matchAll(D3_ALL)) {
+            if ((d.index ?? -1) >= from && (d.index ?? -1) < to && !refused(s, d.index ?? 0)) return true;
+          }
+        }
+        return false;
+      }),
+    );
+}
+
+/** Negation words that turn a "3D" in their clause into a refusal. */
+const NEGATE =
+  /\b(no|not|never|none|don[’']?t|doesn[’']?t|didn[’']?t|do not|does not|did not|won[’']?t|wouldn[’']?t|shouldn[’']?t|can[’']?t|cannot|isn[’']?t|aren[’']?t|wasn[’']?t|weren[’']?t|without|instead of|rather than|skip|forget)\b/i;
+/** "Don't forget to make a 3D model" is an order, not a refusal. */
+const NOT_A_REFUSAL = /\b(don[’']?t forget|do not forget|not only|no problem|no worries)\b/i;
+/** Where a clause starts: a negation before one of these does not reach past it. */
+const CLAUSE_BREAK = /[,;:—–]|\bbut\b/gi;
+
+/**
+ * Is the word at `at` inside a refusal? Only the clause that holds it counts, so
+ * "I don't want a picture, I want a 3D model" stays an order and "I don't want
+ * a 3D model, just a picture" does not.
+ */
+function refused(sentence: string, at: number): boolean {
+  const prefix = sentence.slice(0, at);
+  let cut = -1;
+  CLAUSE_BREAK.lastIndex = 0;
+  for (let b = CLAUSE_BREAK.exec(prefix); b; b = CLAUSE_BREAK.exec(prefix)) cut = b.index;
+  const clause = cut >= 0 ? prefix.slice(cut + 1) : prefix;
+  return NEGATE.test(clause) && !NOT_A_REFUSAL.test(clause);
 }
 
 /** A deliverable request in the owner's own words (not only "file" phrasing). */

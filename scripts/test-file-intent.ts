@@ -135,6 +135,10 @@ for (const m of [
   "What do you think? Make a 3D cupcake.",
   "make a 3D model of a 3D printer",
   "make a 3D model of a race track",
+  "Make a 3D model from my photo, not the first photo",
+  "I don't want a picture, I want a 3D model",
+  "No picture — make a 3D model of a chair instead",
+  "Don't forget to make the 3D model of the car",
 ]) expect(JSON.stringify(m), is3dRequest(m), true);
 for (const m of [
   "how do I make a 3D model in Blender?",
@@ -145,6 +149,25 @@ for (const m of [
   "make the button look 3D",
   "make a document with a 3D pie chart",
   "make me a song about ducks",
+]) expect(JSON.stringify(m), is3dRequest(m), false);
+
+// A refusal must never start a paid Meshy job. These all matched before the
+// negation guard (35816fb): "want … 3D" / "make … 3D" in one sentence.
+console.log("says NO to a 3D model (a refusal is not an order):");
+for (const m of [
+  "I don't want a 3D model",
+  "I don't want a 3D model of my dog",
+  "I don’t need a 3D model",
+  "I do not want a 3D model",
+  "No, I don't want a 3D model",
+  "don't make a 3D model of me",
+  "Don't make me a 3D model",
+  "never make a 3D model of my face",
+  "I don't want you to make a 3D model",
+  "no 3D please, just a picture",
+  "make a picture instead of a 3D model",
+  "I don't want a 3D model, just a flat picture",
+  "skip the 3D model, write a document instead",
 ]) expect(JSON.stringify(m), is3dRequest(m), false);
 
 console.log("");

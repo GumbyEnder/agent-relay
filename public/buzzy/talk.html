@@ -2788,6 +2788,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
             content: res.j.duplicate ? "Already here — same file." : "Saved.",
             asset: { id: res.j.id, url: "/api/buzzy/assets/" + res.j.id, name: label, bytes: res.j.bytes || file.size, type: file.type || "" }
           });
+          // A picture rides the next message, so BeeZilla looks at it (vision.ts):
+          // testers asked for it to "read and analyze a referred or uploaded image".
+          if (/^image\//i.test(file.type || "") && res.j.id) {
+            chatState.pendingPictureIds = (chatState.pendingPictureIds || []).concat([res.j.id]).slice(-4);
+          }
           renderChatMessages();
         })
         .catch(function () {
@@ -2970,35 +2975,89 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       }
       msg.model3dTask = taskId;
       show("Building the 3D model…");
+      // A job moves through steps (the shape, then its paint; a bare model is painted
+      // again): each answer may name the next id to poll (`next`) and what it is doing
+      // (`stage`). The line and the board card keep the first id.
+      var pollId = taskId;
+      var stage = "Building the 3D model";
+      // One request at a time: a finished model's answer can take a while (it is fetched
+      // and kept), and a second request meanwhile would fetch it again.
+      var asking = false;
+      // Paused while Lockdown is on: that time doesn't count toward giving up, and it is
+      // asked about every 20 seconds instead of every 4.
+      var restFor = 0;
+      // Each status request has a deadline: one that never answers counts as a miss
+      // instead of holding the watch for ever.
+      function ask(id) {
+        return fetch("/api/buzzy/model3d/" + encodeURIComponent(id), {
+          credentials: "same-origin",
+          signal: window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
+        }).then(function (r) { return r.json(); });
+      }
+      // The FBX copy can come in after the model (its download may take up to 90 seconds):
+      // asked for until then. It joins the model's card in place — rebuilding the thread
+      // would stop a track playing above.
+      function addCompanion(f) {
+        msg.asset2 = f;
+        // Next to this reply's own card, found by its job. Not on screen (another
+        // conversation is): left alone; it shows the next time this reply does.
+        var at = document.querySelector('[data-model3d-card="' + String(taskId).replace(/[^A-Za-z0-9._-]/g, "") + '"]');
+        if (!at) return;
+        var next = at.nextElementSibling;
+        if (next && next.querySelector && next.querySelector('a[href="' + String(f.url).replace(/"/g, "") + '"]')) return;
+        at.insertAdjacentHTML("afterend", renderMediaCard(f));
+      }
+      function companion(left) {
+        if (left <= 0) return;
+        setTimeout(function () {
+          ask(pollId)
+            .then(function (p) {
+              if (p.fbx && p.fbx.url) addCompanion(p.fbx);
+              else if (p.fbxPending) companion(left - 1);
+            })
+            .catch(function () { companion(left - 1); });
+        }, 8000);
+      }
       var tick = setInterval(function () {
+        if (asking) return;
+        if (restFor > 0) { restFor--; return; }
         tries++;
-        fetch("/api/buzzy/model3d/" + encodeURIComponent(taskId), { credentials: "same-origin" })
-          .then(function (r) { return r.json(); })
+        asking = true;
+        ask(pollId)
           .then(function (p) {
             var status = String(p.status || "");
+            if (p.next) { pollId = String(p.next); misses = 0; }
+            if (p.stage) stage = String(p.stage);
             if (p.asset) {
               clearInterval(tick);
-              msg.progress = "";
+              // Said plainly when it came back without colour (it is kept all the same).
+              msg.progress = p.warning ? String(p.warning) : "";
               msg.asset = p.asset;
+              // The quad mesh as FBX too, for editing (glTF only holds triangles).
+              if (p.fbx && p.fbx.url) msg.asset2 = p.fbx;
+              else if (p.fbxPending) companion(14);
               renderChatMessages();
               onBoard({ state: "done", title: p.asset.name || "3D model", url: p.asset.url, contentType: p.asset.type || "model/gltf-binary", detail: "" });
               return;
             }
+            if (status === "PAUSED") { tries--; misses = 0; restFor = 4; show(stage); return; }
             if (p.ok === false || status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
               return stop("The 3D model did not finish" + (p.error ? ": " + p.error : "."));
             }
-            if (tries > 60) return stop("The 3D model is taking too long — ask again in a moment.");
+            // Meshy can take a while when it is busy: up to 15 minutes before giving up.
+            if (tries > 225) return stop("The 3D model is taking too long — ask again in a moment.");
             // One bad poll is not a failed model: give up only after several in a row.
             if (status === "error") {
               if (++misses >= 4) stop("Lost touch with the 3D model" + (p.error ? ": " + p.error : "."));
               return;
             }
             misses = 0;
-            show("Building the 3D model… " + (p.progress || 0) + "%");
+            show(stage + "… " + (p.progress || 0) + "%");
           })
           .catch(function () {
             if (++misses >= 4) stop("Lost touch with the 3D model — check the connection.");
-          });
+          })
+          .then(function () { asking = false; });
       }, 4000);
     }
 
@@ -3208,7 +3267,12 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           bubble += renderFileCard(m.document);
         }
         if (m.asset && m.asset.url) {
-          bubble += renderMediaCard(m.asset);
+          var mediaCard = renderMediaCard(m.asset);
+          // A 3D model's card names the job it came from: its FBX copy, coming later, joins
+          // this card — not another message showing the same file.
+          if (m.model3dTask) mediaCard = mediaCard.replace('<div class="file-card media-card"', '<div class="file-card media-card" data-model3d-card="' + String(m.model3dTask).replace(/[^A-Za-z0-9._-]/g, "") + '"');
+          bubble += mediaCard;
+          if (m.asset2 && m.asset2.url) bubble += renderMediaCard(m.asset2);
         }
         // The artifact envelope is the delivery list for this turn. Anything the
         // turn produced but did not put on `document`/`asset` still gets a card
@@ -6740,6 +6804,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
     }
 
     async function restoreTranscript() {
+      const askedSession = chatState.jobId ? null : chatState.sessionId;
       try {
         const q = chatState.jobId
         ? "?jobId=" + encodeURIComponent(chatState.jobId)
@@ -6755,6 +6820,11 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (!r.ok) throw new Error("no transcript");
         const data = await r.json();
         const msgs = (data.messages || []).map((m) => ({ role: m.role, content: m.content }));
+        // Its pictures belong to the conversation that was asked for: not to another one
+        // opened while this answer was on its way.
+        if (askedSession && chatState.sessionId === askedSession && !chatState.jobId && Array.isArray(data.pictures)) {
+          chatState.picturesFor = { sessionId: askedSession, ids: data.pictures.slice(0, 6) };
+        }
         if (msgs.length >= 2) {
           chatState.messages = msgs;
           // BZ-F004: restore the structured Decisions captured so far — the
@@ -6941,6 +7011,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       paperLoad++;
       renderPaper(null);
       chatState.slots = {};
+      chatState.pendingPictureIds = [];   // a photo added here belongs to the conversation being left
       chatState.messages = [{ role: "assistant", content: welcomeMessage() }];
       setBackVisible(true);
       resetDraftGate();
@@ -7501,7 +7572,26 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
           boardNodes: (function () { try { var n = window.bzBoardNodes && window.bzBoardNodes(); return n && n.length ? n : undefined; } catch (_) { return undefined; } })(),
           // What they were looking at on the Idea Board as this turn started (above).
           boardView: boardView,
+          // Pictures they added to the conversation since their last message.
+          pictureIds: (chatState.pendingPictureIds && chatState.pendingPictureIds.length) ? chatState.pendingPictureIds.slice() : undefined,
+          // …and every picture of this conversation, newest first ("make this photo 3D" later on),
+          // including the ones added before it was reopened from History (kept with it, 0073).
+          chatPictureIds: (function () {
+            var out = [];
+            for (var i = chatState.messages.length - 1; i >= 0 && out.length < 6; i--) {
+              var a = chatState.messages[i] && chatState.messages[i].asset;
+              if (a && a.id && /^image\//i.test(a.type || "") && out.indexOf(a.id) < 0) out.push(a.id);
+            }
+            var kept = chatState.picturesFor;
+            if (kept && kept.sessionId && kept.sessionId === chatState.sessionId) {
+              (kept.ids || []).forEach(function (id) { if (out.length < 6 && out.indexOf(id) < 0) out.push(id); });
+            }
+            return out.length ? out : undefined;
+          })(),
+          // The expert they came from (Experts page): brings that know-how to every turn.
+          expert: chatState.expert || undefined,
         };
+        chatState.pendingPictureIds = [];
         // Abort after 60s so a slow LLM turn fails cleanly instead of reading
         // as a dead connection (dogfood 10018).
         const postOnce = function () {
@@ -8242,6 +8332,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         if (mine !== openSeq || chatEpoch !== ep || (stillWanted && !stillWanted())) return;
         if (s.id !== chatState.sessionId) chatEpoch++;
         chatState.sessionId = s.id;
+        chatState.pendingPictureIds = [];
         // A conversation that was started in a job is a page in that job. Without
         // this, opening it from recent work restored the chat but dropped the job
         // — no sheet, and (after CR-14c) no ?job= in the address either, so the
@@ -8268,6 +8359,8 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
         // BZ-F004: restore structured Decisions from the server instead of
         // blanking the box until the next turn.
         chatState.slots = (data.slots && typeof data.slots === "object") ? data.slots : {};
+        // The pictures added to it before (kept with the conversation): still "this photo".
+        chatState.picturesFor = { sessionId: s.id, ids: Array.isArray(data.pictures) ? data.pictures.slice(0, 6) : [] };
         setBackVisible(true);
         resetDraftGate();
         document.getElementById("chatError").classList.add("hidden");
@@ -8453,6 +8546,7 @@ This is paperwork you can hand to contractors. BeeZilla is not hiring anyone or 
       var id = co ? co.id : null;
       if (chatState.boundCompanyId && id && chatState.boundCompanyId !== id) {
         chatState.boundCompanyId = id;
+        chatState.pendingPictureIds = [];
         chatState.sessionId = null;
         chatState.jobId = null;
         chatState.jobContext = null;
