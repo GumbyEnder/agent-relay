@@ -509,6 +509,46 @@
       "html.bz-has-head .bz-brandrow .bz-brand img{width:44px;height:44px;border-radius:10px;object-fit:contain}",
       "html.bz-has-head .bz-brandrow .bz-brand strong{font-size:1.1rem;font-weight:800;letter-spacing:.01em}",
       "html.bz-has-head #bzMicLive{display:none!important}",
+      // A phone on Orchestrate: the website's bar is ~515px tall at 360px wide (the
+      // composer 183 + search 68 + the places row 224) and CR-14 pins it. Pinned, it
+      // left 142px of an 800px screen for the editor — the toolbar began at y=658 and
+      // could never be scrolled clear of it, and the fixed gear (44px at 16/16) sat on
+      // its second button row, so "Import" read "Imp" (buzzygrok, 2026-11-26). On this
+      // page, on a phone, the bar scrolls away and Orchestrate pins its own toolbar
+      // under the face row instead. Desktop keeps the pinned bar: there the editor
+      // starts at y=406. The class is boot()'s (section() === "orchestrate"); a page
+      // cannot reach this element with its own CSS — HEAD_AREA rewrites page rules.
+      //
+      // Library is the same 515 / 477 / 440px bar (measured at 360 / 390 / 430), and
+      // pinned it held a document list to the 146px strip under it for the whole visit
+      // (buzzygrok, 2026-11-26). There is no workspace under this one to keep clear, so
+      // the list scrolls and the bar goes with it — it comes back on a scroll up.
+      //
+      // Sketch is the third: the canvas is the page, and 515px of bar above it left a
+      // 34px strip of canvas at 360 (measured on a local production build, CR-15). The
+      // bar scrolls away there too; the canvas page then starts right under the face row.
+      "@media (max-width:640px){html.bz-on-orchestrate .bz-head,html.bz-on-library .bz-head,html.bz-on-sketch .bz-head{position:static}}",
+      // ── Sketch on a phone: the page is exactly the screen under the face row ─────
+      // nav.js moves a page's `body` layout onto its #bzPage, and Sketch's `body` says
+      // height:100vh — so #bzPage is a full 100vh block that starts BELOW the pinned
+      // face row: the page's own 100% viewport ran off the bottom of the screen and its
+      // canvas (flex:1) was measured against a box taller than what the person sees.
+      // The rewrite lands as `body > #bzPage` (0,1,1), which outranks a page's own
+      // `#bzPage` rule (0,1,0) — so the correction has to live here, after both.
+      // The page is at least the visible strip (100svh minus the face row), so its own
+      // 100% viewport is the one the person is looking at, and #work's 46svh floor on a
+      // phone keeps the canvas from collapsing.
+      //
+      // It is min-height, not height, and deliberately NOT a second scroller. Measured
+      // at 360x800 on this build: with height + overflow-y:auto, a flick on the 147px
+      // strip of page that is on screen moved the page (scrollTop 0 → 360) and never the
+      // document (scrollY stayed 0) — `overscroll-behavior:contain` then stopped it, and
+      // the 515px site bar could only be moved by flicking the bar itself. A phone's
+      // thumb lives at the bottom of the screen, so that is a trap, not a scroll. With
+      // min-height the document is the only scroller, one flick puts the canvas where the
+      // person is, and the final view is identical: work at y=261..629 under the 138px
+      // face row, both variants.
+      "@media (max-width:640px){html.bz-on-sketch #bzPage{height:auto;min-height:calc(100svh - var(--bz-chrome-h,0px))}}",
       // Tooltips you can read, beside the thing, never under the pointer (bzTips below).
       "#bzTip{position:fixed;left:0;top:0;z-index:2147483600;box-sizing:border-box;max-width:min(340px,calc(100vw - 24px));padding:9px 13px;border-radius:10px;border:1px solid #3a3a3a;background:#1b1b1b;color:#f4f4f4;font:500 15px/1.4 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:none}",
       "#bzTip[hidden]{display:none}",
@@ -1363,6 +1403,26 @@
     // Talk keeps its places along the bottom (owner: "put the top menu below everything
     // else"), so the link row hides there; every other page keeps it.
     document.documentElement.classList.toggle("bz-on-talk", section() === "talk");
+    // A canvas workspace on a phone: the website's bar above it is ~515px tall at
+    // 360px wide (composer + search + the places row), and CR-14 pins it. On
+    // Orchestrate that pinned bar left 142px of an 800px screen for the editor and
+    // the fixed settings gear landed on its toolbar (buzzygrok, 2026-11-26), so this
+    // class lets the bar scroll away at phone widths. The page's own CSS may not do
+    // it: page rules are rewritten to exclude the head (HEAD_AREA). Desktop keeps
+    // the pinned bar — there the editor starts at y=406 and needs nothing.
+    document.documentElement.classList.toggle("bz-on-orchestrate", section() === "orchestrate");
+    // Library is a document list, not a workspace: on a phone the same pinned bar left
+    // 146px of an 800px screen for rows, forever, and rows that had already been read
+    // still filled it. There is nothing under it that needs the bar clear of it, so it
+    // unpins too and scrolls away with the list. Measured on a local production build
+    // at 360x800 with a real session: pinned, the list could never rise above y=654;
+    // unpinned, a 600px scroll puts the head at y=-462 and hands the list 662px.
+    document.documentElement.classList.toggle("bz-on-library", section() === "library");
+    // Sketch on a phone is a drawing surface, not a page with a canvas somewhere down
+    // it: the bar above it scrolls away and #bzPage becomes exactly the screen under the
+    // face row (see the bz-on-sketch rules in style() above). Desktop keeps the pinned
+    // bar and the 406px offset it has always had — CR-15 is phone-only.
+    document.documentElement.classList.toggle("bz-on-sketch", section() === "sketch");
     // The website's header (#bzHead: Talk to BeeZilla, the search, the row of places)
     // is on every page that has it, so the old link row up here hides there too.
     document.documentElement.classList.toggle("bz-has-head", !!document.getElementById("bzHead"));
