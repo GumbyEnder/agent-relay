@@ -80,6 +80,13 @@ import { sanitizeMemoryText, leaksJargon } from "./sanitizer";
 import { SLOT_IDS, STATEMENT_IDS, REQUIRED_SLOTS, DEEPENING_IDS, classifyJobType, TYPE_DRAFT_HINTS, EXPERT_SUGGESTIONS } from "./questions";
 import { getSql } from "@/lib/db";
 import { DbMemory } from "./memory";
+import {
+  extractRememberedFact,
+  loadRememberedFacts,
+  rememberAccountFact,
+  rememberedPromptSection,
+  REMEMBERED_PROMPT_ROWS,
+} from "./remember";
 import { materializeDraft, documentIdForJob } from "./documents";
 import { ensurePeer, ensureSession, syncMessages, honchoAvailable } from "./honcho";
 import { voiceCompletion, voiceAvailable, VOICE_MODEL, type VoiceHandlers } from "./voice";
@@ -464,6 +471,12 @@ export interface ChatResponse {
   tools?: Array<{ name: string; ms: number; ok: boolean; code?: string }>;
   /** The file this turn produced, with links the chat can show inline. */
   document?: { filename: string; contentType: string; bytes: number | null; documentId?: string; downloadUrl: string; libraryUrl: string };
+  /**
+   * A fact the person explicitly asked this turn to remember (CR-18). Written
+   * before the model call, at account scope (job_id NULL), so a failed model
+   * call still keeps it. Absent when nothing was asked or the request was refused.
+   */
+  remembered?: { key: string; value: string };
   error?: string;
   code?: string;
 }
@@ -713,6 +726,45 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     // as 20s of slot extraction). Name it separately.
     extractMs = Math.max(0, Date.now() - extractStarted - artMs);
   }
+
+  // ── A fact they asked to remember (CR-18) ──────────────────────────
+  // Deterministic and message-only: the trigger must be in THIS turn's words.
+  // No history scan, no assistant text, no tool surface (a tool would miss every
+  // chat/voice turn or disable streaming — measured, see the CR-18 brief).
+  // The write happens before the model call, so a failed reply still keeps it.
+  const rememberAttempt = extractRememberedFact(message);
+  let rememberedThisTurn: { key: string; value: string } | null = null;
+  let rememberRefusal: string | null = null;
+  if (rememberAttempt) {
+    if (!rememberAttempt.ok) {
+      rememberRefusal = rememberAttempt.reason;
+    } else {
+      try {
+        const saved = await rememberAccountFact(sql, userId, rememberAttempt.value);
+        if (saved.ok) {
+          rememberedThisTurn = { key: saved.key, value: saved.value };
+          req.onFlow?.({
+            kind: "memory",
+            id: "remembered",
+            title: "Remembered",
+            parent: "agent",
+            state: "done",
+            detail: saved.value.slice(0, 300),
+          });
+        } else {
+          rememberRefusal = saved.reason;
+        }
+      } catch (err) {
+        // Memory never takes the answer down with it.
+        console.warn("[buzzy/remember] save failed:", err instanceof Error ? err.message : err);
+        rememberRefusal = "I couldn't save that to Memory just now — the store did not answer. Nothing was kept.";
+      }
+    }
+  }
+  // Account-wide recall in every conversation: one indexed SELECT per turn.
+  const rememberedSection = rememberedPromptSection(
+    await loadRememberedFacts(sql, userId, REMEMBERED_PROMPT_ROWS),
+  );
 
   // ── Build system prompt ────────────────────────────────────────────
   const factsText = await memory.get_facts();
@@ -1141,7 +1193,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const boardViewText = boardViewBlock(req.boardView ?? null, BOARD_VIEW_BUDGET_CHARS);
   const boardViewSection = boardViewText ? "\n\n" + boardViewText : "";
   const systemPrompt =
-    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings) + boardViewSection;
+    persona + jobCtxSection + confirmedCompanySection(companyName, companyFacts) + (req.customerMemoryBlock ?? "") + factsSection + rememberedSection + guidance + freshnessBlock + sourcesBlock + boardSection + madeThingsSection(madeThings) + boardViewSection;
 
   // ── Build messages for LLM ─────────────────────────────────────────
   // Audio this turn actually produced. The reply may only claim a track when this
@@ -2439,6 +2491,24 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const carried = carry && oneState ? pendingPrompt(oneState) : null;
   if (carried) cleanReply = `${cleanReply}\n\n${carried.line}`;
 
+  // ── "Remembered" must be true when the reply says it ────────────────
+  // Same shape as the Library delivery check above. A save that did not happen
+  // must not be narrated as one; and when the person asked us to keep a fact,
+  // a refusal is said out loud rather than left to the model's goodwill.
+  if (rememberAttempt && !rememberedThisTurn && rememberRefusal) {
+    const CLAIMS_MEMORY =
+      /\b(i(?:'|’)?ve\s+(?:saved|noted|stored|remembered|written|made a note)|i\s+have\s+(?:saved|noted|stored|remembered|written|made a note)|i(?:'|’)?ll\s+remember|i\s+will\s+remember|i(?:'|’)?ll\s+keep\s+(?:that|it)\s+in\s+mind|(?:saved|noted|stored)\s+(?:that|it|this)|it(?:'|’)?s\s+(?:saved|noted|stored|remembered)|[.!]\s*noted\s*[.!]?$|^noted\s*[.!]?$)/i;
+    const sentences = cleanReply.split(/(?<=[.!?])\s+/);
+    const claimed = sentences.some((s) => CLAIMS_MEMORY.test(s.trim()));
+    if (claimed) {
+      console.warn("[buzzy] reply claimed a memory save that did not happen");
+      const kept = sentences.filter((s) => !CLAIMS_MEMORY.test(s.trim())).join(" ").trim();
+      cleanReply = (kept ? kept + " " : "") + rememberRefusal;
+    } else if (rememberAttempt.kind === "save_request") {
+      cleanReply = cleanReply.trim() ? `${cleanReply.trim()} ${rememberRefusal}` : rememberRefusal;
+    }
+  }
+
   // ── Same voice, always ──────────────────────────────────────────────
   // Turns that need tools or produce a deliverable run on the text lane, which
   // has no audio. The client used to fall back to the browser's speech engine,
@@ -2615,6 +2685,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
     },
   };
   if (appPlan) response.actions = appPlan;
+  if (rememberedThisTurn) response.remembered = rememberedThisTurn;
   response.oneMode = { step: goHow === "ticket" ? "ticket" : "go", why: oneModeWhy };
   if (carried) response.choice = { kind: carried.kind, options: carried.options, note: WAITING_NOTE };
   if (assumptions.length) response.assumptions = assumptions;
