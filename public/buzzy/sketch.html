@@ -348,6 +348,21 @@
     var titleEl = document.getElementById("pTitle");
 
     var doc = { w: 1, h: 1, bg: "#141414", raster: null, strokes: [], images: [], order: [] };
+    // ── the load gate ─────────────────────────────────────────────────
+    // load() reads the saved board asynchronously, so between parse and that read
+    // landing `doc` is the empty default above. Anything that wrote in that window
+    // (the 1.2s autosave after an early stroke, pagehide, visibilitychange) posted an
+    // EMPTY board over marks the server still held, and a GET that merely failed
+    // (401 while the session cookie settled, a 404, a dropped request) used to look
+    // exactly like "this board is empty": fitted to the stage, strokes 0, save armed.
+    // Observed on a load where the read did not land: strokes 0 / doc 1265x1128 while
+    // the server still held 7 marks. The document now has one owner for that question:
+    //   loading     — the read is in flight; nothing may be drawn or saved
+    //   ready       — the saved board has been read back (or the server has none)
+    //   unavailable — the read failed twice; this page must never overwrite it
+    var boardState = jobId ? "loading" : "ready";
+    var pendingSave = false;      // a save asked for during "loading", run after it lands
+    var loadRetryMs = 800;
     var view = { zoom: 1, panX: 0, panY: 0 };
     var tool = "select";
     var colorP = "#ffd40d";
@@ -967,6 +982,13 @@
     }
     function flushSave() {
       if (!jobId) return;
+      // A save before the board has been read back is a write of the empty default
+      // document over the saved marks — the exact overwrite this gate exists to stop.
+      // Hold it; load() runs it once the real board is on screen.
+      if (boardState === "loading") { pendingSave = true; return; }
+      // The read failed twice: this document was never read, so there is no honest
+      // snapshot of it to send. Say that once instead of posting `{}` over the board.
+      if (boardState === "unavailable") { boardNotLoaded(); return; }
       if (saving) { saveAgain = true; return; }
       saving = true;
       var body;
@@ -1037,6 +1059,17 @@
     }
     window.addEventListener("pagehide", function () { if (jobId) flushSave(); });
     document.addEventListener("visibilitychange", function () { if (document.hidden) flushSave(); });
+    // Said once, and deliberately not "retrying": this page holds no read of the board,
+    // so it must not send one. A tab that keeps re-trying a save it never loaded is how
+    // a board with marks on it ends up as strokes 0.
+    var boardNotLoadedSaid = false;
+    function boardNotLoaded() {
+      if (boardNotLoadedSaid) return;
+      boardNotLoadedSaid = true;
+      var el = document.getElementById("savedFlag");
+      if (el) { el.textContent = "Board did not load — not saving over it"; el.style.color = "#ff6b6b"; }
+      setStatus("The saved board did not load, so nothing here will be written over it. Reload the page to try again.");
+    }
 
     function boardJson() {
       orderSync();
@@ -1701,6 +1734,14 @@
         return;
       }
 
+      // Pan and zoom are view-only and stay live. Anything that would CHANGE the
+      // document waits for the board's own marks: a mark made now is either dropped by
+      // the read that lands a moment later, or saved over a board we never saw.
+      if (boardState !== "ready") {
+        setStatus(boardState === "loading" ? "Loading the board…" : "The saved board did not load. Reload before drawing.");
+        return;
+      }
+
       if (tool === "selrect" || tool === "selfree") {
         e.preventDefault();
         if (floating) {
@@ -1967,6 +2008,12 @@
 
     // ── images: drop, paste, move, resize ─────────────────────────────
     function addImage(url, at, file) {
+      // Same gate as a stroke: the read that lands next would replace doc.images and
+      // the dropped picture would vanish (or be saved over a board we never read).
+      if (boardState !== "ready") {
+        setStatus(boardState === "loading" ? "Loading the board…" : "The saved board did not load. Reload before adding an image.");
+        return;
+      }
       // A blob: URL points into this document only: saved into the board it comes back
       // as a dead reference and the image is gone on the next load (it was being saved
       // verbatim). Keep the bytes instead, so the board *is* the image.
@@ -2493,6 +2540,9 @@
     });
 
     document.getElementById("create").addEventListener("click", function () {
+      // Flattening a document that was never read would spend a paid render on an empty
+      // board and file the result as this project's deliverable.
+      if (boardState !== "ready") { setStatus(boardState === "loading" ? "Loading the board — one moment." : "The saved board did not load. Reload before creating."); return; }
       var prompt = (promptEl.value || "").trim();
       if (!prompt) { setStatus("Describe what to create first."); promptEl.focus(); return; }
       var btn = document.getElementById("create");
@@ -2647,7 +2697,10 @@
     })();
 
     // ── load the saved board ──────────────────────────────────────────
-    function load() {
+    // attempt is only >0 from the retry below: one dropped request must not become a
+    // page that looks like an empty board and writes over the real one.
+    function load(attempt) {
+      attempt = attempt || 0;
       if (!jobId) { fitDoc(); return; }
       // The board belongs to a project; show the project's name, not "New board".
       fetch("/api/buzzy/projects/" + encodeURIComponent(jobId), { credentials: "same-origin" })
@@ -2661,9 +2714,16 @@
         })
         .catch(function () {});
       fetch("/api/buzzy/art?job=" + encodeURIComponent(jobId), { credentials: "same-origin" })
-        .then(function (r) { return r.json(); })
+        // A signed-out or not-yours GET still answers JSON ({error, code}), and a 404
+        // answers JSON too. Reading either as "no board" is what fitted an empty doc
+        // and then armed the autosave over the real one — so non-OK is a failure here.
+        .then(function (r) {
+          if (!r.ok) throw new Error("board read failed: HTTP " + r.status);
+          return r.json();
+        })
         .then(function (d) {
-          if (d && d.board) {
+          if (!d || d.ok !== true) throw new Error("board read failed: unreadable answer");
+          if (d.board) {
             if (d.board.w && d.board.h) { doc.w = d.board.w; doc.h = d.board.h; }
             if (d.board.bg) doc.bg = d.board.bg;
             doc.strokes = d.board.strokes || [];
@@ -2680,7 +2740,7 @@
             orderSync();
             doc.raster = d.board.raster || null;
           }
-          if (d && d.images && d.images.length) {
+          if (d.images && d.images.length) {
             var last = d.images[d.images.length - 1];
             lastRenderUrl = last.url;
             var box = document.getElementById("result");
@@ -2688,13 +2748,29 @@
             document.getElementById("resultImg").src = last.url;
             document.getElementById("resultLink").href = last.url;
           }
+          // The saved board — or the server's own answer that it has none — is the
+          // page's document from here on. Only now may a mark be drawn or a save leave
+          // this tab; before this line `doc` was a guess with the same shape as empty.
+          boardState = "ready";
           if (!doc.w || doc.w < 2) fitDoc();
           ensureRaster();
           loadRaster(doc.raster);
           renderImages();
           paint();
+          // A save was asked for while the read was in flight (an unload, a hide). It
+          // held the empty default back; send the real board now instead of losing it.
+          if (pendingSave) { pendingSave = false; flushSave(); }
         })
-        .catch(function () { fitDoc(); });
+        .catch(function () {
+          // One retry: the usual cause is a request that did not land, and the cost of
+          // guessing wrong about ownership is the owner's board. After the retry, fit
+          // only so there is a canvas to paint — this page writes nothing.
+          if (attempt < 1) { setTimeout(function () { load(attempt + 1); }, loadRetryMs); return; }
+          boardState = "unavailable";
+          pendingSave = false;
+          fitDoc();
+          boardNotLoaded();
+        });
     }
 
     // Canvas size follows the stage on a brand-new board, once, after layout settles.
@@ -2743,6 +2819,7 @@
         return { jobId: jobId, saving: saving, saveAgain: saveAgain, w: doc.w, h: doc.h,
                  zoom: view.zoom, panX: view.panX, panY: view.panY, bg: doc.bg,
                  strokes: doc.strokes.length, images: doc.images.length,
+                 boardState: boardState, pendingSave: pendingSave,
                  sel: sel ? { x: sel.x, y: sel.y, w: sel.w, h: sel.h } : null, floating: !!floating };
       },
     };
