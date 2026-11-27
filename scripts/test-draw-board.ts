@@ -112,7 +112,10 @@ const firstArrow = arrows[0]!;
 check("BOARD-2c  the arrow runs from the first box's right edge to the second's left edge", Number(firstArrow.x1) === xs[0]! + 200 && Number(firstArrow.x2) === xs[1]!, `${firstArrow.x1}->${firstArrow.x2}`);
 
 check("BOARD-3a  the art route's document version", board?.version === 3);
-check("BOARD-3b  a canvas that contains every mark", board?.w! > Math.max(...boxes.map((b) => Number(b.x2))) && board?.h! > 0, `w=${board?.w} h=${board?.h}`);
+// Lint: `board?.w!` is a non-null assertion on an optional chain, which is unsafe by
+// construction — read the value once and compare numbers instead.
+const boardW = Number(board?.w ?? 0), boardH = Number(board?.h ?? 0);
+check("BOARD-3b  a canvas that contains every mark", boardW > Math.max(...boxes.map((b) => Number(b.x2))) && boardH > 0, `w=${board?.w} h=${board?.h}`);
 check("BOARD-3c  an order entry per mark", board?.order.length === board?.strokes.length && board.order.every((o) => board.strokes.some((s) => s.id === o.id)));
 check("BOARD-3d  no images, no raster", (board?.images.length ?? -1) === 0 && board?.raster === null);
 const TOOLS = new Set(["rect", "text", "arrow", "line"]);
