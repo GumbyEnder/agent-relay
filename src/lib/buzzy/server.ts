@@ -93,7 +93,7 @@ import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteComm
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, takeBoardSeen, boardReferencePrompt, type MadeThing } from "./pictureChange";
 import { keepConversationPictures } from "./chatPictures";
-import { lookAtPictures, picturesSeenBlock, asksAboutPicture, namesAPicture, lookAtPicture, PICTURES_NOTE, type LookBlock, type LookPick, type PictureLook } from "./vision";
+import { lookAtPictures, lookBudgetMs, picturesSeenBlock, asksAboutPicture, namesAPicture, lookAtPicture, PICTURES_NOTE, type LookBlock, type LookPick, type PictureLook } from "./vision";
 import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, setsUpBrowserJob, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
@@ -834,11 +834,14 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   const questionPictureId = asksAboutPicture(message) || namedPictureId !== null
     ? pointedLookId ?? attachedPictureIds[0] ?? namedPictureId ?? (lookIds.size === 1 && namesAPicture(message) ? [...lookIds][0]! : null)
     : null;
-  // Waited for only when the turn is about a picture (pointed at, just added, named, or a
-  // 3D model to make). Otherwise the reply doesn't wait: what was already seen is
-  // used, and new pictures are looked at in the background, ready for the next turn.
+  // The turn is about a picture: pointed at, just added, named, or a 3D model to make.
   // (A bare "is it…?" with pictures on the board is not enough: "is it raining?")
   const picturesMatter = pointedLookId !== null || attachedPictureIds.length > 0 || namedPictureId !== null || namesAPicture(message) || wants3d;
+  // How long the reply waits for the looks (lookBudgetMs): a turn about a picture waits,
+  // and so does any turn with a picture on the board — the person put it there for
+  // BeeZilla, so the turn right after it lands knows what it shows, whatever the words
+  // ("what do you see?", "what's on my board?"). A picture already looked at costs no
+  // wait (its description is kept), so only a new one is ever waited for.
   const lookStarted = Date.now();
   const lookPromise = lookPicks.length
     ? lookAtPictures(sql, userId, lookPicks, {
@@ -846,7 +849,7 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         questionFor: questionPictureId,
         cachedOnly: lookBlocked,
         blocked: lookBlock ?? undefined,
-        budgetMs: !picturesMatter ? 700 : surface === "voice" ? 4000 : 9000,
+        budgetMs: lookBudgetMs(lookPicks, { aboutAPicture: picturesMatter, voice: surface === "voice" }),
       }).catch(() => null)
     : Promise.resolve(null);
   if (lookPicks.length) {

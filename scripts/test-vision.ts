@@ -260,6 +260,52 @@ ok("several at once, inside a time budget: what is late is counted, not waited f
   truthy(r.late === 1, `one late, got ${r.late}`);
 });
 
+console.log("\nA picture put on the board");
+
+ok("any turn with a picture on the board waits for its look, whatever the words; a turn about a picture always does", () => {
+  for (const why of ["on the board", "in view", "connected", "pointed"] as const) {
+    eq(V.lookBudgetMs([{ why }], { aboutAPicture: false, voice: false }), 9000, `"${why}", words not about a picture:`);
+    eq(V.lookBudgetMs([{ why: "in the conversation" }, { why }], { aboutAPicture: false, voice: true }), 4000, `"${why}" on voice:`);
+  }
+  eq(V.lookBudgetMs([{ why: "in the conversation" }], { aboutAPicture: true, voice: false }), 9000, "about a picture:");
+  eq(V.lookBudgetMs([{ why: "attached" }], { aboutAPicture: true, voice: true }), 4000, "about a picture, on voice:");
+  // Only pictures from earlier in the conversation, and words about something else: no wait.
+  eq(V.lookBudgetMs([{ why: "in the conversation" }, { why: "made here" }], { aboutAPicture: false, voice: false }), 700, "only earlier pictures:");
+  eq(V.lookBudgetMs([], { aboutAPicture: false, voice: false }), 700, "no pictures:");
+});
+
+ok("the turn right after a picture lands knows what it shows: its first look is waited for", async () => {
+  const db = fakeSql([{ id: 21, user: "u1", type: "image/png", body: PNG }, { id: 22, user: "u1", type: "image/png", body: PNG }]);
+  // A first look that takes longer than the old 0.7 s, as a real one can.
+  const net = fakeFetch(() => ({ ...says("A red house under a yellow sun; the words PURPLE KANGAROO across the top."), delayMs: 1000 }));
+  // "what do you see?" names no picture and points at nothing: the board picture is still waited for…
+  const onBoard: Array<{ id: number; why: "on the board" }> = [{ id: 21, why: "on the board" }];
+  const r = await V.lookAtPictures(db.sql, "u1", onBoard, { budgetMs: V.lookBudgetMs(onBoard, { aboutAPicture: false, voice: false }), fetchImpl: net.f });
+  eq([r.looks.length, r.late], [1, 0], "seen, not late:");
+  truthy(/PURPLE KANGAROO/.test(V.picturesSeenBlock(r.looks)), "what it shows reaches the reply");
+  // …while a picture only from earlier in the conversation doesn't hold up a turn about something else.
+  const earlier: Array<{ id: number; why: "in the conversation" }> = [{ id: 22, why: "in the conversation" }];
+  const r2 = await V.lookAtPictures(db.sql, "u1", earlier, { budgetMs: V.lookBudgetMs(earlier, { aboutAPicture: false, voice: false }), fetchImpl: net.f });
+  eq([r2.looks.length, r2.late], [0, 1], "earlier picture, other words:");
+});
+
+ok("a picture already looked at costs no wait: its kept description comes back at once", async () => {
+  const looks = new Map([["u1:23", { note: "A zebra on grass.", model: "vision-model" }]]);
+  const db = fakeSql([{ id: 23, user: "u1", type: "image/png", body: PNG }], looks);
+  const net = fakeFetch(() => ({ ...says("never asked"), delayMs: 5000 }));
+  const t0 = Date.now();
+  const r = await V.lookAtPictures(db.sql, "u1", [{ id: 23, why: "on the board" }], { budgetMs: 9000, fetchImpl: net.f });
+  truthy(Date.now() - t0 < 300, `waited ${Date.now() - t0} ms`);
+  eq([r.looks.length, net.calls.length], [1, 0], "kept, nothing sent:");
+});
+
+ok("a first look still on its way is said to be on its way, never guessed at", () => {
+  const late = V.picturesSeenBlock([], { late: 1 });
+  truthy(/1 more picture is still being looked at/.test(late) && /should be ready with their next message/.test(late) && /never guess what it shows/.test(late), late);
+  const both = V.picturesSeenBlock([], { late: 2, failed: [{ id: 1, label: "", why: "on the board", code: "provider_error", error: "provider 500" }] });
+  truthy(/1 more picture could not be looked at this turn \(provider 500\)/.test(both) && /2 more pictures are still being looked at/.test(both) && /never guess what they show/.test(both), both);
+});
+
 console.log("\nWhat BeeZilla reads");
 
 ok("BeeZilla's instructions say how to treat pictures; what they show rides with the message as data", () => {
@@ -300,7 +346,7 @@ ok("the turn looks at the pictures early, and writes what they show before the b
   truthy(/estimateTokens\(messages\.map/.test(server), "the context meter counts what is sent, pictures included");
   truthy(/keepConversationPictures\(sql, userId, sessionId, attachedPictureIds, chatPictureIds\)/.test(server), "an added picture stays with its conversation");
   truthy(/content: \(focusNote \? `\$\{message\}\\n\\n\$\{focusNote\}` : message\) \+ \(picturesText \? `\\n\\n\$\{picturesText\}` : ""\)/.test(server), "what the pictures show goes with the message, not the instructions");
-  truthy(/budgetMs: !picturesMatter \? 700 :/.test(server), "a turn not about a picture doesn't wait for new pictures to be looked at");
+  truthy(/budgetMs: lookBudgetMs\(lookPicks, \{ aboutAPicture: picturesMatter, voice: surface === "voice" \}\)/.test(server), "the turn waits as lookBudgetMs says: for a picture it is about, or one on the board");
   truthy(/madeThingsSection\(madeThings\) \+ picturesSection \+ boardViewSection;/.test(server), "in the instructions");
   truthy(/why: "pointed"/.test(server) && /why: "attached"/.test(server) && /why: "connected"/.test(server) && /why: "in view"/.test(server) && /why: "on the board"/.test(server), "every reason");
   const chat = readFileSync("src/lib/buzzy/chat.nitro.ts", "utf8");

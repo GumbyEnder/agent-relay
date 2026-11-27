@@ -329,6 +329,24 @@ async function lookOnce(
   return done(note || kept?.note || "", model, false, answer);
 }
 
+/** Reasons that mean the picture is on their Idea Board. */
+const ON_THE_BOARD: ReadonlySet<LookWhy> = new Set<LookWhy>(["pointed", "connected", "in view", "on the board"]);
+
+/**
+ * How long a turn waits for its pictures to be looked at. A turn about a picture (pointed
+ * at, just added, named, a 3D model to make) waits for it, and so does any turn with a
+ * picture on the board: the person put it there for BeeZilla (owner, 2026-11-26: it
+ * should see "images that you put on the board for it"), so the turn right after it
+ * lands knows what it shows, whatever the words are ("what do you see?", "what's on my
+ * board?"). A picture already looked at costs no wait (its description is kept and read
+ * back at once), so this only ever waits for one that is new to BeeZilla. Pictures that
+ * are only from earlier in the conversation don't hold up a turn about something else.
+ */
+export function lookBudgetMs(picks: ReadonlyArray<Pick<LookPick, "why">>, o: { aboutAPicture: boolean; voice: boolean }): number {
+  if (!o.aboutAPicture && !picks.some((p) => ON_THE_BOARD.has(p.why))) return 700;
+  return o.voice ? 4000 : 9000;
+}
+
 /**
  * Look at several pictures at once, inside a time budget: the turn waits at most
  * `budgetMs` for pictures it has not seen before; what is not back by then is left
@@ -433,8 +451,24 @@ export function picturesSeenBlock(
               ? `${were}: this month's AI spending limit is reached. If they ask about ${them}, say so; the limit is in their AI settings.`
               : blocked === "unknown"
                 ? `${were}: their AI settings couldn't be read just now, so nothing new was sent out. If they ask about ${them}, say so and that it should work on their next message.`
-                : `${missed} more picture${missed === 1 ? "" : "s"} could not be looked at this turn${failed[0] ? ` (${failed[0].error})` : ""}. If they ask about ${them}, say that plainly instead of guessing.`,
+                : notLookedAt(failed, opts.late ?? 0),
     );
   }
   return lines.join("\n");
+}
+
+// Pictures not looked at this turn, when nothing blocked them: one that failed is said
+// plainly; one whose first look was still on its way when the reply had to start is still
+// being looked at (the look goes on and is kept), so it is ready for the next message.
+function notLookedAt(failed: LookFailure[], late: number): string {
+  const out: string[] = [];
+  if (failed.length) {
+    const one = failed.length === 1;
+    out.push(`${failed.length} more picture${one ? "" : "s"} could not be looked at this turn (${failed[0]!.error}). If they ask about ${one ? "it" : "them"}, say that plainly instead of guessing.`);
+  }
+  if (late > 0) {
+    const one = late === 1;
+    out.push(`${late} more picture${one ? " is" : "s are"} still being looked at (a first look takes a moment). If they ask about ${one ? "it" : "them"}, say you are still looking and that ${one ? "it" : "they"} should be ready with their next message; never guess what ${one ? "it shows" : "they show"}.`);
+  }
+  return out.join("\n");
 }
