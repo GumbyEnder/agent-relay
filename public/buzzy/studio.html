@@ -141,6 +141,12 @@
   (function () {
     var jobId = new URLSearchParams(location.search).get("job");
     var state = null;
+    // A track whose read did not answer is not an empty track. Until a GET says
+    // otherwise the form on screen is not the person's brief, and saving it would
+    // replace the real one (measured: prompt "", lyrics "", instruments [] over
+    // "KEEP THIS BRIEF" / "KEEP THESE WORDS"). CR-17's rule, on the studio: a page
+    // that did not read must not write.
+    var loaded = false;
     var selection = null; // {fromMs,toMs}
     var audioCtx = null;
 
@@ -385,14 +391,44 @@
         return;
       }
       api("GET").then(function (res) {
-        if (!res.ok) { setStatus(res.body.error || "Could not load this track.", "bad"); return; }
+        if (!res.ok) {
+          // The form is empty because nothing was read, not because the track is
+          // empty. Saves stay off until a reload gets an answer.
+          loaded = false;
+          armWrites(false);
+          // Whatever the server said, say what to do about it: the form on screen is
+          // not the track, and saving it would replace the track.
+          setStatus((res.body && res.body.error ? res.body.error + " — " : "Could not load this track — ")
+            + "reload before saving.", "bad");
+          return;
+        }
         state = res.body;
+        loaded = true;
+        armWrites(true);
         renderRows();
         if (window.BeeZillaChat) mountAI();
         else { var s2 = document.createElement("script"); s2.src = "/buzzy/chat.js"; s2.onload = mountAI; document.head.appendChild(s2); }
         if (state.asset) setStatus("Loaded " + (state.versions || []).length + " version(s).", "good");
         else setStatus("No track yet — fill in the brief and press Create track.");
+      }).catch(function () {
+        loaded = false;
+        armWrites(false);
+        setStatus("Could not load this track — check the connection. Reload before saving.", "bad");
       });
+    }
+
+    // The three buttons that write the form back. An unread track keeps them off, and
+    // the handlers check again so a hidden path cannot slip a save through.
+    function armWrites(on) {
+      ["savePlan", "saveLyrics", "renderBtn"].forEach(function (id) {
+        var b = $(id);
+        if (b) b.disabled = !on;
+      });
+    }
+    function canWrite() {
+      if (loaded) return true;
+      setStatus("This track did not load, so the form is empty. Reload before saving — an empty brief would replace what is already there.", "bad");
+      return false;
     }
 
     function planFromForm() {
@@ -425,6 +461,7 @@
     }
 
     $("savePlan").addEventListener("click", function () {
+      if (!canWrite()) return;
       var done = busy(this, "Saving…");
       api("POST", { action: "save", jobId: jobId, plan: planFromForm() }).then(function (r) {
         done();
@@ -433,6 +470,7 @@
     });
 
     $("saveLyrics").addEventListener("click", function () {
+      if (!canWrite()) return;
       var done = busy(this, "Saving…");
       api("POST", { action: "save", jobId: jobId, plan: { lyrics: $("lyrics").value } }).then(function (r) {
         done();
@@ -441,6 +479,7 @@
     });
 
     $("renderBtn").addEventListener("click", function () {
+      if (!canWrite()) return;
       var btn = this;
       var done = busy(btn, "Composing…");
       setStatus("Composing the track — this takes as long as the track is long…");
@@ -454,6 +493,7 @@
     });
 
     $("editBtn").addEventListener("click", function () {
+      if (!canWrite()) return;
       var instruction = $("instruction").value.trim();
       if (!instruction) { setStatus("Say what should change in the selection.", "bad"); return; }
       if (!selection) { setStatus("Select a passage on the waveform first.", "bad"); return; }
@@ -496,6 +536,7 @@
       }, 5000);
     }
 
+    armWrites(false);   // nothing may write the form before a read has answered
     load();
   })();
 </script>
