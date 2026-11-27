@@ -34,6 +34,17 @@ export const TOOL_REGISTRY: ToolDeclaration[] = [
     failureBehavior: "render error is surfaced in the reply; nothing is staged or charged beyond the model call",
   },
   {
+    name: "draw_board",
+    inputs: "{ title?, nodes: [{ id?, label, after? }], edges: [{ from, to, label? }] } — at most 40 boxes",
+    output: "boxes, labelled connectors and text drawn on this project's Sketch board (data.board) — editable, nothing published",
+    sensitivity: "account-documents",
+    costClass: "free",
+    sideEffects: "render-to-memory",
+    permission: "session_user",
+    verification: "typed box/connector validation before a mark is written; the saved board is the sketch page's own document (version 3, strokes + order)",
+    failureBehavior: "no project, no diagram request, a box over the 40 limit or an unknown connector end returns a named refusal; the owner's existing board is appended to, never replaced",
+  },
+  {
     name: "render_presentation",
     inputs: "{ title, slides[] }",
     output: "a .pptx file staged on the job, approval-gated",
