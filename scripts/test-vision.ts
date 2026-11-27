@@ -512,6 +512,28 @@ ok("a database hiccup reading a picture is not held against the picture (review 
   truthy(V.waitsForLook("w17", { id: 181, why: "on the board" }, { aboutAPicture: false }), "waited for");
 });
 
+ok("a slow mark is cleared when the picture's read then fails on the database (review 5)", async () => {
+  const db = fakeSql([201].map((id) => ({ id, user: "w19", type: "image/png", body: PNG })));
+  const run = db.sql as unknown as (s: TemplateStringsArray, ...v: unknown[]) => Promise<unknown[]>;
+  const sql = ((strings: TemplateStringsArray, ...vals: unknown[]) =>
+    (/FROM buzzy_assets/.test(strings.join("?")) ? new Promise((_, no) => setTimeout(() => no(new Error("connection reset")), 500)) : run(strings, ...vals))) as unknown as Parameters<typeof V.lookAtPictures>[0];
+  const net = fakeFetch(() => says("never reached"));
+  const r = await V.lookAtPictures(sql, "w19", [{ id: 201, why: "on the board" }], { budgetMs: 200, waitFor: () => true, fetchImpl: net.f });
+  eq(r.late, 1, "late:");
+  truthy(V.lookFailedRecently("w19", 201), "noted slow at the budget's end");
+  await new Promise((res) => setTimeout(res, 500));
+  truthy(!V.lookFailedRecently("w19", 201), "cleared: the database failed, not the picture");
+});
+
+ok("the answer survives even when the description has to go entirely (review 5)", () => {
+  const answer = "Three windows on the front, two on the side, " + "and a small round one in the attic. ".repeat(10);
+  const first = { id: 1, label: "house", why: "pointed" as const, note: "A pencil house with a door. ".repeat(23).trim(), answer, cached: false, model: "m" };
+  const second = { id: 2, label: "tree", why: "on the board" as const, note: "A tall green tree.", cached: true, model: "m" };
+  const text = V.picturesSeenBlock([first, second], { maxChars: 1000 });
+  truthy(text.length <= 1000, `${text.length} chars`);
+  truthy(text.includes("What you see, for their question: " + answer.replace(/\s+/g, " ").trim()), text);
+});
+
 ok("the answer to their question is never what gets cut for room (review 4)", () => {
   const first = { id: 1, label: "house", why: "pointed" as const, note: "A small house drawn in pencil with a door. ".repeat(15).trim(), answer: "It has three windows.", cached: false, model: "m" };
   const second = { id: 2, label: "tree", why: "on the board" as const, note: "A tall green tree.", cached: true, model: "m" };

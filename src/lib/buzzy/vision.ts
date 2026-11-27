@@ -298,7 +298,10 @@ async function lookOnce(
       SELECT body, content_type FROM buzzy_assets WHERE user_id = ${userId} AND id = ${pick.id} LIMIT 1`;
     row = rows[0];
   } catch {
-    return fail("unreadable", "the picture could not be read");   // the database, not the picture: not noted
+    // The database, not the picture: not noted — and a "slow" mark the budget's end left on
+    // this look is cleared, so the next turn waits for the picture again.
+    noteLookFailed(userId, pick.id, false);
+    return fail("unreadable", "the picture could not be read");
   }
   if (!row) return unlookable("not_found", "no such picture in their Library");
   const type = String(row.content_type || "").toLowerCase();
@@ -562,12 +565,16 @@ export function picturesSeenBlock(
       const atWord = hard.replace(/\s+\S*$/, "");
       return (atWord.length >= hard.length * 0.8 ? atWord : hard) + "…";
     };
-    const fixed = head.length + 1 + answer.length;
+    const forBody = share - head.length - 1 - answer.length;
     const cut = line.length <= share
       ? line
-      : share - fixed >= 60
-        ? `${head} ${trim(body, share - fixed)}${answer}`
-        : trim(line, share);
+      : !answer
+        ? trim(line, share)
+        : forBody >= 2
+          ? `${head} ${trim(body, forBody)}${answer}`
+          : head.length + answer.length <= share
+            ? `${head}${answer}`
+            : `${head}${trim(answer, share - head.length)}`;
     lines.push(cut);
     used += cut.length + 1;
   });
