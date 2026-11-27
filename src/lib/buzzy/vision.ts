@@ -271,6 +271,9 @@ async function lookOnce(
 ): Promise<PictureLook | LookFailure> {
   const label = pick.label || "";
   const fail = (code: string, error: string): LookFailure => ({ id: pick.id, label, why: pick.why, code, error });
+  // This picture itself can't be looked at (gone, not a picture, empty, too big, unreadable):
+  // noted like a failed look, so it never keeps a newer picture out of the six places.
+  const unlookable = (code: string, error: string): LookFailure => { noteLookFailed(userId, pick.id, true); return fail(code, error); };
   const question = opts.question ? String(opts.question) : null;
   let kept: { note: string; model: string } | null = null;
   try {
@@ -295,14 +298,14 @@ async function lookOnce(
       SELECT body, content_type FROM buzzy_assets WHERE user_id = ${userId} AND id = ${pick.id} LIMIT 1`;
     row = rows[0];
   } catch {
-    return fail("unreadable", "the picture could not be read");
+    return unlookable("unreadable", "the picture could not be read");
   }
-  if (!row) return fail("not_found", "no such picture in their Library");
+  if (!row) return unlookable("not_found", "no such picture in their Library");
   const type = String(row.content_type || "").toLowerCase();
-  if (!/^image\/(?:png|jpe?g|webp|gif)$/.test(type)) return fail("not_a_picture", `not a picture this can read (${type || "unknown type"})`);
+  if (!/^image\/(?:png|jpe?g|webp|gif)$/.test(type)) return unlookable("not_a_picture", `not a picture this can read (${type || "unknown type"})`);
   const bytes = row.body;
-  if (!bytes || !bytes.byteLength) return fail("empty", "the picture is empty");
-  if (bytes.byteLength > LOOK_BYTES_MAX) return kept ? done(kept.note, kept.model, true) : fail("too_big", "the picture is over 8 MB");
+  if (!bytes || !bytes.byteLength) return unlookable("empty", "the picture is empty");
+  if (bytes.byteLength > LOOK_BYTES_MAX) return kept ? done(kept.note, kept.model, true) : unlookable("too_big", "the picture is over 8 MB");
   const dataUrl = `data:${type};base64,${Buffer.from(bytes).toString("base64")}`;
 
   const fetchImpl = opts.fetchImpl ?? ((url, init) => fetch(url, init));
@@ -338,13 +341,17 @@ const ON_THE_BOARD: ReadonlySet<LookWhy> = new Set<LookWhy>(["pointed", "connect
 
 /** Every picture a turn looks at gets this long, whether it is waited for or not. */
 export const LOOK_QUICK_MS = 700;
-/** Reading which board pictures are already known: at most this many, for at most this long. */
-const KNOWN_CHECK_MAX = 16;
+/** Reading which pictures are already known: at most this many, for at most this long. */
+const KNOWN_CHECK_MAX = 48;
 const KNOWN_CHECK_MS = 300;
 
 // An error's words, whatever was thrown.
 function errorText(e: unknown): string {
-  return String((e as { message?: unknown } | null)?.message ?? e).slice(0, 160);
+  try {
+    return String((e as { message?: unknown } | null)?.message ?? e).slice(0, 160);
+  } catch {
+    return "the look failed";
+  }
 }
 
 /** How long a turn waits, at most, for the pictures it waits for (waitsForLook). */
@@ -430,22 +437,19 @@ export async function lookAtPictures(
   const kept = new Set<number>();
   if (!opts.cachedOnly && rest.length > 1) {
     const candidates = rest.slice(0, KNOWN_CHECK_MAX);
-    const checks = Promise.all(candidates.map((p) => (ON_THE_BOARD.has(p.why) && p.why !== "pointed"
-      ? sql`SELECT 1 AS one FROM buzzy_picture_looks WHERE user_id = ${userId} AND asset_id = ${p.id} LIMIT 1`
-          .then((r): "kept" | "new" => (r.length > 0 ? "kept" : "new"), (): "unknown" => "unknown")
-      : Promise.resolve<"unknown">("unknown"))));
-    let found: Array<"kept" | "new" | "unknown"> | null = null;
-    await within(checks.then((r) => { found = r; }), KNOWN_CHECK_MS);
-    const seen = found as Array<"kept" | "new" | "unknown"> | null;
-    if (seen) {
-      candidates.forEach((p, i) => { if (seen[i] === "kept") kept.add(p.id); });
-      const fresh = candidates.filter((_, i) => seen[i] === "new");
-      if (fresh.length) {
-        const lead = rest.filter((p) => p.why === "pointed" || p.why === "attached");
-        const failing = fresh.filter((p) => lookFailedRecently(userId, p.id));
-        const ready = fresh.filter((p) => !failing.includes(p));
-        rest = [...lead, ...ready, ...rest.filter((p) => !lead.includes(p) && !fresh.includes(p)), ...failing];
-      }
+    // Each answer is used as it comes; one that is slow stays "unknown" (no reordering for it).
+    const seen: Array<"kept" | "new" | "unknown"> = candidates.map(() => "unknown");
+    const checks = candidates.map((p, i) =>
+      sql`SELECT 1 AS one FROM buzzy_picture_looks WHERE user_id = ${userId} AND asset_id = ${p.id} LIMIT 1`
+        .then((r) => { seen[i] = r.length > 0 ? "kept" : "new"; }, () => { /* unknown */ }));
+    await within(Promise.all(checks), Math.min(KNOWN_CHECK_MS, budget));
+    candidates.forEach((p, i) => { if (seen[i] === "kept") kept.add(p.id); });
+    const fresh = candidates.filter((p, i) => seen[i] === "new" && ON_THE_BOARD.has(p.why) && p.why !== "pointed");
+    if (fresh.length) {
+      const lead = rest.filter((p) => p.why === "pointed" || p.why === "attached");
+      const failing = fresh.filter((p) => lookFailedRecently(userId, p.id));
+      const ready = fresh.filter((p) => !failing.includes(p));
+      rest = [...lead, ...ready, ...rest.filter((p) => !lead.includes(p) && !fresh.includes(p)), ...failing];
     }
   }
   const list = (asked ? [asked, ...rest] : rest).slice(0, LOOK_MAX);
@@ -458,11 +462,13 @@ export async function lookAtPictures(
   const results: Array<PictureLook | LookFailure | undefined> = new Array(list.length);
   const finished: Array<() => void> = [];
   const ends = list.map((_, i) => new Promise<void>((r) => { finished[i] = r; }));
+  const begun: boolean[] = list.map(() => false);
   let next = 0;
   const worker = async () => {
     while (next < queue.length) {
       const i = queue[next++]!;
       const p = list[i]!;
+      begun[i] = true;
       const q = opts.question && opts.questionFor === p.id ? opts.question : null;
       try {
         results[i] = await lookAtPicture(sql, userId, p, { question: q, cachedOnly: opts.cachedOnly, blocked: opts.blocked, fetchImpl: opts.fetchImpl });
@@ -478,9 +484,10 @@ export async function lookAtPictures(
   // Every picture gets the quick wait; the ones waited for get up to the budget.
   await within(all, Math.min(budget, LOOK_QUICK_MS) - (Date.now() - started));
   await within(Promise.all(ends.filter((_, i) => waited[i])), budget - (Date.now() - started));
-  // A look waited for and still out when the budget ran out is slow: like a failure, the next
-  // turns about something else don't wait for it again (until it comes back or ten minutes pass).
-  list.forEach((p, i) => { if (waited[i] && results[i] === undefined) noteLookFailed(userId, p.id, true); });
+  // A look waited for, started, and still out when the budget ran out is slow: like a failure,
+  // the next turns about something else don't wait for it again (until it comes back or ten
+  // minutes pass). One still queued behind slow ones was never tried, so it isn't noted.
+  list.forEach((p, i) => { if (waited[i] && begun[i] && results[i] === undefined) noteLookFailed(userId, p.id, true); });
   const looks: PictureLook[] = [];
   const failed: LookFailure[] = [];
   let late = 0;
@@ -538,8 +545,13 @@ export function picturesSeenBlock(
     const line = `${head} ${body}${answer}`;
     const room = max - used - 2;
     if (room < 120) return;
-    const share = i === 0 ? room : Math.min(room, Math.max(240, Math.floor(room / (looks.length - i)) - 1));
-    const cut = line.length > share ? line.slice(0, share - 1).replace(/\s+\S*$/, "") + "…" : line;
+    const others = looks.length - i - 1;
+    const share = i === 0
+      ? Math.max(Math.floor(room / 2), room - others * 240)
+      : Math.min(room, Math.max(240, Math.floor(room / (others + 1)) - 1));
+    const hard = line.slice(0, Math.max(1, share - 1));
+    const atWord = hard.replace(/\s+\S*$/, "");
+    const cut = line.length > share ? (atWord.length >= hard.length * 0.8 ? atWord : hard) + "…" : line;
     lines.push(cut);
     used += cut.length + 1;
   });
