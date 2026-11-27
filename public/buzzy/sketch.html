@@ -109,6 +109,13 @@
             padding:0.3rem 1rem; border-bottom:1px solid var(--bz-line); background:#0f0f0f; }
   @media (max-width: 640px) {
     #selHint, #textbar .hint { display:none; }
+    /* CR-15: a hidden bar is not a bar. #textbar and #orderbar are visibility:hidden
+       until their mode turns them on, which still spends 112px of a phone screen on
+       nothing (74 + 38 at 360). Take them out of the flow until they are on. */
+    #textbar:not(.on), #orderbar:not(.on) { display:none; }
+    /* …and give the canvas a floor: the page scrolls to its own bars instead of the
+       canvas collapsing to a 34px strip (measured at 360 before this rule). */
+    #work { min-height: 46svh; }
     /* The settings gear is fixed 16px from the bottom-right corner and sat on the
        last tool (CR-13: one icon clipped at the edge). Reserve its column so the
        tools wrap instead of hiding under it. */
