@@ -16,6 +16,10 @@
  *     mixes two people's boards, a late upload lands on its own card, going back keeps
  *     what was drawn meanwhile, and failing saves wait longer each time.
  *   - History covers the settings gear's corner, never the reverse.
+ *   - A visit's blank is written only after the account has been read: a failed read
+ *     writes nothing, and the blank goes up at the revision it read. A blank save from an
+ *     old revision is refused and the account keeps its board. Only "talk" is emptied.
+ *   - The paper is written by three acts only: one line, a drop or paste, and the X.
  *
  * Hermetic: every migration on an in-memory PGlite and a local HTTP stand-in.
  *   npx tsx scripts/test-board-sync.ts
@@ -42,7 +46,7 @@ const eq = (a: unknown, b: unknown, msg = "") => {
 };
 
 type Card = Record<string, unknown> & { id: string };
-type Board = { v?: number; cards: Card[]; links: Array<Record<string, unknown>>; view?: unknown; sync?: { rev: number | null; dirty: boolean; base: unknown; off?: boolean } };
+type Board = { v?: number; cards: Card[]; links: Array<Record<string, unknown>>; view?: unknown; sync?: { rev: number | null; dirty: boolean; base: unknown; off?: boolean; fresh?: boolean } };
 const card = (id: string, extra: Record<string, unknown> = {}): Card =>
   ({ id, kind: "note", title: id, body: "", url: "", contentType: "", x: 0, y: 0, ...extra });
 const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ v: 2, cards, links, view: { x: 0, y: 0, z: 1 } });
@@ -257,7 +261,9 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
   // ── Two computers, running the real browser code ───────────────────────
   console.log("\nTwo computers — public/buzzy/whiteboard.js against the route\n");
 
-  const trouble = { failSaves: false };
+  // failReads: the account can be written but not read (a 500 on GET). failSaves: the
+  // other way round. Neither is a dropped connection: the request goes out and is answered.
+  const trouble = { failSaves: false, failReads: false };
   const server = http.createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
@@ -265,6 +271,7 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
     if (!user) return send(401, { ok: false, code: "signed_out" });
     if (trouble.failSaves && req.method === "PUT") return send(500, { ok: false, error: "boom" });
+    if (trouble.failReads && req.method === "GET") return send(500, { ok: false, error: "boom" });
     const path = new URL(req.url || "/", "http://x").pathname;
     const prefix = "/api/buzzy/whiteboards/";
     if (!path.startsWith(prefix)) return send(404, { ok: false });
@@ -724,6 +731,106 @@ const board = (cards: Card[], links: Array<Record<string, unknown>> = []) => ({ 
     truthy(hist > gear, `History (${hist}) over the gear (${gear})`);
     truthy(hist < selbar && selbar < editor && editor < toast, `the board's order is kept: History ${hist} < selection bar ${selbar} < editor ${editor} < message ${toast}`);
     truthy(toast < menu, `all under the account menu (${menu})`);
+  });
+
+  // ── What the visit's blank costs ──────────────────────────────────────────
+  // A visit empties "talk" at once ("It should open to a blank page each time", owner
+  // 2026-11-20), and what was drawn stays in History. The blank reaches the account only
+  // through startFresh: the account is read first, and the blank save names the revision
+  // it read. So a read that fails costs nothing — no save is invented on a guessed
+  // revision — and the drawing is still there to go back to once the read works.
+  await ok("a visit whose read fails writes nothing, and the blank goes up when the read comes back", async () => {
+    const disk = new Map<string, string>();
+    const drew = computer("u18", disk);
+    await drew.api.sync("talk");
+    drew.edit("talk", (b) => { b.cards.push(card("kept-1"), card("kept-2")); });
+    await drew.api.sync("talk");
+    const before = (await account("u18", "talk"))!;
+    eq(ids(before), ["kept-1", "kept-2"]);
+    const visit = computer("u18", disk);          // the same browser, opened again
+    trouble.failReads = true;
+    await visit.api.reset("talk");
+    eq(visit.net.calls.filter((c) => c.startsWith("PUT")).length, 0, "no save was tried");
+    const during = (await account("u18", "talk"))!;
+    eq([ids(during), during.rev], [["kept-1", "kept-2"], before.rev], "the account is untouched");
+    eq(ids(visit.read("talk")), [], "the board in front of the person is blank at once");
+    eq([visit.read("talk")!.sync!.fresh, visit.read("talk")!.sync!.dirty], [true, true], "and is still to be written");
+    eq(visit.inner.engine("talk").status, "offline", "and says so, rather than guessing");
+    trouble.failReads = false;
+    await visit.api.sync("talk");                 // the read comes back
+    const after = (await account("u18", "talk"))!;
+    eq(ids(after), [], "the blank lands now");
+    eq(after.rev, before.rev + 1, "at the revision it read, not one it guessed");
+    eq(visit.net.calls.filter((c) => c.startsWith("PUT")).length, 1, "exactly one save");
+    eq(visit.read("talk")!.sync!.dirty, false, "and this computer is settled");
+    const hist = await versions("u18", "talk");
+    const drawing = hist.find((v) => v.cards === 2);
+    truthy(drawing && (drawing.titles || []).includes("kept-1"), `the drawing is in History: ${JSON.stringify(hist.map((v) => [v.cards, v.titles]))}`);
+  });
+  // A blank save is what empties a board, so it is the one save that must never land on a
+  // revision it did not read. Both of the account's answers here are refusals (409 with
+  // its own copy), and the account keeps its board either way.
+  await ok("a blank save from an old revision is refused, and the account keeps its board", async () => {
+    const first = await route("u19", "PUT", "talk", { state: board([card("one"), card("two")]), baseRev: null });
+    eq(first.status, 200);
+    const moved = await route("u19", "PUT", "talk", { state: board([card("one"), card("two"), card("three")]), baseRev: Number(first.body.rev) });
+    eq(moved.status, 200);
+    const now = (await account("u19", "talk"))!;
+    const stale = await route("u19", "PUT", "talk", { state: board([]), baseRev: Number(first.body.rev) });
+    eq([stale.status, stale.body.code], [409, "conflict"]);
+    eq((stale.body.board as wb.StoredWhiteboard).rev, now.rev, "the account's copy comes back with the refusal");
+    const unknown = await route("u19", "PUT", "talk", { state: board([]), baseRev: null });
+    eq(unknown.status, 409, "a blank that says it was never in the account is refused onto one that is");
+    const after = (await account("u19", "talk"))!;
+    eq([ids(after), after.rev], [["one", "two", "three"], now.rev], "nothing was emptied");
+  });
+  // The paper (CR-14) is written by three acts and nothing else: one line confirmed or
+  // corrected, a letter dropped or pasted, and the X. Read from the page's own source,
+  // because a fourth write — a paper made on a page load, or a rewrite of one — is the
+  // shape of the bug that put a six-week-old letter on a fresh Talk page.
+  await ok("the paper is written by three acts only: a line, a drop or paste, and the X", () => {
+    const page = readFileSync(join(process.cwd(), "public/buzzy/talk.html"), "utf8");
+    const sites = [...page.matchAll(/["'](\/api\/buzzy\/papers[^"']*)["']/g)]
+      .map((m) => ({ at: m.index!, url: m[1]!, tail: page.slice(m.index!, m.index! + 400) }));
+    const method = (s: { tail: string }) => (s.tail.match(/method:\s*"(\w+)"/) || [undefined, "GET"])[1]!;
+    const enclosing = (at: number) => {
+      const m = [...page.slice(0, at).matchAll(/\n\s*function\s+([A-Za-z0-9_$]+)\s*\(/g)].pop();
+      return m ? m[1]! : "";
+    };
+    const where = sites.map((s) => `${method(s)} ${enclosing(s.at)}`).sort();
+    eq(where, ["DELETE dismissPaper", "GET loadCompanyPaper", "POST postPaperLine", "POST submitPaper"],
+      `four places name a paper and three of them write: ${JSON.stringify(where)}`);
+    const make = sites.find((s) => enclosing(s.at) === "submitPaper")!;
+    eq([method(make), make.url], ["POST", "/api/buzzy/papers"], "the one that makes a paper posts the collection");
+    truthy(sites.some((s) => enclosing(s.at) === "postPaperLine" && s.tail.includes('+ "/lines"')), "a line is its own POST");
+    truthy(sites.some((s) => enclosing(s.at) === "dismissPaper" && method(s) === "DELETE"), "the X deletes the paper");
+    // The drop/paste path needs a company before it writes anything.
+    const from = page.indexOf("function submitPaper(");
+    const guard = page.indexOf("if (!co) {", from);
+    truthy(from > 0 && guard > from && guard < make.at, "with no company chosen, it stops before the request");
+    // Neither reading a paper nor painting one ever writes one.
+    for (const name of ["loadCompanyPaper", "renderPaper"]) {
+      const at = page.indexOf("function " + name + "(");
+      truthy(at > 0, `found ${name}`);
+      const end = page.indexOf("\n    function ", at + 10);
+      const body = page.slice(at, end > at ? end : undefined);
+      truthy(!/submitPaper\(|fetch\(\s*["']\/api\/buzzy\/papers/.test(body), `${name} writes nothing`);
+    }
+    truthy(!/method:\s*"(PUT|PATCH)"/.test(sites.map((s) => s.tail).join("")), "no paper is ever rewritten");
+  });
+  // A visit empties the scratch board only: a conversation's board is read back as it is
+  // (the two production call sites of reset, voice-stage.js and New conversation).
+  await ok("a visit empties only the scratch board", () => {
+    const vs = readFileSync(join(process.cwd(), "public/buzzy/voice-stage.js"), "utf8");
+    const calls = vs.split("\n").filter((l) => l.includes("BeeZillaWhiteboard.reset("));
+    eq(calls.length, 1, "the board driver empties one board, in one place");
+    truthy(/boardId\(\) === "talk"\s*&&/.test(calls[0]!), `and only when the scratch board is in front: ${calls[0]!.trim()}`);
+    const talk = readFileSync(join(process.cwd(), "public/buzzy/talk.html"), "utf8");
+    eq((talk.match(/BeeZillaWhiteboard\.reset\(/g) || []).length, 1, "the page has one other, on New conversation");
+    const at = talk.indexOf("function newChatNow(");
+    truthy(at > 0, "found newChatNow");
+    const end = talk.indexOf("\n    function ", at + 10);
+    truthy(talk.slice(at, end > at ? end : undefined).includes('BeeZillaWhiteboard.reset("talk")'), "New conversation is where it is");
   });
 
   server.close();
