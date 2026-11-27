@@ -93,7 +93,7 @@ import { isDraftRequest, isFileRequest, isExplicitDocumentRequest, isExecuteComm
 import { selfKnowledgeNote, wantsOpener, OPENER_NOTE } from "./self-knowledge";
 import { isPictureChange, isNewPictureAsk, changePrompt, pictureDataUrl, madeThingsSection, takeBoardPictures, takeBoardSeen, boardReferencePrompt, type MadeThing } from "./pictureChange";
 import { keepConversationPictures } from "./chatPictures";
-import { lookAtPictures, lookBudgetMs, picturesSeenBlock, asksAboutPicture, namesAPicture, lookAtPicture, PICTURES_NOTE, type LookBlock, type LookPick, type PictureLook } from "./vision";
+import { lookAtPictures, lookBudgetMs, waitsForLook, picturesSeenBlock, asksAboutPicture, namesAPicture, lookAtPicture, PICTURES_NOTE, type LookBlock, type LookPick, type PictureLook } from "./vision";
 import { appActionsNote, asksToOrchestrate, boardHasFlow, ORCHESTRATE_USER_LINE, planAppActions, setsUpBrowserJob, type AppAction } from "./pilot";
 import { lostNote, soundsLost } from "./boardPilot";
 import { STARTING_BOARDS, findStartingBoards, startingBoardByName } from "./starterBoards";
@@ -837,11 +837,11 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // The turn is about a picture: pointed at, just added, named, or a 3D model to make.
   // (A bare "is it…?" with pictures on the board is not enough: "is it raining?")
   const picturesMatter = pointedLookId !== null || attachedPictureIds.length > 0 || namedPictureId !== null || namesAPicture(message) || wants3d;
-  // How long the reply waits for the looks (lookBudgetMs): a turn about a picture waits,
-  // and so does any turn with a picture on the board — the person put it there for
-  // BeeZilla, so the turn right after it lands knows what it shows, whatever the words
-  // ("what do you see?", "what's on my board?"). A picture already looked at costs no
-  // wait (its description is kept), so only a new one is ever waited for.
+  // Which looks the reply waits for (waitsForLook): all of them on a turn about a picture;
+  // on any other turn, the pictures on the board — the person put them there for BeeZilla,
+  // so the turn right after one lands knows what it shows, whatever the words ("what do you
+  // see?", "what's on my board?"). A picture already looked at costs no wait (its
+  // description is kept), so only a new one is ever waited for; the rest get a quick look.
   const lookStarted = Date.now();
   const lookPromise = lookPicks.length
     ? lookAtPictures(sql, userId, lookPicks, {
@@ -849,7 +849,8 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
         questionFor: questionPictureId,
         cachedOnly: lookBlocked,
         blocked: lookBlock ?? undefined,
-        budgetMs: lookBudgetMs(lookPicks, { aboutAPicture: picturesMatter, voice: surface === "voice" }),
+        budgetMs: lookBudgetMs({ voice: surface === "voice" }),
+        waitFor: (p) => waitsForLook(userId, p, { aboutAPicture: picturesMatter }),
       }).catch(() => null)
     : Promise.resolve(null);
   if (lookPicks.length) {
@@ -1273,12 +1274,17 @@ export async function chatLoop(req: ChatRequest): Promise<ChatResponse> {
   // message below, as observed data (words read off a picture are never instructions).
   const picturesSection = picturesText ? "\n\n" + PICTURES_NOTE : "";
   if (lookPicks.length || seenPictures.length) {
+    // Nothing back yet, and nothing failed: the looks are still going (a slow reader), not
+    // broken — the card says so, as the reply does.
+    const stillLooking = !seenPictures.length && !looked?.failed.length && (looked?.late ?? 0) > 0;
     req.onFlow?.({
-      kind: "skill", id: "skill:look", title: "Looked at your pictures", parent: "agent",
-      state: seenPictures.length ? "done" : "failed",
+      kind: "skill", id: "skill:look", title: stillLooking ? "Still looking at your pictures" : "Looked at your pictures", parent: "agent",
+      state: seenPictures.length || stillLooking ? "done" : "failed",
       detail: seenPictures.length
         ? seenPictures.map((l) => (l.label ? `“${l.label}”: ` : "") + l.note.replace(/\s+/g, " ").slice(0, 140)).join(" · ").slice(0, 600)
-        : (looked?.failed[0]?.error ?? "no picture could be looked at"),
+        : stillLooking
+          ? "not back yet — ask again in a moment"
+          : (looked?.failed[0]?.error ?? "no picture could be looked at"),
     });
   }
   const lookMs = lookPicks.length || seenPictures.length ? Date.now() - lookStarted : 0;

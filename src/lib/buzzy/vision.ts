@@ -316,7 +316,11 @@ async function lookOnce(
     model = fallback;
     got = await askModel(model, dataUrl, question, fetchImpl, timeoutMs);
   }
-  if (!got.ok) return kept ? done(kept.note, kept.model, true) : fail(got.code, got.error);
+  if (!got.ok) {
+    if (!kept) noteLookFailed(userId, pick.id, true);
+    return kept ? done(kept.note, kept.model, true) : fail(got.code, got.error);
+  }
+  noteLookFailed(userId, pick.id, false);
   const { note, answer } = splitAnswer(got.text, Boolean(question));
   if (note) {
     try {
@@ -332,51 +336,118 @@ async function lookOnce(
 /** Reasons that mean the picture is on their Idea Board. */
 const ON_THE_BOARD: ReadonlySet<LookWhy> = new Set<LookWhy>(["pointed", "connected", "in view", "on the board"]);
 
-/**
- * How long a turn waits for its pictures to be looked at. A turn about a picture (pointed
- * at, just added, named, a 3D model to make) waits for it, and so does any turn with a
- * picture on the board: the person put it there for BeeZilla (owner, 2026-11-26: it
- * should see "images that you put on the board for it"), so the turn right after it
- * lands knows what it shows, whatever the words are ("what do you see?", "what's on my
- * board?"). A picture already looked at costs no wait (its description is kept and read
- * back at once), so this only ever waits for one that is new to BeeZilla. Pictures that
- * are only from earlier in the conversation don't hold up a turn about something else.
- */
-export function lookBudgetMs(picks: ReadonlyArray<Pick<LookPick, "why">>, o: { aboutAPicture: boolean; voice: boolean }): number {
-  if (!o.aboutAPicture && !picks.some((p) => ON_THE_BOARD.has(p.why))) return 700;
+/** Every picture a turn looks at gets this long, whether it is waited for or not. */
+export const LOOK_QUICK_MS = 700;
+
+/** How long a turn waits, at most, for the pictures it waits for (waitsForLook). */
+export function lookBudgetMs(o: { voice: boolean }): number {
   return o.voice ? 4000 : 9000;
+}
+
+// Board pictures whose last look failed once the reader was tried (an error, no answer, too
+// slow), per person and picture. For a while such a picture is not waited for on a turn
+// about something else, so one picture the reader can't manage never slows every reply; it
+// is still tried again in the background, and a turn about a picture still waits for it.
+const FAILED_PAUSE_MS = 10 * 60_000;
+const lookFailedAt = new Map<string, number>();
+function noteLookFailed(userId: string, id: number, failed: boolean): void {
+  const key = `${userId}:${id}`;
+  lookFailedAt.delete(key);
+  if (!failed) return;
+  lookFailedAt.set(key, Date.now());
+  if (lookFailedAt.size > 5000) lookFailedAt.delete(lookFailedAt.keys().next().value as string);
+}
+
+/** Did this picture's last look fail, within the last ten minutes? */
+export function lookFailedRecently(userId: string, id: number, now: number = Date.now()): boolean {
+  const at = lookFailedAt.get(`${userId}:${id}`);
+  return at !== undefined && now - at < FAILED_PAUSE_MS;
+}
+
+/**
+ * Which pictures a turn waits for (up to lookBudgetMs; every other one gets LOOK_QUICK_MS).
+ * A turn about a picture (pointed at, just added, named, a 3D model to make) waits for all
+ * of them. Any other turn waits for the pictures on the board: the person put them there for
+ * BeeZilla (owner, 2026-11-26: it should see "images that you put on the board for it"), so
+ * the turn right after one lands knows what it shows, whatever the words ("what do you see?",
+ * "what's on my board?"). A picture already looked at costs no wait (its description is kept
+ * and read back at once), so this only ever waits for one new to BeeZilla. Not waited for on
+ * such a turn: pictures only from earlier in the conversation, and a board picture whose last
+ * look failed in the last ten minutes.
+ */
+export function waitsForLook(userId: string, p: Pick<LookPick, "id" | "why">, o: { aboutAPicture: boolean }): boolean {
+  if (o.aboutAPicture) return true;
+  return ON_THE_BOARD.has(p.why) && !lookFailedRecently(userId, p.id);
+}
+
+// Wait for `p`, but no longer than `ms` (the timer is cleared when `p` comes first).
+async function within(p: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([p.then(() => undefined, () => undefined), new Promise<void>((r) => { timer = setTimeout(r, Math.max(0, ms)); })]);
+  if (timer) clearTimeout(timer);
 }
 
 /**
  * Look at several pictures at once, inside a time budget: the turn waits at most
- * `budgetMs` for pictures it has not seen before; what is not back by then is left
- * out of this turn (and is kept for the next one when it does come back).
+ * `budgetMs` for the pictures it waits for (`waitFor`; all of them when not given) and
+ * LOOK_QUICK_MS for the others; what is not back by then is left out of this turn (and
+ * is kept for the next one when it does come back).
  */
 export async function lookAtPictures(
   sql: Sql,
   userId: string,
   picks: LookPick[],
-  opts: { question?: string | null; questionFor?: number | null; cachedOnly?: boolean; blocked?: LookBlock; budgetMs?: number; fetchImpl?: FetchLike } = {},
+  opts: {
+    question?: string | null; questionFor?: number | null; cachedOnly?: boolean; blocked?: LookBlock; budgetMs?: number;
+    waitFor?: (p: LookPick) => boolean; fetchImpl?: FetchLike;
+  } = {},
 ): Promise<{ looks: PictureLook[]; failed: LookFailure[]; late: number }> {
   // The picture the question is about comes first — looked at first, and first in what
   // the reply is told (its answer never falls past the block's room) — even when more
   // important ones would fill the six places.
   const everyOne = pickPictures(picks, Number.MAX_SAFE_INTEGER);
   const asked = opts.questionFor == null ? null : everyOne.find((p) => p.id === opts.questionFor) ?? null;
-  const list = asked ? [asked, ...everyOne.filter((p) => p !== asked)].slice(0, LOOK_MAX) : everyOne.slice(0, LOOK_MAX);
+  let rest = everyOne.filter((p) => p !== asked);
+  // A picture on the board that BeeZilla has never looked at comes right after the ones
+  // they point at or just added: on a crowded board the one just put there is never the
+  // one left out (six places, and the room in what the reply is told). Not when nothing new
+  // can be sent out (Lockdown, the account's rules): then what is already known comes first.
+  if (!opts.cachedOnly && rest.length > 1) {
+    const known = await Promise.all(rest.map((p) => (ON_THE_BOARD.has(p.why) && p.why !== "pointed"
+      ? sql`SELECT 1 AS one FROM buzzy_picture_looks WHERE user_id = ${userId} AND asset_id = ${p.id} LIMIT 1`.then((r) => r.length > 0, () => true)
+      : Promise.resolve(true))));
+    const fresh = rest.filter((_, i) => !known[i]);
+    if (fresh.length) {
+      const lead = rest.filter((p) => p.why === "pointed" || p.why === "attached");
+      rest = [...lead, ...fresh, ...rest.filter((p) => !lead.includes(p) && !fresh.includes(p))];
+    }
+  }
+  const list = (asked ? [asked, ...rest] : rest).slice(0, LOOK_MAX);
+  const waited = list.map((p) => (opts.waitFor ? opts.waitFor(p) : true));
+  // The ones waited for are looked at first; each keeps its place in what the reply is told.
+  const queue = list.map((_, i) => i).sort((a, b) => Number(!waited[a]) - Number(!waited[b]));
   const results: Array<PictureLook | LookFailure | undefined> = new Array(list.length);
+  const finished: Array<() => void> = [];
+  const ends = list.map((_, i) => new Promise<void>((r) => { finished[i] = r; }));
   let next = 0;
   const worker = async () => {
-    while (next < list.length) {
-      const i = next++;
+    while (next < queue.length) {
+      const i = queue[next++]!;
       const p = list[i]!;
       const q = opts.question && opts.questionFor === p.id ? opts.question : null;
-      results[i] = await lookAtPicture(sql, userId, p, { question: q, cachedOnly: opts.cachedOnly, blocked: opts.blocked, fetchImpl: opts.fetchImpl });
+      try {
+        results[i] = await lookAtPicture(sql, userId, p, { question: q, cachedOnly: opts.cachedOnly, blocked: opts.blocked, fetchImpl: opts.fetchImpl });
+      } finally {
+        finished[i]!();
+      }
     }
   };
   const all = Promise.all([worker(), worker(), worker()]);
+  const started = Date.now();
   const budget = Math.max(0, opts.budgetMs ?? 9000);
-  await Promise.race([all, new Promise((r) => setTimeout(r, budget))]);
+  // Every picture gets the quick wait; the ones waited for get up to the budget.
+  await within(all, Math.min(budget, LOOK_QUICK_MS));
+  await within(Promise.all(ends.filter((_, i) => waited[i])), budget - (Date.now() - started));
   const looks: PictureLook[] = [];
   const failed: LookFailure[] = [];
   let late = 0;
@@ -458,8 +529,9 @@ export function picturesSeenBlock(
 }
 
 // Pictures not looked at this turn, when nothing blocked them: one that failed is said
-// plainly; one whose first look was still on its way when the reply had to start is still
-// being looked at (the look goes on and is kept), so it is ready for the next message.
+// plainly; one whose look was still on its way when the reply had to start is said to be
+// still being looked at (the look goes on in the background and is kept when it comes back,
+// but nothing promises when — it may still fail).
 function notLookedAt(failed: LookFailure[], late: number): string {
   const out: string[] = [];
   if (failed.length) {
@@ -468,7 +540,7 @@ function notLookedAt(failed: LookFailure[], late: number): string {
   }
   if (late > 0) {
     const one = late === 1;
-    out.push(`${late} more picture${one ? " is" : "s are"} still being looked at (a first look takes a moment). If they ask about ${one ? "it" : "them"}, say you are still looking and that ${one ? "it" : "they"} should be ready with their next message; never guess what ${one ? "it shows" : "they show"}.`);
+    out.push(`${late} more picture${one ? " was" : "s were"} still being looked at when this reply had to start. If they ask about ${one ? "it" : "them"}, say you are still looking at ${one ? "it" : "them"} and to ask again in a moment; never guess what ${one ? "it shows" : "they show"}.`);
   }
   return out.join("\n");
 }
